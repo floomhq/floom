@@ -3,8 +3,8 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,35 +22,19 @@ function readStoredSecret(): string {
 }
 
 export default function CliAuthPage() {
-  return (
-    <Suspense fallback={<CliAuthFallback />}>
-      <CliAuthContent />
-    </Suspense>
-  );
-}
-
-function CliAuthFallback() {
-  return (
-    <div className="max-w-xl space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Authorize CLI</h1>
-      <Card>
-        <CardContent className="pt-6 text-sm text-muted-foreground">Loading authorization request...</CardContent>
-      </Card>
-    </div>
-  );
+  return <CliAuthContent />;
 }
 
 function CliAuthContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const code = useMemo(() => (searchParams.get("code") || "").trim().toUpperCase(), [searchParams]);
-
+  const [code, setCode] = useState("");
   const [secret, setSecret] = useState("");
   const [busyAction, setBusyAction] = useState<"approve" | "deny" | null>(null);
   const [statusText, setStatusText] = useState("");
   const [confirmCode, setConfirmCode] = useState("");
 
   useEffect(() => {
+    setCode(new URLSearchParams(window.location.search).get("code")?.trim().toUpperCase() || "");
     setSecret(readStoredSecret());
   }, []);
 
