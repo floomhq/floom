@@ -197,10 +197,10 @@ export default function EditWorkerPage() {
 
   return (
     <div className="space-y-6">
-      {/* S28: back-nav above H1 (Federico request). */}
+      {/* S29o: back-nav size bumped to text-sm (matches /runs/<id> + /workers/new). */}
       <Link
         href={`/workers/${id}`}
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <span aria-hidden="true">←</span>
         {worker.name}
