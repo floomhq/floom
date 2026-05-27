@@ -61,49 +61,62 @@
 }
 
 :root {
-  --bg: #f7f7f6;
-  --bg-2: #ededec;
-  --bg-3: #e6e6e4;
-  --paper: #ffffff;
-  --paper-2: #fbfbfa;
-  --ink: #1a1a1a;
-  --ink-soft: rgba(26, 26, 26, 0.66);
-  --ink-mute: rgba(26, 26, 26, 0.45);
-  --ink-faint: rgba(26, 26, 26, 0.26);
-  --emerald: #2f7a59;
-  --emerald-dark: #2c2c2c;
-  --accent: #3a6ea5;
-  --accent-soft: rgba(58, 110, 165, 0.11);
-  --accent-line: rgba(58, 110, 165, 0.26);
-  --solid: #1a1a1a;
-  --solid-2: #2c2c2c;
-  --solid-fg: #fbfbfb;
-  --sage: #9fb2a8;
-  --sage-tint: rgba(47, 122, 89, 0.1);
-  --line: rgba(20, 20, 20, 0.08);
-  --line-strong: rgba(20, 20, 20, 0.14);
-  --line-soft: rgba(20, 20, 20, 0.045);
-  --glass-bg: rgba(255, 255, 255, 0.48);
-  --glass-bg-strong: rgba(255, 255, 255, 0.72);
-  --glass-edge: rgba(255, 255, 255, 0.96);
+  /* PR S20 matte palette — ported from openchat-v2. Federico explicitly
+     asked for the matte aesthetic from g-gpt.com / openchat-v2. Key
+     differences from the previous translucent / blue-accent system:
+     - Warm off-white background (oklch perceptual lightness)
+     - Flat opaque surfaces; no translucent glass
+     - Pure black borders in light mode (the matte hallmark)
+     - No blue accent — primary is near-black for buttons */
+  --bg: oklch(0.985 0.002 90);
+  --bg-2: oklch(0.96 0.003 85);
+  --bg-3: oklch(0.94 0.004 85);
+  --paper: oklch(0.985 0.002 90);
+  --paper-2: oklch(0.975 0.002 90);
+  --ink: oklch(0.141 0.005 285.823);
+  --ink-soft: oklch(0.42 0.016 285.938);
+  --ink-mute: oklch(0.55 0.012 285.938);
+  --ink-faint: oklch(0.7 0.008 285.938);
+  --emerald: oklch(0.55 0.13 152);
+  --emerald-dark: oklch(0.4 0.12 152);
+  /* Matte: primary is near-black, NOT blue. Keep the blue available as
+     accent-blue for the small number of places that still benefit (eg
+     OAuth provider pill), but default to neutral. */
+  --accent: oklch(0.21 0.006 285.885);
+  --accent-soft: oklch(0.94 0.004 85);
+  --accent-line: oklch(0.85 0.005 285.938);
+  --accent-blue: #3a6ea5;
+  --solid: oklch(0.141 0.005 285.823);
+  --solid-2: oklch(0.21 0.006 285.885);
+  --solid-fg: oklch(0.985 0 0);
+  --sage: oklch(0.6 0.05 152);
+  --sage-tint: oklch(0.95 0.02 152);
+  /* Pure black border in light mode — the openchat-v2 matte signature. */
+  --line: hsl(0 0% 0% / 0.12);
+  --line-strong: hsl(0 0% 0% / 0.22);
+  --line-soft: hsl(0 0% 0% / 0.06);
+  --glass-bg: oklch(0.985 0.002 90);
+  --glass-bg-strong: oklch(0.985 0.002 90);
+  --glass-edge: hsl(0 0% 0% / 0.08);
   --hairline: 0 0 0 1px var(--line);
-  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  --shadow-sm: 0 1px 2px rgba(20, 20, 20, 0.05), 0 0 0 1px rgba(20, 20, 20, 0.05), var(--edge);
-  --shadow-md: 0 6px 20px -8px rgba(20, 20, 20, 0.13), 0 0 0 1px rgba(20, 20, 20, 0.05), var(--edge);
-  --shadow-pop: 0 22px 50px -16px rgba(20, 20, 20, 0.2), 0 0 0 1px rgba(20, 20, 20, 0.06), var(--edge);
-  --shadow-btn: 0 1px 2px rgba(20, 20, 20, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --edge: none;
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.06), 0 0 0 1px var(--line);
+  --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.08), 0 0 0 1px var(--line);
+  --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.12), 0 0 0 1px var(--line);
+  --shadow-btn: 0 1px 0 hsl(0 0% 0% / 0.06);
   --focus: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
-  --sidebar-glass: color-mix(in srgb, var(--accent) 5%, color-mix(in srgb, var(--paper) 70%, transparent));
-  --sidebar-glass-shadow: 0 1px 2px rgba(20, 35, 50, 0.04), 0 4px 16px rgba(58, 110, 165, 0.06);
-  --card-glass: color-mix(in srgb, var(--paper) 38%, transparent);
-  --card-border: color-mix(in srgb, var(--accent) 12%, var(--line));
+  --sidebar-glass: oklch(0.975 0.002 90);
+  --sidebar-glass-shadow: 0 1px 0 hsl(0 0% 0% / 0.04);
+  --card-glass: var(--paper);
+  --card-border: var(--line);
   --card-shadow: var(--shadow-sm);
+  /* PR S20 matte: tighten radii to the openchat-v2 0.375rem norm. */
   --r-xs: 3px;
-  --r-sm: 5px;
-  --r-md: 7px;
-  --r-lg: 9px;
-  --r-xl: 11px;
-  --r-2xl: 13px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 6px;
+  --r-xl: 8px;
+  --r-2xl: 10px;
   --r-pill: 999px;
   --spring: cubic-bezier(0.32, 1.06, 0.5, 1);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -152,48 +165,46 @@
 
 html.dark {
   color-scheme: dark;
-  /* PR S19 (I-22): Federico explicitly wants sidebar DARKER than content,
-     with the blue accent tint preserved. So:
-     - --bg (main content surface) now bumps to #1c1c1c (slightly lifted)
-     - --paper (card surface) goes to #242424 (one step brighter)
-     - --sidebar-glass goes back to mixing accent into a NEAR-BLACK base
-       (#0e0e10), so the rail reads as the deepest surface with a blue tone. */
-  --bg: #1c1c1c;
-  --bg-2: #232323;
-  --bg-3: #2a2a2a;
-  --paper: #242424;
-  --paper-2: #2c2c2c;
-  --ink: #f4f4f1;
-  --ink-soft: rgba(244, 244, 241, 0.74);
-  --ink-mute: rgba(244, 244, 241, 0.6);
-  --ink-faint: rgba(244, 244, 241, 0.28);
-  --emerald: #4cae84;
-  --emerald-dark: #75c8a2;
-  --accent: #7fb0e0;
-  --accent-soft: rgba(127, 176, 224, 0.16);
-  --accent-line: rgba(127, 176, 224, 0.28);
-  --solid: #e8e8e7;
-  --solid-2: #ffffff;
-  --solid-fg: #1b1b1b;
-  --sage: #5f7f6d;
-  --sage-tint: rgba(76, 174, 132, 0.13);
-  --line: rgba(244, 244, 241, 0.1);
-  --line-strong: rgba(244, 244, 241, 0.18);
-  --line-soft: rgba(244, 244, 241, 0.06);
-  --glass-bg: rgba(35, 35, 35, 0.54);
-  --glass-bg-strong: rgba(35, 35, 35, 0.78);
-  --glass-edge: rgba(244, 244, 241, 0.14);
-  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.055);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(255, 255, 255, 0.04), var(--edge);
-  --shadow-md: 0 6px 18px -8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05), var(--edge);
-  --shadow-pop: 0 22px 48px -16px rgba(0, 0, 0, 0.66), 0 0 0 1px rgba(255, 255, 255, 0.06), var(--edge);
-  --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  /* PR S19 (I-22): sidebar darker than content + blue accent retained.
-     Mixes the bright accent into a deep near-black for a navy-ish rail. */
-  --sidebar-glass: color-mix(in srgb, var(--accent) 6%, #0e0e10);
-  --sidebar-glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(127, 176, 224, 0.08);
-  --card-glass: color-mix(in srgb, var(--paper) 88%, var(--accent) 4%);
-  --card-border: color-mix(in srgb, var(--accent) 10%, var(--line));
+  /* PR S20 matte dark — openchat-v2 palette.
+     Sidebar is the DARKEST surface (Federico's explicit preference).
+     Pure white borders at 8-12% alpha — the matte signature. */
+  --bg: oklch(0.213 0 0);
+  --bg-2: oklch(0.27 0 0);
+  --bg-3: oklch(0.32 0 0);
+  --paper: oklch(0.213 0 0);
+  --paper-2: oklch(0.265 0 0);
+  --ink: oklch(0.985 0 0);
+  --ink-soft: oklch(0.75 0.015 286.067);
+  --ink-mute: oklch(0.62 0.012 286.067);
+  --ink-faint: oklch(0.42 0.01 286.067);
+  --emerald: oklch(0.7 0.16 152);
+  --emerald-dark: oklch(0.8 0.13 152);
+  /* Matte dark: primary stays near-white (button bg), no blue tint. */
+  --accent: oklch(0.985 0 0);
+  --accent-soft: hsl(0 0% 100% / 0.06);
+  --accent-line: hsl(0 0% 100% / 0.12);
+  --accent-blue: #7fb0e0;
+  --solid: oklch(0.985 0 0);
+  --solid-2: oklch(0.985 0 0);
+  --solid-fg: oklch(0.21 0.006 285.885);
+  --sage: oklch(0.65 0.06 152);
+  --sage-tint: oklch(0.3 0.04 152);
+  /* Pure white borders in dark mode at low alpha — the matte hallmark. */
+  --line: hsl(0 0% 100% / 0.1);
+  --line-strong: hsl(0 0% 100% / 0.18);
+  --line-soft: hsl(0 0% 100% / 0.06);
+  --glass-bg: oklch(0.213 0 0);
+  --glass-bg-strong: oklch(0.213 0 0);
+  --glass-edge: hsl(0 0% 100% / 0.1);
+  --edge: none;
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.3), 0 0 0 1px var(--line);
+  --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.4), 0 0 0 1px var(--line);
+  --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.5), 0 0 0 1px var(--line);
+  --shadow-btn: 0 1px 0 hsl(0 0% 0% / 0.4);
+  --sidebar-glass: oklch(0.19 0 0);
+  --sidebar-glass-shadow: 0 1px 0 hsl(0 0% 0% / 0.3);
+  --card-glass: var(--paper);
+  --card-border: var(--line);
   --card-shadow: var(--shadow-sm);
 
   --background: var(--bg);
@@ -354,11 +365,11 @@ html.dark ::selection {
   background: radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--accent) 34%, transparent) 0%, color-mix(in srgb, var(--accent) 18%, transparent) 48%, color-mix(in srgb, var(--accent) 7%, transparent) 74%, transparent 100%);
 }
 
+.spacebg .c,
 html.dark .spacebg .c {
-  /* PR S19 (I-22): bring the ambient blue back at low opacity for the dark
-     theme. Federico explicitly likes the blue. */
-  mix-blend-mode: screen;
-  opacity: 0.15;
+  /* PR S20 matte: kill the ambient blue blobs entirely. Matte = flat,
+     opaque surfaces. The blue glow contradicts the openchat-v2 aesthetic. */
+  display: none;
 }
 
 @media (max-width: 640px) {
