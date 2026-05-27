@@ -3638,7 +3638,14 @@ def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str) -> Optional[
         payload = r.json()
         if not payload.get("successful"):
             return None
-        data = payload.get("data", {}).get("response_data") or payload.get("data", {})
+        # Composio nests the tool output under either "response_data" or
+        # "response_dict" depending on the tool implementation. Try both.
+        outer = payload.get("data", {}) or {}
+        data = (
+            outer.get("response_data")
+            or outer.get("response_dict")
+            or outer
+        )
         return extract(data) if isinstance(data, dict) else None
     except Exception as exc:
         logger.debug("provider email fetch failed for %s: %s", toolkit_slug, exc)
