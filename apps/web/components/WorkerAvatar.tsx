@@ -1,31 +1,21 @@
-// S29n: deterministic per-worker avatar. Federico (2026-05-28): workers
-// should feel like employees, not scripts. Avatar makes the worker feel
-// like a person on a team.
+// S29r: deterministic-hue gradient dropped. Federico (2026-05-28): "the
+// placeholder should not have different colours. I don't like too many
+// colours overall, as a rule." Single mono treatment across all workers,
+// matching the floomhq/relay + skills-neo membership-mark pattern.
 //
-// Behavior:
-// - Hash the worker name (or id) into a stable hue in 0..360.
-// - Render a circular gradient from hue->hue+30 with the worker's initials.
-// - One worker, one stable color, across cards / detail / runs.
+// Style: muted bg + foreground initials + thin line ring. One color
+// register, no per-worker variation. Stays circular (radius via --r-pill).
 import { cn } from "@/lib/utils";
 
 interface WorkerAvatarProps {
-  // Worker name OR id - the seed used to derive the gradient. Pass the most
-  // stable identifier you have so the color doesn't change on rename.
-  seed: string;
-  // Display label - used to extract initials. Defaults to seed.
+  // Kept for API compatibility — earlier S29n used `seed` for hue derivation.
+  // No longer drives color; accept and ignore so existing call sites compile.
+  seed?: string;
+  // Display label used to extract initials. Falls back to seed.
   name?: string;
   className?: string;
   // Tailwind size class. Default size-9.
   size?: string;
-}
-
-function hash(str: string): number {
-  let h = 0;
-  for (let i = 0; i < str.length; i += 1) {
-    h = (h << 5) - h + str.charCodeAt(i);
-    h |= 0;
-  }
-  return Math.abs(h);
 }
 
 function initials(name: string): string {
@@ -38,24 +28,17 @@ function initials(name: string): string {
 }
 
 export function WorkerAvatar({ seed, name, className, size = "size-9" }: WorkerAvatarProps) {
-  const display = name || seed;
-  const hue = hash(seed) % 360;
-  const hue2 = (hue + 30) % 360;
-  // Use HSL with consistent lightness/saturation so all avatars share a
-  // visual register (no jarringly bright or dark cards). Tuned for both
-  // light and dark themes.
-  const bgGradient = `linear-gradient(135deg, hsl(${hue} 55% 56%) 0%, hsl(${hue2} 60% 48%) 100%)`;
+  const display = name || seed || "?";
   return (
     <div
       className={cn(
-        "shrink-0 rounded-full grid place-items-center text-white font-semibold tracking-tight shadow-sm",
+        "shrink-0 rounded-full grid place-items-center font-medium tracking-tight bg-muted text-foreground border border-line",
         size,
         className,
       )}
-      style={{ background: bgGradient }}
       aria-label={`${display} avatar`}
     >
-      <span className="text-[11px] leading-none drop-shadow-sm">{initials(display)}</span>
+      <span className="text-[11px] leading-none">{initials(display)}</span>
     </div>
   );
 }
