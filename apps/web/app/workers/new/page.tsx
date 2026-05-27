@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Paperclip, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 
 // ---------------------------------------------------------------------------
@@ -49,9 +50,9 @@ function NewWorkerPageInner({
 function NewWorkerSkeleton() {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pt-8">
-      <div className="h-8 w-56 bg-[#e4e4e7] rounded-md" />
-      <div className="h-4 w-80 bg-[#ececef] rounded-md" />
-      <div className="h-[280px] bg-card border border-border rounded-lg" />
+      <Skeleton className="h-8 w-56 rounded-md" />
+      <Skeleton className="h-4 w-80 rounded-md" />
+      <Skeleton className="h-[280px] rounded-lg" />
     </div>
   );
 }

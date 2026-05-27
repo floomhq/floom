@@ -233,7 +233,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
         {label && <p className="text-sm font-medium mb-1.5">{label}</p>}
         <div
           className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
-            dragging ? "border-black bg-muted" : "border-border hover:border-[#aaa]"
+            dragging ? "border-[var(--accent)] bg-muted" : "border-line hover:border-muted-foreground/40"
           }`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
