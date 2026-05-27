@@ -228,12 +228,8 @@ function WorkersContent() {
             All available workers. Run, edit, or create.
           </p>
         </div>
-        <Link href="/workers/new">
-          <Button size="sm">
-            <Plus className="w-3.5 h-3.5 mr-1.5" />
-            New worker
-          </Button>
-        </Link>
+        {/* S29p: dropped duplicate header "+ New worker" — sidebar already
+            has it. Empty-state CTA below stays. */}
       </div>
 
       {!loading && workers.length === 0 ? (

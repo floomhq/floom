@@ -97,12 +97,9 @@ export default function OverviewPage() {
             What ran, what is running, and what is next.
           </p>
         </div>
-        <Link href="/workers/new">
-          <Button size="sm">
-            <Plus className="size-4" />
-            New worker
-          </Button>
-        </Link>
+        {/* S29p: dropped duplicate "+ New worker" header CTA — the sidebar
+            already has the saturated primary. ChatGPT principle 11: one
+            primary action per screen. */}
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
