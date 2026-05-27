@@ -82,8 +82,11 @@ data/         SQLite DB + artifacts
 Workers live in `workers/<name>/` and contain:
 
 - `worker.yml` — configuration (inputs, outputs, secrets, trigger, runtime)
-- `run.py` — worker code exposing a `run(inputs, context)` function
+- `run.py` — worker code exposing a `run(inputs, context)` function (script mode)
+- `SKILL.md` — agent prompt (agent mode); mutually exclusive with `run.py`
 - `requirements.txt` — Python dependencies
+
+**See [docs/AUTHORING.md](docs/AUTHORING.md) for the full schema, both execution modes, deploying Claude-style skills, and the agent-side draft contract.** That doc is the source of truth; this section is the elevator pitch.
 
 ### Included workers
 
