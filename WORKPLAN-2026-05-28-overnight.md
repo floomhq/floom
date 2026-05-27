@@ -102,12 +102,67 @@ end when: all 6 release-gate flows green AND zero open P0s
 
 If any of those fail, the morning report names which flow failed and the residual P0s — no "fake green".
 
-## Current snapshot (07:25 UTC)
+## S22 reference-based redesign — DECIDED 2026-05-28
 
-- Codex workplan review: **DONE** (4/10). All criticisms folded into this v2.
-- PR #73 S20 matte palette: open, awaits Vercel. Once green, merge + alias.
-- Codex A1 (I-52 contract fix): dispatching now.
-- B1 openchat-v2 polish: starting after A1 dispatch + matte merge.
+After surface-by-surface piecemeal patches (S15-S20) failed Federico's bar ("still looks really bad", "manual and brute force"), pivoted to wholesale ports from polished references. Six parallel reference surveys ran; design doc at `docs/audits/overnight-2026-05-28/S22-redesign-plan.md`.
+
+**Locked decisions (Federico 2026-05-28):**
+
+| # | Decision | Pick |
+|---|---|---|
+| D1 | Font stack | **Geist + Geist Mono** (override skills-neo Inter when porting) |
+| D2 | Blue accent | **Floom blue oklch(0.52/0.13/250)** (override skills-neo #3a6ea5 when porting) |
+| D3 | Surface treatment | **Solid matte** (override skills-neo glass when porting) |
+| D4 | Tremor analytics | **Defer to S23** |
+| D5 | Cmd-K palette | **Ship in S22a** (freebie from chrome PR) |
+| D6 | PR shape | **6 sequenced PRs S22a-f**, each independently shippable |
+| D7 | Wire format | **Adopt AI SDK part-type union** in S22d (text/tool-call/tool-result/reasoning/step-start over SSE) — Codex lane |
+
+**Per-surface lift map:**
+
+| Surface | Lift source (primary) | License | Owner |
+|---|---|---|---|
+| Global chrome + Cmd-K | skills-neo `WorkspaceShell` + openchat-v2 chrome | local | Claude (S22a) |
+| `/workers` list + `/workers/<id>` config | skills-neo `LibraryBody` + `LibrarySkillBody` | local | Claude (S22b) |
+| `/workers/new` | skills-neo `NewSkillBody` + prompt-kit `PromptInput` | local + MIT | Claude (S22c) |
+| In-progress run + run detail | Trigger.dev `runs.$runParam` + vercel/ai-elements `<Tool>`/`<Terminal>`/`<StackTrace>` | Apache 2.0 + MIT | Codex (S22d, backend wire format change) |
+| `/runs` global history | Kiranism dashboard-starter (TanStack + nuqs) | MIT | Claude (S22e) |
+| `/connections` + `/settings` | shadcn primitives + skills-neo `SettingsBody` | local | Claude (S22f) |
+
+**Pattern-only refs (no code copy):** Inngest (SSPL §13), dub.co + Cal.com (AGPL viral). Reference for UX, never lift code.
+
+## S22 PR sequence (each in its own worktree per shared-checkout rule)
+
+| # | Worktree | Lane | Status | Scope |
+|---|---|---|---|---|
+| S22a | `/tmp/workeros-s22a-chrome` | Claude | pending | Sidebar + header + theme sync + Cmd-K palette |
+| S22b | `/tmp/workeros-s22b-workers` | Claude | blocked by S22a | `/workers` list (LibraryBody) + `/workers/<id>` config tabs (LibrarySkillBody) |
+| S22c | `/tmp/workeros-s22c-newworker` | Claude | blocked by S22a | `/workers/new` (NewSkillBody) + prompt-kit vendoring |
+| S22d | `/tmp/workeros-s22d-rundetail` | Codex | blocked by S22a | AgentDriver SSE part-type stream + Trigger.dev split-pane + ai-elements transcript |
+| S22e | `/tmp/workeros-s22e-runs` | Claude | blocked by S22a | `/runs` TanStack table + nuqs URL filters |
+| S22f | `/tmp/workeros-s22f-conn-settings` | Claude | blocked by S22a | `/connections` polish + `/settings` (SettingsBody) |
+
+**Per-PR working rules (CRITICAL):**
+1. Dedicated worktree per PR. Never share `/root/workeros` checkout across S22 lanes.
+2. Commit + push after every meaningful step.
+3. THINK BEFORE IMPLEMENTING: read source + target files thoroughly, write a focused S22<x>-plan.md under `docs/audits/overnight-2026-05-28/`, then write code.
+4. After implementing each PR: critical self-review (deviations from source, accessibility, dark mode, mobile, regressions on other pages). Surface gaps in plain language before claiming done.
+5. After merge: Lane C verification + Lane D worker smoke before unblocking dependents.
+
+## Lane B reshuffle
+
+The old Lane B (B1-B17 piecemeal fixes) is largely absorbed into S22a-f. Outstanding items that don't fit any S22 PR move to a B-residual bucket evaluated post-S22:
+- I-39 label drift sweep (cross-cutting; do as part of S22b's port pass)
+- I-42 /cli-auth strip app chrome (post-S22a, trivial)
+- I-46 URL-sync filter/search/pagination (absorbed into S22e)
+- I-50 Overview stat cards drill-in (post-S22, requires Tremor S23)
+- Everything else listed under "Outstanding" → either absorbed into S22 ports or marked DEFER
+
+## Current snapshot (now)
+
+- Codex A1 (I-52 contract fix) PR #75: MERGED + verified (run_9e500f6d7863).
+- PR #73 S20 matte palette: MERGED + aliased to prod.
+- S22a chrome: **starting now** (Claude lane, after careful read-first investigation).
 
 ## Reporting
 
