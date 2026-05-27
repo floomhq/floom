@@ -122,7 +122,10 @@ def test_skill_prompt_loading_and_tool_schema(tmp_path):
     first_call = client.chat.completions.calls[0]
     assert "Override prompt." in first_call["messages"][0]["content"]
     assert "# Skill" in first_call["messages"][0]["content"]
-    tool_names = {tool["function"]["name"] for tool in first_call["tools"]}
+    tool_names = {
+        tool["function"]["name"] if tool.get("type") == "function" or "function" in tool else tool["type"]
+        for tool in first_call["tools"]
+    }
     assert {
         "list_dir",
         "read_file",
@@ -131,6 +134,7 @@ def test_skill_prompt_loading_and_tool_schema(tmp_path):
         "invoke_worker",
         "log",
         "composio__gmail__execute",
+        "web_search",  # PR S11: default-on OpenAI native tool.
     }.issubset(tool_names)
     assert log_entries
 

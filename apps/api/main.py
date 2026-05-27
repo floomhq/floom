@@ -221,6 +221,9 @@ async def auth_middleware(request: Request, call_next):
 
 logger = logging.getLogger("floom.api")
 
+# Process start time for /system/metrics uptime reporting.
+_PROCESS_START_TIME = time.time()
+
 
 # Architecture banner: visible in journalctl on every API boot so auditors
 # and operators don't have to read the source to learn that workers run
@@ -1703,41 +1706,37 @@ The bundle is returned via the `files` array. Every file has `path` (relative, e
 
 === WORKER ARCHETYPES ===
 
-Pick ONE archetype based on the task:
+The execution mode is derived from `exec.entry`:
 
-A — AGENT-ONLY (pure reasoning over inputs, no external API calls in code):
-Use when: the task is pure reasoning, analysis, summarisation, or writing.
+- `entry: SKILL.md` -> agent mode. The platform runs an LLM tool loop with web_search, file tools, and any declared connections.
+- `entry: run.py` (or `.sh` / `.js`) -> script mode. The platform just runs the file in an E2B sandbox.
+
+Both shapes are first-class. Pick the one the task needs:
+
+A - AGENT (pure reasoning, web research, agent-driven orchestration):
+Use when: the task is reasoning, analysis, summarisation, writing, or anything that benefits from live web search.
 Files: worker.yml + SKILL.md
 worker.yml exec block:
   exec:
+    entry: "SKILL.md"
     runtime: "skill"
-    mode: "agent"
     runner: "e2b"
-    entrypoint: "SKILL.md"
 
-B — PURE-SCRIPT (deterministic data transform, no LLM call inside):
-Use when: the task is a predictable data transform, file conversion, or calculation.
+B - SCRIPT (deterministic data transform, you control the code):
+Use when: the task is a predictable data transform, file conversion, calculation, or API choreography you want to write yourself.
 Files: worker.yml + run.py + requirements.txt
 worker.yml exec block:
   exec:
-    runtime: "python311"
-    mode: "pure-script"
-    runner: "e2b"
+    entry: "run.py"
     command: "python run.py"
+    runtime: "python311"
+    runner: "e2b"
 
-C — HYBRID (fetch data via API + LLM reasoning + write back):
-Use when: the task fetches from external APIs, processes with LLM reasoning, and writes results back.
-Files: worker.yml + run.py + SKILL.md + lib/*.py + requirements.txt
-worker.yml exec block:
-  exec:
-    runtime: "python311"
-    mode: "hybrid"
-    runner: "e2b"
-    command: "python run.py"
+Both are valid. A script that needs to call an LLM is just script-mode with an openai import; no separate "hybrid" mode is needed.
 
 === WORKED EXAMPLES ===
 
-Example A (agent-only):
+Example A (agent):
 files:
   worker.yml: |
     schema_version: "0.3"
@@ -1748,8 +1747,8 @@ files:
     entrypoint: "SKILL.md"
     targets: [generic]
     exec:
+      entry: "SKILL.md"
       runtime: "skill"
-      mode: "agent"
       runner: "e2b"
       inputs:
       - name: topic
@@ -1776,7 +1775,7 @@ files:
     You are a research analyst. The user provides a topic, audience, and depth.
     Generate a structured markdown brief. Call write_output(name="brief", content="...").
 
-Example B (pure-script):
+Example B (script):
 files:
   worker.yml: |
     schema_version: "0.3"
@@ -1786,8 +1785,8 @@ files:
     version: "0.1.0"
     targets: [generic]
     exec:
+      entry: "run.py"
       runtime: "python311"
-      mode: "pure-script"
       runner: "e2b"
       command: "python run.py"
       inputs:
@@ -1818,7 +1817,7 @@ files:
   requirements.txt: |
     python-dotenv>=1.0.0
 
-Example C (hybrid):
+Example C (script that calls an LLM):
 files:
   worker.yml: |
     schema_version: "0.3"
@@ -1828,8 +1827,8 @@ files:
     version: "0.1.0"
     targets: [generic]
     exec:
+      entry: "run.py"
       runtime: "python311"
-      mode: "hybrid"
       runner: "e2b"
       command: "python run.py"
       secrets:
@@ -4621,6 +4620,57 @@ def system_info():
         "artifacts_dir": str(ARTIFACTS_DIR),
         "run_count": run_count,
         "worker_count": len(workers),
+    }
+
+
+@app.get("/system/metrics")
+def system_metrics():
+    """Operational metrics for the dashboard / external monitors.
+
+    Gated by x-floom-secret like other admin routes. Returns a flat counters
+    payload suitable for cron-scraped JSON monitoring.
+    """
+    workers = discover_workers(use_cache=True)
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM runs")
+        runs_total = cursor.fetchone()["cnt"]
+        cursor.execute(
+            "SELECT COUNT(*) as cnt FROM runs WHERE created_at >= datetime('now', '-7 days')"
+        )
+        runs_7d = cursor.fetchone()["cnt"]
+        cursor.execute(
+            "SELECT COUNT(*) as cnt FROM runs "
+            "WHERE created_at >= datetime('now', '-7 days') AND status = ?",
+            (RunStatus.FAILED.value,),
+        )
+        runs_failed_7d = cursor.fetchone()["cnt"]
+        try:
+            cursor.execute("SELECT COUNT(*) as cnt FROM composio_connections WHERE status = 'active'")
+            connections_count = cursor.fetchone()["cnt"]
+        except sqlite3.OperationalError:
+            connections_count = 0
+        try:
+            cursor.execute("SELECT COUNT(*) as cnt FROM secrets")
+            secrets_count = cursor.fetchone()["cnt"]
+        except sqlite3.OperationalError:
+            secrets_count = 0
+        try:
+            cursor.execute(
+                "SELECT COUNT(*) as cnt FROM workers WHERE enabled = 1 AND trigger_type != 'manual'"
+            )
+            active_triggers = cursor.fetchone()["cnt"]
+        except sqlite3.OperationalError:
+            active_triggers = 0
+    return {
+        "workers_count": len(workers),
+        "runs_total": int(runs_total or 0),
+        "runs_7d": int(runs_7d or 0),
+        "runs_failed_7d": int(runs_failed_7d or 0),
+        "connections_count": int(connections_count or 0),
+        "secrets_count": int(secrets_count or 0),
+        "active_triggers": int(active_triggers or 0),
+        "uptime_seconds": int(time.time() - _PROCESS_START_TIME),
     }
 
 

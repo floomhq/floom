@@ -310,6 +310,15 @@ class AgentDriver(SandboxDriver):
         return "\n\n".join(part for part in prompt_parts if part)
 
     def _tool_schemas(self, config: WorkerConfig) -> list[Dict[str, Any]]:
+        """Build the tool list for the agent loop.
+
+        PR S11: tools-on-by-default. The full set is:
+          - Builtin: list_dir, read_file, write_output, run_command, invoke_worker, log
+          - OpenAI native: web_search
+          - Composio: one tool per declared connection
+        Workers opt out via `exec.disable_tools: [...]` in worker.yml. file_search
+        is deferred until a vector-store wiring lands (TODO PR S12+).
+        """
         tools = [
             {
                 "type": "function",
@@ -398,6 +407,9 @@ class AgentDriver(SandboxDriver):
                     },
                 },
             },
+            # OpenAI native web search. The model uses the search results in
+            # its reasoning; the platform does not handle the call locally.
+            {"type": "web_search"},
         ]
         for app in config.connections:
             safe_app = "".join(ch if ch.isalnum() else "_" for ch in app.lower())
@@ -406,7 +418,7 @@ class AgentDriver(SandboxDriver):
                     "type": "function",
                     "function": {
                         "name": f"composio__{safe_app}__execute",
-                        "description": f"Execute a Composio tool as composio.{app}.<tool>(arguments).",
+                        "description": f"Execute a {app} tool as integration.{app}.<tool>(arguments).",
                         "parameters": {
                             "type": "object",
                             "properties": {
@@ -418,7 +430,41 @@ class AgentDriver(SandboxDriver):
                     },
                 }
             )
+        # PR S11: opt-out filter. `exec.disable_tools` may name builtin tool
+        # names ("web_search", "run_command", ...) or composio app slugs.
+        disabled = self._disabled_tool_names(config)
+        if disabled:
+            tools = [t for t in tools if not self._tool_is_disabled(t, disabled)]
         return tools
+
+    def _disabled_tool_names(self, config: WorkerConfig) -> set[str]:
+        """Read `exec.disable_tools` from the underlying manifest, if present.
+
+        WorkerConfig (legacy shape) does not carry `disable_tools` directly; the
+        list lives on the WorkerContract.exec. Run service stores the contract
+        manifest_json in the DB. Worker config exposes it via `runtime.system_prompt`
+        only. For PR S11 we read it from an attached attribute set during
+        manifest projection (see worker_contract_to_worker_config).
+        """
+        disabled = getattr(config.runtime, "disable_tools", None) or []
+        return {str(name).strip().lower() for name in disabled if str(name).strip()}
+
+    def _tool_is_disabled(self, tool: Dict[str, Any], disabled: set[str]) -> bool:
+        tool_type = tool.get("type")
+        if tool_type and tool_type != "function":
+            # OpenAI native tool (e.g. web_search). Match by type name.
+            return tool_type.lower() in disabled
+        fn = tool.get("function") or {}
+        name = (fn.get("name") or "").lower()
+        if name in disabled:
+            return True
+        # Composio tools: allow disabling by app slug (e.g. "gmail" removes
+        # composio__gmail__execute).
+        if name.startswith("composio__"):
+            parts = name.split("__")
+            if len(parts) >= 3 and parts[1] in disabled:
+                return True
+        return False
 
     def _handle_tool(
         self,
