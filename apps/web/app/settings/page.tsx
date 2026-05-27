@@ -12,6 +12,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -45,7 +47,8 @@ function SettingsContent() {
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
   const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const [confirmClear, setConfirmClear] = useState(false);
+  // PR S19 (I-44): type-to-confirm text for the Clear runs button.
+  const [clearConfirmText, setClearConfirmText] = useState("");
 
   const loadData = useCallback(async () => {
     try {
@@ -90,15 +93,12 @@ function SettingsContent() {
   }
 
   async function handleClearRuns() {
-    if (!confirmClear) {
-      setConfirmClear(true);
-      return;
-    }
+    if (clearConfirmText.trim() !== "DELETE ALL RUNS") return;
     setClearing(true);
     try {
       await api.system.clearRuns();
       toast.success("Run history cleared");
-      setConfirmClear(false);
+      setClearConfirmText("");
       void loadData();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to clear runs");
@@ -263,30 +263,39 @@ function SettingsContent() {
         </TabsContent>
 
         <TabsContent value="danger" className="space-y-4">
-          <Card>
+          <Card className="border-destructive/40">
             <CardHeader>
-              <CardTitle className="text-sm font-medium">Danger zone</CardTitle>
+              <CardTitle className="text-sm font-medium text-destructive">Danger zone</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between gap-4">
+              <div className="space-y-3">
                 <div>
                   <p className="text-sm font-medium">Clear run history</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     Deletes all runs, logs, artifacts, and approvals. Cannot be undone.
                   </p>
                 </div>
+                {/* PR S19 (I-44): type-to-confirm, same pattern as delete-worker.
+                    Previous version was a single-click after a tap → click chain
+                    which is too easy to fat-finger. */}
+                <Label htmlFor="clear-runs-confirm" className="text-xs text-muted-foreground">
+                  Type <code className="text-foreground">DELETE ALL RUNS</code> to confirm.
+                </Label>
+                <Input
+                  id="clear-runs-confirm"
+                  value={clearConfirmText}
+                  onChange={(e) => setClearConfirmText(e.target.value)}
+                  placeholder="DELETE ALL RUNS"
+                  className="max-w-sm"
+                />
                 <Button
-                  variant={confirmClear ? "destructive" : "outline"}
+                  variant="destructive"
                   size="sm"
                   className="shrink-0"
                   onClick={handleClearRuns}
-                  disabled={clearing}
+                  disabled={clearing || clearConfirmText.trim() !== "DELETE ALL RUNS"}
                 >
-                  {clearing
-                    ? "Clearing..."
-                    : confirmClear
-                    ? "Confirm clear"
-                    : "Clear runs"}
+                  {clearing ? "Clearing..." : "Delete all runs"}
                 </Button>
               </div>
             </CardContent>

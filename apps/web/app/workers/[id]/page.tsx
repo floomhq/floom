@@ -119,9 +119,10 @@ export default function WorkerDetailPage() {
           msg.toLowerCase() === "not found";
         if (isNotFound) {
           setNotFound(true);
-        } else {
-          toast.error(`Failed to load worker: ${msg}`);
         }
+        // PR S19 (I-32): swallow the toast for non-404 failures. The page
+        // renders a "Couldn't load worker / Retry" state for that case;
+        // a transient network blip should not also spam a red toast.
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -219,7 +220,11 @@ export default function WorkerDetailPage() {
     );
   }
 
-  if (notFound || !worker) {
+  // PR S19 (I-32): only render "Worker not found" on a CONFIRMED 404 from
+  // the backend. A transient network failure should NOT flash the
+  // "deleted" copy at first-time users. Other failures (network, 5xx)
+  // surface as a generic "Failed to load" with a retry option.
+  if (notFound) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
         <p className="text-sm font-medium text-foreground">Worker not found</p>
@@ -227,6 +232,18 @@ export default function WorkerDetailPage() {
         <a href="/workers" className="text-xs underline text-muted-foreground hover:text-foreground transition-colors">
           Back to workers
         </a>
+      </div>
+    );
+  }
+
+  if (!worker) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
+        <p className="text-sm font-medium text-foreground">Couldn&apos;t load worker</p>
+        <p className="text-xs text-muted-foreground">Something went wrong fetching this worker.</p>
+        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
       </div>
     );
   }

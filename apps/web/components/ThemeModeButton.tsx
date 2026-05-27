@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 type ThemeMode = "system" | "day" | "night";
 
 const STORAGE_KEY = "floom-theme";
+const SYNC_EVENT = "floom-theme-change";
 const ORDER: ThemeMode[] = ["system", "day", "night"];
 const LABELS: Record<ThemeMode, string> = {
   system: "System",
@@ -25,6 +26,9 @@ function applyMode(mode: ThemeMode) {
   document.documentElement.classList.toggle("dark", isDark);
   document.documentElement.dataset.theme = mode;
   window.localStorage.setItem(STORAGE_KEY, mode);
+  // PR S19 (I-43): broadcast so every mounted ThemeModeButton (e.g. the
+  // sidebar one AND the one inside Settings → Appearance) re-syncs.
+  window.dispatchEvent(new CustomEvent(SYNC_EVENT, { detail: { mode } }));
 }
 
 export function ThemeModeButton({ className = "" }: { className?: string }) {
@@ -36,14 +40,23 @@ export function ThemeModeButton({ className = "" }: { className?: string }) {
     applyMode(initial);
 
     const media = window.matchMedia?.("(prefers-color-scheme: dark)");
-    if (!media) return undefined;
-
-    const onChange = () => {
+    const onMedia = () => {
       if (readMode() === "system") applyMode("system");
     };
+    media?.addEventListener("change", onMedia);
 
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
+    // PR S19 (I-43): listen for sibling instances toggling the theme so
+    // this button's local state stays consistent with the actual mode.
+    const onSync = (e: Event) => {
+      const detail = (e as CustomEvent<{ mode: ThemeMode }>).detail;
+      if (detail?.mode) setMode(detail.mode);
+    };
+    window.addEventListener(SYNC_EVENT, onSync);
+
+    return () => {
+      media?.removeEventListener("change", onMedia);
+      window.removeEventListener(SYNC_EVENT, onSync);
+    };
   }, []);
 
   function cycle() {
