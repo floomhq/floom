@@ -1806,12 +1806,17 @@ files:
     trigger:
       type: manual
   run.py: |
-    import json, csv, io
+    import json, csv, io, os
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(".env.local")
+    except ImportError:
+        pass
     inputs = json.load(open("inputs.json"))
     # process inputs["csv_data"] ...
     json.dump({"status": "completed", "outputs": {}, "artifacts": []}, open("result.json", "w"))
   requirements.txt: |
-    # no deps
+    python-dotenv>=1.0.0
 
 Example C (hybrid):
 files:
@@ -1846,14 +1851,20 @@ files:
     You are summarising a Granola meeting transcript into HubSpot-ready action items.
     Input: meeting transcript. Output JSON: {"summary": str, "action_items": [str]}.
   run.py: |
-    import json
+    import json, os
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(".env.local")
+    except ImportError:
+        pass
     from agent import run as run_agent
     from lib.granola_client import fetch_recent_meetings
     from lib.hubspot_client import create_note
-    secrets = json.load(open("secrets.json"))
-    for meeting in fetch_recent_meetings(secrets["GRANOLA_API_KEY"]):
+    granola_key = os.environ.get("GRANOLA_API_KEY") or json.load(open("secrets.json")).get("GRANOLA_API_KEY", "")
+    for meeting in fetch_recent_meetings(granola_key):
         result = run_agent("SKILL.md", input=meeting["transcript"])
-        create_note(secrets.get("HUBSPOT_ACCESS_TOKEN", ""), meeting["id"], result["summary"])
+        hubspot_token = os.environ.get("HUBSPOT_ACCESS_TOKEN", "")
+        create_note(hubspot_token, meeting["id"], result["summary"])
     json.dump({"status": "completed", "outputs": {}, "artifacts": []}, open("result.json", "w"))
   lib/granola_client.py: |
     import requests
