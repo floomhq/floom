@@ -134,9 +134,13 @@ function CatalogCard({
         ) : null}
       </div>
 
+      {/* S29p: was variant=default (saturated blue). With 15+ apps on the
+          page that's 15 "primary actions" — ChatGPT principle 11 calls for
+          one. Now outline; the catalog grid IS the page, each tile a peer. */}
       <Button
         type="button"
         size="sm"
+        variant="outline"
         className="w-full"
         disabled={connecting}
         onClick={() => onConnect(item.slug)}
