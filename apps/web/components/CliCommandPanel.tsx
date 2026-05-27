@@ -20,11 +20,13 @@ function readStoredSecret(): string {
 }
 
 function maskSecret(secret: string): string {
-  // PR S21: was first-4 + (length-8) asterisks + last-4 -> 60+ asterisks
-  // for our 64-char secret, looked broken. Now: first 4 + "..." + last 4.
+  // S29a: Federico saw "924a. fe59" rendered on prod — the three ASCII dots
+  // were getting collapsed/spaced weirdly in monospace at small sizes. Switch
+  // to a Unicode horizontal ellipsis (U+2026) which is one glyph and renders
+  // consistently across fonts.
   if (!secret) return "<YOUR_FLOOM_SECRET>";
   if (secret.length <= 8) return "*".repeat(secret.length);
-  return `${secret.slice(0, 4)}...${secret.slice(-4)}`;
+  return `${secret.slice(0, 4)}…${secret.slice(-4)}`;
 }
 
 export function CliCommandPanel() {
