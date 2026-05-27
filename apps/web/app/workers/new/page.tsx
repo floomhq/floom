@@ -266,7 +266,7 @@ function NewWorkerContent() {
             type="button"
             disabled={isBusy}
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-xs font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isUploading ? (
               <>
@@ -337,7 +337,7 @@ function NewWorkerContent() {
               className={
                 idx === 0
                   ? "group flex flex-col items-start gap-1.5 rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-4 py-3 text-left hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-                  : "group flex flex-col items-start gap-1.5 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-accent hover:border-muted-foreground/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  : "group flex flex-col items-start gap-1.5 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-muted hover:border-muted-foreground/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               }
             >
               <span className={idx === 0 ? "text-sm font-semibold text-[var(--accent)]" : "text-sm font-semibold text-foreground"}>
