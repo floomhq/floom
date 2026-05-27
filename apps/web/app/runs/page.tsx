@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RunStatusBadge } from "@/components/RunStatus";
+import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { formatRelative } from "@/lib/formatters";
 import {
   Select,
@@ -257,7 +258,10 @@ function RunsContent() {
               rel="noopener noreferrer"
               className="grid grid-cols-[1fr_auto] md:grid-cols-[1fr_120px_100px_140px_140px] gap-4 px-4 py-2.5 border-b border-line last:border-b-0 hover:bg-muted transition-colors items-center cursor-pointer"
             >
-              <span className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</span>
+              <span className="flex items-center gap-2.5 min-w-0">
+                <WorkerAvatar seed={r.worker_id} name={r.worker_name || r.worker_id} size="size-6" />
+                <span className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</span>
+              </span>
               <span className="hidden md:inline text-xs text-muted-foreground truncate">
                 {r.trigger_source && r.trigger_source !== "manual" ? r.trigger_source : <span className="text-muted-foreground/50">manual</span>}
               </span>
