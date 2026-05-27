@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ArrowLeft,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -20,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import type { IntegrationCatalogItem, IntegrationCatalogResponse } from "@/lib/types";
 
 const PAGE_SIZE = 30;
@@ -261,23 +261,17 @@ export default function ConnectionsBrowsePage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <Link
-            href="/connections"
-            className="mb-3 inline-flex h-7 items-center gap-1 rounded-md text-[0.8rem] font-medium text-[var(--ink-soft)] hover:text-ink"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Connections
-          </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">Browse integrations</h1>
-          <p className="mt-1 text-sm text-[var(--ink-soft)]">
-            Search the full integration catalog and connect any of 1000+ apps for your workers.
-          </p>
-        </div>
-        <div className="text-sm text-[var(--ink-mute)]">{pageSummary}</div>
-      </div>
+    <div className="space-y-6">
+      {/* S23: shared header + tabs match /connections so the two pages read as
+          one surface. Back-arrow dropped (tabs cover the nav). */}
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+        <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
+          Search the full integration catalog and connect any of 1000+ apps for your workers.
+        </p>
+      </header>
+      <ConnectionsTabs />
+      <div className="text-sm text-[var(--ink-mute)]">{pageSummary}</div>
 
       <section className="space-y-3 rounded-lg border border-line bg-[var(--glass-bg)] p-3 shadow-sm backdrop-blur-[10px]">
         <div className="relative">

@@ -38,7 +38,7 @@ export default function RootLayout({
         <Ambient />
         <Sidebar />
         <main className="relative z-10 flex-1 min-w-0">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
         </main>
         <CommandPalette />
         <Toaster position="bottom-right" />

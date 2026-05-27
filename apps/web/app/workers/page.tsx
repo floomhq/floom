@@ -281,10 +281,11 @@ function WorkersContent() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {/* S23: auto-rows-fr stretches every card in a row to equal height. */}
+          <div className="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {loading
               ? Array.from({ length: 8 }).map((_, i) => (
-                  <Skeleton key={i} className="h-44 w-full" />
+                  <WorkerCardSkeleton key={i} />
                 ))
               : displayedWorkers.map((w) => (
                   <WorkerCard
@@ -468,15 +469,16 @@ function WorkerCard({
   //     buttons but do nothing")
   return (
     <Card
-      className="hover:border-border hover:shadow-sm transition-all overflow-hidden"
+      className="h-full hover:border-border hover:shadow-sm transition-all overflow-hidden"
       title={hoverDescription || undefined}
     >
-      <Link href={`/workers/${worker.id}`} className="block">
-      <CardContent className={`p-5 ${compact ? "space-y-2" : "space-y-3"}`}>
+      <Link href={`/workers/${worker.id}`} className="block h-full">
+      <CardContent className={`h-full p-5 ${compact ? "space-y-2" : "space-y-3"}`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
           </div>
+          {/* S23: star uses Floom blue accent (was amber/yellow — Federico). */}
           <button
             type="button"
             title={isFavorite ? "Remove from favourites" : "Add to favourites"}
@@ -487,8 +489,8 @@ function WorkerCard({
             }}
             className={`size-7 flex items-center justify-center rounded transition-colors shrink-0 ${
               isFavorite
-                ? "text-amber-400 hover:text-amber-500"
-                : "text-muted-foreground/40 hover:text-amber-400"
+                ? "text-[var(--accent)] hover:opacity-80"
+                : "text-muted-foreground/40 hover:text-[var(--accent)]"
             }`}
           >
             <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
@@ -582,4 +584,32 @@ function CardStatusPill({ status }: { status: string }) {
 
 function firstLine(value?: string): string {
   return (value || "").split("\n").map((line) => line.trim()).find(Boolean) || "";
+}
+
+// S23: skeleton shaped to match the real WorkerCard (title, status pill,
+// 2-line description, tag row, trigger row, sparkline strip, stats row).
+// Previous Skeleton was a flat h-44 rectangle that flipped to a tall
+// content card on load — looked broken.
+function WorkerCardSkeleton() {
+  return (
+    <Card className="h-full overflow-hidden">
+      <CardContent className="p-5 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="size-5 rounded-full" />
+        </div>
+        <Skeleton className="h-5 w-24 rounded-full" />
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-5/6" />
+        <div className="flex gap-1.5">
+          <Skeleton className="h-5 w-14 rounded" />
+          <Skeleton className="h-5 w-16 rounded" />
+          <Skeleton className="h-5 w-12 rounded" />
+        </div>
+        <Skeleton className="h-5 w-20 rounded" />
+        <Skeleton className="h-7 w-32" />
+        <Skeleton className="h-3 w-5/6" />
+      </CardContent>
+    </Card>
+  );
 }
