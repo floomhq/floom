@@ -86,7 +86,9 @@ Workers live in `workers/<name>/` and contain:
 - `SKILL.md` — agent prompt (agent mode); mutually exclusive with `run.py`
 - `requirements.txt` — Python dependencies
 
-**See [docs/AUTHORING.md](docs/AUTHORING.md) for the full schema, both execution modes, deploying Claude-style skills, and the agent-side draft contract.** That doc is the source of truth; this section is the elevator pitch.
+**Agents (Claude Code / Cursor) — start at [docs/AGENT-COOKBOOK.md](docs/AGENT-COOKBOOK.md).** End-to-end recipes for writing + deploying workers via the MCP, including porting Claude skill bundles.
+
+**Humans authoring workers by hand — see [docs/AUTHORING.md](docs/AUTHORING.md)** for the full `worker.yml` schema, both execution modes, secrets/connections/triggers, and the agent-side draft contract.
 
 ### Included workers
 

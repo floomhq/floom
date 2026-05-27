@@ -1,5 +1,7 @@
 # Authoring Workers
 
+> **If you are an agent (Claude Code / Cursor) authoring via the MCP, read [AGENT-COOKBOOK.md](AGENT-COOKBOOK.md) first** — it has the per-tool examples + end-to-end recipes. This doc is the schema + concept reference.
+
 This is the canonical guide for writing, deploying, and updating workers on Workeros. It covers:
 
 1. What a worker is
