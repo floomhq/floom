@@ -627,7 +627,11 @@ function RunSection({
   return (
     <div className="max-w-xl space-y-6">
       {hasAbout && (
-        <details className="border border-line">
+        // S32: Federico — "how do I understand what this is doing?" without
+        // an Overview tab. Open by default so first-time visitors see what
+        // the worker does immediately. Users who already know can collapse
+        // manually.
+        <details className="border border-line" open>
           <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors flex items-center justify-between [&::-webkit-details-marker]:hidden">
             <span>About this worker</span>
             <ChevronDown className="size-4 text-muted-foreground transition-transform [details[open]_&]:rotate-180" />
