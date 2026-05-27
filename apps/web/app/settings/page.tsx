@@ -18,7 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
-import { ThemeModeButton } from "@/components/ThemeModeButton";
+import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 // S22f: Notifications tab is currently hidden. The TabKey type still includes
@@ -259,12 +259,14 @@ function SettingsContent() {
         </TabsContent>
 
         <TabsContent value="appearance" className="space-y-3">
-          {/* S29s: dropped Card. Theme is a one-liner section. */}
+          {/* S29z: explicit three-button toggle (System / Light / Dark)
+              instead of a single cycling button. Sidebar keeps the
+              compact cycle button; here we show all three at once. */}
           <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
           <p className="text-sm text-muted-foreground">
             Choose how Floom looks. System follows your operating system.
           </p>
-          <ThemeModeButton />
+          <ThemeModeToggleGroup />
         </TabsContent>
 
         <TabsContent value="danger" className="space-y-4">
