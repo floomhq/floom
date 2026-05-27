@@ -1,4 +1,4 @@
-"""Pydantic models for Workeros — request schemas, response schemas, and domain types."""
+"""Pydantic models for Workeros: request schemas, response schemas, and domain types."""
 
 import re
 from typing import Any, Dict, List, Literal, Optional
@@ -59,6 +59,10 @@ class WorkerOutput(BaseModel):
     name: str
     label: str
     type: str
+    required: bool = True
+    kind: Optional[str] = None
+    media_type: Optional[str] = None
+    path: Optional[str] = None
     columns: Optional[List[str]] = None  # For CSV: declared expected column headers in order
     json_required_keys: Optional[List[str]] = None  # For JSON: declared required top-level keys
 
@@ -611,6 +615,10 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             name=field.name,
             label=field.label or field.name.replace("_", " ").title(),
             type=_contract_output_type(field),
+            required=field.required,
+            kind=field.kind,
+            media_type=field.media_type,
+            path=field.path,
             columns=field.columns,
             json_required_keys=field.json_required_keys,
         )
@@ -698,10 +706,10 @@ def _legacy_output_to_contract_field(field: WorkerOutput) -> WorkerContractField
         }[field.type]
         return WorkerContractField(
             name=field.name,
-            kind="file",
-            media_type=media_type,
-            path=f"out/{field.name}.{extension}",
-            required=True,
+            kind=field.kind or "file",
+            media_type=field.media_type or media_type,
+            path=field.path or f"out/{field.name}.{extension}",
+            required=field.required,
             label=field.label,
             columns=field.columns,
             json_required_keys=field.json_required_keys,
@@ -709,9 +717,9 @@ def _legacy_output_to_contract_field(field: WorkerOutput) -> WorkerContractField
     scalar_type = "string" if field.type == "text" else field.type
     return WorkerContractField(
         name=field.name,
-        kind="scalar",
+        kind=field.kind or "scalar",
         type=scalar_type,
-        required=True,
+        required=field.required,
         label=field.label,
     )
 

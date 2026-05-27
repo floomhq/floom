@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 from models import WorkerContract, parse_worker_manifest, worker_contract_to_worker_config
-from runner_sandbox import AgentDriver, E2BSandboxDriver, LocalSandboxDriver, get_driver
+from runner_sandbox import AgentDriver, E2BSandboxDriver, get_driver
 
 
 def manifest(exec_block, **extra):
@@ -41,11 +41,11 @@ def test_legacy_python_command_projects_to_pure_script():
     config = worker_contract_to_worker_config(contract, "mode-test")
     assert config.runtime.mode == "pure-script"
     assert config.runtime.entrypoint == "run.py"
-    assert isinstance(get_driver(config.runtime.runner, config=config), LocalSandboxDriver)
+    assert isinstance(get_driver(config.runtime.runner, config=config), E2BSandboxDriver)
 
 
 def test_missing_mode_defaults_to_agent_without_script_command():
-    contract = parse_worker_manifest(manifest({"runtime": "none", "runner": "local"}))
+    contract = parse_worker_manifest(manifest({"runtime": "skill", "runner": "local"}))
     assert isinstance(contract, WorkerContract)
     assert contract.exec.mode == "agent"
     config = worker_contract_to_worker_config(contract, "mode-test")
@@ -100,9 +100,8 @@ def test_stock_worker_migration_dispatch_matrix():
         config = worker_contract_to_worker_config(contract, path.parent.name)
         rows.append((path.parent.name, contract.exec.mode, type(get_driver(config.runtime.runner, config=config)).__name__))
 
-    assert len(rows) == 12
+    assert len(rows) == 7
     assert {name for name, mode, _driver in rows if mode == "agent"} == {
-        "input_types_test",
         "research_brief",
         "weekly_update",
     }
@@ -110,11 +109,7 @@ def test_stock_worker_migration_dispatch_matrix():
         "csv_enricher",
         "cv_writeup",
         "dach_compliance",
-        "e2b_test",
         "gmail_intake_brief",
         "reverse_match_crm",
-        "schedule_test",
-        "webhook_secret_test",
-        "webhook_test",
     }
-    assert dict((name, driver) for name, _mode, driver in rows)["e2b_test"] == "E2BSandboxDriver"
+    assert dict((name, driver) for name, _mode, driver in rows)["csv_enricher"] == "E2BSandboxDriver"
