@@ -1,156 +1,171 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
+import { readFileSync } from "node:fs";
+import { Command } from "commander";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { runLoginCommand } from "./commands/login.js";
+import { runLogoutCommand } from "./commands/logout.js";
+import { runWhoamiCommand } from "./commands/whoami.js";
+import { runWorkerCommand } from "./commands/run.js";
+import { workersListCommand, workersShowCommand } from "./commands/workers.js";
+import {
+  runsDownloadCommand,
+  runsListCommand,
+  runsLogsCommand,
+  runsShowCommand,
+} from "./commands/runs.js";
+import {
+  secretsDeleteCommand,
+  secretsListCommand,
+  secretsSetCommand,
+} from "./commands/secrets.js";
+import { mcpInstallCommand, mcpUninstallCommand } from "./commands/mcp.js";
+import { completionCommand } from "./commands/completion.js";
 import { main as runServer } from "./server.js";
 
-type JsonObject = Record<string, unknown>;
+type RunResult = Promise<number> | number;
 
-const PACKAGE_NAME = "@floomhq/workeros";
-const SERVER_ENTRY = {
-  command: "npx",
-  args: ["-y", PACKAGE_NAME],
-};
-
-const CLIENTS = [
-  { name: "Claude Code", path: ".claude/settings.json", kind: "object" },
-  { name: "Cursor", path: ".cursor/mcp.json", kind: "object" },
-  { name: "Continue", path: ".continue/.continuerc.json", kind: "array" },
-] as const;
-
-function homeDir(): string {
-  return process.env.HOME || process.env.USERPROFILE || "";
+export function getPackageVersion(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const packageJsonPath = join(here, "..", "package.json");
+  const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version?: string };
+  return parsed.version || "0.0.0";
 }
 
-function serverConfig(secret: string): JsonObject {
-  return {
-    ...SERVER_ENTRY,
-    env: {
-      WORKEROS_API_SECRET: secret,
-    },
-  };
-}
-
-function readJson(path: string): JsonObject {
-  if (!existsSync(path)) {
-    return {};
-  }
-  const raw = readFileSync(path, "utf8").trim();
-  if (!raw) {
-    return {};
-  }
-  return JSON.parse(raw) as JsonObject;
-}
-
-function writeJson(path: string, value: JsonObject): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-function patchObjectConfig(config: JsonObject, secret: string): JsonObject {
-  const next = { ...config };
-  const mcpServers = typeof next.mcpServers === "object" && next.mcpServers && !Array.isArray(next.mcpServers)
-    ? { ...(next.mcpServers as JsonObject) }
-    : {};
-  mcpServers.workeros = serverConfig(secret);
-  next.mcpServers = mcpServers;
-  return next;
-}
-
-function patchContinueConfig(config: JsonObject, secret: string): JsonObject {
-  const next = { ...config };
-  const servers = Array.isArray(next.mcpServers) ? [...next.mcpServers] : [];
-  const entry = {
-    name: "workeros",
-    ...serverConfig(secret),
-  };
-  const existingIndex = servers.findIndex((server) => (
-    typeof server === "object" && server !== null && (server as JsonObject).name === "workeros"
-  ));
-  if (existingIndex === -1) {
-    servers.push(entry);
-  } else {
-    servers[existingIndex] = entry;
-  }
-  next.mcpServers = servers;
-  return next;
-}
-
-function manualSnippets(): string {
-  const placeholder = "<WORKEROS_API_SECRET>";
-  const objectSnippet = JSON.stringify({ mcpServers: { workeros: serverConfig(placeholder) } }, null, 2);
-  const continueSnippet = JSON.stringify({ mcpServers: [{ name: "workeros", ...serverConfig(placeholder) }] }, null, 2);
-  return [
-    "No supported agent config file was found.",
-    "",
-    "Create or update one of these files:",
-    "- Claude Code: ~/.claude/settings.json",
-    "- Cursor: ~/.cursor/mcp.json",
-    "- Continue: ~/.continue/.continuerc.json",
-    "",
-    "Claude Code / Cursor:",
-    objectSnippet,
-    "",
-    "Continue:",
-    continueSnippet,
-  ].join("\n");
-}
-
-async function resolveSecret(): Promise<string> {
-  if (process.env.WORKEROS_API_SECRET) {
-    return process.env.WORKEROS_API_SECRET;
-  }
-  const rl = createInterface({ input, output });
-  try {
-    const secret = await rl.question("WORKEROS_API_SECRET: ");
-    if (!secret.trim()) {
-      throw new Error("WORKEROS_API_SECRET is required");
-    }
-    return secret.trim();
-  } finally {
-    rl.close();
+async function runAction(result: RunResult): Promise<void> {
+  const code = await result;
+  if (code !== 0) {
+    process.exitCode = code;
   }
 }
 
-async function install(): Promise<void> {
-  const home = homeDir();
-  if (!home) {
-    throw new Error("HOME is required to locate agent config files");
-  }
+export function buildCliProgram(): Command {
+  const program = new Command();
+  program
+    .name("floom")
+    .description("Workeros CLI")
+    .version(getPackageVersion())
+    .showHelpAfterError();
 
-  const secret = await resolveSecret();
-  for (const client of CLIENTS) {
-    const path = join(home, client.path);
-    if (!existsSync(path)) {
-      continue;
-    }
-    const config = readJson(path);
-    const patched = client.kind === "array" ? patchContinueConfig(config, secret) : patchObjectConfig(config, secret);
-    writeJson(path, patched);
-    console.log(`Installed Workeros MCP config for ${client.name} at ~/${client.path}`);
-    return;
-  }
+  program.command("login")
+    .description("Login via browser device authorization")
+    .action(async () => runAction(runLoginCommand()));
 
-  console.log(manualSnippets());
+  program.command("logout")
+    .description("Remove saved CLI credentials")
+    .action(async () => runAction(runLogoutCommand()));
+
+  program.command("whoami")
+    .description("Show current auth identity")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(runWhoamiCommand(options)));
+
+  program.command("run")
+    .description("Start and monitor a worker run")
+    .argument("<id>", "Worker id")
+    .option("--input <key=value>", "Input key/value (repeatable)", (value: string, acc: string[]) => [...acc, value], [])
+    .option("-f, --inputs-file <path>", "Path to JSON inputs object")
+    .option("--output-dir <path>", "Save artifacts to this directory")
+    .option("--json", "Print final run JSON")
+    .action(async (
+      id: string,
+      options: { input?: string[]; inputsFile?: string; outputDir?: string; json?: boolean },
+    ) => runAction(runWorkerCommand(id, options)));
+
+  const workers = program.command("workers").description("List or inspect workers");
+  workers.command("list")
+    .description("List workers")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(workersListCommand(options)));
+  workers.command("show")
+    .description("Show a worker")
+    .argument("<id>", "Worker id")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { json?: boolean }) => runAction(workersShowCommand(id, options)));
+
+  const runs = program.command("runs").description("Inspect worker runs");
+  runs.command("list")
+    .description("List runs")
+    .option("--worker <id>", "Filter by worker id")
+    .option("--status <status>", "Filter by run status")
+    .option("--limit <n>", "Number of rows", (value: string) => Number(value), 20)
+    .option("--json", "Print raw JSON")
+    .action(async (options: { worker?: string; status?: string; limit?: number; json?: boolean }) =>
+      runAction(runsListCommand(options)));
+  runs.command("show")
+    .description("Show run details")
+    .argument("<id>", "Run id")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { json?: boolean }) => runAction(runsShowCommand(id, options)));
+  runs.command("logs")
+    .description("Show run logs")
+    .argument("<id>", "Run id")
+    .option("-f, --follow", "Follow live run events")
+    .action(async (id: string, options: { follow?: boolean }) => runAction(runsLogsCommand(id, options)));
+  runs.command("download")
+    .description("Download run bundle archive")
+    .argument("<id>", "Run id")
+    .action(async (id: string) => runAction(runsDownloadCommand(id)));
+
+  const secrets = program.command("secrets").description("Manage secrets");
+  secrets.command("list")
+    .description("List secret names")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(secretsListCommand(options)));
+  secrets.command("set")
+    .description("Set a secret value")
+    .argument("<key>", "Secret name")
+    .action(async (key: string) => runAction(secretsSetCommand(key)));
+  secrets.command("delete")
+    .description("Delete a secret")
+    .argument("<key>", "Secret name")
+    .option("-y, --yes", "Skip confirmation")
+    .action(async (key: string, options: { yes?: boolean }) => runAction(secretsDeleteCommand(key, options)));
+
+  const mcp = program.command("mcp").description("Manage MCP client config");
+  mcp.command("install")
+    .description("Install MCP config for a client")
+    .option("--target <target>", "claude | cursor | continue")
+    .action(async (options: { target?: "claude" | "cursor" | "continue" }) =>
+      runAction(mcpInstallCommand(options)));
+  mcp.command("uninstall")
+    .description("Remove MCP config for a client")
+    .option("--target <target>", "claude | cursor | continue")
+    .action(async (options: { target?: "claude" | "cursor" | "continue" }) =>
+      runAction(mcpUninstallCommand(options)));
+
+  program.command("completion")
+    .description("Print shell completion script")
+    .argument("<shell>", "bash | zsh | fish")
+    .action(async (shell: "bash" | "zsh" | "fish") => {
+      if (!["bash", "zsh", "fish"].includes(shell)) {
+        throw new Error("Shell must be one of: bash, zsh, fish");
+      }
+      await runAction(completionCommand(shell));
+    });
+
+  program.command("install")
+    .description("Install MCP config (deprecated alias for mcp install)")
+    .action(async () => runAction(mcpInstallCommand({})));
+
+  return program;
 }
 
-export async function main(argv = process.argv.slice(2)): Promise<void> {
-  const command = argv[0];
-  if (!command) {
+export async function main(argv = process.argv): Promise<void> {
+  const program = buildCliProgram();
+  const args = argv.slice(2);
+  if (args.length === 0) {
     await runServer();
     return;
   }
-  if (command === "install") {
-    await install();
-    return;
-  }
-
-  console.log("Usage: workeros install");
+  await program.parseAsync(argv);
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`workeros failed: ${message}`);
-  process.exit(1);
-});
+const executedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+if (executedPath && fileURLToPath(import.meta.url) === executedPath) {
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`floom failed: ${message}`);
+    process.exit(1);
+  });
+}
