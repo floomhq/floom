@@ -154,55 +154,54 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
     return <p className="text-sm text-muted-foreground">No files found for this worker.</p>;
   }
 
+  // S29t (score walk): file rail was w-52 (208px) wrapping path names; right
+  // pane wrapped in a Card with a duplicated path header. Now: wider rail
+  // (256px), no Card wrapper, path shown once as a quiet header above content.
   return (
-    <div className="flex gap-4 items-start max-w-5xl">
-      <div className="w-52 shrink-0">
-        <Card className="border-border shadow-none bg-card">
-          <CardHeader className="py-2 px-3">
-            <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <FolderOpen className="w-3.5 h-3.5" />
-              Files
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0 pb-1">
-            {files.map((f) => (
-              <button
-                key={f.path}
-                type="button"
-                onClick={() => onSelect?.(f.path)}
-                className={`w-full text-left px-3 py-1.5 text-xs font-mono truncate flex items-center gap-1.5 transition-colors ${
-                  f.path === selectedPath
-                    ? "bg-muted text-foreground font-semibold"
-                    : "text-muted-foreground hover:bg-muted/50"
-                }`}
-                title={f.path}
-              >
-                <File className="w-3 h-3 shrink-0 text-muted-foreground" />
-                <span className="truncate">{f.path}</span>
-              </button>
-            ))}
-          </CardContent>
-        </Card>
+    <div className="flex gap-6 items-start max-w-5xl">
+      <div className="w-64 shrink-0 border border-line">
+        <div className="px-3 py-2 border-b border-line">
+          <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+            <FolderOpen className="w-3.5 h-3.5" />
+            Files
+          </p>
+        </div>
+        <div className="py-1">
+          {files.map((f) => (
+            <button
+              key={f.path}
+              type="button"
+              onClick={() => onSelect?.(f.path)}
+              className={`w-full text-left px-3 py-1.5 text-xs font-mono truncate flex items-center gap-1.5 transition-colors ${
+                f.path === selectedPath
+                  ? "bg-muted text-foreground font-medium"
+                  : "text-muted-foreground hover:bg-muted/50"
+              }`}
+              title={f.path}
+            >
+              <File className="w-3 h-3 shrink-0 text-muted-foreground" />
+              <span className="truncate">{f.path}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 min-w-0">
         {selected ? (
-          <Card className="border-border shadow-none bg-card">
-            <CardHeader className="py-2 px-4 border-b border-border">
-              <CardTitle className="text-xs font-medium font-mono text-muted-foreground">{selected.path}</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {selected.binary ? (
-                <div className="p-4 text-sm text-muted-foreground">Binary file -- cannot display.</div>
-              ) : selected.language === "markdown" ? (
-                <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-b-md overflow-auto max-h-[600px]">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content || ""}</ReactMarkdown>
-                </div>
-              ) : (
-                <SyntaxHighlightedCode content={selected.content || ""} language={selected.language} />
-              )}
-            </CardContent>
-          </Card>
+          <div className="border border-line">
+            <div className="py-2 px-4 border-b border-line">
+              <p className="text-xs font-mono text-muted-foreground">{selected.path}</p>
+            </div>
+            {selected.binary ? (
+              <div className="p-4 text-sm text-muted-foreground">Binary file -- cannot display.</div>
+            ) : selected.language === "markdown" ? (
+              <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px]">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content || ""}</ReactMarkdown>
+              </div>
+            ) : (
+              <SyntaxHighlightedCode content={selected.content || ""} language={selected.language} />
+            )}
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground">Select a file to view.</p>
         )}

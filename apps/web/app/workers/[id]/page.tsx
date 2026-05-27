@@ -581,6 +581,10 @@ function RunSection({
   // S29m (ChatGPT-audit P-3): drop Card wrapper; the Run tab is a form, not
   // a distinct surface needing a border. Section heading + form fields sit
   // directly on the page background.
+  // S29t (score walk): short inputs (select/string/number/boolean) pair
+  // side-by-side; long inputs (textarea/file/csv) span both columns.
+  const isLongInput = (inp: WorkerInput) =>
+    inp.type === "textarea" || inp.type === "file";
   return (
     <div className="max-w-xl space-y-6">
       <div className="space-y-4">
@@ -612,8 +616,9 @@ function RunSection({
               )}
             </div>
           )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {worker.config.inputs.map((inp: WorkerInput) => (
-            <div key={inp.name} className="space-y-1.5">
+            <div key={inp.name} className={`space-y-1.5 ${isLongInput(inp) ? "sm:col-span-2" : ""}`}>
               <Label className="text-sm">
                 {inp.label}
                 {inp.required && <span className="text-red-500 ml-0.5">*</span>}
@@ -685,13 +690,14 @@ function RunSection({
               )}
             </div>
           ))}
+        </div>
 
           {worker.config.inputs.length === 0 && (
             <p className="text-sm text-muted-foreground">This worker has no inputs.</p>
           )}
 
           {missingConnections.length > 0 && (
-            <div className="flex items-start gap-2 p-3 rounded-md bg-amber-50 border border-amber-200 text-xs text-amber-800">
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800">
               <Plug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <div>
                 <p className="font-medium">Connection required</p>
