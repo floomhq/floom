@@ -9,19 +9,16 @@ import logging
 import shutil
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from db import DB_PATH, get_db, now_iso
+from db.factory import Repositories, get_repositories
 from worker_registry import WORKERS_DIR, get_worker_config
 from runner_sandbox import get_driver as get_sandbox_driver
 from models import (
     WorkerConfig,
-    WorkerContract,
     RunStatus,
-    parse_worker_manifest,
-    worker_contract_to_worker_config,
 )
 
 logger = logging.getLogger("floom.run_service")
@@ -92,50 +89,71 @@ def scrub_secrets(text: str, secrets: Dict[str, str]) -> str:
 # Run lifecycle
 # ---------------------------------------------------------------------------
 
-def _load_worker_recipe(worker_id: str) -> Optional[tuple[WorkerConfig, Optional[Dict[str, Any]]]]:
-    """Load the executable recipe from skill_versions plus instance row."""
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _configured_db_path() -> Path:
+    configured = os.environ.get("WORKEROS_DB") or os.environ.get("FLOOM_DB")
+    if configured:
+        return Path(configured)
+    return Path(__file__).resolve().parents[2] / "data" / "floom.db"
+
+
+def _repos(repos: Repositories | None = None) -> Repositories:
+    return repos or get_repositories()
+
+
+def _worker_owner_id(worker_id: str, repos: Repositories | None = None) -> str | None:
+    return _repos(repos).workers.get_owner(worker_id=worker_id)
+
+
+def _run_scope(run_id: str, repos: Repositories | None = None) -> tuple[str, str] | None:
+    repos_obj = _repos(repos)
+    run_row = repos_obj.runs.get_any(run_id=run_id)
+    if run_row is None:
+        return None
+    owner_id = repos_obj.workers.get_owner(worker_id=run_row["worker_id"])
+    if not owner_id:
+        return None
+    return owner_id, run_row["worker_id"]
+
+
+def _load_worker_recipe(
+    worker_id: str,
+    repos: Repositories | None = None,
+) -> Optional[tuple[str | None, WorkerConfig, Optional[Dict[str, Any]]]]:
+    """Load the executable recipe from the repository layer plus instance row."""
+    repos_obj = _repos(repos)
     try:
-        with get_db() as conn:
-            row = conn.execute(
-                """
-                SELECT w.id, w.trigger_type, w.cron_expr, w.cron_timezone, w.grants_json,
-                       w.input_values_json, w.enabled, sv.manifest_json, sv.bundle_path
-                FROM workers w
-                JOIN skill_versions sv ON sv.id = w.skill_version_id
-                WHERE w.id = ?
-                """,
-                (worker_id,),
-            ).fetchone()
-        if row:
-            manifest_raw = json.loads(row["manifest_json"] or "{}")
-            parsed = parse_worker_manifest(manifest_raw)
-            if isinstance(parsed, WorkerContract):
-                config = worker_contract_to_worker_config(parsed, worker_id)
-            else:
-                config = parsed
-            if row["trigger_type"]:
-                config.trigger.type = row["trigger_type"]
-            if row["cron_expr"]:
-                config.trigger.cron = row["cron_expr"]
-            if row["cron_timezone"]:
-                config.trigger.timezone = row["cron_timezone"]
-            if config.runtime:
-                config.runtime.bundle_path = row["bundle_path"]
-            return config, {
-                "grants": json.loads(row["grants_json"] or "{}"),
-                "input_values": json.loads(row["input_values_json"] or "{}"),
-                "enabled": bool(row["enabled"]),
-            }
+        recipe = repos_obj.workers.get_recipe(worker_id=worker_id)
+        if recipe:
+            config = recipe.get("config")
+            if isinstance(config, WorkerConfig):
+                return (
+                    recipe.get("owner_id"),
+                    config,
+                    {
+                        "grants": recipe.get("grants") or {},
+                        "input_values": recipe.get("input_values") or {},
+                        "enabled": bool(recipe.get("enabled", True)),
+                    },
+                )
     except Exception:
         logger.exception("Failed to load worker recipe from database for %s", worker_id)
 
     config = get_worker_config(worker_id)
-    return (config, None) if config else None
+    if not config:
+        return None
+    return (_worker_owner_id(worker_id, repos_obj), config, None)
 
 
-def _get_worker_config_for_run(worker_id: str) -> Optional[WorkerConfig]:
-    loaded = _load_worker_recipe(worker_id)
-    return loaded[0] if loaded else None
+def _get_worker_config_for_run(
+    worker_id: str,
+    repos: Repositories | None = None,
+) -> Optional[WorkerConfig]:
+    loaded = _load_worker_recipe(worker_id, repos=repos)
+    return loaded[1] if loaded else None
 
 
 def get_worker_config_for_run(worker_id: str) -> Optional[WorkerConfig]:
@@ -180,7 +198,7 @@ def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
 
 def _snapshot_worker_bundle(run_id: str, worker_id: str, config: Optional[WorkerConfig]) -> Optional[str]:
     """Best-effort copy of the worker bundle for run reproducibility."""
-    data_dir = Path(DB_PATH).resolve().parent
+    data_dir = _configured_db_path().resolve().parent
     snapshot_dir = data_dir / "run-bundles" / run_id
     try:
         worker_dir = _worker_dir_for_run(worker_id, config)
@@ -201,34 +219,33 @@ def create_run(
     worker_id: str,
     inputs: Dict[str, Any],
     trigger_source: str = "manual",
+    *,
+    user_id: str | None = None,
+    repos: Repositories | None = None,
 ) -> str:
+    repos_obj = _repos(repos)
     run_id = f"run_{uuid.uuid4().hex[:12]}"
-    loaded = _load_worker_recipe(worker_id)
-    config = loaded[0] if loaded else None
-    instance = loaded[1] if loaded else None
+    loaded = _load_worker_recipe(worker_id, repos=repos_obj)
+    owner_id = user_id or (loaded[0] if loaded else None) or _worker_owner_id(worker_id, repos_obj)
+    if not owner_id:
+        raise ValueError(f"Worker {worker_id} owner not found")
+    config = loaded[1] if loaded else None
+    instance = loaded[2] if loaded else None
     if instance and not instance.get("enabled", True):
         raise ValueError(f"Worker {worker_id} is disabled")
     effective_inputs = _merge_instance_inputs(instance, inputs)
     # Determine runner from config (default to "local" for backward compat)
     runner = _runner_key(config)
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO runs
-                (id, worker_id, status, trigger_source, runner,
-                 input_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                run_id,
-                worker_id,
-                RunStatus.QUEUED.value,
-                trigger_source,
-                runner,
-                json.dumps(effective_inputs),
-                now_iso(),
-            ),
-        )
+    repos_obj.runs.create(
+        user_id=owner_id,
+        run_id=run_id,
+        worker_id=worker_id,
+        status=RunStatus.QUEUED.value,
+        trigger_source=trigger_source,
+        runner=runner,
+        input_json=effective_inputs,
+        created_at=_now_iso(),
+    )
     logger.info("Created run %s for worker %s (runner=%s)", run_id, worker_id, runner)
     return run_id
 
@@ -239,17 +256,26 @@ def add_log(
     level: str = "info",
     trace_id: Optional[str] = None,
     attributes: Optional[Dict[str, Any]] = None,
+    *,
+    user_id: str | None = None,
+    repos: Repositories | None = None,
 ) -> None:
-    ts = now_iso()
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO logs
-                (run_id, level, message, timestamp, trace_id)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (run_id, level, message, ts, trace_id),
-        )
+    repos_obj = _repos(repos)
+    owner_id = user_id
+    if owner_id is None:
+        scope = _run_scope(run_id, repos_obj)
+        if scope is None:
+            return
+        owner_id, _worker_id = scope
+    ts = _now_iso()
+    repos_obj.runs.add_log(
+        user_id=owner_id,
+        run_id=run_id,
+        level=level,
+        message=message,
+        timestamp=ts,
+        trace_id=trace_id,
+    )
     _publish_sse(run_id, {
         "type": "log",
         "run_id": run_id,
@@ -265,45 +291,24 @@ def update_run_status(
     status: str,
     output: Optional[Dict[str, Any]] = None,
     error: Optional[str] = None,
+    *,
+    user_id: str | None = None,
+    repos: Repositories | None = None,
 ) -> None:
-    with get_db() as conn:
-        cursor = conn.cursor()
-        updates = ["status = ?"]
-        params: list[Any] = [status]
-
-        if output is not None:
-            updates.append("output_json = ?")
-            params.append(json.dumps(output))
-        if error is not None:
-            updates.append("error = ?")
-            params.append(error)
-        if status == RunStatus.RUNNING.value:
-            updates.append("started_at = ?")
-            params.append(now_iso())
-        if status in {
-            RunStatus.COMPLETED.value,
-            RunStatus.FAILED.value,
-        }:
-            updates.append("completed_at = ?")
-            params.append(now_iso())
-            # Compute duration if started_at exists
-            cursor.execute("SELECT started_at FROM runs WHERE id = ?", (run_id,))
-            row = cursor.fetchone()
-            if row and row["started_at"]:
-                try:
-                    started = datetime.fromisoformat(row["started_at"])
-                    completed = datetime.fromisoformat(now_iso())
-                    duration_ms = int((completed - started).total_seconds() * 1000)
-                    updates.append("duration_ms = ?")
-                    params.append(duration_ms)
-                except Exception:
-                    pass
-
-        params.append(run_id)
-        cursor.execute(
-            f"UPDATE runs SET {', '.join(updates)} WHERE id = ?",
-            tuple(params),
-        )
+    repos_obj = _repos(repos)
+    owner_id = user_id
+    if owner_id is None:
+        scope = _run_scope(run_id, repos_obj)
+        if scope is None:
+            return
+        owner_id, _worker_id = scope
+    repos_obj.runs.update_status(
+        user_id=owner_id,
+        run_id=run_id,
+        status=status,
+        output_json=output,
+        error=error,
+    )
 
     # Publish SSE event for the status change
     _publish_sse(run_id, {
@@ -318,7 +323,17 @@ def _store_run_artifacts(
     run_id: str,
     artifacts: list[Dict[str, Any]],
     log_fn: Callable[[str, str], None],
+    *,
+    user_id: str | None = None,
+    repos: Repositories | None = None,
 ) -> None:
+    repos_obj = _repos(repos)
+    owner_id = user_id
+    if owner_id is None:
+        scope = _run_scope(run_id, repos_obj)
+        if scope is None:
+            return
+        owner_id, _worker_id = scope
     for art in artifacts:
         try:
             art_id = f"art_{uuid.uuid4().hex[:12]}"
@@ -326,16 +341,17 @@ def _store_run_artifacts(
             art_type = art.get("type", "file")
             art_path = art.get("path", "")
             art_size = art.get("size_bytes", 0)
-            art_created = now_iso()
-            with get_db() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO artifacts
-                        (id, run_id, name, type, path, size_bytes, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (art_id, run_id, art_name, art_type, art_path, art_size, art_created),
-                )
+            art_created = _now_iso()
+            repos_obj.runs.add_artifact(
+                user_id=owner_id,
+                run_id=run_id,
+                artifact_id=art_id,
+                name=art_name,
+                artifact_type=art_type,
+                path=art_path,
+                size_bytes=art_size,
+                created_at=art_created,
+            )
             _publish_sse(run_id, {
                 "type": "artifact",
                 "run_id": run_id,
@@ -372,14 +388,12 @@ def _env_keys_from_file(path: Path) -> set[str]:
     return keys
 
 
-def _secret_names_from_db() -> set[str]:
+def _secret_names_from_db(
+    user_id: str,
+    repos: Repositories | None = None,
+) -> set[str]:
     try:
-        with get_db() as conn:
-            return {
-                row["name"]
-                for row in conn.execute("SELECT name FROM secrets").fetchall()
-                if row["name"]
-            }
+        return _repos(repos).secrets.list_names(user_id=user_id)
     except Exception:
         return set()
 
@@ -409,7 +423,12 @@ _PLATFORM_SECRET_NAMES: frozenset[str] = frozenset({
 })
 
 
-def get_secrets_for_worker(worker_id: str) -> Dict[str, str]:
+def get_secrets_for_worker(
+    worker_id: str,
+    *,
+    user_id: str | None = None,
+    repos: Repositories | None = None,
+) -> Dict[str, str]:
     """Resolve the secrets dict that ships to the worker sandbox.
 
     SECURITY: The sandbox secrets.json must contain ONLY:
@@ -425,54 +444,64 @@ def get_secrets_for_worker(worker_id: str) -> Dict[str, str]:
     flagged it as P0. The `_PLATFORM_SECRET_NAMES` denylist now blocks them
     regardless of whether they appear in the worker manifest or the DB.
     """
+    repos_obj = _repos(repos)
+    owner_id = user_id or _worker_owner_id(worker_id, repos_obj)
+    if not owner_id:
+        return {}
     _load_runtime_env_files()
-    config = _get_worker_config_for_run(worker_id)
+    config = _get_worker_config_for_run(worker_id, repos_obj)
     names = set(config.secrets if config else [])
-    names.update(_secret_names_from_db())
+    names.update(_secret_names_from_db(owner_id, repos_obj))
     # DO NOT union env-file keys here. They include platform infra secrets.
-    secrets: Dict[str, str] = {}
-    for name in names:
-        if name in _PLATFORM_SECRET_NAMES:
-            # Belt-and-suspenders: even if a worker.yml or the secrets table
-            # tries to declare a platform secret name, never propagate it
-            # into the sandbox.
-            continue
-        value = os.environ.get(name)
-        if value:
-            secrets[name] = value
-    return secrets
+    allowed_names = [name for name in names if name not in _PLATFORM_SECRET_NAMES]
+    return repos_obj.secrets.resolve(user_id=owner_id, names=allowed_names)
 
 
 # ---------------------------------------------------------------------------
 # Execution orchestration
 # ---------------------------------------------------------------------------
 
-def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
+def execute_run(
+    run_id: str,
+    worker_id: str,
+    inputs: Dict[str, Any],
+    user_id: str | None = None,
+    repos: Repositories | None = None,
+) -> None:
+    repos_obj = _repos(repos)
+    owner_id = user_id or _worker_owner_id(worker_id, repos_obj)
     trace_id = f"trace_{uuid.uuid4().hex[:16]}"
-    loaded = _load_worker_recipe(worker_id)
-    config = loaded[0] if loaded else None
-    instance = loaded[1] if loaded else None
+    loaded = _load_worker_recipe(worker_id, repos_obj)
+    config = loaded[1] if loaded else None
+    instance = loaded[2] if loaded else None
     effective_inputs = _merge_instance_inputs(instance, inputs)
 
     def log_fn(msg: str, level: str = "info") -> None:
-        secrets = get_secrets_for_worker(worker_id)
+        secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
         safe_msg = scrub_secrets(msg, secrets)
-        add_log(run_id, safe_msg, level=level, trace_id=trace_id)
+        add_log(
+            run_id,
+            safe_msg,
+            level=level,
+            trace_id=trace_id,
+            user_id=owner_id,
+            repos=repos_obj,
+        )
 
-    update_run_status(run_id, RunStatus.RUNNING.value)
+    update_run_status(run_id, RunStatus.RUNNING.value, user_id=owner_id, repos=repos_obj)
     log_fn("Run started")
     log_fn("Validating inputs", level="debug")
 
     if not config:
         err = "Worker config not found"
-        update_run_status(run_id, RunStatus.FAILED.value, error=err)
+        update_run_status(run_id, RunStatus.FAILED.value, error=err, user_id=owner_id, repos=repos_obj)
         publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
         log_fn(err, level="error")
         return
 
     if instance and not instance.get("enabled", True):
         err = "Worker is disabled"
-        update_run_status(run_id, RunStatus.FAILED.value, error=err)
+        update_run_status(run_id, RunStatus.FAILED.value, error=err, user_id=owner_id, repos=repos_obj)
         publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
         log_fn(err, level="error")
         return
@@ -481,17 +510,17 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
     for inp in config.inputs:
         if inp.required and (inp.name not in effective_inputs or effective_inputs[inp.name] in (None, "")):
             err = f"Missing required input: {inp.name}"
-            update_run_status(run_id, RunStatus.FAILED.value, error=err)
+            update_run_status(run_id, RunStatus.FAILED.value, error=err, user_id=owner_id, repos=repos_obj)
             publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
             log_fn(err, level="error")
             return
 
     log_fn("Loading secrets", level="debug")
-    secrets = get_secrets_for_worker(worker_id)
+    secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
     missing = [s for s in config.secrets if s not in secrets]
     if missing:
         err = f"Missing secrets: {', '.join(missing)}"
-        update_run_status(run_id, RunStatus.FAILED.value, error=err)
+        update_run_status(run_id, RunStatus.FAILED.value, error=err, user_id=owner_id, repos=repos_obj)
         publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
         log_fn(err, level="error")
         return
@@ -503,16 +532,17 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         from runner_utils import _resolve_connections
         connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config)
         if conn_err:
-            update_run_status(run_id, RunStatus.FAILED.value, error=conn_err)
+            update_run_status(run_id, RunStatus.FAILED.value, error=conn_err, user_id=owner_id, repos=repos_obj)
             publish_run_part(run_id, {"type": "finish", "status": "failed", "error": conn_err})
             log_fn(conn_err, level="error")
             return
 
     bundle_snapshot_path = _snapshot_worker_bundle(run_id, worker_id, config)
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE runs SET bundle_snapshot_path = ? WHERE id = ?",
-            (bundle_snapshot_path, run_id),
+    if owner_id:
+        repos_obj.runs.set_bundle_snapshot_path(
+            user_id=owner_id,
+            run_id=run_id,
+            bundle_snapshot_path=bundle_snapshot_path,
         )
 
     # Dispatch to the appropriate sandbox driver based on worker config
@@ -541,11 +571,11 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
 
     outputs = result.outputs
     artifacts = result.artifacts
-    _store_run_artifacts(run_id, artifacts, log_fn)
+    _store_run_artifacts(run_id, artifacts, log_fn, user_id=owner_id, repos=repos_obj)
 
     # Both "error" and "failed" terminal statuses map to a failed run
     if result.status in ("error", "failed"):
-        update_run_status(run_id, RunStatus.FAILED.value, error=result.error)
+        update_run_status(run_id, RunStatus.FAILED.value, error=result.error, user_id=owner_id, repos=repos_obj)
         finish_status = "timeout" if (result.error_code or "").lower().find("timeout") >= 0 else "failed"
         publish_run_part(
             run_id,
@@ -554,16 +584,23 @@ def execute_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
         log_fn(f"Run failed: {result.error}", level="error")
         return
 
-    update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs)
+    update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
     publish_run_part(run_id, {"type": "finish", "status": "completed"})
     log_fn("Output generated")
     log_fn("Run completed")
 
 
-def start_run(run_id: str, worker_id: str, inputs: Dict[str, Any]) -> None:
+def start_run(
+    run_id: str,
+    worker_id: str,
+    inputs: Dict[str, Any],
+    *,
+    user_id: str | None = None,
+    repos: Repositories | None = None,
+) -> None:
     thread = threading.Thread(
         target=execute_run,
-        args=(run_id, worker_id, inputs),
+        args=(run_id, worker_id, inputs, user_id, repos),
         daemon=True,
     )
     thread.start()
