@@ -161,30 +161,9 @@ export default function ConnectionsPage() {
     });
   }, [connections, lastUsedBySlug, metadataByConnectionId, scopesByConnectionId]);
 
-  async function handleConnect(slug: string) {
-    setConnecting(slug);
-    const oauthTab = window.open("", "_blank");
-    if (oauthTab) oauthTab.opener = null;
-    try {
-      const result = await api.connections.initiate(slug);
-      if (result.redirect_url) {
-        if (oauthTab) {
-          oauthTab.location.href = result.redirect_url;
-        } else {
-          window.open(result.redirect_url, "_blank", "noopener,noreferrer");
-        }
-        toast.success(`OAuth opened for ${slug}`);
-      } else {
-        oauthTab?.close();
-        toast.success(`Connection initiated for ${slug}`);
-      }
-      void refresh();
-    } catch (error: unknown) {
-      oauthTab?.close();
-      toast.error(error instanceof Error ? error.message : `Failed to connect ${slug}`);
-    } finally {
-      setConnecting(null);
-    }
+  function handleConnect(slug: string) {
+    // PR S17: route through our pre-confirm page instead of going straight to OAuth.
+    window.location.href = `/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`;
   }
 
   async function handleRefresh(connection: ConnectionView) {

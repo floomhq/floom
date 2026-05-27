@@ -345,28 +345,36 @@ def _resolve_auth_config_id(app_name: str) -> str:
 
 
 def initiate_connection(app_name: str, redirect_url: str) -> Dict[str, str]:
-    """Initiate OAuth for app_name using Composio's white-label Connect Link.
+    """Initiate OAuth for app_name. Returns the direct provider OAuth URL.
 
-    Uses POST /api/v3/connected_accounts/link instead of the legacy
-    POST /api/v3/connected_accounts. The link endpoint returns a hosted
-    connect.composio.dev URL that shows the white-labeled "Floom wants to
-    connect to <App>" interstitial (configured in the Composio dashboard
-    under Project Settings -> Auth Screen) BEFORE redirecting to the
-    provider's OAuth screen. The legacy endpoint skipped that interstitial
-    and sent users straight to the provider, bypassing Floom branding.
+    PR S17: Switched from /connected_accounts/link (hosted Connect Link page
+    that flashed branding then auto-forwarded) back to /connected_accounts
+    direct. Our own pre-confirm screen at /connections/connect/<app> renders
+    BEFORE this URL is opened, giving us full control over the consent moment.
+
+    The downstream provider OAuth page (Google etc.) still shows our
+    integrations partner's name on the consent screen until per-provider
+    BYO OAuth credentials are registered. Known limitation, single-user v0.
 
     Returns {composio_connection_id, redirect_url}.
 
-    Raises NoManagedAuthError if the app does not support Composio-managed OAuth.
+    Raises NoManagedAuthError if the app does not support managed OAuth.
     """
     auth_config_id = _resolve_auth_config_id(app_name)
-    data = _post("/connected_accounts/link", {
-        "auth_config_id": auth_config_id,
-        "user_id": _USER_ID,
-        "callback_url": redirect_url,
+    data = _post("/connected_accounts", {
+        "auth_config": {"id": auth_config_id},
+        "connection": {
+            "user_id": _USER_ID,
+            "callback_url": redirect_url,
+        },
     })
-    conn_id = data.get("connected_account_id", "")
-    oauth_url = data.get("redirect_url", "")
+    conn_id = data.get("id") or data.get("connected_account_id") or ""
+    oauth_url = (
+        (data.get("connection_data") or {}).get("val", {}).get("redirectUrl")
+        or data.get("redirect_url")
+        or data.get("oauth_url")
+        or ""
+    )
     return {
         "composio_connection_id": conn_id,
         "redirect_url": oauth_url,
