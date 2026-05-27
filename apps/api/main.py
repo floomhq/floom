@@ -36,6 +36,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 
+from auth import AuthContext, get_auth_context, get_auth_provider
+
 try:
     from slowapi.util import get_remote_address as _slowapi_get_remote_address
 except Exception:  # pragma: no cover - fallback only used when dependency is absent locally
@@ -109,6 +111,7 @@ async def lifespan(app: FastAPI):
     register_sse_publisher(_sse_publish)
     register_part_publisher(_run_part_publish)
     # Startup
+    _validate_startup_configuration()
     reload_workers()
     from scheduler import start_scheduler
     start_scheduler()
@@ -134,7 +137,6 @@ app = FastAPI(
 )
 
 
-DEFAULT_USER_ID = "federico"
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
 DEFAULT_RATE_LIMIT = (60, 60.0)
@@ -177,22 +179,16 @@ app.add_middleware(
 )
 
 
-def require_secret(request: Request) -> None:
-    secret = os.environ.get("FLOOM_SECRET", "")
-    if not secret:
-        return
-    header = request.headers.get("x-floom-secret", "")
-    if header != secret:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+def _validate_startup_configuration() -> None:
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy != "local":
+        get_auth_provider()
 
 
-def _request_user_id(request: Request) -> str:
-    if os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":
-        header_user = (request.headers.get("x-floom-user") or "").strip()
-        if header_user:
-            return header_user[:128]
-    configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
-    return configured or DEFAULT_USER_ID
+async def require_secret(request: Request) -> str:
+    """DEPRECATED: use Depends(get_auth_context) instead."""
+    ctx = await get_auth_context(request)
+    return ctx.user_id
 
 
 def _connection_row_for_user(connection_id: str, user_id: str, columns: str) -> sqlite3.Row:
@@ -4718,7 +4714,7 @@ def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
     return []
 
 
-def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str) -> Optional[str]:
+def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str, user_id: str) -> Optional[str]:
     """Resolve the connected user's email via Composio's tool-execute proxy.
 
     Composio masks the raw OAuth access_token from `/connected_accounts/<id>`
@@ -4751,7 +4747,7 @@ def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str) -> Optional[
         r = _requests.post(
             f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
             headers={"x-api-key": key, "Content-Type": "application/json"},
-            json={"connected_account_id": composio_conn_id, "user_id": "federico", "arguments": {}},
+            json={"connected_account_id": composio_conn_id, "user_id": user_id, "arguments": {}},
             timeout=8,
         )
         if not r.ok:
@@ -4773,7 +4769,7 @@ def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str) -> Optional[
     return None
 
 
-def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
+def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict[str, Any]:
     """Fetch Composio connected-account and return normalized account info.
 
     Returns a dict with keys: email, scopes, user_id, auth_config_id.
@@ -4817,7 +4813,7 @@ def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
         if not email:
             toolkit_slug = ((account.get("toolkit") or {}).get("slug") or "").lower()
             if toolkit_slug and composio_conn_id:
-                email = _fetch_provider_email(toolkit_slug, composio_conn_id)
+                email = _fetch_provider_email(toolkit_slug, composio_conn_id, user_id)
         return {
             "email": email,
             "scopes": scopes,
@@ -4833,9 +4829,9 @@ def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
         return {}
 
 
-@app.get("/connections", response_model=List[ConnectionItem], dependencies=[Depends(require_secret)])
-def list_connections(request: Request) -> List[ConnectionItem]:
-    user_id = _request_user_id(request)
+@app.get("/connections", response_model=List[ConnectionItem])
+def list_connections(auth: AuthContext = Depends(get_auth_context)) -> List[ConnectionItem]:
+    user_id = auth.user_id
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -4854,8 +4850,11 @@ def list_connections(request: Request) -> List[ConnectionItem]:
     return result
 
 
-@app.post("/connections", response_model=ConnectionInitResponse, dependencies=[Depends(require_secret)])
-def initiate_connection(payload: ConnectionInitRequest, request: Request) -> ConnectionInitResponse:
+@app.post("/connections", response_model=ConnectionInitResponse)
+def initiate_connection(
+    payload: ConnectionInitRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> ConnectionInitResponse:
     from composio_client import initiate_connection as composio_initiate, NoManagedAuthError
     app_name = payload.app_name.lower().strip()
     if not app_name:
@@ -4863,7 +4862,7 @@ def initiate_connection(payload: ConnectionInitRequest, request: Request) -> Con
 
     callback_url = _get_callback_url()
     try:
-        result = composio_initiate(app_name, callback_url)
+        result = composio_initiate(app_name, callback_url, user_id=auth.user_id)
     except NoManagedAuthError as exc:
         # App does not support Composio-managed OAuth (e.g. API-key-only apps).
         # Return 422 with a prefixed detail string so the frontend can detect it
@@ -4878,8 +4877,6 @@ def initiate_connection(payload: ConnectionInitRequest, request: Request) -> Con
 
     composio_conn_id = result["composio_connection_id"]
     redirect_url = result["redirect_url"]
-    user_id = _request_user_id(request)
-
     # Always insert a new row — multiple accounts per app are allowed.
     # Each Composio connected_account is a distinct row identified by its own UUID.
     conn_id = str(_uuid_mod.uuid4())
@@ -4889,7 +4886,7 @@ def initiate_connection(payload: ConnectionInitRequest, request: Request) -> Con
             "INSERT INTO composio_connections "
             "(id, app_name, composio_connection_id, status, created_at, updated_at, user_id) "
             "VALUES (?, ?, ?, 'initiated', ?, ?, ?)",
-            (conn_id, app_name, composio_conn_id, now, now, user_id),
+            (conn_id, app_name, composio_conn_id, now, now, auth.user_id),
         )
 
     return ConnectionInitResponse(
@@ -4957,9 +4954,12 @@ def connections_callback_alias(connection_id: str = "", status: str = ""):
     return connections_callback(connection_id=connection_id, status=status)
 
 
-@app.get("/connections/{connection_id}/status", response_model=ConnectionItem, dependencies=[Depends(require_secret)])
-def get_connection_status(connection_id: str, request: Request) -> ConnectionItem:
-    user_id = _request_user_id(request)
+@app.get("/connections/{connection_id}/status", response_model=ConnectionItem)
+def get_connection_status(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> ConnectionItem:
+    user_id = auth.user_id
     row = _connection_row_for_user(
         connection_id,
         user_id,
@@ -4989,9 +4989,9 @@ def get_connection_status(connection_id: str, request: Request) -> ConnectionIte
     return ConnectionItem(**item)
 
 
-@app.delete("/connections/{connection_id}", dependencies=[Depends(require_secret)])
-def delete_connection(connection_id: str, request: Request):
-    user_id = _request_user_id(request)
+@app.delete("/connections/{connection_id}")
+def delete_connection(connection_id: str, auth: AuthContext = Depends(get_auth_context)):
+    user_id = auth.user_id
     row = _connection_row_for_user(connection_id, user_id, "composio_connection_id")
 
     composio_conn_id = row["composio_connection_id"]
@@ -5009,18 +5009,20 @@ def delete_connection(connection_id: str, request: Request):
     return {"status": "deleted"}
 
 
-@app.get("/connections/{connection_id}/account-info", dependencies=[Depends(require_secret)])
-def get_connection_account_info(connection_id: str, request: Request) -> Dict[str, Any]:
+@app.get("/connections/{connection_id}/account-info")
+def get_connection_account_info(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
     """Return Composio connected-account info needed by the UI.
 
     The frontend calls this to hydrate connection cards. The Composio API key
     lives here on the API service so it never needs to be on Vercel.
     """
-    user_id = _request_user_id(request)
-    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id, created_at")
+    row = _connection_row_for_user(connection_id, auth.user_id, "composio_connection_id, created_at")
 
     composio_conn_id = row["composio_connection_id"]
-    info = _fetch_composio_account_info(composio_conn_id)
+    info = _fetch_composio_account_info(composio_conn_id, user_id=auth.user_id)
     if not info:
         raise HTTPException(status_code=502, detail="Unable to fetch account info from upstream")
 
@@ -5042,7 +5044,7 @@ def get_connection_account_info(connection_id: str, request: Request) -> Dict[st
     }
 
 
-@app.get("/connections/auth-configs/{auth_config_id}", dependencies=[Depends(require_secret)])
+@app.get("/connections/auth-configs/{auth_config_id}", dependencies=[Depends(get_auth_context)])
 def get_auth_config(auth_config_id: str) -> Dict[str, Any]:
     """Return Composio auth_config (scopes definition) for a given auth_config_id.
 
@@ -5134,11 +5136,13 @@ def _extract_auth_config_scopes(body: Any) -> List[str]:
     return []
 
 
-@app.post("/connections/{connection_id}/test", response_model=ConnectionTestResult, dependencies=[Depends(require_secret)])
-def test_connection(connection_id: str, request: Request) -> ConnectionTestResult:
+@app.post("/connections/{connection_id}/test", response_model=ConnectionTestResult)
+def test_connection(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> ConnectionTestResult:
     """Test whether a connection's token is still valid by calling Composio."""
-    user_id = _request_user_id(request)
-    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id")
+    row = _connection_row_for_user(connection_id, auth.user_id, "composio_connection_id")
 
     composio_conn_id = row["composio_connection_id"]
     tested_at = now_iso()
@@ -5206,7 +5210,7 @@ async def _run_connection_sweep() -> None:
     logger.info("Connection health sweep starting")
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, composio_connection_id FROM composio_connections")
+        cursor.execute("SELECT id, composio_connection_id, user_id FROM composio_connections")
         rows = cursor.fetchall()
 
     for row in rows:
@@ -5230,7 +5234,7 @@ async def _run_connection_sweep() -> None:
         # proxy to get the real email via GMAIL_GET_PROFILE etc.
         if check == "valid":
             try:
-                info = _fetch_composio_account_info(composio_conn_id)
+                info = _fetch_composio_account_info(composio_conn_id, user_id=row["user_id"])
                 email_or_user = info.get("email") or info.get("user_id") or ""
                 if email_or_user:
                     with get_db() as conn2:
