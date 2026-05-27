@@ -1,0 +1,429 @@
+# Authoring Workers
+
+This is the canonical guide for writing, deploying, and updating workers on Workeros. It covers:
+
+1. What a worker is
+2. The two execution modes (script vs agent / SKILL.md)
+3. The `worker.yml` schema (every field, with examples)
+4. Inputs, outputs, secrets, connections, triggers, approvals
+5. Deploying a Claude-style skill bundle as a worker
+6. The CLI + MCP authoring flows
+7. The agent-side "write a worker from a prompt" contract
+
+Treat this as the source of truth. The README's worker section is a stub; everything operational lives here.
+
+---
+
+## 1. What a worker is
+
+A **worker** is a folder under `workers/<name>/` containing exactly:
+
+```
+workers/<name>/
+  worker.yml          # configuration (required)
+  run.py              # entry code (script mode) OR
+  SKILL.md            # agent prompt (agent mode)
+  requirements.txt    # Python deps (optional but recommended)
+  <any other files>   # bundled into the sandbox at runtime
+```
+
+The bundle is uploaded as-is to the run sandbox. You can include helper modules, data files, prompt fragments, anything. Files outside the folder are not visible to the worker.
+
+When the worker runs, the runtime:
+
+1. Materializes the bundle into a working directory.
+2. Materializes named inputs at the paths declared in `exec.inputs[].path`.
+3. Resolves declared secrets/connections from the host's secret store and exposes them as env vars.
+4. Executes `exec.command` (script mode) or the agent loop (agent mode).
+5. Captures stdout / stderr / structured events into the run's logs + parts stream.
+6. Materializes named outputs from the paths declared in `exec.outputs[].path`.
+7. Marks the run succeeded / failed / cancelled.
+
+---
+
+## 2. Execution modes
+
+There are two modes; they are mutually exclusive per worker.
+
+### Script mode (`run.py`)
+
+Plain Python entry. Predictable, deterministic, no LLM tool loop. Use for:
+
+- ETL: CSV enrichment, format conversion, deterministic transforms.
+- Webhook fan-out: receive a payload, call an API, write a row.
+- Scheduled jobs: pull data, summarize, send.
+
+Contract:
+
+```python
+# run.py
+def run(inputs, context):
+    """Single entry point. The runtime calls this with:
+       inputs   — dict of resolved input values (scalar values + file paths)
+       context  — object exposing:
+                    .secrets       (dict of declared secrets)
+                    .connections   (dict of Composio connections)
+                    .openai()      (preconfigured OpenAI client if OPENAI_API_KEY is declared)
+                    .write_output(name, content_or_path)
+                    .log(level, message)
+                    .approve(message)   # block until human approves (if exec.approvals.required)
+       Returns: dict of structured output (also writable via context.write_output)
+    """
+    ...
+```
+
+You can also use `exec.command: python run.py` and write to argv-driven entry — both work, the `def run(...)` contract is just the recommended shape.
+
+### Agent mode (`SKILL.md`)
+
+LLM-driven tool loop. Use for:
+
+- Tasks that need reasoning over unstructured input (CV writeup, research brief, candidate matching).
+- Tasks where the steps vary per input (custom report, multi-tool research).
+- Tasks where the output format depends on a description the user wrote.
+
+The runner reads `SKILL.md` as the system prompt and runs an LLM loop with:
+- Web search (when available; see runtime caveats in the worker.yml).
+- File tools (read/write inside the sandbox).
+- Connection tools (Composio actions for the declared connections).
+- Output writers (one per declared `exec.outputs[]`).
+
+`SKILL.md` is a plain markdown file. The shape that works in practice:
+
+```markdown
+# <Title>
+
+You receive: <list of inputs>.
+
+Your task:
+1. ...
+2. ...
+
+Constraints:
+- Output formats: ...
+- When to call X tool: ...
+
+Done = you have written every declared output.
+```
+
+The loop terminates when the agent calls the final output-writer or hits `exec.limits.max_tool_iterations`.
+
+---
+
+## 3. The `worker.yml` schema
+
+Schema version: `0.3`. Every field below has been used in production workers in this repo (see `workers/research_brief/worker.yml`, `workers/cv_writeup/worker.yml` for live references).
+
+```yaml
+schema_version: "0.3"
+
+# === IDENTITY ===
+name: my-worker              # unique slug, lowercase + dashes
+title: My Worker             # human-readable title
+description: One-liner.      # appears on the worker card
+long_description: |
+  Two-to-five paragraph plain-English description shown on the Overview tab.
+  This is what readers see FIRST. Lead with what it does, not how.
+
+use_cases:                   # bulleted list, shown on Overview
+  - First use case in one sentence.
+  - Second use case in one sentence.
+
+example_input:               # dict; "Fill with sample input" button on /workers/<id>#run
+  topic: Some example
+  audience: executive
+
+example_output: |            # rendered as markdown on Overview
+  ## Example output
+  ...
+
+how_it_works: |              # plain-English steps, shown on Overview
+  Step 1 -> Step 2 -> Step 3.
+
+folder: Category/Subcategory # used for grouping in /workers nav rail
+tags:                        # used by the tag filter row + search
+  - tag1
+  - tag2
+
+version: 0.1.0               # semver; bump on any bundle change
+
+# === EXECUTION ===
+entrypoint: SKILL.md         # OR `run.py` for script mode
+targets:                     # which runtimes are supported
+  - generic
+limits:                      # agent-mode only; ignored for script mode
+  max_tool_iterations: 12
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 300
+
+exec:
+  command: python run.py     # script mode only
+  runtime: python311         # python311 | node20
+  runner: e2b                # e2b (default) | local (zero cold-start, trusted only)
+  entry: run.py              # legacy field; should match `entrypoint`
+
+  inputs:
+    - name: topic            # field name (passed to run())
+      kind: scalar           # scalar | file
+      type: string           # string | number | boolean | textarea | select | url
+      required: true
+      label: Topic           # shown above the input on /workers/<id>#run
+      placeholder: e.g., AI recruiting workflow tools
+      default: ""            # optional
+      enum:                  # required if type=select
+        - option_a
+        - option_b
+      options:               # mirrors enum (legacy)
+        - option_a
+        - option_b
+
+    - name: cv_file
+      kind: file
+      media_type: application/octet-stream
+      path: inputs/cv_file   # where the file is materialized inside the sandbox
+      required: true
+      label: CV file (PDF, DOCX, TXT)
+      accepts:               # optional MIME filter for the upload control
+        - application/pdf
+        - text/plain
+      max_size_mb: 10        # optional
+      accept_csv: false      # if true, surfaces the CSV column mapper
+
+  outputs:
+    - name: writeup
+      kind: file
+      media_type: text/markdown   # text/markdown is rendered inline
+      path: out/writeup.md        # where the worker writes the output
+      required: true
+      label: Candidate Writeup
+    - name: extracted_profile
+      kind: file
+      media_type: application/json
+      path: out/extracted_profile.json
+      required: true
+      label: Extracted Profile (JSON)
+
+  secrets:                   # env-var names the worker can read
+    - OPENAI_API_KEY
+
+capabilities:
+  secrets:
+    - OPENAI_API_KEY
+  network:
+    egress: true             # required for any worker that calls external APIs
+
+approvals:
+  required: false            # if true, runs pause before completing
+  label: Review and approve before sending to client
+
+# === TRIGGER ===
+trigger:
+  type: manual               # manual | schedule | webhook | composio
+
+# OR for schedule:
+# trigger:
+#   type: schedule
+#   cron: "0 9 * * MON"
+#   timezone: "Europe/Berlin"
+
+# OR for webhook:
+# trigger:
+#   type: webhook
+#   webhook:
+#     secret: true
+#     allowed_methods: [POST]
+
+# OR for app event (Composio):
+# trigger:
+#   type: composio
+#   composio:
+#     event: "gmail.new_message"
+#     connection_id: "ca_<id>"
+#     filters: {}
+
+# === MULTIPLE TRIGGERS (S22+) ===
+# triggers:                  # plural alternative; can mix types
+#   - type: schedule
+#     cron: "0 9 * * MON"
+#     timezone: "Europe/Berlin"
+#   - type: webhook
+#     webhook: { secret: true, allowed_methods: [POST] }
+```
+
+### Required vs optional
+
+**Required:** `schema_version`, `name`, `title`, `description`, `entrypoint`, `exec.runtime`, `exec.runner`, `exec.inputs` (can be empty `[]`), `exec.outputs` (can be empty `[]`), `trigger`.
+
+**Recommended:** `long_description`, `example_input`, `example_output`, `use_cases`, `how_it_works`, `version`, `tags`, `folder`. These power the Overview tab.
+
+**Conditional:** `limits` (agent mode), `secrets` (only the ones you read), `capabilities.network.egress` (set true if you call external APIs), `approvals` (only if you want human-in-the-loop).
+
+---
+
+## 4. Inputs, outputs, secrets, connections, triggers
+
+### Inputs
+
+- Scalars (`kind: scalar`, `type: string|number|boolean|textarea|select|url`) arrive as values in `inputs[name]`.
+- Files (`kind: file`, with `path`) arrive materialized at `path` inside the bundle. Read them as plain filesystem reads.
+- Select inputs (`type: select` with `enum`) render as a dropdown in the UI. Display labels are humanized automatically (`branded_markdown` -> `Branded markdown`), but the raw enum value is what reaches `run()`.
+
+### Outputs
+
+- File outputs (`kind: file`, with `path`) are materialized from `path` after the run.
+- `media_type: text/markdown` outputs render inline on the Run tab.
+- `media_type: application/json` outputs are pretty-printed.
+- Other media types are downloadable.
+
+### Secrets
+
+- Declare every env var the worker reads under `secrets` AND `capabilities.secrets`.
+- The runtime resolves them from the host's secret store (`/secrets` API) and exposes them as env vars to the worker.
+- Workers cannot read host env vars that are not declared. Failure mode is the var is unset, not a permission denial.
+
+### Connections (Composio)
+
+- Composio connections (Gmail, Calendar, GitHub, etc.) are passed to the worker as objects on `context.connections[<provider>]`.
+- Required connections are declared via `triggers` (`composio` event-triggered) or implicitly by the SKILL.md tool list (agent mode). Future: explicit `requires_connections: [gmail]`.
+
+### Triggers
+
+- **manual** — runs only from /workers/<id> Run tab or via `POST /workers/<id>/runs`.
+- **schedule** — fires on cron (`cron`, `timezone`) via the scheduler service.
+- **webhook** — fires when POST hits `https://workers-api.floom.dev/webhooks/<worker-id>?token=<derived>`. The token is a per-worker HMAC of the worker_id under the host's webhook signing key. The URL is shown in the Triggers tab after the worker is created.
+- **composio** — fires when the named Composio event arrives, scoped to the named connection.
+
+A worker can have multiple triggers (use the `triggers:` plural form). Federico tip: keep it to one when possible; two becomes confusing fast.
+
+### Approvals
+
+When `approvals.required: true`, the run pauses before completing. The Approvals queue surfaces it; a reviewer Approves or Rejects from the UI. The worker code calls `context.approve(message)` to insert the gate.
+
+---
+
+## 5. Deploying a Claude-style skill bundle as a worker
+
+If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the path to running it as a worker is:
+
+1. Copy or symlink the skill directory to `workers/<name>/`:
+   ```bash
+   cp -r ~/.claude/skills/my-skill /root/workeros/workers/my-skill
+   ```
+2. Add a `worker.yml` next to the `SKILL.md`. Minimum viable:
+   ```yaml
+   schema_version: "0.3"
+   name: my-skill
+   title: My Skill
+   description: <one-liner>
+   entrypoint: SKILL.md
+   exec:
+     runtime: python311
+     runner: e2b
+     inputs: []
+     outputs:
+       - name: result
+         kind: file
+         media_type: text/markdown
+         path: out/result.md
+         required: true
+         label: Result
+     secrets:
+       - OPENAI_API_KEY
+   capabilities:
+     secrets: [OPENAI_API_KEY]
+     network: { egress: true }
+   trigger:
+     type: manual
+   ```
+3. `POST /workers/reload` (or restart the API) so the worker registry picks it up.
+4. Run from the UI to smoke-test.
+
+**Gotchas:**
+
+- Claude-skill bundles often assume the working directory is the skill folder (`~/.claude/skills/<name>/`). Inside the sandbox the working dir IS the bundle, so relative paths work; absolute paths to `~/.claude/...` won't.
+- Skills that depend on Claude-Code-only tools (Read, Edit, Bash that hits the host filesystem) won't work — the runner exposes a different tool set. Audit the skill's tool calls before porting.
+- Heavy Python deps (torch, transformers) won't fit in the E2B template. Either trim the deps or use `runner: local` and accept the bigger trust surface.
+
+The CLI sync target (`floom workeros sync ~/.claude/skills/<name>`) is the long-term path here; not yet built. For now, copy + edit `worker.yml`.
+
+---
+
+## 6. CLI and MCP authoring flows
+
+### CLI
+
+```bash
+npm i -g @floomhq/workeros
+floom login                                  # paste WORKEROS_API_SECRET when prompted
+floom workers list
+floom workers run <id> --input topic="AI tools"
+floom workers create --prompt "make me a worker that ..."   # async-draft path
+```
+
+### MCP (for Claude Code / Cursor agents)
+
+```bash
+npx @floomhq/workeros install --target claude
+```
+
+Exposes tools the agent can call to create, update, run, watch, and delete workers without leaving the chat. Use `WORKEROS_API_SECRET` env var to skip the install-time prompt.
+
+### API direct (for scripts / CI)
+
+```bash
+SECRET=$(cat ~/.workeros/secret)
+curl -X POST https://workers-api.floom.dev/workers/<id>/runs \
+  -H "x-floom-secret: $SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"inputs": {"topic": "AI tools"}}'
+```
+
+---
+
+## 7. Agent-side contract: "write a worker from a prompt"
+
+When an agent (Claude Code / Cursor / a draft-and-create endpoint) writes a worker from a free-text prompt, it must produce:
+
+1. `worker.yml` — well-formed, schema 0.3, every required field present.
+2. `SKILL.md` (agent mode) OR `run.py` (script mode) — never both.
+3. `requirements.txt` — pinned exact versions (no `^` or `~`). Skip if no third-party deps.
+
+Rules the agent should follow (these are the failure modes observed in real drafts):
+
+- **Default to agent mode** unless the task is deterministic / ETL-shaped. Script mode is faster to debug but loses the "describe in plain English" wedge.
+- **Include `long_description`, `use_cases`, `how_it_works`** — these power the Overview tab. Skipping them lands a worker that reads as "developer-config-first" and Federico has flagged that pattern multiple times.
+- **Pin every secret** the worker will read. Missing-secret failure = silent empty output.
+- **Set `capabilities.network.egress: true`** if any external API is called. Default-deny.
+- **Set realistic `limits.timeout_seconds`** — 300 is the safe default; longer needs justification.
+- **Set `approvals.required: true`** for any worker that sends external messages, deletes data, or spends money. Default-off saves a click but raises a regret tax.
+- **Default `trigger: manual`** unless the prompt explicitly says "every Monday" / "when X arrives".
+
+The draft-and-create endpoint runs an LLM with this contract baked in. Look at `apps/api/main.py` for the prompt; keep the agent-side behavior consistent.
+
+---
+
+## Reference workers
+
+Read these end-to-end before writing your first one:
+
+- `workers/research_brief/` — agent mode, manual trigger, markdown output.
+- `workers/cv_writeup/` — agent mode, file input + multiple outputs, branded format.
+- `workers/csv_enricher/` — script mode, CSV passthrough, OpenAI per row.
+- `workers/github-digest/` — schedule trigger, Composio GitHub connection.
+- `workers/gmail_intake_brief/` — composio trigger, Gmail connection, approval-gated output.
+
+The pattern: copy the closest match, edit identity + inputs + outputs + SKILL.md, smoke-test from /workers/<id>#run, then enable the desired trigger.
+
+---
+
+## When to update this doc
+
+If you ship a change that affects:
+
+- The worker.yml schema (any new field, removed field, validation rule),
+- The execution contract (`run()` signature, agent loop tools available),
+- The CLI / MCP / API surface for workers,
+- The trigger types or webhook URL shape,
+
+…update this file in the SAME PR. Doc drift here is the highest-leverage bug we can ship — every new worker author reads this first.
