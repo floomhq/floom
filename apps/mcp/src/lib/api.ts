@@ -1,0 +1,178 @@
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
+import { readCredentials, type StoredCredentials } from "./credentials.js";
+
+export class WorkerosApiError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly body?: unknown,
+  ) {
+    super(message);
+    this.name = "WorkerosApiError";
+  }
+}
+
+type QueryValue = string | number | boolean | null | undefined;
+
+type RequestOptions = {
+  query?: Record<string, QueryValue>;
+  body?: unknown;
+  headers?: Record<string, string>;
+  auth?: boolean;
+};
+
+function normalizeBase(base: string): string {
+  return base.replace(/\/+$/, "");
+}
+
+function buildUrl(base: string, path: string, query?: Record<string, QueryValue>): string {
+  const url = new URL(`${normalizeBase(base)}${path}`);
+  for (const [key, value] of Object.entries(query || {})) {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  return url.toString();
+}
+
+async function parseResponse(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { text };
+  }
+}
+
+export class WorkerosApiClient {
+  constructor(
+    readonly apiBase: string,
+    readonly apiSecret?: string,
+  ) {}
+
+  async requestJson(method: string, path: string, options: RequestOptions = {}): Promise<unknown> {
+    const auth = options.auth ?? true;
+    const headers: Record<string, string> = {
+      accept: "application/json, text/plain, text/event-stream",
+      ...(options.headers || {}),
+    };
+    if (auth) {
+      if (!this.apiSecret) {
+        throw new Error("Not logged in. Run floom login first.");
+      }
+      headers["x-floom-secret"] = this.apiSecret;
+    }
+    let body: BodyInit | undefined;
+    if (options.body !== undefined) {
+      headers["content-type"] = "application/json";
+      body = JSON.stringify(options.body);
+    }
+    const response = await fetch(buildUrl(this.apiBase, path, options.query), {
+      method,
+      headers,
+      body,
+    });
+    const parsed = await parseResponse(response);
+    if (!response.ok) {
+      const detail =
+        parsed && typeof parsed === "object" && "detail" in parsed
+          ? String((parsed as { detail: unknown }).detail)
+          : JSON.stringify(parsed);
+      throw new WorkerosApiError(
+        `API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
+        response.status,
+        parsed,
+      );
+    }
+    return parsed;
+  }
+
+  async requestBuffer(method: string, path: string, options: RequestOptions = {}): Promise<Uint8Array> {
+    const auth = options.auth ?? true;
+    const headers: Record<string, string> = {
+      accept: "*/*",
+      ...(options.headers || {}),
+    };
+    if (auth) {
+      if (!this.apiSecret) {
+        throw new Error("Not logged in. Run floom login first.");
+      }
+      headers["x-floom-secret"] = this.apiSecret;
+    }
+    const response = await fetch(buildUrl(this.apiBase, path, options.query), {
+      method,
+      headers,
+    });
+    if (!response.ok) {
+      const parsed = await parseResponse(response);
+      const detail =
+        parsed && typeof parsed === "object" && "detail" in parsed
+          ? String((parsed as { detail: unknown }).detail)
+          : JSON.stringify(parsed);
+      throw new WorkerosApiError(
+        `API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
+        response.status,
+        parsed,
+      );
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  async uploadFile(inputName: string, filePath: string): Promise<string> {
+    if (!this.apiSecret) {
+      throw new Error("Not logged in. Run floom login first.");
+    }
+    const bytes = await readFile(filePath);
+    const form = new FormData();
+    form.append("file", new File([bytes], basename(filePath)));
+    const response = await fetch(buildUrl(this.apiBase, "/uploads"), {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "x-floom-secret": this.apiSecret,
+      },
+      body: form,
+    });
+    const parsed = await parseResponse(response);
+    if (!response.ok) {
+      const detail =
+        parsed && typeof parsed === "object" && "detail" in parsed
+          ? String((parsed as { detail: unknown }).detail)
+          : JSON.stringify(parsed);
+      throw new WorkerosApiError(
+        `Upload for input ${inputName} failed with HTTP ${response.status}: ${detail}`,
+        response.status,
+        parsed,
+      );
+    }
+    const uploadId = parsed && typeof parsed === "object" ? (parsed as { id?: unknown }).id : undefined;
+    if (!uploadId || typeof uploadId !== "string") {
+      throw new Error(`Upload for input ${inputName} returned no upload id`);
+    }
+    return uploadId;
+  }
+}
+
+export async function createAuthenticatedClient(): Promise<{
+  client: WorkerosApiClient;
+  credentials: StoredCredentials;
+}> {
+  const credentials = await readCredentials();
+  if (!credentials) {
+    throw new Error("Not logged in. Run floom login first.");
+  }
+  return {
+    client: new WorkerosApiClient(credentials.api_base, credentials.api_secret),
+    credentials,
+  };
+}
+
+export function createPublicClient(base = process.env.WORKEROS_API_BASE || "https://workers-api.floom.dev"): WorkerosApiClient {
+  return new WorkerosApiClient(normalizeBase(base));
+}
