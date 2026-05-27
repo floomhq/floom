@@ -1294,7 +1294,123 @@ def _resolve_file_input_references(
     return resolved_inputs
 
 
-_DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # 25 MB hard ceiling
+_DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+_DEFAULT_UPLOAD_HOURLY_CAP_BYTES = 1024 * 1024 * 1024
+_UPLOAD_HOURLY_WINDOW_SECONDS = 3600.0
+_UPLOAD_ALLOWED_MEDIA_TYPES = frozenset({
+    "application/json",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/yaml",
+    "application/zip",
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "text/csv",
+    "text/markdown",
+    "text/plain",
+})
+_UPLOAD_ALLOWED_EXTENSIONS = frozenset({
+    ".csv",
+    ".docx",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".json",
+    ".md",
+    ".markdown",
+    ".pdf",
+    ".png",
+    ".txt",
+    ".webp",
+    ".xlsx",
+    ".yaml",
+    ".yml",
+    ".zip",
+})
+_UPLOAD_BLOCKED_EXTENSIONS = frozenset({
+    ".bat",
+    ".cmd",
+    ".dll",
+    ".exe",
+    ".js",
+    ".php",
+    ".ps1",
+    ".sh",
+})
+_upload_quota_lock = threading.Lock()
+_upload_quota_store: Dict[str, collections.deque] = {}
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _upload_max_bytes() -> int:
+    return _positive_int_env("WORKEROS_UPLOAD_MAX_BYTES", _DEFAULT_UPLOAD_MAX_BYTES)
+
+
+def _upload_hourly_cap_bytes() -> int:
+    return _positive_int_env("WORKEROS_UPLOAD_HOURLY_CAP_BYTES", _DEFAULT_UPLOAD_HOURLY_CAP_BYTES)
+
+
+def _format_bytes(value: int) -> str:
+    if value % (1024 * 1024) == 0:
+        return f"{value // (1024 * 1024)} MiB"
+    return f"{value} bytes"
+
+
+def _upload_quota_key(request: Request) -> str:
+    secret = request.headers.get("x-floom-secret") or ""
+    if not secret:
+        return "anon"
+    return "s:" + hashlib.sha256(secret.encode()).hexdigest()[:16]
+
+
+def _claim_upload_quota(request: Request, size: int) -> Optional[int]:
+    now = time.monotonic()
+    cutoff = now - _UPLOAD_HOURLY_WINDOW_SECONDS
+    cap = _upload_hourly_cap_bytes()
+    key = _upload_quota_key(request)
+    with _upload_quota_lock:
+        dq = _upload_quota_store.setdefault(key, collections.deque())
+        while dq and dq[0][0] <= cutoff:
+            dq.popleft()
+        used = sum(entry_size for _entry_ts, entry_size in dq)
+        if used + size > cap:
+            return cap
+        dq.append((now, size))
+        return None
+
+
+def _validate_upload_filename(raw_filename: str) -> None:
+    if not raw_filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+    if (
+        "/" in raw_filename
+        or "\\" in raw_filename
+        or raw_filename.startswith(".")
+        or ".." in raw_filename.split("/")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="filename must not contain path separators, leading dots, or '..' segments",
+        )
+    suffix = Path(raw_filename).suffix.lower()
+    if suffix in _UPLOAD_BLOCKED_EXTENSIONS or suffix not in _UPLOAD_ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload filename extension {suffix or '<none>'!r} is not allowed",
+        )
 
 
 @app.post("/uploads")
@@ -1307,24 +1423,18 @@ async def upload_file(
     if max_size_mb is not None and max_size_mb <= 0:
         raise HTTPException(status_code=400, detail="max_size_mb must be greater than 0")
 
-    # P1-3: reject path-traversal-shaped filenames at the request boundary.
-    # The blob is stored by SHA so a malicious filename never reaches the FS, but
-    # we surface a 400 instead of silently sanitizing — the caller should know.
     raw_filename = file.filename or ""
-    if raw_filename and (
-        "/" in raw_filename
-        or "\\" in raw_filename
-        or raw_filename.startswith(".")
-        or ".." in raw_filename.split("/")
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="filename must not contain path separators, leading dots, or '..' segments",
-        )
+    _validate_upload_filename(raw_filename)
 
     media_type = normalize_media_type(
-        file.content_type or mimetypes.guess_type(file.filename or "")[0]
+        file.content_type or mimetypes.guess_type(raw_filename)[0]
     )
+    if media_type not in _UPLOAD_ALLOWED_MEDIA_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload media type {media_type!r} is not allowed",
+        )
+
     accepted = _parse_accepts(accepts)
     if accepted and media_type not in accepted:
         raise HTTPException(
@@ -1332,13 +1442,11 @@ async def upload_file(
             detail=f"Upload media type {media_type!r} is not accepted",
         )
 
-    # Fix 3: enforce a hard ceiling even when the client omits max_size_mb.
-    # Stream to a temp file (not memory) and hash on the fly so large uploads
-    # never fully buffer in process RAM before the 413 is raised.
+    configured_max_bytes = _upload_max_bytes()
     if max_size_mb is not None:
-        max_bytes = min(int(max_size_mb * 1024 * 1024), _DEFAULT_UPLOAD_MAX_BYTES)
+        max_bytes = min(int(max_size_mb * 1024 * 1024), configured_max_bytes)
     else:
-        max_bytes = _DEFAULT_UPLOAD_MAX_BYTES
+        max_bytes = configured_max_bytes
 
     hasher = hashlib.sha256()
     size = 0
@@ -1363,10 +1471,9 @@ async def upload_file(
                 size += len(chunk)
                 if size > max_bytes:
                     tmp_out.flush()
-                    limit_mb = max_size_mb if max_size_mb is not None else (_DEFAULT_UPLOAD_MAX_BYTES // (1024 * 1024))
                     raise HTTPException(
-                        status_code=413,
-                        detail=f"Uploaded file exceeds {limit_mb:g} MB",
+                        status_code=400,
+                        detail=f"Uploaded file exceeds {_format_bytes(max_bytes)} limit",
                     )
                 hasher.update(chunk)
                 tmp_out.write(chunk)
@@ -1374,6 +1481,15 @@ async def upload_file(
         if tmp_upload is not None:
             tmp_upload.unlink(missing_ok=True)
         raise
+
+    exceeded_cap = _claim_upload_quota(request, size)
+    if exceeded_cap is not None:
+        if tmp_upload is not None:
+            tmp_upload.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload hourly cap exceeded: {_format_bytes(exceeded_cap)} per hour",
+        )
 
     sha256 = hasher.hexdigest()
     target = ensure_blob_dir(sha256)

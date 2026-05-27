@@ -16,7 +16,13 @@ if API_DIR not in sys.path:
 _AUTH_HEADER = {"x-floom-secret": "test-secret-r5"}
 
 
-def _load_api(monkeypatch, tmp_path, *, workeros_dev: bool = False):
+def _load_api(
+    monkeypatch,
+    tmp_path,
+    *,
+    workeros_dev: bool = False,
+    upload_hourly_cap_bytes: int | None = None,
+):
     workers_dir = tmp_path / "workers"
     blobs_dir = tmp_path / "blobs"
     workers_dir.mkdir()
@@ -31,6 +37,10 @@ def _load_api(monkeypatch, tmp_path, *, workeros_dev: bool = False):
     monkeypatch.setenv("COMPOSIO_API_KEY", "cmp-test")
     monkeypatch.setenv("COMPOSIO_WEBHOOK_SIGNING_KEY", "whsec-test")
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    if upload_hourly_cap_bytes is None:
+        monkeypatch.delenv("WORKEROS_UPLOAD_HOURLY_CAP_BYTES", raising=False)
+    else:
+        monkeypatch.setenv("WORKEROS_UPLOAD_HOURLY_CAP_BYTES", str(upload_hourly_cap_bytes))
     if workeros_dev:
         monkeypatch.setenv("WORKEROS_DEV", "1")
     else:
@@ -83,3 +93,81 @@ def test_cors_preflight_allows_production_frontend(monkeypatch, tmp_path):
     )
 
     assert resp.headers.get("access-control-allow-origin") == "https://workers.floom.dev"
+
+
+def test_upload_accepts_text_plain_file(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/uploads",
+        headers=_AUTH_HEADER,
+        files={"file": ("notes.txt", b"a" * 100, "text/plain")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["size"] == 100
+    assert body["media_type"] == "text/plain"
+
+
+def test_upload_rejects_disallowed_media_type(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/uploads",
+        headers=_AUTH_HEADER,
+        files={"file": ("payload.txt", b"a" * 100, "application/x-msdownload")},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "media type" in resp.json()["detail"]
+
+
+def test_upload_rejects_oversized_file(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/uploads",
+        headers=_AUTH_HEADER,
+        files={"file": ("large.txt", b"a" * (50 * 1024 * 1024), "text/plain")},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "exceeds" in resp.json()["detail"]
+
+
+def test_upload_rejects_disallowed_extension(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/uploads",
+        headers=_AUTH_HEADER,
+        files={"file": ("run.exe", b"a" * 100, "text/plain")},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "extension" in resp.json()["detail"]
+
+
+def test_upload_enforces_per_secret_hourly_cap(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, upload_hourly_cap_bytes=150)
+    client = TestClient(main.app)
+
+    first = client.post(
+        "/uploads",
+        headers=_AUTH_HEADER,
+        files={"file": ("first.txt", b"a" * 100, "text/plain")},
+    )
+    second = client.post(
+        "/uploads",
+        headers=_AUTH_HEADER,
+        files={"file": ("second.txt", b"b" * 100, "text/plain")},
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 400, second.text
+    assert "hourly cap" in second.json()["detail"]
