@@ -26,13 +26,19 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from dotenv import load_dotenv
+
+try:
+    from slowapi.util import get_remote_address as _slowapi_get_remote_address
+except Exception:  # pragma: no cover - fallback only used when dependency is absent locally
+    _slowapi_get_remote_address = None
 
 from db import init_db, get_db, now_iso, DB_PATH
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
@@ -127,21 +133,127 @@ app = FastAPI(
 )
 
 
+DEFAULT_USER_ID = "federico"
+DEFAULT_JSON_BODY_LIMIT_BYTES = 64 * 1024
+FROM_BUNDLE_BODY_LIMIT_BYTES = 1024 * 1024
+DEFAULT_RATE_LIMIT = (60, 60.0)
+RATE_LIMIT_RULES = [
+    (re.compile(r"^/workers/[^/]+/runs$"), (10, 60.0)),
+    (re.compile(r"^/workers$"), (20, 60.0)),
+    (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
+    (re.compile(r"^/connections$"), (20, 60.0)),
+]
+
+
 def _cors_allowed_origins() -> List[str]:
+    configured = os.environ.get("ALLOWED_ORIGINS", "")
+    if configured.strip():
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
     origins = ["https://workers.floom.dev"]
     if os.environ.get("WORKEROS_DEV"):
         origins.extend(["http://localhost:3000", "http://localhost:3011"])
     return origins
 
 
+def _cors_allowed_origin_regex() -> str:
+    configured = os.environ.get("ALLOWED_ORIGIN_REGEX", "")
+    if configured.strip():
+        return configured.strip()
+    if os.environ.get("WORKEROS_DEV"):
+        return r"^https://[a-z0-9-]+\.workeros-[a-z0-9-]+\.vercel\.app$"
+    return r"^https://([a-z0-9-]+\.)*floom\.dev$"
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allowed_origins(),
-    allow_origin_regex=r"^https://[a-z0-9-]+\.workeros-[a-z0-9-]+\.vercel\.app$",
+    allow_origin_regex=_cors_allowed_origin_regex(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def require_secret(request: Request) -> None:
+    secret = os.environ.get("FLOOM_SECRET", "")
+    if not secret:
+        return
+    header = request.headers.get("x-floom-secret", "")
+    if header != secret:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _request_user_id(request: Request) -> str:
+    if os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":
+        header_user = (request.headers.get("x-floom-user") or "").strip()
+        if header_user:
+            return header_user[:128]
+    configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
+    return configured or DEFAULT_USER_ID
+
+
+def _connection_row_for_user(connection_id: str, user_id: str, columns: str) -> sqlite3.Row:
+    with get_db() as conn:
+        row = conn.execute(
+            f"SELECT {columns}, user_id FROM composio_connections WHERE id = ?",
+            (connection_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if row["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return row
+
+
+def _rate_limit_for_path(path: str) -> tuple[int, float]:
+    for pattern, limit in RATE_LIMIT_RULES:
+        if pattern.fullmatch(path):
+            return limit
+    return DEFAULT_RATE_LIMIT
+
+
+def _client_ip(request: Request) -> str:
+    if _slowapi_get_remote_address is not None:
+        return _slowapi_get_remote_address(request) or "unknown"
+    return request.client.host if request.client else "unknown"
+
+
+def _body_limit_for_request(request: Request) -> Optional[int]:
+    method = request.method.upper()
+    if method not in {"POST", "PUT", "PATCH"}:
+        return None
+    path = request.url.path
+    if path == "/workers/from-bundle":
+        return FROM_BUNDLE_BODY_LIMIT_BYTES
+    if path.startswith("/uploads"):
+        return None
+    return DEFAULT_JSON_BODY_LIMIT_BYTES
+
+
+@app.middleware("http")
+async def request_body_size_middleware(request: Request, call_next):
+    max_bytes = _body_limit_for_request(request)
+    if max_bytes is None:
+        return await call_next(request)
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > max_bytes:
+                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+
+    body = await request.body()
+    if len(body) > max_bytes:
+        return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+
+    async def receive() -> Dict[str, Any]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request._receive = receive  # type: ignore[attr-defined]
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -163,44 +275,44 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
     return response
 
-# Simple in-memory token bucket rate limit per x-floom-secret hash.
-# 200 req/min per caller. Reset every 60s. No persistence — per-process,
-# resets on restart. Good enough for single-tenant launch.
-import hashlib
+# Simple in-memory token bucket rate limit per IP and per x-floom-secret hash.
 _rate_lock = threading.Lock()
-_rate_buckets: Dict[str, list] = {}
-_RATE_LIMIT = int(os.environ.get("FLOOM_RATE_LIMIT_PER_MIN", "2000"))
-_RATE_WINDOW = 60.0
+_rate_buckets: Dict[str, list[float]] = {}
 
 
-def _rate_caller_key(request: Request) -> str:
-    """Hash the secret header so logs never expose it. Fall back to IP for unauthed paths."""
+def _rate_caller_keys(request: Request, path: str) -> List[str]:
+    ip_key = f"ip:{_client_ip(request)}:{path}"
+    keys = [ip_key]
     secret = request.headers.get("x-floom-secret") or ""
     if secret:
-        return "s:" + hashlib.sha256(secret.encode()).hexdigest()[:16]
-    return "ip:" + (request.client.host if request.client else "unknown")
+        keys.append(f"s:{hashlib.sha256(secret.encode()).hexdigest()[:16]}:{path}")
+    return keys
 
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    """200 req/min per caller. Exempt: webhooks (their own HMAC), healthz."""
+    """Apply per-IP and per-secret limits. Exempt webhooks and health checks."""
     path = request.url.path
     if path.startswith("/webhooks/") or path in {"/healthz", "/health"}:
         return await call_next(request)
+    if not os.environ.get("FLOOM_SECRET") and os.environ.get("WORKEROS_RATE_LIMIT_DEV") != "1":
+        return await call_next(request)
+
+    limit, window = _rate_limit_for_path(path)
     now = time.time()
-    key = _rate_caller_key(request)
+    keys = _rate_caller_keys(request, path)
     with _rate_lock:
-        bucket = _rate_buckets.get(key, [])
-        bucket = [t for t in bucket if t > now - _RATE_WINDOW]
-        if len(bucket) >= _RATE_LIMIT:
-            from fastapi.responses import JSONResponse as _RLJSONResponse
-            return _RLJSONResponse(
-                status_code=429,
-                content={"detail": f"Rate limit exceeded: {_RATE_LIMIT} req/min"},
-                headers={"Retry-After": "60"},
-            )
-        bucket.append(now)
-        _rate_buckets[key] = bucket
+        for key in keys:
+            bucket = [t for t in _rate_buckets.get(key, []) if t > now - window]
+            _rate_buckets[key] = bucket
+            if len(bucket) >= limit:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded"},
+                    headers={"Retry-After": str(int(window))},
+                )
+        for key in keys:
+            _rate_buckets[key].append(now)
     return await call_next(request)
 
 
@@ -442,6 +554,29 @@ def healthz():
 async def value_error_handler(_request, exc: ValueError):
     logger.warning("Validation error: %s", exc)
     return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+def _redacted_validation_errors(errors: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    sanitized: List[Dict[str, str]] = []
+    for error in errors[:10]:
+        sanitized.append({"loc": "request", "msg": "invalid value"})
+    return sanitized
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(_request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "validation failed", "errors": _redacted_validation_errors(exc.errors())},
+    )
+
+
+@app.exception_handler(ValidationError)
+async def pydantic_validation_error_handler(_request, exc: ValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "validation failed", "errors": _redacted_validation_errors(exc.errors())},
+    )
 
 
 @app.exception_handler(Exception)
@@ -4623,14 +4758,16 @@ def _fetch_composio_account_info(composio_conn_id: str) -> Dict[str, Any]:
         return {}
 
 
-@app.get("/connections", response_model=List[ConnectionItem])
-def list_connections() -> List[ConnectionItem]:
+@app.get("/connections", response_model=List[ConnectionItem], dependencies=[Depends(require_secret)])
+def list_connections(request: Request) -> List[ConnectionItem]:
+    user_id = _request_user_id(request)
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id, app_name, composio_connection_id, status, created_at, updated_at, "
             "scopes_json, account_label, last_checked_at, last_check_status "
-            "FROM composio_connections ORDER BY app_name"
+            "FROM composio_connections WHERE user_id = ? ORDER BY app_name",
+            (user_id,),
         )
         rows = cursor.fetchall()
 
@@ -4642,8 +4779,8 @@ def list_connections() -> List[ConnectionItem]:
     return result
 
 
-@app.post("/connections", response_model=ConnectionInitResponse)
-def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitResponse:
+@app.post("/connections", response_model=ConnectionInitResponse, dependencies=[Depends(require_secret)])
+def initiate_connection(payload: ConnectionInitRequest, request: Request) -> ConnectionInitResponse:
     from composio_client import initiate_connection as composio_initiate, NoManagedAuthError
     app_name = payload.app_name.lower().strip()
     if not app_name:
@@ -4666,6 +4803,7 @@ def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitRespons
 
     composio_conn_id = result["composio_connection_id"]
     redirect_url = result["redirect_url"]
+    user_id = _request_user_id(request)
 
     # Always insert a new row — multiple accounts per app are allowed.
     # Each Composio connected_account is a distinct row identified by its own UUID.
@@ -4673,9 +4811,10 @@ def initiate_connection(payload: ConnectionInitRequest) -> ConnectionInitRespons
     now = now_iso()
     with get_db() as conn:
         conn.execute(
-            "INSERT INTO composio_connections (id, app_name, composio_connection_id, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'initiated', ?, ?)",
-            (conn_id, app_name, composio_conn_id, now, now),
+            "INSERT INTO composio_connections "
+            "(id, app_name, composio_connection_id, status, created_at, updated_at, user_id) "
+            "VALUES (?, ?, ?, 'initiated', ?, ?, ?)",
+            (conn_id, app_name, composio_conn_id, now, now, user_id),
         )
 
     return ConnectionInitResponse(
@@ -4743,19 +4882,15 @@ def connections_callback_alias(connection_id: str = "", status: str = ""):
     return connections_callback(connection_id=connection_id, status=status)
 
 
-@app.get("/connections/{connection_id}/status", response_model=ConnectionItem)
-def get_connection_status(connection_id: str) -> ConnectionItem:
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, app_name, composio_connection_id, status, created_at, updated_at, "
-            "scopes_json, account_label, last_checked_at, last_check_status "
-            "FROM composio_connections WHERE id = ?",
-            (connection_id,),
-        )
-        row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Connection not found")
+@app.get("/connections/{connection_id}/status", response_model=ConnectionItem, dependencies=[Depends(require_secret)])
+def get_connection_status(connection_id: str, request: Request) -> ConnectionItem:
+    user_id = _request_user_id(request)
+    row = _connection_row_for_user(
+        connection_id,
+        user_id,
+        "id, app_name, composio_connection_id, status, created_at, updated_at, "
+        "scopes_json, account_label, last_checked_at, last_check_status",
+    )
 
     item = row_to_dict(row)
     item["scopes"] = _parse_scopes_json(item.pop("scopes_json", None))
@@ -4779,17 +4914,10 @@ def get_connection_status(connection_id: str) -> ConnectionItem:
     return ConnectionItem(**item)
 
 
-@app.delete("/connections/{connection_id}")
-def delete_connection(connection_id: str):
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT composio_connection_id FROM composio_connections WHERE id = ?",
-            (connection_id,),
-        )
-        row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Connection not found")
+@app.delete("/connections/{connection_id}", dependencies=[Depends(require_secret)])
+def delete_connection(connection_id: str, request: Request):
+    user_id = _request_user_id(request)
+    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id")
 
     composio_conn_id = row["composio_connection_id"]
 
@@ -4806,22 +4934,15 @@ def delete_connection(connection_id: str):
     return {"status": "deleted"}
 
 
-@app.get("/connections/{connection_id}/account-info")
-def get_connection_account_info(connection_id: str) -> Dict[str, Any]:
+@app.get("/connections/{connection_id}/account-info", dependencies=[Depends(require_secret)])
+def get_connection_account_info(connection_id: str, request: Request) -> Dict[str, Any]:
     """Return Composio connected-account info (email, scopes, user_id, auth_config_id).
 
     The frontend calls this to hydrate connection cards. The Composio API key
     lives here on the API service so it never needs to be on Vercel.
     """
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT composio_connection_id FROM composio_connections WHERE id = ?",
-            (connection_id,),
-        )
-        row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    user_id = _request_user_id(request)
+    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id")
 
     composio_conn_id = row["composio_connection_id"]
     info = _fetch_composio_account_info(composio_conn_id)
@@ -4848,7 +4969,7 @@ def get_connection_account_info(connection_id: str) -> Dict[str, Any]:
     }
 
 
-@app.get("/connections/auth-configs/{auth_config_id}")
+@app.get("/connections/auth-configs/{auth_config_id}", dependencies=[Depends(require_secret)])
 def get_auth_config(auth_config_id: str) -> Dict[str, Any]:
     """Return Composio auth_config (scopes definition) for a given auth_config_id.
 
@@ -4937,18 +5058,11 @@ def _extract_auth_config_scopes(body: Any) -> List[str]:
     return []
 
 
-@app.post("/connections/{connection_id}/test", response_model=ConnectionTestResult)
-def test_connection(connection_id: str) -> ConnectionTestResult:
+@app.post("/connections/{connection_id}/test", response_model=ConnectionTestResult, dependencies=[Depends(require_secret)])
+def test_connection(connection_id: str, request: Request) -> ConnectionTestResult:
     """Test whether a connection's token is still valid by calling Composio."""
-    with get_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT composio_connection_id FROM composio_connections WHERE id = ?",
-            (connection_id,),
-        )
-        row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Connection not found")
+    user_id = _request_user_id(request)
+    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id")
 
     composio_conn_id = row["composio_connection_id"]
     tested_at = now_iso()
