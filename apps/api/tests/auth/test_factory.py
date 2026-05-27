@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 import types
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
-from auth.factory import get_auth_provider
+from auth.context import AuthContext
+from auth.factory import (
+    _provider_factories,
+    get_auth_provider,
+    register_auth_provider,
+)
 from auth.local import SharedSecretAuthProvider
-from auth.supabase import SupabaseAuthProvider
+
+
+class _FakeCloudProvider:
+    async def verify(self, request: Request) -> AuthContext:  # noqa: ARG002
+        return AuthContext(user_id="fake-cloud-user", email=None, scopes=("admin",))
 
 
 def load_main(monkeypatch, tmp_path):
@@ -35,7 +46,6 @@ def load_main(monkeypatch, tmp_path):
         "auth.factory",
         "auth.interface",
         "auth.local",
-        "auth.supabase",
     ]:
         sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
@@ -47,8 +57,11 @@ def load_main(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def _clear_auth_provider_cache():
+    snapshot = dict(_provider_factories)
     get_auth_provider.cache_clear()
     yield
+    _provider_factories.clear()
+    _provider_factories.update(snapshot)
     get_auth_provider.cache_clear()
 
 
@@ -61,46 +74,64 @@ def test_local_deploy_returns_shared_secret_provider(monkeypatch):
     assert isinstance(provider, SharedSecretAuthProvider)
 
 
-def test_cloud_without_env_vars_raises(monkeypatch):
+def test_cloud_without_registered_provider_raises(monkeypatch):
     monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
-    monkeypatch.delenv("SUPABASE_URL", raising=False)
-    monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
 
     with pytest.raises(
         RuntimeError,
-        match="WORKEROS_DEPLOY=cloud requires SUPABASE_URL and SUPABASE_JWT_SECRET",
+        match="No AuthProvider registered for WORKEROS_DEPLOY='cloud'",
     ):
         get_auth_provider()
 
 
-def test_cloud_with_stub_env_returns_supabase_provider(monkeypatch):
+def test_register_auth_provider_enables_lookup(monkeypatch):
     monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
-    monkeypatch.setenv("SUPABASE_URL", "https://supabase.example.test")
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", "jwt-secret")
+
+    register_auth_provider("cloud", lambda: _FakeCloudProvider())
 
     provider = get_auth_provider()
+    assert isinstance(provider, _FakeCloudProvider)
 
-    assert isinstance(provider, SupabaseAuthProvider)
+    ctx = asyncio.run(
+        provider.verify(Request({"type": "http", "headers": []}))
+    )
+    assert ctx.user_id == "fake-cloud-user"
+
+
+def test_register_auth_provider_clears_cache(monkeypatch):
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret")
+
+    first = get_auth_provider()
+    assert isinstance(first, SharedSecretAuthProvider)
+
+    register_auth_provider("local", lambda: _FakeCloudProvider())
+
+    second = get_auth_provider()
+    assert isinstance(second, _FakeCloudProvider)
 
 
 def test_unknown_deploy_value_raises(monkeypatch):
     monkeypatch.setenv("WORKEROS_DEPLOY", "mystery")
     monkeypatch.delenv("FLOOM_SECRET", raising=False)
 
-    with pytest.raises(RuntimeError, match="Unknown WORKEROS_DEPLOY value: mystery"):
+    with pytest.raises(
+        RuntimeError,
+        match="No AuthProvider registered for WORKEROS_DEPLOY='mystery'",
+    ):
         get_auth_provider()
 
 
-def test_main_refuses_to_boot_in_cloud_mode_without_supabase_env(monkeypatch, tmp_path):
+def test_main_refuses_to_boot_in_cloud_mode_without_registered_provider(
+    monkeypatch, tmp_path
+):
     monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
-    monkeypatch.delenv("SUPABASE_URL", raising=False)
-    monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
 
     main = load_main(monkeypatch, tmp_path)
 
     with pytest.raises(
         RuntimeError,
-        match="WORKEROS_DEPLOY=cloud requires SUPABASE_URL and SUPABASE_JWT_SECRET",
+        match="No AuthProvider registered for WORKEROS_DEPLOY='cloud'",
     ):
         with TestClient(main.app):
             pass
