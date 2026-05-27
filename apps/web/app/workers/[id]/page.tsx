@@ -379,15 +379,11 @@ export default function WorkerDetailPage() {
           {worker.description && (
             <p className="text-muted-foreground text-sm mt-1">{worker.description}</p>
           )}
+          {/* S29m (ChatGPT-audit principles 6, 12): header was stacking
+              category badge + Healthy pill + tag chips + last-run line. The
+              saturated category badge duplicates info already shown via the
+              tag chips below. Dropped. Tags + last-run line remain. */}
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
-            {worker.folder && (
-              <Badge
-                variant="secondary"
-                className="text-[11px] font-medium bg-[var(--accent-soft)] text-[var(--accent)] border-0"
-              >
-                {worker.folder}
-              </Badge>
-            )}
             {(worker.tags || []).map((tag) => (
               <Badge key={tag} variant="outline" className="text-xs font-normal">{tag}</Badge>
             ))}
@@ -579,14 +575,13 @@ function RunSection({
   const inputsFilled = hasInputs && Object.values(inputs).some(
     (v) => v !== null && v !== undefined && v !== "" && v !== false
   );
+  // S29m (ChatGPT-audit P-3): drop Card wrapper; the Run tab is a form, not
+  // a distinct surface needing a border. Section heading + form fields sit
+  // directly on the page background.
   return (
-    <div className="max-w-xl space-y-4">
-      <Card className="border-border shadow-none bg-card">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Run worker</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {hasInputs && (worker.example_input || inputsFilled) && (
+    <div className="max-w-xl space-y-6">
+      <div className="space-y-4">
+        {hasInputs && (worker.example_input || inputsFilled) && (
             <div className="flex items-center gap-2 pb-1">
               {worker.example_input && (
                 <Button
@@ -723,47 +718,44 @@ function RunSection({
               ? `Connect ${missingConnections[0]} first`
               : "Run worker"}
           </Button>
-        </CardContent>
-      </Card>
+      </div>
 
       {worker.webhook_url && (
-        <Card className="border-border shadow-none bg-card">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Webhook</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
+        <section className="space-y-3 pt-4 border-t border-line">
+          <div>
+            <h2 className="text-sm font-medium text-muted-foreground">Webhook</h2>
+            <p className="text-xs text-muted-foreground mt-1">
               Send a POST request to this URL to trigger the worker. The token authenticates the request.
             </p>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground ">Webhook URL</Label>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1.5 break-all">
-                  {worker.webhook_url}
-                </code>
-                <button
-                  type="button"
-                  title="Copy URL"
-                  onClick={() => {
-                    navigator.clipboard.writeText(worker.webhook_url!).then(
-                      () => toast.success("URL copied"),
-                      () => toast.error("Failed to copy"),
-                    );
-                  }}
-                  className="shrink-0 p-1.5 rounded border border-border bg-card hover:bg-muted transition-colors"
-                >
-                  <Copy className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-              </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Webhook URL</Label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1.5 break-all">
+                {worker.webhook_url}
+              </code>
+              <button
+                type="button"
+                title="Copy URL"
+                onClick={() => {
+                  navigator.clipboard.writeText(worker.webhook_url!).then(
+                    () => toast.success("URL copied"),
+                    () => toast.error("Failed to copy"),
+                  );
+                }}
+                className="shrink-0 p-1.5 rounded border border-border bg-card hover:bg-muted transition-colors"
+              >
+                <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+              </button>
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground ">Example curl</Label>
-              <pre className="text-xs font-mono bg-[#1a1a1a] text-[#a8e6a3] rounded p-2 overflow-x-auto whitespace-pre-wrap">
-                {`curl -X POST '${worker.webhook_url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
-              </pre>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Example curl</Label>
+            <pre className="text-xs font-mono bg-[var(--bg-2)] dark:bg-[#1a1a1a] text-foreground dark:text-[#a8e6a3] border border-line rounded p-2 overflow-x-auto whitespace-pre-wrap">
+              {`curl -X POST '${worker.webhook_url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
+            </pre>
+          </div>
+        </section>
       )}
     </div>
   );
@@ -784,62 +776,58 @@ function ConnectionsSection({
   activeConnectionSlugs: Set<string>;
   requiredSecrets: string[];
 }) {
+  // S29m (ChatGPT-audit P-3): drop Card wrappers; render as flat sections
+  // matching Overview tab rhythm.
   return (
-    <div className="max-w-xl space-y-6">
+    <div className="max-w-xl space-y-8">
       {requiredConnections.length > 0 ? (
-        <Card className="border-border shadow-none bg-card">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Required integrations</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Required integrations</h2>
+          <ul className="space-y-2">
             {requiredConnections.map((slug) => {
               const isActive = activeConnectionSlugs.has(slug.toLowerCase());
               return (
-                <div key={slug} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                <li key={slug} className="flex items-center justify-between py-2 border-b border-line last:border-0">
                   <span className="text-sm capitalize font-medium">{slug}</span>
                   {isActive ? (
-                    <Badge variant="outline" className="text-xs text-emerald-600 border-emerald-200 bg-emerald-50">
-                      Active
-                    </Badge>
+                    <span className="text-xs text-muted-foreground">Active</span>
                   ) : (
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-xs text-amber-600 border-amber-200 bg-amber-50">
                         Missing
                       </Badge>
                       <Link href="/connections">
-                        <Button size="sm" variant="outline" className="h-6 text-xs border-border">
+                        <Button size="sm" variant="outline" className="h-6 text-xs border-line">
                           Connect
                         </Button>
                       </Link>
                     </div>
                   )}
-                </div>
+                </li>
               );
             })}
-          </CardContent>
-        </Card>
+          </ul>
+        </section>
       ) : (
         <p className="text-sm text-muted-foreground">This worker requires no integrations.</p>
       )}
 
       {requiredSecrets.length > 0 && (
-        <Card className="border-border shadow-none bg-card">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Required secrets</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">Required secrets</h2>
+          <ul className="space-y-2">
             {requiredSecrets.map((s) => (
-              <div key={s} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+              <li key={s} className="flex items-center justify-between py-2 border-b border-line last:border-0">
                 <span className="text-sm font-mono font-medium">{s}</span>
                 <Link href="/settings">
-                  <Button size="sm" variant="outline" className="h-6 text-xs border-border">
+                  <Button size="sm" variant="outline" className="h-6 text-xs border-line">
                     Configure
                   </Button>
                 </Link>
-              </div>
+              </li>
             ))}
-          </CardContent>
-        </Card>
+          </ul>
+        </section>
       )}
     </div>
   );
@@ -850,34 +838,29 @@ function ConnectionsSection({
 // ---------------------------------------------------------------------------
 
 function RunsSection({ worker }: { worker: WorkerDetail }) {
+  // S29m (ChatGPT-audit P-3): drop Card wrapper. The History tab IS a list,
+  // it doesn't need an extra "Recent runs" titled border.
   return (
-    <div className="max-w-2xl">
-      <Card className="border-border shadow-none bg-card">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {worker.recent_runs?.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No runs yet.</p>
-          ) : (
-            worker.recent_runs?.map((r) => (
-              <Link key={r.id} href={`/runs/${r.id}`}>
-                <div className="flex items-center justify-between p-2 rounded-md hover:bg-muted cursor-pointer transition-colors">
-                  <div>
-                    <p className="text-sm font-medium">{r.worker_name || r.id}</p>
-                    <p className="text-xs text-muted-foreground font-mono">{r.id}</p>
-                    <p className="text-xs text-muted-foreground">{r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline">{r.status}</Badge>
-                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-                  </div>
-                </div>
-              </Link>
-            ))
-          )}
-        </CardContent>
-      </Card>
+    <div className="max-w-2xl space-y-2">
+      {worker.recent_runs?.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No runs yet.</p>
+      ) : (
+        worker.recent_runs?.map((r) => (
+          <Link key={r.id} href={`/runs/${r.id}`} target="_blank" rel="noopener noreferrer">
+            <div className="flex items-center justify-between p-2 rounded-md hover:bg-muted cursor-pointer transition-colors">
+              <div>
+                <p className="text-sm font-medium">{r.worker_name || r.id}</p>
+                <p className="text-xs text-muted-foreground font-mono">{r.id}</p>
+                <p className="text-xs text-muted-foreground">{r.created_at ? new Date(r.created_at).toLocaleString() : "-"}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">{r.status}</Badge>
+                <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+              </div>
+            </div>
+          </Link>
+        ))
+      )}
     </div>
   );
 }
