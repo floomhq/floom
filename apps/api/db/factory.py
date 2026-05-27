@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 from .interface import (
     CliAuthRepository,
@@ -18,13 +18,6 @@ from .sqlite import (
     SqliteSecretRepository,
     SqliteWorkerRepository,
 )
-from .supabase import (
-    SupabaseCliAuthRepository,
-    SupabaseConnectionRepository,
-    SupabaseRunRepository,
-    SupabaseSecretRepository,
-    SupabaseWorkerRepository,
-)
 
 
 class Repositories(NamedTuple):
@@ -35,23 +28,47 @@ class Repositories(NamedTuple):
     cli_auth: CliAuthRepository
 
 
+def _local_repositories() -> Repositories:
+    return Repositories(
+        workers=SqliteWorkerRepository(),
+        runs=SqliteRunRepository(),
+        connections=SqliteConnectionRepository(),
+        secrets=SqliteSecretRepository(),
+        cli_auth=SqliteCliAuthRepository(),
+    )
+
+
+# Registry of Repositories factories keyed by WORKEROS_DEPLOY value.
+# workeros (OSS) ships with "local" (SQLite) built in.
+# workeros-cloud registers its Supabase-backed Repositories at startup via
+# register_repositories("cloud", ...) — keeping Supabase deps out of the
+# OSS engine entirely.
+_repositories_factories: dict[str, Callable[[], Repositories]] = {
+    "local": _local_repositories,
+}
+
+
+def register_repositories(
+    deploy_mode: str, factory: Callable[[], Repositories]
+) -> None:
+    """Register a Repositories factory for a given WORKEROS_DEPLOY value.
+
+    Called by downstream packages (e.g. workeros-cloud) at startup to plug
+    in their own repository implementations without modifying the OSS
+    engine.
+    """
+    _repositories_factories[deploy_mode.strip().lower()] = factory
+    get_repositories.cache_clear()
+
+
 @lru_cache(maxsize=1)
 def get_repositories() -> Repositories:
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
-    if deploy == "local":
-        return Repositories(
-            workers=SqliteWorkerRepository(),
-            runs=SqliteRunRepository(),
-            connections=SqliteConnectionRepository(),
-            secrets=SqliteSecretRepository(),
-            cli_auth=SqliteCliAuthRepository(),
+    factory = _repositories_factories.get(deploy)
+    if factory is None:
+        raise RuntimeError(
+            f"No Repositories registered for WORKEROS_DEPLOY={deploy!r}. "
+            f"workeros ships with 'local' only; downstream packages must call "
+            f"db.factory.register_repositories() at startup."
         )
-    if deploy == "cloud":
-        return Repositories(
-            workers=SupabaseWorkerRepository(),
-            runs=SupabaseRunRepository(),
-            connections=SupabaseConnectionRepository(),
-            secrets=SupabaseSecretRepository(),
-            cli_auth=SupabaseCliAuthRepository(),
-        )
-    raise RuntimeError(f"Unknown WORKEROS_DEPLOY value: {deploy}")
+    return factory()

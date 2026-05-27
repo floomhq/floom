@@ -35,7 +35,6 @@ def load_main(monkeypatch, tmp_path):
         "db.factory",
         "db.dependency",
         "db.interface",
-        "db.supabase",
         "models",
         "files",
         "worker_registry",
@@ -49,7 +48,6 @@ def load_main(monkeypatch, tmp_path):
         "auth.factory",
         "auth.interface",
         "auth.local",
-        "auth.supabase",
     ]:
         sys.modules.pop(name, None)
 
