@@ -96,12 +96,12 @@ export default function OverviewPage() {
             What ran, what is running, and what is next.
           </p>
         </div>
-        <Button asChild size="sm">
-          <Link href="/workers/new">
+        <Link href="/workers/new">
+          <Button size="sm">
             <Plus className="size-4" />
             New worker
-          </Link>
-        </Button>
+          </Button>
+        </Link>
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -156,12 +156,12 @@ export default function OverviewPage() {
               </AlertTitle>
               <AlertDescription className="flex items-center justify-between gap-3">
                 <span>{item.message}</span>
-                <Button asChild variant="ghost" size="sm">
-                  <Link href={item.action_url}>
+                <Link href={item.action_url}>
+                  <Button variant="ghost" size="sm">
                     Open
                     <ArrowUpRight className="size-3.5" />
-                  </Link>
-                </Button>
+                  </Button>
+                </Link>
               </AlertDescription>
             </Alert>
           ))}
@@ -172,12 +172,12 @@ export default function OverviewPage() {
         <Card className="lg:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Recent runs</CardTitle>
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/runs">
+            <Link href="/runs">
+              <Button variant="ghost" size="sm">
                 See all
                 <ArrowUpRight className="size-3.5" />
-              </Link>
-            </Button>
+              </Button>
+            </Link>
           </CardHeader>
           <CardContent className="pt-0">
             {loading ? (

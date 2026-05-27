@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+export const dynamic = "force-dynamic";
+
+import { Suspense, useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -41,6 +43,14 @@ function saveFavorites(favs: Set<string>) {
 }
 
 export default function WorkersPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading workers...</div>}>
+      <WorkersContent />
+    </Suspense>
+  );
+}
+
+function WorkersContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 

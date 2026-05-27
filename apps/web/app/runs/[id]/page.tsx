@@ -189,12 +189,12 @@ export default function RunDetailPage() {
         <RunStatusBadge status={run.status} />
         {refreshing && <span className="text-xs text-[#999]">Refreshing...</span>}
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/workers/${run.worker_id}?section=code`}>
+          <Link href={`/workers/${run.worker_id}?section=code`}>
+            <Button variant="outline" size="sm">
               <Pencil className="w-3.5 h-3.5" />
               Edit worker
-            </Link>
-          </Button>
+            </Button>
+          </Link>
           <Button
             variant="outline"
             size="sm"
@@ -213,12 +213,12 @@ export default function RunDetailPage() {
             <RotateCcw className="w-3.5 h-3.5" />
             Re-run
           </Button>
-          <Button variant="outline" size="sm" asChild>
-            <a href={api.runs.downloadUrl(run.id)} download>
+          <a href={api.runs.downloadUrl(run.id)} download>
+            <Button variant="outline" size="sm">
               <Download className="w-3.5 h-3.5" />
               Download all
-            </a>
-          </Button>
+            </Button>
+          </a>
           {(run.status === "running" || run.status === "queued") && (
             <Button
               variant="outline"
