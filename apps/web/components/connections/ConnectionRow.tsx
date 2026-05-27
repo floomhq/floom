@@ -1,7 +1,13 @@
 "use client";
 
-import { RefreshCw, Trash2, Zap } from "lucide-react";
+import { RefreshCw, Trash2, Zap, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "./BrandLogo";
 import { formatTimestamp, type ConnectionView } from "./connection-data";
@@ -101,7 +107,10 @@ export function ConnectionRow({
         <StatusPill status={connection.status} />
       </span>
 
-      {/* Actions: compact icon buttons on desktop, hover-revealed on mobile */}
+      {/* S29w (score walk): was Reconnect + 3 icon-buttons (Test/Refresh/
+          Disconnect) = 4 actions per row. Now Reconnect + a single
+          overflow menu containing Test / Refresh / Disconnect. Row reads
+          as one primary action with secondary options behind a click. */}
       <div className="flex shrink-0 items-center gap-1">
         <Button
           type="button"
@@ -115,42 +124,33 @@ export function ConnectionRow({
           <RefreshCw className={cn("size-3", reconnecting && "animate-spin")} />
           <span className="hidden sm:inline">{reconnecting ? "Opening" : "Reconnect"}</span>
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="h-7 w-7"
-          onClick={() => onTest(connection)}
-          disabled={testing}
-          title="Test connection"
-          aria-label={`Test ${connection.displayName}`}
-        >
-          <Zap className={cn("size-3.5", testing && "animate-pulse")} />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="h-7 w-7"
-          onClick={() => onRefresh(connection)}
-          disabled={refreshing}
-          title="Refresh status"
-          aria-label={`Refresh ${connection.displayName} status`}
-        >
-          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="h-7 w-7 text-[var(--negative)] hover:bg-[color-mix(in_srgb,var(--negative)_9%,transparent)] hover:text-[var(--negative)]"
-          onClick={() => onDelete(connection)}
-          disabled={deleting}
-          title="Disconnect"
-          aria-label={`Disconnect ${connection.displayName}`}
-        >
-          <Trash2 className="size-3.5" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            className="inline-flex h-7 w-7 items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            title="More"
+            aria-label={`More actions for ${connection.displayName}`}
+          >
+            <MoreHorizontal className="size-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => onTest(connection)} disabled={testing}>
+              <Zap className="size-3.5" />
+              {testing ? "Testing..." : "Test connection"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onRefresh(connection)} disabled={refreshing}>
+              <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+              {refreshing ? "Refreshing..." : "Refresh status"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => onDelete(connection)}
+              disabled={deleting}
+              variant="destructive"
+            >
+              <Trash2 className="size-3.5" />
+              {deleting ? "Disconnecting..." : "Disconnect"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Mobile: status pill on row 2 if needed */}
