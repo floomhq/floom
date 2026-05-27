@@ -11,6 +11,7 @@
 | #79 S22c | /workers/new polish (lighter placeholder, kbd hint visible when disabled, first pill accented) | **MERGED + LIVE** |
 | #80 S22e | /runs polish (URL state filters, ghost Export, no inline run ID, no "manual" noise, louder Failed pill) | **MERGED + LIVE** |
 | #81 S22f | /connections + /settings polish (drop "Default scopes"/"Last used: Never" placeholders, hide Notifications "Soon" tab) | **MERGED + LIVE** |
+| #83 S22g | Triggers tab interior polish (labelled radio-cards with subtitles + Floom-blue active, replaces "button group" affordance) | **MERGED + LIVE** |
 
 Verified live by browser screenshots (`/tmp/s22a-shots/PROD-*.png`). Prod alias `workers.floom.dev` was pointing to an old deploy; promoted to latest manually.
 
