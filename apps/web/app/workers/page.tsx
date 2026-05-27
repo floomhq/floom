@@ -367,28 +367,85 @@ function flattenFolders(workers: WorkerSummary[]): FlatFolder[] {
 
 function EmptyWorkersState() {
   const templates = [
-    { id: "research_brief", title: "Research brief", description: "Markdown brief from topic, audience, and depth." },
-    { id: "gmail_intake_brief", title: "Gmail intake brief", description: "Unread Gmail triage summary with next actions." },
-    { id: "csv_enricher", title: "CSV enricher", description: "Spreadsheet enrichment with structured output." },
+    { id: "research_brief", title: "Research brief", description: "Markdown brief from a topic, audience, and depth.", icon: "📄" },
+    { id: "gmail_intake_brief", title: "Gmail triage", description: "Unread Gmail summary with next actions.", icon: "✉️" },
+    { id: "csv_enricher", title: "CSV enricher", description: "Spreadsheet enrichment with structured output.", icon: "📊" },
+  ];
+
+  const examples = [
+    "Summarise my Granola meetings, post action items to HubSpot, daily",
+    "Every morning at 9am, send me a digest of my GitHub PRs",
+    "When a new HubSpot deal lands, post a summary to Slack #sales",
   ];
 
   return (
-    <div className="rounded-md border border-[#eaeaea] bg-white p-6 space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold tracking-tight">Create your first worker from a template</h2>
-        <p className="text-sm text-[#666] mt-1">Start with a filled WorkerContract and edit the YAML before saving.</p>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {templates.map((template) => (
-          <Link key={template.id} href={`/workers/new?template=${template.id}`}>
-            <div className="h-full rounded-md border border-[#eaeaea] p-4 hover:border-[#cfcfd4] transition-colors">
-              <p className="text-sm font-medium">{template.title}</p>
-              <p className="text-xs text-[#666] mt-1 leading-relaxed">{template.description}</p>
-            </div>
+    <Card className="overflow-hidden">
+      <CardContent className="p-8 sm:p-12 space-y-8">
+        <div className="max-w-xl">
+          <div className="inline-flex items-center justify-center size-12 rounded-xl bg-[var(--accent-soft)] mb-4">
+            <Box className="size-6 text-[var(--accent)]" />
+          </div>
+          <h2 className="text-2xl font-semibold tracking-tight">
+            No workers yet. Spin one up.
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            A worker is a small AI agent (or plain script) that runs on a schedule,
+            a webhook, or on demand. Describe what you want, or start from one of
+            the examples below.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <Link href="/workers/new">
+            <Button size="default" className="gap-2">
+              <Plus className="size-4" />
+              Describe a new worker
+            </Button>
           </Link>
-        ))}
-      </div>
-    </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">
+            Or start from a template
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {templates.map((t) => (
+              <Link
+                key={t.id}
+                href={`/workers/new?template=${t.id}`}
+                className="group block rounded-lg border bg-card hover:bg-accent transition-colors p-4"
+              >
+                <div className="text-2xl mb-2" aria-hidden>
+                  {t.icon}
+                </div>
+                <p className="text-sm font-medium">{t.title}</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {t.description}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-3">
+            Example prompts
+          </p>
+          <ul className="space-y-1.5">
+            {examples.map((ex, i) => (
+              <li key={i}>
+                <Link
+                  href={`/workers/new?prompt=${encodeURIComponent(ex)}`}
+                  className="block rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
+                >
+                  &quot;{ex}&quot;
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
