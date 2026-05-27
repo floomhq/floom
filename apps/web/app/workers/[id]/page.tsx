@@ -18,9 +18,10 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
-  Play, Plug, Pencil, ClipboardCheck, ChevronRight,
+  Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
 } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { FileInputUpload } from "@/components/FileInputUpload";
@@ -843,118 +844,139 @@ function OverviewSection({
   canApplySample: boolean;
   onApplySample: () => void;
 }) {
+  // S29d (F8.7): description-first. Lead with what the worker does in plain
+  // English; push Trigger/Runtime/Runner into a collapsible "Technical
+  // details" block at the bottom. Federico: "wtf is this layout and content?
+  // so hard to digest? who is our ICP?" — non-developers read this first,
+  // they need the narrative before the config.
+  const [techOpen, setTechOpen] = useState(false);
+  const leadDescription = worker.long_description || worker.description;
+  const hasUseCases = worker.use_cases && worker.use_cases.length > 0;
+  const hasExampleInput = !!worker.example_input;
+  const hasExampleOutput = !!worker.example_output;
+  const hasInputs = worker.config.inputs.length > 0;
+  const hasOutputs = worker.config.outputs.length > 0;
+
   return (
-    <div className="max-w-2xl space-y-6">
-      <Card className="border-border shadow-none bg-card">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Configuration</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Trigger</span>
-            <span className="font-medium">{worker.config.trigger.type}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Runtime</span>
-            <span className="font-medium">{worker.config.runtime.type}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Runner</span>
-            <span className="font-medium">{worker.config.runtime.runner}</span>
-          </div>
-          <Separator className="my-2" />
+    <div className="max-w-3xl space-y-8">
+      {leadDescription && (
+        <section>
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">What it does</h2>
+          <p className="text-base text-foreground leading-relaxed whitespace-pre-wrap">{leadDescription}</p>
+        </section>
+      )}
+
+      {hasUseCases && (
+        <section>
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">Use cases</h2>
+          <ul className="space-y-2">
+            {worker.use_cases!.map((useCase) => (
+              <li key={useCase} className="flex gap-2.5 text-sm text-foreground leading-relaxed">
+                <span className="text-muted-foreground mt-1.5 shrink-0">·</span>
+                <span>{useCase}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {worker.how_it_works && (
+        <section>
+          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">How it works</h2>
+          <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{worker.how_it_works}</p>
+        </section>
+      )}
+
+      {(hasInputs || hasOutputs) && (
+        <section className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
-            <span className="text-muted-foreground">Inputs</span>
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {worker.config.inputs.length === 0 ? (
-                <span className="text-xs text-muted-foreground">None</span>
-              ) : (
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2.5">Inputs</h2>
+            <div className="flex flex-wrap gap-1.5">
+              {hasInputs ? (
                 worker.config.inputs.map((inp) => (
                   <Badge key={inp.name} variant="secondary" className="text-xs font-normal">
                     {inp.label || inp.name}
                   </Badge>
                 ))
+              ) : (
+                <span className="text-xs text-muted-foreground">None</span>
               )}
             </div>
           </div>
           <div>
-            <span className="text-muted-foreground">Outputs</span>
-            <div className="flex flex-wrap gap-1.5 mt-1.5">
-              {worker.config.outputs.length === 0 ? (
-                <span className="text-xs text-muted-foreground">None</span>
-              ) : (
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2.5">Outputs</h2>
+            <div className="flex flex-wrap gap-1.5">
+              {hasOutputs ? (
                 worker.config.outputs.map((o) => (
                   <Badge key={o.name} variant="outline" className="text-xs font-normal">
                     {o.label}
                   </Badge>
                 ))
+              ) : (
+                <span className="text-xs text-muted-foreground">None</span>
               )}
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {(worker.long_description || worker.use_cases?.length || worker.example_input || worker.example_output || worker.how_it_works) && (
-        <Card className="border-border shadow-none bg-card">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Worker guide</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {worker.long_description && (
-              <section>
-                <h2 className="text-sm font-medium mb-2">Description</h2>
-                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">{worker.long_description}</p>
-              </section>
-            )}
-
-            {worker.use_cases && worker.use_cases.length > 0 && (
-              <section>
-                <h2 className="text-sm font-medium mb-2">Use cases</h2>
-                <ul className="list-disc pl-5 space-y-1">
-                  {worker.use_cases.map((useCase) => (
-                    <li key={useCase} className="text-sm text-muted-foreground">{useCase}</li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
-            {worker.example_input && (
-              <section className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-medium">Example input</h2>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8"
-                    onClick={onApplySample}
-                    disabled={!canApplySample}
-                  >
-                    <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
-                    Use this sample
-                  </Button>
-                </div>
-                <ExampleInputPreview inputs={worker.config.inputs} example={worker.example_input} />
-              </section>
-            )}
-
-            {worker.example_output && (
-              <section>
-                <h2 className="text-sm font-medium mb-2">Example output</h2>
-                <MarkdownPreview value={worker.example_output} />
-              </section>
-            )}
-
-            {worker.how_it_works && (
-              <section>
-                <h2 className="text-sm font-medium mb-2">How it works</h2>
-                <pre className="text-xs leading-relaxed overflow-auto font-mono bg-muted p-3 rounded-md border border-border whitespace-pre-wrap">
-                  {worker.how_it_works}
-                </pre>
-              </section>
-            )}
-          </CardContent>
-        </Card>
+        </section>
       )}
+
+      {(hasExampleInput || hasExampleOutput) && (
+        <section className="space-y-5">
+          {hasExampleInput && (
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Example input</h2>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={onApplySample}
+                  disabled={!canApplySample}
+                >
+                  <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
+                  Fill with sample input
+                </Button>
+              </div>
+              <ExampleInputPreview inputs={worker.config.inputs} example={worker.example_input!} />
+            </div>
+          )}
+          {hasExampleOutput && (
+            <div className="space-y-2.5">
+              <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Example output</h2>
+              <MarkdownPreview value={worker.example_output!} />
+            </div>
+          )}
+        </section>
+      )}
+
+      <Collapsible open={techOpen} onOpenChange={setTechOpen}>
+        <CollapsibleTrigger
+          className="flex w-full items-center justify-between rounded-md border border-line bg-card px-4 py-2.5 text-sm font-medium text-foreground hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)] transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Technical details</span>
+          </span>
+          <ChevronDown
+            className={`w-4 h-4 text-muted-foreground transition-transform ${techOpen ? "rotate-180" : ""}`}
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="mt-2 rounded-md border border-line bg-card p-4 space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Trigger</span>
+              <span className="font-medium font-mono text-xs">{worker.config.trigger.type}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Runtime</span>
+              <span className="font-medium font-mono text-xs">{worker.config.runtime.type}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Runner</span>
+              <span className="font-medium font-mono text-xs">{worker.config.runtime.runner}</span>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       <DangerZone workerId={worker.id} workerName={worker.name} />
     </div>
