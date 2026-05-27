@@ -100,6 +100,8 @@ class WorkerRuntime(BaseModel):
     mode: Literal["agent", "pure-script", "hybrid"] = "pure-script"
     model: Optional[str] = None
     system_prompt: Optional[str] = None
+    # PR S11: tool opt-out propagated from WorkerContractExec.disable_tools.
+    disable_tools: List[str] = Field(default_factory=list)
     limits: "WorkerLimits" = Field(default_factory=lambda: WorkerLimits())
 
     @field_validator("runner")
@@ -253,15 +255,37 @@ class WorkerLimits(BaseModel):
     timeout_seconds: int = Field(default=300, ge=1)
 
 
+_SCRIPT_ENTRY_SUFFIXES: tuple[str, ...] = (".py", ".sh", ".js")
+_AGENT_ENTRY_SUFFIXES: tuple[str, ...] = (".md",)
+
+
+def _infer_mode_from_entry(entry: str) -> Literal["agent", "pure-script"]:
+    lower = entry.lower()
+    if lower.endswith(_AGENT_ENTRY_SUFFIXES):
+        return "agent"
+    if lower.endswith(_SCRIPT_ENTRY_SUFFIXES):
+        return "pure-script"
+    raise ValueError(
+        f"exec.entry must end in .md (agent) or .py/.sh/.js (script); got {entry!r}"
+    )
+
+
 class WorkerContractExec(BaseModel):
     command: Optional[str] = None
-    runtime: Literal["python311", "node22", "bash", "skill", "none"]
+    runtime: Literal["python311", "node22", "bash", "skill", "none"] = "skill"
     # E2B-only execution. Workers must run in sandboxed microVMs. The
     # `runner: local` declaration is legacy and gets coerced to `e2b` for
     # backward-compatibility with old worker.yml files (in-process executor
     # was removed in PR #28).
     runner: str = "e2b"
+    # PR S11: `entry` is the canonical mode signal. `.md` -> agent, `.py/.sh/.js` -> script.
+    # `mode` is a deprecated alias retained for back-compat; if both are absent we infer
+    # from `command` / `runtime` (legacy path).
+    entry: Optional[str] = None
     mode: Optional[Literal["agent", "pure-script", "hybrid"]] = None
+    # PR S11: tools-on-by-default. `disable_tools` removes specific tools
+    # from the agent loop (e.g. ["web_search"]). Empty/missing = all tools on.
+    disable_tools: List[str] = Field(default_factory=list)
     inputs: List[WorkerContractField] = Field(default_factory=list)
     secrets: List[str] = Field(default_factory=list)
     outputs: List[WorkerContractField] = Field(default_factory=list)
@@ -285,8 +309,40 @@ class WorkerContractExec(BaseModel):
             raise ValueError(f"runner must be 'e2b' (got {value!r}). Workers execute in E2B sandboxes; no in-process execution is supported.")
         return value
 
+    @field_validator("entry")
+    @classmethod
+    def validate_entry(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("exec.entry cannot be empty")
+        # validate suffix; raises if neither agent nor script suffix.
+        _infer_mode_from_entry(stripped)
+        return stripped
+
     @model_validator(mode="after")
     def validate_runtime_mode(self) -> "WorkerContractExec":
+        # PR S11: resolve `entry` <-> `mode` so downstream code can read either.
+        # Priority: explicit `entry` wins. If only `mode` is set (legacy), derive
+        # an entry default so the new code path stays uniform.
+        if self.entry:
+            inferred = _infer_mode_from_entry(self.entry)
+            # "hybrid" survives as a synonym for "pure-script" until removal,
+            # but `entry` always normalizes to agent/pure-script.
+            if self.mode is None:
+                self.mode = inferred
+            elif self.mode == "hybrid" and inferred == "pure-script":
+                # Legacy hybrid + entry=run.py -> normalize to pure-script.
+                self.mode = "pure-script"
+        elif self.mode is not None:
+            # Legacy mode-only manifest: derive entry for the new code path.
+            if self.mode == "agent":
+                self.entry = "SKILL.md"
+            else:
+                # pure-script / hybrid -> run.py
+                self.entry = "run.py"
+        # Validation: keep existing constraints.
         if self.mode in ("pure-script", "hybrid") and not self.command:
             raise ValueError(f"exec.command is required when exec.mode is {self.mode!r}")
         if self.mode in ("pure-script", "hybrid") and self.runtime == "none":
@@ -456,6 +512,9 @@ WorkerManifest = WorkerConfig | WorkerContract
 
 
 def _resolve_legacy_exec_mode(exec_config: WorkerContractExec) -> Literal["agent", "pure-script"]:
+    # PR S11: entry-first. If `entry` is set, prefer the suffix-based inference.
+    if exec_config.entry:
+        return _infer_mode_from_entry(exec_config.entry)
     if exec_config.runtime in {"python311", "node22", "bash"} and exec_config.command:
         return "pure-script"
     return "agent"
@@ -504,13 +563,17 @@ def _contract_output_type(field: WorkerContractField) -> str:
 def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -> WorkerConfig:
     """Project WorkerContract into the existing response/runtime config shape."""
     command_parts = contract.exec.command.strip().split() if contract.exec.command else []
-    entrypoint = contract.entrypoint or "SKILL.md"
+    # PR S11: prefer exec.entry as the entrypoint signal.
+    entrypoint = contract.exec.entry or contract.entrypoint or "SKILL.md"
     if contract.exec.mode == "pure-script":
-        entrypoint = "run.py"
-        if len(command_parts) >= 2 and command_parts[0].startswith("python"):
-            entrypoint = command_parts[-1]
-        elif command_parts:
-            entrypoint = command_parts[-1]
+        if contract.exec.entry:
+            entrypoint = contract.exec.entry
+        else:
+            entrypoint = "run.py"
+            if len(command_parts) >= 2 and command_parts[0].startswith("python"):
+                entrypoint = command_parts[-1]
+            elif command_parts:
+                entrypoint = command_parts[-1]
     elif contract.entrypoints:
         entrypoint = contract.entrypoints[0].path
 
@@ -523,6 +586,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         mode=contract.exec.mode or "agent",
         model=contract.model or "gpt-5-mini",
         system_prompt=contract.system_prompt,
+        disable_tools=list(contract.exec.disable_tools or []),
         limits=contract.limits,
     )
 
@@ -667,6 +731,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             runtime="python311",
             runner=config.runtime.runner,
             mode=config.runtime.mode,
+            entry=config.runtime.entrypoint or "run.py",
             inputs=[_legacy_input_to_contract_field(field) for field in config.inputs],
             secrets=list(config.secrets),
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],

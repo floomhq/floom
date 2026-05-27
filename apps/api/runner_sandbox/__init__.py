@@ -18,17 +18,37 @@ from .skill_driver import SkillRuntimeDriver
 from models import WorkerConfig
 
 
-def get_driver(runner: str = "e2b", config: WorkerConfig | None = None) -> SandboxDriver:
-    """Return the sandbox driver. Pure-script -> E2B; agent-mode -> AgentDriver.
+def _resolve_mode_from_entry(entry: str | None) -> str | None:
+    """PR S11: derive execution mode from the entry-point file suffix.
 
+    `.md` -> agent mode (SKILL.md loop with tools).
+    `.py`, `.sh`, `.js` -> script mode (just exec the file in E2B).
+    """
+    if not entry:
+        return None
+    lower = entry.lower()
+    if lower.endswith(".md"):
+        return "agent"
+    if lower.endswith((".py", ".sh", ".js")):
+        return "pure-script"
+    return None
+
+
+def get_driver(runner: str = "e2b", config: WorkerConfig | None = None) -> SandboxDriver:
+    """Return the sandbox driver. Routes on `entrypoint` suffix (PR S11).
+
+    `entrypoint` ending in `.md` -> AgentDriver. `.py/.sh/.js` -> E2BSandboxDriver.
+    Falls back to legacy `mode` field if entrypoint is unset (back-compat).
     Legacy compat: the `runner` parameter is accepted but ignored for pure-script
     (always E2B now). Skill-runtime workers go through SkillRuntimeDriver.
     """
     if config and config.runtime:
-        mode = config.runtime.mode or "agent"
+        # PR S11: prefer entry-based routing.
+        inferred = _resolve_mode_from_entry(config.runtime.entrypoint)
+        mode = inferred or config.runtime.mode or "agent"
         if mode == "agent":
             return AgentDriver()
-        if mode != "pure-script":
+        if mode not in ("pure-script", "hybrid"):
             raise ValueError(f"Unknown exec mode: {mode!r}. Must be 'agent' or 'pure-script'.")
 
     # Pure-script: always E2B. The `runner` field is informational only.

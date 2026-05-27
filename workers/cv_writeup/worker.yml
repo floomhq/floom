@@ -44,7 +44,6 @@ limits:
   max_total_tokens: 50000
   timeout_seconds: 300
 exec:
-  mode: pure-script
   command: python run.py
   runtime: python311
   runner: e2b
@@ -91,6 +90,7 @@ exec:
     path: out/extracted_profile.json
     required: true
     label: Extracted Profile (JSON)
+  entry: run.py
 capabilities:
   secrets:
   - OPENAI_API_KEY
