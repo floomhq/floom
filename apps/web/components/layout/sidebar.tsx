@@ -193,7 +193,7 @@ function UserProfileFooter() {
   return (
     <div className="flex items-center justify-between gap-3 border-t border-line px-3 py-3">
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <div className="size-7 shrink-0 rounded-full bg-gradient-to-br from-[var(--accent)] to-[var(--solid-2)] text-[var(--solid-fg)] grid place-items-center text-[11px] font-semibold">
+        <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-line grid place-items-center text-[11px] font-medium">
           LU
         </div>
         <div className="min-w-0 leading-tight">
