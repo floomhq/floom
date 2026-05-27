@@ -287,8 +287,8 @@ function NewWorkerContent() {
               key={ex.label}
               type="button"
               disabled={isBusy}
-              onClick={() => void handleGenerate(ex.prompt)}
-              className="inline-flex items-center text-xs font-medium px-3 py-1.5 rounded-full border border-[#e4e4e7] bg-white text-[#333] hover:bg-[#f4f4f5] hover:border-[#ccc] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={() => setPrompt(ex.prompt)}
+              className="inline-flex items-center text-xs font-medium px-3 py-1.5 rounded-full border border-border bg-card text-foreground hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {ex.label}
             </button>

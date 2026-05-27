@@ -5015,6 +5015,11 @@ class OverviewAttentionItem(BaseModel):
     type: str
     worker_id: Optional[str] = None
     connection_id: Optional[str] = None
+    # PR S19 (I-7): name the connection in the UI instead of an opaque
+    # "Connection expired" with no provider context. Populated for
+    # connection_expired / connection_expiring rows; None otherwise.
+    provider_slug: Optional[str] = None
+    provider_display_name: Optional[str] = None
     message: str
     action_url: str
 
@@ -5187,9 +5192,12 @@ def system_overview() -> OverviewResponse:
                 )
             )
 
+        # PR S19 (I-7): include provider_slug + provider_display_name so the
+        # Overview alert can name the connection ("Gmail" instead of opaque
+        # "Connection expired") and the UI can render the right logo.
         expired_rows = conn.execute(
             """
-            SELECT id
+            SELECT id, app_name
             FROM composio_connections
             WHERE status = 'expired' OR last_check_status = 'expired'
             ORDER BY updated_at DESC
@@ -5197,10 +5205,13 @@ def system_overview() -> OverviewResponse:
             """
         ).fetchall()
         for row in expired_rows:
+            slug = (row["app_name"] or "").lower() or None
             attention_items.append(
                 OverviewAttentionItem(
                     type="connection_expired",
                     connection_id=row["id"],
+                    provider_slug=slug,
+                    provider_display_name=row["app_name"] or None,
                     message="Connection has expired and needs re-authorization.",
                     action_url=f"/connections/{row['id']}",
                 )
@@ -5208,7 +5219,7 @@ def system_overview() -> OverviewResponse:
 
         expiring_rows = conn.execute(
             """
-            SELECT id
+            SELECT id, app_name
             FROM composio_connections
             WHERE status = 'active'
               AND last_check_status = 'failed'
@@ -5218,10 +5229,13 @@ def system_overview() -> OverviewResponse:
             """
         ).fetchall()
         for row in expiring_rows:
+            slug = (row["app_name"] or "").lower() or None
             attention_items.append(
                 OverviewAttentionItem(
                     type="connection_expiring",
                     connection_id=row["id"],
+                    provider_slug=slug,
+                    provider_display_name=row["app_name"] or None,
                     message="Connection may expire soon. Reconnect to avoid failures.",
                     action_url=f"/connections/{row['id']}",
                 )
