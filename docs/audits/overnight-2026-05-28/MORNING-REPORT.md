@@ -20,7 +20,18 @@ Verified live by browser screenshots (`/tmp/s22a-shots/PROD-*.png`). Prod alias 
 | PR | Surface | Status |
 |---|---|---|
 | #82 R6 | Backend security (IDOR + PII + DoS + CORS + ratelimit + schema redact) | **OPEN — needs your call** |
-| S22d | Backend SSE part-stream + Trigger.dev split-pane run detail UI | **Codex still running in background** |
+| #84 S22d | Backend SSE part-stream + Trigger.dev split-pane run detail UI | **MERGED + LIVE — see `prod-verify/PROD-09-run-detail-s22d.png`** |
+
+### S22d landed (the big one)
+
+The "shit when any worker is running" complaint is obliterated. `/runs/<id>` now shows:
+- TIMELINE on the left with each tool invocation as a row (status icon, name, callId, "done" pill)
+- TRANSCRIPT / Logs / Output / Metadata tabs on the right
+- ai-elements `<Tool>` collapsible cards per tool-call
+- Sticky header with status pill, run-id, duration, Edit / Re-run / Download
+- AgentDriver now emits AI SDK part-type stream over SSE — live updates without polling
+
+Tests: 5/5 S22d stream tests + 10/10 R6 tests + typecheck + lint + build all green. Live smoke run completed in 26.2s.
 
 ### #82 R6 — needs your decision
 
