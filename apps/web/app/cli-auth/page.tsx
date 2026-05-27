@@ -88,7 +88,7 @@ function CliAuthContent() {
           </p>
           <p>Client: floom-cli</p>
           <div className="space-y-2">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground" htmlFor="cli-auth-confirm-code">
+            <label className="text-xs font-medium text-muted-foreground" htmlFor="cli-auth-confirm-code">
               Confirm code
             </label>
             <Input

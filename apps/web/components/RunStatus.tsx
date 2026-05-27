@@ -36,8 +36,12 @@ const BADGE_STYLE: Record<string, string> = {
   unknown: "bg-muted text-muted-foreground border-border font-medium",
 };
 
+// S29l (ChatGPT-audit P-2): pills are decoration when status is the
+// default-success state. Show only when the user must act (error, running,
+// unknown). The glyph in the row/header already covers "completed".
 export function RunStatusBadge({ status }: { status: string }) {
   const kind = classify(status);
+  if (kind === "success") return null;
   return (
     <Badge variant="outline" className={BADGE_STYLE[kind]}>
       {status.replace("_", " ")}

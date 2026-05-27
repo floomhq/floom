@@ -165,7 +165,7 @@ export function ConnectionEventPicker({
     <div className="space-y-3">
       {/* Step 1: App */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground uppercase tracking-wide">Integration</Label>
+        <Label className="text-xs text-muted-foreground ">Integration</Label>
         <Select value={selectedApp} onValueChange={handleAppChange}>
           <SelectTrigger className="w-full border-border">
             <SelectValue placeholder="Pick a connected integration">
@@ -194,7 +194,7 @@ export function ConnectionEventPicker({
       {/* Step 2: Event (only after app is chosen) */}
       {selectedApp && (
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground uppercase tracking-wide">Event</Label>
+          <Label className="text-xs text-muted-foreground ">Event</Label>
           {loadingTriggers ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -231,7 +231,7 @@ export function ConnectionEventPicker({
       {/* Step 3: Connection (only if multiple connections for the same app) */}
       {selectedApp && appConnections.length > 1 && (
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground uppercase tracking-wide">Account</Label>
+          <Label className="text-xs text-muted-foreground ">Account</Label>
           <Select value={composioConnectionId} onValueChange={(v) => onConnectionIdChange(v ?? "")}>
             <SelectTrigger className="w-full border-border">
               <SelectValue placeholder="Select account" />
