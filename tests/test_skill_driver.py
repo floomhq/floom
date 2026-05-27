@@ -17,7 +17,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 from models import (  # noqa: E402
-    WorkerApprovalConfig,
     WorkerConfig,
     WorkerInput,
     WorkerOutput,
@@ -86,7 +85,6 @@ def config_for(worker_dir: Path, *, connections=None, entrypoint="SKILL.md") -> 
         secrets=["OPENAI_API_KEY"],
         connections=connections or [],
         outputs=[WorkerOutput(name="brief", label="Brief", type="markdown")],
-        approvals=WorkerApprovalConfig(required=False),
     )
 
 

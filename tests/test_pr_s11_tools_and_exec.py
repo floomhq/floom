@@ -4,8 +4,8 @@ Six test families:
   1. exec.entry: SKILL.md infers agent mode.
   2. exec.entry: run.py infers script mode (.sh / .js variants too).
   3. exec.entry must end in .md/.py/.sh/.js (validation error otherwise).
-  4. disable_tools: ["web_search"] removes web_search from the agent tool list.
-  5. Default tools include web_search + builtins (list_dir, read_file, etc.).
+  4. disable_tools remains compatible when an unavailable tool is named.
+  5. Default tools include builtins (list_dir, read_file, etc.).
   6. /system/metrics returns the expected shape and respects x-floom-secret.
 """
 
@@ -153,7 +153,7 @@ def test_legacy_mode_only_still_supported_for_backcompat():
 
 
 # ---------------------------------------------------------------------------
-# Family 4 + 5: agent tool list (web_search default-on, disable_tools opt-out)
+# Family 4 + 5: agent tool list and disable_tools opt-out
 # ---------------------------------------------------------------------------
 
 def _agent_driver_tools(disable_tools=None, connections=None):
@@ -187,34 +187,33 @@ def _tool_names(tools):
     return names
 
 
-def test_default_tools_include_web_search_and_builtins():
+def test_default_tools_include_builtins():
     tools = _agent_driver_tools()
     names = _tool_names(tools)
-    # Builtins
     assert "list_dir" in names
     assert "read_file" in names
     assert "write_output" in names
+    assert "finish_with_outputs" in names
     assert "run_command" in names
     assert "invoke_worker" in names
     assert "log" in names
-    # Native
-    assert "web_search" in names
+    assert "web_search" not in names
 
 
-def test_disable_tools_removes_web_search():
+def test_disable_tools_accepts_unavailable_web_search():
     tools = _agent_driver_tools(disable_tools=["web_search"])
     names = _tool_names(tools)
     assert "web_search" not in names
-    # Builtins are still present.
     assert "list_dir" in names
     assert "write_output" in names
+    assert "finish_with_outputs" in names
 
 
 def test_disable_tools_removes_builtin():
     tools = _agent_driver_tools(disable_tools=["run_command"])
     names = _tool_names(tools)
     assert "run_command" not in names
-    assert "web_search" in names  # untouched
+    assert "finish_with_outputs" in names
 
 
 def test_disable_tools_removes_composio_by_app_slug():

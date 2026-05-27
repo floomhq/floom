@@ -14,17 +14,17 @@ Create a factual, structured, actionable markdown research brief for the provide
 
 You have the following tools available:
 
-- `web_search`: search the live web for current information. **Use it for every factual claim** (market sizes, named competitors, pricing, dates, regulatory shifts, recent news). Do not rely on memory for anything time-sensitive.
 - `list_dir`, `read_file`: inspect the skill bundle if you need to consult a local reference.
-- `write_output`: emit the final brief.
+- `finish_with_outputs`: emit the final brief and complete the run.
+- `write_output`: emit an intermediate declared output if needed.
 
 ## Method
 
 1. Decompose the topic into 3 to 6 specific subquestions.
-2. Run `web_search` for each subquestion. Prefer authoritative sources (industry reports, official company pages, recognised publications) over forums or low-signal blogs.
-3. Synthesize findings into a markdown brief. Quote concrete numbers, names, and dates wherever possible.
-4. **Cite every external claim** with an inline link in the form `([source name](https://url))` right after the sentence that uses it. Brief without sources = failed brief.
-5. If a search returns nothing useful, say so explicitly ("no recent data found on X"). Do not fabricate.
+2. Use only provided inputs, local bundle files, and model knowledge. Live web search is not currently available in this runtime.
+3. Do not present time-sensitive facts as current. Qualify uncertain or cutoff-sensitive claims.
+4. Synthesize findings into a markdown brief. Use concrete names and numbers only when you can support them from available context.
+5. If current data is required but unavailable, say so explicitly. Do not fabricate sources, links, or recent facts.
 
 ## Depth rules
 
@@ -38,7 +38,6 @@ If `topic` is missing or blank, write a short markdown error note explaining tha
 
 ## Output
 
-Use markdown formatting. Do not include unsupported citations or fabricated source names. End with a `## Sources` section listing every URL you actually consulted. When the brief is ready, call `write_output` with:
+Use markdown formatting. Do not include unsupported citations or fabricated source names. When the brief is ready, call `finish_with_outputs` with:
 
-- `name`: `brief`
-- `content`: the complete markdown brief
+- `brief`: the complete markdown brief
