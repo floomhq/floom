@@ -173,7 +173,12 @@ class AgentDriver(SandboxDriver):
         tools = self._tool_schemas(config)
         model = config.runtime.model or "gpt-5-mini"
 
-        for iteration in range(limits.max_tool_iterations):
+        iteration = 0
+        max_iterations = limits.max_tool_iterations
+        corrective_retry_used = False
+        force_finish_next = False
+        loop_exhausted = True
+        while iteration < max_iterations:
             # Check cancel_requested before each iteration so the agent stops
             # promptly on user cancel (runaway LLM token loops).
             if self._cancel_requested(run_id):
@@ -198,8 +203,12 @@ class AgentDriver(SandboxDriver):
                 "model": model,
                 "messages": messages,
                 "tools": tools,
-                "tool_choice": "auto",
+                "tool_choice": {
+                    "type": "function",
+                    "function": {"name": "finish_with_outputs"},
+                } if force_finish_next else "auto",
             }
+            force_finish_next = False
             if model.startswith(("gpt-5", "gpt-4.1", "o1", "o3")):
                 create_kwargs["extra_body"] = {"max_completion_tokens": limits.max_output_tokens}
             else:
@@ -219,8 +228,27 @@ class AgentDriver(SandboxDriver):
             messages.append(self._assistant_message_dict(message, tool_calls))
 
             if not tool_calls:
+                missing_outputs = self._missing_required_outputs(config, outputs)
+                if missing_outputs and not corrective_retry_used:
+                    corrective_retry_used = True
+                    force_finish_next = True
+                    max_iterations += 1
+                    names = ", ".join(missing_outputs)
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": (
+                                f"Required outputs not produced: {names}. "
+                                "Call finish_with_outputs to complete."
+                            ),
+                        }
+                    )
+                    iteration += 1
+                    continue
+                loop_exhausted = False
                 break
 
+            finished = False
             for tool_call in tool_calls:
                 tool_name = self._tool_call_name(tool_call)
                 tool_args = self._tool_call_args(tool_call)
@@ -248,32 +276,32 @@ class AgentDriver(SandboxDriver):
                         "content": json.dumps(tool_result),
                     }
                 )
-        else:
+                if tool_name == "finish_with_outputs" and tool_result.get("ok"):
+                    finished = True
+            iteration += 1
+            if finished:
+                loop_exhausted = False
+                break
+
+        if loop_exhausted:
             return WorkerResult(
                 status="error",
                 error="Agent tool iteration cap exceeded",
                 error_code="tool_iteration_cap_exceeded",
             )
 
+        self._persist_transcript(output_dir, messages, artifacts)
         schema_error = _validate_output_schema(worker_id, outputs, log_fn, config=config)
         if schema_error:
             log_fn(f"Schema validation failed: {schema_error}", level="error")
             return WorkerResult(
                 status="failed",
+                outputs=outputs,
+                artifacts=artifacts,
                 error=f"Output schema violation: {schema_error}",
                 error_code="schema_violation",
             )
 
-        transcript_path = _safe_path(output_dir, "transcript.jsonl")
-        transcript_path.write_text("\n".join(json.dumps(message) for message in messages) + "\n")
-        artifacts.append(
-            {
-                "name": "transcript.jsonl",
-                "type": "application/jsonl",
-                "path": str(transcript_path),
-                "size_bytes": transcript_path.stat().st_size,
-            }
-        )
         return WorkerResult(status="success", outputs=outputs, artifacts=artifacts)
 
     def _cancel_requested(self, run_id: str) -> bool:
@@ -297,6 +325,9 @@ class AgentDriver(SandboxDriver):
         prompt_parts: list[str] = []
         if config.runtime.system_prompt:
             prompt_parts.append(config.runtime.system_prompt.strip())
+        output_contract = self._output_contract_block(config)
+        if output_contract:
+            prompt_parts.append(output_contract)
         entrypoint = config.runtime.entrypoint or "SKILL.md"
         entrypoint_path = _safe_path(bundle_dir, entrypoint)
         if entrypoint_path.is_file():
@@ -305,20 +336,80 @@ class AgentDriver(SandboxDriver):
             raise FileNotFoundError(f"Agent entrypoint not found: {entrypoint}")
         prompt_parts.append(
             "Use tools to inspect bundle files as needed. "
-            "Call write_output once for each declared output before finishing."
+            "Call finish_with_outputs when all required outputs are ready."
         )
         return "\n\n".join(part for part in prompt_parts if part)
+
+    def _output_contract_block(self, config: WorkerConfig) -> str:
+        if not config.outputs:
+            return ""
+        lines = [
+            "## Required outputs",
+            "",
+            "Produce exactly these declared output names. Required outputs must be present.",
+            "When complete, call finish_with_outputs with the output names as top-level keys.",
+            "",
+        ]
+        for output in config.outputs:
+            lines.append(f"- name: {output.name}")
+            lines.append(f"  type: {output.type}")
+            lines.append(f"  required: {str(output.required).lower()}")
+            if output.kind:
+                lines.append(f"  kind: {output.kind}")
+            if output.media_type:
+                lines.append(f"  media_type: {output.media_type}")
+            if output.path:
+                lines.append(f"  path: {output.path}")
+            if output.columns:
+                lines.append(f"  columns: {json.dumps(output.columns)}")
+            if output.json_required_keys:
+                lines.append(f"  json_keys: {json.dumps(output.json_required_keys)}")
+        return "\n".join(lines)
+
+    def _finish_with_outputs_schema(self, config: WorkerConfig) -> Dict[str, Any]:
+        properties = {
+            output.name: self._output_value_schema(output)
+            for output in config.outputs
+        }
+        required = [output.name for output in config.outputs if output.required]
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        }
+
+    def _output_value_schema(self, output: Any) -> Dict[str, Any]:
+        output_type = output.type
+        if output_type in {"markdown", "text", "csv", "file"}:
+            return {"type": "string"}
+        if output_type == "json":
+            schema: Dict[str, Any] = {
+                "type": "object",
+                "additionalProperties": True,
+            }
+            if output.json_required_keys:
+                schema["required"] = list(output.json_required_keys)
+                schema["properties"] = {key: {} for key in output.json_required_keys}
+            return schema
+        if output_type == "number":
+            return {"type": "number"}
+        if output_type == "boolean":
+            return {"type": "boolean"}
+        return {"type": ["string", "object", "array", "number", "boolean"]}
 
     def _tool_schemas(self, config: WorkerConfig) -> list[Dict[str, Any]]:
         """Build the tool list for the agent loop.
 
-        PR S11: tools-on-by-default. The full set is:
-          - Builtin: list_dir, read_file, write_output, run_command, invoke_worker, log
-          - OpenAI native: web_search
+        The full set is:
+          - Builtin: list_dir, read_file, write_output, finish_with_outputs, run_command, invoke_worker, log
           - Composio: one tool per declared connection
-        Workers opt out via `exec.disable_tools: [...]` in worker.yml. file_search
-        is deferred until a vector-store wiring lands (TODO PR S12+).
+        Workers opt out via `exec.disable_tools: [...]` in worker.yml.
         """
+        declared_names = [output.name for output in config.outputs]
+        output_name_schema: Dict[str, Any] = {"type": "string"}
+        if declared_names:
+            output_name_schema["enum"] = declared_names
         tools = [
             {
                 "type": "function",
@@ -352,11 +443,19 @@ class AgentDriver(SandboxDriver):
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "name": {"type": "string"},
+                            "name": output_name_schema,
                             "content": {"type": ["string", "object", "array", "number", "boolean"]},
                         },
                         "required": ["name", "content"],
                     },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "finish_with_outputs",
+                    "description": "Write declared worker outputs and end the agent run successfully.",
+                    "parameters": self._finish_with_outputs_schema(config),
                 },
             },
             {
@@ -407,11 +506,8 @@ class AgentDriver(SandboxDriver):
                     },
                 },
             },
-            # PR S19 hotfix: `{"type": "web_search"}` is a Responses API
-            # feature; it is rejected by Chat Completions (which this driver
-            # uses) with "Invalid value: 'web_search'. Supported values are:
-            # 'function' and 'custom'." That was breaking ~43% of agent runs.
-            # Removed until the driver migrates to the Responses API.
+            # `{"type": "web_search"}` is a Responses API feature. This
+            # driver uses Chat Completions, which accepts function tools only.
         ]
         for app in config.connections:
             safe_app = "".join(ch if ch.isalnum() else "_" for ch in app.lower())
@@ -433,7 +529,7 @@ class AgentDriver(SandboxDriver):
                 }
             )
         # PR S11: opt-out filter. `exec.disable_tools` may name builtin tool
-        # names ("web_search", "run_command", ...) or composio app slugs.
+        # names ("run_command", ...) or composio app slugs.
         disabled = self._disabled_tool_names(config)
         if disabled:
             tools = [t for t in tools if not self._tool_is_disabled(t, disabled)]
@@ -493,6 +589,8 @@ class AgentDriver(SandboxDriver):
                 return self._read_file(bundle_dir, str(args.get("path") or ""))
             if name == "write_output":
                 return self._write_output(args, output_dir, outputs, artifacts, config)
+            if name == "finish_with_outputs":
+                return self._finish_with_outputs(args, output_dir, outputs, artifacts, config)
             if name == "run_command":
                 return self._run_command(
                     args=args,
@@ -541,21 +639,103 @@ class AgentDriver(SandboxDriver):
         name = str(args.get("name") or "")
         declared_names = {output.name for output in config.outputs}
         if declared_names and name not in declared_names:
-            return {"ok": False, "error": f"Undeclared output: {name}"}
+            allowed = ", ".join(sorted(declared_names))
+            return {"ok": False, "error": f"Undeclared output: {name}. Declared outputs: {allowed}"}
         content = args.get("content")
         outputs[name] = content
         serialized = content if isinstance(content, str) else json.dumps(content, indent=2)
-        path = _safe_path(output_dir, f"{name}.txt")
+        declared = self._declared_output(config, name)
+        artifact_root = output_dir.parent
+        relative_path = declared.path if declared and declared.path else f"outputs/{name}.txt"
+        path = _safe_path(artifact_root, relative_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(serialized)
+        artifact = {
+            "name": relative_path,
+            "type": self._artifact_media_type(declared),
+            "path": str(path),
+            "relative_path": relative_path,
+            "size_bytes": path.stat().st_size,
+        }
+        artifacts[:] = [item for item in artifacts if item.get("path") != str(path)]
+        artifacts.append(artifact)
+        return {"ok": True, "name": name, "path": relative_path}
+
+    def _finish_with_outputs(
+        self,
+        args: Dict[str, Any],
+        output_dir: Path,
+        outputs: Dict[str, Any],
+        artifacts: list[Dict[str, Any]],
+        config: WorkerConfig,
+    ) -> Dict[str, Any]:
+        declared_names = {output.name for output in config.outputs}
+        unexpected = sorted(set(args) - declared_names)
+        if unexpected:
+            return {
+                "ok": False,
+                "error": f"Undeclared outputs: {', '.join(unexpected)}",
+            }
+        for name, content in args.items():
+            result = self._write_output(
+                {"name": name, "content": content},
+                output_dir,
+                outputs,
+                artifacts,
+                config,
+            )
+            if not result.get("ok"):
+                return result
+        missing = self._missing_required_outputs(config, outputs)
+        if missing:
+            return {
+                "ok": False,
+                "error": f"Required outputs not produced: {', '.join(missing)}",
+            }
+        return {"ok": True, "finished": True, "outputs": sorted(args)}
+
+    def _declared_output(self, config: WorkerConfig, name: str) -> Any:
+        for output in config.outputs:
+            if output.name == name:
+                return output
+        return None
+
+    def _artifact_media_type(self, output: Any) -> str:
+        if output and output.media_type:
+            return output.media_type
+        if output and output.type == "markdown":
+            return "text/markdown"
+        if output and output.type == "csv":
+            return "text/csv"
+        if output and output.type == "json":
+            return "application/json"
+        return "text/plain"
+
+    def _missing_required_outputs(self, config: WorkerConfig, outputs: Dict[str, Any]) -> list[str]:
+        return [
+            output.name
+            for output in config.outputs
+            if output.required and output.name not in outputs
+        ]
+
+    def _persist_transcript(
+        self,
+        output_dir: Path,
+        messages: list[Dict[str, Any]],
+        artifacts: list[Dict[str, Any]],
+    ) -> None:
+        transcript_path = _safe_path(output_dir, "transcript.jsonl")
+        transcript_path.write_text("\n".join(json.dumps(message) for message in messages) + "\n")
+        artifacts[:] = [item for item in artifacts if item.get("path") != str(transcript_path)]
         artifacts.append(
             {
-                "name": path.name,
-                "type": "text/plain",
-                "path": str(path),
-                "size_bytes": path.stat().st_size,
+                "name": transcript_path.name,
+                "type": "application/jsonl",
+                "path": str(transcript_path),
+                "relative_path": "outputs/transcript.jsonl",
+                "size_bytes": transcript_path.stat().st_size,
             }
         )
-        return {"ok": True, "name": name}
 
     def _run_command(
         self,
