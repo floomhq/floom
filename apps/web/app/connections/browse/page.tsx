@@ -277,20 +277,24 @@ export default function ConnectionsBrowsePage() {
       <ConnectionsTabs />
       <div className="text-sm text-[var(--ink-mute)]">{pageSummary}</div>
 
-      <section className="space-y-3 rounded-lg border border-line bg-[var(--glass-bg)] p-3 shadow-sm backdrop-blur-[10px]">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ink-mute)]" />
+      {/* S29x (score walk): was wrapped in a bordered backdrop-blur section
+          with the category row rendered as saturated-blue pills on active.
+          Now flat: bare search input + quiet underline-style category row
+          matching the /runs status filter rhythm (S29q). */}
+      <section className="space-y-3">
+        <div className="relative max-w-md">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search Gmail, Slack, Notion..."
-            className="h-10 bg-[var(--paper)] pl-8 pr-8"
+            className="h-9 pl-8 pr-8"
             aria-label="Search integrations"
           />
           {search ? (
             <button
               type="button"
-              className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-[var(--ink-mute)] hover:bg-[var(--bg-2)] hover:text-ink"
+              className="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground"
               onClick={() => setSearch("")}
               aria-label="Clear search"
             >
@@ -299,21 +303,23 @@ export default function ConnectionsBrowsePage() {
           ) : null}
         </div>
 
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="flex items-center gap-4 flex-wrap overflow-x-auto pb-1">
           {CATEGORY_FILTERS.map((filter) => (
-            <Button
+            <button
               key={filter.value || "all"}
               type="button"
-              size="sm"
-              variant={category === filter.value ? "default" : "outline"}
-              className="h-7 whitespace-nowrap"
               onClick={() => {
                 setCategory(filter.value);
                 setPage(1);
               }}
+              className={`relative pb-1.5 text-sm whitespace-nowrap transition-colors ${
+                category === filter.value
+                  ? "text-foreground font-medium after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
             >
               {filter.label}
-            </Button>
+            </button>
           ))}
         </div>
       </section>
