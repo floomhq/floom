@@ -21,12 +21,14 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
 } from "lucide-react";
-import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec } from "@/lib/types";
+import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { FileInputUpload } from "@/components/FileInputUpload";
 import { FilesEditor, TriggersEditor, makeTriggerRow, buildTriggersYaml, replaceTriggerBlock } from "@/components/worker-form";
 import type { TriggerRow } from "@/components/worker-form";
 import { formatRelativeTime } from "@/components/connections/connection-data";
+import { RunDetailSplitPane } from "@/components/RunDetailSplitPane";
+import { useRunStream } from "@/lib/useRunStream";
 
 // ---------------------------------------------------------------------------
 // Section types and nav config
@@ -72,8 +74,11 @@ export default function WorkerDetailPage() {
   const [inputs, setInputs] = useState<Record<string, unknown>>({});
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [activeRun, setActiveRun] = useState<RunDetail | null>(null);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const activeRunStream = useRunStream(activeRunId);
 
   // Triggers edit state
   const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([]);
@@ -141,14 +146,42 @@ export default function WorkerDetailPage() {
     setRunning(true);
     try {
       const result = await api.workers.run(worker.id, inputs);
+      if (!result.run_id) throw new Error("Run ID missing from API response");
       toast.success("Run started");
-      router.push(`/runs/${result.run_id}`);
+      setActiveRunId(result.run_id);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start run");
     } finally {
       setRunning(false);
     }
   }
+
+  const loadActiveRun = useCallback(async () => {
+    if (!activeRunId) {
+      setActiveRun(null);
+      return;
+    }
+    try {
+      const detail = await api.runs.get(activeRunId);
+      setActiveRun(detail);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to load active run");
+    }
+  }, [activeRunId]);
+
+  useEffect(() => {
+    void loadActiveRun();
+  }, [loadActiveRun]);
+
+  useEffect(() => {
+    if (activeRunStream.fallbackRun) {
+      setActiveRun(activeRunStream.fallbackRun);
+    }
+  }, [activeRunStream.fallbackRun]);
+
+  useEffect(() => {
+    if (activeRunStream.finishedPart) void loadActiveRun();
+  }, [activeRunStream.finishedPart, loadActiveRun]);
 
   function applyExampleInput() {
     if (!worker?.example_input) return;
@@ -345,22 +378,56 @@ export default function WorkerDetailPage() {
       {/* Section content */}
       <div>
         {activeSection === "run" && (
-          <RunSection
-            worker={worker}
-            inputs={inputs}
-            fileNames={fileNames}
-            running={running}
-            missingConnections={missingConnections}
-            canRun={canRun}
-            canApplySample={canApplySample}
-            onInputChange={(name, value) => setInputs((prev) => ({ ...prev, [name]: value }))}
-            onFileUploaded={(name, sha256, fileName) => {
-              setInputs((prev) => ({ ...prev, [name]: sha256 }));
-              setFileNames((prev) => ({ ...prev, [name]: fileName }));
-            }}
-            onRun={handleRun}
-            onApplySample={applyExampleInput}
-          />
+          activeRun ? (
+            <RunDetailSplitPane
+              inline
+              run={activeRun}
+              parts={activeRunStream.parts}
+              streamConnected={activeRunStream.connected}
+              streamError={activeRunStream.error}
+              onBack={() => {
+                setActiveRunId(null);
+                setActiveRun(null);
+              }}
+              onReplay={async () => {
+                try {
+                  const result = await api.runs.replay(activeRun.worker_id, activeRun.id);
+                  if (!result.run_id) throw new Error("Run ID missing from API response");
+                  toast.success("Re-running with same inputs");
+                  setActiveRunId(result.run_id);
+                } catch (e: unknown) {
+                  toast.error(`Re-run failed: ${e instanceof Error ? e.message : "unknown"}`);
+                }
+              }}
+              onCancel={async () => {
+                if (!confirm("Cancel this run?")) return;
+                try {
+                  await api.runs.cancel(activeRun.id);
+                  toast.success("Cancellation requested");
+                  void loadActiveRun();
+                } catch (e: unknown) {
+                  toast.error(`Cancel failed: ${e instanceof Error ? e.message : "unknown"}`);
+                }
+              }}
+            />
+          ) : (
+            <RunSection
+              worker={worker}
+              inputs={inputs}
+              fileNames={fileNames}
+              running={running}
+              missingConnections={missingConnections}
+              canRun={canRun}
+              canApplySample={canApplySample}
+              onInputChange={(name, value) => setInputs((prev) => ({ ...prev, [name]: value }))}
+              onFileUploaded={(name, sha256, fileName) => {
+                setInputs((prev) => ({ ...prev, [name]: sha256 }));
+                setFileNames((prev) => ({ ...prev, [name]: fileName }));
+              }}
+              onRun={handleRun}
+              onApplySample={applyExampleInput}
+            />
+          )
         )}
 
         {activeSection === "code" && (

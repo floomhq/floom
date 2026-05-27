@@ -22,20 +22,17 @@ export function RunStatusGlyph({
 }) {
   const kind = classify(status);
   const cls = className ?? "size-4";
-  if (kind === "success") return <CheckCircle2 className={`${cls} text-emerald-600`} />;
-  if (kind === "error") return <XCircle className={`${cls} text-red-600`} />;
+  if (kind === "success") return <CheckCircle2 className={`${cls} text-success`} />;
+  if (kind === "error") return <XCircle className={`${cls} text-error`} />;
   if (kind === "running")
-    return <Loader2 className={`${cls} text-blue-600 animate-spin`} />;
+    return <Loader2 className={`${cls} text-pending animate-spin`} />;
   return <Clock className={`${cls} text-muted-foreground`} />;
 }
 
-// S22e: bumped failed/error contrast (roast P1: faint pink + faint red made
-// failed runs invisible against healthy rows in a 60%-success list). Added
-// dark-mode variants across all states (was light-only).
 const BADGE_STYLE: Record<string, string> = {
-  success: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900 font-medium",
-  error: "bg-red-100 text-red-800 border-red-300 dark:bg-red-950/50 dark:text-red-200 dark:border-red-800 font-semibold",
-  running: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900 font-medium",
+  success: "bg-success/10 text-success border-success/30 font-medium",
+  error: "bg-error/10 text-error border-error/30 font-semibold",
+  running: "bg-pending/10 text-pending border-pending/30 font-medium",
   unknown: "bg-muted text-muted-foreground border-border font-medium",
 };
 
