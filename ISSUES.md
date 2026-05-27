@@ -887,3 +887,66 @@ Tackle order (small-to-impact, with bundling where it makes sense):
 - 28 vectors verified SAFE by Round 5: SQLi, command injection, path traversal, XXE, GraphQL, method override, response splitting, cache poisoning, host header bypass, TRACE, subdomain enumeration, ReDoS, prototype pollution, ZIP traversal, exposed config files, directory listing.
 - Previous "SSRF via /connections/callback" + "Open redirect" + "/health unauth" are NOW verified SAFE (auditor reversed Round 4 findings — those endpoints are actually fixed-redirect / 403).
 - Weekly_update worker has 100% failure rate today (2 runs, 0 completed). Not in audit scope but flagged.
+
+---
+
+# Federico 2026-05-27 round 2 walkthrough (after S19 batch 2 + line-clamp deploy)
+
+## P0
+
+### I-22 — Dark mode regressed. Bring back blue sidebar + sidebar DARKER than content
+- **Status:** OPEN, urgent
+- **What:** I read the S18 fix backwards. Federico explicitly wants:
+  - **Sidebar = DARKER** than the main content area
+  - **Sidebar keeps the blue accent tint** (he likes the blue, he said so explicitly during S18 review)
+  - Main content brighter (use `--paper` not `--bg`)
+- **Fix:** Revert `--sidebar-glass` in `html.dark` to include the accent tint AND drop the lightness. Pick a near-black for sidebar (e.g. mix `--bg` with a hint of `--accent`). Content uses `--paper` (#232323) which is brighter than `--bg` (#161616).
+
+### I-23 — `/workers/new` Generate button doesn't work after example pill click
+- **Status:** OPEN
+- **What:** S19 I-9 changed the pill to ONLY set the prompt (not auto-submit). But now clicking Generate after that does nothing. Could be:
+  - `isBusy` state is stuck
+  - `getLivePrompt()` returns the textarea value but setPrompt doesn't propagate to it
+  - Generate button is disabled by a wrong condition
+- **Fix:** Inspect handleGenerate + setPrompt + the Generate button disabled prop. The pill should `setPrompt(ex.prompt)` AND the textarea should reflect the new value. Generate should fire on the updated value.
+
+### I-24 — Worker detail `/workers/<id>` still has no tabs / no side-nav visible
+- **Status:** OPEN, regression
+- **What:** Federico: "I could not click on the worker cards. I can just click on run. They still don't have tabs at the top, like you didn't finish your work on the previous run."
+- **Two things:**
+  - **a)** Worker cards on `/workers` list — card body click does nothing. Only the "Run worker" button navigates. Card body should also navigate to `/workers/<id>`.
+  - **b)** On `/workers/<id>`, the side-nav B rail is not visible OR the user reads it as "no tabs". Could be: side-nav uses hardcoded `bg-card` after the sweep but the rail collapses on narrow viewports, OR section-switching is broken.
+- **Fix:** Make the worker card BODY a `<Link>` wrapper (with the Star + Run button as nested-but-isolated clicks). On `/workers/<id>`, double-check the side-nav rail renders at desktop width.
+
+### I-25 — Workers page click → worker detail loads "super long"
+- **Status:** OPEN
+- **What:** Federico wants fast nav. /workers/<id> takes too long.
+- **Fix:** Likely a slow API call on mount (probably `api.workers.get(id)` plus secondary calls). Either prefetch on hover OR cache the basic worker data from the list response so the page can render skeleton + then enrich. Or use Next.js `<Link prefetch>` if not already.
+
+### I-26 — Hover / highlight feels "breaky" — too fast switching
+- **Status:** OPEN
+- **What:** Federico: "hovering above recent runs feels like everything is breaking, too fast switching between them".
+- **Diagnosis:** Probably the hover background changes with no transition, OR the toast/refresh interval fires too often during hover, OR the row re-renders.
+- **Fix:** Add `transition-colors duration-150` consistently. Don't refresh data while hovering (debounce or pause). Make sure hover doesn't trigger a layout shift.
+
+## P1
+
+### I-27 — Connections page needs search + active/explorer toggle
+- **Status:** OPEN
+- **What:** Federico wants ONE page that lists Active connections AND Available (explorer / catalog), with a toggle between them and a search box. Currently `/connections` and `/connections/browse` are two separate routes.
+- **Fix:** Merge into `/connections` with a top tab row: `[Connected] [Explore]` + search input. Drop the separate `/browse` route or keep as alias.
+
+### I-28 — Setup commands on /settings API access tab still look bad
+- **Status:** OPEN
+- **What:** Federico still calls it out as visually weak. The "Your token" reveal + the three CLI/MCP/API snippet tabs aren't compelling.
+- **Action:** Need a redesign pass on CliCommandPanel — make the token block prominent (large mono), give the snippet boxes proper code-block styling with syntax highlighting, group the install + login commands into one combined `<pre>` block.
+
+### I-29 — Appearance settings should match sidebar theme toggle visually
+- **Status:** OPEN
+- **What:** Federico: "appearance on settings has to align with what we have on the sidebar on the left side". Currently the Appearance tab shows the ThemeModeButton component as-is. He wants it to be the SAME visual as the sidebar toggle (or alternatively, make this the canonical control and remove the sidebar one).
+- **Fix:** Either match style, or replace with a richer 3-option picker (System / Light / Dark cards).
+
+### I-30 — `/runs` page didn't get any S12-UI updates
+- **Status:** OPEN
+- **What:** Federico: "the runs page just didn't change at all". The /runs list page still has the original layout, doesn't show the clickable rows + filter chips + sparkline header.
+- **Fix:** Audit /runs page; align with the locked ASCII spec from `docs/design/ascii-mockups-2026-05-27.md`.
