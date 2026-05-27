@@ -146,29 +146,49 @@ function TriggerRowEditor({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        {(["manual", "schedule", "webhook", "composio"] as const).map((value) => {
-          const labels: Record<string, string> = {
-            manual: "Manual",
-            schedule: "Cron",
-            webhook: "Webhook",
-            composio: "Connection event",
-          };
-          return (
-            <button
-              key={value}
-              type="button"
-              onClick={() => onChange({ ...row, type: value })}
-              className={`h-8 rounded-md border px-2 text-xs font-medium whitespace-nowrap transition-colors ${
-                row.type === value
-                  ? "border-black bg-black text-white"
-                  : "border-border bg-card text-foreground hover:bg-muted"
-              }`}
-            >
-              {labels[value]}
-            </button>
-          );
-        })}
+      {/* S22g (roast P2): trigger-type picker reworked. Original 4 black/
+          outline buttons read as "Manual is selected" instead of "pick
+          one". New form: explicit "Trigger type" label, each option as
+          a radio-card with a 1-line subtitle, active state in Floom blue
+          (not inverted black). Layout 1-col on mobile, 2-col on >=sm. */}
+      <div className="space-y-1.5">
+        <Label className="text-xs text-muted-foreground uppercase tracking-wide">
+          Trigger type
+        </Label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {(["manual", "schedule", "webhook", "composio"] as const).map((value) => {
+            const labels: Record<string, string> = {
+              manual: "Manual",
+              schedule: "Cron",
+              webhook: "Webhook",
+              composio: "Connection event",
+            };
+            const subtitles: Record<string, string> = {
+              manual: "Run only on demand from the Run tab",
+              schedule: "Recurring on a cron schedule",
+              webhook: "Run when an HTTP POST hits a unique URL",
+              composio: "Run on an event from a connected app",
+            };
+            const active = row.type === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => onChange({ ...row, type: value })}
+                className={`flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors ${
+                  active
+                    ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                    : "border-border bg-card text-foreground hover:bg-muted hover:border-muted-foreground/30"
+                }`}
+              >
+                <span className="text-xs font-semibold">{labels[value]}</span>
+                <span className={`text-[11px] leading-tight ${active ? "text-[var(--accent)] opacity-80" : "text-muted-foreground"}`}>
+                  {subtitles[value]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {row.type === "schedule" && (
