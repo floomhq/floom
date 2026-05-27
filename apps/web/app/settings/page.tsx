@@ -4,32 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-
-interface SystemInfo {
-  api_version: string;
-  workers_dir: string;
-  db_path: string;
-  artifacts_dir: string;
-  run_count: number;
-  worker_count: number;
-}
-
-interface PlatformSecret {
-  name: string;
-  status: string;
-  required: boolean;
-  default: string | null;
-  description: string | null;
-}
+import type { PlatformConfig, SystemInfo } from "@/lib/types";
 
 export default function SettingsPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
-  const [platformSecrets, setPlatformSecrets] = useState<PlatformSecret[]>([]);
-  const [infraPaths, setInfraPaths] = useState<PlatformSecret[]>([]);
+  const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
   const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -40,9 +22,8 @@ export default function SettingsPage() {
         api.system.info(),
         api.system.platformConfig(),
       ]);
-      setInfo(infoRes as unknown as SystemInfo);
-      setPlatformSecrets(platformRes.platform_secrets);
-      setInfraPaths(platformRes.infra_paths ?? []);
+      setInfo(infoRes);
+      setPlatformConfig(platformRes);
     } catch (e) {
       console.error(e);
     }
@@ -83,27 +64,13 @@ export default function SettingsPage() {
     }
   }
 
-  function platformSecretBadge(s: PlatformSecret) {
-    if (s.status === "set") {
-      return (
-        <Badge variant="outline" className="text-emerald-600 border-emerald-200 bg-emerald-50 shrink-0 ml-2">
-          set
-        </Badge>
-      );
+  async function copySecretName(name: string) {
+    try {
+      await navigator.clipboard.writeText(name);
+      toast.success(`Copied ${name}`);
+    } catch {
+      toast.error("Could not copy name");
     }
-    if (!s.required) {
-      const label = s.default ? `optional, default: ${s.default}` : "optional";
-      return (
-        <Badge variant="outline" className="text-[#888] border-[#ddd] bg-[#f7f7f7] shrink-0 ml-2">
-          {label}
-        </Badge>
-      );
-    }
-    return (
-      <Badge variant="outline" className="text-red-600 border-red-200 bg-red-50 shrink-0 ml-2">
-        missing
-      </Badge>
-    );
   }
 
   return (
@@ -121,21 +88,21 @@ export default function SettingsPage() {
           {info ? (
             <>
               <div className="flex justify-between">
-                <span className="text-[#666]">API version</span>
-                <span className="font-medium font-mono">{info.api_version}</span>
+                <span className="text-[#666]">Version</span>
+                <span className="font-medium font-mono">{info.version}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#666]">Workers loaded</span>
-                <span className="font-medium">{info.worker_count}</span>
+                <span className="text-[#666]">Started at</span>
+                <span className="font-medium font-mono">{info.started_at}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#666]">Total runs</span>
-                <span className="font-medium">{info.run_count}</span>
+                <span className="text-[#666]">Python</span>
+                <span className="font-medium font-mono">{info.python_version}</span>
               </div>
-              {/* Server filesystem paths (workers_dir / db_path / artifacts_dir)
-                  are intentionally NOT rendered: audit 2026-05-26 flagged them
-                  as a leak surface. They remain available on the platform
-                  configuration card below for the operator if needed. */}
+              <div className="flex justify-between">
+                <span className="text-[#666]">Runner</span>
+                <span className="font-medium">{info.runner}</span>
+              </div>
             </>
           ) : (
             // N8 fix: skeleton placeholders instead of "Loading..." text to
@@ -160,58 +127,56 @@ export default function SettingsPage() {
           <div>
             <p className="text-xs font-medium text-[#555] mb-2">Required secrets</p>
             <p className="text-xs text-[#999] mb-3">
-              Credentials the platform needs to run. Set these as environment variables on the server.
+              Configure required environment variables on the API host.
             </p>
-            <div className="space-y-2">
-              {platformSecrets.length === 0 ? (
-                // Skeleton while loading platform secrets
-                <div className="space-y-2">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
-                      <Skeleton className="h-4 w-36" />
-                      <Skeleton className="h-5 w-14 rounded-full" />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                platformSecrets.map((s) => (
-                  <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
-                    <div className="min-w-0">
-                      <span className="text-sm font-mono text-[#333]">{s.name}</span>
-                      {s.description && (
-                        <p className="text-xs text-[#999] mt-0.5">{s.description}</p>
-                      )}
-                    </div>
-                    {platformSecretBadge(s)}
+            {!platformConfig ? (
+              <div className="space-y-2">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
+                    <Skeleton className="h-4 w-36" />
+                    <Skeleton className="h-8 w-20 rounded" />
                   </div>
-                ))
-              )}
-            </div>
-          </div>
-          {infraPaths.length > 0 && (
-            <>
-              <Separator />
-              <div>
-                <p className="text-xs font-medium text-[#555] mb-2">Infrastructure paths</p>
-                <p className="text-xs text-[#999] mb-3">
-                  Filesystem and tuning config. Defaults work for most setups.
-                </p>
-                <div className="space-y-2">
-                  {infraPaths.map((s) => (
-                    <div key={s.name} className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
-                      <div className="min-w-0">
-                        <span className="text-sm font-mono text-[#333]">{s.name}</span>
-                        {s.description && (
-                          <p className="text-xs text-[#999] mt-0.5">{s.description}</p>
-                        )}
-                      </div>
-                      {platformSecretBadge(s)}
-                    </div>
-                  ))}
-                </div>
+                ))}
               </div>
-            </>
-          )}
+            ) : (
+              <>
+                <div className="flex items-center justify-between p-2 rounded-md bg-[#f4f4f5]">
+                  <span className="text-sm text-[#555]">Configured</span>
+                  <span className="font-medium text-sm">
+                    {platformConfig.set_count}/{platformConfig.required_count}
+                  </span>
+                </div>
+
+                {platformConfig.all_required_set ? (
+                  <div className="flex items-center justify-between p-2 rounded-md bg-emerald-50 border border-emerald-200">
+                    <span className="text-sm text-emerald-700">All required secrets are configured.</span>
+                    <Badge variant="outline" className="text-emerald-700 border-emerald-300 bg-emerald-100">
+                      ready
+                    </Badge>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {platformConfig.missing.map((name) => (
+                      <div key={name} className="flex items-center justify-between p-2 rounded-md bg-[#fef2f2] border border-red-200">
+                        <div className="min-w-0">
+                          <span className="text-sm font-mono text-[#333]">{name}</span>
+                          <p className="text-xs text-[#a33] mt-0.5">Missing</p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="shrink-0"
+                          onClick={() => void copySecretName(name)}
+                        >
+                          Copy name
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </CardContent>
       </Card>
 
