@@ -203,6 +203,8 @@ class AgentDriver(SandboxDriver):
                 "model": model,
                 "messages": messages,
                 "tools": tools,
+                "stream": True,
+                "stream_options": {"include_usage": True},
                 "tool_choice": {
                     "type": "function",
                     "function": {"name": "finish_with_outputs"},
@@ -213,7 +215,10 @@ class AgentDriver(SandboxDriver):
                 create_kwargs["extra_body"] = {"max_completion_tokens": limits.max_output_tokens}
             else:
                 create_kwargs["max_tokens"] = limits.max_output_tokens
+            self._emit_part(run_id, {"type": "step-start", "stepNumber": iteration + 1})
             response = client.chat.completions.create(**create_kwargs)
+            response = self._collect_streamed_response(response, run_id)
+            streamed_text_emitted = bool(response.pop("_streamed_text_emitted", False)) if isinstance(response, dict) else False
             total_tokens += self._usage_tokens(response)
             if total_tokens > limits.max_total_tokens:
                 return WorkerResult(
@@ -225,6 +230,9 @@ class AgentDriver(SandboxDriver):
             choice = self._first_choice(response)
             message = self._choice_message(choice)
             tool_calls = self._message_tool_calls(message)
+            content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+            if isinstance(content, str) and content and not streamed_text_emitted:
+                self._emit_part(run_id, {"type": "text", "text": content})
             messages.append(self._assistant_message_dict(message, tool_calls))
 
             if not tool_calls:
@@ -252,6 +260,16 @@ class AgentDriver(SandboxDriver):
             for tool_call in tool_calls:
                 tool_name = self._tool_call_name(tool_call)
                 tool_args = self._tool_call_args(tool_call)
+                call_id = self._tool_call_id(tool_call)
+                self._emit_part(
+                    run_id,
+                    {
+                        "type": "tool-call",
+                        "toolName": tool_name,
+                        "args": tool_args,
+                        "callId": call_id,
+                    },
+                )
                 tool_result = self._handle_tool(
                     name=tool_name,
                     args=tool_args,
@@ -272,9 +290,18 @@ class AgentDriver(SandboxDriver):
                 messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": self._tool_call_id(tool_call),
+                        "tool_call_id": call_id,
                         "content": json.dumps(tool_result),
                     }
+                )
+                self._emit_part(
+                    run_id,
+                    {
+                        "type": "tool-result",
+                        "callId": call_id,
+                        "result": tool_result,
+                        "isError": not bool(tool_result.get("ok", True)),
+                    },
                 )
                 if tool_name == "finish_with_outputs" and tool_result.get("ok"):
                     finished = True
@@ -977,6 +1004,95 @@ class AgentDriver(SandboxDriver):
         if isinstance(usage, dict):
             return int(usage.get("total_tokens") or 0)
         return int(getattr(usage, "total_tokens", 0) or 0)
+
+    def _emit_part(self, run_id: str, part: Dict[str, Any]) -> None:
+        try:
+            from run_service import publish_run_part
+            publish_run_part(run_id, part)
+        except Exception:
+            logger.debug("Run part emit failed for run %s", run_id, exc_info=True)
+
+    def _collect_streamed_response(self, response: Any, run_id: str) -> Any:
+        if isinstance(response, dict) or hasattr(response, "choices"):
+            return response
+        try:
+            iterator = iter(response)
+        except TypeError:
+            return response
+
+        content_parts: list[str] = []
+        tool_call_parts: Dict[int, Dict[str, Any]] = {}
+        usage: Any = None
+        streamed_text_emitted = False
+
+        for chunk in iterator:
+            chunk_usage = self._object_get(chunk, "usage")
+            if chunk_usage is not None:
+                usage = chunk_usage
+            choices = self._object_get(chunk, "choices") or []
+            if not choices:
+                continue
+            choice = choices[0]
+            delta = self._object_get(choice, "delta") or {}
+
+            text = self._object_get(delta, "content")
+            if text:
+                content_parts.append(str(text))
+                streamed_text_emitted = True
+                self._emit_part(run_id, {"type": "text", "text": str(text)})
+
+            reasoning = (
+                self._object_get(delta, "reasoning")
+                or self._object_get(delta, "reasoning_content")
+            )
+            if reasoning:
+                self._emit_part(run_id, {"type": "reasoning", "text": str(reasoning)})
+
+            for call_delta in self._object_get(delta, "tool_calls") or []:
+                index = int(self._object_get(call_delta, "index") or 0)
+                current = tool_call_parts.setdefault(
+                    index,
+                    {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
+                )
+                call_id = self._object_get(call_delta, "id")
+                if call_id:
+                    current["id"] = call_id
+                call_type = self._object_get(call_delta, "type")
+                if call_type:
+                    current["type"] = call_type
+                function_delta = self._object_get(call_delta, "function") or {}
+                function = current["function"]
+                name_delta = self._object_get(function_delta, "name")
+                if name_delta:
+                    function["name"] = f"{function.get('name') or ''}{name_delta}"
+                args_delta = self._object_get(function_delta, "arguments")
+                if args_delta:
+                    function["arguments"] = f"{function.get('arguments') or ''}{args_delta}"
+
+        tool_calls = []
+        for index in sorted(tool_call_parts):
+            item = tool_call_parts[index]
+            if not item.get("id"):
+                item["id"] = f"call_{uuid.uuid4().hex[:12]}"
+            tool_calls.append(item)
+
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "".join(content_parts) or None,
+                        "tool_calls": tool_calls,
+                    }
+                }
+            ],
+            "usage": usage,
+            "_streamed_text_emitted": streamed_text_emitted,
+        }
+
+    def _object_get(self, obj: Any, key: str) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
 
     def _first_choice(self, response: Any) -> Any:
         choices = response.get("choices") if isinstance(response, dict) else getattr(response, "choices")
