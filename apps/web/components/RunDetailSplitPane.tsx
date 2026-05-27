@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Copy, Download, Pencil, RotateCcw, Square } from "lucide-react";
+import { Copy, Download, Pencil, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -43,13 +43,12 @@ export function RunDetailSplitPane({
 
   return (
     <div className={cn("min-h-[calc(100vh-7rem)]", inline && "min-h-[560px]")}>
-      <div className="sticky top-0 z-10 border-b border-border bg-background/95 py-3 backdrop-blur">
-        <div className="flex flex-wrap items-center gap-2">
-          {onBack && (
-            <Button variant="ghost" size="sm" onClick={onBack}>
-              <ArrowLeft className="size-4" />
-            </Button>
-          )}
+      {/* S27: header chrome aligned with /workers/<id>. Dropped the
+          ArrowLeft (sidebar nav + browser back already cover that), H1 is
+          worker name (status pill inline), subtitle holds run-id +
+          timestamp + duration. Edit/Re-run/Download keep their slot. */}
+      <div className="sticky top-0 z-10 border-b border-border bg-background/95 py-4 backdrop-blur">
+        <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className={cn("truncate font-semibold tracking-tight", inline ? "text-base" : "text-xl")}>
@@ -59,7 +58,7 @@ export function RunDetailSplitPane({
               {streamConnected && <span className="text-xs text-pending">Streaming</span>}
               {streamError && <span className="text-xs text-error">{streamError}</span>}
             </div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               <code className="font-mono">{run.id}</code>
               <button
                 type="button"
@@ -74,30 +73,40 @@ export function RunDetailSplitPane({
               >
                 <Copy className="size-3" />
               </button>
-              {run.created_at && <span>{formatAbsolute(run.created_at)}</span>}
-              {run.duration_ms != null && <span>{formatDuration(run.duration_ms)}</span>}
+              {run.created_at && (
+                <>
+                  <span className="text-muted-foreground/60">·</span>
+                  <span>{formatAbsolute(run.created_at)}</span>
+                </>
+              )}
+              {run.duration_ms != null && (
+                <>
+                  <span className="text-muted-foreground/60">·</span>
+                  <span>{formatDuration(run.duration_ms)}</span>
+                </>
+              )}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <Link href={`/workers/${run.worker_id}?section=code`}>
               <Button variant="outline" size="sm">
-                <Pencil className="size-3.5" />
+                <Pencil className="size-3.5 mr-1.5" />
                 Edit
               </Button>
             </Link>
             <Button variant="outline" size="sm" onClick={onReplay}>
-              <RotateCcw className="size-3.5" />
+              <RotateCcw className="size-3.5 mr-1.5" />
               Re-run
             </Button>
             <a href={api.runs.downloadUrl(run.id)} download>
               <Button variant="outline" size="sm">
-                <Download className="size-3.5" />
+                <Download className="size-3.5 mr-1.5" />
                 Download
               </Button>
             </a>
             {isActive && (
               <Button variant="outline" size="sm" onClick={onCancel}>
-                <Square className="size-3.5" />
+                <Square className="size-3.5 mr-1.5" />
                 Cancel
               </Button>
             )}

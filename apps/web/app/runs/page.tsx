@@ -5,7 +5,7 @@ import Link from "next/link";
 import Papa from "papaparse";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+// S27: dropped Card wrapper for the runs table (using bordered div with column header instead).
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RunStatusBadge } from "@/components/RunStatus";
@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ChevronRight, Download, Play } from "lucide-react";
+import { Download, Play } from "lucide-react";
 import type { RunSummary, WorkerSummary } from "@/lib/types";
 
 const STATUS_OPTIONS = [
@@ -195,96 +195,113 @@ function RunsContent() {
         </div>
       </div>
 
-      <Card className="border-border shadow-none bg-card">
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">History</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1">
-          {loading ? (
-            Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
-          ) : runs.length === 0 ? (
-            <div className="py-12 flex flex-col items-center gap-3 text-center">
-              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
-                <Play className="w-5 h-5 text-muted-foreground" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-foreground">
-                  {workerFilter || statusFilter ? "No runs match these filters" : "No runs yet"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                  {workerFilter || statusFilter
-                    ? "Try clearing filters to see all runs."
-                    : "Runs appear here when you execute a worker manually or via a trigger."}
-                </p>
-              </div>
-              {!workerFilter && !statusFilter && (
-                <Link href="/workers">
-                  <Button size="sm" variant="outline" className="mt-1">
-                    <Play className="w-3.5 h-3.5 mr-1.5" />
-                    Run a worker
-                  </Button>
-                </Link>
-              )}
-              {(workerFilter || statusFilter) && (
-                <button
-                  type="button"
-                  onClick={() => { updateFilter("status", ""); updateFilter("worker_id", ""); router.replace("/runs", { scroll: false }); }}
-                  className="text-xs text-muted-foreground hover:text-foreground underline"
-                >
-                  Clear filters
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              {runs.map((r) => (
-                <Link
-                  key={r.id}
-                  href={`/runs/${r.id}`}
-                  title={r.id}
-                  className="flex items-center justify-between p-3 rounded-md hover:bg-muted transition-colors cursor-pointer"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {/* S22e: dropped inline 12-char run ID (roast P1: took
-                          as much real estate as the timestamp; users scan
-                          name + time + status, not IDs). The full ID is
-                          surfaced via the row's title= tooltip. */}
-                      {r.trigger_source && r.trigger_source !== "manual" && (
-                        <>
-                          <span>{r.trigger_source}</span>
-                          <span className="text-muted-foreground/60 mx-1">·</span>
-                        </>
-                      )}
-                      <span>{formatRelative(r.created_at)}</span>
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <RunStatusBadge status={r.status} />
-                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-                  </div>
-                </Link>
-              ))}
-              {hasMore && (
-                <div className="pt-2 text-center">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={loadMore}
-                    disabled={loadingMore}
-                    className="text-xs"
-                  >
-                    {loadingMore ? "Loading..." : "Load more"}
-                  </Button>
-                </div>
-              )}
-            </>
+      {/* S27: table-style density. Drops the "History" Card+CardTitle
+          wrapper, replaces vertical card-rows with a real columnar table:
+          Worker | Trigger | Duration | Status | Started. Click row to
+          navigate to /runs/<id>. */}
+      {loading ? (
+        <div className="rounded-md border border-border bg-card overflow-hidden">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-11 w-full rounded-none border-b border-line last:border-b-0" />
+          ))}
+        </div>
+      ) : runs.length === 0 ? (
+        <div className="rounded-md border border-border bg-card py-12 flex flex-col items-center gap-3 text-center">
+          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+            <Play className="w-5 h-5 text-muted-foreground" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground">
+              {workerFilter || statusFilter ? "No runs match these filters" : "No runs yet"}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+              {workerFilter || statusFilter
+                ? "Try clearing filters to see all runs."
+                : "Runs appear here when you execute a worker manually or via a trigger."}
+            </p>
+          </div>
+          {!workerFilter && !statusFilter && (
+            <Link href="/workers">
+              <Button size="sm" variant="outline" className="mt-1">
+                <Play className="w-3.5 h-3.5 mr-1.5" />
+                Run a worker
+              </Button>
+            </Link>
           )}
-        </CardContent>
-      </Card>
+          {(workerFilter || statusFilter) && (
+            <button
+              type="button"
+              onClick={() => { updateFilter("status", ""); updateFilter("worker_id", ""); router.replace("/runs", { scroll: false }); }}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-md border border-border bg-card overflow-hidden">
+          {/* Column header row. Hidden on mobile (rows stack instead). */}
+          <div className="hidden md:grid grid-cols-[1fr_120px_100px_140px_140px] gap-4 px-4 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] uppercase tracking-wider font-medium text-muted-foreground">
+            <span>Worker</span>
+            <span>Trigger</span>
+            <span>Duration</span>
+            <span>Status</span>
+            <span>Started</span>
+          </div>
+          {runs.map((r) => (
+            <Link
+              key={r.id}
+              href={`/runs/${r.id}`}
+              title={r.id}
+              className="grid grid-cols-[1fr_auto] md:grid-cols-[1fr_120px_100px_140px_140px] gap-4 px-4 py-2.5 border-b border-line last:border-b-0 hover:bg-muted transition-colors items-center cursor-pointer"
+            >
+              <span className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</span>
+              <span className="hidden md:inline text-xs text-muted-foreground truncate">
+                {r.trigger_source && r.trigger_source !== "manual" ? r.trigger_source : <span className="text-muted-foreground/50">manual</span>}
+              </span>
+              <span className="hidden md:inline text-xs text-muted-foreground tabular-nums">
+                {formatDuration(r.duration_ms)}
+              </span>
+              <span className="hidden md:inline-flex">
+                <RunStatusBadge status={r.status} />
+              </span>
+              <span className="hidden md:inline text-xs text-muted-foreground">
+                {formatRelative(r.created_at)}
+              </span>
+              {/* Mobile fallback: single row on the right with status pill only */}
+              <span className="md:hidden flex items-center gap-2 justify-end">
+                <span className="text-xs text-muted-foreground">{formatRelative(r.created_at)}</span>
+                <RunStatusBadge status={r.status} />
+              </span>
+            </Link>
+          ))}
+          {hasMore && (
+            <div className="px-4 py-3 text-center border-t border-line">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="text-xs"
+              >
+                {loadingMore ? "Loading..." : "Load more"}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+function formatDuration(ms?: number): string {
+  if (ms == null) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rs = Math.round(s % 60);
+  return `${m}m ${rs}s`;
 }
 
 // PR S12-UI-dry: local StatusBadge removed, callers use <RunStatusBadge>
