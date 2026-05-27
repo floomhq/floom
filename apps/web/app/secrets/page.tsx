@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,14 +11,26 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { KeyRound, TestTube2, Trash2, Plus, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import type { SecretItem } from "@/lib/types";
+import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 
 export default function SecretsPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-muted-foreground">Loading secrets...</div>}>
+      <SecretsContent />
+    </Suspense>
+  );
+}
+
+function SecretsContent() {
+  // S24: ?prefill=NAME from /connections/browse -> opens add form pre-filled.
+  const searchParams = useSearchParams();
+  const prefillName = searchParams.get("prefill") ?? "";
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [addingName, setAddingName] = useState("");
+  const [addingName, setAddingName] = useState(prefillName);
   const [addingValue, setAddingValue] = useState("");
-  const [addingOpen, setAddingOpen] = useState(false);
+  const [addingOpen, setAddingOpen] = useState(Boolean(prefillName));
   const [saving, setSaving] = useState(false);
   const [testingName, setTestingName] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { status: string; reason?: string }>>({});
@@ -112,10 +125,15 @@ export default function SecretsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* S24: /secrets folded into the /connections surface via shared tabs.
+          Same H1 ("Connections") + subtitle pattern as /connections and
+          /connections/browse so the three tabs feel like one page. */}
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Secrets</h1>
-          <p className="text-muted-foreground text-sm mt-1">Manage environment secrets for your workers. Values are write-only.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
+            Manage environment secrets for your workers. Values are write-only.
+          </p>
         </div>
         <Button
           size="sm"
@@ -126,7 +144,8 @@ export default function SecretsPage() {
           <Plus className="w-4 h-4" />
           Add secret
         </Button>
-      </div>
+      </header>
+      <ConnectionsTabs />
 
       {addingOpen && (
         <Card className="border-border shadow-none bg-card">

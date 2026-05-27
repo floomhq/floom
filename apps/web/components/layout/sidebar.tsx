@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Box, Clock, KeyRound, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
+import { Activity, Box, Clock, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -28,11 +28,14 @@ function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
+// S24: Secrets removed from top-level nav; reachable as a third tab on
+// /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
+// are the same mental model (credentials a worker can read) so they share
+// a surface.
 const nav = [
   { href: "/", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box },
   { href: "/runs", label: "Runs", icon: Clock },
-  { href: "/secrets", label: "Secrets", icon: KeyRound },
   { href: "/connections", label: "Connections", icon: Plug },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -108,7 +111,7 @@ export function Sidebar() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--accent-line)] bg-[var(--sidebar-glass)] px-4 shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-[var(--sidebar-glass)] px-4 shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:hidden">
         <Link href="/" className="flex items-center gap-2">
           <FloomMark size={28} />
           <span className="font-semibold text-[15px] tracking-tight">Floom</span>
@@ -134,7 +137,7 @@ export function Sidebar() {
         </div>
       </header>
 
-      <aside className="sticky top-0 z-20 hidden h-screen w-60 flex-col border-r border-[var(--accent-line)] bg-[var(--sidebar-glass)] shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:flex">
+      <aside className="sticky top-0 z-20 hidden h-screen w-60 flex-col border-r border-line bg-[var(--sidebar-glass)] shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:flex">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
         <div className="px-5 py-5">
           <Link href="/" className="flex items-center gap-2">
@@ -157,9 +160,9 @@ export function Sidebar() {
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-[var(--accent-line)] bg-[var(--sidebar-glass)] shadow-pop backdrop-blur-[14px] backdrop-saturate-[140%]">
+          <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-line bg-[var(--sidebar-glass)] shadow-pop backdrop-blur-[14px] backdrop-saturate-[140%]">
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
-            <div className="flex items-center justify-between border-b border-[var(--accent-line)] px-5 py-4">
+            <div className="flex items-center justify-between border-b border-line px-5 py-4">
               <Link href="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
                 <FloomMark size={28} />
                 <span className="font-semibold text-[15px] tracking-tight">Floom</span>
