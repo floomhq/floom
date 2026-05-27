@@ -120,41 +120,47 @@ export function CliCommandPanel() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Setup commands</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Tabs defaultValue="cli">
-            <TabsList>
-              <TabsTrigger value="cli">CLI</TabsTrigger>
-              <TabsTrigger value="mcp">MCP</TabsTrigger>
-              <TabsTrigger value="api">API</TabsTrigger>
-            </TabsList>
-            <TabsContent value="cli">
-              <SnippetBox
-                text={snippets.cli}
-                copied={copiedKey === "cli"}
-                onCopy={() => void copySnippet("cli")}
-              />
-            </TabsContent>
-            <TabsContent value="mcp">
-              <SnippetBox
-                text={snippets.mcp}
-                copied={copiedKey === "mcp"}
-                onCopy={() => void copySnippet("mcp")}
-              />
-            </TabsContent>
-            <TabsContent value="api">
-              <SnippetBox
-                text={snippets.api}
-                copied={copiedKey === "api"}
-                onCopy={() => void copySnippet("api")}
-              />
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
+      {/* S29f (F8.2): was a nested Card with floating Copy button + small
+          uneven tabs + accidental glow border. Now flat under a clear H2,
+          single ring border on the code block, Copy button overlays the
+          top-right corner of the <pre> so the eye lands on the same spot
+          for every tab. */}
+      <div className="space-y-3">
+        <div>
+          <h2 className="text-base font-medium text-foreground">Setup commands</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Drop these into a terminal to install the CLI, add the MCP server, or hit the API directly.
+          </p>
+        </div>
+        <Tabs defaultValue="cli">
+          <TabsList>
+            <TabsTrigger value="cli">CLI</TabsTrigger>
+            <TabsTrigger value="mcp">MCP</TabsTrigger>
+            <TabsTrigger value="api">API</TabsTrigger>
+          </TabsList>
+          <TabsContent value="cli">
+            <SnippetBox
+              text={snippets.cli}
+              copied={copiedKey === "cli"}
+              onCopy={() => void copySnippet("cli")}
+            />
+          </TabsContent>
+          <TabsContent value="mcp">
+            <SnippetBox
+              text={snippets.mcp}
+              copied={copiedKey === "mcp"}
+              onCopy={() => void copySnippet("mcp")}
+            />
+          </TabsContent>
+          <TabsContent value="api">
+            <SnippetBox
+              text={snippets.api}
+              copied={copiedKey === "api"}
+              onCopy={() => void copySnippet("api")}
+            />
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 }
@@ -169,14 +175,17 @@ function SnippetBox({
   onCopy: () => void;
 }) {
   return (
-    <div className="rounded-md border bg-muted/20 p-3">
-      <div className="mb-2 flex justify-end">
-        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={onCopy}>
-          {copied ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <pre className="whitespace-pre-wrap text-xs leading-relaxed">
+    <div className="relative rounded-md border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a]">
+      <button
+        type="button"
+        onClick={onCopy}
+        className="absolute right-2 top-2 inline-flex h-7 items-center gap-1 rounded-md border border-line bg-card px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        aria-label={copied ? "Copied" : "Copy snippet"}
+      >
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? "Copied" : "Copy"}
+      </button>
+      <pre className="whitespace-pre-wrap text-xs leading-relaxed font-mono p-3 pr-20 text-foreground dark:text-[#a8e6a3] overflow-auto">
         <code>{text}</code>
       </pre>
     </div>
