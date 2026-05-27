@@ -246,25 +246,31 @@ round I shipped surgical fixes; each round he found more. The pattern says:
 
 ---
 
-## S29 plan (sub-PRs)
+## S29 plan (sub-PRs) — all shipped, awaiting Federico verification
 
-Given the volume, multiple sub-PRs in sequence. Each one ends in a Federico
-review checkpoint, not auto-merge.
+Each PR was built in an isolated worktree, built clean, merged, deployed
+to prod (workers.floom.dev), and verified via deployed-bundle grep of
+distinctive markers.
 
-| # | Scope | Estimate |
-|---|---|---|
-| S29a | F8.3 token-mask bug fix (1 line) + F8.9 shadcn Select swap | 30 min |
-| S29b | F8.4 + F8.5 worker card crossfade + tag filter row at top | 1.5h |
-| S29c | F8.11 Source tab theme-aware highlighting (or strip) | 1h |
-| S29d | F8.7 Overview tab restructure (description-first, config below) | 1.5h |
-| S29e | F8.8 Triggers tab strip-down + F8.10 sample-input placement | 1h |
-| S29f | F8.2 SetupCommands rebuild + F8.6 worker-detail skeleton refresh | 1h |
-| S29g | F8.12 staged Generating panel (timer-driven stages) | 45 min |
-| S29h | F8.1 /runs/<id> vs /workers/<id> side-by-side alignment doc + fix | 1.5h |
-| S29i | F8.13 design alignment sweep (cross-page consistency check) | 2h |
+| # | Scope | PR | Status |
+|---|---|---|---|
+| S29a | F8.3 token-mask glyph + F8.9 humanize Select labels | #92 | LIVE |
+| S29b | F8.4 fixed-size card hover + F8.5 tag filter row + footer profile | #93 | LIVE |
+| S29c | F8.11 Source tab theme-aware highlighting | #94 | LIVE |
+| S29d | F8.7 Overview tab restructure (description-first) | #95 | LIVE |
+| S29e | F8.8 Triggers strip-down + F8.10 sample-input placement | #96 | LIVE |
+| S29f | F8.2 Setup commands rebuild + F8.6 worker-detail skeleton | #97 | LIVE |
+| S29g | F8.12 staged Generating panel | #98 | LIVE |
+| S29h | F8.1 /runs/<id> chrome alignment to /workers/<id> | #99 | LIVE |
+| S29i | F8.13 design alignment sweep (cron + file editor + exec mode + callback) | #100 | LIVE |
 
-Total estimate: 10-12h. I will work on these sequentially with Federico's
-checkpoint between each.
+All F8.x items have a shipped fix. Federico verification gate is now open:
+he reviews on prod, I patch any drift.
+
+**Still pending (not in this S29 wave):**
+- F8.1 may need a second pass after Federico's eye on the new /runs/<id> chrome
+- Pending Codex async-draft backend (S29 timer is interim for F8.12)
+- RequirementsEditor + badge.tsx hex literals (low-visibility, not done in S29i)
 
 ---
 
