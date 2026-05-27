@@ -130,11 +130,11 @@ def test_skill_prompt_loading_and_tool_schema(tmp_path):
         "list_dir",
         "read_file",
         "write_output",
+        "finish_with_outputs",
         "run_command",
         "invoke_worker",
         "log",
         "composio__gmail__execute",
-        "web_search",  # PR S11: default-on OpenAI native tool.
     }.issubset(tool_names)
     assert log_entries
 
@@ -205,6 +205,7 @@ def test_total_token_cap_is_enforced(tmp_path):
 
 def test_run_command_containment_and_env_allowlist(tmp_path):
     config = make_config(tmp_path, secrets=["TOKEN"])
+    config.runtime.runner = "local"
     _entries, log_fn = logs()
     driver = AgentDriver(openai_client=FakeClient([]))
     bundle_dir = Path(config.runtime.bundle_path)
@@ -281,7 +282,7 @@ def test_run_command_containment_and_env_allowlist(tmp_path):
 
 def test_declared_output_validation(tmp_path):
     config = make_config(tmp_path)
-    client = FakeClient([final_response()])
+    client = FakeClient([final_response(), final_response()])
     _entries, log_fn = logs()
 
     result = AgentDriver(openai_client=client).run(
