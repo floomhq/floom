@@ -10,7 +10,7 @@ import sys
 import types
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -88,7 +88,9 @@ class TestAccountInfoEndpoint:
         body = resp.json()
         assert body["email"] == "user@example.com"
         assert "https://www.googleapis.com/auth/gmail.readonly" in body["scopes"]
-        assert body["auth_config_id"] == "ac_abc123"
+        assert "auth_config_id" not in body
+        assert "user_id" not in body
+        assert "connected_at" in body
 
     def test_account_info_404_for_unknown_connection(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)

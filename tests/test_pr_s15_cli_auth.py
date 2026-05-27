@@ -28,8 +28,10 @@ client = TestClient(app_module.app, raise_server_exceptions=True)
 @pytest.fixture(autouse=True)
 def reset_cli_auth_devices():
     app_module._cli_auth_devices.clear()
+    app_module._rate_buckets.clear()
     yield
     app_module._cli_auth_devices.clear()
+    app_module._rate_buckets.clear()
 
 
 def test_devices_create_and_pending_poll_shape():
