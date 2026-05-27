@@ -9,9 +9,7 @@ import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { ConnectionSkeleton } from "@/components/connections/ConnectionSkeleton";
 import { ConnectionsEmptyState } from "@/components/connections/ConnectionsEmptyState";
 import {
-  getAuthConfigId,
   getLastUsedByConnection,
-  normalizeAppSlug,
   toConnectionView,
   type ConnectionRecord,
   type ConnectionView,
@@ -20,14 +18,8 @@ import { api } from "@/lib/api";
 import type { WorkerDetail } from "@/lib/types";
 
 type ConnectedAccountMetadata = {
-  auth_config_id?: string;
+  connected_at?: string;
   email?: string;
-  scopes?: string[];
-  user_id?: string;
-};
-
-type AuthConfigMetadata = {
-  id?: string;
   scopes?: string[];
 };
 
@@ -52,29 +44,16 @@ export default function ConnectionsPage() {
         ...previous,
         [record.id]: {
           ...previous[record.id],
-          auth_config_id: account.auth_config_id,
           email: account.email,
           scopes: account.scopes,
-          user_id: account.user_id,
         },
       }));
-    }
-
-    const authConfigId =
-      account?.auth_config_id || getAuthConfigId(record) || normalizeAppSlug(record.app_name);
-    const authConfig = await fetchAuthConfig(authConfigId);
-    if (authConfig?.scopes) {
-      setScopesByConnectionId((previous) => ({
-        ...previous,
-        [record.id]: authConfig.scopes ?? [],
-      }));
-      setMetadataByConnectionId((previous) => ({
-        ...previous,
-        [record.id]: {
-          ...previous[record.id],
-          auth_config_id: authConfig.id,
-        },
-      }));
+      if (account.scopes) {
+        setScopesByConnectionId((previous) => ({
+          ...previous,
+          [record.id]: account.scopes ?? [],
+        }));
+      }
     }
   }, []);
 
@@ -304,21 +283,6 @@ async function fetchConnectedAccount(id: string): Promise<ConnectedAccountMetada
     }
     if (!response.ok) return undefined;
     return (await response.json()) as ConnectedAccountMetadata;
-  } catch {
-    return undefined;
-  }
-}
-
-async function fetchAuthConfig(id: string): Promise<AuthConfigMetadata | undefined> {
-  try {
-    const response = await fetch(`/connections/auth-configs/${encodeURIComponent(id)}`, {
-      cache: "no-store",
-    });
-    if (response.status === 503) {
-      return undefined;
-    }
-    if (!response.ok) return undefined;
-    return (await response.json()) as AuthConfigMetadata;
   } catch {
     return undefined;
   }

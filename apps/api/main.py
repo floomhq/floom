@@ -21,18 +21,19 @@ import tempfile
 import secrets as pysecrets
 import uuid as _uuid_mod
 import zipfile
+import ipaddress
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 
 try:
@@ -134,10 +135,11 @@ app = FastAPI(
 
 
 DEFAULT_USER_ID = "federico"
-DEFAULT_JSON_BODY_LIMIT_BYTES = 64 * 1024
-FROM_BUNDLE_BODY_LIMIT_BYTES = 1024 * 1024
+DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
+FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
 DEFAULT_RATE_LIMIT = (60, 60.0)
 RATE_LIMIT_RULES = [
+    (re.compile(r"^/cli-auth/devices$"), (5, 60.0)),
     (re.compile(r"^/workers/[^/]+/runs$"), (10, 60.0)),
     (re.compile(r"^/workers$"), (20, 60.0)),
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
@@ -214,9 +216,58 @@ def _rate_limit_for_path(path: str) -> tuple[int, float]:
 
 
 def _client_ip(request: Request) -> str:
+    peer = request.client.host if request.client else ""
+    if _trusted_proxy_peer(peer):
+        cf_connecting_ip = (request.headers.get("cf-connecting-ip") or "").strip()
+        if _valid_ip_literal(cf_connecting_ip):
+            return cf_connecting_ip
+
+        forwarded_for = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+        if _valid_ip_literal(forwarded_for):
+            return forwarded_for
+
     if _slowapi_get_remote_address is not None:
-        return _slowapi_get_remote_address(request) or "unknown"
-    return request.client.host if request.client else "unknown"
+        return _slowapi_get_remote_address(request) or peer or "unknown"
+    return peer or "unknown"
+
+
+def _trusted_proxy_peer(peer: str) -> bool:
+    configured = (
+        os.environ.get("trusted_proxies")
+        or os.environ.get("TRUSTED_PROXIES")
+        or os.environ.get("WORKEROS_TRUSTED_PROXIES")
+        or ""
+    )
+    entries = [entry.strip() for entry in configured.split(",") if entry.strip()]
+    if not entries:
+        return peer in {"testclient", "127.0.0.1", "::1", "localhost"}
+    if "*" in entries:
+        return True
+    if peer in entries:
+        return True
+    try:
+        peer_ip = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    for entry in entries:
+        try:
+            if "/" in entry and peer_ip in ipaddress.ip_network(entry, strict=False):
+                return True
+            if "/" not in entry and peer_ip == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _valid_ip_literal(value: str) -> bool:
+    if not value:
+        return False
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
 
 
 def _body_limit_for_request(request: Request) -> Optional[int]:
@@ -275,18 +326,13 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
     return response
 
-# Simple in-memory token bucket rate limit per IP and per x-floom-secret hash.
+# Simple in-memory token bucket rate limit per client IP.
 _rate_lock = threading.Lock()
 _rate_buckets: Dict[str, list[float]] = {}
 
 
 def _rate_caller_keys(request: Request, path: str) -> List[str]:
-    ip_key = f"ip:{_client_ip(request)}:{path}"
-    keys = [ip_key]
-    secret = request.headers.get("x-floom-secret") or ""
-    if secret:
-        keys.append(f"s:{hashlib.sha256(secret.encode()).hexdigest()[:16]}:{path}")
-    return keys
+    return [f"ip:{_client_ip(request)}:{path}"]
 
 
 @app.middleware("http")
@@ -559,7 +605,13 @@ async def value_error_handler(_request, exc: ValueError):
 def _redacted_validation_errors(errors: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     sanitized: List[Dict[str, str]] = []
     for error in errors[:10]:
-        sanitized.append({"loc": "request", "msg": "invalid value"})
+        sanitized.append(
+            {
+                "loc": "request",
+                "msg": str(error.get("msg") or "invalid value"),
+                "type": str(error.get("type") or "value_error"),
+            }
+        )
     return sanitized
 
 
@@ -4156,8 +4208,20 @@ async def stream_run_events(run_id: str, request: Request):
     )
 
 
-@app.get("/runs/{run_id}/logs", response_model=List[LogEntry])
-def get_run_logs(run_id: str) -> List[LogEntry]:
+_INTERNAL_LOG_TOKEN_RE = re.compile(
+    r"\b(?:trace_[A-Za-z0-9_.:-]+|(?:thread|step|run|call|msg|tool)_[A-Za-z0-9][A-Za-z0-9_-]{7,})\b"
+)
+_LOG_METADATA_RE = re.compile(r"\b(?:mode|runner)=[^\s,;]+", re.IGNORECASE)
+
+
+def _redact_public_log_message(message: str) -> str:
+    redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", message or "")
+    redacted = _LOG_METADATA_RE.sub("[redacted-metadata]", redacted)
+    return redacted
+
+
+@app.get("/runs/{run_id}/logs")
+def get_run_logs(run_id: str) -> List[Dict[str, Any]]:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,))
@@ -4172,7 +4236,11 @@ def get_run_logs(run_id: str) -> List[LogEntry]:
         )
         rows = cursor.fetchall()
     return [
-        LogEntry(level=r["level"], message=r["message"], timestamp=r["timestamp"], trace_id=row_to_dict(r).get("trace_id"))
+        {
+            "level": r["level"],
+            "message": _redact_public_log_message(r["message"]),
+            "timestamp": r["timestamp"],
+        }
         for r in rows
     ]
 
@@ -4186,12 +4254,15 @@ _ENV_PATH = Path(__file__).parent / ".env"
 
 
 class SecretUpsertRequest(BaseModel):
-    value: str
+    value: str = Field(min_length=1, max_length=32 * 1024)
 
 
 class SecretTestResult(BaseModel):
     status: str  # "valid" | "invalid"
     reason: Optional[str] = None
+
+
+SecretName = Annotated[str, PathParam(min_length=1, max_length=64, pattern=r"^[A-Z][A-Z0-9_]*$")]
 
 
 def _read_env_lines() -> list[str]:
@@ -4217,8 +4288,12 @@ def _write_env_lines(lines: list[str]) -> None:
 def _upsert_env_var(name: str, value: str) -> None:
     """Set or replace NAME=value in the .env file, then reload into os.environ."""
     # Validate name is a legal env var identifier
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+    if len(name) < 1 or len(name) > 64:
+        raise ValueError("Secret name must be 1-64 characters")
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
         raise ValueError(f"Invalid secret name: {name!r}")
+    if len(value) < 1 or len(value) > 32 * 1024:
+        raise ValueError("Secret value must be 1-32768 characters")
     # Reject values that contain newline or null bytes — they corrupt the .env
     # file by injecting extra lines (newline injection attack).
     if any(c in value for c in ("\n", "\r", "\x00")):
@@ -4262,7 +4337,7 @@ def _delete_env_var(name: str) -> bool:
 
 
 @app.post("/secrets/{name}", response_model=SecretTestResult)
-def upsert_secret(name: str, payload: SecretUpsertRequest) -> SecretTestResult:
+def upsert_secret(name: SecretName, payload: SecretUpsertRequest) -> SecretTestResult:
     """Create or update a secret. Value is write-only — never returned.
 
     SECURITY: refuses to overwrite a platform infrastructure secret. A
@@ -4299,7 +4374,7 @@ def upsert_secret(name: str, payload: SecretUpsertRequest) -> SecretTestResult:
 
 
 @app.delete("/secrets/{name}", response_model=SecretTestResult)
-def delete_secret(name: str) -> SecretTestResult:
+def delete_secret(name: SecretName) -> SecretTestResult:
     """Delete a secret from .env and env.
 
     SECURITY: refuses to delete a platform infrastructure secret for the
@@ -4323,7 +4398,7 @@ def delete_secret(name: str) -> SecretTestResult:
 
 
 @app.post("/secrets/{name}/test", response_model=SecretTestResult)
-def test_secret(name: str) -> SecretTestResult:
+def test_secret(name: SecretName) -> SecretTestResult:
     """Test a secret. For OPENAI_API_KEY: does a 1-token completion. Others: confirms env var is set."""
     value = os.environ.get(name)
     if not value:
@@ -4936,13 +5011,13 @@ def delete_connection(connection_id: str, request: Request):
 
 @app.get("/connections/{connection_id}/account-info", dependencies=[Depends(require_secret)])
 def get_connection_account_info(connection_id: str, request: Request) -> Dict[str, Any]:
-    """Return Composio connected-account info (email, scopes, user_id, auth_config_id).
+    """Return Composio connected-account info needed by the UI.
 
     The frontend calls this to hydrate connection cards. The Composio API key
     lives here on the API service so it never needs to be on Vercel.
     """
     user_id = _request_user_id(request)
-    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id")
+    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id, created_at")
 
     composio_conn_id = row["composio_connection_id"]
     info = _fetch_composio_account_info(composio_conn_id)
@@ -4953,7 +5028,7 @@ def get_connection_account_info(connection_id: str, request: Request) -> Dict[st
     if info.get("scopes") is not None or info.get("email"):
         now = now_iso()
         scopes_json = json.dumps(info.get("scopes") or [])
-        account_label = info.get("email") or info.get("user_id") or ""
+        account_label = info.get("email") or ""
         with get_db() as conn:
             conn.execute(
                 "UPDATE composio_connections SET scopes_json=?, account_label=?, updated_at=? WHERE id=?",
@@ -4961,11 +5036,9 @@ def get_connection_account_info(connection_id: str, request: Request) -> Dict[st
             )
 
     return {
-        "id": composio_conn_id,
         "email": info.get("email"),
         "scopes": info.get("scopes") or [],
-        "user_id": info.get("user_id"),
-        "auth_config_id": info.get("auth_config_id"),
+        "connected_at": row["created_at"],
     }
 
 
@@ -4975,6 +5048,9 @@ def get_auth_config(auth_config_id: str) -> Dict[str, Any]:
 
     Proxies to Composio so the key stays on the API service, not on Vercel.
     """
+    if os.environ.get("WORKEROS_ENABLE_INTERNAL_AUTH_CONFIGS") != "1":
+        raise HTTPException(status_code=404, detail="Not found")
+
     import requests as _requests
 
     key = os.environ.get("COMPOSIO_API_KEY", "")
@@ -5939,6 +6015,7 @@ _cli_auth_devices: Dict[str, Dict[str, Any]] = {}
 _CLI_AUTH_EXPIRES_SECONDS = 600
 _CLI_AUTH_POLL_INTERVAL_SECONDS = 2
 _CLI_AUTH_USER_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_CLI_AUTH_MAX_DEVICES = 100
 
 
 class CliAuthDeviceCreateRequest(BaseModel):
@@ -5961,6 +6038,15 @@ def _cli_auth_prune_expired(now_ts: Optional[float] = None) -> None:
         _cli_auth_devices.pop(code, None)
 
 
+def _cli_auth_evict_oldest_if_full() -> None:
+    while len(_cli_auth_devices) >= _CLI_AUTH_MAX_DEVICES:
+        oldest_code = min(
+            _cli_auth_devices,
+            key=lambda code: float(_cli_auth_devices[code].get("created_at", 0.0)),
+        )
+        _cli_auth_devices.pop(oldest_code, None)
+
+
 def _new_device_code() -> str:
     return base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
 
@@ -5980,7 +6066,7 @@ def _frontend_public_base() -> str:
 
 
 @app.post("/cli-auth/devices")
-def create_cli_device(payload: CliAuthDeviceCreateRequest) -> Dict[str, Any]:
+def create_cli_device(payload: CliAuthDeviceCreateRequest, request: Request) -> Dict[str, Any]:
     client_name = (payload.client_name or "").strip()
     if not client_name:
         raise HTTPException(status_code=400, detail="client_name is required")
@@ -5989,6 +6075,7 @@ def create_cli_device(payload: CliAuthDeviceCreateRequest) -> Dict[str, Any]:
     expires_at = now_ts + _CLI_AUTH_EXPIRES_SECONDS
     with _cli_auth_lock:
         _cli_auth_prune_expired(now_ts)
+        _cli_auth_evict_oldest_if_full()
 
         device_code = _new_device_code()
         while device_code in _cli_auth_devices:
@@ -6007,6 +6094,7 @@ def create_cli_device(payload: CliAuthDeviceCreateRequest) -> Dict[str, Any]:
             "secret": None,
             "client_name": client_name,
             "scopes": list(payload.scopes or []),
+            "created_ip": _client_ip(request),
         }
 
     verification_url = f"{_frontend_public_base()}/cli-auth?code={user_code}"
