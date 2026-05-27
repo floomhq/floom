@@ -322,7 +322,7 @@ function NewWorkerContent() {
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium text-foreground">Or start from a popular workflow</p>
           {idx0NoteVisible(EXAMPLES) && (
-            <span className="text-[11px] uppercase tracking-wider text-[var(--accent)]">
+            <span className="text-[11px] text-[var(--accent)]">
               Recommended first
             </span>
           )}
@@ -444,7 +444,7 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
 
       {prompt && (
         <div className="rounded-lg border border-line bg-[var(--bg-2)] px-4 py-3">
-          <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+          <p className="text-[11px] text-muted-foreground mb-1">
             Your prompt
           </p>
           <p className="text-sm text-foreground whitespace-pre-wrap">{prompt}</p>

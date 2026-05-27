@@ -504,7 +504,7 @@ export function RequirementsEditor({
             <>
               {requiredSecrets.length > 0 && (
                 <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground uppercase tracking-wide">API keys</Label>
+                  <Label className="text-xs text-muted-foreground ">API keys</Label>
                   <div className="space-y-2">
                     {secretStates.map((s) => (
                       <InlineSecretRow key={s.name} name={s.name} initialStatus={s.status} onSaved={handleSecretSaved} />
@@ -514,7 +514,7 @@ export function RequirementsEditor({
               )}
               {requiredConnections.length > 0 && (
                 <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground uppercase tracking-wide">OAuth connections</Label>
+                  <Label className="text-xs text-muted-foreground ">OAuth connections</Label>
                   <div className="space-y-2">
                     {connectionStates.map((c) => {
                       const appData = getSupportedApp(c.slug);

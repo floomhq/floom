@@ -193,7 +193,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
     <div className="space-y-3">
       {/* Frequency */}
       <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground uppercase tracking-wide">Frequency</Label>
+        <Label className="text-xs text-muted-foreground ">Frequency</Label>
         <div className="flex flex-wrap gap-1.5">
           {([
             ["minute", "Every minute"],

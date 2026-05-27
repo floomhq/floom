@@ -334,7 +334,7 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
       </div>
 
       <section className="space-y-2">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Parts (SSE stream order)</p>
+        <p className="text-[11px] font-medium text-muted-foreground">Parts (SSE stream order)</p>
         {parts.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">No parts captured.</p>
         ) : (
@@ -345,7 +345,7 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
       </section>
 
       <section className="space-y-2">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Logs (server-side, timestamped)</p>
+        <p className="text-[11px] font-medium text-muted-foreground">Logs (server-side, timestamped)</p>
         {run.logs.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">No logs captured.</p>
         ) : (
