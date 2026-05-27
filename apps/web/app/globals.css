@@ -138,13 +138,16 @@
   --card-glass: var(--paper);
   --card-border: var(--line);
   --card-shadow: var(--shadow-sm);
-  /* PR S20 matte: tighten radii to the openchat-v2 0.375rem norm. */
-  --r-xs: 3px;
-  --r-sm: 4px;
-  --r-md: 6px;
-  --r-lg: 6px;
-  --r-xl: 8px;
-  --r-2xl: 10px;
+  /* S29o: Federico 2026-05-28 — "I like the square design [on /runs/<id>],
+     everything should be square, no rounded corners." Squash every utility
+     radius to 0. Pill (used by avatars + status badges via rounded-full)
+     stays 999 so circles still circle. */
+  --r-xs: 0;
+  --r-sm: 0;
+  --r-md: 0;
+  --r-lg: 0;
+  --r-xl: 0;
+  --r-2xl: 0;
   --r-pill: 999px;
   --spring: cubic-bezier(0.32, 1.06, 0.5, 1);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);

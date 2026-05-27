@@ -208,26 +208,22 @@ function NewWorkerContent() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8 pt-8 pb-16">
-      {/* S28: back-nav above the centered hero (Federico request: subpages
-          need a way to return to the main item). */}
+    <div className="max-w-3xl space-y-8">
+      {/* S29o: was max-w-3xl mx-auto (centered) + text-center hero, which
+          Federico flagged as not aligning with the rest of the surface
+          (everything else is left-aligned). Now left-aligned, prominent
+          back-nav (text-sm), heading text-xl matching detail headers, no
+          decorative icon since the page is the action. */}
       <Link
         href="/workers"
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <span aria-hidden="true">←</span>
         Workers
       </Link>
-      {/* S25: warmer landing. Centered hero, larger inviting heading. */}
-      <div className="text-center space-y-3">
-        <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--solid-2)] text-[var(--solid-fg)] shadow-[var(--shadow-md)]">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="size-7" aria-hidden="true">
-            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-            <circle cx="12" cy="12" r="4" />
-          </svg>
-        </div>
-        <h1 className="text-3xl font-semibold tracking-tight">What should Floom automate?</h1>
-        <p className="text-base text-muted-foreground max-w-xl mx-auto">
+      <div className="space-y-1.5">
+        <h1 className="text-xl font-semibold tracking-tight">What should Floom automate?</h1>
+        <p className="text-sm text-muted-foreground">
           Describe a task in plain English. Floom will draft the worker, pick the right
           integrations, and open the editor so you can review before running.
         </p>
@@ -235,7 +231,7 @@ function NewWorkerContent() {
 
       {/* S25: hero textarea card sized to feel like the centerpiece, not a
           form field. Bigger min-height + tighter footer. */}
-      <div className="rounded-xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] space-y-4">
+      <div className="rounded-none border border-border bg-card p-5 shadow-[var(--shadow-sm)] space-y-4">
         <Textarea
           ref={textareaRef}
           placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
@@ -432,7 +428,7 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="text-center space-y-3">
-        <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--solid-2)] text-[var(--solid-fg)] shadow-[var(--shadow-md)]">
+        <div className="inline-flex h-14 w-14 items-center justify-center rounded-none bg-gradient-to-br from-[var(--accent)] to-[var(--solid-2)] text-[var(--solid-fg)] shadow-[var(--shadow-md)]">
           <Loader2 className="size-7 animate-spin" aria-hidden="true" />
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">Drafting your worker</h1>

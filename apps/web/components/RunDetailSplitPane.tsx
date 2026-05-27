@@ -51,7 +51,7 @@ export function RunDetailSplitPane({
       {!inline && (
         <Link
           href="/runs"
-          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <span aria-hidden="true">←</span>
           Runs
