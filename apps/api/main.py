@@ -125,9 +125,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+def _cors_allowed_origins() -> List[str]:
+    origins = ["https://workers.floom.dev"]
+    if os.environ.get("WORKEROS_DEV"):
+        origins.extend(["http://localhost:3000", "http://localhost:3011"])
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3011", "https://workers.floom.dev"],
+    allow_origins=_cors_allowed_origins(),
+    allow_origin_regex=r"^https://[a-z0-9-]+\.workeros-[a-z0-9-]+\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
