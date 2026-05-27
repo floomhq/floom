@@ -2,26 +2,41 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from typing import Callable
 
 from .interface import AuthProvider
 from .local import SharedSecretAuthProvider
-from .supabase import SupabaseAuthProvider
+
+# Registry of AuthProvider factories keyed by WORKEROS_DEPLOY value.
+# workeros (OSS) ships with "local" built in.
+# managed-deployment registers its SupabaseAuthProvider at startup via
+# register_auth_provider("cloud", ...) — keeping Supabase deps out of
+# the OSS engine entirely.
+_provider_factories: dict[str, Callable[[], AuthProvider]] = {
+    "local": lambda: SharedSecretAuthProvider(),
+}
+
+
+def register_auth_provider(
+    deploy_mode: str, factory: Callable[[], AuthProvider]
+) -> None:
+    """Register an AuthProvider factory for a given WORKEROS_DEPLOY value.
+
+    Called by downstream packages (e.g. managed-deployment) at startup to plug
+    in their own provider without modifying the OSS engine.
+    """
+    _provider_factories[deploy_mode.strip().lower()] = factory
+    get_auth_provider.cache_clear()
 
 
 @lru_cache(maxsize=1)
 def get_auth_provider() -> AuthProvider:
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
-    if deploy == "local":
-        return SharedSecretAuthProvider()
-    if deploy == "cloud":
-        supabase_url = (os.environ.get("SUPABASE_URL") or "").strip()
-        supabase_jwt_secret = (os.environ.get("SUPABASE_JWT_SECRET") or "").strip()
-        if not supabase_url or not supabase_jwt_secret:
-            raise RuntimeError(
-                "WORKEROS_DEPLOY=cloud requires SUPABASE_URL and SUPABASE_JWT_SECRET"
-            )
-        return SupabaseAuthProvider(
-            supabase_url=supabase_url,
-            supabase_jwt_secret=supabase_jwt_secret,
+    factory = _provider_factories.get(deploy)
+    if factory is None:
+        raise RuntimeError(
+            f"No AuthProvider registered for WORKEROS_DEPLOY={deploy!r}. "
+            f"workeros ships with 'local' only; downstream packages must call "
+            f"auth.factory.register_auth_provider() at startup."
         )
-    raise RuntimeError(f"Unknown WORKEROS_DEPLOY value: {deploy}")
+    return factory()
