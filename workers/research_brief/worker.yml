@@ -46,7 +46,6 @@ limits:
   max_total_tokens: 50000
   timeout_seconds: 300
 exec:
-  mode: agent
   runtime: skill
   runner: e2b
   inputs:
@@ -93,6 +92,7 @@ exec:
     path: out/brief.md
     required: true
     label: Research brief
+  entry: SKILL.md
 capabilities:
   secrets:
   - OPENAI_API_KEY

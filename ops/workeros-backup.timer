@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Workeros SQLite snapshot
+Requires=workeros-backup.service
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=15m
+Persistent=true
+Unit=workeros-backup.service
+
+[Install]
+WantedBy=timers.target
