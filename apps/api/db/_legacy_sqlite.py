@@ -8,7 +8,16 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Generator
 
-DB_PATH = os.environ.get("FLOOM_DB", "../../data/floom.db")
+
+def _configured_db_path() -> str:
+    return (
+        os.environ.get("WORKEROS_DB")
+        or os.environ.get("FLOOM_DB")
+        or "../../data/floom.db"
+    )
+
+
+DB_PATH = _configured_db_path()
 logger = logging.getLogger("floom.db")
 
 # ---------------------------------------------------------------------------
@@ -19,6 +28,8 @@ logger = logging.getLogger("floom.db")
 def get_db() -> Generator[sqlite3.Connection, None, None]:
     """Yield a SQLite connection. Automatically commits on success,
     rolls back on exception, and closes on exit."""
+    global DB_PATH
+    DB_PATH = _configured_db_path()
     os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
     conn.row_factory = sqlite3.Row
@@ -333,6 +344,94 @@ def _migrate_composio_trigger_columns(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_secrets_user_scope(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "secrets"):
+        return
+    columns = _table_columns(conn, "secrets")
+    if "user_id" in columns:
+        return
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS secrets_new (
+            user_id TEXT NOT NULL DEFAULT 'federico',
+            name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            last_used_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            last_checked_at TEXT,
+            last_check_status TEXT,
+            last_check_error TEXT,
+            PRIMARY KEY (user_id, name)
+        );
+        """
+    )
+
+    rows = conn.execute("SELECT * FROM secrets ORDER BY name").fetchall()
+    for row in rows:
+        conn.execute(
+            """
+            INSERT INTO secrets_new
+                (user_id, name, status, last_used_at, created_at, updated_at,
+                 last_checked_at, last_check_status, last_check_error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "federico",
+                row["name"],
+                row["status"],
+                row["last_used_at"],
+                row["created_at"],
+                row["updated_at"],
+                row["last_checked_at"] if "last_checked_at" in columns else None,
+                row["last_check_status"] if "last_check_status" in columns else None,
+                row["last_check_error"] if "last_check_error" in columns else None,
+            ),
+        )
+
+    conn.executescript(
+        """
+        DROP TABLE secrets;
+        ALTER TABLE secrets_new RENAME TO secrets;
+        CREATE INDEX IF NOT EXISTS idx_secrets_user_id ON secrets(user_id);
+        """
+    )
+
+
+def _migrate_cli_auth_devices(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS cli_auth_devices (
+            device_code TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            user_code TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            secret TEXT,
+            client_name TEXT NOT NULL,
+            scopes_json TEXT NOT NULL,
+            created_ip TEXT,
+            created_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            approved_at REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_cli_auth_devices_user_id
+            ON cli_auth_devices(user_id);
+        CREATE INDEX IF NOT EXISTS idx_cli_auth_devices_user_code
+            ON cli_auth_devices(user_code);
+        """
+    )
+
+
+def _add_owner_indexes(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_workers_owner_id ON workers(owner_id);
+        CREATE INDEX IF NOT EXISTS idx_runs_worker_created_at ON runs(worker_id, created_at);
+        """
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
@@ -609,6 +708,12 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_composio_connections_user_id
         ON composio_connections(user_id);
     """,
+    # -- migration 24: scope secrets by user_id for repository abstraction -----
+    _migrate_secrets_user_scope,
+    # -- migration 25: persist CLI auth devices in sqlite ----------------------
+    _migrate_cli_auth_devices,
+    # -- migration 26: index owner/user joins for repository queries -----------
+    _add_owner_indexes,
 ]
 
 
@@ -651,4 +756,6 @@ def apply_migrations():
 
 
 def init_db():
+    global DB_PATH
+    DB_PATH = _configured_db_path()
     apply_migrations()

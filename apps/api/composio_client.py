@@ -2,13 +2,11 @@
 
 Uses requests directly (no heavy SDK) against Composio v3 API:
   - list_apps()              → known app slugs we support
-  - list_connections()       → active connected accounts for entity "federico"
+  - list_connections()       → active connected accounts for a Workeros user
   - initiate_connection(app) → start OAuth flow, returns redirect_url + conn_id
   - check_status(conn_id)    → refresh connection status from Composio
   - get_entity_connection_id(app) → return composio_connection_id for the active connection
   - revoke_connection(conn_id) → delete connection from Composio
-
-Single-user: all connections use user_id = "federico".
 """
 
 from __future__ import annotations
@@ -26,7 +24,6 @@ from dotenv import load_dotenv
 logger = logging.getLogger("floom.composio")
 
 _BASE = "https://backend.composio.dev/api/v3"
-_USER_ID = "federico"
 _CATALOG_TTL_SECONDS = 60 * 60
 _catalog_cache: Dict[tuple, tuple[float, Dict[str, Any]]] = {}
 _catalog_cache_lock = threading.Lock()
@@ -172,9 +169,9 @@ def list_catalog_apps(
     return result
 
 
-def list_connections() -> List[Dict[str, Any]]:
-    """Return connected accounts for our single user from Composio v3."""
-    data = _get("/connected_accounts", user_ids=_USER_ID, limit=100)
+def list_connections(*, user_id: str) -> List[Dict[str, Any]]:
+    """Return connected accounts for a Workeros user from Composio v3."""
+    data = _get("/connected_accounts", user_ids=user_id, limit=100)
     items = data.get("items") or []
     result: List[Dict[str, Any]] = []
     for item in items:
@@ -344,7 +341,7 @@ def _resolve_auth_config_id(app_name: str) -> str:
     return created["auth_config"]["id"]
 
 
-def initiate_connection(app_name: str, redirect_url: str) -> Dict[str, str]:
+def initiate_connection(app_name: str, redirect_url: str, *, user_id: str) -> Dict[str, str]:
     """Initiate OAuth for app_name. Returns the direct provider OAuth URL.
 
     PR S17: Switched from /connected_accounts/link (hosted Connect Link page
@@ -364,7 +361,7 @@ def initiate_connection(app_name: str, redirect_url: str) -> Dict[str, str]:
     data = _post("/connected_accounts", {
         "auth_config": {"id": auth_config_id},
         "connection": {
-            "user_id": _USER_ID,
+            "user_id": user_id,
             "callback_url": redirect_url,
         },
     })
@@ -396,9 +393,9 @@ def revoke_connection(composio_connection_id: str) -> None:
     _delete(f"/connected_accounts/{composio_connection_id}")
 
 
-def get_entity_connection_id(app_name: str) -> Optional[str]:
+def get_entity_connection_id(app_name: str, *, user_id: str) -> Optional[str]:
     """Return the composio_connection_id of the active connection for app_name."""
-    for conn in list_connections():
+    for conn in list_connections(user_id=user_id):
         if conn["app_name"].lower() == app_name.lower() and conn["status"] == "active":
             return conn["composio_connection_id"]
     return None
