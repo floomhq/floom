@@ -44,8 +44,8 @@ function CallbackInner() {
   return (
     <div className="flex items-center justify-center min-h-[60vh]">
       <div className="text-center space-y-2">
-        <div className="w-8 h-8 rounded-full border-2 border-[#111] border-t-transparent animate-spin mx-auto" />
-        <p className="text-sm text-[#666]">Finalizing connection...</p>
+        <div className="w-8 h-8 rounded-full border-2 border-foreground border-t-transparent animate-spin mx-auto" />
+        <p className="text-sm text-muted-foreground">Finalizing connection...</p>
       </div>
     </div>
   );
