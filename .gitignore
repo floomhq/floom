@@ -24,6 +24,9 @@ build/
 .vscode/
 .idea/
 WORKPLAN-*.md
+CODEX_BRIEF.md
+.codex-last-message.md
+.codex-stdout.log
 
 # Secrets
 .deploy-secret
