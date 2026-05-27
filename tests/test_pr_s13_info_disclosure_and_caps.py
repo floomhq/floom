@@ -137,26 +137,44 @@ def test_platform_config_is_redacted(monkeypatch, tmp_path):
     assert body["set_count"] < body["required_count"]
 
 
-def test_draft_endpoints_share_hourly_cap_and_retry_after(monkeypatch, tmp_path):
+def _setup_rate_limited_draft_client(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path, draft_rate_hour=2)
     client = TestClient(main.app)
-
-    # No external LLM call during tests.
     payload = _valid_draft_payload(name="s13-rate-limited")
     monkeypatch.setattr(main, "_call_draft_llm", lambda *args, **kwargs: payload)
+    return main, client
 
+
+def _consume_two_draft_slots(client: TestClient):
     first = client.post("/workers/draft-from-prompt", json={"prompt": "first"}, headers=_AUTH_HEADER)
     assert first.status_code == 200, first.text
-
     second = client.post("/workers/draft-and-create", json={"prompt": "second"}, headers=_AUTH_HEADER)
     assert second.status_code == 200, second.text
+
+
+def test_draft_endpoints_share_hourly_cap(monkeypatch, tmp_path):
+    _main, client = _setup_rate_limited_draft_client(monkeypatch, tmp_path)
+    _consume_two_draft_slots(client)
 
     third = client.post("/workers/draft-from-prompt", json={"prompt": "third"}, headers=_AUTH_HEADER)
     assert third.status_code == 429, third.text
     assert third.json() == {"detail": "Draft rate limit reached: 2/hour. Try again later."}
+
+
+def test_draft_limit_sets_retry_after_header(monkeypatch, tmp_path):
+    _main, client = _setup_rate_limited_draft_client(monkeypatch, tmp_path)
+    _consume_two_draft_slots(client)
+
+    third = client.post("/workers/draft-from-prompt", json={"prompt": "third"}, headers=_AUTH_HEADER)
+    assert third.status_code == 429, third.text
     assert "Retry-After" in third.headers
     retry_after = int(third.headers["Retry-After"])
     assert 1 <= retry_after <= 3600
+
+
+def test_system_metrics_includes_drafts_last_hour(monkeypatch, tmp_path):
+    _main, client = _setup_rate_limited_draft_client(monkeypatch, tmp_path)
+    _consume_two_draft_slots(client)
 
     metrics = client.get("/system/metrics", headers=_AUTH_HEADER)
     assert metrics.status_code == 200, metrics.text
