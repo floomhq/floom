@@ -407,9 +407,11 @@ class AgentDriver(SandboxDriver):
                     },
                 },
             },
-            # OpenAI native web search. The model uses the search results in
-            # its reasoning; the platform does not handle the call locally.
-            {"type": "web_search"},
+            # PR S19 hotfix: `{"type": "web_search"}` is a Responses API
+            # feature; it is rejected by Chat Completions (which this driver
+            # uses) with "Invalid value: 'web_search'. Supported values are:
+            # 'function' and 'custom'." That was breaking ~43% of agent runs.
+            # Removed until the driver migrates to the Responses API.
         ]
         for app in config.connections:
             safe_app = "".join(ch if ch.isalnum() else "_" for ch in app.lower())
