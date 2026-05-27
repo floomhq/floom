@@ -23,6 +23,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { WorkerAvatar } from "@/components/WorkerAvatar";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { FileInputUpload } from "@/components/FileInputUpload";
@@ -370,7 +371,9 @@ export default function WorkerDetailPage() {
           palette + breadcrumb already provide back-nav). Status dot replaced
           with a labelled pill so users can read the state at a glance.
           Category badge differentiated from tag badges visually. */}
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-4">
+        {/* S29n: WorkerAvatar — workers feel like employees, not scripts. */}
+        <WorkerAvatar seed={worker.id} name={worker.name} size="size-12" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-semibold tracking-tight">{worker.name}</h1>
@@ -379,18 +382,16 @@ export default function WorkerDetailPage() {
           {worker.description && (
             <p className="text-muted-foreground text-sm mt-1">{worker.description}</p>
           )}
-          {/* S29m (ChatGPT-audit principles 6, 12): header was stacking
-              category badge + Healthy pill + tag chips + last-run line. The
-              saturated category badge duplicates info already shown via the
-              tag chips below. Dropped. Tags + last-run line remain. */}
-          <div className="flex flex-wrap items-center gap-1.5 mt-2">
-            {(worker.tags || []).map((tag) => (
-              <Badge key={tag} variant="outline" className="text-xs font-normal">{tag}</Badge>
-            ))}
-            {lastRunAt && (
-              <span className="text-xs text-muted-foreground">· Last run {formatRelativeTime(lastRunAt)}</span>
-            )}
-          </div>
+          {(worker.tags || []).length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+              {(worker.tags || []).map((tag) => (
+                <Badge key={tag} variant="outline" className="text-xs font-normal">{tag}</Badge>
+              ))}
+            </div>
+          )}
+          {lastRunAt && (
+            <p className="text-xs text-muted-foreground mt-2">Last run {formatRelativeTime(lastRunAt)}</p>
+          )}
         </div>
         <Link href={`/workers/${worker.id}/edit`} className="shrink-0">
           <Button variant="outline" size="sm">
@@ -896,17 +897,23 @@ function OverviewSection({
       {leadDescription && (
         <section>
           <h2 className="text-sm font-medium text-muted-foreground mb-2">What it does</h2>
-          <p className="text-base text-foreground leading-relaxed whitespace-pre-wrap">{leadDescription}</p>
+          {/* S29n: was whitespace-pre-wrap; YAML's | block scalar preserves
+              single newlines and turned the description into chopped lines.
+              pre-line collapses single \n to space; double \n still breaks
+              paragraphs. Renders as continuous prose. */}
+          <p className="text-base text-foreground leading-relaxed whitespace-pre-line">{leadDescription}</p>
         </section>
       )}
 
       {hasUseCases && (
         <section>
           <h2 className="text-sm font-medium text-muted-foreground mb-3">Use cases</h2>
+          {/* S29n: ·-middot bullet was almost invisible. Use a small filled
+              circle aligned with the text baseline. */}
           <ul className="space-y-2">
             {worker.use_cases!.map((useCase) => (
-              <li key={useCase} className="flex gap-2.5 text-sm text-foreground leading-relaxed">
-                <span className="text-muted-foreground mt-1.5 shrink-0">·</span>
+              <li key={useCase} className="flex gap-3 text-sm text-foreground leading-relaxed">
+                <span className="mt-2 size-1 rounded-full bg-muted-foreground shrink-0" aria-hidden="true" />
                 <span>{useCase}</span>
               </li>
             ))}
@@ -917,7 +924,29 @@ function OverviewSection({
       {worker.how_it_works && (
         <section>
           <h2 className="text-sm font-medium text-muted-foreground mb-2">How it works</h2>
-          <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{worker.how_it_works}</p>
+          {/* S29n: if author wrote arrow-style flow (lines starting with ->
+              or →), render as a clean stepped list. Otherwise prose. */}
+          {(() => {
+            const lines = worker.how_it_works.split("\n").map((l) => l.trim()).filter(Boolean);
+            const arrowLines = lines.filter((l) => /^(->|→)/.test(l) || lines.indexOf(l) === 0);
+            const isFlow = arrowLines.length >= 2 && lines.slice(1).every((l) => /^(->|→)/.test(l));
+            if (isFlow) {
+              const steps = lines.map((l) => l.replace(/^(->|→)\s*/, ""));
+              return (
+                <ol className="space-y-1.5">
+                  {steps.map((step, i) => (
+                    <li key={i} className="flex items-baseline gap-2.5 text-sm text-foreground leading-relaxed">
+                      <span className="font-mono text-xs text-muted-foreground shrink-0 w-5 tabular-nums">{i + 1}</span>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              );
+            }
+            return (
+              <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{worker.how_it_works}</p>
+            );
+          })()}
         </section>
       )}
 

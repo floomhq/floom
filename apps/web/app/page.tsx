@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Sparkline } from "@/components/Sparkline";
 import { RunStatusGlyph } from "@/components/RunStatus";
+import { WorkerAvatar } from "@/components/WorkerAvatar";
 import {
   formatDuration,
   formatRelative,
@@ -236,9 +237,12 @@ export default function OverviewPage() {
                     className="flex items-center justify-between gap-3 py-3 hover:bg-muted rounded-md px-2 -mx-2 transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <RunStatusGlyph status={r.status} />
+                      <WorkerAvatar seed={r.worker_id || r.worker_name} name={r.worker_name} size="size-8" />
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">{r.worker_name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium">{r.worker_name}</p>
+                          <RunStatusGlyph status={r.status} className="size-3.5" />
+                        </div>
                         <p className="text-xs text-muted-foreground">
                           {formatRelative(r.started_at)} · {formatDuration(r.duration_ms)} ·{" "}
                           {r.trigger_source}
