@@ -2,6 +2,7 @@
 
 import { Suspense, use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Paperclip, Loader2 } from "lucide-react";
@@ -206,10 +207,17 @@ function NewWorkerContent() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8 pt-12 pb-16">
-      {/* S25: warmer landing. Centered hero, larger inviting heading.
-          Dropped the brusque "Create a worker" for a question that gets
-          the user to commit to a prompt. */}
+    <div className="max-w-3xl mx-auto space-y-8 pt-8 pb-16">
+      {/* S28: back-nav above the centered hero (Federico request: subpages
+          need a way to return to the main item). */}
+      <Link
+        href="/workers"
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <span aria-hidden="true">←</span>
+        Workers
+      </Link>
+      {/* S25: warmer landing. Centered hero, larger inviting heading. */}
       <div className="text-center space-y-3">
         <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--solid-2)] text-[var(--solid-fg)] shadow-[var(--shadow-md)]">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="size-7" aria-hidden="true">

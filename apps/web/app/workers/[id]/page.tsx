@@ -36,6 +36,12 @@ import { useRunStream } from "@/lib/useRunStream";
 
 type Section = "run" | "code" | "triggers" | "connections" | "runs" | "overview";
 
+const VALID_SECTIONS: Section[] = ["run", "code", "triggers", "connections", "runs", "overview"];
+
+function isValidSection(s: string): s is Section {
+  return VALID_SECTIONS.includes(s as Section);
+}
+
 interface NavItem {
   id: Section;
   label: string;
@@ -63,10 +69,18 @@ export default function WorkerDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // S22b: Overview is now the default landing section (was "run"). Promotes
-  // the "what is this worker" page from position 6 of the tab row to 1.
-  const sectionParam = (searchParams.get("section") as Section) || "overview";
-  const [activeSection, setActiveSection] = useState<Section>(sectionParam);
+  // S22b: Overview is the default landing section.
+  // S28: tab state now lives in URL hash (#run, #triggers, etc.) instead of
+  // ?section=. Federico request: "all tabs on pages should have # on url slug".
+  // Initial section reads from hash on mount; falls back to legacy ?section=
+  // for backwards-compat with old links.
+  const sectionParam =
+    (typeof window !== "undefined" && window.location.hash.replace(/^#/, "")) ||
+    (searchParams.get("section") as string) ||
+    "overview";
+  const [activeSection, setActiveSection] = useState<Section>(
+    isValidSection(sectionParam) ? sectionParam : "overview"
+  );
 
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -87,8 +101,11 @@ export default function WorkerDetailPage() {
 
   const setSection = useCallback((s: Section) => {
     setActiveSection(s);
+    // S28: write to hash instead of ?section=. Clean up the legacy query
+    // param if present (link migration).
     const url = new URL(window.location.href);
-    url.searchParams.set("section", s);
+    url.searchParams.delete("section");
+    url.hash = s;
     window.history.replaceState(null, "", url.toString());
   }, []);
 
