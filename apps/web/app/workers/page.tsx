@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Box, ChevronRight, Eye, Folder, Pencil, Play, Plus, Search, Star,
+  Box, ChevronRight, Folder, Plus, Search, Star,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -291,7 +291,6 @@ function WorkersContent() {
                     key={w.id}
                     worker={w}
                     isFavorite={favorites.has(w.id)}
-                    onTagClick={(t) => setSearch(t)}
                     onFavoriteToggle={toggleFavorite}
                   />
                 ))}
@@ -300,7 +299,7 @@ function WorkersContent() {
           {!loading && displayedWorkers.length === 0 && (
             <p className="text-sm text-muted-foreground">
               {tab === "starred"
-                ? "Nothing starred yet. Tap the star on any worker card to pin it here."
+                ? "Nothing starred yet. Click the star on any worker card to pin it here."
                 : tab === "recent"
                 ? "No workers run yet."
                 : searchLower
@@ -445,31 +444,28 @@ function EmptyWorkersState() {
 function WorkerCard({
   worker,
   isFavorite,
-  onTagClick,
   onFavoriteToggle,
   compact,
 }: {
   worker: WorkerSummary;
   isFavorite: boolean;
-  onTagClick: (tag: string) => void;
+  onTagClick?: (tag: string) => void;
   onFavoriteToggle: (id: string) => void;
   compact?: boolean;
 }) {
-  const statusColor: Record<string, string> = {
-    healthy: "text-emerald-600 border-emerald-200 bg-emerald-50",
-    needs_attention: "text-amber-600 border-amber-200 bg-amber-50",
-    missing_secret: "text-amber-600 border-amber-200 bg-amber-50",
-    error: "text-red-600 border-red-200 bg-red-50",
-  };
   const hoverDescription = firstLine(worker.long_description);
   const stats = worker.recent_stats;
   const hasStats = stats && stats.runs_7d > 0;
   const hasSparkline = Array.isArray(worker.timeseries) && worker.timeseries.length > 0 && hasStats;
 
-  // PR S19 I-24a: Federico couldn't click cards, only the Run button.
-  // Wrap the entire body in a Link to /workers/<id>. Nested controls
-  // (Star, Run button, tag chips) stop propagation to avoid hijacking
-  // the parent navigation.
+  // S22b card refresh (roast P1):
+  //   - Dropped generic Box icon (every card showed identical icon -> noise)
+  //   - Dropped non-functional "Open worker" pointer-events-none footer button
+  //     (the whole card already navigates)
+  //   - Status dot -> labelled pill via StatusPill (dot was too subtle in dark
+  //     mode; "needs attention" amber blended with "healthy" green at card scale)
+  //   - Tag buttons -> static Badge pills (they routed nowhere; "look like
+  //     buttons but do nothing")
   return (
     <Card
       className="hover:border-border hover:shadow-sm transition-all overflow-hidden"
@@ -477,26 +473,8 @@ function WorkerCard({
     >
       <Link href={`/workers/${worker.id}`} className="block">
       <CardContent className={`p-5 ${compact ? "space-y-2" : "space-y-3"}`}>
-        {/* Header row */}
-        {/* PR S19 I-11: header was 5 elements deep (Box + name + star + eye +
-            pencil + status badge with text). At 250px card width the name
-            truncated to "Re...". Solution: keep Box + name + truncate, drop
-            inline View/Edit (whole card click goes to /workers/<id>),
-            replace text badge with a status dot. Star moved to top-right. */}
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <Box className="size-4 text-muted-foreground shrink-0" />
-            <span
-              className={`size-2 rounded-full shrink-0 ${
-                worker.status === "healthy"
-                  ? "bg-emerald-500"
-                  : worker.status === "error"
-                  ? "bg-red-500"
-                  : "bg-amber-500"
-              }`}
-              title={worker.status.replace("_", " ")}
-              aria-label={worker.status.replace("_", " ")}
-            />
+          <div className="min-w-0 flex-1">
             <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
           </div>
           <button
@@ -517,35 +495,26 @@ function WorkerCard({
           </button>
         </div>
 
+        <CardStatusPill status={worker.status} />
+
         {!compact && (
           <p className="text-sm text-muted-foreground line-clamp-2">{worker.description || "No description."}</p>
-        )}
-
-        {worker.folder && (
-          <p className="text-xs text-muted-foreground">{worker.folder}</p>
         )}
 
         {!compact && (worker.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {(worker.tags || []).map((tag) => (
-              <button
+              <Badge
                 key={tag}
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onTagClick(tag);
-                }}
+                variant="outline"
+                className="bg-card text-xs font-normal"
               >
-                <Badge variant="outline" className="cursor-pointer bg-card text-xs font-normal hover:bg-muted">
-                  {tag}
-                </Badge>
-              </button>
+                {tag}
+              </Badge>
             ))}
           </div>
         )}
 
-        {/* Trigger chips */}
         {(worker.triggers || []).length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {(worker.triggers || []).map((label) => (
@@ -561,14 +530,12 @@ function WorkerCard({
           <p className="text-xs text-muted-foreground">{worker.trigger_type}</p>
         )}
 
-        {/* Sparkline (only shown when timeseries data available and has runs) */}
         {hasSparkline && (
           <div>
             <Sparkline data={worker.timeseries!} width={120} height={28} />
           </div>
         )}
 
-        {/* Usage stats text */}
         {hasStats && (
           <p className="text-xs text-muted-foreground">
             {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
@@ -577,16 +544,39 @@ function WorkerCard({
             {stats.success_rate_7d != null ? ` · ${Math.round(stats.success_rate_7d * 100)}% success` : ""}
           </p>
         )}
-
-        <div className="pt-1">
-          <Button variant="secondary" size="sm" className="w-full pointer-events-none">
-            <Play className="w-3.5 h-3.5 mr-1.5" />
-            Open worker
-          </Button>
-        </div>
       </CardContent>
       </Link>
     </Card>
+  );
+}
+
+function CardStatusPill({ status }: { status: string }) {
+  const conf: Record<string, { label: string; classes: string }> = {
+    healthy: {
+      label: "Healthy",
+      classes: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
+    },
+    needs_attention: {
+      label: "Needs attention",
+      classes: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
+    },
+    missing_secret: {
+      label: "Missing secret",
+      classes: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
+    },
+    error: {
+      label: "Error",
+      classes: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900",
+    },
+  };
+  const { label, classes } = conf[status] ?? { label: status, classes: "bg-muted text-muted-foreground border-border" };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${classes}`}
+    >
+      <span className="size-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
+      {label}
+    </span>
   );
 }
 
