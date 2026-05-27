@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
 from fastapi.testclient import TestClient
 
 
@@ -180,3 +181,28 @@ def test_rate_limit_runs(monkeypatch, tmp_path):
 
     assert responses[-1].status_code == 429
     assert responses[-1].headers.get("Retry-After") == "60"
+
+
+def test_stock_agent_workers_do_not_require_user_openai_secret():
+    for relative in ["workers/research_brief/worker.yml", "workers/weekly_update/worker.yml"]:
+        manifest = yaml.safe_load((Path(__file__).resolve().parents[1] / relative).read_text())
+        exec_secrets = ((manifest.get("exec") or {}).get("secrets") or [])
+        capability_secrets = ((manifest.get("capabilities") or {}).get("secrets") or [])
+        assert "OPENAI_API_KEY" not in exec_secrets
+        assert "OPENAI_API_KEY" not in capability_secrets
+
+
+def test_agent_tool_schemas_do_not_emit_native_web_search(monkeypatch, tmp_path):
+    _load_api(monkeypatch, tmp_path)
+    from runner_sandbox.agent_driver import AgentDriver
+
+    config = types.SimpleNamespace(
+        outputs=[],
+        connections=[],
+        runtime=types.SimpleNamespace(disable_tools=[]),
+    )
+
+    tools = AgentDriver()._tool_schemas(config)
+
+    assert all(tool.get("type") in {"function", "custom"} for tool in tools)
+    assert all(tool.get("type") != "web_search" for tool in tools)
