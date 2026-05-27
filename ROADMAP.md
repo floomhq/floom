@@ -6,7 +6,7 @@ Single source of truth. Two sections:
 
 Scope decisions are owned by Federico. Implementation decisions are owned by Codex. Claude orchestrates and reviews.
 
-Last updated: 2026-05-26 — full rewrite to the locked launch-readiness boundary.
+Last updated: 2026-05-27 — added Series S launch-readiness push to a target score of 91/100.
 
 ---
 
@@ -96,6 +96,59 @@ All items below are SHIPPED unless flagged otherwise. Anything not on this list 
 8 pure-script Python workers (legacy run.py path, agentless): csv_enricher, cv_writeup, dach_compliance, e2b_test, gmail_intake_brief, input_types_test, reverse_match_crm, schedule_test, webhook_secret_test, webhook_test.
 
 2 agent-mode skill workers (markdown SKILL.md, OpenAI tool loop): research_brief, weekly_update.
+
+---
+
+## Series S — Launch-readiness push (2026-05-27)
+
+Goal: take launch-readiness score from 78 → 91 / 100. Brutally simple: cut anything that doesn't move the score for a single-user v0.
+
+### Shipped this push
+
+| PR | Title | Status |
+|---|---|---|
+| S7 | Shared `worker-form/` components (DRY across create + edit) | ✅ merged |
+| S8 | `/workers/[id]` side-nav B, `/workers` Drive folders, sparklines | ✅ merged #58 |
+| S9 | `/workers/new` Option A (single hero card, integrated upload, chip examples, skip Step 2 → land on edit) | ✅ merged #60 |
+| S10 | Sandbox secrets via `.env.local` (dotenv) instead of `secrets.json` | ✅ merged #59 |
+| S11 | `exec.entry` simplified mode (one field, derives mode from suffix), `web_search` default-on, `/system/metrics`, daily backup script (committed, enabled in S13) | ✅ merged #61 |
+| Cloudflare WAF fix | Allow rule expanded to permit `/composio-events` + `/connections/callback` (audit found webhooks were 403'ing) | ✅ live |
+| Composio Connect Link white-label | Switched to v3 `/connected_accounts/link` endpoint so OAuth shows Floom-branded screen | ✅ merged |
+
+### In flight (parallel cursor-agent lanes)
+
+| PR | Worktree | Scope |
+|---|---|---|
+| S12 | `/tmp/workeros-pr-s12` | `/` Overview page, `/runs` global runs list, `/runs/<id>` detail (output-first + Download + Edit + Re-run), `/workers` Drive-clone simplification, `/settings` in-page tabs, global `<Tabs>` primitive (horizontal + vertical), run-time bundle snapshot |
+| S13 | `/tmp/workeros-pr-s13` | `/system/info` path-leak fix, `/system/platform-config` secret-name redaction, draft endpoint per-hour cap, `/webhooks/composio-events` + `/webhooks/oauth-callback` aliases, backup cron `systemctl enable`'d, S11.1 `detectEntry()` hotfix |
+| S15 | `/tmp/workeros-pr-s15` | Device-code CLI login (`floom login` → browser → `~/.config/workeros/credentials.json`), Tier 1 CLI in Node (`floom run`, `floom workers list/show`, `floom runs list/show/logs/download`, `floom secrets *`, `floom mcp install`, completion, `--json`), `@path` file syntax, `--output-dir`, new `/cli-auth/*` API endpoints |
+
+### Queued (serialized — touches files S12 owns)
+
+| PR | Scope | Why serial |
+|---|---|---|
+| S14 | Git-backed worker versioning (auto-commit per save), History tab in side-nav B, "Restore this version" button, diff viewer | Touches `run_service.py` heavily — conflicts with S12's snapshot path |
+| S16 | Inline PDF + image render in `/runs/<id>` Output panel, multi-file inputs + drag-drop, MCP file-path passing, secrets + connections MCP tools | Touches `output-renderer.tsx` + `FileInputUpload.tsx` which S12 owns |
+
+### Parallelization rules
+
+- One cursor-agent per worktree, one PR per worktree.
+- Two PRs can run in parallel if they don't both edit the same file's same block. `apps/api/main.py` is the common surface — adding new endpoint blocks is fine, editing the same existing handler is not.
+- Web pages are usually safe: each page is its own file.
+- `run_service.py`, `e2b_driver.py`, `models.py`, `agent_driver.py` are bottlenecks — only one PR may touch them at a time.
+
+### Path to 91 / 100
+
+| PR | Score delta | Cumulative |
+|---|---|---|
+| Current (S8-S11 merged + Cloudflare fix) | baseline | 78 |
+| S12 lands | +6 | 84 |
+| S13 lands | +3 | 87 |
+| S14 lands | +2 | 89 |
+| S15 lands | +2 | 91 |
+| S16 lands | +1 (polish) | 92 |
+
+Above 92 needs things outside single-user v0 scope: Sentry, multi-tenancy prep, real DR drills.
 
 ---
 
