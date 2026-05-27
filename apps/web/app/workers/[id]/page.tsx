@@ -108,10 +108,43 @@ export default function WorkerDetailPage() {
     setActiveSection(s);
     // S28: write to hash instead of ?section=. Clean up the legacy query
     // param if present (link migration).
+    // S30: pushState (was replaceState) so back/forward navigation walks
+    // through tab history. Combined with the hashchange listener below,
+    // browser back button now jumps to previous tab.
     const url = new URL(window.location.href);
     url.searchParams.delete("section");
     url.hash = s;
-    window.history.replaceState(null, "", url.toString());
+    window.history.pushState(null, "", url.toString());
+  }, []);
+
+  // S30: useState initializer only runs once. When the URL hash changes
+  // externally (back/forward navigation, deep link, direct paste), the
+  // activeSection state stayed at its initial value and the tabs got out
+  // of sync with the URL. Listen to hashchange + popstate to re-sync.
+  useEffect(() => {
+    const sync = () => {
+      const h = window.location.hash.replace(/^#/, "");
+      if (isValidSection(h) && h !== activeSection) setActiveSection(h);
+    };
+    window.addEventListener("hashchange", sync);
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.removeEventListener("hashchange", sync);
+      window.removeEventListener("popstate", sync);
+    };
+  }, [activeSection]);
+
+  // S30: Federico — "has no # slugs for the tabs". On first mount, if the
+  // URL has no hash (e.g. user just typed /workers/<id>), write the active
+  // section to the hash so the URL is always canonical. Once-only.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!window.location.hash) {
+      const url = new URL(window.location.href);
+      url.hash = activeSection;
+      window.history.replaceState(null, "", url.toString());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -732,7 +765,7 @@ function RunSection({
       {worker.webhook_url && (
         <section className="space-y-3 pt-4 border-t border-line">
           <div>
-            <h2 className="text-sm font-medium text-muted-foreground">Webhook</h2>
+            <h2 className="text-base font-semibold text-foreground">Webhook</h2>
             <p className="text-xs text-muted-foreground mt-1">
               Send a POST request to this URL to trigger the worker. The token authenticates the request.
             </p>
@@ -791,7 +824,7 @@ function ConnectionsSection({
     <div className="max-w-xl space-y-8">
       {requiredConnections.length > 0 ? (
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground">Required integrations</h2>
+          <h2 className="text-base font-semibold text-foreground">Required integrations</h2>
           <ul className="space-y-2">
             {requiredConnections.map((slug) => {
               const isActive = activeConnectionSlugs.has(slug.toLowerCase());
@@ -823,7 +856,7 @@ function ConnectionsSection({
 
       {requiredSecrets.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground">Required secrets</h2>
+          <h2 className="text-base font-semibold text-foreground">Required secrets</h2>
           <ul className="space-y-2">
             {requiredSecrets.map((s) => (
               <li key={s} className="flex items-center justify-between py-2 border-b border-line last:border-0">
@@ -914,7 +947,7 @@ function OverviewSection({
     <div className="max-w-3xl space-y-8">
       {leadDescription && (
         <section>
-          <h2 className="text-sm font-medium text-muted-foreground mb-2">What it does</h2>
+          <h2 className="text-base font-semibold text-foreground mb-2">What it does</h2>
           {/* S29n: was whitespace-pre-wrap; YAML's | block scalar preserves
               single newlines and turned the description into chopped lines.
               pre-line collapses single \n to space; double \n still breaks
@@ -925,7 +958,7 @@ function OverviewSection({
 
       {hasUseCases && (
         <section>
-          <h2 className="text-sm font-medium text-muted-foreground mb-3">Use cases</h2>
+          <h2 className="text-base font-semibold text-foreground mb-3">Use cases</h2>
           {/* S29n: ·-middot bullet was almost invisible. Use a small filled
               circle aligned with the text baseline. */}
           <ul className="space-y-2">
@@ -941,7 +974,7 @@ function OverviewSection({
 
       {worker.how_it_works && (
         <section>
-          <h2 className="text-sm font-medium text-muted-foreground mb-2">How it works</h2>
+          <h2 className="text-base font-semibold text-foreground mb-2">How it works</h2>
           {/* S29n: if author wrote arrow-style flow (lines starting with ->
               or →), render as a clean stepped list. Otherwise prose. */}
           {(() => {
@@ -971,7 +1004,7 @@ function OverviewSection({
       {(hasInputs || hasOutputs) && (
         <section className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
-            <h2 className="text-sm font-medium text-muted-foreground mb-2.5">Inputs</h2>
+            <h2 className="text-base font-semibold text-foreground mb-2.5">Inputs</h2>
             <div className="flex flex-wrap gap-1.5">
               {hasInputs ? (
                 worker.config.inputs.map((inp) => (
@@ -985,7 +1018,7 @@ function OverviewSection({
             </div>
           </div>
           <div>
-            <h2 className="text-sm font-medium text-muted-foreground mb-2.5">Outputs</h2>
+            <h2 className="text-base font-semibold text-foreground mb-2.5">Outputs</h2>
             <div className="flex flex-wrap gap-1.5">
               {hasOutputs ? (
                 worker.config.outputs.map((o) => (
@@ -1006,7 +1039,7 @@ function OverviewSection({
           {hasExampleInput && (
             <div className="space-y-2.5">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-medium text-muted-foreground">Example input</h2>
+                <h2 className="text-base font-semibold text-foreground">Example input</h2>
                 <Button
                   variant="outline"
                   size="sm"
@@ -1023,7 +1056,7 @@ function OverviewSection({
           )}
           {hasExampleOutput && (
             <div className="space-y-2.5">
-              <h2 className="text-sm font-medium text-muted-foreground">Example output</h2>
+              <h2 className="text-base font-semibold text-foreground">Example output</h2>
               <MarkdownPreview value={worker.example_output!} />
             </div>
           )}
@@ -1035,7 +1068,7 @@ function OverviewSection({
           className="flex w-full items-center justify-between rounded-md border border-line bg-card px-4 py-2.5 text-sm font-medium text-foreground hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)] transition-colors"
         >
           <span className="flex items-center gap-2">
-            <span className="text-sm font-medium text-muted-foreground">Technical details</span>
+            <span className="text-base font-semibold text-foreground">Technical details</span>
           </span>
           <ChevronDown
             className={`w-4 h-4 text-muted-foreground transition-transform ${techOpen ? "rotate-180" : ""}`}
