@@ -145,6 +145,13 @@ export interface RecentStats {
   success_rate_7d?: number | null;
 }
 
+export interface TimeseriesDay {
+  date: string;       // "YYYY-MM-DD"
+  total: number;
+  completed: number;
+  failed: number;
+}
+
 export interface WorkerSummary {
   id: string;
   name: string;
@@ -163,6 +170,7 @@ export interface WorkerSummary {
   triggers: string[];
   triggers_spec: TriggerSpec[];
   recent_stats?: RecentStats | null;
+  timeseries?: TimeseriesDay[] | null;
 }
 
 export interface WorkerFile {
@@ -298,6 +306,11 @@ export interface DraftRequirementItem {
   reason: string;
 }
 
+export interface DraftFile {
+  path: string;     // e.g. "worker.yml", "SKILL.md", "run.py", "lib/client.py"
+  content: string;  // UTF-8 text content
+}
+
 export interface DraftFromPromptResponse {
   worker_yml: string;
   skill_md?: string;
@@ -305,6 +318,8 @@ export interface DraftFromPromptResponse {
   suggested_title: string;
   // New: one entry per app, method is "oauth" or "api_key". No duplicates.
   requirements?: DraftRequirementItem[];
+  // Skill-bundle: all files returned by the LLM
+  files?: DraftFile[];
   // Legacy fields kept for backward compatibility
   required_connections: string[];
   required_secrets: string[];
