@@ -197,27 +197,36 @@ function NewWorkerContent() {
   const isUploading = uploadState !== "idle";
   const isBusy = generating || isUploading;
 
-  // S24: when generating, swap the entire hero+pills surface for a
-  // dedicated GeneratingPanel that auto-advances through 4 steps so the
-  // user has a sense of progress instead of a frozen "Generating..." button.
   if (generating) {
     return (
       <div className="max-w-4xl mx-auto pt-8 pb-16">
-        <GeneratingPanel prompt={prompt} />
+        <GeneratingPanel prompt={prompt} onCancel={() => setGenerating(false)} />
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pt-8 pb-16">
-      {/* Page header. S22c (roast P2): dropped subtitle that duplicated the
-          sidebar context. */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Create a worker</h1>
+    <div className="max-w-3xl mx-auto space-y-8 pt-12 pb-16">
+      {/* S25: warmer landing. Centered hero, larger inviting heading.
+          Dropped the brusque "Create a worker" for a question that gets
+          the user to commit to a prompt. */}
+      <div className="text-center space-y-3">
+        <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--solid-2)] text-[var(--solid-fg)] shadow-[var(--shadow-md)]">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="size-7" aria-hidden="true">
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+            <circle cx="12" cy="12" r="4" />
+          </svg>
+        </div>
+        <h1 className="text-3xl font-semibold tracking-tight">What should Floom automate?</h1>
+        <p className="text-base text-muted-foreground max-w-xl mx-auto">
+          Describe a task in plain English. Floom will draft the worker, pick the right
+          integrations, and open the editor so you can review before running.
+        </p>
       </div>
 
-      {/* Hero card */}
-      <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+      {/* S25: hero textarea card sized to feel like the centerpiece, not a
+          form field. Bigger min-height + tighter footer. */}
+      <div className="rounded-xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] space-y-4">
         <Textarea
           ref={textareaRef}
           placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
@@ -227,7 +236,7 @@ function NewWorkerContent() {
             const val = (e.target as HTMLTextAreaElement).value;
             if (val !== prompt) setPrompt(val);
           }}
-          className="min-h-[120px] resize-none border-border text-sm focus-visible:ring-0 focus-visible:border-black placeholder:text-muted-foreground/50"
+          className="min-h-[160px] resize-none border-0 px-0 shadow-none text-base focus-visible:ring-0 focus-visible:border-0 placeholder:text-muted-foreground/50"
           disabled={isBusy}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -237,8 +246,7 @@ function NewWorkerContent() {
           }}
         />
 
-        {/* Divider */}
-        <div className="border-t border-[#f0f0f0]" />
+        <div className="border-t border-line" />
 
         {/* Bottom row: upload (left) + generate (right).
             S22c (roast P1/P2): upload now reads as a button (border + padded
@@ -298,12 +306,19 @@ function NewWorkerContent() {
         </div>
       </div>
 
-      {/* Example chips. S22c (roast P1): first pill gets a "Try this" accent
-          so users have a clear suggested starting point instead of 5
-          equally-weighted options. */}
+      {/* S25: examples promoted from pills to a tappable card grid with the
+          full prompt visible. Less heartless: users see what kind of work
+          Floom can do, not just abstract one-liners. */}
       <div className="space-y-3">
-        <p className="text-sm text-muted-foreground">Or start from an example:</p>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">Or start from a popular workflow</p>
+          {idx0NoteVisible(EXAMPLES) && (
+            <span className="text-[11px] uppercase tracking-wider text-[var(--accent)]">
+              Recommended first
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {EXAMPLES.map((ex, idx) => (
             <button
               key={ex.label}
@@ -312,20 +327,26 @@ function NewWorkerContent() {
               onClick={() => setPrompt(ex.prompt)}
               className={
                 idx === 0
-                  ? "inline-flex items-center text-xs font-medium px-3 py-1.5 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-                  : "inline-flex items-center text-xs font-medium px-3 py-1.5 rounded-full border border-border bg-card text-foreground hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  ? "group flex flex-col items-start gap-1.5 rounded-lg border border-[var(--accent)] bg-[var(--accent-soft)] px-4 py-3 text-left hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                  : "group flex flex-col items-start gap-1.5 rounded-lg border border-border bg-card px-4 py-3 text-left hover:bg-accent hover:border-muted-foreground/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               }
             >
-              {idx === 0 && (
-                <span className="mr-1.5 inline-flex h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
-              )}
-              {ex.label}
+              <span className={idx === 0 ? "text-sm font-semibold text-[var(--accent)]" : "text-sm font-semibold text-foreground"}>
+                {ex.label}
+              </span>
+              <span className={idx === 0 ? "text-xs text-[var(--accent)] opacity-80 line-clamp-2" : "text-xs text-muted-foreground line-clamp-2"}>
+                {ex.prompt}
+              </span>
             </button>
           ))}
         </div>
       </div>
     </div>
   );
+}
+
+function idx0NoteVisible(items: { label: string }[]): boolean {
+  return items.length > 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -373,28 +394,31 @@ async function readText(file: File): Promise<string | null> {
 // run -> Validating -> Opening editor). The advancement is aspirational
 // (we do not know which step the API is on); it gives users a sense of
 // progress instead of a static spinner.
-function GeneratingPanel({ prompt }: { prompt: string }) {
-  const steps = [
-    "Understanding what you want",
-    "Drafting worker.yml",
-    "Writing run.py + SKILL.md",
-    "Validating + opening editor",
-  ];
-  const [activeStep, setActiveStep] = useState(0);
+// S25: honest indeterminate loader. Federico called the prior 4-step panel
+// out for (a) hardcoding "Writing run.py + SKILL.md" which doesn't apply to
+// every worker (pure-script vs agent), and (b) getting stuck on the last
+// step forever when the API takes longer than 4*2.2s. Removed the fake
+// progress. Single elegant indeterminate state with the prompt echoed,
+// an animated indeterminate bar, an elapsed counter, and an escape hatch
+// after 60s in case the request really hung.
+function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () => void }) {
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setActiveStep((prev) => Math.min(prev + 1, steps.length - 1));
-    }, 2200);
+    const id = window.setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => window.clearInterval(id);
-  }, [steps.length]);
+  }, []);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Creating your worker</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Floom is drafting code from your prompt. This usually takes 15-30 seconds.
+    <div className="max-w-2xl mx-auto space-y-6">
+      <div className="text-center space-y-3">
+        <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--solid-2)] text-[var(--solid-fg)] shadow-[var(--shadow-md)]">
+          <Loader2 className="size-7 animate-spin" aria-hidden="true" />
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">Drafting your worker</h1>
+        <p className="text-sm text-muted-foreground max-w-md mx-auto">
+          Floom is reading your prompt, picking integrations, and writing the worker files.
+          Usually 15-30 seconds; rarely up to 60.
         </p>
       </div>
 
@@ -403,62 +427,51 @@ function GeneratingPanel({ prompt }: { prompt: string }) {
           <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
             Your prompt
           </p>
-          <p className="text-sm text-foreground line-clamp-3">{prompt}</p>
+          <p className="text-sm text-foreground whitespace-pre-wrap">{prompt}</p>
         </div>
       )}
 
-      <div className="rounded-lg border border-border bg-card p-6">
-        <ol className="space-y-3">
-          {steps.map((label, i) => {
-            const done = i < activeStep;
-            const current = i === activeStep;
-            return (
-              <li key={label} className="flex items-center gap-3">
-                <span
-                  className={
-                    done
-                      ? "inline-flex size-6 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--solid-fg)]"
-                      : current
-                      ? "inline-flex size-6 items-center justify-center rounded-full border-2 border-[var(--accent)] bg-[var(--accent-soft)]"
-                      : "inline-flex size-6 items-center justify-center rounded-full border border-line bg-card"
-                  }
-                  aria-hidden="true"
-                >
-                  {done ? (
-                    <svg viewBox="0 0 16 16" fill="none" className="size-3.5">
-                      <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  ) : current ? (
-                    <Loader2 className="size-3 animate-spin text-[var(--accent)]" />
-                  ) : null}
-                </span>
-                <span
-                  className={
-                    current
-                      ? "text-sm font-medium text-foreground"
-                      : done
-                      ? "text-sm text-muted-foreground"
-                      : "text-sm text-muted-foreground/60"
-                  }
-                >
-                  {label}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-
-        <div className="mt-6 h-1 w-full overflow-hidden rounded-full bg-[var(--bg-2)]">
-          <div
-            className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-500 ease-out"
-            style={{ width: `${((activeStep + 1) / steps.length) * 100}%` }}
-          />
+      {/* Indeterminate progress bar - pure animation, not tied to fake steps */}
+      <div className="space-y-2">
+        <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--bg-2)] relative">
+          <div className="absolute inset-y-0 w-1/3 rounded-full bg-[var(--accent)] animate-[s25-slide_1.8s_ease-in-out_infinite]" />
+        </div>
+        <div className="flex justify-between text-[11px] text-muted-foreground">
+          <span>Working...</span>
+          <span>{formatElapsed(elapsed)}</span>
         </div>
       </div>
 
-      <p className="text-xs text-muted-foreground text-center">
-        Keep this tab open. You will land in the worker editor when it is ready.
-      </p>
+      {/* Escape hatch after 60s in case the request hung */}
+      {elapsed >= 60 && onCancel && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:bg-amber-950/30 dark:border-amber-900">
+          <p className="text-xs text-amber-800 dark:text-amber-300">
+            This is taking longer than usual. The request may have stalled.
+          </p>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="mt-2 text-xs underline text-amber-900 hover:text-amber-700 dark:text-amber-200 dark:hover:text-amber-100"
+          >
+            Go back and try a shorter prompt
+          </button>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes s25-slide {
+          0% { transform: translateX(-100%); }
+          50% { transform: translateX(200%); }
+          100% { transform: translateX(-100%); }
+        }
+      `}</style>
     </div>
   );
+}
+
+function formatElapsed(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}m ${s}s`;
 }
