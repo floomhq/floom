@@ -3730,6 +3730,9 @@ def get_run(run_id: str) -> RunDetail:
     return RunDetail(
         id=run["id"],
         worker_id=run["worker_id"],
+        # PR S21: query already SELECTs worker_name (line ~3670) but it was
+        # never plumbed through to the response model — UI showed the slug.
+        worker_name=run.get("worker_name"),
         status=RunStatus(run["status"]),
         trigger_source=run["trigger_source"],
         runner=run["runner"],
