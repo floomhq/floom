@@ -2289,6 +2289,234 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
     )
 
 
+# ---------------------------------------------------------------------------
+# POST /workers/draft-and-create — draft + register in one round-trip
+# ---------------------------------------------------------------------------
+
+class DraftAndCreateRequest(BaseModel):
+    prompt: str = ""
+    # Optional pre-built files to skip the LLM step (used for .md / .py uploads)
+    files: List[DraftFile] = []
+
+
+class DraftAndCreateResponse(BaseModel):
+    worker_id: str
+
+
+@app.post("/workers/draft-and-create", response_model=DraftAndCreateResponse)
+async def draft_and_create_worker(payload: DraftAndCreateRequest) -> DraftAndCreateResponse:
+    """Draft a worker via LLM (or from pre-supplied files) and immediately register it.
+
+    If ``files`` is provided (non-empty), skips the LLM and writes those files directly.
+    If only ``prompt`` is given, calls the LLM with up to 3 retries; returns 502 on
+    persistent YAML validation failure (no worker is written to disk on failure).
+    """
+    from worker_registry import WORKERS_DIR
+    import yaml as pyyaml
+    from models import parse_worker_manifest
+
+    # ----------------------------------------------------------------
+    # Path A: pre-supplied files (upload flow — skip LLM)
+    # ----------------------------------------------------------------
+    if payload.files:
+        draft_files = []
+        for f in payload.files:
+            path = (f.path or "").strip()
+            parts = path.replace("\\", "/").split("/")
+            if any(p in ("", "..") for p in parts):
+                raise HTTPException(status_code=400, detail=f"Invalid path: {path!r}")
+            draft_files.append(f)
+
+        worker_yml_file = next((f for f in draft_files if f.path == "worker.yml"), None)
+        if not worker_yml_file:
+            raise HTTPException(status_code=400, detail="files must include worker.yml")
+
+        worker_id, _config = _parse_worker_payload(worker_yml_file.content)
+
+        target_dir = WORKERS_DIR / worker_id
+        if target_dir.exists():
+            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+
+        target_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            for f in draft_files:
+                parts = f.path.replace("\\", "/").split("/")
+                dest = target_dir
+                for part in parts[:-1]:
+                    dest = dest / part
+                    dest.mkdir(exist_ok=True)
+                (dest / parts[-1]).write_text(f.content)
+
+            if not (target_dir / "run.py").exists():
+                (target_dir / "run.py").write_text(
+                    "from typing import Dict, Any\n\n"
+                    "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
+                    "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
+                )
+            if not (target_dir / "requirements.txt").exists():
+                (target_dir / "requirements.txt").write_text("")
+        except HTTPException:
+            import shutil
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise
+        except Exception as exc:
+            import shutil
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=f"Failed to write files: {exc}") from exc
+
+        invalidate_worker_cache()
+        workers = discover_workers()
+        with get_db() as conn:
+            try:
+                _persist_discovered_workers(conn, workers)
+            except (sqlite3.IntegrityError, RuntimeError) as exc:
+                import shutil
+                shutil.rmtree(target_dir, ignore_errors=True)
+                invalidate_worker_cache()
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        return DraftAndCreateResponse(worker_id=worker_id)
+
+    # ----------------------------------------------------------------
+    # Path B: LLM draft from prompt
+    # ----------------------------------------------------------------
+    prompt = (payload.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt or files is required")
+    if len(prompt) > 4000:
+        raise HTTPException(status_code=400, detail="prompt must be 4000 characters or fewer")
+
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    if not openai_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
+
+    from openai import OpenAI
+
+    prompt_lower = prompt.lower()
+    detected_connections = _detect_connections(prompt_lower)
+
+    user_message = (
+        f"Design a Workeros worker for this task:\n\n{prompt}\n\n"
+        f"Detected Composio apps that may be needed: "
+        f"{detected_connections if detected_connections else 'none detected, infer from context'}\n\n"
+        "Generate the full WorkerContract YAML and metadata JSON as specified. "
+        "Make sure the YAML is valid and passes schema_version 0.3 validation. "
+        "Remember: every string scalar in the YAML must be wrapped in double quotes."
+    )
+
+    client = OpenAI(api_key=openai_key)
+
+    max_attempts = 3
+    last_yaml_error: Optional[str] = None
+    draft_files_from_llm: List[DraftFile] = []
+    worker_yml_str = ""
+    parsed_llm: Dict[str, Any] = {}
+
+    for attempt in range(1, max_attempts + 1):
+        extra_instructions: Optional[str] = None
+        if last_yaml_error:
+            extra_instructions = (
+                f"PREVIOUS ATTEMPT FAILED YAML VALIDATION with error: {last_yaml_error}\n"
+                "Retry. Double-quote every single string value in the YAML. "
+                "Do not leave any string unquoted."
+            )
+
+        parsed_llm = _call_draft_llm(client, user_message, extra_instructions)
+        worker_yml_str = parsed_llm.get("worker_yml", "")
+        if not worker_yml_str:
+            last_yaml_error = "empty worker_yml returned"
+            continue
+
+        try:
+            raw_manifest = pyyaml.safe_load(worker_yml_str)
+            if not isinstance(raw_manifest, dict):
+                raise ValueError("worker_yml must be a YAML mapping")
+            parse_worker_manifest(raw_manifest)
+            last_yaml_error = None
+            break
+        except Exception as exc:
+            last_yaml_error = str(exc)
+            logger.warning(
+                "draft-and-create YAML validation failed on attempt %d/%d: %s",
+                attempt,
+                max_attempts,
+                exc,
+            )
+
+    if last_yaml_error:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM-generated worker YAML is not valid after {max_attempts} attempts: {last_yaml_error}",
+        )
+
+    # Assemble files from LLM response
+    raw_files = parsed_llm.get("files") or []
+    if isinstance(raw_files, list):
+        for f in raw_files:
+            if not isinstance(f, dict):
+                continue
+            path = (f.get("path") or "").strip()
+            content = f.get("content") or ""
+            if not path:
+                continue
+            parts = path.replace("\\", "/").split("/")
+            if any(p in ("", "..") for p in parts):
+                continue
+            draft_files_from_llm.append(DraftFile(path=path, content=content))
+
+    paths_in_files = {f.path for f in draft_files_from_llm}
+    if draft_files_from_llm and "worker.yml" not in paths_in_files:
+        draft_files_from_llm.insert(0, DraftFile(path="worker.yml", content=worker_yml_str))
+    elif not draft_files_from_llm:
+        draft_files_from_llm.append(DraftFile(path="worker.yml", content=worker_yml_str))
+        skill_md_str = parsed_llm.get("skill_md")
+        if skill_md_str:
+            draft_files_from_llm.append(DraftFile(path="SKILL.md", content=skill_md_str))
+
+    # Parse worker_id from validated YAML
+    worker_id, _config2 = _parse_worker_payload(worker_yml_str)
+
+    target_dir = WORKERS_DIR / worker_id
+    if target_dir.exists():
+        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+
+    target_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        for f in draft_files_from_llm:
+            parts = f.path.replace("\\", "/").split("/")
+            dest = target_dir
+            for part in parts[:-1]:
+                dest = dest / part
+                dest.mkdir(exist_ok=True)
+            (dest / parts[-1]).write_text(f.content)
+
+        if not (target_dir / "run.py").exists():
+            (target_dir / "run.py").write_text(
+                "from typing import Dict, Any\n\n"
+                "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
+                "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
+            )
+        if not (target_dir / "requirements.txt").exists():
+            (target_dir / "requirements.txt").write_text("")
+    except Exception as exc:
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"Failed to write worker files: {exc}") from exc
+
+    invalidate_worker_cache()
+    workers = discover_workers()
+    with get_db() as conn:
+        try:
+            _persist_discovered_workers(conn, workers)
+        except (sqlite3.IntegrityError, RuntimeError) as exc:
+            import shutil
+            shutil.rmtree(target_dir, ignore_errors=True)
+            invalidate_worker_cache()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return DraftAndCreateResponse(worker_id=worker_id)
+
+
 def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
     import yaml as pyyaml
 

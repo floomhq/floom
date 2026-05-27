@@ -39,6 +39,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ prompt }),
       }),
+    draftAndCreate: (params: { prompt?: string; files?: { path: string; content: string }[] }) =>
+      fetchJson<{ worker_id: string }>("/workers/draft-and-create", {
+        method: "POST",
+        body: JSON.stringify(params),
+      }),
     createFromBundle: async (zipBlob: Blob): Promise<import("./types").WorkerDetail> => {
       const form = new FormData();
       form.append("bundle", zipBlob, "bundle.zip");
