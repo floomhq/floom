@@ -269,6 +269,13 @@ export interface SystemOverviewRunItem {
   trigger_source: string;
 }
 
+export interface SystemOverviewOutcomeItem {
+  worker_id: string;
+  worker_name: string;
+  label: string;
+  count: number;
+}
+
 export interface SystemOverviewScheduledItem {
   worker_id: string;
   worker_name: string;
@@ -288,6 +295,7 @@ export interface SystemOverviewAttentionItem {
 
 export interface SystemOverview {
   stats: SystemOverviewStats;
+  outcomes: SystemOverviewOutcomeItem[];
   recent_runs: SystemOverviewRunItem[];
   scheduled_today: SystemOverviewScheduledItem[];
   needs_attention: SystemOverviewAttentionItem[];
