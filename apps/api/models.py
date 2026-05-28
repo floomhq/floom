@@ -1,7 +1,7 @@
 """Pydantic models for Floom V0: request schemas, response schemas, and domain types."""
 
 import re
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 
@@ -101,6 +101,62 @@ class WorkerTrigger(BaseModel):
     composio: Optional[WorkerComposioTriggerConfig] = None
 
 
+class WorkerMCPConnection(BaseModel):
+    label: str
+    url: str
+    auth: Optional[str] = None
+    allowed_tools: Optional[List[str]] = None
+    require_approval: Literal["never", "always"] = "never"
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: str) -> str:
+        stripped = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", stripped):
+            raise ValueError("mcp label must be 1-64 letters, digits, underscores, or hyphens")
+        return stripped
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped.startswith(("http://", "https://")):
+            raise ValueError("mcp url must start with http:// or https://")
+        return stripped
+
+    @field_validator("auth")
+    @classmethod
+    def validate_auth(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if not stripped.startswith("bearer:"):
+            raise ValueError("mcp auth currently supports bearer:<SECRET_NAME>")
+        secret_name = stripped.split(":", 1)[1]
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", secret_name):
+            raise ValueError("mcp bearer auth must reference a valid secret name")
+        return stripped
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def validate_allowed_tools(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        cleaned = [item.strip() for item in value if item and item.strip()]
+        if len(cleaned) != len(value):
+            raise ValueError("mcp allowed_tools entries must be non-empty")
+        return cleaned
+
+
+class WorkerConnection(BaseModel):
+    mcp: WorkerMCPConnection
+
+
+WorkerConnectionSpec = Union[str, WorkerConnection]
+
+
 class WorkerRuntime(BaseModel):
     type: str
     entrypoint: str = "run.py"
@@ -136,7 +192,7 @@ class WorkerConfig(BaseModel):
     runtime: WorkerRuntime
     inputs: List[WorkerInput] = []
     secrets: List[str] = []
-    connections: List[str] = []  # Composio app slugs required by this worker
+    connections: List[WorkerConnectionSpec] = []  # Strings are legacy Composio app slugs.
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
 
@@ -416,7 +472,7 @@ class WorkerContract(BaseModel):
     trigger: WorkerContractTrigger = Field(default_factory=WorkerContractTrigger)
     # Multiple triggers (new). If provided, `trigger` is derived from triggers[0].
     triggers: Optional[List[WorkerContractTrigger]] = None
-    connections: List[str] = Field(default_factory=list)
+    connections: List[WorkerConnectionSpec] = Field(default_factory=list)
     csv_required_columns: Optional[List[str]] = None
 
     @field_validator("name")
@@ -646,7 +702,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         runtime=runtime,
         inputs=inputs,
         secrets=contract.exec.secrets,
-        connections=contract.connections,
+        connections=[_model_data(connection) for connection in contract.connections],
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
     )
@@ -765,7 +821,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             webhook=config.trigger.webhook,
             composio=config.trigger.composio,
         ),
-        connections=list(config.connections),
+        connections=[_model_data(connection) for connection in config.connections],
         csv_required_columns=config.csv_required_columns,
     )
 
