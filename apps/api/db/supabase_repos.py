@@ -9,7 +9,9 @@ from typing import Any
 from supabase import Client
 
 from apps.api._engine import ensure_engine_api_path
+from apps.api.auth.workspace_context import get_active_workspace_id
 from apps.api.config import get_supabase_service_client
+from apps.api.db import workspaces as workspace_repo
 from apps.api.db._secret_crypto import decrypt_secret, encrypt_secret
 
 ensure_engine_api_path()
@@ -239,6 +241,79 @@ def _bytea_bytes(value: Any) -> bytes | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Workspace scoping
+# ---------------------------------------------------------------------------
+#
+# The cloud is workspace-scoped, but the engine code that calls these repos
+# only knows about ``user_id`` (from AuthContext). The active workspace_id
+# is set on a contextvar by SupabaseAuthProvider.verify on every HTTP
+# request; we read it here.
+#
+# Two scoping modes:
+#   1. Web request (contextvar set) -> filter by workspace_id.
+#   2. Out-of-request (scheduler, webhook -- contextvar unset) -> fall back
+#      to filtering by user_id. The scheduler/webhook code already passes
+#      the worker's owner_id; user-scoped queries still return correct rows
+#      because every workspace_id maps to exactly one owner.
+#
+# On INSERT we always set workspace_id. Resolution order:
+#   a. ``workspace_id`` kwarg explicitly passed (rare; tests or future
+#      cross-workspace tooling).
+#   b. contextvar.
+#   c. worker_id -> workspace_id lookup (scheduler / webhook trigger path).
+#   d. user's default workspace (lazy create if zero exist).
+
+def _scope_by_workspace(
+    builder: Any,
+    *,
+    user_id: str | None,
+    explicit_workspace_id: str | None = None,
+) -> Any:
+    """Apply the right scope filter to a Supabase query builder.
+
+    Prefers workspace_id (active workspace for the request); falls back to
+    user_id when the contextvar is unset and no explicit workspace_id is
+    provided.
+    """
+    workspace_id = explicit_workspace_id or get_active_workspace_id()
+    if workspace_id:
+        return builder.eq("workspace_id", workspace_id)
+    if user_id is not None:
+        return builder.eq("user_id", user_id)
+    return builder
+
+
+def _resolve_workspace_id_for_write(
+    *,
+    user_id: str,
+    explicit_workspace_id: str | None = None,
+    worker_id: str | None = None,
+    email: str | None = None,
+) -> str:
+    """Resolve the workspace_id to stamp on a new row.
+
+    Order: explicit kwarg -> contextvar -> worker's existing workspace_id
+    -> user's default workspace (lazy-create if none). Always returns a
+    non-empty string; never returns None.
+    """
+    if explicit_workspace_id:
+        return explicit_workspace_id
+    from_context = get_active_workspace_id()
+    if from_context:
+        return from_context
+    if worker_id:
+        existing = workspace_repo.workspace_id_for_worker(worker_id=worker_id)
+        if existing:
+            return existing
+    active = workspace_repo.resolve_active_workspace(
+        user_id=user_id,
+        email=email,
+        requested_id=None,
+    )
+    return str(active["id"])
+
+
 class _BaseSupabaseRepository:
     def __init__(self, client: Client | None = None) -> None:
         self._client = client or get_supabase_service_client()
@@ -270,8 +345,9 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         worker_ids: Iterable[str] | None = None,
     ) -> list[dict[str, Any]]:
         builder = self._client.table("workers").select("*")
-        if user_id is not None:
-            builder = builder.eq("user_id", user_id)
+        # Workspace scope: filter by workspace_id when set (per-request
+        # contextvar). Falls back to user_id when out of request context.
+        builder = _scope_by_workspace(builder, user_id=user_id)
         if worker_id is not None:
             builder = builder.eq("id", worker_id)
         if worker_ids is not None:
@@ -328,6 +404,10 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         name = fields.get("name") or manifest_json.get("title") or manifest_json.get("name") or worker_id
         created_at = fields.get("created_at") or datetime.now(timezone.utc).isoformat()
         skill_version_id = fields.get("skill_version_id") or _skill_version_id(worker_id, manifest_json)
+        workspace_id = _resolve_workspace_id_for_write(
+            user_id=user_id,
+            explicit_workspace_id=fields.get("workspace_id"),
+        )
         self._client.table("skill_versions").upsert(
             {
                 "id": skill_version_id,
@@ -344,6 +424,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             {
                 "id": worker_id,
                 "user_id": user_id,
+                "workspace_id": workspace_id,
                 "skill_version_id": skill_version_id,
                 "name": name,
                 "trigger_type": fields.get("trigger_type") or "manual",
@@ -435,6 +516,15 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         # insert. PostgREST upsert applies the whole payload on conflict,
         # so we have to branch.
         if existing_owner is None:
+            # On insert: stamp workspace_id. On update: leave it as-is
+            # (a worker's workspace doesn't change after creation; the
+            # engine's _persist_discovered_workers re-runs upsert on
+            # every discovery pass).
+            worker_payload["workspace_id"] = _resolve_workspace_id_for_write(
+                user_id=user_id,
+                explicit_workspace_id=fields.get("workspace_id"),
+                worker_id=worker_id,
+            )
             worker_payload.update(
                 {
                     "next_run_at": fields.get("next_run_at"),
@@ -500,20 +590,15 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         if "triggers_json" in fields:
             payload["triggers_json"] = _json_storage_value(fields["triggers_json"], [])
         if payload:
-            self._client.table("workers").update(payload).eq("id", worker_id).eq(
-                "user_id",
-                user_id,
-            ).execute()
+            builder = self._client.table("workers").update(payload).eq("id", worker_id)
+            builder = _scope_by_workspace(builder, user_id=user_id)
+            builder.execute()
         return self.get(user_id=user_id, worker_id=worker_id)
 
     def delete(self, *, user_id: str, worker_id: str) -> bool:
-        response = (
-            self._client.table("workers")
-            .delete()
-            .eq("id", worker_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
+        builder = self._client.table("workers").delete().eq("id", worker_id)
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.execute()
         return bool(_response_rows(response))
 
     def list_recent_runs(
@@ -523,17 +608,12 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         worker_id: str,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
-        response = (
-            self._client.table("runs")
-            .select(
-                "id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error"
-            )
-            .eq("user_id", user_id)
-            .eq("worker_id", worker_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
+        builder = self._client.table("runs").select(
+            "id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error"
         )
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        builder = builder.eq("worker_id", worker_id)
+        response = builder.order("created_at", desc=True).limit(limit).execute()
         return _response_rows(response)
 
     def get_last_run(self, *, user_id: str, worker_id: str) -> dict[str, Any] | None:
@@ -550,10 +630,10 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         if not worker_ids:
             return {}
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        builder = self._client.table("runs").select("worker_id,status,created_at")
+        builder = _scope_by_workspace(builder, user_id=user_id)
         response = (
-            self._client.table("runs")
-            .select("worker_id,status,created_at")
-            .eq("user_id", user_id)
+            builder
             .in_("worker_id", worker_ids)
             .gte("created_at", cutoff)
             .execute()
@@ -583,10 +663,10 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         if not worker_ids:
             return {}
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        builder = self._client.table("runs").select("worker_id,status,created_at")
+        builder = _scope_by_workspace(builder, user_id=user_id)
         response = (
-            self._client.table("runs")
-            .select("worker_id,status,created_at")
-            .eq("user_id", user_id)
+            builder
             .in_("worker_id", worker_ids)
             .gte("created_at", cutoff)
             .execute()
@@ -695,10 +775,10 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         ).eq("id", worker_id).execute()
 
     def list_active_run_ids(self, *, user_id: str, worker_id: str) -> list[str]:
+        builder = self._client.table("runs").select("id")
+        builder = _scope_by_workspace(builder, user_id=user_id)
         response = (
-            self._client.table("runs")
-            .select("id")
-            .eq("user_id", user_id)
+            builder
             .eq("worker_id", worker_id)
             .in_("status", [RunStatus.QUEUED.value, RunStatus.RUNNING.value])
             .order("created_at")
@@ -814,12 +894,12 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
+        builder = self._client.table("runs").select(
+            "id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error"
+        )
+        builder = _scope_by_workspace(builder, user_id=user_id)
         response = (
-            self._client.table("runs")
-            .select(
-                "id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error"
-            )
-            .eq("user_id", user_id)
+            builder
             .eq("worker_id", worker_id)
             .order("created_at", desc=True)
             .range(offset, offset + limit - 1)
@@ -838,14 +918,11 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        builder = (
-            self._client.table("runs")
-            .select(
-                "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path",
-                count="exact",
-            )
-            .eq("user_id", user_id)
+        builder = self._client.table("runs").select(
+            "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path",
+            count="exact",
         )
+        builder = _scope_by_workspace(builder, user_id=user_id)
         if worker_id:
             builder = builder.eq("worker_id", worker_id)
         if statuses:
@@ -863,16 +940,11 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         return rows, total
 
     def get(self, *, user_id: str, run_id: str) -> dict[str, Any] | None:
-        response = (
-            self._client.table("runs")
-            .select(
-                "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path"
-            )
-            .eq("user_id", user_id)
-            .eq("id", run_id)
-            .limit(1)
-            .execute()
+        builder = self._client.table("runs").select(
+            "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path"
         )
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.eq("id", run_id).limit(1).execute()
         row = _first_row(response)
         if row is None:
             return None
@@ -897,21 +969,28 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
 
     def create(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         worker_id = fields["worker_id"]
-        worker = (
-            self._client.table("workers")
-            .select("id")
-            .eq("id", worker_id)
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
-        )
+        # Pre-check: confirm the worker belongs to this user. We scope by
+        # workspace_id (if contextvar is set) so a user can't trigger a
+        # run on a worker in a workspace they aren't currently viewing.
+        worker_builder = self._client.table("workers").select("id").eq("id", worker_id)
+        worker_builder = _scope_by_workspace(worker_builder, user_id=user_id)
+        worker = worker_builder.limit(1).execute()
         if _first_row(worker) is None:
             raise ValueError(f"worker {worker_id} does not belong to {user_id}")
         run_id = fields["run_id"]
+        # Stamp workspace_id on the run row. For scheduler/webhook triggers
+        # the contextvar is unset, so we fall back to the worker's
+        # workspace_id (looked up from the DB).
+        workspace_id = _resolve_workspace_id_for_write(
+            user_id=user_id,
+            explicit_workspace_id=fields.get("workspace_id"),
+            worker_id=worker_id,
+        )
         self._client.table("runs").insert(
             {
                 "id": run_id,
                 "user_id": user_id,
+                "workspace_id": workspace_id,
                 "worker_id": worker_id,
                 "status": fields.get("status") or RunStatus.QUEUED.value,
                 "trigger_source": fields.get("trigger_source") or "manual",
@@ -957,20 +1036,15 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         if "cancel_requested" in fields:
             payload["cancel_requested"] = bool(fields["cancel_requested"])
         if payload:
-            self._client.table("runs").update(payload).eq("id", run_id).eq(
-                "user_id",
-                user_id,
-            ).execute()
+            builder = self._client.table("runs").update(payload).eq("id", run_id)
+            builder = _scope_by_workspace(builder, user_id=user_id)
+            builder.execute()
         return self.get(user_id=user_id, run_id=run_id)
 
     def delete(self, *, user_id: str, run_id: str) -> bool:
-        response = (
-            self._client.table("runs")
-            .delete()
-            .eq("id", run_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
+        builder = self._client.table("runs").delete().eq("id", run_id)
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.execute()
         return bool(_response_rows(response))
 
     def set_input_json(self, *, user_id: str, run_id: str, input_json: dict[str, Any]) -> None:
@@ -1089,16 +1163,16 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         run_ids = [row["id"] for row in self.list_all_ids(user_id=user_id)]
         if not run_ids:
             return 0
-        self._client.table("runs").delete().eq("user_id", user_id).execute()
+        # Delete by run_ids (already scoped to the active workspace via
+        # list_all_ids) so we don't accidentally wipe runs across all
+        # workspaces this user owns.
+        self._client.table("runs").delete().in_("id", run_ids).execute()
         return len(run_ids)
 
     def list_all_ids(self, *, user_id: str) -> list[dict[str, Any]]:
-        response = (
-            self._client.table("runs")
-            .select("id")
-            .eq("user_id", user_id)
-            .execute()
-        )
+        builder = self._client.table("runs").select("id")
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.execute()
         return _response_rows(response)
 
     def cancel(self, *, user_id: str, run_id: str, cancelled_at: str) -> dict[str, Any] | None:
@@ -1110,10 +1184,12 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         )
 
     def count_running_for_worker(self, *, user_id: str, worker_id: str) -> int:
+        # Scoped by workspace_id when called inside a web request; falls
+        # back to user_id outside one (scheduler concurrency check).
+        builder = self._client.table("runs").select("id", count="exact")
+        builder = _scope_by_workspace(builder, user_id=user_id)
         response = (
-            self._client.table("runs")
-            .select("id", count="exact")
-            .eq("user_id", user_id)
+            builder
             .eq("worker_id", worker_id)
             .eq("status", RunStatus.RUNNING.value)
             .execute()
@@ -1145,28 +1221,19 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
         return item
 
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
-        response = (
-            self._client.table("connections")
-            .select(
-                "id,app_name,composio_connection_id,composio_user_id,status,created_at,updated_at,scopes_json,account_label,last_checked_at,last_check_status,last_check_error,user_id"
-            )
-            .eq("user_id", user_id)
-            .order("app_name")
-            .execute()
+        builder = self._client.table("connections").select(
+            "id,app_name,composio_connection_id,composio_user_id,status,created_at,updated_at,scopes_json,account_label,last_checked_at,last_check_status,last_check_error,user_id"
         )
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.order("app_name").execute()
         return [self._normalize_row(row) for row in _response_rows(response)]
 
     def get(self, *, user_id: str, composio_id: str) -> dict[str, Any] | None:
-        response = (
-            self._client.table("connections")
-            .select(
-                "id,app_name,composio_connection_id,composio_user_id,status,created_at,updated_at,scopes_json,account_label,last_checked_at,last_check_status,last_check_error,user_id"
-            )
-            .eq("user_id", user_id)
-            .eq("id", composio_id)
-            .limit(1)
-            .execute()
+        builder = self._client.table("connections").select(
+            "id,app_name,composio_connection_id,composio_user_id,status,created_at,updated_at,scopes_json,account_label,last_checked_at,last_check_status,last_check_error,user_id"
         )
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.eq("id", composio_id).limit(1).execute()
         row = _first_row(response)
         return self._normalize_row(row) if row else None
 
@@ -1187,10 +1254,15 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
         connection_id = fields["id"]
         created_at = fields.get("created_at") or datetime.now(timezone.utc).isoformat()
         updated_at = fields.get("updated_at") or created_at
+        workspace_id = _resolve_workspace_id_for_write(
+            user_id=user_id,
+            explicit_workspace_id=fields.get("workspace_id"),
+        )
         self._client.table("connections").upsert(
             {
                 "id": connection_id,
                 "user_id": user_id,
+                "workspace_id": workspace_id,
                 "app_name": fields["app_name"],
                 "composio_connection_id": fields["composio_connection_id"],
                 "composio_user_id": fields.get("composio_user_id") or user_id,
@@ -1227,20 +1299,15 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
         if "scopes_json" in fields:
             payload["scopes_json"] = _json_storage_value(fields["scopes_json"], [])
         if payload:
-            self._client.table("connections").update(payload).eq("id", composio_id).eq(
-                "user_id",
-                user_id,
-            ).execute()
+            builder = self._client.table("connections").update(payload).eq("id", composio_id)
+            builder = _scope_by_workspace(builder, user_id=user_id)
+            builder.execute()
         return self.get(user_id=user_id, composio_id=composio_id)
 
     def delete(self, *, user_id: str, composio_id: str) -> bool:
-        response = (
-            self._client.table("connections")
-            .delete()
-            .eq("id", composio_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
+        builder = self._client.table("connections").delete().eq("id", composio_id)
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.execute()
         return bool(_response_rows(response))
 
     def list_all(self) -> list[dict[str, Any]]:
@@ -1258,15 +1325,11 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
 
 class SupabaseSecretRepository(_BaseSupabaseRepository):
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
-        response = (
-            self._client.table("secrets")
-            .select(
-                "user_id,name,value,status,last_used_at,created_at,updated_at,last_checked_at,last_check_status,last_check_error"
-            )
-            .eq("user_id", user_id)
-            .order("name")
-            .execute()
+        builder = self._client.table("secrets").select(
+            "user_id,name,value,status,last_used_at,created_at,updated_at,last_checked_at,last_check_status,last_check_error"
         )
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.order("name").execute()
         items = _response_rows(response)
         for item in items:
             ciphertext = _bytea_bytes(item.get("value"))
@@ -1274,16 +1337,11 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
         return items
 
     def get(self, *, user_id: str, name: str) -> dict[str, Any] | None:
-        response = (
-            self._client.table("secrets")
-            .select(
-                "user_id,name,value,status,last_used_at,created_at,updated_at,last_checked_at,last_check_status,last_check_error"
-            )
-            .eq("user_id", user_id)
-            .eq("name", name)
-            .limit(1)
-            .execute()
+        builder = self._client.table("secrets").select(
+            "user_id,name,value,status,last_used_at,created_at,updated_at,last_checked_at,last_check_status,last_check_error"
         )
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.eq("name", name).limit(1).execute()
         row = _first_row(response)
         if row is None:
             return None
@@ -1294,18 +1352,15 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
     def set(self, *, user_id: str, name: str, value: str, status: str = "set") -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         ciphertext = _bytea_literal(encrypt_secret(value))
-        existing = (
-            self._client.table("secrets")
-            .select("created_at")
-            .eq("user_id", user_id)
-            .eq("name", name)
-            .limit(1)
-            .execute()
-        )
+        workspace_id = _resolve_workspace_id_for_write(user_id=user_id)
+        existing_builder = self._client.table("secrets").select("created_at")
+        existing_builder = _scope_by_workspace(existing_builder, user_id=user_id)
+        existing = existing_builder.eq("name", name).limit(1).execute()
         if _first_row(existing) is None:
             self._client.table("secrets").insert(
                 {
                     "user_id": user_id,
+                    "workspace_id": workspace_id,
                     "name": name,
                     "value": ciphertext,
                     "status": status,
@@ -1314,37 +1369,30 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
                 }
             ).execute()
         else:
-            self._client.table("secrets").update(
+            update_builder = self._client.table("secrets").update(
                 {
                     "value": ciphertext,
                     "status": status,
                     "updated_at": now,
                 }
-            ).eq("user_id", user_id).eq("name", name).execute()
+            ).eq("name", name)
+            update_builder = _scope_by_workspace(update_builder, user_id=user_id)
+            update_builder.execute()
         item = self.get(user_id=user_id, name=name)
         if item is None:
             raise RuntimeError(f"failed to set secret {name}")
         return item
 
     def delete(self, *, user_id: str, name: str) -> bool:
-        response = (
-            self._client.table("secrets")
-            .delete()
-            .eq("user_id", user_id)
-            .eq("name", name)
-            .execute()
-        )
+        builder = self._client.table("secrets").delete().eq("name", name)
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.execute()
         return bool(_response_rows(response))
 
     def read_value(self, *, user_id: str, name: str) -> str | None:
-        response = (
-            self._client.table("secrets")
-            .select("value")
-            .eq("user_id", user_id)
-            .eq("name", name)
-            .limit(1)
-            .execute()
-        )
+        builder = self._client.table("secrets").select("value")
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.eq("name", name).limit(1).execute()
         row = _first_row(response)
         if row is None:
             return None
@@ -1352,19 +1400,17 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
         if ciphertext is None:
             return None
         plaintext = decrypt_secret(ciphertext)
-        self._client.table("secrets").update(
+        used_builder = self._client.table("secrets").update(
             {"last_used_at": datetime.now(timezone.utc).isoformat()}
-        ).eq("user_id", user_id).eq("name", name).execute()
+        ).eq("name", name)
+        used_builder = _scope_by_workspace(used_builder, user_id=user_id)
+        used_builder.execute()
         return plaintext
 
     def list_names(self, *, user_id: str) -> set[str]:
-        response = (
-            self._client.table("secrets")
-            .select("name")
-            .eq("user_id", user_id)
-            .order("name")
-            .execute()
-        )
+        builder = self._client.table("secrets").select("name")
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.order("name").execute()
         return {str(item["name"]) for item in _response_rows(response)}
 
     def resolve(self, *, user_id: str, names: Iterable[str]) -> dict[str, str]:

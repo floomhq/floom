@@ -7,6 +7,7 @@ import { Activity, Box, Clock, Settings, Menu, X, Plug, Plus, Search } from "luc
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
+import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 
 function FloomMark({ size = 28 }: { size?: number }) {
   return (
@@ -145,6 +146,7 @@ export function Sidebar() {
             <span className="font-semibold text-[15px] tracking-tight">Floom</span>
           </Link>
         </div>
+        <WorkspaceSwitcher />
         <SidebarPrimaryActions />
         <NavLinks pathname={pathname} />
         <UserProfileFooter />
@@ -174,6 +176,7 @@ export function Sidebar() {
               </button>
             </div>
             <div className="py-3 flex-1 overflow-auto">
+              <WorkspaceSwitcher />
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>

@@ -11,11 +11,18 @@ import jwt
 from fastapi import HTTPException, Request
 
 from apps.api._engine import ensure_engine_api_path
+from apps.api.auth.workspace_context import set_active_workspace_id
 from apps.api.config import get_cloud_settings
+from apps.api.db import workspaces as workspace_repo
 
 ensure_engine_api_path()
 
 from auth.context import AuthContext  # noqa: E402
+
+
+# Cookie name shared with apps.api.routes.workspaces and the dashboard
+# (via Set-Cookie on .floom.dev). HttpOnly + Secure, 30d lifetime.
+ACTIVE_WORKSPACE_COOKIE = "workeros_active_workspace"
 
 
 def _parse_bearer_token(authorization: str | None) -> str:
@@ -132,13 +139,33 @@ class SupabaseAuthProvider:
         user_id = claims.get("sub")
         if not user_id:
             raise HTTPException(status_code=401, detail="unauthorized")
-        email = claims.get("email")
+        email_value = claims.get("email")
+        email = email_value if isinstance(email_value, str) else None
         scopes = ()
         app_metadata = claims.get("app_metadata") or {}
         if isinstance(app_metadata, dict):
             scopes = _normalize_scopes(app_metadata.get("scopes"))
+
+        # Workspace resolution: cookie -> owner check -> default -> lazy
+        # bootstrap. The contextvar feeds every repository call inside this
+        # request, so all queries scope by the active workspace_id.
+        requested_workspace_id = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
+        try:
+            active = workspace_repo.resolve_active_workspace(
+                user_id=str(user_id),
+                email=email,
+                requested_id=requested_workspace_id,
+            )
+            set_active_workspace_id(str(active["id"]))
+        except Exception:
+            # If workspace resolution fails (e.g. transient Supabase
+            # error), fall back to user-scoped behavior so the request
+            # doesn't 500. Repos will scope by user_id when contextvar
+            # is None.
+            set_active_workspace_id(None)
+
         return AuthContext(
             user_id=str(user_id),
-            email=email if isinstance(email, str) else None,
+            email=email,
             scopes=scopes,
         )

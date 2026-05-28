@@ -11,6 +11,7 @@ from apps.api.cloud_scheduler import start_cloud_scheduler, stop_cloud_scheduler
 from apps.api.cloud_webhooks import verify_webhook_token
 from apps.api._engine import import_engine_module
 from apps.api.routes.auth import router as auth_router
+from apps.api.routes.workspaces import router as workspaces_router
 
 import apps.api.startup  # noqa: F401
 
@@ -45,6 +46,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(auth_router)
+# Mount workspaces under /api BEFORE the engine sub-app mount; otherwise
+# FastAPI's path matching dispatches /api/workspaces into the engine
+# (which doesn't know about it) and returns 404.
+app.include_router(workspaces_router, prefix="/api")
 
 
 @app.post("/api/webhooks/{worker_id}", response_model=engine_main.ActionResponse)

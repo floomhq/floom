@@ -156,6 +156,18 @@ export const api = {
         method: "POST",
       }),
   },
+  workspaces: {
+    list: () => fetchJson<{ workspaces: import("./types").Workspace[]; active_id: string | null }>("/workspaces"),
+    create: (name: string) =>
+      fetchJson<import("./types").Workspace>("/workspaces", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    select: (id: string) =>
+      fetchJson<import("./types").Workspace>(`/workspaces/${encodeURIComponent(id)}/select`, {
+        method: "POST",
+      }),
+  },
   integrations: {
     triggers: () =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),

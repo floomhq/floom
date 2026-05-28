@@ -1,5 +1,16 @@
 export type WorkerStatus = "healthy" | "needs_attention" | "missing_secret" | "error";
 
+// v1 workspaces: a single user can create + switch between N personal
+// workspaces. No invites, no roles, no members yet — owner_user_id is
+// the only access control.
+export interface Workspace {
+  id: string;
+  name: string;
+  owner_user_id: string;
+  created_at: string;
+}
+
+
 export interface TriggerSpec {
   type: string;
   cron?: string;
