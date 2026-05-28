@@ -199,6 +199,8 @@ export interface WorkerSummary {
   triggers_spec: TriggerSpec[];
   recent_stats?: RecentStats | null;
   timeseries?: TimeseriesDay[] | null;
+  connections: string[];  // Composio app slugs declared in worker.yml
+  runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
 }
 
 export interface WorkerFile {
