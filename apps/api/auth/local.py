@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 
 from fastapi import HTTPException, Request
 
@@ -19,4 +20,11 @@ class SharedSecretAuthProvider:
         provided = request.headers.get("x-floom-secret", "")
         if not provided or not hmac.compare_digest(provided, self._secret):
             raise HTTPException(status_code=401, detail="unauthorized")
-        return AuthContext(user_id="federico", email=None, scopes=("admin",))
+        user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
+        if os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":
+            header_user = (request.headers.get("x-floom-user") or "").strip()
+            if header_user:
+                if not re.fullmatch(r"[A-Za-z0-9_.:@-]{1,128}", header_user):
+                    raise HTTPException(status_code=400, detail="invalid x-floom-user")
+                user_id = header_user
+        return AuthContext(user_id=user_id, email=None, scopes=("admin",))

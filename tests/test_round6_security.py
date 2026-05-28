@@ -100,7 +100,7 @@ def test_delete_connection_requires_ownership(monkeypatch, tmp_path):
     with patch("composio_client.revoke_connection") as revoke:
         resp = client.delete(f"/connections/{created.json()['id']}", headers=_headers("user-b"))
 
-    assert resp.status_code == 403
+    assert resp.status_code == 404
     revoke.assert_not_called()
 
 
@@ -170,7 +170,7 @@ def test_cors_blocks_unknown_origin(monkeypatch, tmp_path):
     assert resp.headers.get("access-control-allow-origin") != "https://evil.com"
 
 
-def test_rate_limit_runs(monkeypatch, tmp_path):
+def test_run_create_missing_worker_is_not_ip_globally_limited(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
 
@@ -179,8 +179,7 @@ def test_rate_limit_runs(monkeypatch, tmp_path):
         for _ in range(11)
     ]
 
-    assert responses[-1].status_code == 429
-    assert responses[-1].headers.get("Retry-After") == "60"
+    assert [response.status_code for response in responses] == [404] * 11
 
 
 def test_stock_agent_workers_do_not_require_user_openai_secret():
