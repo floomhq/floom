@@ -1,10 +1,10 @@
 [Unit]
-Description=Workeros daily SQLite snapshot
+Description=Workeros hourly data snapshot and artifact rotation
 After=workeros-api.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/root/workeros/apps/api
+WorkingDirectory=/root/workeros
 EnvironmentFile=/root/.config/workeros/api.env
 ExecStart=/root/workeros/ops/backup-db.sh
 Nice=10

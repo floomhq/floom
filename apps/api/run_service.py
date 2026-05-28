@@ -38,6 +38,18 @@ _PLACEHOLDER_MARKERS = (
 )
 _PATH_VALUE_RE = re.compile(r"^(?:\.?/)?(?:out|outputs|output|artifacts|inputs)/[A-Za-z0-9._/@ -]+$")
 
+
+class InsufficientDiskSpaceError(RuntimeError):
+    """Raised when the API refuses run creation because local disk is too full."""
+
+
+def _minimum_free_disk_bytes() -> int:
+    raw = os.environ.get("WORKEROS_MIN_FREE_DISK_BYTES", str(1024 * 1024 * 1024))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 1024 * 1024 * 1024
+
 # ---------------------------------------------------------------------------
 # SSE event publisher hook
 # ---------------------------------------------------------------------------
@@ -110,6 +122,30 @@ def _configured_db_path() -> Path:
     if configured:
         return Path(configured)
     return Path(__file__).resolve().parents[2] / "data" / "floom.db"
+
+
+def _existing_disk_usage_path(path: Path) -> Path:
+    candidate = path if path.suffix == "" else path.parent
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate
+
+
+def _ensure_prerun_disk_space() -> None:
+    minimum = _minimum_free_disk_bytes()
+    if minimum <= 0:
+        return
+    checks = {
+        "database": _existing_disk_usage_path(_configured_db_path()),
+        "artifacts": _existing_disk_usage_path(ARTIFACTS_DIR),
+    }
+    failures: list[str] = []
+    for label, path in checks.items():
+        free = shutil.disk_usage(path).free
+        if free < minimum:
+            failures.append(f"{label} path {path} has {free} bytes free, minimum {minimum}")
+    if failures:
+        raise InsufficientDiskSpaceError("; ".join(failures))
 
 
 def _repos(repos: Repositories | None = None) -> Repositories:
@@ -236,6 +272,7 @@ def create_run(
     repos: Repositories | None = None,
 ) -> str:
     repos_obj = _repos(repos)
+    _ensure_prerun_disk_space()
     run_id = f"run_{uuid.uuid4().hex[:12]}"
     loaded = _load_worker_recipe(worker_id, repos=repos_obj)
     owner_id = user_id or (loaded[0] if loaded else None) or _worker_owner_id(worker_id, repos_obj)
