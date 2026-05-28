@@ -24,6 +24,13 @@ from auth.context import AuthContext  # noqa: E402
 # (via Set-Cookie on .floom.dev). HttpOnly + Secure, 30d lifetime.
 ACTIVE_WORKSPACE_COOKIE = "workeros_active_workspace"
 
+# Header used by the @floomhq/workeros CLI (cloud mode) to scope a request
+# to a specific workspace. Mirrors the cookie-based dashboard flow.
+# Ownership is validated by workspace_repo.resolve_active_workspace, exactly
+# like the cookie path; an attacker can NOT scope themselves into another
+# user's workspace by setting the header.
+ACTIVE_WORKSPACE_HEADER = "x-workeros-workspace"
+
 
 def _parse_bearer_token(authorization: str | None) -> str:
     header = (authorization or "").strip()
@@ -146,10 +153,18 @@ class SupabaseAuthProvider:
         if isinstance(app_metadata, dict):
             scopes = _normalize_scopes(app_metadata.get("scopes"))
 
-        # Workspace resolution: cookie -> owner check -> default -> lazy
-        # bootstrap. The contextvar feeds every repository call inside this
-        # request, so all queries scope by the active workspace_id.
-        requested_workspace_id = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
+        # Workspace resolution: header (CLI) -> cookie (dashboard) -> owner
+        # check -> default -> lazy bootstrap. The contextvar feeds every
+        # repository call inside this request, so all queries scope by the
+        # active workspace_id. resolve_active_workspace() validates that
+        # the requested workspace_id is owned by user_id; an unauthorized
+        # header/cookie falls back to the user's default workspace, never
+        # leaks data from another user's workspace.
+        header_workspace_id = request.headers.get(ACTIVE_WORKSPACE_HEADER)
+        cookie_workspace_id = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
+        requested_workspace_id = (
+            (header_workspace_id or "").strip() or cookie_workspace_id
+        )
         try:
             active = workspace_repo.resolve_active_workspace(
                 user_id=str(user_id),

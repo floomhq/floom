@@ -43,7 +43,12 @@ def _client(rows: dict[str, dict], monkeypatch) -> TestClient:
     monkeypatch.setattr(
         auth_routes,
         "get_cloud_settings",
-        lambda: SimpleNamespace(cli_code_ttl_seconds=300),
+        lambda: SimpleNamespace(
+            cli_code_ttl_seconds=300,
+            supabase_url="https://test.supabase.co",
+            supabase_anon_key="anon-test-key",
+            api_base="https://workeros-api.test",
+        ),
     )
     return TestClient(app)
 
