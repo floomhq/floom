@@ -263,10 +263,21 @@ export interface PlatformConfig {
 export interface SystemOverviewStats {
   runs_24h: number;
   runs_24h_sparkline: number[];
-  success_rate_7d: number;
+  runs_7d_sparkline: OverviewSparklineBucket[];
+  success_rate_7d: number | null;
   active_workers_count: number;
+  paused_workers_count: number;
   connections_healthy: number;
   connections_total: number;
+  work_shipped_7d: number;
+  work_shipped_previous_7d: number;
+  runs_today: number;
+  completed_today: number;
+  failed_today: number;
+  running_now: number;
+  queued_now: number;
+  scheduled_24h_count: number;
+  next_scheduled_at?: string | null;
 }
 
 export interface SystemOverviewRunItem {
@@ -291,16 +302,33 @@ export interface SystemOverviewScheduledItem {
   worker_name: string;
   next_fire_at: string;
   trigger_label: string;
+  trigger_source: string;
+  paused?: boolean;
 }
 
 export interface SystemOverviewAttentionItem {
+  kind?: "failing" | "connection_expired" | "connection_expiring" | string;
   type: string;
   worker_id?: string;
+  worker_name?: string;
   connection_id?: string;
   provider_slug?: string;
   provider_display_name?: string;
+  provider_names?: string[];
   message: string;
+  cause?: string | null;
+  error_code?: string | null;
+  recent_failure_count?: number | null;
+  last_failed_at?: string | null;
+  suggested_actions?: string[];
   action_url: string;
+}
+
+export interface OverviewSparklineBucket {
+  label: string;
+  started_at: string;
+  total: number;
+  failed: number;
 }
 
 export interface SystemOverview {
