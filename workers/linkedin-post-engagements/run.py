@@ -97,12 +97,15 @@ def build_snapshot(profile_url: str, new_posts: list[dict], new_engagers: list[d
 
     posts = []
     for post in new_posts:
-        url = post["url"]
+        url = post.get("url")
+        if not url:
+            continue
+        posted_at = post.get("posted_at") or {}
         posts.append(
             {
                 "url": url,
                 "urn": (post.get("urn") or {}).get("activity_urn"),
-                "date": post["posted_at"]["date"],
+                "date": posted_at.get("date"),
                 "text": post.get("text", ""),
                 "stats": post.get("stats", {}),
                 "engagers": engagers_by_post.get(url, []),
