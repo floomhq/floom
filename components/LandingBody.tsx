@@ -3,9 +3,9 @@ import "../app/landing.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ThemeModeButton } from "./ThemeModeButton";
-import { OAUTH_LOGIN_URL } from "@/lib/api";
-
-const SIGN_IN_HREF = OAUTH_LOGIN_URL("/app");
+// Landing CTAs point at /login (lets the user choose Google or GitHub) instead
+// of triggering one provider directly.
+const SIGN_IN_HREF = "/login";
 
 /* ─── SVG icons ──────────────────────────────────────────────────── */
 const MarkSVG = ({ size = 17 }: { size?: number }) => (
