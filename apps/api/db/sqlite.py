@@ -1171,15 +1171,20 @@ class SqliteRunRepository:
 
 
 class SqliteConnectionRepository:
+    _columns = """
+        id, app_name, composio_connection_id, status, created_at, updated_at,
+        scopes_json, account_label, last_checked_at, last_check_status, last_check_error, user_id,
+        kind, mcp_label, mcp_url, mcp_auth_secret, mcp_allowed_tools_json
+    """
+
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
         with get_db() as conn:
             rows = conn.execute(
-                """
-                SELECT id, app_name, composio_connection_id, status, created_at, updated_at,
-                       scopes_json, account_label, last_checked_at, last_check_status, last_check_error, user_id
+                f"""
+                SELECT {self._columns}
                 FROM composio_connections
                 WHERE user_id = ?
-                ORDER BY app_name
+                ORDER BY kind, app_name
                 """,
                 (user_id,),
             ).fetchall()
@@ -1188,9 +1193,8 @@ class SqliteConnectionRepository:
     def get(self, *, user_id: str, composio_id: str) -> dict[str, Any] | None:
         with get_db() as conn:
             row = conn.execute(
-                """
-                SELECT id, app_name, composio_connection_id, status, created_at, updated_at,
-                       scopes_json, account_label, last_checked_at, last_check_status, last_check_error, user_id
+                f"""
+                SELECT {self._columns}
                 FROM composio_connections
                 WHERE user_id = ? AND id = ?
                 LIMIT 1
@@ -1202,9 +1206,8 @@ class SqliteConnectionRepository:
     def get_by_composio_connection_id(self, *, composio_connection_id: str) -> dict[str, Any] | None:
         with get_db() as conn:
             row = conn.execute(
-                """
-                SELECT id, app_name, composio_connection_id, status, created_at, updated_at,
-                       scopes_json, account_label, last_checked_at, last_check_status, last_check_error, user_id
+                f"""
+                SELECT {self._columns}
                 FROM composio_connections
                 WHERE composio_connection_id = ?
                 LIMIT 1
@@ -1225,13 +1228,21 @@ class SqliteConnectionRepository:
         last_checked_at = fields.get("last_checked_at")
         last_check_status = fields.get("last_check_status")
         last_check_error = fields.get("last_check_error")
+        kind = fields.get("kind") or "composio"
+        mcp_label = fields.get("mcp_label")
+        mcp_url = fields.get("mcp_url")
+        mcp_auth_secret = fields.get("mcp_auth_secret")
+        mcp_allowed_tools_json = fields.get("mcp_allowed_tools_json")
+        if mcp_allowed_tools_json is not None and not isinstance(mcp_allowed_tools_json, str):
+            mcp_allowed_tools_json = _json_dump(mcp_allowed_tools_json)
         with get_db() as conn:
             conn.execute(
                 """
                 INSERT INTO composio_connections
                     (id, app_name, composio_connection_id, status, created_at, updated_at,
-                     scopes_json, account_label, last_checked_at, last_check_status, last_check_error, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     scopes_json, account_label, last_checked_at, last_check_status, last_check_error, user_id,
+                     kind, mcp_label, mcp_url, mcp_auth_secret, mcp_allowed_tools_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     app_name = excluded.app_name,
                     composio_connection_id = excluded.composio_connection_id,
@@ -1242,7 +1253,12 @@ class SqliteConnectionRepository:
                     last_checked_at = excluded.last_checked_at,
                     last_check_status = excluded.last_check_status,
                     last_check_error = excluded.last_check_error,
-                    user_id = excluded.user_id
+                    user_id = excluded.user_id,
+                    kind = excluded.kind,
+                    mcp_label = excluded.mcp_label,
+                    mcp_url = excluded.mcp_url,
+                    mcp_auth_secret = excluded.mcp_auth_secret,
+                    mcp_allowed_tools_json = excluded.mcp_allowed_tools_json
                 """,
                 (
                     connection_id,
@@ -1257,6 +1273,11 @@ class SqliteConnectionRepository:
                     last_check_status,
                     last_check_error,
                     user_id,
+                    kind,
+                    mcp_label,
+                    mcp_url,
+                    mcp_auth_secret,
+                    mcp_allowed_tools_json,
                 ),
             )
         item = self.get(user_id=user_id, composio_id=connection_id)
@@ -1275,6 +1296,11 @@ class SqliteConnectionRepository:
             "last_checked_at",
             "last_check_status",
             "last_check_error",
+            "kind",
+            "mcp_label",
+            "mcp_url",
+            "mcp_auth_secret",
+            "mcp_allowed_tools_json",
         }
         updates: list[str] = []
         params: list[Any] = []
@@ -1306,9 +1332,8 @@ class SqliteConnectionRepository:
     def list_all(self) -> list[dict[str, Any]]:
         with get_db() as conn:
             rows = conn.execute(
-                """
-                SELECT id, app_name, composio_connection_id, status, created_at, updated_at,
-                       scopes_json, account_label, last_checked_at, last_check_status, last_check_error, user_id
+                f"""
+                SELECT {self._columns}
                 FROM composio_connections
                 ORDER BY created_at, id
                 """

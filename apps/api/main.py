@@ -4860,6 +4860,13 @@ class ConnectionInitRequest(BaseModel):
     app_name: str
 
 
+class MCPConnectionCreateRequest(BaseModel):
+    label: str
+    url: str
+    auth_secret: Optional[str] = None
+    allowed_tools: List[str] = Field(default_factory=list)
+
+
 class ConnectionItem(BaseModel):
     id: str
     app_name: str
@@ -4867,11 +4874,16 @@ class ConnectionItem(BaseModel):
     status: str
     created_at: str
     updated_at: str
+    kind: str = "composio"
     scopes: List[str] = []
     account_label: Optional[str] = None
     display_name: Optional[str] = None
     last_checked_at: Optional[str] = None
     last_check_status: Optional[str] = None
+    mcp_label: Optional[str] = None
+    mcp_url: Optional[str] = None
+    mcp_auth_secret: Optional[str] = None
+    mcp_allowed_tools: List[str] = []
 
 
 class ConnectionTestResult(BaseModel):
@@ -4994,6 +5006,18 @@ def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
     return []
 
 
+def _parse_json_string_list(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, str) and item.strip()]
+
+
 _CONNECTION_LIST_REFRESH_STATUSES = {"initiated", "pending"}
 _CONNECTION_LIST_REFRESH_INTERVAL = timedelta(seconds=30)
 _COMPOSIO_ACTIVE_STATUSES = {"active", "valid"}
@@ -5007,6 +5031,9 @@ def _normalize_composio_connection_status(status: Optional[str]) -> str:
 
 
 def _connection_list_refresh_due(row: Dict[str, Any], now: datetime) -> bool:
+    if (row.get("kind") or "composio") != "composio":
+        return False
+
     status = str(row.get("status") or "").lower()
     if status not in _CONNECTION_LIST_REFRESH_STATUSES:
         return False
@@ -5080,9 +5107,39 @@ def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
 
 def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
     item = dict(data)
+    item["kind"] = item.get("kind") or "composio"
     item["account_label"] = _redact_connection_account_label(item.get("account_label"))
     item["display_name"] = _redact_connection_account_label(item.get("display_name"))
+    item["mcp_allowed_tools"] = _parse_json_string_list(item.pop("mcp_allowed_tools_json", None))
     return ConnectionItem(**item)
+
+
+def _normalize_mcp_connection_payload(payload: MCPConnectionCreateRequest) -> Dict[str, Any]:
+    label = payload.label.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", label):
+        raise HTTPException(
+            status_code=400,
+            detail="MCP label must be 1-64 letters, digits, underscores, or hyphens",
+        )
+
+    url = payload.url.strip()
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="MCP URL must start with http:// or https://")
+
+    auth_secret = (payload.auth_secret or "").strip() or None
+    if auth_secret and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", auth_secret):
+        raise HTTPException(status_code=400, detail="MCP auth secret must be a valid secret name")
+
+    allowed_tools = [tool.strip() for tool in payload.allowed_tools if tool and tool.strip()]
+    if len(allowed_tools) != len(payload.allowed_tools):
+        raise HTTPException(status_code=400, detail="MCP allowed tools must be non-empty")
+
+    return {
+        "label": label,
+        "url": url,
+        "auth_secret": auth_secret,
+        "allowed_tools": allowed_tools,
+    }
 
 
 def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str, user_id: str) -> Optional[str]:
@@ -5267,6 +5324,44 @@ def initiate_connection(
     )
 
 
+@app.post("/connections/mcp", response_model=ConnectionItem)
+def create_mcp_connection(
+    payload: MCPConnectionCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ConnectionItem:
+    normalized = _normalize_mcp_connection_payload(payload)
+    label = normalized["label"]
+    label_key = label.lower()
+    for existing in repos.connections.list(user_id=auth.user_id):
+        if (existing.get("kind") or "composio") != "mcp":
+            continue
+        if str(existing.get("mcp_label") or "").lower() == label_key:
+            raise HTTPException(status_code=409, detail="MCP label already exists")
+
+    conn_id = str(_uuid_mod.uuid4())
+    now = now_iso()
+    app_name = f"mcp:{label.lower()}"
+    row = repos.connections.upsert(
+        user_id=auth.user_id,
+        id=conn_id,
+        app_name=app_name,
+        composio_connection_id=f"mcp:{conn_id}",
+        status="active",
+        created_at=now,
+        updated_at=now,
+        kind="mcp",
+        account_label=normalized["url"],
+        mcp_label=label,
+        mcp_url=normalized["url"],
+        mcp_auth_secret=normalized["auth_secret"],
+        mcp_allowed_tools_json=normalized["allowed_tools"],
+    )
+    item = row_to_dict(row)
+    item["scopes"] = _parse_scopes_json(item.pop("scopes_json", None))
+    return _public_connection_item(item)
+
+
 @app.get("/connections/callback")
 def connections_callback(connection_id: str = "", status: str = ""):
     """OAuth callback landing — Composio redirects here after user authorizes.
@@ -5342,6 +5437,9 @@ def get_connection_status(
     item = row_to_dict(row)
     item["scopes"] = _parse_scopes_json(item.pop("scopes_json", None))
 
+    if (item.get("kind") or "composio") != "composio":
+        return _public_connection_item(item)
+
     # Refresh from Composio
     try:
         from composio_client import check_status
@@ -5371,16 +5469,17 @@ def delete_connection(
     repos: Repositories = Depends(get_repos),
 ):
     user_id = auth.user_id
-    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id", repos=repos)
+    row = _connection_row_for_user(connection_id, user_id, "composio_connection_id, kind", repos=repos)
 
     composio_conn_id = row["composio_connection_id"]
 
     # Attempt to revoke from Composio (best-effort)
-    try:
-        from composio_client import revoke_connection
-        revoke_connection(composio_conn_id)
-    except Exception as exc:
-        logger.warning("Could not revoke Composio connection %s: %s", composio_conn_id, exc)
+    if (row.get("kind") or "composio") == "composio":
+        try:
+            from composio_client import revoke_connection
+            revoke_connection(composio_conn_id)
+        except Exception as exc:
+            logger.warning("Could not revoke Composio connection %s: %s", composio_conn_id, exc)
 
     repos.connections.delete(user_id=user_id, composio_id=connection_id)
 
@@ -5531,12 +5630,20 @@ def test_connection(
     row = _connection_row_for_user(
         connection_id,
         auth.user_id,
-        "composio_connection_id",
+        "composio_connection_id, kind",
         repos=repos,
     )
 
     composio_conn_id = row["composio_connection_id"]
     tested_at = now_iso()
+
+    if (row.get("kind") or "composio") != "composio":
+        _write_connection_check(connection_id, "valid", None, tested_at, repos=repos)
+        return ConnectionTestResult(
+            status="valid",
+            reason="MCP server is saved; runtime connection is checked when a worker runs.",
+            tested_at=tested_at,
+        )
 
     try:
         from composio_client import check_status
@@ -5635,6 +5742,9 @@ async def _run_connection_sweep() -> None:
     rows = repos.connections.list_all()
 
     for row in rows:
+        if (row.get("kind") or "composio") != "composio":
+            logger.debug("Skipped MCP connection %s during Composio sweep", row["id"])
+            continue
         conn_id = row["id"]
         composio_conn_id = row["composio_connection_id"]
         tested_at = now_iso()
