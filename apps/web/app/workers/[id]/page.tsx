@@ -72,6 +72,112 @@ const NAV_ITEMS: NavItem[] = [
   { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
 ];
 
+function triggerTypeLabel(type?: string) {
+  const value = (type || "manual").toLowerCase();
+  if (value === "schedule" || value === "scheduled") return "Schedule";
+  if (value === "webhook") return "Webhook";
+  if (value === "composio") return "App event";
+  return "Manual";
+}
+
+function triggerHeadline(spec: TriggerSpec) {
+  const type = (spec.type || "manual").toLowerCase();
+  if (type === "schedule" || type === "scheduled") {
+    if (spec.cron) return "Cron";
+    return "Recurring schedule";
+  }
+  if (type === "webhook") return "Webhook endpoint";
+  if (type === "composio") {
+    const event = spec.composio?.event;
+    return event ? `On ${event}` : "Connected app event";
+  }
+  return "Manual run";
+}
+
+function triggerDetails(spec: TriggerSpec) {
+  const type = (spec.type || "manual").toLowerCase();
+  if (type === "schedule" || type === "scheduled") {
+    return [
+      spec.cron ? { label: "Cron", value: spec.cron, code: true } : null,
+      spec.timezone ? { label: "Timezone", value: spec.timezone, code: false } : null,
+    ].filter(Boolean) as { label: string; value: string; code: boolean }[];
+  }
+  if (type === "webhook") {
+    const methods = spec.webhook?.allowed_methods?.length
+      ? spec.webhook.allowed_methods.join(", ")
+      : "POST";
+    return [
+      { label: "Methods", value: methods, code: false },
+      { label: "Secret", value: spec.webhook?.secret ? "Required" : "Not required", code: false },
+    ];
+  }
+  if (type === "composio") {
+    return [
+      spec.composio?.connection_id
+        ? { label: "Connection", value: spec.composio.connection_id, code: true }
+        : null,
+      spec.composio?.event
+        ? { label: "Event", value: spec.composio.event, code: true }
+        : null,
+    ].filter(Boolean) as { label: string; value: string; code: boolean }[];
+  }
+  return [{ label: "Source", value: "Manual Run tab", code: false }];
+}
+
+function ConfiguredTriggersSummary({ specs }: { specs: TriggerSpec[] }) {
+  if (specs.length === 0) return null;
+
+  return (
+    <div className="rounded-md border border-line bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Configured in worker.yml
+          </p>
+          <h3 className="text-sm font-medium text-foreground">
+            {specs.length === 1 ? "Declared trigger" : "Declared triggers"}
+          </h3>
+        </div>
+        <Badge variant="outline" className="shrink-0 border-line text-muted-foreground">
+          {specs.length}
+        </Badge>
+      </div>
+      <div className="mt-4 space-y-3">
+        {specs.map((spec, index) => (
+          <div
+            key={`${spec.type || "manual"}-${spec.cron || spec.composio?.event || index}`}
+            className="rounded-md border border-line bg-background/60 p-3"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="rounded text-xs">
+                {triggerTypeLabel(spec.type)}
+              </Badge>
+              <span className="text-sm font-medium text-foreground">
+                {triggerHeadline(spec)}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {triggerDetails(spec).map((detail) => (
+                <span
+                  key={`${detail.label}-${detail.value}`}
+                  className="inline-flex items-center gap-1.5 rounded border border-line bg-card px-2 py-1 text-xs text-muted-foreground"
+                >
+                  <span>{detail.label}</span>
+                  {detail.code ? (
+                    <code className="font-mono text-foreground">{detail.value}</code>
+                  ) : (
+                    <span className="text-foreground">{detail.value}</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main page component
 // ---------------------------------------------------------------------------
@@ -555,7 +661,16 @@ export default function WorkerDetailPage() {
         )}
 
         {activeSection === "triggers" && (
-          <div className="max-w-2xl">
+          <div className="max-w-2xl space-y-6">
+            <ConfiguredTriggersSummary
+              specs={
+                worker.triggers_spec?.length
+                  ? worker.triggers_spec
+                  : worker.config.trigger
+                    ? [worker.config.trigger as TriggerSpec]
+                    : []
+              }
+            />
             <TriggersEditor
               rows={triggerRows}
               onChange={(rows) => {
