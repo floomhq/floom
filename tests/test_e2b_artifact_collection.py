@@ -1,15 +1,19 @@
 import os
 import sys
+import tarfile
 import types
+from io import BytesIO
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, os.path.join(str(ROOT), "apps", "api"))
 
+import contexts as contexts_module
 from models import WorkerConfig, WorkerOutput, WorkerRuntime, WorkerTrigger
 from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import (
     E2BSandboxDriver,
+    _extract_context_tar,
     _install_timeout_for_run,
     _register_sandbox,
     _sandbox_lifetime_timeout,
@@ -88,8 +92,16 @@ class FakeFullSandbox:
 
 
 class FakeWritableFiles(FakeFiles):
+    def __init__(self, files: dict[str, bytes]):
+        super().__init__(files)
+        self.dirs = set()
+
     def make_dir(self, _path):
+        self.dirs.add(_path)
         return None
+
+    def exists(self, path, **_kwargs):
+        return path in self._files or path in self.dirs
 
     def write(self, path, content):
         if isinstance(content, str):
@@ -279,6 +291,62 @@ def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
     assert logs.count(("info", "[e2b] live stdout")) == 1
     assert logs.count(("warning", "[e2b] stderr: live stderr")) == 1
     assert not any("stdout after exit" in message for _level, message in logs)
+
+
+def test_uploads_declared_context_files_as_bytes(tmp_path, monkeypatch):
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    local_context = contexts_root / "knowledge-base"
+    local_context.mkdir(parents=True)
+    (local_context / "faq.md").write_text("# FAQ\n")
+    (local_context / "deck.pdf").write_bytes(b"%PDF-1.4\x00binary")
+    sandbox = FakeFullSandbox()
+    config = WorkerConfig(
+        id="context-test",
+        name="Context Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
+        contexts=["knowledge-base"],
+        outputs=[],
+    )
+
+    err = E2BSandboxDriver()._upload_contexts_to_sandbox(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        config=config,
+        made_dirs={"/home/user/worker"},
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+
+    assert err is None
+    assert sandbox.files._files["/home/user/worker/context/knowledge-base/faq.md"] == b"# FAQ\n"
+    assert sandbox.files._files["/home/user/worker/context/knowledge-base/deck.pdf"] == b"%PDF-1.4\x00binary"
+
+
+def _tar_bytes(entries: dict[str, bytes]) -> bytes:
+    buffer = BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, content in entries.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            archive.addfile(info, BytesIO(content))
+    return buffer.getvalue()
+
+
+def test_persists_writeable_context_tar_safely(tmp_path, monkeypatch):
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    target = contexts_root / "history"
+    target.mkdir(parents=True)
+    (target / "state.json").write_text('{"before": true}\n')
+
+    raw_tar = _tar_bytes({"state.json": b'{"after": true}\n', "nested/log.bin": b"\x00\x01"})
+    _extract_context_tar(raw_tar, target)
+
+    assert (target / "state.json").read_text() == '{"after": true}\n'
+    assert (target / "nested" / "log.bin").read_bytes() == b"\x00\x01"
 
 
 def test_e2b_driver_maps_oom_exit_to_sandbox_oom(tmp_path, monkeypatch):
