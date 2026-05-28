@@ -143,17 +143,20 @@ export function ConnectionCard({
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-start">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-[106px]"
-            onClick={() => onReconnect(connection.app_name)}
-            disabled={reconnecting}
-          >
-            <RefreshCw className={cn("size-3.5", reconnecting && "animate-spin")} />
-            {reconnecting ? "Opening" : "Reconnect"}
-          </Button>
+          {/* E1 fix: Reconnect only when status=expired or lastCheckStatus≠valid */}
+          {(connection.status === "expired" || connection.lastCheckStatus !== "valid") && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-[106px]"
+              onClick={() => onReconnect(connection.app_name)}
+              disabled={reconnecting}
+            >
+              <RefreshCw className={cn("size-3.5", reconnecting && "animate-spin")} />
+              {reconnecting ? "Opening" : "Reconnect"}
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"

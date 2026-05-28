@@ -814,6 +814,13 @@ MIGRATIONS: list[Migration] = [
     """,
     # -- migration 32: repair DBs where version 31 was already consumed --------
     _ensure_runs_artifacts_archived_column,
+    # -- migration 33: persist real display name (email/login) for connections --
+    # display_name stores the unredacted email resolved from Composio so the
+    # /connections page can show "depontefede@gmail.com" instead of
+    # "Connected account". Additive only — no existing columns dropped.
+    """
+    ALTER TABLE composio_connections ADD COLUMN display_name TEXT;
+    """,
 ]
 
 
@@ -841,7 +848,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",

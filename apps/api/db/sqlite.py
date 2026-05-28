@@ -1189,7 +1189,7 @@ class SqliteRunRepository:
 class SqliteConnectionRepository:
     _columns = """
         id, app_name, composio_connection_id, status, created_at, updated_at,
-        scopes_json, account_label, last_checked_at, last_check_status, last_check_error, user_id,
+        scopes_json, account_label, display_name, last_checked_at, last_check_status, last_check_error, user_id,
         kind, mcp_label, mcp_url, mcp_auth_secret, mcp_allowed_tools_json
     """
 
@@ -1241,6 +1241,7 @@ class SqliteConnectionRepository:
         updated_at = fields.get("updated_at") or created_at
         scopes_json = fields.get("scopes_json")
         account_label = fields.get("account_label")
+        display_name = fields.get("display_name")
         last_checked_at = fields.get("last_checked_at")
         last_check_status = fields.get("last_check_status")
         last_check_error = fields.get("last_check_error")
@@ -1256,9 +1257,9 @@ class SqliteConnectionRepository:
                 """
                 INSERT INTO composio_connections
                     (id, app_name, composio_connection_id, status, created_at, updated_at,
-                     scopes_json, account_label, last_checked_at, last_check_status, last_check_error, user_id,
+                     scopes_json, account_label, display_name, last_checked_at, last_check_status, last_check_error, user_id,
                      kind, mcp_label, mcp_url, mcp_auth_secret, mcp_allowed_tools_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     app_name = excluded.app_name,
                     composio_connection_id = excluded.composio_connection_id,
@@ -1266,6 +1267,7 @@ class SqliteConnectionRepository:
                     updated_at = excluded.updated_at,
                     scopes_json = excluded.scopes_json,
                     account_label = excluded.account_label,
+                    display_name = excluded.display_name,
                     last_checked_at = excluded.last_checked_at,
                     last_check_status = excluded.last_check_status,
                     last_check_error = excluded.last_check_error,
@@ -1285,6 +1287,7 @@ class SqliteConnectionRepository:
                     updated_at,
                     scopes_json,
                     account_label,
+                    display_name,
                     last_checked_at,
                     last_check_status,
                     last_check_error,
@@ -1309,6 +1312,7 @@ class SqliteConnectionRepository:
             "updated_at",
             "scopes_json",
             "account_label",
+            "display_name",
             "last_checked_at",
             "last_check_status",
             "last_check_error",
