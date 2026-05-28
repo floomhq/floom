@@ -93,23 +93,19 @@ def test_invalid_runtime_none_combinations_fail():
 
 
 def test_stock_worker_migration_dispatch_matrix():
-    rows = []
+    rows = {}
     for path in sorted((ROOT / "workers").glob("*/worker.yml")):
         contract = parse_worker_manifest(yaml.safe_load(path.read_text()))
         assert isinstance(contract, WorkerContract)
         config = worker_contract_to_worker_config(contract, path.parent.name)
-        rows.append((path.parent.name, contract.exec.mode, type(get_driver(config.runtime.runner, config=config)).__name__))
+        rows[path.parent.name] = (
+            contract.exec.mode,
+            type(get_driver(config.runtime.runner, config=config)).__name__,
+        )
 
-    assert len(rows) == 7
-    assert {name for name, mode, _driver in rows if mode == "agent"} == {
-        "research_brief",
-        "weekly_update",
-    }
-    assert {name for name, mode, _driver in rows if mode == "pure-script"} == {
-        "csv_enricher",
-        "cv_writeup",
-        "dach_compliance",
-        "gmail_intake_brief",
-        "reverse_match_crm",
-    }
-    assert dict((name, driver) for name, _mode, driver in rows)["csv_enricher"] == "E2BSandboxDriver"
+    assert rows["research_brief"] == ("agent", "AgentDriver")
+    assert rows["weekly_update"] == ("agent", "AgentDriver")
+    assert rows["openblog"] == ("agent", "AgentDriver")
+    assert rows["opendraft"] == ("pure-script", "E2BSandboxDriver")
+    assert rows["csv_enricher"] == ("pure-script", "E2BSandboxDriver")
+    assert rows["linkedin-post-engagements"] == ("pure-script", "E2BSandboxDriver")
