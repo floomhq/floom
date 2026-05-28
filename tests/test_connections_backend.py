@@ -200,7 +200,7 @@ class TestConnectionsListProjection:
                 (stale_time, local_id),
             )
 
-        with patch("composio_client.check_status", return_value="active") as mock_check:
+        with patch("composio_client.check_status", return_value="valid") as mock_check:
             resp = client.get("/connections", headers=AUTH_HEADERS)
 
         assert resp.status_code == 200
@@ -210,6 +210,24 @@ class TestConnectionsListProjection:
         assert item["status"] == "active"
         assert item["last_checked_at"] is not None
         assert item["last_check_status"] == "active"
+
+    def test_status_endpoint_normalizes_valid_to_active(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="github")
+        local_id = conn["id"]
+
+        with main.get_db() as db:
+            db.execute(
+                "UPDATE composio_connections SET status = 'initiated' WHERE id = ?",
+                (local_id,),
+            )
+
+        with patch("composio_client.check_status", return_value="valid"):
+            resp = client.get(f"/connections/{local_id}/status", headers=AUTH_HEADERS)
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "active"
 
     def test_list_skips_fresh_initiated_status(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
