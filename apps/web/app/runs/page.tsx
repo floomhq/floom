@@ -46,7 +46,7 @@ function RunsContent() {
 
   // S22e: filter state lives in the URL (?status=failed&worker_id=foo) so
   // links are shareable, refresh preserves filters, and back-button works.
-  const workerFilter = searchParams.get("worker_id") ?? "";
+  const workerFilter = searchParams.get("worker_id") ?? searchParams.get("worker") ?? "";
   const statusFilter = searchParams.get("status") ?? "";
 
   const [runs, setRuns] = useState<RunSummary[]>([]);
