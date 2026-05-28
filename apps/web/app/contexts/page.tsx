@@ -1,23 +1,16 @@
 "use client";
 
-import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Papa from "papaparse";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
-  Download,
-  Edit3,
   File as FileIcon,
   FileCode,
   FileText,
-  Folder,
   Image as ImageIcon,
   Plus,
-  Save,
   Search,
   Trash2,
-  Upload,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -26,11 +19,6 @@ import type { ContextDetail, ContextFileItem, ContextSummary } from "@/lib/types
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
-
-const TEXT_PREVIEW_LIMIT = 256 * 1024;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -38,71 +26,25 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(value?: string | null): string {
-  if (!value) return "Never";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function isKnownTextFile(file: ContextFileItem): boolean {
-  const mime = file.mime_type.toLowerCase();
-  const path = file.path.toLowerCase();
-  return (
-    !file.is_binary &&
-    (
-      mime.startsWith("text/") ||
-      ["application/javascript", "application/json", "application/toml", "application/typescript", "application/yaml", "application/x-yaml", "application/xml"].includes(mime) ||
-      /\.(mdx?|txt|log|env|json|ya?ml|toml|csv|tsv|py|js|jsx|ts|tsx|css|scss|html?|xml|sql|sh|go|rs|rb|php|java|c|cpp|h|hpp|cs)$/.test(path)
-    )
-  );
-}
-
-function isTextEditable(file: ContextFileItem): boolean {
-  return isKnownTextFile(file) && file.size <= TEXT_PREVIEW_LIMIT;
-}
-
-function fileKind(file: ContextFileItem): "markdown" | "html" | "csv" | "code" | "pdf" | "image" | "binary" {
-  const mime = file.mime_type.toLowerCase();
-  const path = file.path.toLowerCase();
-  if (path.endsWith(".md") || mime === "text/markdown") return "markdown";
-  if (/\.(csv|tsv)$/.test(path) || mime === "text/csv" || mime === "text/tab-separated-values") return "csv";
-  if (/\.(html|htm)$/.test(path) || mime === "text/html") return "html";
-  if (mime === "application/pdf" || path.endsWith(".pdf")) return "pdf";
-  if (mime.startsWith("image/")) return "image";
-  if (isKnownTextFile(file)) return "code";
-  return "binary";
-}
-
-function FileKindIcon({ file }: { file: ContextFileItem }) {
-  const kind = fileKind(file);
-  if (kind === "image") return <ImageIcon className="size-4" />;
-  if (kind === "code") return <FileCode className="size-4" />;
-  if (kind === "markdown" || kind === "pdf") return <FileText className="size-4" />;
-  return <FileIcon className="size-4" />;
+function displayTypeIcon(displayType: string) {
+  if (displayType === "Markdown") return <FileText className="size-4 shrink-0 text-muted-foreground" />;
+  if (["YAML", "Python", "JavaScript", "TypeScript", "JSON", "Shell", "SQL"].includes(displayType))
+    return <FileCode className="size-4 shrink-0 text-muted-foreground" />;
+  if (displayType === "Image") return <ImageIcon className="size-4 shrink-0 text-muted-foreground" />;
+  return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
 }
 
 export default function ContextsPage() {
+  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [contexts, setContexts] = useState<ContextSummary[]>([]);
   const [selectedName, setSelectedName] = useState<string>("");
   const [detail, setDetail] = useState<ContextDetail | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [newContextName, setNewContextName] = useState("");
-  const [newFilePath, setNewFilePath] = useState("");
-  const [previewText, setPreviewText] = useState("");
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [showNewContext, setShowNewContext] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-
-  const selectedFile = detail?.files.find((file) => file.path === selectedPath) || null;
 
   const loadContexts = useCallback(async (nextSelected?: string) => {
     const items = await api.contexts.list();
@@ -112,48 +54,29 @@ export default function ContextsPage() {
     if (selected) {
       const loaded = await api.contexts.get(selected);
       setDetail(loaded);
-      setSelectedPath((current) => (
-        current && loaded.files.some((file) => file.path === current)
-          ? current
-          : loaded.files[0]?.path || ""
-      ));
     } else {
       setDetail(null);
-      setSelectedPath("");
     }
   }, [selectedName]);
 
   useEffect(() => {
     loadContexts()
-      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to load contexts"))
+      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to load knowledge packs"))
       .finally(() => setLoading(false));
   }, [loadContexts]);
-
-  useEffect(() => {
-    setEditing(false);
-    setPreviewText("");
-    if (!selectedName || !selectedFile || !isTextEditable(selectedFile)) return;
-    setPreviewLoading(true);
-    api.contexts.readTextFile(selectedName, selectedFile.path)
-      .then(setPreviewText)
-      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to load file"))
-      .finally(() => setPreviewLoading(false));
-  }, [selectedName, selectedFile]);
 
   const filteredContexts = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return contexts;
-    return contexts.filter((context) => context.name.toLowerCase().includes(q));
+    return contexts.filter((c) => c.name.toLowerCase().includes(q));
   }, [contexts, search]);
 
   async function selectContext(name: string) {
     setSelectedName(name);
-    setSelectedPath("");
-    setPreviewText("");
     try {
       setDetail(await api.contexts.get(name));
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to load context");
+      toast.error(error instanceof Error ? error.message : "Failed to load knowledge pack");
     }
   }
 
@@ -163,48 +86,32 @@ export default function ContextsPage() {
     try {
       await api.contexts.create(name);
       setNewContextName("");
+      setShowNewContext(false);
       await loadContexts(name);
-      toast.success("Context created");
+      toast.success("Knowledge pack created");
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to create context");
+      toast.error(error instanceof Error ? error.message : "Failed to create knowledge pack");
     }
   }
 
-  async function saveFile() {
-    if (!selectedName || !selectedFile) return;
+  async function deleteContext(context: ContextSummary) {
+    if (!confirm(`Delete knowledge pack "${context.name}"? This cannot be undone.`)) return;
     try {
-      await api.contexts.saveTextFile(selectedName, selectedFile.path, previewText);
-      setEditing(false);
-      await loadContexts(selectedName);
-      setSelectedPath(selectedFile.path);
-      toast.success("File saved");
+      await api.contexts.delete(context.name, true);
+      const remaining = contexts.filter((item) => item.name !== context.name);
+      setContexts(remaining);
+      await loadContexts(remaining[0]?.name || "");
+      toast.success("Knowledge pack deleted");
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to save file");
-    }
-  }
-
-  async function addTextFile() {
-    if (!selectedName) return;
-    const path = newFilePath.trim();
-    if (!path) return;
-    try {
-      await api.contexts.saveTextFile(selectedName, path, "");
-      setNewFilePath("");
-      await loadContexts(selectedName);
-      setSelectedPath(path);
-      setEditing(true);
-      toast.success("File created");
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to create file");
+      toast.error(error instanceof Error ? error.message : "Failed to delete knowledge pack");
     }
   }
 
   async function deleteFile(file: ContextFileItem) {
-    if (!selectedName || !confirm(`Delete ${file.path}?`)) return;
+    if (!selectedName || !confirm(`Delete "${file.path}"?`)) return;
     try {
       const next = await api.contexts.deleteFile(selectedName, file.path);
       setDetail(next);
-      setSelectedPath(next.files[0]?.path || "");
       await loadContexts(selectedName);
       toast.success("File deleted");
     } catch (error: unknown) {
@@ -217,477 +124,315 @@ export default function ContextsPage() {
     try {
       await api.contexts.upload(selectedName, files);
       await loadContexts(selectedName);
-      toast.success("Upload complete");
+      toast.success("File added");
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Upload failed");
-    }
-  }
-
-  async function deleteContext(context: ContextSummary) {
-    if (!confirm(`Delete context ${context.name}?`)) return;
-    try {
-      await api.contexts.delete(context.name, true);
-      const remaining = contexts.filter((item) => item.name !== context.name);
-      setContexts(remaining);
-      await loadContexts(remaining[0]?.name || "");
-      toast.success("Context deleted");
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete context");
+      toast.error(error instanceof Error ? error.message : "Failed to add file");
     }
   }
 
   if (loading) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-10 w-56" />
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_320px_1fr]">
-          <Skeleton className="h-[520px] rounded-[var(--radius-button)]" />
-          <Skeleton className="h-[520px] rounded-[var(--radius-button)]" />
-          <Skeleton className="h-[520px] rounded-[var(--radius-button)]" />
+        <div className="space-y-1">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-4 w-72" />
+        </div>
+        <div className="flex gap-4" style={{ minHeight: 520 }}>
+          <Skeleton className="w-[25%] min-w-[240px] max-w-[320px] rounded-[var(--radius-button)]" />
+          <Skeleton className="flex-1 rounded-[var(--radius-button)]" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 120px)" }}>
+      {/* Page header */}
+      <div className="flex items-start justify-between gap-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Contexts</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Contexts</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Reusable knowledge packs your workers can read before they act.
+          </p>
         </div>
-        <div className="flex gap-2">
-          <Input
-            value={newContextName}
-            onChange={(event) => setNewContextName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void createContext();
-            }}
-            placeholder="knowledge-base"
-            className="h-9 w-48"
-          />
-          <Button size="sm" onClick={createContext}>
-            <Plus className="size-4" />
-            New context
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setShowNewContext(true)}>
+          <Plus className="size-4" />
+          New
+        </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_320px_1fr]">
-        <section className="min-h-[520px] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
-          <div className="border-b border-[var(--border-default)] p-3">
+      {/* New context inline form */}
+      {showNewContext && (
+        <div className="shrink-0 flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)] px-3 py-2">
+          <Input
+            autoFocus
+            value={newContextName}
+            onChange={(e) => setNewContextName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void createContext();
+              if (e.key === "Escape") { setShowNewContext(false); setNewContextName(""); }
+            }}
+            placeholder="knowledge-base"
+            className="h-8 w-56"
+          />
+          <Button size="sm" onClick={createContext} disabled={!newContextName.trim()}>Create</Button>
+          <Button size="sm" variant="ghost" onClick={() => { setShowNewContext(false); setNewContextName(""); }}>
+            <X className="size-4" />
+          </Button>
+        </div>
+      )}
+
+      {/* 25/75 split */}
+      <div className="flex gap-4 flex-1 min-h-0">
+        {/* Left: pack list (25%) */}
+        <section className="flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden min-w-[240px] max-w-[320px] w-[25%]">
+          <div className="border-b border-[var(--border-default)] p-3 shrink-0">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Knowledge packs</p>
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search contexts..."
-                className="h-8 pl-9"
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search packs..."
+                className="h-7 pl-8 text-sm"
               />
             </div>
           </div>
-          <div className="divide-y divide-line">
-            {filteredContexts.map((context) => (
+
+          <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-default)]">
+            {filteredContexts.length === 0 && (
+              <div className="p-4 text-center">
+                {contexts.length === 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">No knowledge packs yet.</p>
+                    <p className="text-xs text-muted-foreground">Add your first one.</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No matches.</p>
+                )}
+              </div>
+            )}
+            {filteredContexts.map((ctx) => (
               <div
-                key={context.name}
+                key={ctx.name}
                 role="button"
                 tabIndex={0}
-                onClick={() => void selectContext(context.name)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") void selectContext(context.name);
-                }}
-                className={`group flex w-full items-start gap-2 px-3 py-3 text-left transition-colors ${
-                  context.name === selectedName ? "bg-muted text-foreground" : "hover:bg-muted/50"
+                onClick={() => void selectContext(ctx.name)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") void selectContext(ctx.name); }}
+                className={`group relative flex w-full items-start gap-2.5 px-3 py-3 text-left transition-colors cursor-pointer ${
+                  ctx.name === selectedName
+                    ? "bg-[var(--active-nav-bg)] border-l-2 border-l-[var(--border-default)]"
+                    : "hover:bg-muted/40"
                 }`}
               >
-                <Folder className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <span className="mt-0.5 text-muted-foreground">{ctx.name === selectedName ? "●" : "○"}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{context.name}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
-                    {context.file_count} files · {formatBytes(context.total_size_bytes)}
+                  <span className="block truncate text-sm font-medium">{ctx.name}</span>
+                  {ctx.description && (
+                    <span className="block truncate text-xs text-muted-foreground mt-0.5">{ctx.description}</span>
+                  )}
+                  <span className="block text-xs text-muted-foreground mt-0.5">
+                    {ctx.file_count} {ctx.file_count === 1 ? "file" : "files"} · {ctx.worker_count} {ctx.worker_count === 1 ? "worker" : "workers"}
                   </span>
                 </span>
                 <button
                   type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void deleteContext(context);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.stopPropagation();
-                      void deleteContext(context);
-                    }
-                  }}
-                  className="opacity-0 transition-opacity group-hover:opacity-100"
-                  title={`Delete ${context.name}`}
+                  onClick={(e) => { e.stopPropagation(); void deleteContext(ctx); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); void deleteContext(ctx); } }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity mt-0.5"
+                  title={`Delete ${ctx.name}`}
                 >
-                  <Trash2 className="size-3.5 text-muted-foreground hover:text-red-500" />
+                  <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
                 </button>
               </div>
             ))}
-            {filteredContexts.length === 0 && (
-              <p className="p-4 text-sm text-muted-foreground">No contexts found.</p>
-            )}
           </div>
         </section>
 
+        {/* Right: pack detail (75%) */}
         <section
-          className={`min-h-[520px] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden ${dragActive ? "bg-[var(--active-nav-bg)]" : ""}`}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragActive(true);
-          }}
+          className="flex-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden flex flex-col"
+          onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
           onDragLeave={() => setDragActive(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDragActive(false);
-            void uploadFiles(event.dataTransfer.files);
-          }}
+          onDrop={(e) => { e.preventDefault(); setDragActive(false); void uploadFiles(e.dataTransfer.files); }}
         >
-          <div className="flex items-center justify-between border-b border-line p-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{detail?.name || "Files"}</p>
-              <p className="text-xs text-muted-foreground">
-                {detail ? `${formatBytes(detail.total_size_bytes)} · updated ${formatDate(detail.updated_at)}` : "No context selected"}
-              </p>
+          {!selectedName ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center space-y-2">
+                <p className="text-sm text-muted-foreground">Select a knowledge pack to manage it.</p>
+              </div>
             </div>
-            <div className="flex gap-1">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(event) => {
-                  if (event.target.files) void uploadFiles(event.target.files);
-                  event.target.value = "";
-                }}
-              />
-              <Button
-                size="icon"
-                variant="outline"
-                disabled={!selectedName}
-                onClick={() => fileInputRef.current?.click()}
-                title="Upload file"
-              >
-                <Upload className="size-4" />
-              </Button>
+          ) : !detail ? (
+            <div className="flex-1 flex items-center justify-center">
+              <Skeleton className="h-10 w-48" />
             </div>
+          ) : (
+            <PackDetail
+              detail={detail}
+              dragActive={dragActive}
+              onOpenFile={(file) => router.push(`/contexts/${encodeURIComponent(detail.name)}/files/${file.path.split("/").map(encodeURIComponent).join("/")}`)}
+              onDeleteFile={deleteFile}
+              onAddFile={() => fileInputRef.current?.click()}
+            />
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) void uploadFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function PackDetail({
+  detail,
+  dragActive,
+  onOpenFile,
+  onDeleteFile,
+  onAddFile,
+}: {
+  detail: ContextDetail;
+  dragActive: boolean;
+  onOpenFile: (file: ContextFileItem) => void;
+  onDeleteFile: (file: ContextFileItem) => Promise<void>;
+  onAddFile: () => void;
+}) {
+  return (
+    <div className={`flex flex-col flex-1 overflow-hidden transition-colors ${dragActive ? "bg-muted/30" : ""}`}>
+      {/* Pack header */}
+      <div className="border-b border-[var(--border-default)] px-5 py-4 shrink-0">
+        <h2 className="text-base font-semibold">{detail.name}</h2>
+        {detail.description ? (
+          <p className="text-sm text-muted-foreground mt-0.5">{detail.description}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground mt-0.5 italic">
+            No description. Add a README.md to this pack.
+          </p>
+        )}
+
+        {/* Stats row */}
+        <div className="flex gap-3 mt-3">
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5">
+            <span className="text-xs text-muted-foreground">Files</span>
+            <span className="text-xs font-medium">{detail.file_count}</span>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5">
+            <span className="text-xs text-muted-foreground">Workers</span>
+            <span className="text-xs font-medium">{detail.worker_count}</span>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5">
+            <span className="text-xs text-muted-foreground">Size</span>
+            <span className="text-xs font-medium">{formatBytes(detail.total_size_bytes)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+        {/* Used by */}
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Used by</p>
+          {detail.used_by.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No workers reference this pack yet. Workers attach contexts in their <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">worker.yml</code>.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {detail.used_by.map((ref) => (
+                <Link
+                  key={ref.worker_id}
+                  href={`/workers/${encodeURIComponent(ref.worker_id)}`}
+                  className="inline-flex items-center rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-2.5 py-1 text-sm hover:bg-muted transition-colors"
+                >
+                  {ref.worker_name}
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Files */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Files</p>
+            <Button size="sm" variant="outline" onClick={onAddFile} className="h-7 text-xs gap-1">
+              <Plus className="size-3.5" />
+              Add file
+            </Button>
           </div>
 
-          {selectedName && (
-            <div className="border-b border-line p-3">
-              <div className="flex gap-2">
-                <Input
-                  value={newFilePath}
-                  onChange={(event) => setNewFilePath(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void addTextFile();
-                  }}
-                  placeholder="notes/template.md"
-                  className="h-8"
+          {detail.files.length === 0 ? (
+            <div className="rounded-[var(--radius-button)] border border-dashed border-[var(--border-default)] p-6 text-center">
+              <p className="text-sm text-muted-foreground">This pack is empty. Add a file to get started.</p>
+              <Button size="sm" variant="outline" className="mt-3" onClick={onAddFile}>
+                <Plus className="size-4" />
+                Add file
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {detail.files.map((file) => (
+                <FileCard
+                  key={file.path}
+                  file={file}
+                  onOpen={() => onOpenFile(file)}
+                  onDelete={() => onDeleteFile(file)}
                 />
-                <Button size="sm" variant="outline" onClick={addTextFile}>
-                  <Plus className="size-4" />
-                  New file
-                </Button>
-              </div>
+              ))}
             </div>
           )}
 
-          <div className="divide-y divide-line">
-            {(detail?.files || []).map((file) => (
-              <div
-                key={file.path}
-                role="button"
-                tabIndex={0}
-                onClick={() => setSelectedPath(file.path)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") setSelectedPath(file.path);
-                }}
-                className={`group flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors ${
-                  file.path === selectedPath ? "bg-muted text-foreground" : "hover:bg-muted/50"
-                }`}
-              >
-                <span className="text-muted-foreground"><FileKindIcon file={file} /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-mono text-xs">{file.path}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {formatBytes(file.size)} · {file.mime_type}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void deleteFile(file);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.stopPropagation();
-                      void deleteFile(file);
-                    }
-                  }}
-                  className="opacity-0 transition-opacity group-hover:opacity-100"
-                  title={`Delete ${file.path}`}
-                >
-                  <Trash2 className="size-3.5 text-muted-foreground hover:text-red-500" />
-                </button>
-              </div>
-            ))}
-            {selectedName && detail?.files.length === 0 && (
-              <p className="p-4 text-sm text-muted-foreground">No files found.</p>
-            )}
-          </div>
-        </section>
-
-        <section className="min-h-[520px] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-[var(--border-default)] p-3">
-            <div className="min-w-0">
-              <p className="truncate font-mono text-sm">{selectedFile?.path || "Select a file"}</p>
-              {selectedFile && (
-                <p className="text-xs text-muted-foreground">
-                  {formatBytes(selectedFile.size)} · {formatDate(selectedFile.updated_at)}
-                </p>
-              )}
+          {dragActive && (
+            <div className="mt-2 rounded-[var(--radius-button)] border-2 border-dashed border-[var(--border-default)] p-4 text-center text-sm text-muted-foreground">
+              Drop files here to add them
             </div>
-            {selectedFile && (
-              <div className="flex gap-1">
-                {isTextEditable(selectedFile) && !editing && (
-                  <Button size="icon" variant="outline" onClick={() => setEditing(true)} title="Edit file">
-                    <Edit3 className="size-4" />
-                  </Button>
-                )}
-                {editing && (
-                  <>
-                    <Button size="icon" variant="outline" onClick={() => setEditing(false)} title="Cancel">
-                      <X className="size-4" />
-                    </Button>
-                    <Button size="icon" onClick={saveFile} title="Save file">
-                      <Save className="size-4" />
-                    </Button>
-                  </>
-                )}
-                <a
-                  href={api.contexts.fileUrl(selectedName, selectedFile.path)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-button)] border border-line text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title="Download file"
-                >
-                  <Download className="size-4" />
-                </a>
-              </div>
-            )}
-          </div>
-
-          <div className="p-4">
-            {!selectedFile ? (
-              <p className="text-sm text-muted-foreground">No file selected.</p>
-            ) : previewLoading ? (
-              <Skeleton className="h-64 w-full rounded-[var(--radius-button)]" />
-            ) : editing ? (
-              <Textarea
-                value={previewText}
-                onChange={(event) => setPreviewText(event.target.value)}
-                className="min-h-[560px] w-full resize-y border border-line bg-background p-3 font-mono text-xs leading-6 outline-none focus:border-foreground"
-              />
-            ) : (
-              <FilePreview file={selectedFile} contextName={selectedName} text={previewText} />
-            )}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function FilePreview({
-  contextName,
-  file,
-  text,
-}: {
-  contextName: string;
-  file: ContextFileItem;
-  text: string;
-}) {
-  const kind = fileKind(file);
-  const fileUrl = api.contexts.fileUrl(contextName, file.path);
-
-  if (isKnownTextFile(file) && file.size > TEXT_PREVIEW_LIMIT) {
-    return (
-      <div className="space-y-3 text-sm">
-        <p className="text-muted-foreground">File too large to preview inline.</p>
-        <DownloadLink fileUrl={fileUrl} />
-      </div>
-    );
-  }
-
-  if (kind === "markdown") {
-    return (
-      <TextPreviewTabs text={text} fileUrl={fileUrl}>
-        <div className="prose prose-sm max-w-none text-foreground">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+          )}
         </div>
-      </TextPreviewTabs>
-    );
-  }
-  if (kind === "html") {
-    return (
-      <TextPreviewTabs text={text} fileUrl={fileUrl}>
-        <iframe
-          srcDoc={text}
-          sandbox="allow-same-origin"
-          className="h-[640px] w-full border border-line bg-white"
-          title={file.path}
-        />
-      </TextPreviewTabs>
-    );
-  }
-  if (kind === "csv") {
-    return (
-      <TextPreviewTabs text={text} fileUrl={fileUrl}>
-        <CsvPreview text={text} delimiter={file.path.toLowerCase().endsWith(".tsv") ? "\t" : ","} />
-      </TextPreviewTabs>
-    );
-  }
-  if (kind === "code") {
-    return (
-      <TextPreviewTabs text={text} fileUrl={fileUrl}>
-        <CodeBlock text={text} />
-      </TextPreviewTabs>
-    );
-  }
-  if (kind === "pdf") {
-    return (
-      <Tabs defaultValue="preview">
-        <TabsList>
-          <TabsTrigger value="preview">Preview</TabsTrigger>
-          <TabsTrigger value="download">Download</TabsTrigger>
-        </TabsList>
-        <TabsContent value="preview">
-          <embed src={fileUrl} type="application/pdf" className="h-[640px] w-full border border-line" />
-        </TabsContent>
-        <TabsContent value="download">
-          <DownloadLink fileUrl={fileUrl} />
-        </TabsContent>
-      </Tabs>
-    );
-  }
-  if (kind === "image") {
-    return (
-      <Tabs defaultValue="preview">
-        <TabsList>
-          <TabsTrigger value="preview">Preview</TabsTrigger>
-          <TabsTrigger value="download">Download</TabsTrigger>
-        </TabsList>
-        <TabsContent value="preview">
-          <div className="flex min-h-[320px] items-center justify-center bg-muted/30 p-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={fileUrl} alt={file.path} className="max-h-[640px] max-w-full object-contain" />
-          </div>
-        </TabsContent>
-        <TabsContent value="download">
-          <DownloadLink fileUrl={fileUrl} />
-        </TabsContent>
-      </Tabs>
-    );
-  }
-  return <BinaryPreview file={file} fileUrl={fileUrl} />;
-}
-
-function TextPreviewTabs({
-  children,
-  fileUrl,
-  text,
-}: {
-  children: React.ReactNode;
-  fileUrl: string;
-  text: string;
-}) {
-  return (
-    <Tabs defaultValue="preview">
-      <TabsList>
-        <TabsTrigger value="preview">Preview</TabsTrigger>
-        <TabsTrigger value="raw">Raw</TabsTrigger>
-        <TabsTrigger value="download">Download</TabsTrigger>
-      </TabsList>
-      <TabsContent value="preview">{children}</TabsContent>
-      <TabsContent value="raw">
-        <CodeBlock text={text} />
-      </TabsContent>
-      <TabsContent value="download">
-        <DownloadLink fileUrl={fileUrl} />
-      </TabsContent>
-    </Tabs>
-  );
-}
-
-function CodeBlock({ text }: { text: string }) {
-  return (
-    <pre className="max-h-[640px] overflow-auto bg-muted/40 p-3 font-mono text-xs leading-6">
-      <code>{text}</code>
-    </pre>
-  );
-}
-
-function CsvPreview({ text, delimiter }: { text: string; delimiter: string }) {
-  const rows = Papa.parse<string[]>(text.trim(), {
-    delimiter,
-    skipEmptyLines: true,
-  }).data as string[][];
-
-  if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground">Empty file.</p>;
-  }
-
-  const [header, ...body] = rows;
-  return (
-    <div className="max-h-[640px] overflow-auto border border-line">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {header.map((cell, index) => (
-              <TableHead key={`${cell}-${index}`} className="font-mono text-xs">
-                {cell || `Column ${index + 1}`}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {body.map((row, rowIndex) => (
-            <TableRow key={rowIndex}>
-              {header.map((_cell, cellIndex) => (
-                <TableCell key={cellIndex} className="font-mono text-xs">
-                  {row[cellIndex] || ""}
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      </div>
     </div>
   );
 }
 
-function DownloadLink({ fileUrl }: { fileUrl: string }) {
+function FileCard({
+  file,
+  onOpen,
+  onDelete,
+}: {
+  file: ContextFileItem;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
   return (
-    <a
-      href={fileUrl}
-      className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-button)] border border-line px-3 text-sm font-medium hover:bg-muted"
-    >
-      <Download className="size-4" />
-      Download
-    </a>
-  );
-}
-
-function BinaryPreview({ file, fileUrl }: { file: ContextFileItem; fileUrl: string }) {
-  return (
-    <div className="space-y-3 text-sm">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <FileIcon className="size-4" />
-        <span>{file.mime_type}</span>
+    <div className="group flex items-center gap-3 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-2.5 hover:bg-muted/40 transition-colors">
+      {displayTypeIcon(file.display_type)}
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-mono truncate">{file.path}</p>
+        <p className="text-xs text-muted-foreground mt-0.5 truncate">
+          {file.description || <span className="italic">(no description)</span>}
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {formatBytes(file.size)} · {file.display_type}
+        </p>
       </div>
-      <p className="font-mono text-xs text-muted-foreground">{file.path}</p>
-      <DownloadLink fileUrl={fileUrl} />
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Button size="sm" variant="outline" onClick={onOpen} className="h-7 text-xs">
+          Open
+        </Button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="p-1 rounded hover:bg-muted"
+          title="Delete file"
+        >
+          <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
+        </button>
+      </div>
     </div>
   );
 }
