@@ -531,13 +531,15 @@ class SqliteWorkerRepository:
                 f"""
                 SELECT
                     r.worker_id,
-                    MAX(r.created_at) AS last_run_at,
-                    COUNT(*) AS runs_{days}d,
-                    SUM(CASE WHEN r.status = 'completed' THEN 1 ELSE 0 END) * 1.0 / COUNT(*) AS success_rate
+                    MAX(CASE WHEN r.created_at > datetime('now', '-{days} days') THEN r.created_at END) AS last_run_at,
+                    SUM(CASE WHEN r.created_at > datetime('now', '-{days} days') THEN 1 ELSE 0 END) AS runs_{days}d,
+                    SUM(CASE WHEN r.created_at > datetime('now', '-{days} days') AND r.status = 'completed' THEN 1 ELSE 0 END) AS completed_{days}d,
+                    SUM(CASE WHEN r.created_at <= datetime('now', '-{days} days') THEN 1 ELSE 0 END) AS previous_runs_{days}d,
+                    SUM(CASE WHEN r.created_at <= datetime('now', '-{days} days') AND r.status = 'completed' THEN 1 ELSE 0 END) AS previous_completed_{days}d
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 WHERE w.owner_id = ?
-                  AND r.created_at > datetime('now', '-{days} days')
+                  AND r.created_at > datetime('now', '-{days * 2} days')
                   AND r.worker_id IN ({placeholders})
                 GROUP BY r.worker_id
                 """,
@@ -547,10 +549,18 @@ class SqliteWorkerRepository:
         for row in rows:
             data = _row_dict(row)
             runs = int(data[f"runs_{days}d"] or 0)
+            completed = int(data[f"completed_{days}d"] or 0)
+            previous_runs = int(data[f"previous_runs_{days}d"] or 0)
+            previous_completed = int(data[f"previous_completed_{days}d"] or 0)
+            current_rate = (completed / runs) if runs else None
+            previous_rate = (previous_completed / previous_runs) if previous_runs else None
             result[data["worker_id"]] = RecentStats(
                 last_run_at=data.get("last_run_at"),
                 runs_7d=runs,
-                success_rate_7d=float(data["success_rate"]) if data["success_rate"] is not None and runs else None,
+                success_rate_7d=current_rate,
+                success_rate_change_7d=(current_rate - previous_rate)
+                if current_rate is not None and previous_rate is not None
+                else None,
             )
         return result
 
