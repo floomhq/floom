@@ -432,6 +432,27 @@ def _add_owner_indexes(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_mcp_connection_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(composio_connections)").fetchall()
+    }
+    additions = [
+        ("kind", "ALTER TABLE composio_connections ADD COLUMN kind TEXT NOT NULL DEFAULT 'composio'"),
+        ("mcp_label", "ALTER TABLE composio_connections ADD COLUMN mcp_label TEXT"),
+        ("mcp_url", "ALTER TABLE composio_connections ADD COLUMN mcp_url TEXT"),
+        ("mcp_auth_secret", "ALTER TABLE composio_connections ADD COLUMN mcp_auth_secret TEXT"),
+        ("mcp_allowed_tools_json", "ALTER TABLE composio_connections ADD COLUMN mcp_allowed_tools_json TEXT"),
+    ]
+    for column, statement in additions:
+        if column not in columns:
+            conn.execute(statement)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_composio_connections_kind "
+        "ON composio_connections(kind)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
@@ -728,6 +749,8 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_composio_connections_kind
         ON composio_connections(kind);
     """,
+    # -- migration 29: repair DBs where version 28 was already consumed --------
+    _ensure_mcp_connection_columns,
 ]
 
 
