@@ -552,13 +552,14 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
     )
 
     upload_owner = f"audit-upload-{uuid.uuid4().hex[:8]}"
+    upload_content = f"upload-url-probe-{uuid.uuid4().hex}".encode()
     upload_ok = request(
         api,
         "POST",
         "/uploads",
         secret=secret,
         headers={"x-floom-user": upload_owner},
-        files={"file": ("audit.txt", io.BytesIO(b"upload-url-probe"), "text/plain")},
+        files={"file": ("audit.txt", io.BytesIO(upload_content), "text/plain")},
     )
     upload_url = ""
     upload_download: dict[str, Any] = {}
@@ -591,7 +592,7 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
         upload_ok["status"] == 200
         and upload_url.startswith("/uploads/")
         and upload_download.get("status") == 200
-        and upload_download.get("content") == b"upload-url-probe",
+        and upload_download.get("content") == upload_content,
         f"upload={upload_ok['status']} url={upload_url!r} download={upload_download.get('status')}",
         {"upload": upload_ok, "download": {k: v for k, v in upload_download.items() if k != "content"}},
     )
@@ -862,44 +863,18 @@ def build_kimi_prompt(profile: str, transcript: dict[str, Any], repo: Path) -> s
         "product-flow": "full product launch readiness across web + API + CLI/MCP from a hostile user perspective; identify flows still not actually tested.",
     }.get(profile, "general adversarial launch-readiness review")
 
-    compact_transcript = {
-        "generated_at": transcript.get("generated_at"),
-        "api_base": transcript.get("api_base"),
-        "web_base": transcript.get("web_base"),
-        "route_inventory_count": transcript.get("route_inventory_count"),
-        "results": [
-            {
-                "id": item.get("id"),
-                "result": "PASS" if item.get("ok") else "FAIL",
-                "detail": item.get("detail"),
-            }
-            for item in transcript.get("results", [])
-        ],
-    }
-    probe_md = json.dumps(compact_transcript, indent=2)
-
     routes = transcript.get("route_inventory") or []
-    mutating_routes = [
-        route for route in routes
-        if route.get("method") in {"POST", "PUT", "PATCH", "DELETE"}
-    ]
     high_risk_routes = [
         route for route in routes
         if route.get("risk_tags")
     ]
-    route_brief = json.dumps(
-        {
-            "total_routes": len(routes),
-            "mutating_routes": [
-                f"{route.get('method')} {route.get('path')} tags={','.join(route.get('risk_tags') or [])}"
-                for route in mutating_routes
-            ],
-            "high_risk_routes": [
-                f"{route.get('method')} {route.get('path')} tags={','.join(route.get('risk_tags') or [])}"
-                for route in high_risk_routes
-            ],
-        },
-        indent=2,
+    probe_lines = "\n".join(
+        f"- {item.get('id')}: {'PASS' if item.get('ok') else 'FAIL'}; {item.get('detail')}"
+        for item in transcript.get("results", [])
+    )
+    route_lines = "\n".join(
+        f"- {route.get('method')} {route.get('path')} tags={','.join(route.get('risk_tags') or [])}"
+        for route in high_risk_routes
     )
 
     return textwrap.dedent(
@@ -909,26 +884,20 @@ def build_kimi_prompt(profile: str, transcript: dict[str, Any], repo: Path) -> s
         Target product:
         - Web: {transcript['web_base']}
         - API: {transcript['api_base']}
-        - Repo: {repo}
 
         Your focus:
         {profile_focus}
 
-        You are running in the repository root. Inspect code if useful, especially:
-        - apps/api/main.py
-        - apps/api/db/sqlite.py
-        - apps/api/run_service.py
-        - apps/web/app/api/proxy/[...path]/route.ts
-        - scripts/workeros-kimi-audit.py
-
         Audit rules:
+        - Audit only the live evidence below. Do not inspect the repo in this Kimi pass.
         - Do NOT just summarize passing probes.
         - Your main job is to find what the probes missed.
-        - Compare every mutating/object-ID route in the route inventory against the probe IDs.
+        - Compare every high-risk route below against the probe IDs.
         - For every untested mutating/object-ID route, ask: can it leak object existence, mutate a stock asset, cross user boundaries, expose logs/artifacts/secrets, burn quota, trigger external side effects, bypass rate limits, or create a race/resource exhaustion condition?
-        - A finding can be CONFIRMED only with probe evidence or direct code evidence.
+        - A finding can be CONFIRMED only with probe evidence in this prompt.
         - A finding can be UNCONFIRMED when evidence is insufficient, but it must include an exact curl/Python reproducer for the next run.
         - If all deterministic probes passed, you still must produce the strongest untested hypotheses. An empty New Findings section is a failure unless you prove all high-risk route classes have coverage.
+        - Keep the report under 1200 words.
 
         Prior misses that this prompt must prevent:
         - Secret test endpoint leaked platform secret existence, key lengths, and OpenAI validity.
@@ -963,15 +932,11 @@ def build_kimi_prompt(profile: str, transcript: dict[str, Any], repo: Path) -> s
 
         ## One-Sentence Handoff
 
-        Route inventory summary:
-        ```json
-        {route_brief}
-        ```
+        High-risk routes:
+        {route_lines}
 
         Probe transcript:
-        ```json
-        {probe_md}
-        ```
+        {probe_lines}
         """
     ).strip() + "\n"
 
@@ -1099,13 +1064,16 @@ def main() -> int:
             kimi_runs.append({"profile": "all", "ok": False, "report": str(out_dir / "kimi-missing.md"), "error": "kimi-agent not found"})
             (out_dir / "kimi-missing.md").write_text("kimi-agent not found on PATH.\n")
         else:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(profiles) or 1)) as pool:
-                futures = [
-                    pool.submit(run_kimi, profile, build_kimi_prompt(profile, transcript, repo), out_dir, repo, args.kimi_timeout)
-                    for profile in profiles
-                ]
-                for future in concurrent.futures.as_completed(futures):
-                    kimi_runs.append(future.result())
+            for profile in profiles:
+                kimi_runs.append(
+                    run_kimi(
+                        profile,
+                        build_kimi_prompt(profile, transcript, repo),
+                        out_dir,
+                        repo,
+                        args.kimi_timeout,
+                    )
+                )
 
     aggregate(out_dir, transcript, kimi_runs, secret)
     print(out_dir)
