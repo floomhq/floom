@@ -17,6 +17,14 @@ import apps.api.startup  # noqa: F401
 
 engine_main = import_engine_module("main")
 
+# The engine's main.py auto-loads /root/.config/workeros/api.env via load_dotenv()
+# on import. That file is the OSS single-tenant local-mode prod env and contains
+# FLOOM_SECRET. When loaded into our cloud process, the engine's auth_middleware
+# (which gates every request behind x-floom-secret when FLOOM_SECRET is set)
+# rejects all our JWT-authed cloud traffic with 401. Strip it in cloud mode.
+if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
+    os.environ.pop("FLOOM_SECRET", None)
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):

@@ -3,6 +3,9 @@ import "../app/landing.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ThemeModeButton } from "./ThemeModeButton";
+import { OAUTH_LOGIN_URL } from "@/lib/api";
+
+const SIGN_IN_HREF = OAUTH_LOGIN_URL("/app");
 
 /* ─── SVG icons ──────────────────────────────────────────────────── */
 const MarkSVG = ({ size = 17 }: { size?: number }) => (
@@ -486,7 +489,7 @@ export function LandingBody() {
             <GitHubSVG />
           </a>
           <ThemeModeButton />
-          <Link href="/login" className="ln-cta">Sign in</Link>
+          <a href={SIGN_IN_HREF} className="ln-cta">Sign in</a>
         </div>
       </nav>
 
@@ -526,7 +529,7 @@ export function LandingBody() {
             </p>
 
             <div className="ln-ctas">
-              <Link href="/login" className="ln-btn-primary">Start a workspace</Link>
+              <a href={SIGN_IN_HREF} className="ln-btn-primary">Start a workspace</a>
               <button
                 type="button"
                 className={"ln-cmd" + (copied ? " copied" : "")}
@@ -1066,7 +1069,7 @@ export function LandingBody() {
             The cockpit for every background task you direct. Triggered by cron, webhook, or your agent.
           </p>
           <div className="ln-ctas" style={{ marginTop: 34 }}>
-            <Link href="/login" className="ln-btn-primary">Start a workspace</Link>
+            <a href={SIGN_IN_HREF} className="ln-btn-primary">Start a workspace</a>
             <button
               type="button"
               className={"ln-cmd" + (copied ? " copied" : "")}
@@ -1091,7 +1094,7 @@ export function LandingBody() {
           <div className="ln-footer-brand">Workeros<span className="cp">© 2026 · Built with care in San Francisco</span></div>
           <div className="ln-footer-col">
             <h3>Product</h3>
-            <Link href="/login">Sign in</Link>
+            <a href={SIGN_IN_HREF}>Sign in</a>
             <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer">Docs</a>
             <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer">GitHub</a>
           </div>
