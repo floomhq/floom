@@ -1,0 +1,31 @@
+schema_version: "0.3"
+name: "meeting-prep"
+title: "Meeting Prep"
+description: "On-demand pre-meeting brief: agenda, talking points, decisions to land."
+version: "0.1.0"
+targets: ["generic"]
+exec:
+  entry: "SKILL.md"
+runtime: "skill"
+running: "e2b"
+inputs:
+- name: meeting_title
+  kind: scalar
+  type: string
+  required: true
+  label: "Meeting Title"
+- name: meeting_context
+  kind: scalar
+  type: string
+  required: false
+  label: "Context"
+  default: "general check-in"
+outputs:
+- name: prep_doc
+  kind: file
+  media_type: text/markdown
+  path: out/prep.md
+  required: true
+  label: "Prep Doc"
+trigger:
+  type: manual

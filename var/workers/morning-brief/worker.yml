@@ -1,0 +1,28 @@
+schema_version: "0.3"
+name: "morning-brief"
+title: "Morning Brief"
+description: "Draft a concise 3-bullet morning brief every weekday at 8am Berlin time."
+version: "0.1.0"
+targets: ["generic"]
+exec:
+  entry: "SKILL.md"
+runtime: "skill"
+running: "e2b"
+inputs:
+- name: focus_topic
+  kind: scalar
+  type: string
+  required: false
+  label: "Focus Topic"
+  default: "your day ahead: priorities, risks, one quick win"
+outputs:
+- name: brief
+  kind: file
+  media_type: text/markdown
+  path: out/brief.md
+  required: true
+  label: "Morning Brief"
+trigger:
+  type: schedule
+  cron: "0 8 * * *"
+  timezone: "Europe/Berlin"
