@@ -394,6 +394,77 @@ class TestContextsAPI(unittest.TestCase):
         self.assertEqual(r.status_code, 400, r.text)
         self.assertFalse((self.tmpdir.parent / "secret.txt").exists())
 
+    def test_scope_resolver_isolates_tenants(self):
+        """In cloud mode, a registered scope resolver MUST prefix every
+        context FS path with the active scope id, so workspace A's
+        contexts are invisible to workspace B (and vice versa). This is
+        the BUG #34 regression test."""
+        # Workspace A creates a context + a file
+        contexts_module.set_context_scope_resolver(lambda: "ws_AAAA111")
+        try:
+            ra = client.post("/contexts/kb-a", json={}, headers=self._headers())
+            self.assertEqual(ra.status_code, 200, ra.text)
+            fa = client.put(
+                "/contexts/kb-a/files/secret.txt",
+                json={"content": "tenant-A-only"},
+                headers=self._headers(),
+            )
+            self.assertEqual(fa.status_code, 200, fa.text)
+            la = client.get("/contexts", headers=self._headers())
+            self.assertEqual(la.status_code, 200)
+            self.assertEqual({c["name"] for c in la.json()}, {"kb-a"})
+
+            # FS layout: scoped subdir under tmpdir
+            self.assertTrue((self.tmpdir / "ws_AAAA111" / "kb-a" / "secret.txt").is_file())
+        finally:
+            pass
+
+        # Workspace B sees an empty list, can't read kb-a, can create its own
+        contexts_module.set_context_scope_resolver(lambda: "ws_BBBB222")
+        try:
+            lb = client.get("/contexts", headers=self._headers())
+            self.assertEqual(lb.status_code, 200)
+            self.assertEqual(lb.json(), [], "Workspace B must not see workspace A's contexts")
+
+            denied = client.get("/contexts/kb-a", headers=self._headers())
+            self.assertEqual(denied.status_code, 404, "kb-a must be invisible to workspace B")
+
+            denied_file = client.get(
+                "/contexts/kb-a/files/secret.txt",
+                headers=self._headers(),
+            )
+            self.assertEqual(denied_file.status_code, 404)
+
+            rb = client.post("/contexts/kb-b", json={}, headers=self._headers())
+            self.assertEqual(rb.status_code, 200, rb.text)
+            lb2 = client.get("/contexts", headers=self._headers())
+            self.assertEqual({c["name"] for c in lb2.json()}, {"kb-b"})
+
+            self.assertTrue((self.tmpdir / "ws_BBBB222" / "kb-b").is_dir())
+            # Workspace A's dir still exists; B's create did NOT collide with A's kb-a
+            self.assertTrue((self.tmpdir / "ws_AAAA111" / "kb-a").is_dir())
+        finally:
+            contexts_module.set_context_scope_resolver(None)
+
+        # Resolver cleared -> unscoped (OSS behavior). Both workspace dirs are
+        # visible as siblings of any pre-existing legacy contexts. We do NOT
+        # assert listing here because unscoped mode treats the scope dirs
+        # themselves as contexts; that is by design for OSS migration.
+
+    def test_resolver_with_invalid_scope_falls_back_to_unscoped(self):
+        """A scope resolver returning something unsafe (path traversal,
+        empty string) must fall back to unscoped behavior so we never
+        write outside CONTEXTS_DIR."""
+        contexts_module.set_context_scope_resolver(lambda: "../escape")
+        try:
+            r = client.post("/contexts/kb-fallback", json={}, headers=self._headers())
+            self.assertEqual(r.status_code, 200, r.text)
+            # Created directly under CONTEXTS_DIR, NOT under "../escape"
+            self.assertTrue((self.tmpdir / "kb-fallback").is_dir())
+            self.assertFalse((self.tmpdir.parent / "escape").exists())
+        finally:
+            contexts_module.set_context_scope_resolver(None)
+
 
 # ===========================================================================
 # DELETE /workers/{worker_id} tests (Deliverable 2)
