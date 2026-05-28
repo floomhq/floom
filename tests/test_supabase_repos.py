@@ -1,0 +1,307 @@
+from __future__ import annotations
+
+import time
+from datetime import datetime, timezone
+from uuid import uuid4
+
+import pytest
+
+from apps.api.config import new_supabase_anon_client, new_supabase_service_client
+from apps.api.db._secret_crypto import encrypt_secret
+from apps.api.db.supabase_repos import (
+    SupabaseCliAuthRepository,
+    SupabaseConnectionRepository,
+    SupabaseRunRepository,
+    SupabaseSecretRepository,
+    SupabaseWorkerRepository,
+    _bytea_literal,
+)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _manifest(worker_id: str, name: str) -> dict[str, object]:
+    return {
+        "id": worker_id,
+        "name": name,
+        "trigger": {"type": "manual"},
+        "runtime": {"type": "python", "entrypoint": "run.py", "runner": "e2b"},
+        "inputs": [],
+        "outputs": [],
+        "secrets": [],
+        "connections": [],
+    }
+
+
+def _create_auth_user(service_client, prefix: str, timestamp: int) -> dict[str, str]:
+    email = f"test-user-{prefix}+{timestamp}@workeros.test"
+    password = f"P@ssw0rd-{uuid4().hex}"
+    response = service_client.auth.admin.create_user(
+        {
+            "email": email,
+            "password": password,
+            "email_confirm": True,
+        }
+    )
+    user = response.user
+    if user is None:
+        raise RuntimeError("Supabase admin create_user returned no user")
+    return {"id": str(user.id), "email": email, "password": password}
+
+
+def _signed_in_client(email: str, password: str):
+    client = new_supabase_anon_client()
+    response = client.auth.sign_in_with_password({"email": email, "password": password})
+    assert response.session is not None
+    return client
+
+
+def test_supabase_repositories_enforce_rls_between_users():
+    service = new_supabase_service_client()
+    timestamp = time.time_ns()
+    now_iso = _now_iso()
+    secret_name = "OPENAI_API_KEY"
+    user_a: dict[str, str] | None = None
+    user_b: dict[str, str] | None = None
+
+    try:
+        try:
+            user_a = _create_auth_user(service, "a", timestamp)
+            user_b = _create_auth_user(service, "b", timestamp)
+        except Exception as exc:
+            pytest.skip(f"Supabase admin user creation failed: {exc}")
+
+        service.table("users").upsert(
+            [
+                {"id": user_a["id"], "email": user_a["email"], "updated_at": now_iso},
+                {"id": user_b["id"], "email": user_b["email"], "updated_at": now_iso},
+            ],
+            on_conflict="id",
+        ).execute()
+
+        skill_version_a = f"sv-{uuid4().hex}"
+        skill_version_b = f"sv-{uuid4().hex}"
+        worker_a = f"worker-{uuid4().hex}"
+        worker_b = f"worker-{uuid4().hex}"
+        run_a = f"run-{uuid4().hex}"
+        run_b = f"run-{uuid4().hex}"
+        connection_a = f"conn-{uuid4().hex}"
+        connection_b = f"conn-{uuid4().hex}"
+        composio_connection_id_a = f"composio-{uuid4().hex}"
+        composio_connection_id_b = f"composio-{uuid4().hex}"
+        device_a = f"device-{uuid4().hex}"
+        device_b = f"device-{uuid4().hex}"
+        user_code_a = f"A{uuid4().hex[:3]}-A{uuid4().hex[:3]}".upper()
+        user_code_b = f"B{uuid4().hex[:3]}-B{uuid4().hex[:3]}".upper()
+
+        service.table("skill_versions").insert(
+            [
+                {
+                    "id": skill_version_a,
+                    "user_id": user_a["id"],
+                    "name": "worker-a",
+                    "version": "0.1.0",
+                    "manifest_json": _manifest(worker_a, "Worker A"),
+                    "bundle_path": "workers/worker-a",
+                    "created_at": now_iso,
+                },
+                {
+                    "id": skill_version_b,
+                    "user_id": user_b["id"],
+                    "name": "worker-b",
+                    "version": "0.1.0",
+                    "manifest_json": _manifest(worker_b, "Worker B"),
+                    "bundle_path": "workers/worker-b",
+                    "created_at": now_iso,
+                },
+            ]
+        ).execute()
+        service.table("workers").insert(
+            [
+                {
+                    "id": worker_a,
+                    "user_id": user_a["id"],
+                    "skill_version_id": skill_version_a,
+                    "name": "Worker A",
+                    "trigger_type": "manual",
+                    "grants_json": {},
+                    "input_values_json": {},
+                    "triggers_json": [],
+                    "enabled": True,
+                    "created_at": now_iso,
+                },
+                {
+                    "id": worker_b,
+                    "user_id": user_b["id"],
+                    "skill_version_id": skill_version_b,
+                    "name": "Worker B",
+                    "trigger_type": "manual",
+                    "grants_json": {},
+                    "input_values_json": {},
+                    "triggers_json": [],
+                    "enabled": True,
+                    "created_at": now_iso,
+                },
+            ]
+        ).execute()
+        service.table("runs").insert(
+            [
+                {
+                    "id": run_a,
+                    "user_id": user_a["id"],
+                    "worker_id": worker_a,
+                    "status": "completed",
+                    "trigger_source": "manual",
+                    "runner": "local",
+                    "input_json": {},
+                    "output_json": {},
+                    "created_at": now_iso,
+                },
+                {
+                    "id": run_b,
+                    "user_id": user_b["id"],
+                    "worker_id": worker_b,
+                    "status": "completed",
+                    "trigger_source": "manual",
+                    "runner": "local",
+                    "input_json": {},
+                    "output_json": {},
+                    "created_at": now_iso,
+                },
+            ]
+        ).execute()
+        service.table("connections").insert(
+            [
+                {
+                    "id": connection_a,
+                    "user_id": user_a["id"],
+                    "app_name": "gmail",
+                    "composio_connection_id": composio_connection_id_a,
+                    "composio_user_id": user_a["id"],
+                    "status": "active",
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                    "scopes_json": ["gmail.read"],
+                },
+                {
+                    "id": connection_b,
+                    "user_id": user_b["id"],
+                    "app_name": "github",
+                    "composio_connection_id": composio_connection_id_b,
+                    "composio_user_id": user_b["id"],
+                    "status": "active",
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                    "scopes_json": ["repo"],
+                },
+            ]
+        ).execute()
+        service.table("secrets").insert(
+            [
+                {
+                    "user_id": user_a["id"],
+                    "name": secret_name,
+                    "value": _bytea_literal(encrypt_secret("sk-user-a")),
+                    "status": "set",
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                },
+                {
+                    "user_id": user_b["id"],
+                    "name": secret_name,
+                    "value": _bytea_literal(encrypt_secret("sk-user-b")),
+                    "status": "set",
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                },
+            ]
+        ).execute()
+        service.table("cli_auth_devices").insert(
+            [
+                {
+                    "device_code": device_a,
+                    "user_id": user_a["id"],
+                    "user_code": user_code_a,
+                    "status": "approved",
+                    "secret": "refresh-a",
+                    "client_name": "workeros-cli",
+                    "scopes_json": [],
+                    "created_at": 1000.0,
+                    "expires_at": 9999999999.0,
+                    "approved_at": 1001.0,
+                },
+                {
+                    "device_code": device_b,
+                    "user_id": user_b["id"],
+                    "user_code": user_code_b,
+                    "status": "approved",
+                    "secret": "refresh-b",
+                    "client_name": "workeros-cli",
+                    "scopes_json": [],
+                    "created_at": 1000.0,
+                    "expires_at": 9999999999.0,
+                    "approved_at": 1001.0,
+                },
+            ]
+        ).execute()
+
+        user_a_client = _signed_in_client(user_a["email"], user_a["password"])
+        user_b_client = _signed_in_client(user_b["email"], user_b["password"])
+
+        workers_a = SupabaseWorkerRepository(client=user_a_client)
+        runs_a = SupabaseRunRepository(client=user_a_client)
+        connections_a = SupabaseConnectionRepository(client=user_a_client)
+        secrets_a = SupabaseSecretRepository(client=user_a_client)
+        cli_auth_a = SupabaseCliAuthRepository(client=user_a_client)
+
+        workers_b = SupabaseWorkerRepository(client=user_b_client)
+
+        assert [row["id"] for row in workers_a.list(user_id=user_a["id"])] == [worker_a]
+        assert workers_a.list(user_id=user_b["id"]) == []
+        assert workers_a.get(user_id=user_a["id"], worker_id=worker_b) is None
+        assert workers_a.get_any(worker_id=worker_b) is None
+        assert workers_b.get_any(worker_id=worker_a) is None
+
+        runs_rows, runs_total = runs_a.list(user_id=user_a["id"])
+        assert runs_total == 1
+        assert [row["id"] for row in runs_rows] == [run_a]
+        assert runs_a.get(user_id=user_a["id"], run_id=run_b) is None
+        assert runs_a.get_any(run_id=run_b) is None
+
+        assert [row["id"] for row in connections_a.list(user_id=user_a["id"])] == [connection_a]
+        assert connections_a.list(user_id=user_b["id"]) == []
+        assert connections_a.get_by_composio_connection_id(
+            composio_connection_id=composio_connection_id_b
+        ) is None
+
+        secret_row = secrets_a.get(user_id=user_a["id"], name=secret_name)
+        assert secret_row is not None
+        assert secret_row["value"] == "sk-user-a"
+        assert secrets_a.get(user_id=user_b["id"], name=secret_name) is None
+        assert secrets_a.read_value(user_id=user_a["id"], name=secret_name) == "sk-user-a"
+        assert secrets_a.read_value(user_id=user_b["id"], name=secret_name) is None
+        assert secrets_a.list_names(user_id=user_a["id"]) == {secret_name}
+
+        assert [row["device_code"] for row in cli_auth_a.list(user_id=user_a["id"])] == [device_a]
+        assert cli_auth_a.list(user_id=user_b["id"]) == []
+        assert cli_auth_a.get(user_id=user_a["id"], device_code=device_b) is None
+        assert cli_auth_a.verify_device(user_code_b) is None
+    finally:
+        user_ids = [user["id"] for user in (user_a, user_b) if user is not None]
+        if user_ids:
+            service.table("cli_auth_devices").delete().in_("user_id", user_ids).execute()
+            service.table("connections").delete().in_("user_id", user_ids).execute()
+            service.table("secrets").delete().in_("user_id", user_ids).execute()
+            service.table("runs").delete().in_("user_id", user_ids).execute()
+            service.table("workers").delete().in_("user_id", user_ids).execute()
+            service.table("skill_versions").delete().in_("user_id", user_ids).execute()
+            service.table("users").delete().in_("id", user_ids).execute()
+        for user in (user_a, user_b):
+            if user is None:
+                continue
+            try:
+                service.auth.admin.delete_user(user["id"])
+            except Exception:
+                pass

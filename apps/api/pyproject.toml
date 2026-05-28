@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "workeros-cloud-api"
+version = "0.0.1"
+description = "Supabase-backed cloud wrapper for the workeros OSS API engine."
+readme = "../../README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.setuptools]
+packages = ["apps", "apps.api"]

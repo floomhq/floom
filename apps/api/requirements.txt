@@ -1,0 +1,4 @@
+-r ../../engine/apps/api/requirements.txt
+cryptography==43.0.1
+psycopg[binary]==3.2.9
+supabase==2.15.3

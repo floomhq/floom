@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+.venv/
+__pycache__/
 
 # vercel
 .vercel
@@ -39,3 +41,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# workplan + codex artifacts
+WORKPLAN-*.md
+CODEX_BRIEF.md
+.phase-state.json
+.codex-*.md
+.codex-*.log

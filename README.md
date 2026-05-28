@@ -76,6 +76,12 @@ After login, the MCP package detects credentials and uses Supabase JWT for API c
 | Email | Resend or Postmark |
 | Observability | PostHog + Sentry |
 
+## Scheduler Lock
+
+Cloud scheduler boot acquires Postgres advisory lock `87452311` before starting
+the in-process cron loop. If another instance already holds the lock, the second
+API process logs the conflict and exits instead of double-firing scheduled runs.
+
 ## Tenancy model
 
 - Single Supabase project shared across all users
