@@ -167,6 +167,12 @@ def _zip_directory(source_dir: Path, zip_path: Path) -> bool:
     return True
 
 
+def _zip_nonempty_directory(source_dir: Path, zip_path: Path) -> bool:
+    if not source_dir.exists() or not any(path.is_file() for path in source_dir.rglob("*")):
+        return False
+    return _zip_directory(source_dir, zip_path)
+
+
 def _copy_file(source: Path, destination: Path) -> bool:
     if not source.is_file():
         return False
@@ -394,7 +400,7 @@ def main() -> None:
     _write_json(OUT_DIR / "run_metadata.json", metadata)
 
     _zip_directory(ARTICLE_EXPORT_DIR, OUT_DIR / "openblog_articles.zip")
-    _zip_directory(IMAGE_EXPORT_DIR, OUT_DIR / "openblog_images.zip")
+    _zip_nonempty_directory(IMAGE_EXPORT_DIR, OUT_DIR / "openblog_images.zip")
     _zip_directory(OUT_DIR, OUT_DIR / "openblog_workspace.zip")
 
     outputs, artifacts = _collect_existing_artifacts({
