@@ -117,12 +117,17 @@ def new_supabase_service_client() -> Client:
     return _create_client_with_key(settings.supabase_service_role_key)
 
 
-@lru_cache(maxsize=1)
+# NOTE: NOT lru_cached. The httpx client inside maintains a long-lived
+# HTTP/2 connection pool to Supabase. If we cache the client, after a few
+# minutes of idle Supabase silently closes the connection, and the next
+# request fails with httpcore.RemoteProtocolError: ConnectionTerminated
+# (which Starlette's BaseHTTPMiddleware swallows into a useless
+# "No response returned" 500). Per-request clients eat ~50ms of TLS
+# handshake but stay reliable indefinitely.
 def get_supabase_anon_client() -> Client:
     return new_supabase_anon_client()
 
 
-@lru_cache(maxsize=1)
 def get_supabase_service_client() -> Client:
     return new_supabase_service_client()
 

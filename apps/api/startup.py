@@ -19,6 +19,7 @@ ensure_engine_api_path()
 
 from auth.factory import register_auth_provider  # noqa: E402
 import db as engine_db  # noqa: E402
+from db import factory as engine_db_factory  # noqa: E402
 from db.factory import Repositories, register_repositories  # noqa: E402
 
 
@@ -46,6 +47,19 @@ def register_cloud_components() -> None:
     register_repositories("cloud", _cloud_repositories)
     apply_engine_overrides()
     engine_db.init_db = lambda: None
+
+    # Bypass the engine's lru_cache on get_repositories. Otherwise the
+    # cached Repositories instance holds repo objects that hold a stale
+    # cached httpx client, and Supabase eventually closes the long-lived
+    # HTTP/2 connection — the next request fails with
+    # httpcore.RemoteProtocolError: ConnectionTerminated, which
+    # Starlette's BaseHTTPMiddleware swallows into a useless 500
+    # "No response returned". Rebuilding per request costs ~5ms but
+    # stays reliable indefinitely.
+    if hasattr(engine_db_factory.get_repositories, "__wrapped__"):
+        engine_db_factory.get_repositories = (
+            engine_db_factory.get_repositories.__wrapped__
+        )
 
 
 register_cloud_components()
