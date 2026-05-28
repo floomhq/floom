@@ -802,6 +802,10 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE runs ADD COLUMN error_code TEXT;
     """,
+    # -- migration 31: mark runs whose internal artifacts were compressed ------
+    """
+    ALTER TABLE runs ADD COLUMN artifacts_archived INTEGER DEFAULT 0 NOT NULL;
+    """,
 ]
 
 
@@ -829,7 +833,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",

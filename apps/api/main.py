@@ -80,6 +80,7 @@ from run_service import (
     start_run,
     update_run_status,
     request_active_run_shutdown,
+    InsufficientDiskSpaceError,
 )
 from run_service import register_sse_publisher, register_part_publisher
 
@@ -159,6 +160,14 @@ app = FastAPI(
     description="Open-source self-hosted runtime for AI workers",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(InsufficientDiskSpaceError)
+async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDiskSpaceError):
+    return JSONResponse(
+        status_code=507,
+        content={"detail": "Insufficient disk space for run creation", "error": str(exc)},
+    )
 
 
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024

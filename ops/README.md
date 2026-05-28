@@ -2,35 +2,50 @@
 
 Operational scripts and systemd units for the production API.
 
-## Daily SQLite backup
+## Hourly Data Backup
 
 Files:
-- `backup-db.sh` - online snapshot via `sqlite3 .backup`, gzip, 30-day retention
-- `workeros-backup.service` - oneshot systemd unit that runs the script
-- `workeros-backup.timer` - daily timer with 15m randomized delay
+- `backup-db.sh` - online SQLite `.backup`, artifacts tarball, manifest, retention pruning
+- `rotate-artifacts.py` - gzip old `transcript.jsonl` files and mark `runs.artifacts_archived`
+- `workeros-backup.service` - oneshot systemd unit that runs backup and rotation
+- `workeros-backup.timer` - hourly timer with 5m randomized delay
 
-The script and units are committed; they are NOT installed automatically. To
-activate on the production box:
+Backup output:
+
+```text
+/root/backups/workeros-YYYY-MM-DD-HHMM/
+  floom.db
+  artifacts.tar.gz
+  manifest.json
+```
+
+Retention keeps 48 hourly restore points, 7 daily restore points, and 4 weekly restore points.
+
+Install or refresh production units:
 
 ```bash
-cp ops/workeros-backup.service /etc/systemd/system/
-cp ops/workeros-backup.timer /etc/systemd/system/
+install -m 0755 ops/backup-db.sh /root/workeros/ops/backup-db.sh
+install -m 0755 ops/rotate-artifacts.py /root/workeros/ops/rotate-artifacts.py
+install -m 0644 ops/workeros-backup.service /etc/systemd/system/workeros-backup.service
+install -m 0644 ops/workeros-backup.timer /etc/systemd/system/workeros-backup.timer
 systemctl daemon-reload
 systemctl enable --now workeros-backup.timer
 ```
 
 Verify:
+
 ```bash
-systemctl list-timers | rg workeros-backup
+systemctl list-timers workeros-backup.timer
 systemctl start workeros-backup.service
-ls -la /var/backups/workeros
+ls -la /root/backups
 ```
 
-Tunables (env):
-- `FLOOM_DB` source SQLite path (default `/root/workeros/data/floom.db`)
-- `FLOOM_BACKUP_DIR` destination dir (default `/var/backups/workeros`)
-- `FLOOM_BACKUP_DAYS` retention in days (default `30`)
-
-self-hosted server status (2026-05-27):
-- `workeros-backup.timer` is active and scheduled daily.
-- Manual run via `systemctl start workeros-backup.service` succeeds and writes a gzipped snapshot under `/var/backups/workeros/`.
+Tunables:
+- `WORKEROS_ROOT` repo root, default `/root/workeros`
+- `FLOOM_DB` source SQLite path, default `$WORKEROS_ROOT/data/floom.db`
+- `FLOOM_ARTIFACTS_DIR` artifacts dir, default `$WORKEROS_ROOT/data/artifacts`
+- `WORKEROS_BACKUP_ROOT` destination root, default `/root/backups`
+- `WORKEROS_BACKUP_HOURLY` hourly retention count, default `48`
+- `WORKEROS_BACKUP_DAILY` daily retention count, default `7`
+- `WORKEROS_BACKUP_WEEKLY` weekly retention count, default `4`
+- `WORKEROS_ARTIFACT_RETENTION_DAYS` transcript gzip cutoff, default `30`
