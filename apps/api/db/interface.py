@@ -18,6 +18,17 @@ class WorkerRepository(Protocol):
 
     def update(self, *, user_id: str, worker_id: str, **fields: Any) -> RowDict | None: ...
 
+    def upsert(self, *, user_id: str, **fields: Any) -> RowDict:
+        """Insert-or-update a worker row from a discovered-worker dict.
+
+        Implementations MUST be idempotent: if a row with the same id
+        already exists for this user_id it is updated in place; otherwise
+        it is inserted. Used by _persist_discovered_workers to sync the
+        canonical store after a worker is drafted or its files change on
+        disk.
+        """
+        ...
+
     def delete(self, *, user_id: str, worker_id: str) -> bool: ...
 
     def list_recent_runs(self, *, user_id: str, worker_id: str, limit: int = 10) -> list[RowDict]: ...
