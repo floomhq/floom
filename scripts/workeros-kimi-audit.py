@@ -551,6 +551,108 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
         upload_null,
     )
 
+    upload_owner = f"audit-upload-{uuid.uuid4().hex[:8]}"
+    upload_ok = request(
+        api,
+        "POST",
+        "/uploads",
+        secret=secret,
+        headers={"x-floom-user": upload_owner},
+        files={"file": ("audit.txt", io.BytesIO(b"upload-url-probe"), "text/plain")},
+    )
+    upload_url = ""
+    upload_download: dict[str, Any] = {}
+    upload_spoof: dict[str, Any] = {}
+    upload_tamper: dict[str, Any] = {}
+    try:
+        upload_body = json.loads(upload_ok["body"])
+        upload_url = str(upload_body.get("url") or "")
+        if upload_url:
+            upload_download = request_binary(
+                api,
+                "GET",
+                upload_url,
+                secret=secret,
+                headers={"x-floom-user": upload_owner},
+            )
+            upload_spoof = request(
+                api,
+                "GET",
+                upload_url.split("?", 1)[0],
+                secret=secret,
+                headers={"x-floom-user": upload_owner},
+            )
+            upload_tamper = request(api, "GET", upload_url.replace("download_token=", "download_token=x"), secret=secret)
+    except Exception as exc:
+        upload_download = {"status": "EXCEPTION", "body": f"{type(exc).__name__}: {exc}"}
+    record(
+        results,
+        "upload-url-present-and-downloadable",
+        upload_ok["status"] == 200
+        and upload_url.startswith("/uploads/")
+        and upload_download.get("status") == 200
+        and upload_download.get("content") == b"upload-url-probe",
+        f"upload={upload_ok['status']} url={upload_url!r} download={upload_download.get('status')}",
+        {"upload": upload_ok, "download": {k: v for k, v in upload_download.items() if k != "content"}},
+    )
+    record(
+        results,
+        "upload-download-requires-signed-token",
+        upload_spoof.get("status") == 404 and upload_tamper.get("status") == 404,
+        f"missing_token={upload_spoof.get('status')} tampered_token={upload_tamper.get('status')}",
+        {"missing_token": upload_spoof, "tampered_token": upload_tamper},
+    )
+
+    get_body = request(api, "GET", "/workers", secret=secret, data=b"x" * 1024)
+    record(
+        results,
+        "get-request-body-rejected",
+        get_body["status"] == 413,
+        f"status={get_body['status']}",
+        get_body,
+    )
+
+    run_quota_names = [f"audit-runquota-{uuid.uuid4().hex[:8]}-{idx}" for idx in range(3)]
+    run_quota_creates: list[dict[str, Any]] = []
+    run_quota_statuses: list[Any] = []
+    run_quota_cleanups: list[dict[str, Any]] = []
+    for name in run_quota_names:
+        request(api, "DELETE", f"/workers/{name}", secret=secret)
+        created = request(
+            api,
+            "POST",
+            "/workers",
+            secret=secret,
+            json={
+                "worker_yml": make_worker_yml(name),
+                "run_py": "def run(inputs, context):\n    return {'status': 'success', 'outputs': {'ok': True}, 'artifacts': []}\n",
+            },
+        )
+        run_quota_creates.append(created)
+    if all(item["status"] == 200 for item in run_quota_creates):
+        for idx in range(11):
+            created_run = request(
+                api,
+                "POST",
+                f"/workers/{run_quota_names[idx % len(run_quota_names)]}/runs",
+                secret=secret,
+                headers={"X-Forwarded-For": f"198.51.100.{idx + 1}"},
+                json={"inputs": {}, "trigger_source": "audit"},
+                timeout=10,
+            )
+            run_quota_statuses.append(created_run["status"])
+            if created_run["status"] == 429:
+                break
+    for name in run_quota_names:
+        run_quota_cleanups.append(request(api, "DELETE", f"/workers/{name}", secret=secret))
+    record(
+        results,
+        "run-create-global-rate-limit",
+        429 in run_quota_statuses,
+        f"creates={[item['status'] for item in run_quota_creates]} run_statuses={run_quota_statuses} cleanups={[item['status'] for item in run_quota_cleanups]}",
+        {"creates": run_quota_creates, "run_statuses": run_quota_statuses, "cleanups": run_quota_cleanups},
+    )
+
     symlink_name = f"audit-symlink-{uuid.uuid4().hex[:8]}"
     symlink = request(
         api,
