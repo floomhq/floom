@@ -464,7 +464,7 @@ function EmptyWorkersState() {
               <Link
                 key={t.id}
                 href={`/workers/new?template=${t.id}`}
-                className="group block rounded-lg border bg-card hover:bg-muted transition-colors p-4"
+                className="group block rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] hover:bg-[var(--active-nav-bg)] transition-colors p-4"
               >
                 <div className="text-2xl mb-2" aria-hidden>
                   {t.icon}

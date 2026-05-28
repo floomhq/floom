@@ -78,7 +78,7 @@ function CatalogSkeleton() {
       {Array.from({ length: PAGE_SIZE }).map((_, index) => (
         <div
           key={index}
-          className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-lg border border-line bg-[var(--paper)] p-4 shadow-sm"
+          className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]"
         >
           <div className="flex items-center gap-3">
             <Skeleton className="h-10 w-10 rounded-md" />
@@ -108,9 +108,9 @@ function CatalogCard({
   onConnect: (slug: string) => void;
 }) {
   return (
-    <article className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-lg border border-line bg-[var(--paper)] p-4 shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-[var(--ease)] hover:-translate-y-px hover:border-[var(--accent-line)] hover:shadow-md">
+    <article className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[border-color,box-shadow,transform] duration-150 ease-[var(--ease)] hover:-translate-y-px hover:border-[var(--accent-line)] hover:shadow-md">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line bg-[var(--paper-2)]">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-2)]">
           <img
             src={item.logo_url}
             alt={`${item.name} logo`}
@@ -297,7 +297,7 @@ export default function ConnectionsBrowsePage() {
         {loading ? (
           <CatalogSkeleton />
         ) : loadError ? (
-          <div className="col-span-full rounded-lg border border-dashed border-line bg-[var(--paper)] px-4 py-12 text-center space-y-3">
+          <div className="col-span-full rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-12 text-center space-y-3">
             <p className="text-sm font-medium text-ink">Could not load integrations</p>
             <p className="mt-1 text-sm text-[var(--ink-soft)]">{loadError}</p>
             <button
@@ -321,7 +321,7 @@ export default function ConnectionsBrowsePage() {
           // S24: when Composio catalog returns no match for the search,
           // bridge to the manual path: store a raw API key as a Secret.
           // Many apps that lack Composio OAuth still expose a simple key.
-          <div className="col-span-full rounded-lg border border-dashed border-line bg-[var(--paper)] px-6 py-10 text-center">
+          <div className="col-span-full rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-card)] px-6 py-10 text-center">
             <p className="text-sm font-medium text-ink">No integrations found</p>
             <p className="mt-1 text-sm text-[var(--ink-soft)]">
               Clear filters or try a broader search.

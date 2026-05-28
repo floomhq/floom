@@ -215,7 +215,7 @@ function SecretsContent() {
           ) : (
             secrets.map((s) => (
               <div key={s.name} className="space-y-2">
-                <div className="flex items-center justify-between p-3 rounded-md hover:bg-muted transition-colors">
+                <div className="flex items-center justify-between p-3 rounded-lg hover:bg-[var(--active-nav-bg)] transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <KeyRound className="w-4 h-4 text-muted-foreground shrink-0" />
                     <div className="min-w-0">
