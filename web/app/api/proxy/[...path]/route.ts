@@ -105,13 +105,12 @@ async function handler(
   if (cacheControl) responseHeaders.set("cache-control", cacheControl);
   // Forward Set-Cookie so backend-initiated cookie writes (e.g. /auth/logout
   // clearing workeros_cloud_session on .floom.dev) actually reach the
-  // browser. Set-Cookie can appear multiple times so use headers.append on
-  // the raw entries iterator.
-  upstream.headers.forEach((value, key) => {
-    if (key.toLowerCase() === "set-cookie") {
-      responseHeaders.append("set-cookie", value);
-    }
-  });
+  // browser. Use getSetCookie() (Node 20+) which preserves the individual
+  // values rather than collapsing multiple Set-Cookie headers into one
+  // comma-joined string (which would break cookie parsing).
+  for (const cookie of upstream.headers.getSetCookie()) {
+    responseHeaders.append("set-cookie", cookie);
+  }
 
   return new NextResponse(upstream.body, {
     status: upstream.status,
