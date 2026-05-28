@@ -1215,23 +1215,38 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
 
 
 class SupabaseConnectionRepository(_BaseSupabaseRepository):
+    # Columns selected on every read. MCP fields (engine PR #161 / 8136efc,
+    # mirrored to Supabase via migration 0006) are part of every projection
+    # so the engine's _public_connection_item() can read mcp_label/mcp_url/
+    # mcp_auth_secret/mcp_allowed_tools_json + kind without per-call lookups.
+    _CONNECTION_COLUMNS = (
+        "id,app_name,composio_connection_id,composio_user_id,status,"
+        "created_at,updated_at,scopes_json,account_label,last_checked_at,"
+        "last_check_status,last_check_error,user_id,kind,mcp_label,mcp_url,"
+        "mcp_auth_secret,mcp_allowed_tools_json"
+    )
+
     def _normalize_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
         item = dict(row)
         item["scopes_json"] = _json_text(item.get("scopes_json"), [])
+        # Engine's _public_connection_item() calls _parse_json_string_list()
+        # on mcp_allowed_tools_json, which expects a JSON-text string (not a
+        # Python list). Supabase returns the column as a Python list because
+        # we declared it jsonb. Re-stringify so the engine parser succeeds.
+        item["mcp_allowed_tools_json"] = _json_text(item.get("mcp_allowed_tools_json"), [])
+        # Default kind for legacy rows where the column was added with a
+        # default but the row predates the migration's default fill.
+        item["kind"] = item.get("kind") or "composio"
         return item
 
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
-        builder = self._client.table("connections").select(
-            "id,app_name,composio_connection_id,composio_user_id,status,created_at,updated_at,scopes_json,account_label,last_checked_at,last_check_status,last_check_error,user_id"
-        )
+        builder = self._client.table("connections").select(self._CONNECTION_COLUMNS)
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.order("app_name").execute()
         return [self._normalize_row(row) for row in _response_rows(response)]
 
     def get(self, *, user_id: str, composio_id: str) -> dict[str, Any] | None:
-        builder = self._client.table("connections").select(
-            "id,app_name,composio_connection_id,composio_user_id,status,created_at,updated_at,scopes_json,account_label,last_checked_at,last_check_status,last_check_error,user_id"
-        )
+        builder = self._client.table("connections").select(self._CONNECTION_COLUMNS)
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.eq("id", composio_id).limit(1).execute()
         row = _first_row(response)
@@ -1240,9 +1255,7 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
     def get_by_composio_connection_id(self, *, composio_connection_id: str) -> dict[str, Any] | None:
         response = (
             self._client.table("connections")
-            .select(
-                "id,app_name,composio_connection_id,composio_user_id,status,created_at,updated_at,scopes_json,account_label,last_checked_at,last_check_status,last_check_error,user_id"
-            )
+            .select(self._CONNECTION_COLUMNS)
             .eq("composio_connection_id", composio_connection_id)
             .limit(1)
             .execute()
@@ -1258,25 +1271,36 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
             user_id=user_id,
             explicit_workspace_id=fields.get("workspace_id"),
         )
-        self._client.table("connections").upsert(
-            {
-                "id": connection_id,
-                "user_id": user_id,
-                "workspace_id": workspace_id,
-                "app_name": fields["app_name"],
-                "composio_connection_id": fields["composio_connection_id"],
-                "composio_user_id": fields.get("composio_user_id") or user_id,
-                "status": fields.get("status") or "initiated",
-                "created_at": created_at,
-                "updated_at": updated_at,
-                "scopes_json": _json_storage_value(fields.get("scopes_json"), []),
-                "account_label": fields.get("account_label"),
-                "last_checked_at": fields.get("last_checked_at"),
-                "last_check_status": fields.get("last_check_status"),
-                "last_check_error": fields.get("last_check_error"),
-            },
-            on_conflict="id",
-        ).execute()
+        payload: dict[str, Any] = {
+            "id": connection_id,
+            "user_id": user_id,
+            "workspace_id": workspace_id,
+            "app_name": fields["app_name"],
+            "composio_connection_id": fields["composio_connection_id"],
+            "composio_user_id": fields.get("composio_user_id") or user_id,
+            "status": fields.get("status") or "initiated",
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "scopes_json": _json_storage_value(fields.get("scopes_json"), []),
+            "account_label": fields.get("account_label"),
+            "last_checked_at": fields.get("last_checked_at"),
+            "last_check_status": fields.get("last_check_status"),
+            "last_check_error": fields.get("last_check_error"),
+        }
+        # MCP fields (engine PR #161). Engine passes kind="mcp" plus
+        # mcp_label/mcp_url/mcp_auth_secret/mcp_allowed_tools_json when
+        # creating an MCP connection; composio rows omit them and we let
+        # the column defaults apply (kind='composio', tools='[]'::jsonb).
+        if "kind" in fields:
+            payload["kind"] = fields["kind"] or "composio"
+        for key in ("mcp_label", "mcp_url", "mcp_auth_secret"):
+            if key in fields:
+                payload[key] = fields[key]
+        if "mcp_allowed_tools_json" in fields:
+            payload["mcp_allowed_tools_json"] = _json_storage_value(
+                fields["mcp_allowed_tools_json"], []
+            )
+        self._client.table("connections").upsert(payload, on_conflict="id").execute()
         item = self.get(user_id=user_id, composio_id=connection_id)
         if item is None:
             raise RuntimeError(f"failed to upsert connection {connection_id}")
@@ -1293,11 +1317,19 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
             "last_checked_at",
             "last_check_status",
             "last_check_error",
+            "kind",
+            "mcp_label",
+            "mcp_url",
+            "mcp_auth_secret",
         ):
             if key in fields:
                 payload[key] = fields[key]
         if "scopes_json" in fields:
             payload["scopes_json"] = _json_storage_value(fields["scopes_json"], [])
+        if "mcp_allowed_tools_json" in fields:
+            payload["mcp_allowed_tools_json"] = _json_storage_value(
+                fields["mcp_allowed_tools_json"], []
+            )
         if payload:
             builder = self._client.table("connections").update(payload).eq("id", composio_id)
             builder = _scope_by_workspace(builder, user_id=user_id)
@@ -1313,9 +1345,7 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
     def list_all(self) -> list[dict[str, Any]]:
         response = (
             self._client.table("connections")
-            .select(
-                "id,app_name,composio_connection_id,composio_user_id,status,created_at,updated_at,scopes_json,account_label,last_checked_at,last_check_status,last_check_error,user_id"
-            )
+            .select(self._CONNECTION_COLUMNS)
             .order("created_at")
             .order("id")
             .execute()
