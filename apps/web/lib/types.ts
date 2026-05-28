@@ -253,6 +253,13 @@ export interface ContextSummary {
   total_size_bytes: number;
   updated_at?: string | null;
   writeable: boolean;
+  worker_count: number;
+  description?: string | null;
+}
+
+export interface ContextWorkerRef {
+  worker_id: string;
+  worker_name: string;
 }
 
 export interface ContextFileItem {
@@ -261,10 +268,13 @@ export interface ContextFileItem {
   mime_type: string;
   updated_at: string;
   is_binary: boolean;
+  description?: string | null;
+  display_type: string;
 }
 
 export interface ContextDetail extends ContextSummary {
   files: ContextFileItem[];
+  used_by: ContextWorkerRef[];
 }
 
 export interface ReloadResponse {
