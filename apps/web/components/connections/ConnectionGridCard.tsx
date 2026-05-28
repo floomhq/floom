@@ -123,18 +123,22 @@ export function ConnectionGridCard({
         </div>
       </div>
 
-      {/* Bottom: Reconnect CTA (mirrors Browse's "Connect" button slot) */}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="w-full"
-        disabled={reconnecting}
-        onClick={() => onReconnect(connection.app_name)}
-      >
-        <RefreshCw className={cn("size-3.5", reconnecting && "animate-spin")} />
-        {reconnecting ? "Opening..." : "Reconnect"}
-      </Button>
+      {/* Bottom: Reconnect CTA — only when the connection actually needs it.
+          E1 fix: active/valid connections skip this; the hover-reveal Test /
+          Refresh / Disconnect actions are sufficient. */}
+      {(connection.status === "expired" || connection.lastCheckStatus !== "valid") && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="w-full"
+          disabled={reconnecting}
+          onClick={() => onReconnect(connection.app_name)}
+        >
+          <RefreshCw className={cn("size-3.5", reconnecting && "animate-spin")} />
+          {reconnecting ? "Opening..." : "Reconnect"}
+        </Button>
+      )}
     </article>
   );
 }

@@ -90,11 +90,26 @@ export function ConnectionRow({
         </p>
       </div>
 
-      {/* Scopes count (desktop only) */}
-      <span className="hidden md:inline text-xs text-muted-foreground truncate">
+      {/* Scopes count (desktop only).
+          E3 fix: when scopes are empty, show muted "default scopes" with an
+          inline Refresh icon that re-fetches via the Test action (which
+          triggers a Composio re-check and repopulates scopes in the DB). */}
+      <span className="hidden md:inline-flex items-center gap-1 text-xs text-muted-foreground truncate">
         {connection.scopes.length > 0
           ? `${connection.scopes.length} scope${connection.scopes.length === 1 ? "" : "s"}`
-          : <span className="text-muted-foreground/50">default scopes</span>}
+          : (
+            <>
+              <span className="text-muted-foreground/50">default scopes</span>
+              <button
+                type="button"
+                className="inline-flex items-center text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                title="Refresh to load granted scopes"
+                onClick={() => onTest(connection)}
+              >
+                <RefreshCw className="size-3" />
+              </button>
+            </>
+          )}
       </span>
 
       {/* Last used (desktop only) */}
@@ -108,22 +123,25 @@ export function ConnectionRow({
       </span>
 
       {/* S29w (score walk): was Reconnect + 3 icon-buttons (Test/Refresh/
-          Disconnect) = 4 actions per row. Now Reconnect + a single
-          overflow menu containing Test / Refresh / Disconnect. Row reads
-          as one primary action with secondary options behind a click. */}
+          Disconnect) = 4 actions per row. Now Reconnect (only when needed) + a
+          single overflow menu containing Test / Refresh / Disconnect. Row reads
+          as one primary action with secondary options behind a click.
+          E1 fix: only show Reconnect when the connection actually needs it. */}
       <div className="flex shrink-0 items-center gap-1">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 px-2 text-xs"
-          onClick={() => onReconnect(connection.app_name)}
-          disabled={reconnecting}
-          title={reconnecting ? "Opening" : "Reconnect"}
-        >
-          <RefreshCw className={cn("size-3", reconnecting && "animate-spin")} />
-          <span className="hidden sm:inline">{reconnecting ? "Opening" : "Reconnect"}</span>
-        </Button>
+        {(connection.status === "expired" || connection.lastCheckStatus !== "valid") && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => onReconnect(connection.app_name)}
+            disabled={reconnecting}
+            title={reconnecting ? "Opening" : "Reconnect"}
+          >
+            <RefreshCw className={cn("size-3", reconnecting && "animate-spin")} />
+            <span className="hidden sm:inline">{reconnecting ? "Opening" : "Reconnect"}</span>
+          </Button>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger
             className="inline-flex h-7 w-7 items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
