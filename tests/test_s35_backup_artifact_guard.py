@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -118,8 +119,16 @@ def test_rotate_artifacts_gzips_old_transcripts(tmp_path):
 
 
 def test_backup_script_writes_db_artifacts_and_manifest(tmp_path):
-    db_path = tmp_path / "floom.db"
-    artifacts_dir = tmp_path / "artifacts"
+    workeros_root = tmp_path / "workeros"
+    api_dir = workeros_root / "apps" / "api"
+    data_dir = workeros_root / "data"
+    ops_dir = workeros_root / "ops"
+    api_dir.mkdir(parents=True)
+    data_dir.mkdir()
+    ops_dir.mkdir()
+    shutil.copy2(ROOT / "ops" / "rotate-artifacts.py", ops_dir / "rotate-artifacts.py")
+    db_path = data_dir / "floom.db"
+    artifacts_dir = data_dir / "artifacts"
     backup_root = tmp_path / "backups"
     artifacts_dir.mkdir()
     (artifacts_dir / ".gitkeep").write_text("", encoding="utf-8")
@@ -140,9 +149,10 @@ def test_backup_script_writes_db_artifacts_and_manifest(tmp_path):
 
     env = {
         **os.environ,
-        "WORKEROS_ROOT": str(ROOT),
-        "FLOOM_DB": str(db_path),
-        "FLOOM_ARTIFACTS_DIR": str(artifacts_dir),
+        "WORKEROS_ROOT": str(workeros_root),
+        "WORKEROS_API_DIR": str(api_dir),
+        "FLOOM_DB": "../../data/floom.db",
+        "FLOOM_ARTIFACTS_DIR": "../../data/artifacts",
         "WORKEROS_BACKUP_ROOT": str(backup_root),
         "WORKEROS_BACKUP_HOURLY": "48",
         "WORKEROS_BACKUP_DAILY": "7",
