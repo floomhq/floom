@@ -1357,6 +1357,47 @@ def _persist_discovered_workers(
             ),
         )
 
+        # Mirror to the canonical repository so non-local deployments
+        # (e.g. managed-deployment → Supabase) actually persist the row.
+        # In local mode the SqliteWorkerRepository.upsert() above just
+        # re-overwrites the same row we just inserted via `conn`, so the
+        # end-state is unchanged. In cloud mode the SupabaseWorkerRepository
+        # writes the row to Postgres with the proper user_id, which is
+        # what the rest of the request lifecycle (get_repos().workers.get)
+        # reads from. Failures here are logged but do NOT roll back the
+        # filesystem worker bundle — callers already handle that on
+        # IntegrityError/RuntimeError above.
+        try:
+            from db.factory import get_repositories
+            get_repositories().workers.upsert(
+                user_id=user_id,
+                worker_id=worker_id,
+                name=w["name"],
+                manifest_json=manifest,
+                bundle_path=str((WORKERS_DIR / worker_id).resolve()),
+                skill_version_id=skill_version_id,
+                trigger_type=(
+                    primary_trigger_type
+                    or trigger.get("type")
+                    or w.get("trigger_type")
+                    or "manual"
+                ),
+                cron_expr=trigger.get("cron"),
+                cron_timezone=trigger.get("timezone"),
+                created_at=now,
+                composio_trigger_id=composio_trigger_id,
+                composio_event=composio_event,
+                triggers_json=triggers_list,
+            )
+        except Exception:
+            logger.exception(
+                "repos.workers.upsert failed for worker %s (user %s) — "
+                "filesystem bundle written, but DB row may be missing",
+                worker_id,
+                user_id,
+            )
+            raise
+
 
 def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     d = row_to_dict(row)
