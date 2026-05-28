@@ -5,22 +5,14 @@ import Link from "next/link";
 import {
   AlertTriangle,
   ArrowUpRight,
-  Box,
-  CheckCircle2,
-  Clock,
   Plug,
-  Plus,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
 import type { SystemOverview } from "@/lib/types";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { Sparkline } from "@/components/Sparkline";
 import { RunStatusGlyph } from "@/components/RunStatus";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
 import {
@@ -34,13 +26,11 @@ function StatCard({
   label,
   value,
   trend,
-  icon: Icon,
   loading,
 }: {
   label: string;
   value: string | number;
   trend?: React.ReactNode;
-  icon: React.ComponentType<{ className?: string }>;
   loading: boolean;
 }) {
   return (
@@ -81,7 +71,29 @@ export default function OverviewPage() {
     };
   }, []);
 
-  const stats = data?.stats;
+  const outcomes = data?.outcomes ?? [];
+  const completedThisWeek = outcomes.reduce((total, item) => total + item.count, 0);
+  const fallbackOutcomes = [
+    { label: "Leads researched", value: 0, trend: "Ready when a worker completes" },
+    { label: "Follow-ups drafted", value: 0, trend: "Ready when a worker completes" },
+    { label: "Invoices processed", value: 0, trend: "Ready when a worker completes" },
+  ];
+  const outcomeTiles = [
+    {
+      label: "What got done this week",
+      value: completedThisWeek,
+      trend: "Completed in the last 7 days",
+    },
+    ...outcomes.map((item) => ({
+      label: item.label,
+      value: item.count,
+      trend: item.worker_name,
+    })),
+  ];
+  const tiles = [
+    ...outcomeTiles,
+    ...fallbackOutcomes.slice(0, Math.max(0, 4 - outcomeTiles.length)),
+  ].slice(0, 4);
   const recent = data?.recent_runs ?? [];
   const scheduled = data?.scheduled_today ?? [];
   const attention = data?.needs_attention ?? [];
@@ -90,9 +102,9 @@ export default function OverviewPage() {
     <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Work done</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            What ran, what is running, and what is next.
+            Outcomes completed by your AI workers, plus what needs attention next.
           </p>
         </div>
         {/* S29p: dropped duplicate "+ New worker" header CTA — the sidebar
@@ -101,39 +113,15 @@ export default function OverviewPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatCard
-          label="Runs 24h"
-          value={stats?.runs_24h ?? 0}
-          icon={Clock}
-          loading={loading}
-          trend={
-            stats ? (
-              <Sparkline data={stats.runs_24h_sparkline} width={96} height={24} />
-            ) : null
-          }
-        />
-        <StatCard
-          label="Success 7d"
-          value={stats ? `${Math.round(stats.success_rate_7d * 100)}%` : "0%"}
-          icon={CheckCircle2}
-          loading={loading}
-        />
-        <StatCard
-          label="Active workers"
-          value={stats?.active_workers_count ?? 0}
-          icon={Box}
-          loading={loading}
-        />
-        <StatCard
-          label="Connections"
-          value={
-            stats
-              ? `${stats.connections_healthy} / ${stats.connections_total}`
-              : "0 / 0"
-          }
-          icon={Plug}
-          loading={loading}
-        />
+        {tiles.map((tile) => (
+          <StatCard
+            key={tile.label}
+            label={tile.label}
+            value={tile.value}
+            loading={loading}
+            trend={tile.trend}
+          />
+        ))}
       </div>
 
       {attention.length > 0 && (
