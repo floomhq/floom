@@ -57,7 +57,7 @@ limits:
   max_tool_iterations: 12
   max_output_tokens: 6144
   max_total_tokens: 60000
-  timeout_seconds: 1200
+  timeout_seconds: 3600
 exec:
   mode: pure-script
   command: python run.py

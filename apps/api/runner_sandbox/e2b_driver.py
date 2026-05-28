@@ -260,6 +260,12 @@ class E2BSandboxDriver(SandboxDriver):
                 # Skip any stale inputs/ dir that may exist in older bundles.
                 if rel.parts and rel.parts[0] == "inputs":
                     continue
+                if (
+                    "__pycache__" in rel.parts
+                    or rel.suffix == ".pyc"
+                    or (rel.parts and rel.parts[0] in {".pytest_cache", ".ruff_cache"})
+                ):
+                    continue
                 dest = f"{workdir}/{rel.as_posix()}"
                 if fpath.is_dir():
                     if dest not in made_dirs:
