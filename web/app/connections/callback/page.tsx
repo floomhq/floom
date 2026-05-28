@@ -36,8 +36,10 @@ function CallbackInner() {
       const qs = new URLSearchParams();
       if (connectionId) qs.set("connection_id", connectionId);
       if (status) qs.set("status", status);
-      // The API proxy will handle DB update + redirect back here with ?connected=1
-      window.location.href = `/api/proxy/connections/callback?${qs.toString()}`;
+      // The API proxy will handle DB update + redirect back here with ?connected=1.
+      // workeros-cloud: prepend basePath /app since window.location bypasses
+      // Next.js basePath rewriting (unlike router.push).
+      window.location.href = `/app/api/proxy/connections/callback?${qs.toString()}`;
     }
   }, [params, router]);
 

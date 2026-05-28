@@ -41,7 +41,10 @@ export default function ConnectionsPage() {
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const hydrateOneConnection = useCallback(async (record: ConnectionRecord) => {
-    const account = await fetchConnectedAccount(record.composio_connection_id);
+    // workeros-cloud: hit our cloud proxy with the LOCAL connection id;
+    // engine's /connections/{id}/account-info expects local id and reads
+    // composio_connection_id from the DB row itself.
+    const account = await fetchConnectedAccount(record.id);
     if (account) {
       setMetadataByConnectionId((previous) => ({
         ...previous,
@@ -303,11 +306,13 @@ async function loadWorkerDetails() {
 
 async function fetchConnectedAccount(id: string): Promise<ConnectedAccountMetadata | undefined> {
   try {
-    const response = await fetch(`/connections/connected-accounts/${encodeURIComponent(id)}`, {
-      cache: "no-store",
-    });
+    // workeros-cloud: call our cloud API proxy (Supabase-JWT-authed) directly,
+    // not the OSS engine's FLOOM_SECRET-authed Next route.
+    const response = await fetch(
+      `/app/api/proxy/connections/${encodeURIComponent(id)}/account-info`,
+      { cache: "no-store" }
+    );
     if (response.status === 503) {
-      // Connections backend not configured: surface via toast once, return undefined
       toast.error("Connections backend not configured on this server");
       return undefined;
     }
