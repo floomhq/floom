@@ -18,6 +18,7 @@ export type ConnectionRecord = ConnectionItem & {
     scopes?: string[];
   };
   connected_as?: string;
+  display_name?: string | null;
   email?: string;
   last_used_at?: string;
   last_used?: string;
@@ -101,10 +102,14 @@ export function formatTimestamp(value?: string) {
 export { formatRelativeTime } from "@/lib/formatters";
 
 export function getConnectionAccountLabel(conn: ConnectionRecord) {
+  // E2 fix: prefer display_name (unredacted real email from Composio) over
+  // account_label (which may have been redacted server-side). Fall through to
+  // legacy fields for backward compat.
   // N10 fix: fall back to connection ID suffix when all human-readable labels
   // are absent or identical (e.g. two Gmail accounts both showing "federico").
   // Appending the suffix ensures the cards are visually distinct.
   const label =
+    conn.display_name ||
     conn.account_label ||
     conn.email ||
     conn.account_email ||
