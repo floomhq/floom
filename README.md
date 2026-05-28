@@ -1,6 +1,6 @@
 # Workeros
 
-The OS for Background Workers. Open-source, self-hosted, sandboxed by default.
+The open-source, self-hosted runtime for AI workers. Sandboxed by default.
 
 > Create a worker. Give it tools. Let it run. See everything.
 

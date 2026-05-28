@@ -19,8 +19,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Floom: OS for Background Workers",
-  description: "Spawn workers, run them, and observe everything.",
+  title: "Floom Workers",
+  description: "Workers that use your tools. Run them on schedule, webhook, or approval.",
 };
 
 export default function RootLayout({

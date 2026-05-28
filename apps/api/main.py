@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Floom API",
     version="0.1.0",
-    description="The OS for Background Workers",
+    description="Open-source self-hosted runtime for AI workers",
     lifespan=lifespan,
 )
 
