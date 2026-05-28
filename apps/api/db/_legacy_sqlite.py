@@ -714,6 +714,10 @@ MIGRATIONS: list[Migration] = [
     _migrate_cli_auth_devices,
     # -- migration 26: index owner/user joins for repository queries -----------
     _add_owner_indexes,
+    # -- migration 27: output quality warning marker on runs -------------------
+    """
+    ALTER TABLE runs ADD COLUMN quality_warning TEXT;
+    """,
 ]
 
 
@@ -741,7 +745,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
