@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -15,8 +14,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
-import { Sparkline } from "@/components/Sparkline";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
+import { BrandLogo } from "@/components/connections/BrandLogo";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -479,6 +478,76 @@ function EmptyWorkersState() {
 }
 
 // ---------------------------------------------------------------------------
+// WorkerToolStrip — 20px rounded-square brand logos + AI icon + +N overflow
+// ---------------------------------------------------------------------------
+
+// Runtimes that invoke an LLM and should show the AI icon.
+const LLM_RUNTIMES = new Set(["skill", "agent"]);
+
+// Slug normalization mirror of ProviderLogos.tsx (keeps BrandLogo lookup happy).
+const SLUG_ALIASES: Record<string, string> = {
+  googlecalendar: "google-calendar",
+  googledrive: "google-drive",
+  googledocs: "google-docs",
+  googlesheets: "google-sheets",
+  googlemeet: "google-meet",
+};
+function normalizeSlug(slug: string): string {
+  const lower = slug.toLowerCase();
+  return SLUG_ALIASES[lower] ?? lower;
+}
+
+function WorkerToolStrip({ worker }: { worker: WorkerSummary }) {
+  const isLlmWorker = LLM_RUNTIMES.has(worker.runtime ?? "");
+  const connSlugs = (worker.connections ?? []).map(normalizeSlug);
+
+  // Build ordered tool list: connections first, then AI icon at the end.
+  type Tool = { type: "connection"; slug: string } | { type: "ai" };
+  const tools: Tool[] = [
+    ...connSlugs.map((slug) => ({ type: "connection" as const, slug })),
+    ...(isLlmWorker ? [{ type: "ai" as const }] : []),
+  ];
+
+  if (tools.length === 0) return null;
+
+  const MAX_VISIBLE = 4;
+  const visible = tools.slice(0, MAX_VISIBLE);
+  const overflow = tools.length - MAX_VISIBLE;
+
+  return (
+    <div className="flex items-center gap-1">
+      {visible.map((tool, i) =>
+        tool.type === "connection" ? (
+          <span
+            key={`conn-${tool.slug}-${i}`}
+            className="inline-flex size-5 items-center justify-center rounded-[4px] border border-border bg-card"
+            title={tool.slug}
+          >
+            <BrandLogo icon={tool.slug} className="size-3" />
+          </span>
+        ) : (
+          <span
+            key="ai-icon"
+            className="inline-flex size-5 items-center justify-center rounded-[4px] border border-border bg-card"
+            title="AI / LLM"
+          >
+            {/* Anthropic-style AI mark — minimal A shape */}
+            <svg viewBox="0 0 24 24" className="size-3 text-[#C96442]" fill="currentColor" aria-hidden>
+              <use href="#icon-anthropic" />
+            </svg>
+          </span>
+        )
+      )}
+      {overflow > 0 && (
+        <span className="inline-flex h-5 items-center rounded-[4px] border border-border bg-card px-1 text-[10px] font-medium text-muted-foreground">
+          +{overflow}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // WorkerCard
 // ---------------------------------------------------------------------------
 
@@ -487,18 +556,14 @@ function WorkerCard({
   isFavorite,
   onTagClick,
   onFavoriteToggle,
-  compact,
 }: {
   worker: WorkerSummary;
   isFavorite: boolean;
   onTagClick?: (tag: string) => void;
   onFavoriteToggle: (id: string) => void;
-  compact?: boolean;
 }) {
   const hoverDescription = firstLine(worker.long_description);
   const stats = worker.recent_stats;
-  const hasStats = stats && stats.runs_7d > 0;
-  const hasSparkline = Array.isArray(worker.timeseries) && worker.timeseries.length > 0 && hasStats;
 
   return (
     <Card
@@ -506,13 +571,17 @@ function WorkerCard({
       title={hoverDescription || undefined}
     >
       <Link href={`/workers/${worker.id}`} className="block h-full" target="_blank" rel="noopener noreferrer">
-      <CardContent className={`h-full flex flex-col p-5 ${compact ? "gap-2" : "gap-2.5"}`}>
+      <CardContent className="h-full flex flex-col p-4 gap-1.5">
+        {/* Tool-logo strip */}
+        <WorkerToolStrip worker={worker} />
+
+        {/* Avatar + title row */}
         <div className="flex items-start justify-between gap-3">
           <WorkerAvatar seed={worker.id} name={worker.name} size="size-10" />
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
             {worker.is_example && (
-              <span className="mt-1 inline-flex items-center rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+              <span className="mt-0.5 inline-flex items-center rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
                 Example
               </span>
             )}
@@ -537,11 +606,9 @@ function WorkerCard({
 
         <CardStatusPill status={worker.status} />
 
-        {!compact && (
-          <p className="text-sm text-muted-foreground line-clamp-2">{worker.description || "No description."}</p>
-        )}
+        <p className="text-sm text-muted-foreground line-clamp-1">{worker.description || "No description."}</p>
 
-        {!compact && (worker.tags || []).length > 0 && (
+        {(worker.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {(worker.tags || []).map((tag) => (
               <button
@@ -560,37 +627,11 @@ function WorkerCard({
           </div>
         )}
 
-        <div className="relative h-16 mt-auto">
-          <div className="absolute inset-x-0 bottom-0 transition-opacity duration-200 opacity-100 group-hover:opacity-0 pointer-events-none">
-            {stats?.last_run_at && (
-              <p className="text-xs text-muted-foreground">
-                Last run {formatRelativeTime(stats.last_run_at)}
-              </p>
-            )}
-          </div>
-          <div className="absolute inset-x-0 bottom-0 flex flex-col gap-1.5 transition-opacity duration-200 opacity-0 group-hover:opacity-100 pointer-events-none">
-            <div className="flex items-center gap-2 flex-wrap">
-              {(worker.triggers || []).length > 0 ? (
-                (worker.triggers || []).map((label) => (
-                  <span key={label} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-muted text-muted-foreground">
-                    {label}
-                  </span>
-                ))
-              ) : (
-                <span className="text-[11px] text-muted-foreground">{worker.trigger_type}</span>
-              )}
-              {hasSparkline && (
-                <Sparkline data={worker.timeseries!} width={80} height={20} />
-              )}
-            </div>
-            {hasStats && (
-              <p className="text-xs text-muted-foreground truncate">
-                {stats.runs_7d > 0 && `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d`}
-                {stats.success_rate_7d != null && stats.runs_7d > 0 && ` · ${Math.round(stats.success_rate_7d * 100)}% success`}
-              </p>
-            )}
-          </div>
-        </div>
+        {stats?.last_run_at && (
+          <p className="text-xs text-muted-foreground mt-auto">
+            Last run {formatRelativeTime(stats.last_run_at)}
+          </p>
+        )}
       </CardContent>
       </Link>
     </Card>
@@ -631,22 +672,25 @@ function firstLine(value?: string): string {
 function WorkerCardSkeleton() {
   return (
     <Card className="h-full overflow-hidden">
-      <CardContent className="p-5 space-y-3">
+      <CardContent className="p-4 space-y-1.5">
+        {/* Tool strip skeleton */}
+        <div className="flex gap-1">
+          <Skeleton className="size-5 rounded-[4px]" />
+          <Skeleton className="size-5 rounded-[4px]" />
+          <Skeleton className="size-5 rounded-[4px]" />
+        </div>
+        {/* Avatar + title row */}
         <div className="flex items-start justify-between gap-2">
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="size-5 rounded-full" />
+          <Skeleton className="size-10 rounded-lg shrink-0" />
+          <Skeleton className="h-4 w-3/4 mt-1" />
+          <Skeleton className="size-5 rounded-full shrink-0" />
         </div>
-        <Skeleton className="h-5 w-24 rounded-full" />
         <Skeleton className="h-3 w-full" />
-        <Skeleton className="h-3 w-5/6" />
         <div className="flex gap-1.5">
-          <Skeleton className="h-5 w-14 rounded" />
-          <Skeleton className="h-5 w-16 rounded" />
-          <Skeleton className="h-5 w-12 rounded" />
+          <Skeleton className="h-5 w-14 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-full" />
         </div>
-        <Skeleton className="h-5 w-20 rounded" />
-        <Skeleton className="h-7 w-32" />
-        <Skeleton className="h-3 w-5/6" />
+        <Skeleton className="h-3 w-20" />
       </CardContent>
     </Card>
   );
