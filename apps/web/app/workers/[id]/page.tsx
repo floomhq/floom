@@ -20,7 +20,7 @@ import { toast } from "sonner";
 import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
-  Trash2,
+  Trash2, ArrowLeft, BookOpen,
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
@@ -46,9 +46,9 @@ import { useRunStream } from "@/lib/useRunStream";
 // ABOVE the Run form on the Run tab. Danger zone moves to /edit only
 // (already exists there). Tech details + I/O chips dropped (redundant
 // with the form fields below + the Run/Source/Edit tabs).
-type Section = "run" | "code" | "triggers" | "connections" | "runs";
+type Section = "about" | "run" | "code" | "triggers" | "connections" | "runs";
 
-const VALID_SECTIONS: Section[] = ["run", "code", "triggers", "connections", "runs"];
+const VALID_SECTIONS: Section[] = ["about", "run", "code", "triggers", "connections", "runs"];
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
@@ -60,7 +60,11 @@ interface NavItem {
   icon: React.ReactNode;
 }
 
+// S34: Federico — "this page about this worker and run should be different
+// tabs. These are completely different content and it's confusing." Restored
+// About as a first-class tab (was inlined as <details> on the Run tab in S32).
 const NAV_ITEMS: NavItem[] = [
+  { id: "about", label: "About", icon: <BookOpen className="w-4 h-4" /> },
   { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
   { id: "triggers", label: "Triggers", icon: <Clock className="w-4 h-4" /> },
   { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
@@ -85,10 +89,13 @@ export default function WorkerDetailPage() {
   const sectionParam =
     (typeof window !== "undefined" && window.location.hash.replace(/^#/, "")) ||
     (searchParams.get("section") as string) ||
-    "run";
-  // S31: Run is the default. Legacy "#overview" URLs collapse to "run".
+    "";
+  // S34: default to "about" so first-time visitors see what the worker does
+  // before the Run form. Once they pick a tab via URL hash, that wins. Legacy
+  // "#overview" URLs collapse to "about".
   const [activeSection, setActiveSection] = useState<Section>(
-    isValidSection(sectionParam) ? sectionParam : "run"
+    isValidSection(sectionParam) ? sectionParam :
+      (sectionParam === "overview" ? "about" : "about")
   );
 
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
@@ -405,11 +412,20 @@ export default function WorkerDetailPage() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="space-y-6">
-      {/* Worker header. S22b: dropped redundant ArrowLeft (sidebar + Cmd-K
-          palette + breadcrumb already provide back-nav). Status dot replaced
-          with a labelled pill so users can read the state at a glance.
-          Category badge differentiated from tag badges visually. */}
+    <div className="space-y-4">
+      {/* S34: Federico — "where is the arrow back to workers here?" Restored
+          a quiet back-link above the worker title. Cmd-K + sidebar exist but
+          a direct one-click "back to list" is what users expect on a detail
+          page. */}
+      <Link
+        href="/workers"
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="size-3.5" />
+        <span>Workers</span>
+      </Link>
+      {/* Worker header. Status dot replaced with a labelled pill so users
+          can read the state at a glance. */}
       <div className="flex items-start gap-4">
         {/* S29n: WorkerAvatar — workers feel like employees, not scripts. */}
         <WorkerAvatar seed={worker.id} name={worker.name} size="size-12" />
@@ -465,6 +481,9 @@ export default function WorkerDetailPage() {
 
       {/* Section content */}
       <div>
+        {activeSection === "about" && (
+          <AboutSection worker={worker} />
+        )}
         {activeSection === "run" && (
           activeRun ? (
             <RunDetailSplitPane
@@ -582,6 +601,54 @@ export default function WorkerDetailPage() {
 // Run section
 // ---------------------------------------------------------------------------
 
+// S34: dedicated About tab — long_description + use_cases + how_it_works.
+// Federico — "this page about this worker and run should be different tabs.
+// These are completely different content and it's confusing."
+function AboutSection({ worker }: { worker: WorkerDetail }) {
+  const hasContent = !!(
+    worker.long_description ||
+    (worker.use_cases && worker.use_cases.length > 0) ||
+    worker.how_it_works
+  );
+  if (!hasContent) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {worker.description || "No description provided."}
+      </p>
+    );
+  }
+  return (
+    <div className="max-w-2xl space-y-6">
+      {worker.long_description && (
+        <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
+          {worker.long_description}
+        </p>
+      )}
+      {worker.use_cases && worker.use_cases.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-base font-semibold text-foreground">Use cases</h2>
+          <ul className="space-y-1.5">
+            {worker.use_cases.map((uc) => (
+              <li key={uc} className="flex gap-2.5 text-sm text-foreground leading-relaxed">
+                <span className="mt-2 size-1 rounded-full bg-muted-foreground shrink-0" aria-hidden="true" />
+                <span>{uc}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {worker.how_it_works && (
+        <div className="space-y-2">
+          <h2 className="text-base font-semibold text-foreground">How it works</h2>
+          <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
+            {worker.how_it_works}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RunSection({
   worker,
   inputs,
@@ -623,50 +690,10 @@ function RunSection({
   // side-by-side; long inputs (textarea/file/csv) span both columns.
   const isLongInput = (inp: WorkerInput) =>
     inp.type === "textarea" || inp.type === "file";
-  // S31: "About this worker" surfaces what the Overview tab used to
-  // show, collapsed by default so it doesn't dominate the Run form.
-  // Includes long_description + use_cases + how_it_works only -- the
-  // narrative content. Inputs/outputs/example are already represented
-  // by the form below + the "Fill with sample" affordance.
-  const hasAbout = !!(worker.long_description || (worker.use_cases && worker.use_cases.length > 0) || worker.how_it_works);
+  // S34: About content moved to its own tab (Federico — "different content,
+  // different tabs"). Run tab is now form-only.
   return (
     <div className="max-w-xl space-y-6">
-      {hasAbout && (
-        // S32: Federico — "how do I understand what this is doing?" without
-        // an Overview tab. Open by default so first-time visitors see what
-        // the worker does immediately. Users who already know can collapse
-        // manually.
-        <details className="border border-line" open>
-          <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors flex items-center justify-between [&::-webkit-details-marker]:hidden">
-            <span>About this worker</span>
-            <ChevronDown className="size-4 text-muted-foreground transition-transform [details[open]_&]:rotate-180" />
-          </summary>
-          <div className="px-3 py-3 space-y-4 border-t border-line">
-            {worker.long_description && (
-              <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{worker.long_description}</p>
-            )}
-            {worker.use_cases && worker.use_cases.length > 0 && (
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">Use cases</p>
-                <ul className="space-y-1.5">
-                  {worker.use_cases.map((uc) => (
-                    <li key={uc} className="flex gap-2.5 text-sm text-foreground leading-relaxed">
-                      <span className="mt-2 size-1 rounded-full bg-muted-foreground shrink-0" aria-hidden="true" />
-                      <span>{uc}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {worker.how_it_works && (
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">How it works</p>
-                <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{worker.how_it_works}</p>
-              </div>
-            )}
-          </div>
-        </details>
-      )}
       <div className="space-y-4">
         {hasInputs && (worker.example_input || inputsFilled) && (
             <div className="flex items-center gap-2 pb-1">
