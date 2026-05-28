@@ -8,6 +8,10 @@ MUST write result.json with:
 import json
 import logging
 import os
+import io
+import shlex
+import shutil
+import tarfile
 import threading
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -15,6 +19,7 @@ from typing import Any, Callable, Dict, Optional
 
 from .base import SandboxDriver
 from models import WorkerConfig, WorkerResult
+from contexts import CONTEXTS_DIR, context_dir, normalize_context_mount
 from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR
 
@@ -215,6 +220,50 @@ def _merge_artifacts(
     return merged
 
 
+def _safe_context_tar_member(member_name: str) -> PurePosixPath:
+    path = PurePosixPath(member_name)
+    if str(path) in {"", "."}:
+        raise ValueError("empty tar path")
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"invalid context tar path: {member_name!r}")
+    return path
+
+
+def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
+    tmp_dir = CONTEXTS_DIR / f".{target_dir.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw_tar), mode="r:*") as archive:
+            for member in archive.getmembers():
+                try:
+                    rel = _safe_context_tar_member(member.name)
+                except ValueError:
+                    continue
+                if member.isdir():
+                    (tmp_dir / rel.as_posix()).mkdir(parents=True, exist_ok=True)
+                    continue
+                if not member.isfile():
+                    continue
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    continue
+                destination = (tmp_dir / rel.as_posix()).resolve()
+                try:
+                    destination.relative_to(tmp_dir.resolve())
+                except ValueError:
+                    continue
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(extracted.read())
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        os.replace(tmp_dir, target_dir)
+    finally:
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
     bundle_path = config.runtime.bundle_path if config and config.runtime else None
     if bundle_path:
@@ -372,6 +421,21 @@ class E2BSandboxDriver(SandboxDriver):
                 content = fpath.read_bytes()
                 sandbox.files.write(dest, content)
                 log_fn(f"[e2b] Uploaded {rel.as_posix()}", "debug")
+
+            context_error = self._upload_contexts_to_sandbox(
+                sandbox=sandbox,
+                workdir=workdir,
+                config=config,
+                made_dirs=made_dirs,
+                log_fn=log_fn,
+            )
+            if context_error:
+                return WorkerResult(
+                    status="error",
+                    error=context_error,
+                    error_code="context_mount_failed",
+                    retryable=True,
+                )
 
             # Upload per-run file inputs from their isolated staging paths.
             # Inputs dict values for file inputs are absolute local paths.
@@ -559,6 +623,7 @@ class E2BSandboxDriver(SandboxDriver):
             outputs = result_data.get("outputs", {})
             if not isinstance(outputs, dict):
                 outputs = {}
+            result_status = result_data.get("status", "success")
             result_artifacts = result_data.get("artifacts", [])
             if not isinstance(result_artifacts, list):
                 result_artifacts = []
@@ -572,10 +637,18 @@ class E2BSandboxDriver(SandboxDriver):
                 log_fn=log_fn,
             )
             artifacts = _merge_artifacts(result_artifacts, collected_artifacts)
+            if result_status not in ("error", "failed"):
+                self._persist_writeable_contexts(
+                    sandbox=sandbox,
+                    workdir=workdir,
+                    run_id=run_id,
+                    config=config,
+                    log_fn=log_fn,
+                )
 
             log_fn("[e2b] Run completed successfully", "info")
             return WorkerResult(
-                status=result_data.get("status", "success"),
+                status=result_status,
                 outputs=outputs,
                 artifacts=artifacts,
                 error=result_data.get("error"),
@@ -592,6 +665,129 @@ class E2BSandboxDriver(SandboxDriver):
             except Exception as close_exc:
                 # Sandbox may have self-terminated (timeout, OOM) — not an error.
                 logger.debug("E2B sandbox already gone (kill suppressed): %s", close_exc)
+
+    def _upload_contexts_to_sandbox(
+        self,
+        *,
+        sandbox: Any,
+        workdir: str,
+        config: Optional[WorkerConfig],
+        made_dirs: set[str],
+        log_fn: Callable[[str, str], None],
+    ) -> str | None:
+        if not config or not config.contexts:
+            return None
+
+        contexts_root = f"{workdir}/context"
+        if contexts_root not in made_dirs:
+            sandbox.files.make_dir(contexts_root)
+            made_dirs.add(contexts_root)
+
+        for raw_context in config.contexts:
+            try:
+                context = normalize_context_mount(raw_context)
+            except ValueError as exc:
+                return f"Invalid context declaration: {exc}"
+
+            name = context["name"]
+            source = context["source"]
+            sandbox_target = f"{contexts_root}/{name}"
+            sandbox.files.make_dir(sandbox_target)
+            made_dirs.add(sandbox_target)
+
+            if source.startswith("git+"):
+                repo_url = source.removeprefix("git+")
+                log_fn(f"[e2b] Cloning git context {name!r}", "info")
+                result = sandbox.commands.run(
+                    "git clone --depth 1 "
+                    f"{shlex.quote(repo_url)} {shlex.quote(sandbox_target)}",
+                    timeout=180,
+                )
+                if result.exit_code != 0:
+                    return (
+                        f"git context {name!r} clone failed "
+                        f"(exit {result.exit_code}): {(result.stderr or result.stdout or '')[:500]}"
+                    )
+                continue
+
+            local_dir = context_dir(name)
+            if not local_dir.is_dir():
+                log_fn(f"[e2b] context {name!r} not found locally", "warning")
+                continue
+
+            for fpath in local_dir.rglob("*"):
+                if "__pycache__" in fpath.parts or fpath.is_symlink():
+                    continue
+                rel = fpath.relative_to(local_dir)
+                dest = f"{sandbox_target}/{rel.as_posix()}"
+                if fpath.is_dir():
+                    if dest not in made_dirs:
+                        sandbox.files.make_dir(dest)
+                        made_dirs.add(dest)
+                    continue
+                parent = f"{sandbox_target}/{rel.parent.as_posix()}" if rel.parent.as_posix() != "." else sandbox_target
+                if parent not in made_dirs:
+                    sandbox.files.make_dir(parent)
+                    made_dirs.add(parent)
+                sandbox.files.write(dest, fpath.read_bytes())
+                log_fn(f"[e2b] Uploaded context {name}/{rel.as_posix()}", "debug")
+        return None
+
+    def _persist_writeable_contexts(
+        self,
+        *,
+        sandbox: Any,
+        workdir: str,
+        run_id: str,
+        config: Optional[WorkerConfig],
+        log_fn: Callable[[str, str], None],
+    ) -> None:
+        if not config or not config.contexts:
+            return
+
+        for raw_context in config.contexts:
+            try:
+                context = normalize_context_mount(raw_context)
+            except ValueError as exc:
+                log_fn(f"[e2b] Skipping invalid writeable context: {exc}", "warning")
+                continue
+            if not context["writeable"]:
+                continue
+            if context["source"] != "local":
+                log_fn(
+                    f"[e2b] Skipping writeback for git context {context['name']!r}",
+                    "warning",
+                )
+                continue
+
+            name = context["name"]
+            sandbox_source = f"{workdir}/context/{name}"
+            try:
+                if not sandbox.files.exists(sandbox_source, request_timeout=30):
+                    log_fn(f"[e2b] Writeable context {name!r} missing in sandbox", "warning")
+                    continue
+            except Exception as exc:
+                log_fn(f"[e2b] Failed to inspect writeable context {name!r}: {exc}", "warning")
+                continue
+
+            tar_path = f"/tmp/{run_id}-{name}.tar"
+            result = sandbox.commands.run(
+                f"cd {shlex.quote(sandbox_source)} && tar -cf {shlex.quote(tar_path)} .",
+                timeout=120,
+            )
+            if result.exit_code != 0:
+                log_fn(
+                    f"[e2b] Failed to archive writeable context {name!r}: "
+                    f"{(result.stderr or result.stdout or '')[:300]}",
+                    "warning",
+                )
+                continue
+            try:
+                raw_tar = sandbox.files.read(tar_path, format="bytes", request_timeout=120)
+                _extract_context_tar(bytes(raw_tar), context_dir(name))
+                log_fn(f"[e2b] Persisted writeable context {name!r}", "info")
+            except Exception as exc:
+                log_fn(f"[e2b] Failed to persist writeable context {name!r}: {exc}", "warning")
 
     def _collect_sandbox_artifacts(
         self,
