@@ -8,9 +8,9 @@ import { api } from "@/lib/api";
 // S27: dropped Card wrapper for the runs table (using bordered div with column header instead).
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { RunStatusBadge } from "@/components/RunStatus";
+import { RunStatusBadge, RunStatusGlyph } from "@/components/RunStatus";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
-import { formatRelative } from "@/lib/formatters";
+import { formatRelative, formatTimeOfDay } from "@/lib/formatters";
 import {
   Select,
   SelectContent,
@@ -30,6 +30,7 @@ const STATUS_OPTIONS = [
 ];
 
 const PAGE_SIZE = 20;
+const SUCCESS_STATES = new Set(["completed", "success", "succeeded"]);
 
 export default function RunsPage() {
   return (
@@ -99,6 +100,8 @@ function RunsContent() {
     fetchRuns(next);
   }
 
+  const groupedRuns = groupRunsByDay(runs);
+
   const API_PAGE_MAX = 500; // API enforced maximum per page
 
   async function exportCSV() {
@@ -146,8 +149,8 @@ function RunsContent() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Runs</h1>
-          <p className="text-muted-foreground text-sm mt-1">All worker executions.</p>
+          <h1 className="text-2xl font-semibold">Run history</h1>
+          <p className="text-muted-foreground text-sm mt-1">Worker executions grouped by day.</p>
         </div>
         {/* S22e: Export demoted to ghost (roast P1: was as loud as primary
             New worker CTA elsewhere; export is a power-user destination). */}
@@ -245,49 +248,65 @@ function RunsContent() {
           )}
         </div>
       ) : (
-        <div className="rounded-md border border-border bg-card overflow-hidden">
-          {/* Column header row. Hidden on mobile (rows stack instead). */}
-          <div className="hidden md:grid grid-cols-[1fr_120px_100px_140px_140px] gap-4 px-4 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] font-medium text-muted-foreground">
-            <span>Worker</span>
-            <span>Trigger</span>
-            <span>Duration</span>
-            <span>Status</span>
-            <span>Started</span>
-          </div>
-          {runs.map((r) => (
-            <Link
-              key={r.id}
-              href={`/runs/${r.id}`}
-              title={r.id}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="grid grid-cols-[1fr_auto] md:grid-cols-[1fr_120px_100px_140px_140px] gap-4 px-4 py-2.5 border-b border-line last:border-b-0 hover:bg-muted transition-colors items-center cursor-pointer"
-            >
-              <span className="flex items-center gap-2.5 min-w-0">
-                <WorkerAvatar seed={r.worker_id} name={r.worker_name || r.worker_id} size="size-6" />
-                <span className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</span>
-              </span>
-              <span className="hidden md:inline text-xs text-muted-foreground truncate">
-                {r.trigger_source && r.trigger_source !== "manual" ? r.trigger_source : <span className="text-muted-foreground/50">manual</span>}
-              </span>
-              <span className="hidden md:inline text-xs text-muted-foreground tabular-nums">
-                {formatDuration(r.duration_ms)}
-              </span>
-              <span className="hidden md:inline-flex">
-                <RunStatusBadge status={r.status} />
-              </span>
-              <span className="hidden md:inline text-xs text-muted-foreground">
-                {formatRelative(r.created_at)}
-              </span>
-              {/* Mobile fallback: single row on the right with status pill only */}
-              <span className="md:hidden flex items-center gap-2 justify-end">
-                <span className="text-xs text-muted-foreground">{formatRelative(r.created_at)}</span>
-                <RunStatusBadge status={r.status} />
-              </span>
-            </Link>
+        <div className="space-y-4">
+          {groupedRuns.map((group) => (
+            <section key={group.key} className="rounded-md border border-border bg-card overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-line bg-[var(--bg-2)]">
+                <h2 className="text-xs font-semibold uppercase text-muted-foreground">
+                  {group.label}
+                </h2>
+                <span className="text-[11px] text-muted-foreground">
+                  {formatRunCountSummary(group.runs)}
+                </span>
+              </div>
+              <div className="hidden md:grid grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-2 border-b border-line text-[11px] font-medium text-muted-foreground">
+                <span>Worker</span>
+                <span>Trigger</span>
+                <span>Duration</span>
+                <span>Status</span>
+                <span>Started</span>
+              </div>
+              {group.runs.map((r) => (
+                <Link
+                  key={r.id}
+                  href={`/runs/${r.id}`}
+                  title={r.id}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-3 border-b border-line last:border-b-0 hover:bg-muted transition-colors items-center cursor-pointer"
+                >
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <WorkerAvatar seed={r.worker_id} name={r.worker_name || r.worker_id} size="size-6" />
+                      <span className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</span>
+                    </span>
+                    {r.error && (
+                      <span className="mt-1 block truncate text-[11px] text-error/80">
+                        {summarizeError(r.error)}
+                      </span>
+                    )}
+                  </span>
+                  <span className="hidden md:inline text-xs text-muted-foreground truncate">
+                    {formatTrigger(r.trigger_source)}
+                  </span>
+                  <span className="hidden md:inline text-xs text-muted-foreground tabular-nums">
+                    {formatDuration(r.duration_ms)}
+                  </span>
+                  <span className="hidden md:inline-flex">
+                    <RunStatusCell status={r.status} />
+                  </span>
+                  <span className="hidden md:flex flex-col text-xs text-muted-foreground leading-tight">
+                    <span className="text-foreground tabular-nums">{formatStartedTime(r)}</span>
+                    <span>{formatRelative(getRunTimestamp(r))}</span>
+                  </span>
+                  <span className="md:hidden flex flex-col items-end gap-1 justify-end">
+                    <RunStatusCell status={r.status} />
+                    <span className="text-xs text-muted-foreground">{formatRelative(getRunTimestamp(r))}</span>
+                  </span>
+                </Link>
+              ))}
+            </section>
           ))}
           {hasMore && (
-            <div className="px-4 py-3 text-center border-t border-line">
+            <div className="px-4 py-3 text-center rounded-md border border-border bg-card">
               <Button
                 variant="outline"
                 size="sm"
@@ -302,6 +321,86 @@ function RunsContent() {
         </div>
       )}
     </div>
+  );
+}
+
+function groupRunsByDay(runs: RunSummary[]): Array<{ key: string; label: string; runs: RunSummary[] }> {
+  const groups = new Map<string, RunSummary[]>();
+  for (const run of runs) {
+    const timestamp = getRunTimestamp(run);
+    const key = timestamp ? new Date(timestamp).toDateString() : "unknown";
+    const existing = groups.get(key);
+    if (existing) existing.push(run);
+    else groups.set(key, [run]);
+  }
+  return Array.from(groups.entries()).map(([key, groupRuns]) => ({
+    key,
+    label: formatDayLabel(key),
+    runs: groupRuns,
+  }));
+}
+
+function getRunTimestamp(run: RunSummary): string | undefined {
+  return run.started_at || run.created_at || run.completed_at;
+}
+
+function formatDayLabel(key: string): string {
+  if (key === "unknown") return "Unscheduled";
+  const date = new Date(key);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatRunCountSummary(runs: RunSummary[]): string {
+  const failed = runs.filter((run) => run.status === "failed").length;
+  const running = runs.filter((run) => run.status === "running" || run.status === "queued").length;
+  const parts = [`${runs.length} ${runs.length === 1 ? "run" : "runs"}`];
+  if (failed > 0) parts.push(`${failed} failed`);
+  if (running > 0) parts.push(`${running} active`);
+  return parts.join(" · ");
+}
+
+function formatTrigger(triggerSource: string | undefined): string {
+  if (!triggerSource || triggerSource === "manual") return "Manual";
+  return titleCase(triggerSource.replace(/[_-]/g, " "));
+}
+
+function formatStartedTime(run: RunSummary): string {
+  const timestamp = getRunTimestamp(run);
+  if (!timestamp) return "-";
+  return formatTimeOfDay(timestamp);
+}
+
+function summarizeError(error: string): string {
+  const cleaned = error.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= 120) return cleaned;
+  return `${cleaned.slice(0, 117)}...`;
+}
+
+function titleCase(value: string): string {
+  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function RunStatusCell({ status }: { status: RunSummary["status"] }) {
+  const normalized = status.replace(/_/g, " ");
+  const isSuccess = SUCCESS_STATES.has(status.toLowerCase());
+  return (
+    <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+      <RunStatusGlyph status={status} className="size-3.5 shrink-0" />
+      {isSuccess ? (
+        <span className="font-medium text-foreground capitalize">{normalized}</span>
+      ) : (
+        <RunStatusBadge status={status} />
+      )}
+    </span>
   );
 }
 
