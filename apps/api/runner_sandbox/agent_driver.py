@@ -104,6 +104,10 @@ class _AgentRunState:
     finished: bool = False
 
 
+class _MCPConnectionError(RuntimeError):
+    pass
+
+
 class AgentDriver(SandboxDriver):
     """Runs an agent worker through the OpenAI Agents SDK."""
 
@@ -281,122 +285,134 @@ class AgentDriver(SandboxDriver):
         corrective_retry_used = False
         run_number = 1
         last_result: Any = None
+        mcp_servers: list[Any] = []
 
-        while True:
-            if self._cancel_requested(run_id):
-                log_fn("Cancel requested; stopping agent loop", "info")
-                return WorkerResult(
-                    status="failed",
-                    error="Run cancelled by user",
-                    error_code="cancelled",
-                )
-            if total_tokens >= limits.max_total_tokens:
-                return WorkerResult(
-                    status="error",
-                    error="Agent token cap exceeded",
-                    error_code="token_cap_exceeded",
-                )
-
-            force_finish = corrective_retry_used
-            agent = Agent(
-                name=worker_id,
-                instructions=system_prompt,
-                tools=self._sdk_tools(config, state),
-                model=config.runtime.model or "gpt-5-mini",
-                model_settings=ModelSettings(
-                    max_tokens=limits.max_output_tokens,
-                    include_usage=True,
-                    tool_choice="finish_with_outputs" if force_finish else None,
-                ),
-                tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
-            )
-
-            log_fn(f"Agent SDK run {run_number}", "debug")
-            self._emit_part(run_id, {"type": "step-start", "stepNumber": run_number})
-            transcript.append({"type": "step-start", "stepNumber": run_number})
-
-            try:
-                result = await self._run_streamed(
-                    agent=agent,
-                    run_input=run_input,
-                    max_turns=limits.max_tool_iterations,
-                    run_config=run_config,
-                )
-            except Exception as exc:
-                if exc.__class__.__name__ == "MaxTurnsExceeded":
+        try:
+            mcp_servers = await self._connect_mcp_servers(config, secrets, log_fn)
+            while True:
+                if self._cancel_requested(run_id):
+                    log_fn("Cancel requested; stopping agent loop", "info")
+                    return WorkerResult(
+                        status="failed",
+                        error="Run cancelled by user",
+                        error_code="cancelled",
+                    )
+                if total_tokens >= limits.max_total_tokens:
                     return WorkerResult(
                         status="error",
-                        error="Agent tool iteration cap exceeded",
-                        error_code="tool_iteration_cap_exceeded",
+                        error="Agent token cap exceeded",
+                        error_code="token_cap_exceeded",
                     )
-                raise
-            last_result = result
-            try:
-                stream_result = await self._consume_streamed_result(
-                    result=result,
-                    run_id=run_id,
-                    transcript=transcript,
-                    total_tokens=total_tokens,
-                    max_total_tokens=limits.max_total_tokens,
-                )
-            except Exception as exc:
-                if exc.__class__.__name__ == "MaxTurnsExceeded":
-                    return WorkerResult(
-                        status="error",
-                        error="Agent tool iteration cap exceeded",
-                        error_code="tool_iteration_cap_exceeded",
-                    )
-                raise
-            total_tokens = stream_result["total_tokens"]
-            if stream_result["cancelled"]:
-                return WorkerResult(
-                    status="failed",
-                    error="Run cancelled by user",
-                    error_code="cancelled",
-                )
-            if stream_result["token_cap_exceeded"]:
-                return WorkerResult(
-                    status="error",
-                    error="Agent token cap exceeded",
-                    error_code="token_cap_exceeded",
+
+                force_finish = corrective_retry_used
+                agent = Agent(
+                    name=worker_id,
+                    instructions=system_prompt,
+                    tools=self._sdk_tools(config, state),
+                    mcp_servers=mcp_servers,
+                    model=config.runtime.model or "gpt-5-mini",
+                    model_settings=ModelSettings(
+                        max_tokens=limits.max_output_tokens,
+                        include_usage=True,
+                        tool_choice="finish_with_outputs" if force_finish else None,
+                    ),
+                    tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
                 )
 
-            if state.finished:
+                log_fn(f"Agent SDK run {run_number}", "debug")
+                self._emit_part(run_id, {"type": "step-start", "stepNumber": run_number})
+                transcript.append({"type": "step-start", "stepNumber": run_number})
+
+                try:
+                    result = await self._run_streamed(
+                        agent=agent,
+                        run_input=run_input,
+                        max_turns=limits.max_tool_iterations,
+                        run_config=run_config,
+                    )
+                except Exception as exc:
+                    if exc.__class__.__name__ == "MaxTurnsExceeded":
+                        return WorkerResult(
+                            status="error",
+                            error="Agent tool iteration cap exceeded",
+                            error_code="tool_iteration_cap_exceeded",
+                        )
+                    raise
+                last_result = result
+                try:
+                    stream_result = await self._consume_streamed_result(
+                        result=result,
+                        run_id=run_id,
+                        transcript=transcript,
+                        total_tokens=total_tokens,
+                        max_total_tokens=limits.max_total_tokens,
+                    )
+                except Exception as exc:
+                    if exc.__class__.__name__ == "MaxTurnsExceeded":
+                        return WorkerResult(
+                            status="error",
+                            error="Agent tool iteration cap exceeded",
+                            error_code="tool_iteration_cap_exceeded",
+                        )
+                    raise
+                total_tokens = stream_result["total_tokens"]
+                if stream_result["cancelled"]:
+                    return WorkerResult(
+                        status="failed",
+                        error="Run cancelled by user",
+                        error_code="cancelled",
+                    )
+                if stream_result["token_cap_exceeded"]:
+                    return WorkerResult(
+                        status="error",
+                        error="Agent token cap exceeded",
+                        error_code="token_cap_exceeded",
+                    )
+
+                if state.finished:
+                    break
+
+                missing_outputs = self._missing_required_outputs(config, outputs)
+                if missing_outputs and not corrective_retry_used:
+                    corrective_retry_used = True
+                    run_number += 1
+                    names = ", ".join(missing_outputs)
+                    corrective_message = (
+                        f"Required outputs not produced: {names}. "
+                        "Call finish_with_outputs with the required top-level output names now."
+                    )
+                    transcript.append({"role": "user", "content": corrective_message})
+                    try:
+                        run_input = result.to_input_list()
+                        run_input.append({"role": "user", "content": corrective_message})
+                    except Exception:
+                        run_input = corrective_message
+                    continue
                 break
 
-            missing_outputs = self._missing_required_outputs(config, outputs)
-            if missing_outputs and not corrective_retry_used:
-                corrective_retry_used = True
-                run_number += 1
-                names = ", ".join(missing_outputs)
-                corrective_message = (
-                    f"Required outputs not produced: {names}. "
-                    "Call finish_with_outputs with the required top-level output names now."
+            if last_result is not None:
+                transcript.append({"type": "final_output", "content": str(getattr(last_result, "final_output", ""))})
+            self._persist_transcript(output_dir, transcript, artifacts)
+            schema_error = _validate_output_schema(worker_id, outputs, log_fn, config=config)
+            if schema_error:
+                log_fn(f"Schema validation failed: {schema_error}", level="error")
+                return WorkerResult(
+                    status="failed",
+                    outputs=outputs,
+                    artifacts=artifacts,
+                    error=f"Output schema violation: {schema_error}",
+                    error_code="schema_violation",
                 )
-                transcript.append({"role": "user", "content": corrective_message})
-                try:
-                    run_input = result.to_input_list()
-                    run_input.append({"role": "user", "content": corrective_message})
-                except Exception:
-                    run_input = corrective_message
-                continue
-            break
-
-        if last_result is not None:
-            transcript.append({"type": "final_output", "content": str(getattr(last_result, "final_output", ""))})
-        self._persist_transcript(output_dir, transcript, artifacts)
-        schema_error = _validate_output_schema(worker_id, outputs, log_fn, config=config)
-        if schema_error:
-            log_fn(f"Schema validation failed: {schema_error}", level="error")
+            return WorkerResult(status="success", outputs=outputs, artifacts=artifacts)
+        except _MCPConnectionError as exc:
+            log_fn(str(exc), level="error")
             return WorkerResult(
-                status="failed",
-                outputs=outputs,
-                artifacts=artifacts,
-                error=f"Output schema violation: {schema_error}",
-                error_code="schema_violation",
+                status="error",
+                error=str(exc),
+                error_code="mcp_connect_failed",
             )
-
-        return WorkerResult(status="success", outputs=outputs, artifacts=artifacts)
+        finally:
+            await self._cleanup_mcp_servers(mcp_servers, log_fn)
 
     async def _run_streamed(self, agent: Any, run_input: Any, max_turns: int, run_config: Any) -> Any:
         from agents import Runner
@@ -845,6 +861,72 @@ class AgentDriver(SandboxDriver):
         if disabled:
             tools = [tool for tool in tools if not self._tool_is_disabled(tool, disabled)]
         return tools
+
+    async def _connect_mcp_servers(
+        self,
+        config: WorkerConfig,
+        secrets: Dict[str, str],
+        log_fn: Callable[[str, str], None],
+    ) -> list[Any]:
+        servers = []
+        for connection in self._mcp_connections(config):
+            try:
+                server = self._make_mcp_server(connection, secrets)
+                await server.connect()
+                log_fn(f"Connected MCP server {connection.label}", "debug")
+                servers.append(server)
+            except _MCPConnectionError:
+                raise
+            except Exception as exc:
+                raise _MCPConnectionError(f"MCP connection failed for {connection.label}: {exc}") from exc
+        return servers
+
+    async def _cleanup_mcp_servers(self, servers: list[Any], log_fn: Callable[[str, str], None]) -> None:
+        for server in reversed(servers):
+            try:
+                await server.cleanup()
+            except Exception as exc:
+                log_fn(f"MCP cleanup failed for {getattr(server, 'name', 'unknown')}: {exc}", "warning")
+
+    def _make_mcp_server(self, connection: Any, secrets: Dict[str, str]) -> Any:
+        from agents.mcp import MCPServerStreamableHttp
+
+        params: Dict[str, Any] = {"url": connection.url}
+        headers = self._mcp_auth_headers(connection, secrets)
+        if headers:
+            params["headers"] = headers
+
+        tool_filter = None
+        if connection.allowed_tools:
+            tool_filter = {"allowed_tool_names": list(connection.allowed_tools)}
+
+        return MCPServerStreamableHttp(
+            name=connection.label,
+            params=params,
+            cache_tools_list=True,
+            tool_filter=tool_filter,
+            require_approval=connection.require_approval,
+        )
+
+    def _mcp_auth_headers(self, connection: Any, secrets: Dict[str, str]) -> Dict[str, str]:
+        auth = getattr(connection, "auth", None)
+        if not auth:
+            return {}
+        scheme, secret_name = auth.split(":", 1)
+        if scheme != "bearer":
+            raise _MCPConnectionError(f"Unsupported MCP auth for {connection.label}: {scheme}")
+        token = secrets.get(secret_name)
+        if not token:
+            raise _MCPConnectionError(f"MCP connection {connection.label} is missing secret {secret_name}")
+        return {"Authorization": f"Bearer {token}"}
+
+    def _mcp_connections(self, config: WorkerConfig) -> list[Any]:
+        connections: list[Any] = []
+        for connection in config.connections:
+            mcp = self._object_get(connection, "mcp")
+            if mcp is not None:
+                connections.append(mcp)
+        return connections
 
     def _sdk_tools(self, config: WorkerConfig, state: _AgentRunState) -> list[Any]:
         from agents import FunctionTool, WebSearchTool
