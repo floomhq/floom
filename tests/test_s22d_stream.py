@@ -8,6 +8,7 @@ import types
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from agent_driver_sdk_fakes import ScriptedAgentDriverMixin
 
 
 API_DIR = Path(__file__).resolve().parents[1] / "apps" / "api"
@@ -17,50 +18,20 @@ if str(API_DIR) not in sys.path:
 AUTH = {"x-floom-secret": "s22d-secret"}
 
 
-class FakeCompletions:
-    def __init__(self, responses):
-        self.responses = list(responses)
-
-    def create(self, **_kwargs):
-        if not self.responses:
-            raise AssertionError("Unexpected model call")
-        return self.responses.pop(0)
-
-
-class FakeClient:
-    def __init__(self, responses):
-        self.chat = types.SimpleNamespace(completions=FakeCompletions(responses))
+class ScriptedAgentDriver(ScriptedAgentDriverMixin):
+    pass
 
 
 def final_response(content=None, tokens=5):
-    return {
-        "choices": [{"message": {"content": content, "tool_calls": []}}],
-        "usage": {"total_tokens": tokens},
-    }
+    return {"kind": "message", "text": content or "", "tokens": tokens}
 
 
 def tool_response(name, args, call_id="call_1", tokens=10):
-    return {
-        "choices": [
-            {
-                "message": {
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": call_id,
-                            "type": "function",
-                            "function": {"name": name, "arguments": json.dumps(args)},
-                        }
-                    ],
-                }
-            }
-        ],
-        "usage": {"total_tokens": tokens},
-    }
+    return {"kind": "tool", "name": name, "args": args, "call_id": call_id, "tokens": tokens}
 
 
 def text_chunk(text: str):
-    return {"choices": [{"delta": {"content": text}}]}
+    return {"kind": "text", "text": text}
 
 
 def _load_api(monkeypatch, tmp_path):
@@ -75,6 +46,12 @@ def _load_api(monkeypatch, tmp_path):
 
     for name in [
         "main",
+        "auth",
+        "auth.context",
+        "auth.dependency",
+        "auth.factory",
+        "auth.interface",
+        "auth.local",
         "db",
         "files",
         "models",
@@ -129,7 +106,7 @@ def _insert_run(main, run_id="run_s22d"):
                      input_values_json, enabled, created_at, owner_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("s22d-worker", "sv_s22d_worker_0_1_0", "S22d Worker", "manual", "{}", "{}", 1, now, "user-a"),
+                ("s22d-worker", "sv_s22d_worker_0_1_0", "S22d Worker", "manual", "{}", "{}", 1, now, "federico"),
             )
         else:
             conn.execute(
@@ -189,7 +166,10 @@ def _make_config(agent_module, models, tmp_path, *, outputs=None, limits=None):
 def _run_driver(main, tmp_path, responses, *, outputs=None, limits=None):
     agent_module = importlib.import_module("runner_sandbox.agent_driver")
     models = importlib.import_module("models")
-    driver = agent_module.AgentDriver(openai_client=FakeClient(responses))
+    driver_cls = type("ScriptedSDKAgentDriver", (ScriptedAgentDriver, agent_module.AgentDriver), {})
+    driver = driver_cls()
+    script = responses[0] if len(responses) == 1 and isinstance(responses[0], list) else responses
+    driver.set_scripts([script])
     config = _make_config(agent_module, models, tmp_path, outputs=outputs, limits=limits)
     return driver.run(
         "s22d-worker",
@@ -278,12 +258,14 @@ def test_stream_text_chunks(monkeypatch, tmp_path):
 
 
 def test_stream_emits_finish_failed_on_error(monkeypatch, tmp_path):
+    from agents.exceptions import MaxTurnsExceeded
+
     main = _load_api(monkeypatch, tmp_path)
     run_id = _insert_run(main)
     result = _run_driver(
         main,
         tmp_path,
-        [tool_response("read_file", {"path": "missing.txt"})],
+        [{"kind": "raise", "error": MaxTurnsExceeded("Agent tool iteration cap exceeded")}],
         limits={
             "max_tool_iterations": 1,
             "max_output_tokens": 1024,

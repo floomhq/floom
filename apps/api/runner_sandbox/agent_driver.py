@@ -1,18 +1,21 @@
-"""Agent-mode worker driver.
+"""Agent-mode worker driver backed by the OpenAI Agents SDK.
 
 The agent runtime treats a worker folder as a skill bundle. It loads the
 declared entrypoint (default: SKILL.md) as the system prompt, sends run inputs
-as a JSON user message, and lets the model call a small set of local tools.
+as a JSON user message, and lets the model call local Workeros tools plus
+OpenAI-hosted tools such as web search.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import subprocess
 import threading
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -79,10 +82,34 @@ def _scrub(value: str, secrets: Dict[str, str]) -> str:
     return scrubbed
 
 
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, default=str)
+
+
+@dataclass
+class _AgentRunState:
+    worker_id: str
+    run_id: str
+    inputs: Dict[str, Any]
+    secrets: Dict[str, str]
+    log_fn: Callable[[str, str], None]
+    trace_id: str
+    config: WorkerConfig
+    bundle_dir: Path
+    input_dir: Path
+    output_dir: Path
+    outputs: Dict[str, Any]
+    artifacts: list[Dict[str, Any]]
+    timeout_seconds: int
+    finished: bool = False
+
+
 class AgentDriver(SandboxDriver):
-    """Runs a worker through an OpenAI tool loop."""
+    """Runs an agent worker through the OpenAI Agents SDK."""
 
     def __init__(self, openai_client: Any = None):
+        # Kept only for constructor compatibility with older tests/callers.
+        # The SDK owns OpenAI client construction.
         self._client = openai_client
 
     def run(
@@ -98,15 +125,17 @@ class AgentDriver(SandboxDriver):
         connection_ids: Optional[Dict[str, str]] = None,
     ) -> WorkerResult:
         try:
-            return self._run_agent(
-                worker_id=worker_id,
-                run_id=run_id,
-                inputs=inputs,
-                secrets=secrets,
-                log_fn=log_fn,
-                trace_id=trace_id,
-                timeout_seconds=timeout_seconds,
-                config=config,
+            return self._run_coro_sync(
+                self._run_agent_async(
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    inputs=inputs,
+                    secrets=secrets,
+                    log_fn=log_fn,
+                    trace_id=trace_id,
+                    timeout_seconds=timeout_seconds,
+                    config=config,
+                )
             )
         except Exception as exc:
             logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
@@ -118,7 +147,28 @@ class AgentDriver(SandboxDriver):
                 retryable=True,
             )
 
-    def _run_agent(
+    def _run_coro_sync(self, coro: Any) -> WorkerResult:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+
+        result_box: dict[str, WorkerResult | BaseException] = {}
+
+        def _runner() -> None:
+            try:
+                result_box["result"] = asyncio.run(coro)
+            except BaseException as exc:
+                result_box["error"] = exc
+
+        thread = threading.Thread(target=_runner, daemon=True)
+        thread.start()
+        thread.join()
+        if "error" in result_box:
+            raise result_box["error"]  # type: ignore[misc]
+        return result_box["result"]  # type: ignore[return-value]
+
+    async def _run_agent_async(
         self,
         worker_id: str,
         run_id: str,
@@ -134,6 +184,41 @@ class AgentDriver(SandboxDriver):
 
         limits = config.runtime.limits
         timeout_seconds = min(timeout_seconds, limits.timeout_seconds)
+        try:
+            return await asyncio.wait_for(
+                self._run_agent_inner(
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    inputs=inputs,
+                    secrets=secrets,
+                    log_fn=log_fn,
+                    trace_id=trace_id,
+                    timeout_seconds=timeout_seconds,
+                    config=config,
+                ),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            return WorkerResult(
+                status="error",
+                error=f"Agent run exceeded timeout of {timeout_seconds}s",
+                error_code="timeout",
+            )
+
+    async def _run_agent_inner(
+        self,
+        worker_id: str,
+        run_id: str,
+        inputs: Dict[str, Any],
+        secrets: Dict[str, str],
+        log_fn: Callable[[str, str], None],
+        trace_id: str,
+        timeout_seconds: int,
+        config: WorkerConfig,
+    ) -> WorkerResult:
+        from agents import Agent, ModelSettings, RunConfig
+
+        limits = config.runtime.limits
         bundle_dir = _worker_dir_for_run(worker_id, config)
         if not bundle_dir.is_dir():
             return WorkerResult(
@@ -149,38 +234,55 @@ class AgentDriver(SandboxDriver):
         output_dir.mkdir(parents=True, exist_ok=True)
         _safe_path(input_dir, "inputs.json").write_text(json.dumps(inputs, indent=2))
 
-        system_prompt = self._load_system_prompt(bundle_dir, config)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "worker_id": worker_id,
-                        "run_id": run_id,
-                        "inputs": inputs,
-                        "outputs_required": [output.name for output in config.outputs],
-                    },
-                    indent=2,
-                ),
-            },
-        ]
-
         outputs: Dict[str, Any] = {}
         artifacts: list[Dict[str, Any]] = []
-        total_tokens = 0
-        client = self._client or self._make_openai_client()
-        tools = self._tool_schemas(config)
-        model = config.runtime.model or "gpt-5-mini"
+        transcript: list[Dict[str, Any]] = []
+        state = _AgentRunState(
+            worker_id=worker_id,
+            run_id=run_id,
+            inputs=inputs,
+            secrets=secrets,
+            log_fn=log_fn,
+            trace_id=trace_id,
+            config=config,
+            bundle_dir=bundle_dir,
+            input_dir=input_dir,
+            output_dir=output_dir,
+            outputs=outputs,
+            artifacts=artifacts,
+            timeout_seconds=timeout_seconds,
+        )
 
-        iteration = 0
-        max_iterations = limits.max_tool_iterations
+        system_prompt = self._load_system_prompt(bundle_dir, config)
+        run_input: str | list[dict[str, Any]] = json.dumps(
+            {
+                "worker_id": worker_id,
+                "run_id": run_id,
+                "inputs": inputs,
+                "outputs_required": [output.name for output in config.outputs],
+            },
+            indent=2,
+        )
+        transcript.append({"role": "system", "content": system_prompt})
+        transcript.append({"role": "user", "content": run_input})
+
+        model_settings = ModelSettings(
+            max_tokens=limits.max_output_tokens,
+            include_usage=True,
+        )
+        run_config = RunConfig(
+            workflow_name=f"workeros:{worker_id}",
+            trace_id=trace_id,
+            trace_metadata={"worker_id": worker_id, "run_id": run_id},
+            model_settings=model_settings,
+        )
+
+        total_tokens = 0
         corrective_retry_used = False
-        force_finish_next = False
-        loop_exhausted = True
-        while iteration < max_iterations:
-            # Check cancel_requested before each iteration so the agent stops
-            # promptly on user cancel (runaway LLM token loops).
+        run_number = 1
+        last_result: Any = None
+
+        while True:
             if self._cancel_requested(run_id):
                 log_fn("Cancel requested; stopping agent loop", "info")
                 return WorkerResult(
@@ -188,7 +290,6 @@ class AgentDriver(SandboxDriver):
                     error="Run cancelled by user",
                     error_code="cancelled",
                 )
-
             if total_tokens >= limits.max_total_tokens:
                 return WorkerResult(
                     status="error",
@@ -196,128 +297,94 @@ class AgentDriver(SandboxDriver):
                     error_code="token_cap_exceeded",
                 )
 
-            log_fn(f"Agent iteration {iteration + 1}", "debug")
-            # GPT-5 family + reasoning models require max_completion_tokens (not max_tokens).
-            # Old openai SDK doesn't expose it as a kwarg, so we pass via extra_body.
-            create_kwargs: Dict[str, Any] = {
-                "model": model,
-                "messages": messages,
-                "tools": tools,
-                "stream": True,
-                "stream_options": {"include_usage": True},
-                "tool_choice": {
-                    "type": "function",
-                    "function": {"name": "finish_with_outputs"},
-                } if force_finish_next else "auto",
-            }
-            force_finish_next = False
-            if model.startswith(("gpt-5", "gpt-4.1", "o1", "o3")):
-                create_kwargs["extra_body"] = {"max_completion_tokens": limits.max_output_tokens}
-            else:
-                create_kwargs["max_tokens"] = limits.max_output_tokens
-            self._emit_part(run_id, {"type": "step-start", "stepNumber": iteration + 1})
-            response = client.chat.completions.create(**create_kwargs)
-            response = self._collect_streamed_response(response, run_id)
-            streamed_text_emitted = bool(response.pop("_streamed_text_emitted", False)) if isinstance(response, dict) else False
-            total_tokens += self._usage_tokens(response)
-            if total_tokens > limits.max_total_tokens:
+            force_finish = corrective_retry_used
+            agent = Agent(
+                name=worker_id,
+                instructions=system_prompt,
+                tools=self._sdk_tools(config, state),
+                model=config.runtime.model or "gpt-5-mini",
+                model_settings=ModelSettings(
+                    max_tokens=limits.max_output_tokens,
+                    include_usage=True,
+                    tool_choice="finish_with_outputs" if force_finish else None,
+                ),
+                tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
+            )
+
+            log_fn(f"Agent SDK run {run_number}", "debug")
+            self._emit_part(run_id, {"type": "step-start", "stepNumber": run_number})
+            transcript.append({"type": "step-start", "stepNumber": run_number})
+
+            try:
+                result = await self._run_streamed(
+                    agent=agent,
+                    run_input=run_input,
+                    max_turns=limits.max_tool_iterations,
+                    run_config=run_config,
+                )
+            except Exception as exc:
+                if exc.__class__.__name__ == "MaxTurnsExceeded":
+                    return WorkerResult(
+                        status="error",
+                        error="Agent tool iteration cap exceeded",
+                        error_code="tool_iteration_cap_exceeded",
+                    )
+                raise
+            last_result = result
+            try:
+                stream_result = await self._consume_streamed_result(
+                    result=result,
+                    run_id=run_id,
+                    transcript=transcript,
+                    total_tokens=total_tokens,
+                    max_total_tokens=limits.max_total_tokens,
+                )
+            except Exception as exc:
+                if exc.__class__.__name__ == "MaxTurnsExceeded":
+                    return WorkerResult(
+                        status="error",
+                        error="Agent tool iteration cap exceeded",
+                        error_code="tool_iteration_cap_exceeded",
+                    )
+                raise
+            total_tokens = stream_result["total_tokens"]
+            if stream_result["cancelled"]:
+                return WorkerResult(
+                    status="failed",
+                    error="Run cancelled by user",
+                    error_code="cancelled",
+                )
+            if stream_result["token_cap_exceeded"]:
                 return WorkerResult(
                     status="error",
                     error="Agent token cap exceeded",
                     error_code="token_cap_exceeded",
                 )
 
-            choice = self._first_choice(response)
-            message = self._choice_message(choice)
-            tool_calls = self._message_tool_calls(message)
-            content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
-            if isinstance(content, str) and content and not streamed_text_emitted:
-                self._emit_part(run_id, {"type": "text", "text": content})
-            messages.append(self._assistant_message_dict(message, tool_calls))
-
-            if not tool_calls:
-                missing_outputs = self._missing_required_outputs(config, outputs)
-                if missing_outputs and not corrective_retry_used:
-                    corrective_retry_used = True
-                    force_finish_next = True
-                    max_iterations += 1
-                    names = ", ".join(missing_outputs)
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": (
-                                f"Required outputs not produced: {names}. "
-                                "Call finish_with_outputs to complete."
-                            ),
-                        }
-                    )
-                    iteration += 1
-                    continue
-                loop_exhausted = False
+            if state.finished:
                 break
 
-            finished = False
-            for tool_call in tool_calls:
-                tool_name = self._tool_call_name(tool_call)
-                tool_args = self._tool_call_args(tool_call)
-                call_id = self._tool_call_id(tool_call)
-                self._emit_part(
-                    run_id,
-                    {
-                        "type": "tool-call",
-                        "toolName": tool_name,
-                        "args": tool_args,
-                        "callId": call_id,
-                    },
+            missing_outputs = self._missing_required_outputs(config, outputs)
+            if missing_outputs and not corrective_retry_used:
+                corrective_retry_used = True
+                run_number += 1
+                names = ", ".join(missing_outputs)
+                corrective_message = (
+                    f"Required outputs not produced: {names}. "
+                    "Call finish_with_outputs with the required top-level output names now."
                 )
-                tool_result = self._handle_tool(
-                    name=tool_name,
-                    args=tool_args,
-                    worker_id=worker_id,
-                    run_id=run_id,
-                    inputs=inputs,
-                    secrets=secrets,
-                    log_fn=log_fn,
-                    trace_id=trace_id,
-                    config=config,
-                    bundle_dir=bundle_dir,
-                    input_dir=input_dir,
-                    output_dir=output_dir,
-                    outputs=outputs,
-                    artifacts=artifacts,
-                    timeout_seconds=timeout_seconds,
-                )
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": json.dumps(tool_result),
-                    }
-                )
-                self._emit_part(
-                    run_id,
-                    {
-                        "type": "tool-result",
-                        "callId": call_id,
-                        "result": tool_result,
-                        "isError": not bool(tool_result.get("ok", True)),
-                    },
-                )
-                if tool_name == "finish_with_outputs" and tool_result.get("ok"):
-                    finished = True
-            iteration += 1
-            if finished:
-                loop_exhausted = False
-                break
+                transcript.append({"role": "user", "content": corrective_message})
+                try:
+                    run_input = result.to_input_list()
+                    run_input.append({"role": "user", "content": corrective_message})
+                except Exception:
+                    run_input = corrective_message
+                continue
+            break
 
-        if loop_exhausted:
-            return WorkerResult(
-                status="error",
-                error="Agent tool iteration cap exceeded",
-                error_code="tool_iteration_cap_exceeded",
-            )
-
-        self._persist_transcript(output_dir, messages, artifacts)
+        if last_result is not None:
+            transcript.append({"type": "final_output", "content": str(getattr(last_result, "final_output", ""))})
+        self._persist_transcript(output_dir, transcript, artifacts)
         schema_error = _validate_output_schema(worker_id, outputs, log_fn, config=config)
         if schema_error:
             log_fn(f"Schema validation failed: {schema_error}", level="error")
@@ -331,6 +398,233 @@ class AgentDriver(SandboxDriver):
 
         return WorkerResult(status="success", outputs=outputs, artifacts=artifacts)
 
+    async def _run_streamed(self, agent: Any, run_input: Any, max_turns: int, run_config: Any) -> Any:
+        from agents import Runner
+
+        return Runner.run_streamed(
+            agent,
+            input=run_input,
+            max_turns=max_turns,
+            run_config=run_config,
+        )
+
+    async def _consume_streamed_result(
+        self,
+        result: Any,
+        run_id: str,
+        transcript: list[Dict[str, Any]],
+        total_tokens: int,
+        max_total_tokens: int,
+    ) -> Dict[str, Any]:
+        emitted_text_delta = False
+        cancelled = False
+        token_cap_exceeded = False
+
+        async for event in result.stream_events():
+            if self._cancel_requested(run_id):
+                try:
+                    result.cancel()
+                except Exception:
+                    logger.debug("Agent SDK cancellation failed for run %s", run_id, exc_info=True)
+                cancelled = True
+                break
+
+            usage_tokens = self._usage_tokens_from_raw_event(event)
+            if usage_tokens:
+                total_tokens += usage_tokens
+                if total_tokens > max_total_tokens:
+                    try:
+                        result.cancel()
+                    except Exception:
+                        logger.debug("Agent SDK token-cap cancellation failed for run %s", run_id, exc_info=True)
+                    token_cap_exceeded = True
+                    break
+
+            part, emitted_delta = self._agent_event_to_part(event, emitted_text_delta)
+            emitted_text_delta = emitted_text_delta or emitted_delta
+            if part is None:
+                continue
+            transcript.append(part)
+            self._emit_part(run_id, part)
+
+        usage_total = self._usage_tokens_from_result(result)
+        if usage_total and total_tokens < usage_total:
+            total_tokens = usage_total
+        return {
+            "cancelled": cancelled,
+            "token_cap_exceeded": token_cap_exceeded or total_tokens > max_total_tokens,
+            "total_tokens": total_tokens,
+        }
+
+    def _usage_tokens_from_raw_event(self, event: Any) -> int:
+        if getattr(event, "type", None) != "raw_response_event":
+            return 0
+        data = getattr(event, "data", None)
+        response = getattr(data, "response", None)
+        usage = getattr(response, "usage", None)
+        return self._usage_tokens(usage)
+
+    def _usage_tokens_from_result(self, result: Any) -> int:
+        context_wrapper = getattr(result, "context_wrapper", None)
+        usage = getattr(context_wrapper, "usage", None)
+        return self._usage_tokens(usage)
+
+    def _agent_event_to_part(self, event: Any, emitted_text_delta: bool) -> tuple[Optional[Dict[str, Any]], bool]:
+        event_type = getattr(event, "type", None)
+        if event_type == "raw_response_event":
+            part = self._raw_response_event_to_part(getattr(event, "data", None))
+            return part, bool(part and part.get("type") == "text")
+
+        if event_type != "run_item_stream_event":
+            return None, False
+
+        name = getattr(event, "name", None)
+        item = getattr(event, "item", None)
+        raw_item = getattr(item, "raw_item", None)
+
+        if name == "message_output_created":
+            if emitted_text_delta:
+                return None, False
+            text = self._message_item_text(item)
+            if text:
+                return {"type": "text", "text": text}, False
+            return None, False
+
+        if name == "reasoning_item_created":
+            text = self._object_get(raw_item, "summary") or self._object_get(raw_item, "content")
+            if isinstance(text, list):
+                text = " ".join(str(part) for part in text)
+            if text:
+                return {"type": "reasoning", "text": str(text)}, False
+            return None, False
+
+        if name == "tool_called":
+            tool_name = self._raw_tool_name(raw_item, item)
+            return {
+                "type": "tool-call",
+                "toolName": tool_name,
+                "args": self._raw_tool_args(raw_item),
+                "callId": self._raw_tool_call_id(raw_item),
+                **self._tool_part_metadata(raw_item, item),
+            }, False
+
+        if name == "tool_output":
+            output = getattr(item, "output", None)
+            parsed_output = self._maybe_json_loads(output)
+            return {
+                "type": "tool-result",
+                "callId": self._raw_tool_call_id(raw_item),
+                "result": parsed_output,
+                "isError": self._tool_output_is_error(parsed_output),
+                **self._tool_part_metadata(raw_item, item),
+            }, False
+
+        if name == "mcp_approval_requested":
+            return {
+                "type": "tool-call",
+                "toolName": self._raw_tool_name(raw_item, item) or "mcp_approval_requested",
+                "args": self._raw_tool_args(raw_item),
+                "callId": self._raw_tool_call_id(raw_item),
+                "kind": "mcp-approval",
+                **self._tool_part_metadata(raw_item, item),
+            }, False
+
+        if name == "mcp_list_tools":
+            server_label = self._object_get(raw_item, "server_label") or self._object_get(raw_item, "serverLabel")
+            return {
+                "type": "tool-result",
+                "callId": self._raw_tool_call_id(raw_item),
+                "result": {
+                    "ok": True,
+                    "event": "mcp_list_tools",
+                    "server_label": server_label,
+                },
+                "isError": False,
+                "kind": "mcp-list-tools",
+                "mcpServer": server_label,
+            }, False
+
+        return None, False
+
+    def _raw_response_event_to_part(self, data: Any) -> Optional[Dict[str, Any]]:
+        data_type = str(getattr(data, "type", "") or "")
+        delta = getattr(data, "delta", None)
+        if delta and data_type.endswith("output_text.delta"):
+            return {"type": "text", "text": str(delta)}
+        if delta and "reasoning" in data_type:
+            return {"type": "reasoning", "text": str(delta)}
+        return None
+
+    def _message_item_text(self, item: Any) -> str:
+        try:
+            from agents.items import ItemHelpers
+
+            return ItemHelpers.text_message_output(item)
+        except Exception:
+            raw_item = getattr(item, "raw_item", None)
+            content = self._object_get(raw_item, "content") or []
+            parts: list[str] = []
+            for entry in content:
+                text = self._object_get(entry, "text")
+                if text:
+                    parts.append(str(text))
+            return "".join(parts)
+
+    def _raw_tool_name(self, raw_item: Any, item: Any = None) -> str:
+        server_label = self._object_get(raw_item, "server_label") or self._object_get(raw_item, "serverLabel")
+        name = self._object_get(raw_item, "name")
+        raw_type = self._object_get(raw_item, "type")
+        if server_label and name:
+            return f"{server_label}.{name}"
+        if name:
+            return str(name)
+        if raw_type:
+            return str(raw_type)
+        title = getattr(item, "title", None)
+        return str(title or "tool")
+
+    def _raw_tool_args(self, raw_item: Any) -> Any:
+        raw_args = (
+            self._object_get(raw_item, "arguments")
+            or self._object_get(raw_item, "input")
+            or self._object_get(raw_item, "action")
+        )
+        return self._maybe_json_loads(raw_args)
+
+    def _raw_tool_call_id(self, raw_item: Any) -> str:
+        value = (
+            self._object_get(raw_item, "call_id")
+            or self._object_get(raw_item, "callId")
+            or self._object_get(raw_item, "id")
+        )
+        return str(value or f"call_{uuid.uuid4().hex[:12]}")
+
+    def _tool_part_metadata(self, raw_item: Any, item: Any = None) -> Dict[str, Any]:
+        metadata: Dict[str, Any] = {}
+        server_label = self._object_get(raw_item, "server_label") or self._object_get(raw_item, "serverLabel")
+        tool_origin = getattr(item, "tool_origin", None)
+        origin_server = getattr(tool_origin, "mcp_server_name", None)
+        if server_label or origin_server:
+            metadata["kind"] = "mcp"
+            metadata["mcpServer"] = server_label or origin_server
+        raw_type = self._object_get(raw_item, "type")
+        if raw_type == "web_search_call":
+            metadata["kind"] = "web_search"
+        return metadata
+
+    def _tool_output_is_error(self, output: Any) -> bool:
+        if isinstance(output, dict) and "ok" in output:
+            return not bool(output.get("ok"))
+        return False
+
+    def _maybe_json_loads(self, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value if value is not None else {}
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+
     def _cancel_requested(self, run_id: str) -> bool:
         """Check if the run's cancel_requested flag is set in the DB."""
         try:
@@ -342,11 +636,6 @@ class AgentDriver(SandboxDriver):
             return bool(row and row["cancel_requested"])
         except Exception:
             return False
-
-    def _make_openai_client(self) -> Any:
-        from openai import OpenAI
-
-        return OpenAI()
 
     def _load_system_prompt(self, bundle_dir: Path, config: WorkerConfig) -> str:
         prompt_parts: list[str] = []
@@ -363,6 +652,7 @@ class AgentDriver(SandboxDriver):
             raise FileNotFoundError(f"Agent entrypoint not found: {entrypoint}")
         prompt_parts.append(
             "Use tools to inspect bundle files as needed. "
+            "Use web_search for fresh or external facts unless disabled. "
             "Call finish_with_outputs when all required outputs are ready."
         )
         return "\n\n".join(part for part in prompt_parts if part)
@@ -426,11 +716,8 @@ class AgentDriver(SandboxDriver):
         return {"type": ["string", "object", "array", "number", "boolean"]}
 
     def _tool_schemas(self, config: WorkerConfig) -> list[Dict[str, Any]]:
-        """Build the tool list for the agent loop.
+        """Build tool schemas exposed to the agent.
 
-        The full set is:
-          - Builtin: list_dir, read_file, write_output, finish_with_outputs, run_command, invoke_worker, log
-          - Composio: one tool per declared connection
         Workers opt out via `exec.disable_tools: [...]` in worker.yml.
         """
         declared_names = [output.name for output in config.outputs]
@@ -438,6 +725,7 @@ class AgentDriver(SandboxDriver):
         if declared_names:
             output_name_schema["enum"] = declared_names
         tools = [
+            {"type": "web_search"},
             {
                 "type": "function",
                 "function": {
@@ -533,10 +821,8 @@ class AgentDriver(SandboxDriver):
                     },
                 },
             },
-            # `{"type": "web_search"}` is a Responses API feature. This
-            # driver uses Chat Completions, which accepts function tools only.
         ]
-        for app in config.connections:
+        for app in self._composio_connection_names(config):
             safe_app = "".join(ch if ch.isalnum() else "_" for ch in app.lower())
             tools.append(
                 {
@@ -555,36 +841,83 @@ class AgentDriver(SandboxDriver):
                     },
                 }
             )
-        # PR S11: opt-out filter. `exec.disable_tools` may name builtin tool
-        # names ("run_command", ...) or composio app slugs.
         disabled = self._disabled_tool_names(config)
         if disabled:
-            tools = [t for t in tools if not self._tool_is_disabled(t, disabled)]
+            tools = [tool for tool in tools if not self._tool_is_disabled(tool, disabled)]
         return tools
 
-    def _disabled_tool_names(self, config: WorkerConfig) -> set[str]:
-        """Read `exec.disable_tools` from the underlying manifest, if present.
+    def _sdk_tools(self, config: WorkerConfig, state: _AgentRunState) -> list[Any]:
+        from agents import FunctionTool, WebSearchTool
 
-        WorkerConfig (legacy shape) does not carry `disable_tools` directly; the
-        list lives on the WorkerContract.exec. Run service stores the contract
-        manifest_json in the DB. Worker config exposes it via `runtime.system_prompt`
-        only. For PR S11 we read it from an attached attribute set during
-        manifest projection (see worker_contract_to_worker_config).
-        """
+        sdk_tools: list[Any] = []
+        for tool in self._tool_schemas(config):
+            tool_type = tool.get("type")
+            if tool_type == "web_search":
+                sdk_tools.append(WebSearchTool())
+                continue
+            if tool_type != "function":
+                continue
+            function = tool.get("function") or {}
+            name = function["name"]
+
+            async def _invoke(_ctx: Any, raw_args: str, *, tool_name: str = name) -> str:
+                try:
+                    args = json.loads(raw_args or "{}")
+                    if not isinstance(args, dict):
+                        return _json_dumps({"ok": False, "error": "Tool arguments must be an object"})
+                except json.JSONDecodeError as exc:
+                    return _json_dumps({"ok": False, "error": f"Invalid JSON arguments: {exc}"})
+                result = self._handle_tool(
+                    name=tool_name,
+                    args=args,
+                    worker_id=state.worker_id,
+                    run_id=state.run_id,
+                    inputs=state.inputs,
+                    secrets=state.secrets,
+                    log_fn=state.log_fn,
+                    trace_id=state.trace_id,
+                    config=state.config,
+                    bundle_dir=state.bundle_dir,
+                    input_dir=state.input_dir,
+                    output_dir=state.output_dir,
+                    outputs=state.outputs,
+                    artifacts=state.artifacts,
+                    timeout_seconds=state.timeout_seconds,
+                )
+                if tool_name == "finish_with_outputs" and result.get("ok"):
+                    state.finished = True
+                return _json_dumps(result)
+
+            sdk_tools.append(
+                FunctionTool(
+                    name=name,
+                    description=function.get("description") or name,
+                    params_json_schema=function.get("parameters") or {"type": "object", "properties": {}},
+                    on_invoke_tool=_invoke,
+                    strict_json_schema=False,
+                )
+            )
+        return sdk_tools
+
+    def _composio_connection_names(self, config: WorkerConfig) -> list[str]:
+        names: list[str] = []
+        for connection in config.connections:
+            if isinstance(connection, str):
+                names.append(connection)
+        return names
+
+    def _disabled_tool_names(self, config: WorkerConfig) -> set[str]:
         disabled = getattr(config.runtime, "disable_tools", None) or []
         return {str(name).strip().lower() for name in disabled if str(name).strip()}
 
     def _tool_is_disabled(self, tool: Dict[str, Any], disabled: set[str]) -> bool:
         tool_type = tool.get("type")
         if tool_type and tool_type != "function":
-            # OpenAI native tool (e.g. web_search). Match by type name.
             return tool_type.lower() in disabled
         fn = tool.get("function") or {}
         name = (fn.get("name") or "").lower()
         if name in disabled:
             return True
-        # Composio tools: allow disabling by app slug (e.g. "gmail" removes
-        # composio__gmail__execute).
         if name.startswith("composio__"):
             parts = name.split("__")
             if len(parts) >= 3 and parts[1] in disabled:
@@ -752,7 +1085,7 @@ class AgentDriver(SandboxDriver):
         artifacts: list[Dict[str, Any]],
     ) -> None:
         transcript_path = _safe_path(output_dir, "transcript.jsonl")
-        transcript_path.write_text("\n".join(json.dumps(message) for message in messages) + "\n")
+        transcript_path.write_text("\n".join(json.dumps(message, default=str) for message in messages) + "\n")
         artifacts[:] = [item for item in artifacts if item.get("path") != str(transcript_path)]
         artifacts.append(
             {
@@ -995,10 +1328,7 @@ class AgentDriver(SandboxDriver):
         result = response.json()
         return {"ok": True, "result": result}
 
-    def _usage_tokens(self, response: Any) -> int:
-        usage = getattr(response, "usage", None)
-        if usage is None and isinstance(response, dict):
-            usage = response.get("usage")
+    def _usage_tokens(self, usage: Any) -> int:
         if usage is None:
             return 0
         if isinstance(usage, dict):
@@ -1012,130 +1342,7 @@ class AgentDriver(SandboxDriver):
         except Exception:
             logger.debug("Run part emit failed for run %s", run_id, exc_info=True)
 
-    def _collect_streamed_response(self, response: Any, run_id: str) -> Any:
-        if isinstance(response, dict) or hasattr(response, "choices"):
-            return response
-        try:
-            iterator = iter(response)
-        except TypeError:
-            return response
-
-        content_parts: list[str] = []
-        tool_call_parts: Dict[int, Dict[str, Any]] = {}
-        usage: Any = None
-        streamed_text_emitted = False
-
-        for chunk in iterator:
-            chunk_usage = self._object_get(chunk, "usage")
-            if chunk_usage is not None:
-                usage = chunk_usage
-            choices = self._object_get(chunk, "choices") or []
-            if not choices:
-                continue
-            choice = choices[0]
-            delta = self._object_get(choice, "delta") or {}
-
-            text = self._object_get(delta, "content")
-            if text:
-                content_parts.append(str(text))
-                streamed_text_emitted = True
-                self._emit_part(run_id, {"type": "text", "text": str(text)})
-
-            reasoning = (
-                self._object_get(delta, "reasoning")
-                or self._object_get(delta, "reasoning_content")
-            )
-            if reasoning:
-                self._emit_part(run_id, {"type": "reasoning", "text": str(reasoning)})
-
-            for call_delta in self._object_get(delta, "tool_calls") or []:
-                index = int(self._object_get(call_delta, "index") or 0)
-                current = tool_call_parts.setdefault(
-                    index,
-                    {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
-                )
-                call_id = self._object_get(call_delta, "id")
-                if call_id:
-                    current["id"] = call_id
-                call_type = self._object_get(call_delta, "type")
-                if call_type:
-                    current["type"] = call_type
-                function_delta = self._object_get(call_delta, "function") or {}
-                function = current["function"]
-                name_delta = self._object_get(function_delta, "name")
-                if name_delta:
-                    function["name"] = f"{function.get('name') or ''}{name_delta}"
-                args_delta = self._object_get(function_delta, "arguments")
-                if args_delta:
-                    function["arguments"] = f"{function.get('arguments') or ''}{args_delta}"
-
-        tool_calls = []
-        for index in sorted(tool_call_parts):
-            item = tool_call_parts[index]
-            if not item.get("id"):
-                item["id"] = f"call_{uuid.uuid4().hex[:12]}"
-            tool_calls.append(item)
-
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "content": "".join(content_parts) or None,
-                        "tool_calls": tool_calls,
-                    }
-                }
-            ],
-            "usage": usage,
-            "_streamed_text_emitted": streamed_text_emitted,
-        }
-
     def _object_get(self, obj: Any, key: str) -> Any:
         if isinstance(obj, dict):
             return obj.get(key)
         return getattr(obj, key, None)
-
-    def _first_choice(self, response: Any) -> Any:
-        choices = response.get("choices") if isinstance(response, dict) else getattr(response, "choices")
-        return choices[0]
-
-    def _choice_message(self, choice: Any) -> Any:
-        return choice.get("message") if isinstance(choice, dict) else getattr(choice, "message")
-
-    def _message_tool_calls(self, message: Any) -> list[Any]:
-        calls = message.get("tool_calls") if isinstance(message, dict) else getattr(message, "tool_calls", None)
-        return list(calls or [])
-
-    def _assistant_message_dict(self, message: Any, tool_calls: list[Any]) -> Dict[str, Any]:
-        content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
-        result: Dict[str, Any] = {"role": "assistant", "content": content}
-        if tool_calls:
-            result["tool_calls"] = [self._tool_call_dict(call) for call in tool_calls]
-        return result
-
-    def _tool_call_dict(self, tool_call: Any) -> Dict[str, Any]:
-        function = tool_call.get("function") if isinstance(tool_call, dict) else getattr(tool_call, "function")
-        return {
-            "id": self._tool_call_id(tool_call),
-            "type": "function",
-            "function": {
-                "name": function.get("name") if isinstance(function, dict) else getattr(function, "name"),
-                "arguments": function.get("arguments") if isinstance(function, dict) else getattr(function, "arguments"),
-            },
-        }
-
-    def _tool_call_id(self, tool_call: Any) -> str:
-        value = tool_call.get("id") if isinstance(tool_call, dict) else getattr(tool_call, "id", None)
-        return value or f"call_{uuid.uuid4().hex[:12]}"
-
-    def _tool_call_name(self, tool_call: Any) -> str:
-        function = tool_call.get("function") if isinstance(tool_call, dict) else getattr(tool_call, "function")
-        return function.get("name") if isinstance(function, dict) else getattr(function, "name")
-
-    def _tool_call_args(self, tool_call: Any) -> Dict[str, Any]:
-        function = tool_call.get("function") if isinstance(tool_call, dict) else getattr(tool_call, "function")
-        raw = function.get("arguments") if isinstance(function, dict) else getattr(function, "arguments")
-        if not raw:
-            return {}
-        if isinstance(raw, dict):
-            return raw
-        return json.loads(raw)

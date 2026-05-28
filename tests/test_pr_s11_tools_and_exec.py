@@ -197,10 +197,10 @@ def test_default_tools_include_builtins():
     assert "run_command" in names
     assert "invoke_worker" in names
     assert "log" in names
-    assert "web_search" not in names
+    assert "web_search" in names
 
 
-def test_disable_tools_accepts_unavailable_web_search():
+def test_disable_tools_removes_web_search():
     tools = _agent_driver_tools(disable_tools=["web_search"])
     names = _tool_names(tools)
     assert "web_search" not in names
