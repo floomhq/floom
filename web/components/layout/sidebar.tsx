@@ -154,9 +154,11 @@ export function Sidebar() {
             <span className="font-semibold text-[15px] tracking-tight">Floom</span>
           </Link>
         </div>
-        <WorkspaceSwitcher />
         <SidebarPrimaryActions />
         <NavLinks pathname={pathname} />
+        <div className="mt-auto pt-3 border-t border-line">
+          <WorkspaceSwitcher />
+        </div>
         <UserProfileFooter />
       </aside>
 
@@ -184,9 +186,11 @@ export function Sidebar() {
               </button>
             </div>
             <div className="py-3 flex-1 overflow-auto">
-              <WorkspaceSwitcher />
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
+            </div>
+            <div className="pt-3 border-t border-line">
+              <WorkspaceSwitcher />
             </div>
             <UserProfileFooter />
           </aside>
