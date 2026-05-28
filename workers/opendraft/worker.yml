@@ -1,152 +1,190 @@
 schema_version: '0.3'
 is_example: true
 name: opendraft
-title: OpenDraft Research Outline
-description: Generates an academic research outline from a topic, level, and length target, modeled on the OpenDraft engine.
+title: OpenDraft Research Paper
+description: Runs the upstream OpenDraft engine end to end to generate a long-form academic draft with verified citation discovery and export artifacts.
 long_description: |
-  Manual-shim port of the OpenDraft engine (federicodeponte/opendraft). The full upstream engine
-  drives 19 specialized agents across research, structure, writing, citation, polish, and export
-  phases to produce a 5–80 page draft with verified citations. That pipeline takes 10–20 minutes,
-  calls CrossRef / OpenAlex / Semantic Scholar / arXiv, and needs weasyprint + python-docx + Gemini
-  + Anthropic + OpenAI clients; it does not fit the current E2B sandbox budget (300s timeout, agent
-  runner, no external Python packages bundled).
+  This worker bundles and runs the real federicodeponte/opendraft engine inside
+  the Workeros E2B sandbox. It calls opendraft.generate.generate_draft directly,
+  using the upstream research, architecture, writing, validation, and final
+  compilation pipeline.
 
-  This worker runs the agent-mode planning phases of OpenDraft only: it produces a structured
-  research outline (sections, key questions, candidate sub-arguments, suggested source types) that
-  a human or downstream worker can hand to the full engine to render the long-form draft. Citations
-  in the outline are described by type, not fabricated. Live web search is not currently available
-  in the agent runtime, so all source suggestions are qualified.
+  The run uses GOOGLE_API_KEY from Workeros secrets, keeps network egress
+  enabled for academic source discovery, writes the final markdown draft, saves
+  the citation database when produced, attempts PDF and DOCX exports, and always
+  includes an export report plus a zipped workspace so any missing export is
+  visible instead of silently dropped.
 use_cases:
-- Get a thesis-level outline before kicking off a long-form draft.
-- "Compare two framings of the same topic (audience: undergrad vs phd) side by side."
-- Draft a literature-review skeleton that a researcher fills in with verified citations.
+- Generate a full academic research paper draft from a thesis question or topic.
+- Produce a citation-backed literature review draft with intermediate workspace files preserved.
+- Stress-test real long-running E2B worker execution with a heavyweight Python engine.
 example_input:
   topic: The role of synthetic data in training small language models
-  level: masters
-  length_target: 30_pages
-  language: en
+  citation_style: APA 7th
+  language: english
+  export_pdf: true
+  export_docx: true
 example_output: |
-  # The role of synthetic data in training small language models
-
-  ## Working thesis
-
-  Synthetic data is becoming a primary lever for training compact, capable SLMs when high-quality
-  human-authored data is scarce; the open question is whether quality-controlled synthetic data can
-  match real data on out-of-distribution generalization.
-
-  ## Outline
-
-  1. Introduction — define SLMs, synthetic data, motivation.
-  2. Literature review — Phi family, Orca, distillation literature, TinyStories.
-  3. Methods — categories of synthetic-data generation (paraphrase, programmatic, model-generated).
-  4. Evidence — published benchmarks, ablations, failure modes.
-  5. Risks — model collapse, contamination, evaluation leakage.
-  6. Discussion — when synthetic data is strictly better, neutral, worse.
-  7. Conclusion — open problems, recommended next experiments.
-
-  ## Suggested source types (not specific papers)
-
-  - Peer-reviewed ML conference papers (NeurIPS, ICML, ICLR) on data distillation.
-  - Technical reports from major labs (Microsoft Phi, Anthropic, Mistral).
-  - Survey papers on synthetic data for NLP.
-  - Empirical benchmark papers covering model collapse.
+  {
+    "final_draft": "out/final_draft.md",
+    "run_metadata": "out/run_metadata.json",
+    "export_report": "out/export_report.json",
+    "workspace_archive": "out/opendraft_workspace.zip"
+  }
 how_it_works: |
-  Topic + level + length_target + language
-    -> draft a working thesis
-    -> generate a section-level outline appropriate for the target length
-    -> name the kinds of sources to seek per section (do not fabricate citations)
-    -> qualify any time-sensitive claims (no live web search in runtime)
-    -> return a markdown outline ready for the OpenDraft long-form engine
+  Topic + citation style + language
+    -> run the upstream OpenDraft generate_draft pipeline
+    -> discover and validate academic citations through the bundled engine
+    -> write the full final markdown draft
+    -> attempt PDF and DOCX exports
+    -> return metadata, export status, citation database, and workspace archive
 folder: Research/Drafting
 tags:
 - research
 - thesis
-- outline
 - opendraft
 - academic
-version: 0.1.0
-entrypoint: SKILL.md
+- citations
+version: 0.2.0
+entrypoint: run.py
 targets:
 - generic
 entrypoints:
 - name: main
-  path: SKILL.md
-  type: markdown
+  path: run.py
+  type: python
 limits:
   max_tool_iterations: 12
   max_output_tokens: 6144
   max_total_tokens: 60000
-  timeout_seconds: 300
+  timeout_seconds: 2640
 exec:
-  runtime: skill
+  mode: pure-script
+  command: python run.py
+  runtime: python311
   runner: e2b
+  entry: run.py
   inputs:
   - name: topic
     kind: scalar
-    type: string
+    type: textarea
     required: true
     label: Research topic
     placeholder: e.g. "The role of synthetic data in training small language models"
-  - name: level
+  - name: citation_style
     kind: scalar
     type: select
     required: true
-    default: masters
+    default: APA 7th
     enum:
-    - undergrad
-    - masters
-    - phd
-    label: Academic level
+    - APA 7th
+    - IEEE
+    - Chicago
+    - MLA
+    label: Citation style
     options:
-    - undergrad
-    - masters
-    - phd
-  - name: length_target
-    kind: scalar
-    type: select
-    required: true
-    default: 30_pages
-    enum:
-    - 10_pages
-    - 30_pages
-    - 60_pages
-    - 100_pages
-    label: Target length
-    options:
-    - 10_pages
-    - 30_pages
-    - 60_pages
-    - 100_pages
+    - APA 7th
+    - IEEE
+    - Chicago
+    - MLA
   - name: language
     kind: scalar
     type: select
     required: true
-    default: en
+    default: english
     enum:
-    - en
-    - de
-    - es
-    - fr
-    label: Output language
+    - english
+    - german
+    - spanish
+    - french
+    label: Draft language
     options:
-    - en
-    - de
-    - es
-    - fr
+    - english
+    - german
+    - spanish
+    - french
+  - name: model_name
+    kind: scalar
+    type: string
+    required: false
+    label: Gemini model override
+    placeholder: Defaults to gemini-3.1-pro-preview
+  - name: enable_citation_verification
+    kind: scalar
+    type: boolean
+    required: false
+    default: true
+    label: Run citation claim verification
+  - name: export_pdf
+    kind: scalar
+    type: boolean
+    required: false
+    default: true
+    label: Export PDF
+  - name: export_docx
+    kind: scalar
+    type: boolean
+    required: false
+    default: true
+    label: Export DOCX
+  secrets:
+  - GOOGLE_API_KEY
   outputs:
-  - name: outline
+  - name: final_draft
     kind: file
     media_type: text/markdown
-    path: out/outline.md
+    path: out/final_draft.md
     required: true
-    label: Research outline
-  entry: SKILL.md
+    label: Final markdown draft
+  - name: run_metadata
+    kind: file
+    media_type: application/json
+    path: out/run_metadata.json
+    required: true
+    label: Run metadata
+  - name: export_report
+    kind: file
+    media_type: application/json
+    path: out/export_report.json
+    required: true
+    label: Export report
+  - name: citation_database
+    kind: file
+    media_type: application/json
+    path: out/citation_database.json
+    required: false
+    label: Citation database
+  - name: workspace_archive
+    kind: file
+    media_type: application/zip
+    path: out/opendraft_workspace.zip
+    required: true
+    label: Workspace archive
+  - name: pdf
+    kind: file
+    media_type: application/pdf
+    path: out/final_draft.pdf
+    required: false
+    label: PDF export
+  - name: docx
+    kind: file
+    media_type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+    path: out/final_draft.docx
+    required: false
+    label: DOCX export
+  - name: error_report
+    kind: file
+    media_type: application/json
+    path: out/error_report.json
+    required: false
+    label: Error report
 capabilities:
-  secrets: []
+  secrets:
+  - GOOGLE_API_KEY
   network:
     egress: true
 approvals:
   required: false
-  label: Approve research outline
+  label: Approve research draft
 trigger:
   type: manual
