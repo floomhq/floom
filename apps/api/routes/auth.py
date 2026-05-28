@@ -448,15 +448,19 @@ def _session_user(request: Request) -> tuple[str, str]:
 _OSS_PLACEHOLDER_USER_ID = "federico"
 
 
-def _device_can_be_claimed(device_user_id: str, session_user_id: str) -> bool:
-    """Allow approve when the device was minted by the OSS placeholder user.
+def _device_can_be_claimed(device_user_id: str | None, session_user_id: str) -> bool:
+    """Allow approve when the device hasn't been claimed yet.
 
-    The engine's POST /cli-auth/devices handler (mounted under /api in cloud)
-    stores user_id=_bootstrap_user_id() = "federico" because it has no idea
-    who the dashboard user is yet. When that user then signs in and clicks
-    Approve, this handler claims the device for the real Supabase user_id.
+    Cloud's POST /api/cli-auth/devices override (see routes/cli_auth_devices.py)
+    mints rows with user_id=NULL since the dashboard user isn't known at
+    mint time. When that user signs in and clicks Approve, this handler
+    claims the device for the real Supabase user_id.
 
-    A device that already belongs to a real Supabase user can only be
+    Older device rows minted by the engine's OSS handler before the cloud
+    override existed carry the placeholder string "federico" — same
+    semantics, allow the claim.
+
+    A device that already belongs to a real Supabase user can ONLY be
     approved by that same user (prevents another user from stealing a
     half-completed login).
     """
