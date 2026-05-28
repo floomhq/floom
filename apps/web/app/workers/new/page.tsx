@@ -50,8 +50,8 @@ function NewWorkerPageInner({
 function NewWorkerSkeleton() {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pt-8">
-      <Skeleton className="h-8 w-56 rounded-md" />
-      <Skeleton className="h-4 w-80 rounded-md" />
+      <Skeleton className="h-8 w-56 rounded-[var(--radius-button)]" />
+      <Skeleton className="h-4 w-80 rounded-[var(--radius-button)]" />
       <Skeleton className="h-[280px] rounded-lg" />
     </div>
   );
@@ -346,7 +346,7 @@ function NewWorkerContent() {
             type="button"
             disabled={isBusy}
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-border bg-card px-3 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isUploading ? (
               <>

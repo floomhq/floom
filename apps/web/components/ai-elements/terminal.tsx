@@ -17,7 +17,7 @@ export function Terminal({
 }) {
   return (
     <div className={cn(
-      "overflow-hidden rounded-md border border-border bg-[var(--bg-2)] text-foreground",
+      "overflow-hidden rounded-[var(--radius-button)] border border-border bg-[var(--bg-2)] text-foreground",
       "dark:bg-[#0d0d0d] dark:text-[#e8e8e8] dark:border-white/10",
       className,
     )}>

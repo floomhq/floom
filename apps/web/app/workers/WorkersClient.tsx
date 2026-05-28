@@ -464,7 +464,7 @@ function EmptyWorkersState() {
               <li key={i}>
                 <Link
                   href={`/workers/new?prompt=${encodeURIComponent(ex)}`}
-                  className="block rounded-md px-3 py-2 text-sm hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                  className="block rounded-[var(--radius-button)] px-3 py-2 text-sm hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
                 >
                   &quot;{ex}&quot;
                 </Link>
@@ -581,7 +581,7 @@ function WorkerCard({
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
             {worker.is_example && (
-              <span className="mt-0.5 inline-flex items-center rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+              <span className="mt-1 inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
                 Example
               </span>
             )}
