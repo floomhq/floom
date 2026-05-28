@@ -1,0 +1,28 @@
+schema_version: "0.3"
+name: "skill-quality-audit"
+title: "Skill Quality Audit"
+description: "Weekly Friday review of submitted Floom skills for quality issues."
+version: "0.1.0"
+targets: ["generic"]
+exec:
+  entry: "SKILL.md"
+runtime: "skill"
+running: "e2b"
+inputs:
+- name: audit_focus
+  kind: scalar
+  type: string
+  required: false
+  label: "Audit Focus"
+  default: "common quality issues in newly submitted skills"
+outputs:
+- name: audit
+  kind: file
+  media_type: text/markdown
+  path: out/audit.md
+  required: true
+  label: "Quality Audit"
+trigger:
+  type: schedule
+  cron: "0 16 * * 5"
+  timezone: "Europe/Berlin"

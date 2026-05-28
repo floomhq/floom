@@ -1,0 +1,35 @@
+schema_version: "0.3"
+name: "applicant-followup"
+title: "Applicant Followup"
+description: "Drafts a personalised follow-up email to a candidate based on a short CV summary."
+version: "0.1.0"
+targets: ["generic"]
+exec:
+  entry: "SKILL.md"
+runtime: "skill"
+running: "e2b"
+inputs:
+- name: candidate_name
+  kind: scalar
+  type: string
+  required: true
+  label: "Candidate Name"
+- name: role_title
+  kind: scalar
+  type: string
+  required: true
+  label: "Role Title"
+- name: cv_summary
+  kind: scalar
+  type: string
+  required: true
+  label: "CV Summary"
+outputs:
+- name: email
+  kind: file
+  media_type: text/markdown
+  path: out/email.md
+  required: true
+  label: "Follow-up Email"
+trigger:
+  type: manual

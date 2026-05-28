@@ -1,0 +1,28 @@
+schema_version: "0.3"
+name: "hiring-pulse"
+title: "Hiring Pulse"
+description: "Weekly Monday-morning brief on European tech hiring trends."
+version: "0.1.0"
+targets: ["generic"]
+exec:
+  entry: "SKILL.md"
+runtime: "skill"
+running: "e2b"
+inputs:
+- name: market_focus
+  kind: scalar
+  type: string
+  required: false
+  label: "Market Focus"
+  default: "European tech hiring across early-stage and growth-stage startups"
+outputs:
+- name: pulse
+  kind: file
+  media_type: text/markdown
+  path: out/pulse.md
+  required: true
+  label: "Hiring Pulse"
+trigger:
+  type: schedule
+  cron: "0 10 * * 1"
+  timezone: "Europe/Berlin"

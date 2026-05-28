@@ -1,0 +1,28 @@
+schema_version: "0.3"
+name: "job-digest"
+title: "Job Digest"
+description: "Daily summary of new tech jobs added to Rocketlist."
+version: "0.1.0"
+targets: ["generic"]
+exec:
+  entry: "SKILL.md"
+runtime: "skill"
+running: "e2b"
+inputs:
+- name: focus_segment
+  kind: scalar
+  type: string
+  required: false
+  label: "Focus Segment"
+  default: "senior backend, ML, and infra roles at European startups"
+outputs:
+- name: digest
+  kind: file
+  media_type: text/markdown
+  path: out/digest.md
+  required: true
+  label: "Job Digest"
+trigger:
+  type: schedule
+  cron: "0 9 * * *"
+  timezone: "Europe/Berlin"

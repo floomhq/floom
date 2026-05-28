@@ -1,0 +1,28 @@
+schema_version: "0.3"
+name: "community-digest"
+title: "Community Digest"
+description: "Daily summary of Floom community activity across Discord, comments, and issues."
+version: "0.1.0"
+targets: ["generic"]
+exec:
+  entry: "SKILL.md"
+runtime: "skill"
+running: "e2b"
+inputs:
+- name: community_focus
+  kind: scalar
+  type: string
+  required: false
+  label: "Community Focus"
+  default: "skill builders, integrators, and early adopters discussing patterns, bugs, and feature requests"
+outputs:
+- name: digest
+  kind: file
+  media_type: text/markdown
+  path: out/digest.md
+  required: true
+  label: "Community Digest"
+trigger:
+  type: schedule
+  cron: "0 8 * * *"
+  timezone: "Europe/Berlin"
