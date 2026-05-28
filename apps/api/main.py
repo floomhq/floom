@@ -3964,6 +3964,7 @@ def create_worker_run(
 def replay_run(
     worker_id: str,
     run_id: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
@@ -3979,6 +3980,7 @@ def replay_run(
 
     source_inputs = json.loads(row["input_json"] or "{}")
     replay_inputs = json.loads(json.dumps(source_inputs))
+    _enforce_run_create_quota(auth, request)
     new_run_id = create_run(
         worker_id,
         replay_inputs,
@@ -6165,11 +6167,7 @@ async def webhook_trigger(
 ) -> ActionResponse:
     """Receive an incoming webhook and trigger a worker run.
 
-    Authentication accepts either:
-    - ?token=<webhook_token>
-    - X-Floom-Signature header (legacy HMAC, for backwards compat)
-
-    Both are accepted; if token query param is present it takes priority.
+    Requires a worker-specific webhook credential.
     On success returns run_id immediately (non-blocking).
     """
     from webhook_service import get_webhook_secret_hash, verify_signature, verify_webhook_token
@@ -6254,6 +6252,7 @@ def rotate_webhook_secret(
     """
     from webhook_service import generate_webhook_secret
 
+    _raise_if_protected_worker_mutation(worker_id)
     worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
