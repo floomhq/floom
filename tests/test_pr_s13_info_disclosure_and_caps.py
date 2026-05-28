@@ -28,7 +28,13 @@ if API_DIR not in sys.path:
 _AUTH_HEADER = {"x-floom-secret": "test-secret-s13"}
 
 
-def _load_api(monkeypatch, tmp_path, *, draft_rate_hour: int = 20):
+def _load_api(
+    monkeypatch,
+    tmp_path,
+    *,
+    draft_rate_hour: int = 20,
+    run_create_rate_minute: int = 10,
+):
     workers_dir = tmp_path / "workers"
     workers_dir.mkdir()
     artifacts_dir = tmp_path / "artifacts"
@@ -45,6 +51,8 @@ def _load_api(monkeypatch, tmp_path, *, draft_rate_hour: int = 20):
     monkeypatch.setenv("COMPOSIO_WEBHOOK_SIGNING_KEY", "whsec-test")
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
     monkeypatch.setenv("WORKEROS_DRAFT_RATE_HOUR", str(draft_rate_hour))
+    monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_LIMIT", str(run_create_rate_minute))
+    monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60")
 
     reset_prefixes = ("auth.", "db.")
     reset_exact = {
@@ -159,7 +167,7 @@ def _insert_minimal_worker(main: Any, worker_id: str, *, secrets: list[str] | No
         "name": worker_id,
         "description": "audit test worker",
         "version": "0.1.0",
-        "runtime": "skill",
+        "runtime": {"type": "python311", "entrypoint": "run.py", "runner": "e2b"},
         "secrets": secrets or [],
         "inputs": [],
         "outputs": [],
@@ -323,6 +331,71 @@ def test_upload_rejects_null_byte_filename(monkeypatch, tmp_path):
 
     assert resp.status_code == 400, resp.text
     assert resp.json() == {"detail": "filename must not contain control characters"}
+
+
+def test_upload_returns_owner_scoped_download_url(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    headers = {**_AUTH_HEADER, "x-floom-user": "upload-owner"}
+
+    resp = client.post(
+        "/uploads",
+        headers=headers,
+        files={"file": ("audit.txt", b"upload body", "text/plain")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["url"].startswith(f"/uploads/{body['sha256']}?download_token=")
+    assert body["id"] == body["sha256"]
+
+    download = client.get(body["url"], headers=_AUTH_HEADER)
+    assert download.status_code == 200, download.text
+    assert download.content == b"upload body"
+
+    spoofed = client.get(
+        f"/uploads/{body['sha256']}",
+        headers={**_AUTH_HEADER, "x-floom-user": "upload-owner"},
+    )
+    assert spoofed.status_code == 404, spoofed.text
+
+    tampered = client.get(body["url"].replace("download_token=", "download_token=x"), headers=_AUTH_HEADER)
+    assert tampered.status_code == 404, tampered.text
+
+
+def test_get_with_body_is_rejected(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.request("GET", "/workers", headers=_AUTH_HEADER, content=b"x")
+
+    assert resp.status_code == 413, resp.text
+    assert resp.json() == {"detail": "Request body not allowed"}
+
+
+def test_run_creation_quota_is_shared_across_workers_and_ips(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, run_create_rate_minute=3)
+    client = TestClient(main.app)
+    monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
+    worker_ids = [f"s13-run-quota-{idx}" for idx in range(3)]
+    for worker_id in worker_ids:
+        _insert_minimal_worker(main, worker_id)
+
+    statuses = []
+    bodies = []
+    for idx in range(4):
+        headers = {**_AUTH_HEADER, "x-forwarded-for": f"203.0.113.{idx + 1}"}
+        resp = client.post(
+            f"/workers/{worker_ids[idx % len(worker_ids)]}/runs",
+            headers=headers,
+            json={"inputs": {}, "trigger_source": "manual"},
+        )
+        statuses.append(resp.status_code)
+        bodies.append(resp.text)
+
+    assert statuses == [200, 200, 200, 429], bodies
+    assert "Retry-After" in resp.headers
+    assert resp.json() == {"detail": "Run creation rate limit exceeded: 3/60s"}
 
 
 def test_sweep_connections_has_cooldown(monkeypatch, tmp_path):

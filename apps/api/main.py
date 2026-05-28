@@ -145,6 +145,7 @@ app = FastAPI(
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
 DEFAULT_RATE_LIMIT = (60, 60.0)
+BODYLESS_METHODS = {"GET", "HEAD", "OPTIONS"}
 RATE_LIMIT_RULES = [
     (re.compile(r"^/cli-auth/devices$"), (5, 60.0)),
     (re.compile(r"^/workers/[^/]+/runs$"), (10, 60.0)),
@@ -304,6 +305,18 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
 
 @app.middleware("http")
 async def request_body_size_middleware(request: Request, call_next):
+    if request.method.upper() in BODYLESS_METHODS:
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > 0:
+                    return JSONResponse(status_code=413, content={"detail": "Request body not allowed"})
+            except ValueError:
+                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+        if request.headers.get("transfer-encoding"):
+            return JSONResponse(status_code=413, content={"detail": "Request body not allowed"})
+        return await call_next(request)
+
     max_bytes = _body_limit_for_request(request)
     if max_bytes is None:
         return await call_next(request)
@@ -347,7 +360,67 @@ _rate_buckets: Dict[str, list[float]] = {}
 
 
 def _rate_caller_keys(request: Request, path: str) -> List[str]:
-    return [f"ip:{_client_ip(request)}:{path}"]
+    keys = [f"ip:{_client_ip(request)}:{path}"]
+    if request.method.upper() == "POST" and re.fullmatch(r"^/workers/[^/]+/runs$", path):
+        keys.append(f"ip:{_client_ip(request)}:/workers/*/runs")
+    return keys
+
+
+def _run_create_quota_config() -> tuple[int, float]:
+    try:
+        limit = int(os.environ.get("WORKEROS_RUN_CREATE_RATE_LIMIT", "10"))
+    except ValueError:
+        limit = 10
+    try:
+        window = float(os.environ.get("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60"))
+    except ValueError:
+        window = 60.0
+    return max(0, limit), max(1.0, window)
+
+
+def _run_create_quota_keys(auth: AuthContext, request: Request) -> List[str]:
+    return [f"user:{auth.user_id}", f"ip:{_client_ip(request)}"]
+
+
+def _enforce_run_create_quota(auth: AuthContext, request: Request) -> None:
+    limit, window = _run_create_quota_config()
+    if limit <= 0:
+        return
+
+    now = time.time()
+    cutoff = now - window
+    keys = _run_create_quota_keys(auth, request)
+    with get_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS run_create_rate_limits (
+                key TEXT NOT NULL,
+                ts REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_create_rate_limits_key_ts ON run_create_rate_limits(key, ts)"
+        )
+        conn.execute("DELETE FROM run_create_rate_limits WHERE ts <= ?", (cutoff,))
+        for key in keys:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count, MIN(ts) AS oldest_ts FROM run_create_rate_limits WHERE key = ?",
+                (key,),
+            ).fetchone()
+            count = int(row["count"] or 0) if row else 0
+            if count >= limit:
+                oldest_ts = float(row["oldest_ts"] or now) if row else now
+                retry_after = max(1, int(window - (now - oldest_ts)))
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Run creation rate limit exceeded: {limit}/{int(window)}s",
+                    headers={"Retry-After": str(retry_after)},
+                )
+        conn.executemany(
+            "INSERT INTO run_create_rate_limits (key, ts) VALUES (?, ?)",
+            [(key, now) for key in keys],
+        )
 
 
 @app.middleware("http")
@@ -1717,6 +1790,69 @@ def _validate_upload_filename(raw_filename: str) -> None:
         )
 
 
+def _upload_url_ttl_seconds() -> int:
+    try:
+        return max(60, int(os.environ.get("WORKEROS_UPLOAD_URL_TTL_SECONDS", "3600")))
+    except ValueError:
+        return 3600
+
+
+def _upload_signing_key() -> bytes:
+    key = (
+        os.environ.get("WORKEROS_UPLOAD_URL_SIGNING_SECRET")
+        or os.environ.get("FLOOM_SECRET")
+        or "local-dev-upload-url-signing"
+    )
+    return key.encode("utf-8")
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(data: str) -> bytes:
+    padding = "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(data + padding)
+
+
+def _make_upload_download_token(file_id: str, uploaded_by: str) -> str:
+    expires_at = int(time.time()) + _upload_url_ttl_seconds()
+    payload = _b64url_encode(
+        json.dumps(
+            {"file_id": file_id, "uploaded_by": uploaded_by, "expires_at": expires_at},
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    signature = hmac.new(_upload_signing_key(), payload.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def _verify_upload_download_token(file_id: str, token: str) -> str:
+    try:
+        payload, signature = token.split(".", 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Uploaded file not found") from exc
+
+    expected = hmac.new(_upload_signing_key(), payload.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+
+    try:
+        claims = json.loads(_b64url_decode(payload).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail="Uploaded file not found") from exc
+
+    if claims.get("file_id") != file_id:
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+    expires_at = int(claims.get("expires_at") or 0)
+    if expires_at < int(time.time()):
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+    uploaded_by = str(claims.get("uploaded_by") or "")
+    if not uploaded_by:
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+    return uploaded_by
+
+
 @app.post("/uploads")
 async def upload_file(
     request: Request,
@@ -1829,7 +1965,51 @@ async def upload_file(
             (sha256, filename, media_type, size, uploaded_by, uploaded_at),
         )
 
-    return {"id": sha256, "sha256": sha256, "size": size, "media_type": media_type}
+    download_token = _make_upload_download_token(sha256, uploaded_by)
+    upload_url = f"/uploads/{sha256}?download_token={download_token}"
+    return {
+        "id": sha256,
+        "sha256": sha256,
+        "size": size,
+        "media_type": media_type,
+        "url": upload_url,
+    }
+
+
+@app.get("/uploads/{file_id}")
+def download_upload(
+    file_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> FileResponse:
+    _ = auth
+    if not is_sha256(file_id):
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+
+    download_token = request.query_params.get("download_token", "")
+    uploaded_by = _verify_upload_download_token(file_id, download_token)
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT filename, media_type
+            FROM files
+            WHERE id = ? AND uploaded_by = ?
+            """,
+            (file_id, uploaded_by),
+        ).fetchone()
+
+    path = blob_path(file_id)
+    if row is None or not path.exists():
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+
+    filename = row["filename"] or file_id
+    media_type = normalize_media_type(row["media_type"])
+    return FileResponse(
+        path,
+        filename=filename,
+        media_type=media_type,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/workers", response_model=List[WorkerSummary])
@@ -3739,6 +3919,8 @@ def create_worker_run(
                 status_code=400,
                 detail=f"Missing required inputs: {', '.join(missing)}",
             )
+
+    _enforce_run_create_quota(auth, request)
 
     # Create the run record first so we have a run_id for per-run file staging.
     run_id = create_run(
