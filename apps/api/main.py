@@ -4996,6 +4996,14 @@ def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
 
 _CONNECTION_LIST_REFRESH_STATUSES = {"initiated", "pending"}
 _CONNECTION_LIST_REFRESH_INTERVAL = timedelta(seconds=30)
+_COMPOSIO_ACTIVE_STATUSES = {"active", "valid"}
+
+
+def _normalize_composio_connection_status(status: Optional[str]) -> str:
+    normalized = (status or "").strip().lower()
+    if normalized in _COMPOSIO_ACTIVE_STATUSES:
+        return "active"
+    return normalized
 
 
 def _connection_list_refresh_due(row: Dict[str, Any], now: datetime) -> bool:
@@ -5028,7 +5036,9 @@ def _refresh_connection_status_for_list(
     try:
         from composio_client import check_status
 
-        remote_status = (check_status(row["composio_connection_id"]) or "").strip().lower()
+        remote_status = _normalize_composio_connection_status(
+            check_status(row["composio_connection_id"])
+        )
     except Exception as exc:
         logger.warning("Could not refresh Composio status for %s during list: %s", row.get("id"), exc)
         updated = repos.connections.update(
@@ -5280,7 +5290,7 @@ def connections_callback(connection_id: str = "", status: str = ""):
         # Try to refresh from Composio first
         try:
             from composio_client import check_status
-            remote_status = check_status(connection_id)
+            remote_status = _normalize_composio_connection_status(check_status(connection_id))
         except Exception:
             remote_status = ""
 
@@ -5335,7 +5345,9 @@ def get_connection_status(
     # Refresh from Composio
     try:
         from composio_client import check_status
-        remote_status = check_status(item["composio_connection_id"])
+        remote_status = _normalize_composio_connection_status(
+            check_status(item["composio_connection_id"])
+        )
         if remote_status and remote_status != item["status"]:
             now = now_iso()
             repos.connections.update(
@@ -5528,7 +5540,7 @@ def test_connection(
 
     try:
         from composio_client import check_status
-        remote_status = check_status(composio_conn_id)
+        remote_status = _normalize_composio_connection_status(check_status(composio_conn_id))
     except Exception as exc:
         _write_connection_check(connection_id, "failed", str(exc), tested_at, repos=repos)
         return ConnectionTestResult(
@@ -5628,7 +5640,9 @@ async def _run_connection_sweep() -> None:
         tested_at = now_iso()
         try:
             from composio_client import check_status
-            remote_status = check_status(composio_conn_id)
+            remote_status = _normalize_composio_connection_status(
+                check_status(composio_conn_id)
+            )
             check = "valid" if remote_status == "active" else (
                 remote_status if remote_status in ("expired", "failed") else "valid"
             )
