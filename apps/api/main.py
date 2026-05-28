@@ -148,10 +148,26 @@ DEFAULT_RATE_LIMIT = (60, 60.0)
 RATE_LIMIT_RULES = [
     (re.compile(r"^/cli-auth/devices$"), (5, 60.0)),
     (re.compile(r"^/workers/[^/]+/runs$"), (10, 60.0)),
+    (re.compile(r"^/workers/from-bundle$"), (10, 60.0)),
     (re.compile(r"^/workers$"), (20, 60.0)),
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
     (re.compile(r"^/connections$"), (20, 60.0)),
 ]
+
+PROTECTED_STOCK_WORKER_IDS = frozenset(
+    {
+        "csv_enricher",
+        "cv_writeup",
+        "dach_compliance",
+        "github-digest",
+        "gmail_intake_brief",
+        "openblog",
+        "opendraft",
+        "research_brief",
+        "reverse_match_crm",
+        "weekly_update",
+    }
+)
 
 
 def _cors_allowed_origins() -> List[str]:
@@ -706,6 +722,24 @@ def _sanitize_download_name(name: str) -> str:
         .replace("\n", "_")
     )
     return sanitized or "file"
+
+
+_SENSITIVE_ARTIFACT_FILENAMES = frozenset({"transcript.jsonl"})
+
+
+def _is_sensitive_artifact_name(name: str) -> bool:
+    normalized = (name or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return normalized in _SENSITIVE_ARTIFACT_FILENAMES
+
+
+def _is_sensitive_artifact_row(row: Any) -> bool:
+    data = row_to_dict(row)
+    return _is_sensitive_artifact_name(str(data.get("name") or data.get("path") or ""))
+
+
+def _raise_if_protected_worker_mutation(worker_id: str) -> None:
+    if worker_id in PROTECTED_STOCK_WORKER_IDS:
+        raise HTTPException(status_code=403, detail="Stock workers cannot be modified through the API")
 
 
 def _extract_primary_output_file(output_payload: Dict[str, Any]) -> Optional[tuple[str, bytes]]:
@@ -1530,15 +1564,19 @@ def _resolve_file_input_references(
                     file_owner,
                     bound_by,
                 )
-                with get_db() as audit_conn:
-                    audit_conn.execute(
-                        """
-                        INSERT INTO file_binding_audit
-                            (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
-                    )
+                try:
+                    with get_db() as audit_conn:
+                        audit_conn.execute(
+                            """
+                            INSERT INTO file_binding_audit
+                                (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
+                        )
+                except sqlite3.OperationalError as exc:
+                    logger.debug("file_binding_audit write skipped: %s", exc)
+                raise HTTPException(status_code=403, detail=f"Uploaded file not found: {inp.name}")
 
             ext = extension_for_file(row["filename"], row["media_type"])
             mounted = run_inputs_dir / f"{inp.name}{ext}"
@@ -1653,6 +1691,14 @@ def _claim_upload_quota(request: Request, size: int) -> Optional[int]:
 def _validate_upload_filename(raw_filename: str) -> None:
     if not raw_filename:
         raise HTTPException(status_code=400, detail="filename is required")
+    if (
+        "%00" in raw_filename.lower()
+        or any(ord(char) < 32 or ord(char) == 127 for char in raw_filename)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="filename must not contain control characters",
+        )
     if (
         "/" in raw_filename
         or "\\" in raw_filename
@@ -1980,6 +2026,7 @@ def update_worker(
     secret once in the response (new_webhook_secret field) — it is never
     stored in plaintext.
     """
+    _raise_if_protected_worker_mutation(worker_id)
     worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -2124,12 +2171,13 @@ def delete_worker(
 ):
     """Delete a worker and all dependent rows (runs, artifacts, logs).
 
-    - FK ON DELETE CASCADE handles dependent rows.
+    - Dependent run, artifact, log, and webhook rows are removed with the worker.
     - Cancels any in-progress run gracefully (marks failed).
     - Cleans up webhook secret.
     - Removes scheduler slot (next_run_at cleared before delete).
     - skill_version is preserved if other workers share it.
     """
+    _raise_if_protected_worker_mutation(worker_id)
     worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -2947,6 +2995,7 @@ async def draft_and_create_worker(
     # Path A: pre-supplied files (upload flow — skip LLM)
     # ----------------------------------------------------------------
     if payload.files:
+        _enforce_draft_rate_limit(request)
         draft_files = []
         for f in payload.files:
             path = (f.path or "").strip()
@@ -3155,6 +3204,9 @@ def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}")
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
+    raw_worker_id = str(raw.get("id") or raw.get("name") or "").strip()
+    if raw_worker_id in PROTECTED_STOCK_WORKER_IDS:
+        _raise_if_protected_worker_mutation(raw_worker_id)
 
     # P1-3: reject path-traversal in caller-supplied bundle_path BEFORE schema parsing
     # (the projection from WorkerContract may strip the field, so we check raw YAML).
@@ -3180,11 +3232,21 @@ def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
         else:
             config = parsed
             worker_id = config.id
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Schema validation failed",
+                "errors": _redacted_validation_errors(exc.errors()),
+            },
+        ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Schema validation failed: {exc}")
+        logger.info("Worker schema validation failed: %s", exc)
+        raise HTTPException(status_code=400, detail="Schema validation failed") from exc
 
     if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
         raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")
+    _raise_if_protected_worker_mutation(worker_id)
     return worker_id, config
 
 
@@ -3204,7 +3266,10 @@ def create_worker(
         raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
 
     # Write files
-    target_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        target_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists") from exc
     (target_dir / "worker.yml").write_text(payload.worker_yml)
     (target_dir / "run.py").write_text(payload.run_py)
     (target_dir / "requirements.txt").write_text("")
@@ -3278,6 +3343,11 @@ async def create_worker_from_bundle(
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=400, detail=f"Not a valid zip file: {exc}")
 
+    for info in zf.infolist():
+        file_type = (info.external_attr >> 16) & 0o170000
+        if file_type == 0o120000:
+            raise HTTPException(status_code=400, detail=f"Bundle contains unsupported symlink: {info.filename!r}")
+
     names = zf.namelist()
 
     # Determine bundle prefix: support flat root or single top-level dir.
@@ -3306,7 +3376,10 @@ async def create_worker_from_bundle(
         raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
 
     # Extract all files under the prefix into target_dir
-    target_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        target_dir.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists") from exc
     try:
         for zip_name in names:
             if not zip_name.startswith(prefix):
@@ -3375,6 +3448,7 @@ def update_worker(
     """Update an existing worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
+    _raise_if_protected_worker_mutation(worker_id)
     parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml)
     if parsed_worker_id != worker_id:
         raise HTTPException(
@@ -3476,6 +3550,7 @@ def update_worker_files(
     """
     from worker_registry import WORKERS_DIR
 
+    _raise_if_protected_worker_mutation(worker_id)
     worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=get_repositories()) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -3777,10 +3852,7 @@ def clear_runs(
     """Wipe all run history.
 
     Destructive operation. Requires explicit `?confirm=yes-wipe-all-runs`
-    query param to proceed. A May 2026 audit accidentally deleted 256 runs
-    by hitting this endpoint with just the platform secret. The confirmation
-    string makes the destructive intent explicit and prevents accidental
-    invocation by API explorers.
+    query param to proceed.
     """
     if confirm != "yes-wipe-all-runs":
         raise HTTPException(
@@ -3808,14 +3880,14 @@ def cancel_run(
 
     Sets cancel_requested=1 on the run row. The runner respects this between
     iterations (AgentDriver) or on the next status write (other drivers).
-    Returns 404 if no such run, 409 if already terminal, 200 if cancellation
-    was recorded (idempotent).
+    Returns 404 if no cancellable run is visible, 200 if cancellation was
+    recorded.
     """
     row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if row["status"] in _TERMINAL_RUN_STATUSES:
-        raise HTTPException(status_code=409, detail=f"Run already {row['status']}")
+        raise HTTPException(status_code=404, detail="Run not found")
     repos.runs.cancel(
         user_id=auth.user_id,
         run_id=run_id,
@@ -3834,38 +3906,45 @@ def download_run_bundle(
     run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
     if not run_row:
         raise HTTPException(status_code=404, detail="Run not found")
-    log_rows = repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
     artifact_rows = repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
 
-    input_payload = json.loads(run_row["input_json"] or "{}")
     output_payload = json.loads(run_row["output_json"] or "{}")
-    if not isinstance(input_payload, dict):
-        input_payload = {}
     if not isinstance(output_payload, dict):
         output_payload = {}
+    run_data = row_to_dict(run_row)
 
     archive_buffer = io.BytesIO()
     with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("inputs.json", json.dumps(input_payload, indent=2, sort_keys=True))
+        metadata = {
+            "id": run_data.get("id"),
+            "worker_id": run_data.get("worker_id"),
+            "status": run_data.get("status"),
+            "trigger_source": run_data.get("trigger_source"),
+            "runner": run_data.get("runner"),
+            "created_at": run_data.get("created_at"),
+            "started_at": run_data.get("started_at"),
+            "completed_at": run_data.get("completed_at"),
+            "duration_ms": run_data.get("duration_ms"),
+        }
+        archive.writestr("metadata.json", json.dumps(metadata, indent=2, sort_keys=True))
         archive.writestr("outputs.json", json.dumps(output_payload, indent=2, sort_keys=True))
+        archive.writestr(
+            "README.txt",
+            "This archive omits run inputs, logs, and internal transcripts. "
+            "Use the Workeros UI for redacted run history.\n",
+        )
 
         primary_output = _extract_primary_output_file(output_payload)
         if primary_output:
             output_name, output_bytes = primary_output
             archive.writestr(output_name, output_bytes)
 
-        log_lines = []
-        for row in log_rows:
-            ts = row["timestamp"] or ""
-            level = (row["level"] or "info").upper()
-            msg = row["message"] or ""
-            log_lines.append(f"[{ts}] {level} {msg}")
-        archive.writestr("logs.txt", "\n".join(log_lines))
-
         from runner_utils import ARTIFACTS_DIR
 
         artifacts_root = ARTIFACTS_DIR.resolve()
         for row in artifact_rows:
+            if _is_sensitive_artifact_row(row):
+                continue
             path_value = row["path"] or ""
             try:
                 resolved = Path(path_value).resolve()
@@ -3897,12 +3976,9 @@ def get_run_bundle_file(
 ):
     snapshot_path = repos.runs.get_bundle_snapshot_path(user_id=auth.user_id, run_id=run_id)
     if snapshot_path is None:
-        run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
-        if run_row is None:
-            raise HTTPException(status_code=404, detail="Run not found")
-        raise HTTPException(status_code=410, detail="Bundle snapshot is not available for this run")
+        raise HTTPException(status_code=404, detail="Bundle file not found")
     if not snapshot_path:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail="Bundle file not found")
 
     base_dir = (Path(DB_PATH).resolve().parent / snapshot_path).resolve()
     try:
@@ -3933,6 +4009,8 @@ def download_artifact(
         None,
     )
     if not row:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if _is_sensitive_artifact_row(row):
         raise HTTPException(status_code=404, detail="Artifact not found")
 
     art = row_to_dict(row)
@@ -3976,7 +4054,7 @@ def download_artifact(
     )
 
 
-@app.get("/runs/{run_id}", response_model=RunDetail)
+@app.get("/runs/{run_id}", response_model=RunDetail, response_model_exclude_none=True)
 def get_run(
     run_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -3986,7 +4064,6 @@ def get_run(
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    run["input"] = json.loads(run.get("input_json") or "{}")
     run["output"] = json.loads(run.get("output_json") or "{}")
     # Build typed output schema from worker config
     output_config = get_worker_config_for_run(run["worker_id"])
@@ -4004,9 +4081,8 @@ def get_run(
     logs = [
         LogEntry(
             level=r["level"],
-            message=r["message"],
+            message=_redact_public_log_message(r["message"]),
             timestamp=r["timestamp"],
-            trace_id=row_to_dict(r).get("trace_id"),
         )
         for r in repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
     ]
@@ -4022,8 +4098,9 @@ def get_run(
             created_at=r["created_at"],
         )
         for r in repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
+        if not _is_sensitive_artifact_row(r)
     ]
-    transcript = _read_transcript_rows(run["runner"], artifacts)
+    transcript: List[Dict[str, Any]] = []
 
     return RunDetail(
         id=run["id"],
@@ -4034,7 +4111,7 @@ def get_run(
         status=RunStatus(run["status"]),
         trigger_source=run["trigger_source"],
         runner=run["runner"],
-        input=run["input"],
+        input={},
         output=run["output"],
         output_schema=output_schema,
         logs=logs,
@@ -4324,11 +4401,7 @@ def upsert_secret(
 ) -> SecretTestResult:
     """Create or update a secret. Value is write-only — never returned.
 
-    SECURITY: refuses to overwrite a platform infrastructure secret. A
-    May 2026 audit found that POST /secrets/FLOOM_SECRET would happily
-    overwrite the running process's FLOOM_SECRET env var, locking the
-    owner out immediately. Platform secrets are managed via systemd
-    EnvironmentFile, not the user-secrets API.
+    Platform infrastructure secrets are managed outside the user-secrets API.
     """
     if name in PLATFORM_SECRETS:
         raise HTTPException(
@@ -4381,30 +4454,16 @@ def test_secret(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> SecretTestResult:
-    """Test a secret. For OPENAI_API_KEY: does a 1-token completion. Others: confirms env var is set."""
+    """Test a user-managed secret without exposing provider details or values."""
+    if name in PLATFORM_SECRETS:
+        raise HTTPException(status_code=404, detail="Secret not found")
+    if repos.secrets.get(user_id=auth.user_id, name=name) is None:
+        raise HTTPException(status_code=404, detail="Secret not found")
     value = repos.secrets.read_value(user_id=auth.user_id, name=name)
     if not value:
-        return SecretTestResult(status="invalid", reason=f"{name} is not set in the environment.")
+        raise HTTPException(status_code=404, detail="Secret not found")
 
-    if name == "OPENAI_API_KEY":
-        try:
-            import openai
-            client = openai.OpenAI(api_key=value)
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=1,
-            )
-            _ = resp.choices[0].message.content
-            return SecretTestResult(status="valid", reason="OpenAI API key is valid (1-token ping succeeded).")
-        except Exception as exc:
-            return SecretTestResult(status="invalid", reason=f"OpenAI API key test failed: {exc}")
-
-    # Generic: secret is set
-    return SecretTestResult(
-        status="valid",
-        reason=f"{name} is set ({len(value)} chars). No additional test available for this secret type.",
-    )
+    return SecretTestResult(status="valid", reason="Secret is configured.")
 
 
 # ---------------------------------------------------------------------------
@@ -4681,6 +4740,24 @@ def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
     return []
 
 
+def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "@" in text:
+        return "Connected account"
+    return text[:32]
+
+
+def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
+    item = dict(data)
+    item["account_label"] = _redact_connection_account_label(item.get("account_label"))
+    item["display_name"] = _redact_connection_account_label(item.get("display_name"))
+    return ConnectionItem(**item)
+
+
 def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str, user_id: str) -> Optional[str]:
     """Resolve the connected user's email via Composio's tool-execute proxy.
 
@@ -4807,7 +4884,7 @@ def list_connections(
     for row in rows:
         d = row_to_dict(row)
         d["scopes"] = _parse_scopes_json(d.pop("scopes_json", None))
-        result.append(ConnectionItem(**d))
+        result.append(_public_connection_item(d))
     return result
 
 
@@ -4953,7 +5030,7 @@ def get_connection_status(
     except Exception as exc:
         logger.warning("Could not refresh Composio status for %s: %s", connection_id, exc)
 
-    return ConnectionItem(**item)
+    return _public_connection_item(item)
 
 
 @app.delete("/connections/{connection_id}")
@@ -5015,7 +5092,7 @@ def get_connection_account_info(
         )
 
     return {
-        "email": info.get("email"),
+        "email": None,
         "scopes": info.get("scopes") or [],
         "connected_at": row["created_at"],
     }
@@ -5264,9 +5341,36 @@ async def _run_connection_sweep() -> None:
     logger.info("Connection health sweep complete (%d connections)", len(rows))
 
 
+_connection_sweep_gate_lock = threading.Lock()
+_connection_sweep_last_started_at = 0.0
+
+
+def _connection_sweep_cooldown_seconds() -> float:
+    try:
+        return max(0.0, float(os.environ.get("WORKEROS_SWEEP_COOLDOWN_SECONDS", "300")))
+    except ValueError:
+        return 300.0
+
+
 @app.post("/system/sweep-connections")
-async def sweep_connections_endpoint():
+async def sweep_connections_endpoint(
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Trigger a health-check sweep for all connections. Called by external cron."""
+    _ = auth
+    global _connection_sweep_last_started_at
+    now = time.monotonic()
+    cooldown = _connection_sweep_cooldown_seconds()
+    with _connection_sweep_gate_lock:
+        elapsed = now - _connection_sweep_last_started_at
+        if cooldown > 0 and _connection_sweep_last_started_at and elapsed < cooldown:
+            retry_after = max(1, int(cooldown - elapsed))
+            raise HTTPException(
+                status_code=429,
+                detail="Connection sweep already started recently",
+                headers={"Retry-After": str(retry_after)},
+            )
+        _connection_sweep_last_started_at = now
     asyncio.create_task(_run_connection_sweep())
     return {"status": "sweep_started"}
 
@@ -5506,7 +5610,7 @@ class PlatformConfig(BaseModel):
 class OverviewStats(BaseModel):
     runs_24h: int
     runs_24h_sparkline: List[int]
-    success_rate_7d: float
+    success_rate_7d: Optional[float] = None
     active_workers_count: int
     connections_healthy: int
     connections_total: int
@@ -5579,14 +5683,12 @@ def system_overview(
         sparkline[bucket] += 1
     runs_24h = int(sum(sparkline))
 
-    runs_7d_rows, runs_total_7d = repos.runs.list(
+    _runs_7d_rows, _runs_total_7d = repos.runs.list(
         user_id=auth.user_id,
         since=window_7d.isoformat(),
         limit=100000,
         offset=0,
     )
-    runs_success_7d = sum(1 for row in runs_7d_rows if row["status"] == RunStatus.COMPLETED.value)
-    success_rate_7d = (runs_success_7d / runs_total_7d) if runs_total_7d else 0.0
 
     workers = repos.workers.list(user_id=auth.user_id)
     active_workers_count = sum(1 for row in workers if row.get("enabled"))
@@ -5727,7 +5829,7 @@ def system_overview(
         stats=OverviewStats(
             runs_24h=runs_24h,
             runs_24h_sparkline=sparkline,
-            success_rate_7d=success_rate_7d,
+            success_rate_7d=None,
             active_workers_count=active_workers_count,
             connections_healthy=connections_healthy,
             connections_total=connections_total,
@@ -5882,7 +5984,7 @@ async def webhook_trigger(
     """Receive an incoming webhook and trigger a worker run.
 
     Authentication accepts either:
-    - ?token=<derived_token>  (deterministic, shown in UI, no rotation needed)
+    - ?token=<webhook_token>
     - X-Floom-Signature header (legacy HMAC, for backwards compat)
 
     Both are accepted; if token query param is present it takes priority.
@@ -6083,7 +6185,7 @@ def poll_cli_device(device_code: str) -> Dict[str, Any]:
 
     if float(record.get("expires_at", 0.0)) <= now_ts:
         repos.cli_auth.delete(device_code=device_code)
-        raise HTTPException(status_code=410, detail="Device code expired")
+        raise HTTPException(status_code=404, detail="Device code not found")
 
     status = str(record.get("status", "pending"))
     if status == "pending":
@@ -6091,7 +6193,7 @@ def poll_cli_device(device_code: str) -> Dict[str, Any]:
 
     if status == "denied":
         repos.cli_auth.delete(device_code=device_code)
-        raise HTTPException(status_code=403, detail="Device code denied")
+        raise HTTPException(status_code=404, detail="Device code not found")
 
     if status == "approved":
         consumed = repos.cli_auth.consume(device_code)
