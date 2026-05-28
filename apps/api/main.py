@@ -1098,7 +1098,9 @@ def get_worker_timeseries(
     repos: Repositories = Depends(get_repos),
 ) -> List[TimeseriesDay]:
     """Return per-day run counts for the last N days (default 14). Zero-filled."""
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker and not _is_cloud_deploy():
+        worker = get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     batch = _get_timeseries_batch(
@@ -2545,7 +2547,9 @@ def _build_worker_detail(
     user_id: str,
     repos: Repositories,
 ) -> WorkerDetail:
-    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos)
+    if not worker and not _is_cloud_deploy():
+        worker = get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -2674,7 +2678,9 @@ def update_worker(
     stored in plaintext.
     """
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker and not _is_cloud_deploy():
+        worker = get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4286,7 +4292,9 @@ def update_worker_files(
     from worker_registry import WORKERS_DIR
 
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=get_repositories()) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
+    if not worker and not _is_cloud_deploy():
+        worker = get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4454,7 +4462,9 @@ def create_worker_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker and not _is_cloud_deploy():
+        worker = get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4523,7 +4533,9 @@ def replay_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker and not _is_cloud_deploy():
+        worker = get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -7252,7 +7264,9 @@ async def webhook_trigger(
     if not _check_webhook_rate_limit(rl_key):
         raise HTTPException(status_code=429, detail="Too many webhook requests")
 
-    worker = repos.workers.get_any(worker_id=worker_id) or get_worker(worker_id)
+    worker = repos.workers.get_any(worker_id=worker_id)
+    if not worker and not _is_cloud_deploy():
+        worker = get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -7326,7 +7340,9 @@ def rotate_webhook_secret(
     from webhook_service import generate_webhook_secret
 
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) or get_worker(worker_id)
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker and not _is_cloud_deploy():
+        worker = get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
