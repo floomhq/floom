@@ -1,0 +1,78 @@
+/**
+ * Server-side API fetch helper.
+ *
+ * Calls the upstream API directly (bypassing the /api/proxy route) using
+ * FLOOM_API_BASE + FLOOM_API_SECRET from env. Only valid in Server Components
+ * and Route Handlers — never import this from client-side code.
+ */
+
+const API_BASE =
+  process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
+const API_SECRET = process.env.FLOOM_API_SECRET || "";
+
+export async function serverFetch<T>(
+  path: string,
+  options?: RequestInit & { next?: { revalidate?: number | false; tags?: string[] } }
+): Promise<T> {
+  const { next, ...fetchOptions } = options ?? {};
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...fetchOptions,
+    headers: {
+      "content-type": "application/json",
+      "x-floom-secret": API_SECRET,
+      ...fetchOptions?.headers,
+    },
+    // next.js cache config — passed through as NextFetchRequestConfig
+    ...(next ? { next } : {}),
+  });
+  if (!res.ok) {
+    let err = "";
+    try {
+      const body = await res.json();
+      err = body.detail || JSON.stringify(body);
+    } catch {
+      err = res.statusText || `HTTP ${res.status}`;
+    }
+    throw new Error(`API error ${res.status}: ${err}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** Fetch worker list (trimmed list-shape, 30s cache). */
+export async function fetchWorkerList() {
+  return serverFetch<import("./types").WorkerSummary[]>("/workers?shape=list", {
+    next: { revalidate: 30 },
+  });
+}
+
+/** Fetch overview stats (10s cache — user-specific). */
+export async function fetchOverview() {
+  return serverFetch<import("./types").SystemOverview>("/system/overview", {
+    next: { revalidate: 10 },
+  });
+}
+
+/** Fetch recent runs (10s cache — user-specific). */
+export async function fetchRuns(params?: {
+  worker_id?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const qs = new URLSearchParams();
+  if (params?.worker_id) qs.append("worker_id", params.worker_id);
+  if (params?.status) qs.append("status", params.status);
+  if (params?.limit) qs.append("limit", String(params.limit));
+  if (params?.offset) qs.append("offset", String(params.offset));
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return serverFetch<import("./types").RunSummary[]>(`/runs${query}`, {
+    next: { revalidate: 10 },
+  });
+}
+
+/** Fetch connections list (10s cache). */
+export async function fetchConnections() {
+  return serverFetch<import("./types").ConnectionItem[]>("/connections", {
+    next: { revalidate: 10 },
+  });
+}
