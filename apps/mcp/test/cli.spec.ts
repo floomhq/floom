@@ -24,19 +24,21 @@ test("floom --version prints package version", async () => {
 test("floom whoami without creds returns exit code 1", async () => {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-home-"));
   const originalHome = process.env.HOME;
-  const originalError = console.error;
+  const originalStderr = process.stderr.write.bind(process.stderr);
   let stderr = "";
   try {
     process.env.HOME = home;
-    console.error = (...args: unknown[]) => {
-      stderr += `${args.map(String).join(" ")}\n`;
+    // Capture process.stderr.write (used by log.err/log.warn)
+    process.stderr.write = (chunk: Uint8Array | string): boolean => {
+      stderr += typeof chunk === "string" ? chunk : chunk.toString();
+      return true;
     };
     const code = await runWhoamiCommand();
     assert.equal(code, 1);
     assert.match(stderr, /Not logged in/);
   } finally {
     process.env.HOME = originalHome;
-    console.error = originalError;
+    process.stderr.write = originalStderr;
   }
 });
 
