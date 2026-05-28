@@ -157,6 +157,33 @@ class WorkerConnection(BaseModel):
 WorkerConnectionSpec = Union[str, WorkerConnection]
 
 
+class WorkerContextMount(BaseModel):
+    name: str
+    writeable: bool = False
+    source: str = "local"
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", stripped):
+            raise ValueError(
+                "context name must be 1-64 letters, digits, dots, underscores, or hyphens"
+            )
+        return stripped
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, value: str) -> str:
+        stripped = (value or "local").strip()
+        if stripped != "local" and not stripped.startswith("git+"):
+            raise ValueError("context source must be 'local' or start with 'git+'")
+        return stripped
+
+
+WorkerContextMountSpec = Union[str, WorkerContextMount]
+
+
 class WorkerRuntime(BaseModel):
     type: str
     entrypoint: str = "run.py"
@@ -193,6 +220,7 @@ class WorkerConfig(BaseModel):
     inputs: List[WorkerInput] = []
     secrets: List[str] = []
     connections: List[WorkerConnectionSpec] = []  # Strings are legacy Composio app slugs.
+    contexts: List[WorkerContextMountSpec] = []
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
 
@@ -354,6 +382,7 @@ class WorkerContractExec(BaseModel):
     disable_tools: List[str] = Field(default_factory=list)
     inputs: List[WorkerContractField] = Field(default_factory=list)
     secrets: List[str] = Field(default_factory=list)
+    contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
     outputs: List[WorkerContractField] = Field(default_factory=list)
 
     @field_validator("command")
@@ -473,6 +502,7 @@ class WorkerContract(BaseModel):
     # Multiple triggers (new). If provided, `trigger` is derived from triggers[0].
     triggers: Optional[List[WorkerContractTrigger]] = None
     connections: List[WorkerConnectionSpec] = Field(default_factory=list)
+    contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
     csv_required_columns: Optional[List[str]] = None
 
     @field_validator("name")
@@ -703,6 +733,10 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         inputs=inputs,
         secrets=contract.exec.secrets,
         connections=[_model_data(connection) for connection in contract.connections],
+        contexts=[
+            _model_data(context)
+            for context in (contract.contexts or contract.exec.contexts or [])
+        ],
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
     )
@@ -822,6 +856,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             composio=config.trigger.composio,
         ),
         connections=[_model_data(connection) for connection in config.connections],
+        contexts=[_model_data(context) for context in config.contexts],
         csv_required_columns=config.csv_required_columns,
     )
 

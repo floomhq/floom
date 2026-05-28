@@ -28,7 +28,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -39,6 +39,25 @@ from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 
 from auth import AuthContext, get_auth_context, get_auth_provider
+from contexts import (
+    MAX_CONTEXT_BYTES,
+    CONTEXTS_DIR,
+    context_dir,
+    context_file_metadata,
+    context_mount_names,
+    context_total_size,
+    context_updated_at,
+    delete_context_metadata,
+    ensure_contexts_dir,
+    guess_mime_type,
+    is_binary_file,
+    iter_context_files,
+    load_context_metadata,
+    normalize_context_file_path,
+    safe_context_file_path,
+    set_context_metadata,
+    validate_context_name,
+)
 
 try:
     from slowapi.util import get_remote_address as _slowapi_get_remote_address
@@ -340,6 +359,8 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
     if path == "/workers/from-bundle":
         return FROM_BUNDLE_BODY_LIMIT_BYTES
     if path.startswith("/uploads"):
+        return None
+    if path.startswith("/contexts"):
         return None
     return DEFAULT_JSON_BODY_LIMIT_BYTES
 
@@ -2162,6 +2183,287 @@ def download_upload(
         filename=filename,
         media_type=media_type,
         headers={"Cache-Control": "no-store"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Contexts — filesystem-backed worker knowledge/state folders
+# ---------------------------------------------------------------------------
+
+class ContextSummary(BaseModel):
+    name: str
+    file_count: int
+    total_size_bytes: int
+    updated_at: Optional[str] = None
+    writeable: bool = False
+
+
+class ContextFileItem(BaseModel):
+    path: str
+    size: int
+    mime_type: str
+    updated_at: str
+    is_binary: bool
+
+
+class ContextDetail(ContextSummary):
+    files: List[ContextFileItem] = Field(default_factory=list)
+
+
+class ContextCreateRequest(BaseModel):
+    writeable: bool = False
+
+
+class ContextTextWriteRequest(BaseModel):
+    content: str
+
+
+class ContextDeleteResponse(BaseModel):
+    status: str
+    referenced_by: List[str] = Field(default_factory=list)
+
+
+class ContextUploadResponse(BaseModel):
+    files: List[ContextFileItem]
+    total_size_bytes: int
+
+
+def _context_name_or_400(name: str) -> str:
+    try:
+        return validate_context_name(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _context_file_path_or_400(path: str) -> str:
+    try:
+        return normalize_context_file_path(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _safe_context_file_or_400(name: str, path: str) -> Path:
+    try:
+        return safe_context_file_path(name, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _context_summary(name: str, metadata: dict[str, dict[str, Any]]) -> ContextSummary:
+    root = context_dir(name)
+    files = list(iter_context_files(root))
+    total_size = sum(path.stat().st_size for path in files)
+    return ContextSummary(
+        name=name,
+        file_count=len(files),
+        total_size_bytes=total_size,
+        updated_at=context_updated_at(root),
+        writeable=bool(metadata.get(name, {}).get("writeable", False)),
+    )
+
+
+def _context_detail(name: str, metadata: dict[str, dict[str, Any]] | None = None) -> ContextDetail:
+    root = context_dir(name)
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Context not found")
+    meta = metadata if metadata is not None else load_context_metadata()
+    files = [
+        ContextFileItem(**context_file_metadata(root, path))
+        for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
+    ]
+    summary = _context_summary(name, meta)
+    return ContextDetail(**summary.model_dump(), files=files)
+
+
+def _raise_context_quota_if_needed(name: str) -> None:
+    total = context_total_size(context_dir(name))
+    if total > MAX_CONTEXT_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Context exceeds 50MB total size limit ({total} bytes)",
+        )
+
+
+def _write_context_file(name: str, file_path: str, data: bytes) -> ContextFileItem:
+    root = context_dir(name)
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Context not found")
+    destination = _safe_context_file_or_400(name, file_path)
+    previous = destination.read_bytes() if destination.exists() else None
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(data)
+    try:
+        _raise_context_quota_if_needed(name)
+    except HTTPException:
+        if previous is None:
+            destination.unlink(missing_ok=True)
+        else:
+            destination.write_bytes(previous)
+        raise
+    set_context_metadata(name)
+    return ContextFileItem(**context_file_metadata(root, destination))
+
+
+def _workers_referencing_context(name: str) -> List[str]:
+    referenced_by: List[str] = []
+    for worker in discover_workers(use_cache=False):
+        try:
+            contexts = (worker.get("config") or {}).get("contexts") or []
+            if name in context_mount_names(contexts):
+                referenced_by.append(str(worker["id"]))
+        except Exception:
+            continue
+    return sorted(set(referenced_by))
+
+
+@app.get("/contexts", response_model=List[ContextSummary])
+def list_contexts(
+    auth: AuthContext = Depends(get_auth_context),
+) -> List[ContextSummary]:
+    _ = auth
+    ensure_contexts_dir()
+    metadata = load_context_metadata()
+    items = [
+        _context_summary(folder.name, metadata)
+        for folder in sorted(CONTEXTS_DIR.iterdir(), key=lambda p: p.name)
+        if folder.is_dir() and not folder.is_symlink()
+    ]
+    return items
+
+
+@app.post("/contexts/{name}", response_model=ContextDetail)
+def create_context(
+    name: str,
+    payload: Optional[ContextCreateRequest] = Body(default=None),
+    auth: AuthContext = Depends(get_auth_context),
+) -> ContextDetail:
+    _ = auth
+    safe_name = _context_name_or_400(name)
+    root = context_dir(safe_name)
+    if root.exists():
+        raise HTTPException(status_code=409, detail="Context already exists")
+    root.mkdir(parents=True)
+    set_context_metadata(safe_name, writeable=bool(payload.writeable) if payload else False)
+    return _context_detail(safe_name)
+
+
+@app.get("/contexts/{name}", response_model=ContextDetail)
+def get_context(
+    name: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> ContextDetail:
+    _ = auth
+    return _context_detail(_context_name_or_400(name))
+
+
+@app.delete("/contexts/{name}", response_model=ContextDeleteResponse)
+def delete_context(
+    name: str,
+    force: bool = Query(False),
+    auth: AuthContext = Depends(get_auth_context),
+) -> ContextDeleteResponse:
+    _ = auth
+    safe_name = _context_name_or_400(name)
+    root = context_dir(safe_name)
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Context not found")
+    referenced_by = _workers_referencing_context(safe_name)
+    if referenced_by and not force:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Context is referenced by workers", "referenced_by": referenced_by},
+        )
+    shutil.rmtree(root)
+    delete_context_metadata(safe_name)
+    return ContextDeleteResponse(status="deleted", referenced_by=referenced_by)
+
+
+@app.get("/contexts/{name}/files/{file_path:path}")
+def get_context_file(
+    name: str,
+    file_path: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
+    _ = auth
+    safe_name = _context_name_or_400(name)
+    rel = _context_file_path_or_400(file_path)
+    target = _safe_context_file_or_400(safe_name, rel)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    mime_type = guess_mime_type(rel)
+    headers = {"Cache-Control": "no-store"}
+    if is_binary_file(rel, mime_type):
+        headers["Content-Disposition"] = f'attachment; filename="{Path(rel).name}"'
+        return FileResponse(target, media_type=mime_type, headers=headers)
+    return Response(content=target.read_bytes(), media_type=mime_type, headers=headers)
+
+
+@app.put("/contexts/{name}/files/{file_path:path}", response_model=ContextFileItem)
+async def put_context_file(
+    name: str,
+    file_path: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> ContextFileItem:
+    _ = auth
+    safe_name = _context_name_or_400(name)
+    rel = _context_file_path_or_400(file_path)
+    content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    if content_type == "application/json":
+        try:
+            payload = ContextTextWriteRequest(**(await request.json()))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}") from exc
+        data = payload.content.encode("utf-8")
+    else:
+        data = await request.body()
+    return _write_context_file(safe_name, rel, data)
+
+
+@app.delete("/contexts/{name}/files/{file_path:path}", response_model=ContextDetail)
+def delete_context_file(
+    name: str,
+    file_path: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> ContextDetail:
+    _ = auth
+    safe_name = _context_name_or_400(name)
+    rel = _context_file_path_or_400(file_path)
+    target = _safe_context_file_or_400(safe_name, rel)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    target.unlink()
+    for parent in target.parents:
+        if parent == context_dir(safe_name):
+            break
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+    set_context_metadata(safe_name)
+    return _context_detail(safe_name)
+
+
+@app.post("/contexts/{name}/upload", response_model=ContextUploadResponse)
+async def upload_context_files(
+    name: str,
+    files: List[UploadFile] = File(...),
+    path_prefix: str = Form(""),
+    auth: AuthContext = Depends(get_auth_context),
+) -> ContextUploadResponse:
+    _ = auth
+    safe_name = _context_name_or_400(name)
+    raw_prefix = path_prefix.strip().strip("/")
+    prefix = _context_file_path_or_400(raw_prefix) if raw_prefix else ""
+    written: List[ContextFileItem] = []
+    for upload in files:
+        filename = _context_file_path_or_400(upload.filename or "upload.bin")
+        rel = f"{prefix}/{filename}" if prefix else filename
+        data = await upload.read()
+        written.append(_write_context_file(safe_name, rel, data))
+    return ContextUploadResponse(
+        files=written,
+        total_size_bytes=context_total_size(context_dir(safe_name)),
     )
 
 
@@ -4879,6 +5181,12 @@ INFRA_PATH_SPECS: list[PlatformSecretSpec] = [
         "required": False,
         "default": "../../data/artifacts",
         "description": "Artifacts directory",
+    },
+    {
+        "name": "FLOOM_CONTEXTS_DIR",
+        "required": False,
+        "default": "../../contexts",
+        "description": "Contexts directory",
     },
     {
         "name": "FLOOM_RUN_TIMEOUT",

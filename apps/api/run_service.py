@@ -606,6 +606,7 @@ _PLATFORM_SECRET_NAMES: frozenset[str] = frozenset({
     "FLOOM_DB",
     "FLOOM_WORKERS_DIR",
     "FLOOM_ARTIFACTS_DIR",
+    "FLOOM_CONTEXTS_DIR",
     "FLOOM_RUN_TIMEOUT",
     # NOTE: OPENAI_API_KEY is INTENTIONALLY NOT in this list. Workers
     # legitimately need it to call OpenAI from inside the sandbox (research_brief,

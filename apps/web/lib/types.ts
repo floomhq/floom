@@ -69,6 +69,14 @@ export interface WorkerMcpConnection {
 
 export type WorkerConnectionSpec = string | { mcp: WorkerMcpConnection };
 
+export interface WorkerContextMount {
+  name: string;
+  writeable?: boolean;
+  source?: string;
+}
+
+export type WorkerContextSpec = string | WorkerContextMount;
+
 export interface WorkerConfig {
   id: string;
   name: string;
@@ -78,6 +86,7 @@ export interface WorkerConfig {
   inputs: WorkerInput[];
   secrets: string[];
   connections: WorkerConnectionSpec[];  // Composio app slugs and MCP server specs
+  contexts: WorkerContextSpec[];
   outputs: WorkerOutput[];
   csv_required_columns?: string[];
 }
@@ -234,6 +243,26 @@ export interface SecretItem {
   last_checked_at?: string | null;
   last_check_status?: string | null;
   used_by: string[];
+}
+
+export interface ContextSummary {
+  name: string;
+  file_count: number;
+  total_size_bytes: number;
+  updated_at?: string | null;
+  writeable: boolean;
+}
+
+export interface ContextFileItem {
+  path: string;
+  size: number;
+  mime_type: string;
+  updated_at: string;
+  is_binary: boolean;
+}
+
+export interface ContextDetail extends ContextSummary {
+  files: ContextFileItem[];
 }
 
 export interface ReloadResponse {
