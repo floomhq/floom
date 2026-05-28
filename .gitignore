@@ -14,6 +14,9 @@ data/blobs/
 data/run-bundles/
 contexts/*
 !contexts/.gitkeep
+# worker-author-style is a platform-managed context (seeded at install)
+!contexts/worker-author-style
+!contexts/worker-author-style/**
 
 # Audit reports (may contain leaked secret values in evidence; keep local only)
 docs/launch-readiness/agent-runs/
