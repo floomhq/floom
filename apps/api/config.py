@@ -27,6 +27,13 @@ class CloudSettings:
     supabase_anon_key: str
     supabase_service_role_key: str
     frontend_url: str
+    # Dashboard origin (scheme + host, NO path). Used by /auth/callback's
+    # _frontend_redirect when posting users back to a dashboard route like
+    # "/secrets". Distinct from frontend_url because the engine's
+    # Composio /connections/callback expects WORKERS_FRONTEND_URL to end
+    # with "/app" (the dashboard basePath), while _frontend_redirect must
+    # NOT include "/app" or every redirect would land on "/app/app/...".
+    dashboard_origin: str
     api_base: str
     cli_code_ttl_seconds: int
 
@@ -51,6 +58,11 @@ def get_cloud_settings() -> CloudSettings:
     )
     frontend_url = _env(
         "WORKERS_FRONTEND_URL",
+        "WORKEROS_FRONTEND_URL",
+        default="http://127.0.0.1:3000",
+    )
+    dashboard_origin = _env(
+        "WORKEROS_DASHBOARD_ORIGIN",
         "WORKEROS_FRONTEND_URL",
         default="http://127.0.0.1:3000",
     )
@@ -79,6 +91,7 @@ def get_cloud_settings() -> CloudSettings:
         supabase_anon_key=anon_key,
         supabase_service_role_key=service_role_key,
         frontend_url=frontend_url.rstrip("/"),
+        dashboard_origin=dashboard_origin.rstrip("/"),
         api_base=api_base.rstrip("/"),
         cli_code_ttl_seconds=int(
             _env(

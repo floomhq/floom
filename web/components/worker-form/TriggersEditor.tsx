@@ -247,7 +247,7 @@ function TriggerRowEditor({
             Your webhook URL will be shown after the worker is created. It includes a unique token for authentication.
           </p>
           <div className="rounded border border-line bg-card p-2 font-mono text-xs text-muted-foreground">
-            https://workers-api.floom.dev/webhooks/&lt;worker-id&gt;?token=...
+            {`${process.env.NEXT_PUBLIC_WORKEROS_API_BASE || "https://workeros-api.floom.dev"}/webhooks/<worker-id>?token=...`}
           </div>
         </div>
       )}

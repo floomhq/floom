@@ -2,24 +2,17 @@
 
 export const dynamic = "force-dynamic";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-const API_BASE = process.env.NEXT_PUBLIC_FLOOM_API_BASE || "https://workers-api.floom.dev";
-const SECRET_STORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
-
-function readStoredSecret(): string {
-  if (typeof window === "undefined") return "";
-  for (const key of SECRET_STORAGE_KEYS) {
-    const value = window.localStorage.getItem(key);
-    if (value && value.trim()) return value.trim();
-  }
-  return "";
-}
+// Cloud rewrite: dropped the OSS shared-secret flow (paste FLOOM_SECRET
+// into localStorage, send as x-floom-secret header). In cloud, the user
+// is already signed in via Supabase — middleware would have redirected
+// to /login otherwise — so approving the CLI just means POSTing to a
+// server-side Next route that forwards the session cookie to the
+// backend's /auth/cli-approve.
 
 export default function CliAuthPage() {
   return <CliAuthContent />;
@@ -28,30 +21,27 @@ export default function CliAuthPage() {
 function CliAuthContent() {
   const router = useRouter();
   const [code, setCode] = useState("");
-  const [secret, setSecret] = useState("");
   const [busyAction, setBusyAction] = useState<"approve" | "deny" | null>(null);
   const [statusText, setStatusText] = useState("");
   const [confirmCode, setConfirmCode] = useState("");
 
   useEffect(() => {
     setCode(new URLSearchParams(window.location.search).get("code")?.trim().toUpperCase() || "");
-    setSecret(readStoredSecret());
   }, []);
 
   const normalizedConfirmCode = confirmCode.trim().toUpperCase();
-  const canApprove = Boolean(secret) && Boolean(code) && normalizedConfirmCode === code;
-  const canDeny = Boolean(secret) && Boolean(code);
+  const canApprove = Boolean(code) && normalizedConfirmCode === code;
+  const canDeny = Boolean(code);
 
   async function submit(action: "approve" | "deny") {
-    if (!code || !secret) return;
+    if (!code) return;
     setBusyAction(action);
     setStatusText("");
     try {
-      const response = await fetch(`${API_BASE}/cli-auth/${action}`, {
+      const response = await fetch(`/app/api/cli-auth/${action}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-floom-secret": secret,
         },
         body: JSON.stringify({ user_code: code }),
       });
@@ -61,7 +51,7 @@ function CliAuthContent() {
         return;
       }
       if (action === "approve") {
-        setStatusText("✓ Approved. You can return to your terminal.");
+        setStatusText("Approved. You can return to your terminal.");
         setTimeout(() => {
           router.push("/");
         }, 3000);
@@ -77,17 +67,15 @@ function CliAuthContent() {
 
   return (
     <div className="max-w-xl space-y-6">
-      {/* S29s: dropped Card wrapper. The page IS the action; a card around
-          a 4-line form added nothing. Heading + content sit flat. */}
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Authorize CLI</h1>
-        <p className="text-sm text-muted-foreground mt-1">A CLI is requesting access.</p>
+        <p className="text-sm text-muted-foreground mt-1">A CLI is requesting access to your workspace.</p>
       </div>
       <div className="space-y-4 text-sm">
         <p>
           Code: <code className="bg-muted px-1.5 py-0.5 font-mono">{code || "(missing)"}</code>
         </p>
-        <p>Client: floom-cli</p>
+        <p>Client: workeros-cli</p>
         <div className="space-y-2">
           <label className="text-xs font-medium text-muted-foreground" htmlFor="cli-auth-confirm-code">
             Confirm code
@@ -100,12 +88,10 @@ function CliAuthContent() {
             value={confirmCode}
             onChange={(event) => setConfirmCode(event.target.value.toUpperCase())}
           />
-        </div>
-        {!secret && (
-          <p className="text-muted-foreground">
-            Sign in first. Paste your secret in <Link className="underline" href="/settings">Settings</Link>, then reload this page.
+          <p className="text-xs text-muted-foreground">
+            Re-type the code shown above to confirm this is your CLI session.
           </p>
-        )}
+        </div>
         <div className="flex gap-2">
           <Button
             disabled={!canApprove || busyAction !== null}

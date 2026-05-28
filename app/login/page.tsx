@@ -5,14 +5,16 @@ export const metadata = {
   title: "Sign in — Workeros",
 };
 
-export default function LoginPage({
+export default async function LoginPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string }> | { next?: string };
+  searchParams?: Promise<{ next?: string }>;
 }) {
-  // Next 16: searchParams is async in server components; we accept either.
-  const sp = ("then" in (searchParams ?? {})) ? null : (searchParams as { next?: string } | undefined);
-  const next = sp?.next ?? "/app";
+  // Next 16: searchParams is ALWAYS a Promise in server components. The
+  // previous ternary that checked for "then" always picked the non-Promise
+  // branch and lost the next param. Awaiting handles undefined too.
+  const sp = (await searchParams) ?? {};
+  const next = sp.next ?? "/app";
 
   return (
     <main

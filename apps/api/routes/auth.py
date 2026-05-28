@@ -37,6 +37,14 @@ class CliExchangeRequest(BaseModel):
     user_code: str
 
 
+class CliApproveRequest(BaseModel):
+    user_code: str
+
+
+class CliDenyRequest(BaseModel):
+    user_code: str
+
+
 def _safe_next(value: str | None) -> str:
     candidate = (value or "/").strip()
     if not candidate.startswith("/") or candidate.startswith("//"):
@@ -45,8 +53,13 @@ def _safe_next(value: str | None) -> str:
 
 
 def _frontend_redirect(next_path: str) -> str:
+    # Must use dashboard_origin (host only, no path) NOT frontend_url. The
+    # engine's Composio /connections/callback requires WORKERS_FRONTEND_URL
+    # to include the /app basePath, so frontend_url is "https://<host>/app".
+    # Concatenating next_path (which already starts with /app/...) onto that
+    # produces "/app/app/..." — the original double-basePath bug.
     settings = get_cloud_settings()
-    return f"{settings.frontend_url}{next_path}"
+    return f"{settings.dashboard_origin}{next_path}"
 
 
 def _callback_url(
@@ -386,6 +399,71 @@ def cli_exchange(payload: CliExchangeRequest):
         "expires_in_seconds": settings.cli_code_ttl_seconds,
         "user_id": consumed.get("user_id"),
     }
+
+
+def _session_user(request: Request) -> tuple[str, str]:
+    """Return (user_id, refresh_token) from the cloud session cookie.
+
+    Used by /auth/cli-approve and /auth/cli-deny. The cookie is HttpOnly,
+    Secure, and set by /auth/callback after successful Supabase auth so
+    presence == authenticated user.
+    """
+    session = _decode_session_cookie(request.cookies.get(_SESSION_COOKIE_NAME))
+    if not session:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    user_id = str(session.get("user_id") or "").strip()
+    refresh_token = str(session.get("refresh_token") or "").strip()
+    if not user_id or not refresh_token:
+        raise HTTPException(status_code=401, detail="Session cookie missing fields")
+    return user_id, refresh_token
+
+
+@router.post("/cli-approve")
+def cli_approve(payload: CliApproveRequest, request: Request):
+    """Cloud equivalent of the engine's /cli-auth/approve.
+
+    The engine endpoint requires FLOOM_SECRET (single-user shared secret)
+    and is incompatible with cloud's per-user Supabase auth. This handler
+    looks up the pending device by user_code, verifies the signed-in
+    user owns it, marks it approved, and stores the user's Supabase
+    refresh_token as the device "secret" — that's what the CLI will
+    receive via the /auth/cli-exchange poll.
+    """
+    user_id, refresh_token = _session_user(request)
+    repos = get_repositories()
+    now_ts = time.time()
+    repos.cli_auth.prune_expired(now_ts=now_ts)
+    record = repos.cli_auth.verify_device(payload.user_code)
+    if not record or str(record.get("user_id") or "") != user_id:
+        raise HTTPException(status_code=404, detail="User code not found")
+    if str(record.get("status") or "").lower() != "pending":
+        raise HTTPException(status_code=409, detail="Device code is no longer pending")
+    repos.cli_auth.update(
+        device_code=record["device_code"],
+        status="approved",
+        secret=refresh_token,
+        approved_at=now_ts,
+    )
+    return {"ok": True, "client_name": record.get("client_name") or "workeros-cli"}
+
+
+@router.post("/cli-deny")
+def cli_deny(payload: CliDenyRequest, request: Request):
+    user_id, _refresh = _session_user(request)
+    repos = get_repositories()
+    now_ts = time.time()
+    repos.cli_auth.prune_expired(now_ts=now_ts)
+    record = repos.cli_auth.verify_device(payload.user_code)
+    if not record or str(record.get("user_id") or "") != user_id:
+        raise HTTPException(status_code=404, detail="User code not found")
+    if str(record.get("status") or "").lower() != "pending":
+        raise HTTPException(status_code=409, detail="Device code is no longer pending")
+    repos.cli_auth.update(
+        device_code=record["device_code"],
+        status="denied",
+        secret=None,
+    )
+    return {"ok": True, "client_name": record.get("client_name") or "workeros-cli"}
 
 
 @router.post("/logout")

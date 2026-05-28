@@ -130,7 +130,7 @@ function SecretsContent() {
           /connections/browse so the three tabs feel like one page. */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Secrets</h1>
           <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
             Manage environment secrets for your workers. Values are write-only.
           </p>
@@ -335,9 +335,9 @@ function SecretsContent() {
       {/* S29v: dropped Card around the footer help text. Flat note matches
           /connections footer rhythm. */}
       <p className="text-sm text-muted-foreground">
-        Secret values are write-only; they are never returned by the API. Changes to{" "}
-        <code className="bg-muted px-1 py-0.5 text-xs">.env</code>{" "}
-        take effect immediately without restarting workers.
+        Secrets are scoped to your workspace and encrypted at rest. Values are
+        write-only and never returned by the API. Changes take effect on the next
+        worker run.
       </p>
     </div>
   );
