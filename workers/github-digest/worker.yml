@@ -8,7 +8,7 @@ targets: ["generic"]
 limits:
   max_tool_iterations: 20
   max_output_tokens: 12000
-  max_total_tokens: 50000
+  max_total_tokens: 200000
   timeout_seconds: 300
 exec:
   entry: "SKILL.md"
