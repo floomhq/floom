@@ -2470,9 +2470,17 @@ async def upload_context_files(
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers(
     include_system: bool = False,
+    shape: str = "full",
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[WorkerSummary]:
+    """List workers.
+
+    ?shape=list  — trimmed payload (~15 KB for 18 workers) for the web UI list view.
+                   Drops: long_description, use_cases, example_input, example_output,
+                   how_it_works, timeseries. Keeps all fields needed to render the card.
+    ?shape=full  — full payload (default, backwards-compat for CLI + MCP consumers).
+    """
     db_workers = _list_db_workers(user_id=auth.user_id, repos=repos)
     # In cloud (multi-tenant) mode never fall back to the shared filesystem,
     # which would expose another tenant's bundles. Local single-tenant mode
@@ -2487,7 +2495,12 @@ def list_workers(
         ]
     worker_ids = [w["id"] for w in workers]
     stats_by_id = _get_stats_batch(worker_ids, user_id=auth.user_id, repos=repos)
-    timeseries_by_id = _get_timeseries_batch(worker_ids, user_id=auth.user_id, repos=repos, days=14)
+    # S44 Win 3: skip expensive timeseries fetch when list shape requested.
+    list_shape = shape == "list"
+    timeseries_by_id = (
+        {} if list_shape
+        else _get_timeseries_batch(worker_ids, user_id=auth.user_id, repos=repos, days=14)
+    )
     available_secret_names = repos.secrets.list_names(user_id=auth.user_id)
     result: List[WorkerSummary] = []
     for w in workers:
@@ -2518,11 +2531,12 @@ def list_workers(
                 id=w["id"],
                 name=w["name"],
                 description=w.get("description"),
-                long_description=w.get("long_description"),
-                use_cases=w.get("use_cases"),
-                example_input=w.get("example_input"),
-                example_output=w.get("example_output"),
-                how_it_works=w.get("how_it_works"),
+                # S44 Win 3: omit detail-only fields in list shape.
+                long_description=None if list_shape else w.get("long_description"),
+                use_cases=None if list_shape else w.get("use_cases"),
+                example_input=None if list_shape else w.get("example_input"),
+                example_output=None if list_shape else w.get("example_output"),
+                how_it_works=None if list_shape else w.get("how_it_works"),
                 is_example=w.get("is_example"),
                 tags=w.get("tags") or [],
                 folder=w.get("folder"),
@@ -2533,7 +2547,7 @@ def list_workers(
                 triggers=triggers,
                 triggers_spec=triggers_spec,
                 recent_stats=recent_stats,
-                timeseries=timeseries,
+                timeseries=None if list_shape else timeseries,
             )
         )
     return result
