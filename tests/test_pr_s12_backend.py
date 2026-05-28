@@ -53,14 +53,16 @@ def api_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_SECRET", "s12-secret")
 
-    for name in ["main", "db", "run_service", "worker_registry", "scheduler"]:
-        sys.modules.pop(name, None)
+    for name in list(sys.modules):
+        if name in {"main", "models", "run_service", "worker_registry", "runner_utils", "scheduler"} or name == "db" or name.startswith("db."):
+            sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,
     )
 
     main = importlib.import_module("main")
+    main.get_auth_provider.cache_clear()
     run_service = importlib.import_module("run_service")
     models = importlib.import_module("models")
 
@@ -74,8 +76,8 @@ def api_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
     monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *_a, **_k: _FakeDriver())
 
-    def _start_run_sync(run_id: str, worker_id: str, inputs: dict):
-        run_service.execute_run(run_id, worker_id, inputs)
+    def _start_run_sync(run_id: str, worker_id: str, inputs: dict, **kwargs):
+        run_service.execute_run(run_id, worker_id, inputs, **kwargs)
 
     monkeypatch.setattr(main, "start_run", _start_run_sync)
 
@@ -126,6 +128,7 @@ def test_overview_shape_and_auth_gate(api_ctx):
     assert set(body.keys()) == {"stats", "recent_runs", "scheduled_today", "needs_attention"}
     stats = body["stats"]
     assert "runs_24h" in stats
+    assert stats["success_rate_7d"] is None
     assert isinstance(stats["runs_24h_sparkline"], list)
     assert len(stats["runs_24h_sparkline"]) == 24
 
@@ -170,7 +173,7 @@ def test_runs_filter_and_total_count_header(api_ctx):
     assert all(item["status"] == "completed" for item in payload)
 
 
-def test_run_download_zip_contains_inputs_and_logs(api_ctx):
+def test_run_download_zip_contains_safe_export_files(api_ctx):
     client = api_ctx["client"]
     headers = api_ctx["headers"]
 
@@ -187,8 +190,11 @@ def test_run_download_zip_contains_inputs_and_logs(api_ctx):
     zip_path.write_bytes(response.content)
     with zipfile.ZipFile(zip_path, "r") as zf:
         names = set(zf.namelist())
-    assert "inputs.json" in names
-    assert "logs.txt" in names
+    assert "metadata.json" in names
+    assert "outputs.json" in names
+    assert "README.txt" in names
+    assert "inputs.json" not in names
+    assert "logs.txt" not in names
 
 
 def test_replay_creates_new_run_with_copied_inputs(api_ctx):
