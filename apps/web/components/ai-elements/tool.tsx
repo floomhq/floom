@@ -25,7 +25,7 @@ export function Tool({
   const state = result === undefined ? "called" : isError ? "error" : "done";
   return (
     <Collapsible defaultOpen={state !== "done"}>
-      <div className={cn("rounded-md border border-border bg-card", className)}>
+      <div className={cn("rounded-[var(--radius-button)] border border-border bg-card", className)}>
         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
           <div className="flex min-w-0 items-center gap-2">
             {isError ? (
@@ -109,7 +109,7 @@ function ToolBlock({ label, value }: { label: string; value: unknown }) {
       </div>
       <pre
         className={cn(
-          "overflow-auto rounded-sm bg-muted p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words",
+          "overflow-auto rounded-[var(--radius-button)] bg-muted p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words",
           expanded ? "max-h-none" : "max-h-[280px]",
         )}
       >

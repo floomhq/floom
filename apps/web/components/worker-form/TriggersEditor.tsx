@@ -153,7 +153,7 @@ function TriggerRowSummary({ row, onEdit, onRemove }: TriggerRowSummaryProps) {
   const summary = triggerSummaryLine(row);
 
   return (
-    <div className="flex items-center gap-3 py-2.5 px-3 rounded-md border border-line bg-card hover:bg-muted/30 transition-colors group">
+    <div className="flex items-center gap-3 py-2.5 px-3 rounded-[var(--radius-button)] border border-line bg-card hover:bg-muted/30 transition-colors group">
       <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0 flex items-center gap-2 overflow-hidden">
         <span className="text-xs font-medium text-foreground shrink-0">{meta.label}</span>
@@ -213,7 +213,7 @@ function TriggerRowEditor({
   const activeMeta = TRIGGER_TYPES.find((t) => t.value === row.type) ?? TRIGGER_TYPES[0];
 
   return (
-    <div className="rounded-md border border-line bg-card p-4 space-y-4">
+    <div className="rounded-[var(--radius-button)] border border-line bg-card p-4 space-y-4">
       {/* header: kind label + collapse + remove */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">Edit trigger</span>
@@ -241,7 +241,7 @@ function TriggerRowEditor({
       </div>
 
       <div className="space-y-2">
-        <div className="inline-flex items-center rounded-md border border-line bg-card p-0.5">
+        <div className="inline-flex items-center rounded-[var(--radius-button)] border border-line bg-card p-0.5">
           {TRIGGER_TYPES.map((t) => {
             const Icon = t.icon;
             const active = row.type === t.value;
@@ -324,7 +324,7 @@ function TriggerRowEditor({
       )}
 
       {row.type === "webhook" && !webhookUrl && (
-        <div className="rounded-md border border-line bg-muted/30 p-3 space-y-2">
+        <div className="rounded-[var(--radius-button)] border border-line bg-muted/30 p-3 space-y-2">
           <p className="text-xs text-muted-foreground font-medium">Webhook URL</p>
           <p className="text-xs text-muted-foreground">
             Your webhook URL will be shown after the worker is created. It includes a unique token for authentication.
@@ -415,7 +415,7 @@ export function TriggersEditor({
       <button
         type="button"
         onClick={addRow}
-        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-line text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[var(--radius-button)] border border-line text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
       >
         <Plus className="w-3.5 h-3.5" />
         Add trigger
@@ -423,7 +423,7 @@ export function TriggersEditor({
 
       {/* Trigger list */}
       {rows.length === 0 ? (
-        <div className="rounded-md border border-dashed border-line p-8 text-center space-y-2">
+        <div className="rounded-[var(--radius-button)] border border-dashed border-line p-8 text-center space-y-2">
           <p className="text-sm text-muted-foreground">This worker has no triggers.</p>
           <p className="text-xs text-muted-foreground">Add one to schedule it or connect an event.</p>
         </div>
