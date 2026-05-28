@@ -81,7 +81,7 @@ function CatalogSkeleton() {
           className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]"
         >
           <div className="flex items-center gap-3">
-            <Skeleton className="h-10 w-10 rounded-md" />
+            <Skeleton className="h-10 w-10 rounded-[var(--radius-button)]" />
             <div className="min-w-0 flex-1 space-y-2">
               <Skeleton className="h-4 w-24" />
               <Skeleton className="h-3 w-14" />
@@ -91,7 +91,7 @@ function CatalogSkeleton() {
             <Skeleton className="h-3 w-full" />
             <Skeleton className="mt-2 h-3 w-2/3" />
           </div>
-          <Skeleton className="h-7 w-full rounded-md" />
+          <Skeleton className="h-7 w-full rounded-[var(--radius-button)]" />
         </div>
       ))}
     </>
@@ -333,7 +333,7 @@ export default function ConnectionsBrowsePage() {
                 </p>
                 <Link
                   href={`/secrets?prefill=${encodeURIComponent(search.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--accent)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] hover:opacity-90 transition-opacity"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--accent)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] hover:opacity-90 transition-opacity"
                 >
                   Add {search.trim()} as a secret
                 </Link>

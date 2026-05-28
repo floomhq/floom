@@ -88,7 +88,7 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
     <div className="space-y-2">
       <button
         type="button"
-        className={`relative w-full rounded-md border-2 border-dashed p-4 text-left transition-colors ${
+        className={`relative w-full rounded-[var(--radius-button)] border-2 border-dashed p-4 text-left transition-colors ${
           dragging ? "border-[var(--accent)] bg-muted" : "border-line hover:border-muted-foreground/40"
         }`}
         onClick={() => inputRef.current?.click()}
@@ -112,7 +112,7 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
           onChange={(event) => pickFile(event.target.files?.[0])}
         />
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] bg-muted text-muted-foreground">
             {value ? <FileText className="h-4 w-4" /> : <UploadCloud className="h-4 w-4" />}
           </div>
           <div className="min-w-0 flex-1">

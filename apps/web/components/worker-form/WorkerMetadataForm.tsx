@@ -39,7 +39,7 @@ export function WorkerMetadataForm({
             Worker ID {!isEdit && <span className="text-red-500">*</span>}
           </Label>
           {isEdit ? (
-            <div className="rounded-md border border-border bg-muted/50 px-3 py-2">
+            <div className="rounded-[var(--radius-button)] border border-border bg-muted/50 px-3 py-2">
               <span className="text-sm font-mono text-muted-foreground">{values.workerId}</span>
               <p className="text-xs text-muted-foreground mt-0.5">Worker ID cannot be changed after creation.</p>
             </div>

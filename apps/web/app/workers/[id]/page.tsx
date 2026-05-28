@@ -557,7 +557,7 @@ export default function WorkerDetailPage() {
             <h1 className="text-xl font-semibold tracking-tight">{worker.name}</h1>
             <StatusPill status={worker.status} />
             {worker.is_example && (
-              <span className="inline-flex items-center rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+              <span className="inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
                 Example
               </span>
             )}

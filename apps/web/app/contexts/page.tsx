@@ -241,9 +241,9 @@ export default function ContextsPage() {
       <div className="space-y-6">
         <Skeleton className="h-10 w-56" />
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_320px_1fr]">
-          <Skeleton className="h-[520px] rounded-md" />
-          <Skeleton className="h-[520px] rounded-md" />
-          <Skeleton className="h-[520px] rounded-md" />
+          <Skeleton className="h-[520px] rounded-[var(--radius-button)]" />
+          <Skeleton className="h-[520px] rounded-[var(--radius-button)]" />
+          <Skeleton className="h-[520px] rounded-[var(--radius-button)]" />
         </div>
       </div>
     );
@@ -469,7 +469,7 @@ export default function ContextsPage() {
                 )}
                 <a
                   href={api.contexts.fileUrl(selectedName, selectedFile.path)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line text-muted-foreground hover:bg-muted hover:text-foreground"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-button)] border border-line text-muted-foreground hover:bg-muted hover:text-foreground"
                   title="Download file"
                 >
                   <Download className="size-4" />
@@ -482,7 +482,7 @@ export default function ContextsPage() {
             {!selectedFile ? (
               <p className="text-sm text-muted-foreground">No file selected.</p>
             ) : previewLoading ? (
-              <Skeleton className="h-64 w-full rounded-md" />
+              <Skeleton className="h-64 w-full rounded-[var(--radius-button)]" />
             ) : editing ? (
               <Textarea
                 value={previewText}
@@ -671,7 +671,7 @@ function DownloadLink({ fileUrl }: { fileUrl: string }) {
   return (
     <a
       href={fileUrl}
-      className="inline-flex h-9 items-center gap-2 rounded-md border border-line px-3 text-sm font-medium hover:bg-muted"
+      className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-button)] border border-line px-3 text-sm font-medium hover:bg-muted"
     >
       <Download className="size-4" />
       Download
