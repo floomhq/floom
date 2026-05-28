@@ -18,6 +18,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -147,27 +148,29 @@ export function WorkspaceSwitcher() {
           className="w-56"
           sideOffset={6}
         >
-          <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-[var(--ink-mute)]">
-            Workspaces
-          </DropdownMenuLabel>
-          {state.workspaces.map((w) => {
-            const isActive = w.id === state.activeId;
-            const isLoading = switchingTo === w.id;
-            return (
-              <DropdownMenuItem
-                key={w.id}
-                onSelect={() => handleSwitch(w.id)}
-                className="flex items-center gap-2"
-                disabled={isLoading}
-              >
-                <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
-                  {shortInitial(w.name)}
-                </div>
-                <span className="flex-1 truncate">{w.name}</span>
-                {isActive ? <Check className="size-4 opacity-80" /> : null}
-              </DropdownMenuItem>
-            );
-          })}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-[var(--ink-mute)]">
+              Workspaces
+            </DropdownMenuLabel>
+            {state.workspaces.map((w) => {
+              const isActive = w.id === state.activeId;
+              const isLoading = switchingTo === w.id;
+              return (
+                <DropdownMenuItem
+                  key={w.id}
+                  onSelect={() => handleSwitch(w.id)}
+                  className="flex items-center gap-2"
+                  disabled={isLoading}
+                >
+                  <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
+                    {shortInitial(w.name)}
+                  </div>
+                  <span className="flex-1 truncate">{w.name}</span>
+                  {isActive ? <Check className="size-4 opacity-80" /> : null}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={() => {
