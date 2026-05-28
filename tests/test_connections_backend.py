@@ -360,6 +360,52 @@ class TestMCPConnections:
         duplicate = client.post("/connections/mcp", headers=AUTH_HEADERS, json=payload)
         assert duplicate.status_code == 409
 
+    def test_migration_repairs_version_28_without_mcp_columns(self, monkeypatch, tmp_path):
+        api_dir = Path(__file__).resolve().parents[1] / "apps" / "api"
+        db_path = tmp_path / "floom.db"
+        monkeypatch.setenv("FLOOM_DB", str(db_path))
+        sys.path.insert(0, str(api_dir))
+        for name in list(sys.modules):
+            if name == "db" or name.startswith("db."):
+                sys.modules.pop(name, None)
+
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            """
+            CREATE TABLE schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
+            INSERT INTO schema_version (version, applied_at)
+                VALUES (28, '2026-05-28T00:00:00+00:00');
+            CREATE TABLE composio_connections (
+                id TEXT PRIMARY KEY,
+                app_name TEXT NOT NULL,
+                composio_connection_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'initiated',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_checked_at TEXT,
+                last_check_status TEXT,
+                last_check_error TEXT,
+                scopes_json TEXT,
+                account_label TEXT,
+                user_id TEXT NOT NULL DEFAULT 'federico'
+            );
+            """
+        )
+        conn.close()
+
+        legacy_db = importlib.import_module("db._legacy_sqlite")
+        legacy_db.init_db()
+
+        conn = sqlite3.connect(db_path)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(composio_connections)").fetchall()}
+        assert {"kind", "mcp_label", "mcp_url", "mcp_auth_secret", "mcp_allowed_tools_json"} <= columns
+        assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 29
+
 
 # ---------------------------------------------------------------------------
 # #11 - POST /connections/{id}/test
