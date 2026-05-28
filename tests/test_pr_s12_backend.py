@@ -1,6 +1,5 @@
 import importlib
 import json
-import os
 import sys
 import types
 import uuid
@@ -91,8 +90,8 @@ def api_ctx(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     }
 
 
-def _create_worker(client: TestClient, headers: dict) -> str:
-    worker_name = f"s12-worker-{uuid.uuid4().hex[:8]}"
+def _create_worker(client: TestClient, headers: dict, worker_name: str | None = None) -> str:
+    worker_name = worker_name or f"s12-worker-{uuid.uuid4().hex[:8]}"
     response = client.post(
         "/workers",
         headers=headers,
@@ -125,12 +124,23 @@ def test_overview_shape_and_auth_gate(api_ctx):
     ok = client.get("/system/overview", headers=headers)
     assert ok.status_code == 200, ok.text
     body = ok.json()
-    assert set(body.keys()) == {"stats", "recent_runs", "scheduled_today", "needs_attention"}
+    assert set(body.keys()) == {"stats", "outcomes", "recent_runs", "scheduled_today", "needs_attention"}
     stats = body["stats"]
     assert "runs_24h" in stats
     assert stats["success_rate_7d"] is None
     assert isinstance(stats["runs_24h_sparkline"], list)
     assert len(stats["runs_24h_sparkline"]) == 24
+
+    worker_id = _create_worker(client, headers, "lead-research-bot")
+    _start_run(client, headers, worker_id, {"text": "hello"})
+    refreshed = client.get("/system/overview", headers=headers)
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["outcomes"][0] == {
+        "worker_id": worker_id,
+        "worker_name": "lead-research-bot",
+        "label": "Leads researched",
+        "count": 1,
+    }
 
 
 def test_runtime_snapshot_created_and_persisted(api_ctx):
