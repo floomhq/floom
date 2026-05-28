@@ -1,11 +1,13 @@
 import { clearCredentials } from "../lib/credentials.js";
+import { log } from "../lib/output.js";
 
 export async function runLogoutCommand(): Promise<number> {
   const removed = await clearCredentials();
   if (removed) {
-    console.log("Logged out.");
+    log.ok("Logged out.");
   } else {
-    console.log("No saved credentials were found.");
+    log.warn("No saved credentials were found.");
+    log.info("Run: floom login to authenticate");
   }
   return 0;
 }
