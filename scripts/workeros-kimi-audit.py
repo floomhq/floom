@@ -42,6 +42,9 @@ LEAK_STRINGS = (
     "1-token",
     "May 2026 audit",
     "A May 2026 audit",
+    "Authentication accepts either:",
+    "?token=<webhook_token>",
+    "X-Floom-Signature header",
 )
 PLATFORM_SECRET_PROBE_NAMES = (
     "OPENAI_API_KEY",
@@ -236,7 +239,19 @@ def route_risk_tags(method: str, path: str) -> list[str]:
     return tags
 
 
-def make_worker_yml(name: str) -> str:
+def make_worker_yml(name: str, *, trigger_type: str = "manual") -> str:
+    if trigger_type == "webhook":
+        trigger_block = """
+trigger:
+  type: webhook
+  webhook:
+    secret: true
+""".strip()
+    else:
+        trigger_block = f"""
+trigger:
+  type: {trigger_type}
+""".strip()
     return f'''schema_version: "0.3"
 name: {name}
 title: "Audit Probe {name}"
@@ -250,8 +265,7 @@ exec:
   command: "python run.py"
   inputs: []
   outputs: []
-trigger:
-  type: manual
+{trigger_block}
 '''
 
 
@@ -652,6 +666,160 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
         429 in run_quota_statuses,
         f"creates={[item['status'] for item in run_quota_creates]} run_statuses={run_quota_statuses} cleanups={[item['status'] for item in run_quota_cleanups]}",
         {"creates": run_quota_creates, "run_statuses": run_quota_statuses, "cleanups": run_quota_cleanups},
+    )
+
+    runs_clear = request(api, "POST", "/runs/clear", secret=secret)
+    record(
+        results,
+        "runs-clear-requires-confirm",
+        runs_clear["status"] == 400 and "yes-wipe-all-runs" in runs_clear["body"],
+        f"status={runs_clear['status']}",
+        runs_clear,
+    )
+
+    replay_name = f"audit-replay-{uuid.uuid4().hex[:8]}"
+    replay_create = request(
+        api,
+        "POST",
+        "/workers",
+        secret=secret,
+        json={
+            "worker_yml": make_worker_yml(replay_name),
+            "run_py": "def run(inputs, context):\n    return {'status': 'success', 'outputs': {'echo': inputs}, 'artifacts': []}\n",
+        },
+    )
+    replay_seed: dict[str, Any] = {}
+    replay_statuses: list[Any] = []
+    bundle_traversal: dict[str, Any] = {}
+    if replay_create["status"] == 200:
+        replay_seed = request(
+            api,
+            "POST",
+            f"/workers/{replay_name}/runs",
+            secret=secret,
+            json={"inputs": {"topic": "audit"}, "trigger_source": "audit"},
+            timeout=10,
+        )
+        if replay_seed["status"] == 200:
+            try:
+                replay_seed_body = json.loads(replay_seed["body"])
+                replay_run_id = str(replay_seed_body.get("run_id") or "")
+            except Exception:
+                replay_run_id = ""
+            if replay_run_id:
+                bundle_traversal = request(
+                    api,
+                    "GET",
+                    f"/runs/{replay_run_id}/bundle/../../../../etc/passwd",
+                    secret=secret,
+                )
+                for _ in range(10):
+                    replay_resp = request(
+                        api,
+                        "POST",
+                        f"/workers/{replay_name}/runs/{replay_run_id}/replay",
+                        secret=secret,
+                        timeout=10,
+                    )
+                    replay_statuses.append(replay_resp["status"])
+                    if replay_resp["status"] == 429:
+                        break
+    replay_cleanup = request(api, "DELETE", f"/workers/{replay_name}", secret=secret)
+    record(
+        results,
+        "run-replay-shares-global-rate-limit",
+        replay_create["status"] == 200 and replay_seed.get("status") == 200 and 429 in replay_statuses,
+        f"create={replay_create['status']} seed={replay_seed.get('status')} replay_statuses={replay_statuses} cleanup={replay_cleanup['status']}",
+        {"create": replay_create, "seed": replay_seed, "replay_statuses": replay_statuses, "cleanup": replay_cleanup},
+    )
+    record(
+        results,
+        "run-bundle-path-traversal-rejected",
+        bundle_traversal.get("status") == 400,
+        f"status={bundle_traversal.get('status')}",
+        bundle_traversal,
+    )
+
+    stock_rotate = request(api, "POST", "/workers/research_brief/webhook-secret/rotate", secret=secret)
+    record(
+        results,
+        "stock-worker-webhook-secret-rotate-blocked",
+        stock_rotate["status"] == 403,
+        f"status={stock_rotate['status']}",
+        stock_rotate,
+    )
+
+    webhook_name = f"audit-webhook-{uuid.uuid4().hex[:8]}"
+    webhook_create = request(
+        api,
+        "POST",
+        "/workers",
+        secret=secret,
+        json={
+            "worker_yml": make_worker_yml(webhook_name, trigger_type="webhook"),
+            "run_py": "def run(inputs, context):\n    return {'status': 'success', 'outputs': {'ok': True}, 'artifacts': []}\n",
+        },
+    )
+    webhook_rotate: dict[str, Any] = {}
+    webhook_missing_auth: dict[str, Any] = {}
+    webhook_bad_token: dict[str, Any] = {}
+    if webhook_create["status"] == 200:
+        webhook_rotate = request(
+            api,
+            "POST",
+            f"/workers/{webhook_name}/webhook-secret/rotate",
+            secret=secret,
+        )
+        webhook_missing_auth = request(
+            api,
+            "POST",
+            f"/webhooks/{webhook_name}",
+            json={"probe": "missing-auth"},
+        )
+        webhook_bad_token = request(
+            api,
+            "POST",
+            f"/webhooks/{webhook_name}?token=wrong-token",
+            json={"probe": "bad-token"},
+        )
+    webhook_cleanup = request(api, "DELETE", f"/workers/{webhook_name}", secret=secret)
+    record(
+        results,
+        "webhook-trigger-auth-required",
+        webhook_create["status"] == 200
+        and webhook_rotate.get("status") == 200
+        and webhook_missing_auth.get("status") == 401
+        and webhook_bad_token.get("status") == 401,
+        f"create={webhook_create['status']} rotate={webhook_rotate.get('status')} missing={webhook_missing_auth.get('status')} bad_token={webhook_bad_token.get('status')} cleanup={webhook_cleanup['status']}",
+        {
+            "create": webhook_create,
+            "rotate": webhook_rotate,
+            "missing_auth": webhook_missing_auth,
+            "bad_token": webhook_bad_token,
+            "cleanup": webhook_cleanup,
+        },
+    )
+
+    composio_invalid = request(
+        api,
+        "POST",
+        "/composio-events",
+        headers={"Content-Type": "application/json"},
+        data=b'{"type":"audit"}',
+    )
+    composio_alias_invalid = request(
+        api,
+        "POST",
+        "/webhooks/composio-events",
+        headers={"Content-Type": "application/json"},
+        data=b'{"type":"audit"}',
+    )
+    record(
+        results,
+        "composio-events-invalid-signature-rejected",
+        composio_invalid["status"] == 401 and composio_alias_invalid["status"] == 401,
+        f"primary={composio_invalid['status']} alias={composio_alias_invalid['status']}",
+        {"primary": composio_invalid, "alias": composio_alias_invalid},
     )
 
     symlink_name = f"audit-symlink-{uuid.uuid4().hex[:8]}"
