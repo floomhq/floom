@@ -216,8 +216,6 @@ export default function OverviewPage() {
                   <Link
                     key={r.run_id}
                     href={`/runs/${r.run_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="flex items-center justify-between gap-3 py-3 hover:bg-muted rounded-md px-2 -mx-2 transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0">
@@ -256,8 +254,6 @@ export default function OverviewPage() {
                   <li key={`${item.worker_id}-${item.next_fire_at}`}>
                     <Link
                       href={`/workers/${item.worker_id}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
                       className="flex items-start justify-between gap-3 hover:bg-muted rounded-md px-2 -mx-2 py-1.5 transition-colors"
                     >
                       <div className="min-w-0">

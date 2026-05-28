@@ -1119,8 +1119,6 @@ function RunsSection({ worker }: { worker: WorkerDetail }) {
           <Link
             key={r.id}
             href={`/runs/${r.id}`}
-            target="_blank"
-            rel="noopener noreferrer"
             className="flex items-center justify-between p-2 hover:bg-muted cursor-pointer transition-colors"
           >
             <div className="min-w-0">

@@ -43,7 +43,7 @@ export function RunDetailSplitPane({
   const isActive = run.status === "running" || run.status === "queued";
 
   return (
-    <div className={cn("space-y-6", !inline && "min-h-[calc(100vh-7rem)]", inline && "min-h-[560px]")}>
+    <div className={cn("space-y-6", inline && "min-h-[280px]")}>
       {/* S29h (F8.1): match /workers/<id> chrome exactly. Drop the
           sticky/backdrop/border-b header pattern (no other page has it),
           drop the border-x box around the split pane. Header is now flat
@@ -124,7 +124,7 @@ export function RunDetailSplitPane({
 
       <RunMetricsStrip run={run} parts={transcriptParts} />
 
-      <div className="flex min-h-[520px] gap-0 border border-line bg-card overflow-hidden">
+      <div className="flex min-h-[280px] gap-0 border border-line bg-card overflow-hidden">
         <aside className="w-[320px] min-w-[240px] max-w-[460px] resize-x overflow-auto border-r border-border bg-muted/25">
           {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
               The timeline IS the panel; the label was dead weight (ChatGPT

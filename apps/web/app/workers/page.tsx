@@ -532,7 +532,7 @@ function WorkerCard({
       className="group h-full hover:border-border hover:shadow-sm transition-all overflow-hidden"
       title={hoverDescription || undefined}
     >
-      <Link href={`/workers/${worker.id}`} className="block h-full" target="_blank" rel="noopener noreferrer">
+      <Link href={`/workers/${worker.id}`} className="block h-full">
       <CardContent className={`h-full flex flex-col p-5 ${compact ? "gap-2" : "gap-2.5"}`}>
         <div className="flex items-start justify-between gap-3">
           {/* S29n: worker avatar makes the card feel like an employee, not a script. */}
