@@ -19,10 +19,10 @@ function FloomMark({ size = 28 }: { size?: number }) {
       aria-label="Floom"
       style={{ borderRadius: "22%" }}
     >
-      <rect width="100" height="100" rx="22" fill="#1a1a1a" />
+      <rect width="100" height="100" rx="22" fill="var(--primary)" />
       <path
         d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z"
-        fill="#FAFAF7"
+        fill="var(--bg-app)"
       />
     </svg>
   );
@@ -33,7 +33,7 @@ function FloomMark({ size = 28 }: { size?: number }) {
 // are the same mental model (credentials a worker can read) so they share
 // a surface.
 const nav = [
-  { href: "/", label: "Overview", icon: Activity },
+  { href: "/overview", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box },
   { href: "/contexts", label: "Contexts", icon: Folder },
   { href: "/runs", label: "Runs", icon: Clock },
@@ -45,17 +45,20 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
   return (
     <nav className="flex-1 px-3 space-y-0.5">
       {nav.map((item) => {
-        const active = pathname === item.href || pathname.startsWith(item.href + "/");
+        const active =
+          item.href === "/overview"
+            ? pathname === "/" || pathname === "/overview"
+            : pathname === item.href || pathname.startsWith(item.href + "/");
         return (
           <Link
             key={item.href}
             href={item.href}
             onClick={onNavigate}
             className={cn(
-              "flex h-9 items-center gap-2.5 rounded-md border px-2.5 text-sm font-medium transition-[background,border-color,color] duration-150 ease-[var(--ease)]",
+              "flex h-9 items-center gap-2.5 rounded-xl px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
               active
-                ? "border-[color-mix(in_srgb,var(--accent)_18%,transparent)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)] text-ink shadow-none [&_svg]:text-[var(--accent)] [&_svg]:opacity-100"
-                : "border-transparent text-[var(--ink-soft)] hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)] hover:text-ink [&_svg]:opacity-65"
+                ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
+                : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
             )}
           >
             <item.icon className="w-4 h-4" />
@@ -77,7 +80,7 @@ function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void }) {
       <Link
         href="/workers/new"
         onClick={onNavigate}
-        className="flex h-9 items-center justify-center gap-1.5 rounded-md bg-[var(--accent)] px-2.5 text-sm font-medium text-[var(--solid-fg)] shadow-[var(--shadow-btn)] hover:bg-[var(--solid-2)] transition-colors duration-150"
+        className="flex h-9 items-center justify-center gap-1.5 rounded-xl bg-[var(--primary)] px-2.5 text-sm font-medium text-[var(--primary-text)] shadow-[var(--shadow-btn)] hover:bg-[var(--solid-2)] transition-colors duration-150"
       >
         <Plus className="w-4 h-4" />
         New worker
@@ -85,14 +88,14 @@ function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void }) {
       <button
         type="button"
         onClick={onSearch}
-        className="flex h-9 w-full items-center gap-2 rounded-md border border-line bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)] hover:text-ink transition-colors duration-150"
+        className="flex h-8 w-full items-center gap-2 rounded-lg border border-[var(--border-soft)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--active-nav-bg)] hover:text-ink transition-colors duration-150"
         aria-label="Open command palette"
       >
         <Search className="w-4 h-4 opacity-70" />
         <span>Search...</span>
         <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] tracking-widest text-[var(--ink-faint)]">
-          <kbd className="rounded border border-line bg-[var(--bg-2)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
-          <kbd className="rounded border border-line bg-[var(--bg-2)] px-1 py-0.5 font-mono">K</kbd>
+          <kbd className="rounded border border-[var(--border-soft)] bg-[var(--bg-2)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
+          <kbd className="rounded border border-[var(--border-soft)] bg-[var(--bg-2)] px-1 py-0.5 font-mono">K</kbd>
         </span>
       </button>
     </div>
@@ -112,7 +115,7 @@ export function Sidebar() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-line bg-[var(--sidebar-glass)] px-4 shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-app)] px-4 md:hidden">
         <Link href="/" className="flex items-center gap-2">
           <FloomMark size={28} />
           <span className="font-semibold text-[15px] tracking-tight">Floom</span>
@@ -138,9 +141,9 @@ export function Sidebar() {
         </div>
       </header>
 
-      <aside className="sticky top-0 z-20 hidden h-screen w-60 flex-col border-r border-line bg-[var(--sidebar-glass)] shadow-[var(--sidebar-glass-shadow)] backdrop-blur-[14px] backdrop-saturate-[140%] md:flex">
+      <aside className="sticky top-0 z-20 hidden h-screen w-60 flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] md:flex">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
-        <div className="px-5 py-5">
+        <div className="px-5 pt-6 pb-8">
           <Link href="/" className="flex items-center gap-2">
             <FloomMark size={28} />
             <span className="font-semibold text-[15px] tracking-tight">Floom</span>
@@ -158,9 +161,9 @@ export function Sidebar() {
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-line bg-[var(--sidebar-glass)] shadow-pop backdrop-blur-[14px] backdrop-saturate-[140%]">
+          <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] shadow-pop">
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
-            <div className="flex items-center justify-between border-b border-line px-5 py-4">
+            <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-5 py-4">
               <Link href="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
                 <FloomMark size={28} />
                 <span className="font-semibold text-[15px] tracking-tight">Floom</span>
@@ -192,9 +195,9 @@ export function Sidebar() {
 // signed-in Supabase user's email + avatar. Theme toggle stays on the right.
 function UserProfileFooter() {
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-line px-3 py-3">
+    <div className="flex items-center justify-between gap-3 border-t border-[var(--border-soft)] px-3 py-3">
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-line grid place-items-center text-[11px] font-medium">
+        <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
           LU
         </div>
         <div className="min-w-0 leading-tight">

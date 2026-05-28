@@ -1425,6 +1425,7 @@ def _persist_discovered_workers(
         triggers_json_str = json.dumps(triggers_list)
         # Primary trigger type is the first trigger's type
         primary_trigger_type = triggers_list[0].get("type") if triggers_list else "manual"
+        enabled_value = 0 if manifest.get("paused") is True or manifest.get("enabled") is False else 1
 
         conn.execute(
             """
@@ -1451,13 +1452,14 @@ def _persist_discovered_workers(
                  next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
                  notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id,
                  composio_trigger_id, composio_event, triggers_json)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 skill_version_id=excluded.skill_version_id,
                 name=excluded.name,
                 trigger_type=excluded.trigger_type,
                 cron_expr=excluded.cron_expr,
                 cron_timezone=excluded.cron_timezone,
+                enabled=excluded.enabled,
                 owner_id=excluded.owner_id,
                 composio_trigger_id=excluded.composio_trigger_id,
                 composio_event=excluded.composio_event,
@@ -1472,6 +1474,7 @@ def _persist_discovered_workers(
                 trigger.get("timezone"),
                 json.dumps({}),
                 json.dumps({}),
+                enabled_value,
                 now,
                 user_id,
                 composio_trigger_id,
@@ -6451,10 +6454,28 @@ class PlatformConfig(BaseModel):
 class OverviewStats(BaseModel):
     runs_24h: int
     runs_24h_sparkline: List[int]
+    runs_7d_sparkline: List["OverviewSparklineBucket"]
     success_rate_7d: Optional[float] = None
     active_workers_count: int
+    paused_workers_count: int
     connections_healthy: int
     connections_total: int
+    work_shipped_7d: int
+    work_shipped_previous_7d: int
+    runs_today: int
+    completed_today: int
+    failed_today: int
+    running_now: int
+    queued_now: int
+    scheduled_24h_count: int
+    next_scheduled_at: Optional[str] = None
+
+
+class OverviewSparklineBucket(BaseModel):
+    label: str
+    started_at: str
+    total: int
+    failed: int
 
 
 class OverviewRunItem(BaseModel):
@@ -6479,18 +6500,28 @@ class OverviewScheduledItem(BaseModel):
     worker_name: str
     next_fire_at: str
     trigger_label: str
+    trigger_source: str
+    paused: bool = False
 
 
 class OverviewAttentionItem(BaseModel):
     type: str
+    kind: Optional[str] = None
     worker_id: Optional[str] = None
+    worker_name: Optional[str] = None
     connection_id: Optional[str] = None
     # PR S19 (I-7): name the connection in the UI instead of an opaque
     # "Connection expired" with no provider context. Populated for
     # connection_expired / connection_expiring rows; None otherwise.
     provider_slug: Optional[str] = None
     provider_display_name: Optional[str] = None
+    provider_names: List[str] = Field(default_factory=list)
     message: str
+    cause: Optional[str] = None
+    error_code: Optional[str] = None
+    recent_failure_count: Optional[int] = None
+    last_failed_at: Optional[str] = None
+    suggested_actions: List[str] = Field(default_factory=list)
     action_url: str
 
 
@@ -6503,27 +6534,62 @@ class OverviewResponse(BaseModel):
 
 
 def _overview_outcome_label(worker_name: str) -> str:
-    normalized = re.sub(r"[_-]+", " ", (worker_name or "")).lower()
-    if "lead" in normalized:
-        return "Leads researched"
-    if "invoice" in normalized:
-        return "Invoices processed"
-    if "follow" in normalized or "gmail" in normalized or "email" in normalized:
-        return "Follow-ups drafted"
-    if "github" in normalized or "pull request" in normalized or " pr " in f" {normalized} ":
-        return "PRs summarized"
-    if "blog" in normalized or "article" in normalized or "post" in normalized:
-        return "Articles drafted"
-    if "draft" in normalized or "paper" in normalized or "research" in normalized:
-        return "Drafts produced"
-    if "csv" in normalized or "row" in normalized or "enrich" in normalized:
-        return "Rows enriched"
-    if "meeting" in normalized or "crm" in normalized or "hubspot" in normalized:
-        return "Meetings processed"
-    if "update" in normalized or "digest" in normalized:
-        return "Updates drafted"
-    cleaned = (worker_name or "Worker").strip()
-    return f"{cleaned} completed"
+    return "Work shipped"
+
+
+def _overview_human_error_code(error_code: Optional[str]) -> str:
+    if not error_code:
+        return "Run failed"
+    return re.sub(r"[_-]+", " ", error_code).strip().capitalize()
+
+
+def _overview_failure_cause(row: Dict[str, Any]) -> str:
+    error_code = _overview_human_error_code(row.get("error_code"))
+    error_message = str(row.get("error") or "").strip()
+    if error_message:
+        first_line = error_message.splitlines()[0].strip()
+        if len(first_line) > 140:
+            first_line = first_line[:137].rstrip() + "..."
+        return f"{error_code}: {first_line}"
+    return error_code
+
+
+def _overview_schedule_triggers(worker: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw_triggers = worker.get("triggers_json")
+    triggers: List[Dict[str, Any]] = []
+    if raw_triggers:
+        try:
+            parsed = json.loads(raw_triggers)
+            if isinstance(parsed, list):
+                triggers.extend(item for item in parsed if isinstance(item, dict))
+        except Exception:
+            pass
+
+    if not triggers:
+        config: Dict[str, Any] = worker.get("config") or {}
+        trigger = config.get("trigger") or {}
+        trigger_type = worker.get("trigger_type") or trigger.get("type") or "manual"
+        trigger_with_type = dict(trigger)
+        trigger_with_type.setdefault("type", trigger_type)
+        triggers = [trigger_with_type]
+
+    return [
+        trigger
+        for trigger in triggers
+        if str(trigger.get("type") or "").lower() in {"schedule", "scheduled"}
+    ]
+
+
+def _overview_worker_paused(worker: Dict[str, Any], trigger: Optional[Dict[str, Any]] = None) -> bool:
+    manifest = worker.get("manifest") or {}
+    trigger_data = trigger or {}
+    return bool(
+        not worker.get("enabled")
+        or manifest.get("paused") is True
+        or manifest.get("enabled") is False
+        or trigger_data.get("paused") is True
+        or trigger_data.get("enabled") is False
+    )
 
 
 @app.get("/system/overview", response_model=OverviewResponse)
@@ -6534,8 +6600,9 @@ def system_overview(
     now = datetime.now(timezone.utc)
     window_24h = now - timedelta(hours=24)
     window_7d = now - timedelta(days=7)
+    window_14d = now - timedelta(days=14)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    tomorrow_start = today_start + timedelta(days=1)
+    next_24h = now + timedelta(hours=24)
 
     runs_24h_rows, _ = repos.runs.list(
         user_id=auth.user_id,
@@ -6556,15 +6623,77 @@ def system_overview(
         sparkline[bucket] += 1
     runs_24h = int(sum(sparkline))
 
-    _runs_7d_rows, _runs_total_7d = repos.runs.list(
+    runs_14d_rows, _runs_total_14d = repos.runs.list(
         user_id=auth.user_id,
-        since=window_7d.isoformat(),
+        since=window_14d.isoformat(),
         limit=100000,
         offset=0,
     )
+    _runs_7d_rows: List[Dict[str, Any]] = []
+    previous_7d_rows: List[Dict[str, Any]] = []
+    today_rows: List[Dict[str, Any]] = []
+    for row in runs_14d_rows:
+        created_at = _parse_iso8601(row.get("created_at"))
+        if created_at is None:
+            continue
+        if created_at >= window_7d:
+            _runs_7d_rows.append(row)
+            if created_at >= today_start:
+                today_rows.append(row)
+        elif created_at >= window_14d:
+            previous_7d_rows.append(row)
+
+    def _is_completed(row: Dict[str, Any]) -> bool:
+        return str(row.get("status") or "").lower() in {"completed", "approved", "success", "succeeded"}
+
+    def _is_failed(row: Dict[str, Any]) -> bool:
+        return str(row.get("status") or "").lower() in {"failed", "error", "cancelled", "rejected", "timeout"}
+
+    completed_7d = sum(1 for row in _runs_7d_rows if _is_completed(row))
+    completed_previous_7d = sum(1 for row in previous_7d_rows if _is_completed(row))
+    completed_today = sum(1 for row in today_rows if _is_completed(row))
+    failed_today = sum(1 for row in today_rows if _is_failed(row))
+
+    current_rows, _ = repos.runs.list(
+        user_id=auth.user_id,
+        statuses=[RunStatus.QUEUED.value, RunStatus.RUNNING.value],
+        limit=100000,
+        offset=0,
+    )
+    queued_now = sum(1 for row in current_rows if str(row.get("status") or "").lower() == RunStatus.QUEUED.value)
+    running_now = sum(1 for row in current_rows if str(row.get("status") or "").lower() == RunStatus.RUNNING.value)
+
+    runs_7d_sparkline: List[OverviewSparklineBucket] = []
+    bucket_count = 28
+    bucket_seconds = int((now - window_7d).total_seconds() / bucket_count)
+    bucket_totals = [0] * bucket_count
+    bucket_failures = [0] * bucket_count
+    for row in _runs_7d_rows:
+        created_at = _parse_iso8601(row.get("created_at"))
+        if created_at is None or created_at < window_7d or created_at > now:
+            continue
+        bucket = int((created_at - window_7d).total_seconds() // bucket_seconds)
+        if bucket < 0:
+            continue
+        if bucket >= bucket_count:
+            bucket = bucket_count - 1
+        bucket_totals[bucket] += 1
+        if _is_failed(row):
+            bucket_failures[bucket] += 1
+    for index in range(bucket_count):
+        bucket_start = window_7d + timedelta(seconds=bucket_seconds * index)
+        runs_7d_sparkline.append(
+            OverviewSparklineBucket(
+                label=bucket_start.strftime("%a %H:%M"),
+                started_at=bucket_start.isoformat(),
+                total=bucket_totals[index],
+                failed=bucket_failures[index],
+            )
+        )
 
     workers = repos.workers.list(user_id=auth.user_id)
-    active_workers_count = sum(1 for row in workers if row.get("enabled"))
+    active_workers_count = sum(1 for row in workers if row.get("enabled") and not _overview_worker_paused(row))
+    paused_workers_count = max(0, len(workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
 
     outcome_counts: Dict[str, int] = collections.Counter(
@@ -6596,7 +6725,7 @@ def system_overview(
         and row.get("last_check_status") in (None, "valid")
     )
 
-    recent_rows, _ = repos.runs.list(user_id=auth.user_id, limit=5, offset=0)
+    recent_rows, _ = repos.runs.list(user_id=auth.user_id, limit=10, offset=0)
     recent_runs = [
         OverviewRunItem(
             run_id=row["id"],
@@ -6611,42 +6740,32 @@ def system_overview(
     ]
 
     scheduled_today: List[OverviewScheduledItem] = []
-    for row in sorted(
-        (
-            worker
-            for worker in workers
-            if worker.get("enabled")
-            and worker.get("next_run_at")
-            and today_start.isoformat() <= worker["next_run_at"] < tomorrow_start.isoformat()
-        ),
-        key=lambda worker: worker["next_run_at"],
-    )[:5]:
-        trigger = {"type": row["trigger_type"] or "schedule", "cron": row.get("cron_expr")}
-        if row.get("triggers_json"):
-            try:
-                parsed_triggers = json.loads(row["triggers_json"])
-                if isinstance(parsed_triggers, list):
-                    schedule_trigger = next(
-                        (
-                            item
-                            for item in parsed_triggers
-                            if isinstance(item, dict)
-                            and str(item.get("type", "")).lower() in {"schedule", "scheduled"}
-                        ),
-                        None,
-                    )
-                    if schedule_trigger is not None:
-                        trigger = schedule_trigger
-            except Exception:
-                pass
-        scheduled_today.append(
-            OverviewScheduledItem(
-                worker_id=row["id"],
-                worker_name=row["name"],
-                next_fire_at=row["next_run_at"],
-                trigger_label=_trigger_label(trigger),
+    try:
+        from scheduler import compute_next_run_at
+    except Exception:
+        compute_next_run_at = None
+
+    for worker in workers:
+        for trigger in _overview_schedule_triggers(worker):
+            cron_expr = trigger.get("cron") or worker.get("cron_expr")
+            next_fire = _parse_iso8601(worker.get("next_run_at"))
+            if next_fire is None or next_fire <= now or next_fire > next_24h:
+                if compute_next_run_at and cron_expr:
+                    computed = compute_next_run_at(str(cron_expr), now)
+                    next_fire = _parse_iso8601(computed) if computed else None
+            if next_fire is None or next_fire <= now or next_fire > next_24h:
+                continue
+            scheduled_today.append(
+                OverviewScheduledItem(
+                    worker_id=worker["id"],
+                    worker_name=worker.get("name") or worker["id"],
+                    next_fire_at=next_fire.isoformat(),
+                    trigger_label=_trigger_label(trigger),
+                    trigger_source="schedule",
+                    paused=_overview_worker_paused(worker, trigger),
+                )
             )
-        )
+    scheduled_today = sorted(scheduled_today, key=lambda item: item.next_fire_at)
 
     attention_items: List[OverviewAttentionItem] = []
     failure_runs, _ = repos.runs.list(
@@ -6656,22 +6775,38 @@ def system_overview(
         limit=100000,
         offset=0,
     )
-    failure_counts: Dict[str, int] = collections.Counter(
-        row["worker_id"] for row in failure_runs if row.get("worker_id")
-    )
+    failure_counts: Dict[str, int] = collections.Counter(row["worker_id"] for row in failure_runs if row.get("worker_id"))
+    latest_failure_by_worker: Dict[str, Dict[str, Any]] = {}
+    for row in failure_runs:
+        worker_id = row.get("worker_id")
+        if not worker_id:
+            continue
+        row_time = _parse_iso8601(row.get("started_at") or row.get("completed_at") or row.get("created_at"))
+        current = latest_failure_by_worker.get(worker_id)
+        current_time = _parse_iso8601((current or {}).get("started_at") or (current or {}).get("completed_at") or (current or {}).get("created_at"))
+        if current is None or (row_time is not None and (current_time is None or row_time > current_time)):
+            latest_failure_by_worker[worker_id] = row
     for worker_id, failure_count in sorted(
         failure_counts.items(),
         key=lambda item: item[1],
         reverse=True,
     )[:3]:
-        if failure_count < 3:
-            continue
+        latest_failure = latest_failure_by_worker.get(worker_id) or {}
+        last_failed_at = latest_failure.get("started_at") or latest_failure.get("completed_at") or latest_failure.get("created_at")
+        cause = _overview_failure_cause(latest_failure)
         attention_items.append(
             OverviewAttentionItem(
                 type="failure_cluster",
+                kind="failing",
                 worker_id=worker_id,
-                message=f"Worker failed {failure_count} times in the last 24 hours.",
-                action_url=f"/workers/{worker_id}",
+                worker_name=worker_names.get(worker_id, worker_id),
+                message=f"{failure_count} failures in 24h",
+                cause=cause,
+                error_code=latest_failure.get("error_code"),
+                recent_failure_count=int(failure_count),
+                last_failed_at=last_failed_at,
+                suggested_actions=["view_logs", "retry", "disable"],
+                action_url=f"/runs?worker={worker_id}&status=failed",
             )
         )
 
@@ -6688,11 +6823,14 @@ def system_overview(
         attention_items.append(
             OverviewAttentionItem(
                 type="connection_expired",
+                kind="connection_expired",
                 connection_id=row["id"],
                 provider_slug=slug,
                 provider_display_name=row.get("app_name") or None,
+                provider_names=[row.get("app_name") or row.get("mcp_label") or "Connection"],
                 message="Connection has expired and needs re-authorization.",
-                action_url=f"/connections/{row['id']}",
+                suggested_actions=["reconnect"],
+                action_url="/connections",
             )
         )
 
@@ -6711,26 +6849,43 @@ def system_overview(
         attention_items.append(
             OverviewAttentionItem(
                 type="connection_expiring",
+                kind="connection_expiring",
                 connection_id=row["id"],
                 provider_slug=slug,
                 provider_display_name=row.get("app_name") or None,
+                provider_names=[row.get("app_name") or row.get("mcp_label") or "Connection"],
                 message="Connection may expire soon. Reconnect to avoid failures.",
-                action_url=f"/connections/{row['id']}",
+                suggested_actions=["reconnect"],
+                action_url="/connections",
             )
         )
+
+    completed_or_failed_7d = sum(1 for row in _runs_7d_rows if _is_completed(row) or _is_failed(row))
+    success_rate_7d = completed_7d / completed_or_failed_7d if completed_or_failed_7d else None
 
     return OverviewResponse(
         stats=OverviewStats(
             runs_24h=runs_24h,
             runs_24h_sparkline=sparkline,
-            success_rate_7d=None,
+            runs_7d_sparkline=runs_7d_sparkline,
+            success_rate_7d=success_rate_7d,
             active_workers_count=active_workers_count,
+            paused_workers_count=paused_workers_count,
             connections_healthy=connections_healthy,
             connections_total=connections_total,
+            work_shipped_7d=completed_7d,
+            work_shipped_previous_7d=completed_previous_7d,
+            runs_today=len(today_rows),
+            completed_today=completed_today,
+            failed_today=failed_today,
+            running_now=running_now,
+            queued_now=queued_now,
+            scheduled_24h_count=len(scheduled_today),
+            next_scheduled_at=scheduled_today[0].next_fire_at if scheduled_today else None,
         ),
         outcomes=outcomes,
         recent_runs=recent_runs,
-        scheduled_today=scheduled_today,
+        scheduled_today=scheduled_today[:5],
         needs_attention=attention_items,
     )
 
