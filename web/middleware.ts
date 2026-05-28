@@ -10,6 +10,7 @@ function isPublicPath(pathname: string): boolean {
   if (path === "/favicon.ico") return true;
   if (path.startsWith("/_next/")) return true;
   if (path.startsWith("/api/proxy/")) return true;
+  if (path === "/api/me") return true;
   return false;
 }
 
