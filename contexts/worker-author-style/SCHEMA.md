@@ -1,0 +1,218 @@
+# Worker YAML Schema — v0.3
+
+This is the reference for generating valid `worker.yml` files.
+
+## Required fields
+
+```yaml
+schema_version: "0.3"        # always exactly this
+name: "my-worker"            # lowercase letters, digits, hyphens; 3-64 chars; start+end alphanumeric
+title: "My Worker"           # human-readable; 5-60 chars; title case
+description: "One sentence." # 20-120 chars; starts with a verb; no trailing period needed
+version: "0.1.0"             # semver; new workers always start at 0.1.0
+exec:                        # execution block (see below)
+  ...
+```
+
+## Optional identity fields
+
+```yaml
+long_description: |          # 2-5 paragraphs shown on Overview tab; lead with what it does
+  ...
+
+use_cases:                   # bullet list shown on Overview
+  - "First use case."
+  - "Second use case."
+
+example_input:               # dict; populates "Fill with sample input" button
+  topic: "AI tools"
+  audience: "executive"
+
+example_output: |            # shown on Overview; markdown rendered
+  ## Example output
+  ...
+
+how_it_works: |              # plain-English steps
+  Input -> Step 1 -> Step 2 -> Output
+
+folder: "Category/Sub"       # groups worker in nav rail
+tags:                        # used by tag filter
+  - "tag1"
+  - "tag2"
+
+is_example: false            # always false for new user-created workers
+```
+
+## Execution block — agent mode (SKILL.md)
+
+Use for reasoning, writing, research, summarization — anything that benefits from an LLM tool loop.
+
+```yaml
+exec:
+  entry: "SKILL.md"
+  runtime: "skill"
+  runner: "e2b"
+  inputs:
+    - name: "topic"
+      kind: "scalar"
+      type: "string"       # string | textarea | number | boolean | select | url
+      required: true
+      label: "Topic"
+      placeholder: "e.g. AI recruiting workflow tools"
+  outputs:
+    - name: "brief"
+      kind: "file"
+      media_type: "text/markdown"
+      path: "out/brief.md"
+      required: true
+      label: "Research Brief"
+```
+
+## Execution block — script mode (run.py)
+
+Use for deterministic transforms, ETL, webhook fan-out, scheduled API calls.
+
+```yaml
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runtime: "python311"     # python311 | node22 | bash
+  runner: "e2b"
+  inputs:
+    - name: "csv_file"
+      kind: "file"
+      media_type: "text/csv"
+      path: "inputs/csv_file"
+      required: true
+      label: "Input CSV"
+  outputs:
+    - name: "result"
+      kind: "file"
+      media_type: "application/json"
+      path: "out/result.json"
+      required: true
+      label: "Result"
+```
+
+## Trigger types
+
+```yaml
+trigger:
+  type: "manual"            # default; operator runs it manually
+
+trigger:
+  type: "schedule"
+  cron: "0 9 * * 1"        # every Monday at 9am
+  timezone: "UTC"
+
+trigger:
+  type: "webhook"
+  webhook:
+    secret: true
+    allowed_methods: ["POST"]
+```
+
+## Contexts (read-only knowledge mounts)
+
+```yaml
+contexts:
+  - name: "my-style-guide"    # must exist in contexts/ directory
+    writeable: false
+```
+
+## Connections (Composio integrations)
+
+```yaml
+connections:
+  - "github"               # Composio app slug
+  - "gmail"
+  - "slack"
+```
+
+## Secrets
+
+```yaml
+# Declared secrets are exposed as env vars inside the sandbox
+exec:
+  secrets:
+    - "OPENAI_API_KEY"
+    - "MY_API_KEY"
+```
+
+## Limits (agent mode only)
+
+```yaml
+limits:
+  max_tool_iterations: 12      # default
+  max_output_tokens: 4096      # default
+  max_total_tokens: 50000      # default
+  timeout_seconds: 300         # default
+```
+
+## Full minimal examples
+
+### Agent mode (SKILL.md entry)
+
+```yaml
+schema_version: "0.3"
+name: "research-brief"
+title: "Research Brief"
+description: "Generates a structured research brief from a topic and audience."
+version: "0.1.0"
+is_example: false
+targets:
+  - "generic"
+exec:
+  entry: "SKILL.md"
+  runtime: "skill"
+  runner: "e2b"
+  inputs:
+    - name: "topic"
+      kind: "scalar"
+      type: "string"
+      required: true
+      label: "Topic"
+  outputs:
+    - name: "brief"
+      kind: "file"
+      media_type: "text/markdown"
+      path: "out/brief.md"
+      required: true
+      label: "Brief"
+trigger:
+  type: "manual"
+```
+
+### Script mode (run.py entry)
+
+```yaml
+schema_version: "0.3"
+name: "csv-enricher"
+title: "CSV Enricher"
+description: "Adds a derived column to a CSV file."
+version: "0.1.0"
+is_example: false
+targets:
+  - "generic"
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runtime: "python311"
+  runner: "e2b"
+  inputs:
+    - name: "input_csv"
+      kind: "file"
+      media_type: "text/csv"
+      path: "inputs/input.csv"
+      required: true
+      label: "Input CSV"
+  outputs:
+    - name: "output_csv"
+      kind: "file"
+      media_type: "text/csv"
+      path: "out/output.csv"
+      required: true
+      label: "Enriched CSV"
+trigger:
+  type: "manual"
+```

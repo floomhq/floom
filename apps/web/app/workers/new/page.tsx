@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, use, useEffect, useRef, useState } from "react";
+import { Suspense, use, useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -63,19 +63,45 @@ function NewWorkerSkeleton() {
 
 type UploadState = "idle" | "processing" | "navigating";
 
+// SSE event from /runs/{id}/events
+interface RunEvent {
+  type: string;
+  status?: string;
+  log?: string;
+  level?: string;
+  error?: string;
+}
+
 function NewWorkerContent() {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [streamRunId, setStreamRunId] = useState<string | null>(null);
+  const [streamLogs, setStreamLogs] = useState<string[]>([]);
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sseRef = useRef<EventSource | null>(null);
 
   function getLivePrompt(): string {
     return (textareaRef.current?.value ?? prompt).trim();
   }
 
+  const cancelStream = useCallback(() => {
+    if (sseRef.current) {
+      sseRef.current.close();
+      sseRef.current = null;
+    }
+    setGenerating(false);
+    setStreamRunId(null);
+    setStreamLogs([]);
+  }, []);
+
   // ---- Generate from prompt ------------------------------------------------
+  // Uses the new /workers/new/from-prompt endpoint which returns a run_id.
+  // We then subscribe to SSE on that run to get real-time progress.
+  // On completion we navigate to /workers/<suggested_id>/edit.
+  // Falls back to draftAndCreate on failure.
 
   async function handleGenerate(overridePrompt?: string) {
     const trimmed = overridePrompt ?? getLivePrompt();
@@ -85,12 +111,65 @@ function NewWorkerContent() {
     }
     if (overridePrompt) setPrompt(overridePrompt);
     setGenerating(true);
+    setStreamLogs([]);
+
     try {
-      const result = await api.workers.draftAndCreate({ prompt: trimmed });
-      router.push(`/workers/${result.worker_id}?edit=1`);
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to generate worker");
-      setGenerating(false);
+      // Try the new streaming endpoint first
+      const result = await api.workers.newFromPrompt({ prompt: trimmed, mode: "draft" });
+      const runId = result.run_id;
+      setStreamRunId(runId);
+
+      // Subscribe to SSE events for real-time progress
+      const evtSource = new EventSource(`/api/proxy/runs/${runId}/events`);
+      sseRef.current = evtSource;
+
+      evtSource.onmessage = (e) => {
+        try {
+          const event: RunEvent = JSON.parse(e.data);
+          if (event.log) {
+            setStreamLogs((prev: string[]) => [...prev.slice(-19), event.log as string]);
+          }
+          if (event.type === "status" && (event.status === "completed" || event.status === "failed")) {
+            evtSource.close();
+            sseRef.current = null;
+            if (event.status === "completed") {
+              // Navigate to the run page so user can see the bundle and save it
+              router.push(`/runs/${runId}`);
+            } else {
+              toast.error(event.error || "Worker generation failed");
+              setGenerating(false);
+              setStreamRunId(null);
+              setStreamLogs([]);
+            }
+          }
+        } catch {
+          // Non-JSON keepalive lines — ignore
+        }
+      };
+
+      evtSource.onerror = () => {
+        evtSource.close();
+        sseRef.current = null;
+        // SSE closed unexpectedly — navigate to the run anyway (may have completed)
+        if (streamRunId) {
+          router.push(`/runs/${runId}`);
+        } else {
+          setGenerating(false);
+          setStreamLogs([]);
+        }
+      };
+    } catch (streamErr) {
+      // Fall back to the synchronous draftAndCreate if the new endpoint is unavailable
+      console.warn("worker-author endpoint unavailable, falling back to draftAndCreate:", streamErr);
+      try {
+        const result = await api.workers.draftAndCreate({ prompt: trimmed });
+        router.push(`/workers/${result.worker_id}?edit=1`);
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : "Failed to generate worker");
+        setGenerating(false);
+        setStreamRunId(null);
+        setStreamLogs([]);
+      }
     }
   }
 
@@ -202,7 +281,12 @@ function NewWorkerContent() {
   if (generating) {
     return (
       <div className="max-w-4xl mx-auto pt-8 pb-16">
-        <GeneratingPanel prompt={prompt} onCancel={() => setGenerating(false)} />
+        <GeneratingPanel
+          prompt={prompt}
+          streamLogs={streamLogs}
+          isStreaming={!!streamRunId}
+          onCancel={cancelStream}
+        />
       </div>
     );
   }
@@ -339,10 +423,6 @@ function NewWorkerContent() {
   );
 }
 
-function idx0NoteVisible(items: { label: string }[]): boolean {
-  return items.length > 1;
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -383,22 +463,27 @@ async function readText(file: File): Promise<string | null> {
   });
 }
 
-// S29g (F8.12): Federico — "0 progress showing, 0 engagement for me I
-// leave the page." S25's pure indeterminate bar was honest but boring.
-// New: 5 named stages cycle on timer thresholds, the bar fills determinately
-// through them, and the last stage holds with a shimmer (backend status
-// still unknown). Stages are timing-best-guess, not backend-driven —
-// labeled as such below the progress so engagement gain doesn't come from
-// lying. Real solution is the async-draft SSE backend (Codex queued).
+// S40: GeneratingPanel now shows real SSE log lines from the worker-author run.
+// Falls back to timer-based stage hints when no stream logs are available yet.
 const DRAFT_STAGES = [
-  { id: "read",     label: "Reading your prompt",          targetSec: 3 },
-  { id: "plan",     label: "Picking integrations",         targetSec: 9 },
-  { id: "draft",    label: "Drafting worker.yml",          targetSec: 16 },
-  { id: "write",    label: "Writing run.py + dependencies", targetSec: 24 },
-  { id: "validate", label: "Validating + opening editor",  targetSec: 38 },
+  { id: "read",     label: "Reading your prompt",           targetSec: 3 },
+  { id: "plan",     label: "Reading style context",         targetSec: 9 },
+  { id: "draft",    label: "Drafting worker.yml",           targetSec: 16 },
+  { id: "write",    label: "Writing SKILL.md / run.py",     targetSec: 24 },
+  { id: "validate", label: "Validating schema",             targetSec: 38 },
 ] as const;
 
-function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () => void }) {
+function GeneratingPanel({
+  prompt,
+  streamLogs,
+  isStreaming,
+  onCancel,
+}: {
+  prompt: string;
+  streamLogs: string[];
+  isStreaming: boolean;
+  onCancel?: () => void;
+}) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -410,29 +495,36 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
   const activeStage = stageIndex === -1 ? DRAFT_STAGES.length - 1 : stageIndex;
   const lastStage = stageIndex === -1;
   const stageRatio = (activeStage + (lastStage ? 0 : 1)) / DRAFT_STAGES.length;
-  // Cap at 92% until backend confirms completion — never claim 100% before
-  // we actually know we're done (would erode trust the next time).
   const progress = Math.min(0.92, stageRatio);
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="text-center space-y-3">
-        {/* S29r: dropped the colorful gradient hero. Federico: "I don't like
-            too many colours overall, as a rule." Plain spinner + heading. */}
         <Loader2 className="size-7 animate-spin mx-auto text-muted-foreground" aria-hidden="true" />
         <h1 className="text-2xl font-semibold tracking-tight">Drafting your worker</h1>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          Floom is reading your prompt, picking integrations, and writing the worker files.
-          Usually 15-30 seconds; rarely up to 60.
+          {isStreaming
+            ? "Worker Author is running — you'll see real progress below."
+            : "Floom is reading your prompt, picking integrations, and writing the worker files."}
         </p>
       </div>
 
       {prompt && (
         <div className="rounded-lg border border-line bg-[var(--bg-2)] px-4 py-3">
-          <p className="text-[11px] text-muted-foreground mb-1">
-            Your prompt
-          </p>
+          <p className="text-[11px] text-muted-foreground mb-1">Your prompt</p>
           <p className="text-sm text-foreground whitespace-pre-wrap">{prompt}</p>
+        </div>
+      )}
+
+      {/* Real SSE log lines from worker-author run */}
+      {streamLogs.length > 0 && (
+        <div className="rounded-lg border border-line bg-[var(--bg-2)] px-4 py-3 space-y-1">
+          <p className="text-[11px] text-muted-foreground mb-2">Worker Author</p>
+          {streamLogs.map((log, i) => (
+            <p key={i} className="text-xs text-muted-foreground font-mono truncate">
+              {log}
+            </p>
+          ))}
         </div>
       )}
 
@@ -444,7 +536,7 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
           />
           {lastStage && (
             <div
-              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10 animate-[s29g-shimmer_1.6s_ease-in-out_infinite]"
+              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-transparent via-white/30 to-transparent dark:via-white/10 animate-[s40-shimmer_1.6s_ease-in-out_infinite]"
               style={{ width: `${progress * 100}%` }}
             />
           )}
@@ -474,7 +566,7 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
           })}
         </ol>
         <div className="flex justify-between text-[11px] text-muted-foreground pt-1">
-          <span>Stages are best-guess timing, not backend-streamed.</span>
+          <span>{isStreaming ? "Live from Worker Author" : "Stages are best-guess timing."}</span>
           <span className="tabular-nums">{formatElapsed(elapsed)}</span>
         </div>
       </div>
@@ -495,7 +587,7 @@ function GeneratingPanel({ prompt, onCancel }: { prompt: string; onCancel?: () =
       )}
 
       <style>{`
-        @keyframes s29g-shimmer {
+        @keyframes s40-shimmer {
           0% { transform: translateX(-100%); opacity: 0; }
           50% { opacity: 1; }
           100% { transform: translateX(100%); opacity: 0; }
