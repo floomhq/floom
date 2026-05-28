@@ -87,7 +87,7 @@ function NewWorkerContent() {
     setGenerating(true);
     try {
       const result = await api.workers.draftAndCreate({ prompt: trimmed });
-      router.push(`/workers/${result.worker_id}/edit`);
+      router.push(`/workers/${result.worker_id}?edit=1`);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to generate worker");
       setGenerating(false);
@@ -126,7 +126,7 @@ function NewWorkerContent() {
           ],
         });
         setUploadState("navigating");
-        router.push(`/workers/${result.worker_id}/edit`);
+        router.push(`/workers/${result.worker_id}?edit=1`);
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : "Failed to create worker from file");
         setUploadState("idle");
@@ -148,7 +148,7 @@ function NewWorkerContent() {
           ],
         });
         setUploadState("navigating");
-        router.push(`/workers/${result.worker_id}/edit`);
+        router.push(`/workers/${result.worker_id}?edit=1`);
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : "Failed to create worker from file");
         setUploadState("idle");
@@ -164,7 +164,7 @@ function NewWorkerContent() {
     try {
       const worker = await api.workers.createFromBundle(file);
       setUploadState("navigating");
-      router.push(`/workers/${worker.id}/edit`);
+      router.push(`/workers/${worker.id}?edit=1`);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to create worker from bundle");
       setUploadState("idle");
@@ -183,7 +183,7 @@ function NewWorkerContent() {
       const blob = await zip.generateAsync({ type: "blob" });
       const worker = await api.workers.createFromBundle(blob);
       setUploadState("navigating");
-      router.push(`/workers/${worker.id}/edit`);
+      router.push(`/workers/${worker.id}?edit=1`);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to create worker from folder");
       setUploadState("idle");
