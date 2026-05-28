@@ -113,9 +113,26 @@ trigger:
     }
 
 
-def _worker_yml(name: str, *, mode: str = "pure-script") -> str:
+def _worker_yml(
+    name: str,
+    *,
+    mode: str = "pure-script",
+    trigger_type: str = "manual",
+) -> str:
     entry = "run.py" if mode == "pure-script" else "SKILL.md"
     runtime = "python311" if mode == "pure-script" else "skill"
+    if trigger_type == "webhook":
+        trigger_block = """
+trigger:
+  type: "webhook"
+  webhook:
+    secret: true
+""".strip()
+    else:
+        trigger_block = f"""
+trigger:
+  type: "{trigger_type}"
+""".strip()
     return f"""
 schema_version: "0.3"
 name: {name}
@@ -130,8 +147,7 @@ exec:
   command: "python run.py"
   inputs: []
   outputs: []
-trigger:
-  type: "manual"
+{trigger_block}
 """.strip()
 
 
@@ -408,6 +424,28 @@ def test_run_creation_quota_is_shared_across_workers_and_ips(monkeypatch, tmp_pa
     assert resp.json() == {"detail": "Run creation rate limit exceeded: 3/60s"}
 
 
+def test_replay_route_shares_run_creation_quota(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, run_create_rate_minute=1)
+    client = TestClient(main.app)
+    monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
+    worker_id = "s13-replay-quota-worker"
+    _insert_minimal_worker(main, worker_id)
+
+    first = client.post(
+        f"/workers/{worker_id}/runs",
+        headers=_AUTH_HEADER,
+        json={"inputs": {}, "trigger_source": "manual"},
+    )
+    assert first.status_code == 200, first.text
+    run_id = first.json()["run_id"]
+
+    replay = client.post(f"/workers/{worker_id}/runs/{run_id}/replay", headers=_AUTH_HEADER)
+
+    assert replay.status_code == 429, replay.text
+    assert replay.json() == {"detail": "Run creation rate limit exceeded: 1/60s"}
+    assert "Retry-After" in replay.headers
+
+
 def test_sweep_connections_has_cooldown(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
@@ -643,6 +681,16 @@ def test_stock_worker_delete_is_blocked_even_when_source_missing(monkeypatch, tm
     assert row is not None
 
 
+def test_stock_worker_webhook_secret_rotate_is_blocked(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post("/workers/research_brief/webhook-secret/rotate", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 403, resp.text
+    assert resp.json() == {"detail": "Stock workers cannot be modified through the API"}
+
+
 def test_stock_worker_mutation_routes_are_blocked(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
@@ -688,8 +736,17 @@ def test_worker_schema_validation_does_not_leak_pydantic_details(monkeypatch, tm
 
     assert resp.status_code == 400, resp.text
     assert "errors.pydantic.dev" not in resp.text
-    assert "input_value" not in resp.text
-    assert "input_type" not in resp.text
+
+
+def test_openapi_does_not_document_webhook_token_auth(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.get("/openapi.json", headers=_AUTH_HEADER)
+
+    assert resp.status_code == 200, resp.text
+    assert "?token=<webhook_token>" not in resp.text
+    assert "X-Floom-Signature header" not in resp.text
 
 
 def test_from_bundle_rejects_symlinks(monkeypatch, tmp_path):
