@@ -12,3 +12,4 @@ export {
 export type { TriggerRow, TriggerType } from "./TriggersEditor";
 export { RequirementsEditor } from "./RequirementsEditor";
 export { FilesEditor } from "./FilesEditor";
+export { McpConnectionsEditor } from "./McpConnectionsEditor";

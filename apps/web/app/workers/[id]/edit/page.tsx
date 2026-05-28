@@ -13,6 +13,7 @@ import type { ConnectionItem, TriggerSpec, WorkerDetail, WorkerFile } from "@/li
 import {
   ExecModePicker,
   FilesEditor,
+  McpConnectionsEditor,
   TriggersEditor,
   WorkerMetadataForm,
   buildTriggersYaml,
@@ -156,6 +157,17 @@ export default function EditWorkerPage() {
 
   const isDirty = files.some((f) => f.content !== (originalContents[f.path] ?? ""));
 
+  function updateWorkerYaml(content: string) {
+    setFiles((previous) => {
+      if (previous.some((file) => file.path === "worker.yml")) {
+        return previous.map((file) =>
+          file.path === "worker.yml" ? { ...file, content } : file
+        );
+      }
+      return [{ path: "worker.yml", content }, ...previous];
+    });
+  }
+
   function navigateAway(path: string) {
     if (isDirty && !confirm("Discard unsaved changes?")) return;
     router.push(path);
@@ -251,6 +263,12 @@ export default function EditWorkerPage() {
             onChange={setTriggerRows}
             connections={connections}
             webhookUrl={worker.webhook_url}
+          />
+
+          <McpConnectionsEditor
+            workerYaml={getContent("worker.yml")}
+            connections={connections}
+            onWorkerYamlChange={updateWorkerYaml}
           />
 
           <ExecModePicker detectedEntry={detectedEntry} />

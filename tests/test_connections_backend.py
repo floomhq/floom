@@ -277,6 +277,90 @@ class TestConnectionsListProjection:
         assert item["status"] == "pending"
 
 
+class TestMCPConnections:
+    def test_create_list_status_test_and_delete_mcp_connection(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        create_resp = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={
+                "label": "github",
+                "url": "https://api.githubcopilot.com/mcp/",
+                "auth_secret": "GITHUB_PAT",
+                "allowed_tools": ["list_pull_requests", "get_repo"],
+            },
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        created = create_resp.json()
+        assert created["kind"] == "mcp"
+        assert created["status"] == "active"
+        assert created["mcp_label"] == "github"
+        assert created["mcp_url"] == "https://api.githubcopilot.com/mcp/"
+        assert created["mcp_auth_secret"] == "GITHUB_PAT"
+        assert created["mcp_allowed_tools"] == ["list_pull_requests", "get_repo"]
+
+        with patch("composio_client.check_status") as mock_check:
+            list_resp = client.get("/connections", headers=AUTH_HEADERS)
+        assert list_resp.status_code == 200
+        mock_check.assert_not_called()
+        listed = next(item for item in list_resp.json() if item["id"] == created["id"])
+        assert listed["kind"] == "mcp"
+        assert listed["mcp_allowed_tools"] == ["list_pull_requests", "get_repo"]
+
+        with patch("composio_client.check_status") as mock_check:
+            status_resp = client.get(f"/connections/{created['id']}/status", headers=AUTH_HEADERS)
+        assert status_resp.status_code == 200
+        mock_check.assert_not_called()
+        assert status_resp.json()["kind"] == "mcp"
+
+        with patch("composio_client.check_status") as mock_check:
+            test_resp = client.post(f"/connections/{created['id']}/test", headers=AUTH_HEADERS)
+        assert test_resp.status_code == 200
+        mock_check.assert_not_called()
+        assert test_resp.json()["status"] == "valid"
+
+        with patch("composio_client.revoke_connection") as mock_revoke:
+            delete_resp = client.delete(f"/connections/{created['id']}", headers=AUTH_HEADERS)
+        assert delete_resp.status_code == 200
+        mock_revoke.assert_not_called()
+        assert delete_resp.json()["status"] == "deleted"
+
+    def test_create_mcp_connection_validates_label_url_and_secret(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        bad_url = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={"label": "github", "url": "ftp://example.com/mcp"},
+        )
+        assert bad_url.status_code == 400
+
+        bad_secret = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={
+                "label": "github",
+                "url": "https://example.com/mcp",
+                "auth_secret": "bad-secret",
+            },
+        )
+        assert bad_secret.status_code == 400
+
+    def test_create_mcp_connection_rejects_duplicate_label(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        payload = {"label": "github", "url": "https://example.com/mcp"}
+
+        first = client.post("/connections/mcp", headers=AUTH_HEADERS, json=payload)
+        assert first.status_code == 200
+
+        duplicate = client.post("/connections/mcp", headers=AUTH_HEADERS, json=payload)
+        assert duplicate.status_code == 409
+
+
 # ---------------------------------------------------------------------------
 # #11 - POST /connections/{id}/test
 # ---------------------------------------------------------------------------
