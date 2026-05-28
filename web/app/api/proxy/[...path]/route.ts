@@ -35,27 +35,40 @@ async function handler(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
+  const { path } = await params;
+  // workeros-cloud: backend mounts the auth router at the root (/auth/*),
+  // NOT under /api/. We expose those through the same proxy so the frontend
+  // never has to know the absolute backend host. /auth/logout (the only
+  // current consumer) reads the session cookie directly on the backend, so
+  // we skip the JWT-required guard for those paths.
+  const isAuthPath = path[0] === "auth";
+  const upstreamPath = (isAuthPath ? "/" : "/api/") + path.join("/");
+
   // workeros-cloud auth swap: replace shared-secret x-floom-secret with
   // a Supabase JWT extracted from the workeros_cloud_session cookie that
   // the backend's /auth/callback sets on .floom.dev (HttpOnly, Secure).
   // If the cookie is missing, return 401 so the frontend can route to
   // /login (the marketing project handles that).
   const accessToken = await getAccessToken();
-  if (!accessToken) {
+  if (!isAuthPath && !accessToken) {
     return NextResponse.json({ detail: "unauthorized" }, { status: 401 });
   }
-
-  const { path } = await params;
-  const upstreamPath = "/api/" + path.join("/");
 
   // Preserve query string
   const search = req.nextUrl.search;
   const upstreamUrl = `${API_BASE}${upstreamPath}${search}`;
 
-  // Forward relevant request headers, injecting the JWT as Bearer
-  const forwardHeaders: Record<string, string> = {
-    Authorization: `Bearer ${accessToken}`,
-  };
+  // Forward relevant request headers, injecting the JWT as Bearer when
+  // available. For auth-path requests we also forward the raw Cookie header
+  // so the backend can read its own workeros_cloud_session cookie.
+  const forwardHeaders: Record<string, string> = {};
+  if (accessToken) {
+    forwardHeaders.Authorization = `Bearer ${accessToken}`;
+  }
+  if (isAuthPath) {
+    const cookieHeader = req.headers.get("cookie");
+    if (cookieHeader) forwardHeaders.cookie = cookieHeader;
+  }
   const contentType = req.headers.get("content-type");
   if (contentType) forwardHeaders["content-type"] = contentType;
   const lastEventId = req.headers.get("last-event-id");
@@ -90,6 +103,15 @@ async function handler(
   if (cl) responseHeaders.set("content-length", cl);
   const cacheControl = upstream.headers.get("cache-control");
   if (cacheControl) responseHeaders.set("cache-control", cacheControl);
+  // Forward Set-Cookie so backend-initiated cookie writes (e.g. /auth/logout
+  // clearing workeros_cloud_session on .floom.dev) actually reach the
+  // browser. Set-Cookie can appear multiple times so use headers.append on
+  // the raw entries iterator.
+  upstream.headers.forEach((value, key) => {
+    if (key.toLowerCase() === "set-cookie") {
+      responseHeaders.append("set-cookie", value);
+    }
+  });
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

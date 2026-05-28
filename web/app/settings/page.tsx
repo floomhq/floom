@@ -58,7 +58,10 @@ function SettingsContent() {
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
-  const [reloading, setReloading] = useState(false);
+  // workeros-cloud: System tab is hidden (VISIBLE_TAB_KEYS omits it) so
+  // the Reload-workers button is no longer reachable. The button POSTed
+  // /workers/reload, an OSS-only endpoint (cloud's worker model is per-
+  // tenant from Supabase). Dropped the handler + reloading state too.
   const [clearing, setClearing] = useState(false);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
@@ -92,19 +95,6 @@ function SettingsContent() {
     params.delete("tab");
     const qs = params.size ? `?${params.toString()}` : "";
     router.replace(`/settings${qs}#${value}`, { scroll: false });
-  }
-
-  async function handleReload() {
-    setReloading(true);
-    try {
-      const res = await api.workers.reload();
-      toast.success(`Loaded ${res.workers_loaded} workers`);
-      void loadData();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to reload");
-    } finally {
-      setReloading(false);
-    }
   }
 
   async function handleClearRuns() {
@@ -369,13 +359,13 @@ function CloudAccessPanel() {
   }
 
   async function handleSignOut() {
+    // workeros-cloud: route through the proxy so we don't hardcode the
+    // backend host (paired with the sidebar Sign out). Post-logout lands on
+    // the marketing /login instead of the marketing root.
     try {
-      await fetch("https://workeros-api.floom.dev/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
+      await fetch("/app/api/proxy/auth/logout", { method: "POST" });
     } finally {
-      window.location.href = "/";
+      window.location.href = "/login";
     }
   }
 

@@ -207,13 +207,16 @@ function UserProfileFooter() {
     ? email.split("@")[0]?.slice(0, 2).toUpperCase() ?? "??"
     : "—";
   const handleSignOut = async () => {
+    // workeros-cloud: go through the dashboard proxy instead of hardcoding
+    // the backend host. Proxy now supports /auth/* and forwards Set-Cookie
+    // so the backend's session-cookie clear actually reaches the browser.
     try {
-      await fetch("https://workeros-api.floom.dev/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
+      await fetch("/app/api/proxy/auth/logout", { method: "POST" });
     } finally {
-      window.location.href = "/";
+      // Land on the marketing /login (NOT the marketing root) so the user
+      // is one click away from signing back in. /login is served by the
+      // marketing project at the apex (no /app basePath).
+      window.location.href = "/login";
     }
   };
   return (
