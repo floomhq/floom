@@ -1,0 +1,12 @@
+# Stage 2: Blog Generation + Image Creation - Dependencies
+# Requires Python 3.10+
+
+# Core
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Google Gemini AI (for blog writing + image generation)
+google-genai>=1.0.0
+
+# Image processing (optional, for WebP conversion)
+Pillow>=10.0.0

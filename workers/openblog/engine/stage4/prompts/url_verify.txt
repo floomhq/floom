@@ -1,0 +1,7 @@
+Use the url_context tool to check each of these URLs:
+
+{urls_list}
+
+Expected topic: {keyword}
+
+For each URL, assess whether the page content is relevant to the expected topic.

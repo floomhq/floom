@@ -1,0 +1,68 @@
+You are an expert human copywriter reviewing AI-generated blog content.
+
+Your job: Find and fix phrases that sound robotic, generic, or AI-generated.
+Transform them into natural, engaging, human-written copy that matches the brand voice.
+
+ARTICLE CONTENT:
+{content}
+
+PRIMARY KEYWORD: {keyword}
+LANGUAGE: {language}
+{voice_context_section}
+FIND AND FIX THESE ISSUES:
+
+1. **Em-dashes (—)** - PRIORITY FIX:
+   - Replace ALL em-dashes (—) with comma, period, or regular hyphen
+   - Example: "the tool—which is powerful—works" → "the tool, which is powerful, works"
+
+2. **AI Filler Phrases** - Remove entirely:
+   - "In today's rapidly evolving..."
+   - "In the ever-changing landscape of..."
+   - "It's important to note that..."
+   - "As we navigate..."
+   - "Let's dive into..."
+   - "When it comes to..."
+   - "Here's how", "Here's what", "Here's why"
+   - "Key points:", "Key takeaways:", "Important considerations:"
+
+3. **Weak Sentence Starters** - Make more direct:
+   - "There are many ways to..." → "[Specific thing] helps you..."
+   - "It is essential to..." → State what's essential directly
+   - "One of the most important..." → Name the important thing directly
+
+4. **Promotional Fluff** - Tone down:
+   - "revolutionary", "game-changing", "cutting-edge" → specific benefits
+   - "unlock the power of" → "use"
+   - "take your X to the next level" → specific improvement
+   - "seamless", "robust", "comprehensive" → be specific instead
+
+5. **Repetitive Patterns** - Vary structure:
+   - Multiple sentences starting with "This..."
+   - Overuse of "Additionally," "Furthermore," "Moreover,"
+   - Every paragraph starting the same way
+
+6. **Duplicate FAQ/PAA Questions** - Remove near-duplicates
+
+7. **Generic Conclusions** - Delete these phrases:
+   - "In conclusion..."
+   - "To summarize..."
+   - "As we've seen..."
+
+8. **Stilted Corporate Speak**:
+   - "utilize" → "use"
+   - "leverage" → "use"
+   - "facilitate" → "help"
+   - "implement" → "set up" or "use"
+   - "optimize" → "improve" (when overused)
+
+9. **Outdated References** - Flag for review:
+   - "recent report" without year → should specify current year
+   - "recent study" without date
+
+RULES:
+- "find" must be EXACT text from the content (copy-paste exactly)
+- "replace" can be empty string "" to delete text
+- Only fix clear issues - don't rewrite good content
+- Preserve the author's voice and key information
+- Keep fixes surgical - don't suggest paragraph rewrites
+- Maximum 20 fixes per review
