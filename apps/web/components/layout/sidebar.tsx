@@ -117,8 +117,8 @@ export function Sidebar() {
     <>
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-app)] px-4 md:hidden">
         <Link href="/" className="flex items-center gap-2">
-          <FloomMark size={28} />
-          <span className="font-semibold text-[15px] tracking-tight">Floom</span>
+          <FloomMark size={22} />
+          <span className="font-semibold text-base tracking-tight">Floom</span>
         </Link>
         <div className="flex items-center gap-2">
           <button
@@ -145,8 +145,8 @@ export function Sidebar() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
         <div className="px-5 pt-6 pb-8">
           <Link href="/" className="flex items-center gap-2">
-            <FloomMark size={28} />
-            <span className="font-semibold text-[15px] tracking-tight">Floom</span>
+            <FloomMark size={22} />
+            <span className="font-semibold text-base tracking-tight">Floom</span>
           </Link>
         </div>
         <SidebarPrimaryActions />
@@ -165,8 +165,8 @@ export function Sidebar() {
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
             <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-5 py-4">
               <Link href="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
-                <FloomMark size={28} />
-                <span className="font-semibold text-[15px] tracking-tight">Floom</span>
+                <FloomMark size={22} />
+                <span className="font-semibold text-base tracking-tight">Floom</span>
               </Link>
               <button
                 type="button"
