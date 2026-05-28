@@ -1,4 +1,7 @@
-const API_BASE = "/api/proxy";
+// workeros-cloud: needs basePath prefix /app since fetch() (unlike Next's
+// router/Link) doesn't auto-prepend basePath. Without this every API call
+// hits the marketing project at the apex and 404s.
+const API_BASE = "/app/api/proxy";
 
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

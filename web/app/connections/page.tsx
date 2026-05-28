@@ -154,7 +154,9 @@ export default function ConnectionsPage() {
 
   function handleConnect(slug: string) {
     // PR S17: route through our pre-confirm page instead of going straight to OAuth.
-    window.location.href = `/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`;
+    // workeros-cloud: prepend basePath /app since window.location bypasses
+    // Next.js basePath rewriting (unlike router.push).
+    window.location.href = `/app/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/app/connections")}`;
   }
 
   async function handleRefresh(connection: ConnectionView) {
@@ -228,7 +230,7 @@ export default function ConnectionsPage() {
               ))}
             </div>
           ) : connectionViews.length === 0 ? (
-            <ConnectionsEmptyState onConnect={() => { window.location.href = "/connections/browse"; }} />
+            <ConnectionsEmptyState onConnect={() => { window.location.href = "/app/connections/browse"; }} />
           ) : (
             // S27 (kept after S28 revert): compact row table. Federico
             // walked back from "make it a grid like browse" to "this is

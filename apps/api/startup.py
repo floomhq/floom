@@ -64,5 +64,58 @@ def register_cloud_components() -> None:
         unwrapped.cache_clear = lambda: None  # type: ignore[attr-defined]
         engine_db_factory.get_repositories = unwrapped
 
+    # Same surgery for get_auth_provider — its cached SupabaseAuthProvider
+    # holds a long-lived supabase client whose httpx HTTP/2 pool goes stale
+    # after Supabase silently drops idle connections. Per-request providers
+    # rebuild the client (~50ms TLS) but stay reliable.
+    from auth import factory as engine_auth_factory
+    if hasattr(engine_auth_factory.get_auth_provider, "__wrapped__"):
+        unwrapped_ap = engine_auth_factory.get_auth_provider.__wrapped__
+        unwrapped_ap.cache_clear = lambda: None  # type: ignore[attr-defined]
+        engine_auth_factory.get_auth_provider = unwrapped_ap
+
+    # The engine has MULTIPLE modules that call load_dotenv() on import,
+    # each pointing at /root/.config/workeros/api.env (OSS single-tenant
+    # local-mode prod env, contains FLOOM_SECRET). When any of them
+    # imports lazily during a request (e.g. composio_client when
+    # /api/integrations/catalog hits), FLOOM_SECRET leaks into our
+    # process environment. The engine's auth_middleware then enforces
+    # x-floom-secret on every subsequent request -> 401 for cloud
+    # traffic.
+    #
+    # Eager-import the known offenders here so the leak happens ONCE at
+    # boot, then pop FLOOM_SECRET. Also install a process-level
+    # os.environ guard that strips FLOOM_SECRET whenever anything tries
+    # to set it in cloud mode, in case the engine grows new
+    # load_dotenv() call sites later.
+    import os as _osmod
+    if (_osmod.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
+        try:
+            __import__("composio_client")
+        except Exception:
+            pass
+        try:
+            __import__("run_service")
+        except Exception:
+            pass
+        try:
+            __import__("webhook_service")
+        except Exception:
+            pass
+        _osmod.environ.pop("FLOOM_SECRET", None)
+
+        _orig_setitem = type(_osmod.environ).__setitem__
+
+        def _block_floom_secret(self, key, value):
+            if key == "FLOOM_SECRET":
+                # In cloud mode this env var has no place. Anything trying
+                # to set it (load_dotenv pulling in a local-mode env file)
+                # is silently bypassed. Auth flows entirely through
+                # Supabase JWTs via SupabaseAuthProvider.
+                return
+            return _orig_setitem(self, key, value)
+
+        type(_osmod.environ).__setitem__ = _block_floom_secret
+
 
 register_cloud_components()
