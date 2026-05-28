@@ -41,7 +41,7 @@ targets:
 - generic
 limits:
   max_tool_iterations: 12
-  max_output_tokens: 4096
+  max_output_tokens: 12000
   max_total_tokens: 50000
   timeout_seconds: 300
 exec:
