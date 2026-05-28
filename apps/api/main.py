@@ -215,6 +215,18 @@ def _validate_startup_configuration() -> None:
         get_auth_provider()
 
 
+def _is_cloud_deploy() -> bool:
+    """True when running in multi-tenant cloud mode.
+
+    In cloud mode the shared filesystem WORKERS_DIR holds bundles from
+    multiple tenants and MUST NOT be used as a fallback list source for
+    any per-user endpoint. Defaults to False when WORKEROS_DEPLOY is unset
+    so OSS single-tenant installs keep their first-time UX (empty DB ->
+    enumerate filesystem).
+    """
+    return (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud"
+
+
 async def require_secret(request: Request) -> str:
     """DEPRECATED: use Depends(get_auth_context) instead."""
     ctx = await get_auth_context(request)
@@ -2066,7 +2078,12 @@ def list_workers(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[WorkerSummary]:
-    workers = _list_db_workers(user_id=auth.user_id, repos=repos) or discover_workers(use_cache=True)
+    db_workers = _list_db_workers(user_id=auth.user_id, repos=repos)
+    # In cloud (multi-tenant) mode never fall back to the shared filesystem,
+    # which would expose another tenant's bundles. Local single-tenant mode
+    # keeps the old behavior so a fresh install with no DB rows yet still
+    # enumerates the on-disk workers for first-time UX.
+    workers = db_workers if (db_workers or _is_cloud_deploy()) else discover_workers(use_cache=True)
     worker_ids = [w["id"] for w in workers]
     stats_by_id = _get_stats_batch(worker_ids, user_id=auth.user_id, repos=repos)
     timeseries_by_id = _get_timeseries_batch(worker_ids, user_id=auth.user_id, repos=repos, days=14)
@@ -4792,7 +4809,11 @@ def list_secrets(
         for row in repos.secrets.list(user_id=auth.user_id)
     }
 
-    workers = _list_db_workers(user_id=auth.user_id, repos=repos) or discover_workers(use_cache=True)
+    db_workers = _list_db_workers(user_id=auth.user_id, repos=repos)
+    # Same cloud-tenant scoping as /workers above: never enumerate the
+    # shared filesystem in cloud mode (would surface another tenant's
+    # worker.yml secret declarations to this user).
+    workers = db_workers if (db_workers or _is_cloud_deploy()) else discover_workers(use_cache=True)
 
     # (a) All secrets declared by any worker.yml
     worker_secret_names: set[str] = set()
