@@ -108,7 +108,7 @@ exec:
     type: string
     required: false
     label: Gemini model override
-    placeholder: Leave blank to use OpenDraft default
+    placeholder: Defaults to gemini-3.1-pro-preview
   - name: enable_citation_verification
     kind: scalar
     type: boolean

@@ -20,6 +20,7 @@ except ImportError:
 
 OUT_DIR = Path("out")
 WORKSPACE_DIR = Path("workspace")
+DEFAULT_MODEL_NAME = "gemini-3.1-pro-preview"
 
 
 def _read_json(path: str, default: Any) -> Any:
@@ -186,7 +187,11 @@ def main() -> None:
         {"english", "german", "spanish", "french"},
         "english",
     )
-    model_name = str(inputs.get("model_name") or "").strip() or None
+    model_name = (
+        str(inputs.get("model_name") or "").strip()
+        or os.environ.get("OPENDRAFT_GEMINI_MODEL")
+        or DEFAULT_MODEL_NAME
+    )
     export_pdf = _as_bool(inputs.get("export_pdf"), True)
     export_docx = _as_bool(inputs.get("export_docx"), True)
     enable_citation_verification = _as_bool(inputs.get("enable_citation_verification"), True)
