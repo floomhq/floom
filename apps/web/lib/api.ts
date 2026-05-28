@@ -111,6 +111,8 @@ export const api = {
         { method: "POST" }
       ),
     downloadUrl: (id: string) => `${API_BASE}/runs/${encodeURIComponent(id)}/download`,
+    artifactUrl: (id: string, artifactId: string) =>
+      `${API_BASE}/runs/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/download`,
     bundleUrl: (id: string, filename: string) =>
       `${API_BASE}/runs/${encodeURIComponent(id)}/bundle/${encodeURIComponent(filename)}`,
   },
