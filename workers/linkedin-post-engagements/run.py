@@ -34,13 +34,25 @@ def apify_request(api_key: str, method: str, path: str, data: dict | None = None
         raise RuntimeError(f"Apify returned non-JSON: {result.stdout[:300]}") from exc
 
 
+def _unwrap_run_start(resp: dict, label: str) -> tuple[str, str]:
+    if "error" in resp:
+        err = resp["error"]
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        raise RuntimeError(f"Apify rejected {label} actor start: {msg}")
+    data = resp.get("data")
+    if not isinstance(data, dict) or not data.get("id") or not data.get("defaultDatasetId"):
+        raise RuntimeError(f"Apify {label} returned unexpected payload: {json.dumps(resp)[:300]}")
+    return data["id"], data["defaultDatasetId"]
+
+
 def poll_run(api_key: str, run_id: str, max_polls: int = 120, interval: int = 5) -> dict:
     for i in range(max_polls):
         resp = apify_request(api_key, "GET", f"/actor-runs/{run_id}")
-        status = resp["data"]["status"]
+        data = resp.get("data") or {}
+        status = data.get("status")
         print(f"  Poll {i + 1}: {status}", file=sys.stderr)
         if status == "SUCCEEDED":
-            return resp["data"]
+            return data
         if status in {"FAILED", "ABORTED", "TIMED-OUT"}:
             raise RuntimeError(f"Run {run_id} ended with status {status}")
         time.sleep(interval)
@@ -55,8 +67,7 @@ def run_profile_scraper(api_key: str, profile_url: str, posts_limit: int) -> lis
         "/acts/datadoping~linkedin-profile-posts-scraper/runs",
         {"profiles": [profile_url], "resultsLimit": posts_limit},
     )
-    run_id = resp["data"]["id"]
-    dataset_id = resp["data"]["defaultDatasetId"]
+    run_id, dataset_id = _unwrap_run_start(resp, "profile-scraper")
     run_data = poll_run(api_key, run_id, max_polls=40, interval=3)
     print(f"  Profile scraper cost: ${run_data.get('usageTotalUsd', 0)}", file=sys.stderr)
 
@@ -75,8 +86,7 @@ def run_engagement_scraper(api_key: str, urls: list[str]) -> list[dict]:
         "/acts/scraping_solutions~linkedin-posts-engagers-likers-and-commenters-no-cookies/runs",
         {"urls": urls},
     )
-    run_id = resp["data"]["id"]
-    dataset_id = resp["data"]["defaultDatasetId"]
+    run_id, dataset_id = _unwrap_run_start(resp, "engagement-scraper")
     run_data = poll_run(api_key, run_id, max_polls=120, interval=5)
     print(f"  Engagement scraper cost: ${run_data.get('usageTotalUsd', 0)}", file=sys.stderr)
 
