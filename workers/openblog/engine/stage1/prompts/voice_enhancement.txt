@@ -1,0 +1,84 @@
+You have an initial voice persona extracted from a company website analysis.
+Now analyze these actual blog articles to REFINE and GROUND the voice persona in real writing examples.
+
+## Initial Voice Persona
+
+{initial_voice_persona}
+
+## Blog Articles to Analyze
+
+Use the URL Context tool to fetch and analyze each of these blog articles:
+
+{blog_urls}
+
+## Analysis Instructions
+
+For EACH article, focus on:
+
+### 1. OPENING & CLOSING
+- Note the first 1-2 sentences (opening hook type)
+- Note how the article ends (CTA style)
+
+### 2. KEY PATTERNS
+- Subheading style (questions, commands, how-to)
+- Use of lists (bullet points, numbered)
+- Approximate sentence length (short/medium/long)
+
+### 3. VOICE MARKERS
+- How they address readers (you/we/passive)
+- Tone (confident/friendly/instructional)
+- 3-5 distinctive phrases that capture the voice
+
+## ARTICLE SUMMARY
+
+For each article:
+
+**Article: [Title]**
+- URL: [url]
+- Opening style: [type]
+- Key phrases: ["phrase1", "phrase2"]
+- Subheadings: ["subhead1", "subhead2"]
+
+## Response Format
+
+Return JSON with TWO sections:
+1. `article_analysis` - Brief summary of each article
+2. The enhanced voice_persona fields
+
+{{
+  "article_analysis": [
+    {{
+      "url": "URL of article",
+      "title": "Title",
+      "opening_type": "question/statistic/story/bold_claim",
+      "subheadings_found": ["Subhead 1", "Subhead 2"],
+      "key_phrases_extracted": ["phrase 1", "phrase 2"],
+      "tone_observed": "confident and instructional"
+    }}
+  ],
+  "icp_profile": "Refined ICP description",
+  "voice_style": "2-3 sentence voice description",
+  "language_style": {{
+    "formality": "casual/professional/formal",
+    "complexity": "simple/moderate/technical",
+    "sentence_length": "short/mixed/detailed",
+    "perspective": "peer-to-peer/expert-to-learner"
+  }},
+  "do_list": ["Behavior 1", "Behavior 2"],
+  "dont_list": ["Anti-pattern 1", "Anti-pattern 2"],
+  "example_phrases": ["Real phrase 1", "Real phrase 2", "Real phrase 3"],
+  "opening_styles": ["Opening style 1", "Opening style 2"],
+  "transition_phrases": ["Transition 1", "Transition 2"],
+  "closing_styles": ["Closing style 1"],
+  "subheading_styles": ["Pattern 1", "Pattern 2"],
+  "technical_terms": ["Term 1", "Term 2"],
+  "power_words": ["Word 1", "Word 2"],
+  "uses_questions": true,
+  "uses_lists": true
+}}
+
+## Critical Instructions
+
+- **EXTRACT REAL CONTENT** - Phrases must come from actual articles
+- **DO NOT HALLUCINATE** - If you can't access an article, say so
+- Include at least 3 example_phrases from real content

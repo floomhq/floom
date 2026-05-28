@@ -1,0 +1,34 @@
+name: openblog-generate
+description: "Generate SEO blog articles from a company URL and a list of keywords using OpenBlog's 5-stage Gemini pipeline."
+entry: floom_entry.py
+
+inputs:
+  - key: url
+    label: "Company Website URL"
+    type: text
+    required: true
+
+  - key: keywords
+    label: "Keywords (one per line)"
+    type: text
+    required: true
+
+outputs:
+  - key: markdown
+    label: "Markdown Source"
+    type: markdown
+    path: out/markdown.md
+
+  - key: raw
+    label: "Raw JSON Result"
+    type: json
+    path: out/raw.json
+
+secrets:
+  - key: GEMINI_API_KEY
+    required: true
+
+runtime:
+  install:
+    - "pip install --quiet -r requirements.txt"
+  timeout: 1800
