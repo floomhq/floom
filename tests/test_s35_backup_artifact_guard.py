@@ -30,6 +30,19 @@ def test_prerun_disk_guard_blocks_when_free_space_below_threshold(monkeypatch):
     assert "minimum 1024" in str(exc.value)
 
 
+def test_artifacts_archived_repair_migration_adds_missing_column():
+    from db import _legacy_sqlite
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE runs (id TEXT PRIMARY KEY)")
+    _legacy_sqlite._ensure_runs_artifacts_archived_column(conn)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    conn.close()
+
+    assert "artifacts_archived" in columns
+
+
 def test_rotate_artifacts_gzips_old_transcripts(tmp_path):
     db_path = tmp_path / "floom.db"
     artifacts_dir = tmp_path / "artifacts"
