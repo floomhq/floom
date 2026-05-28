@@ -718,6 +718,16 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE runs ADD COLUMN quality_warning TEXT;
     """,
+    # -- migration 28: MCP server rows on the connections surface --------------
+    """
+    ALTER TABLE composio_connections ADD COLUMN kind TEXT NOT NULL DEFAULT 'composio';
+    ALTER TABLE composio_connections ADD COLUMN mcp_label TEXT;
+    ALTER TABLE composio_connections ADD COLUMN mcp_url TEXT;
+    ALTER TABLE composio_connections ADD COLUMN mcp_auth_secret TEXT;
+    ALTER TABLE composio_connections ADD COLUMN mcp_allowed_tools_json TEXT;
+    CREATE INDEX IF NOT EXISTS idx_composio_connections_kind
+        ON composio_connections(kind);
+    """,
 ]
 
 
@@ -745,7 +755,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",

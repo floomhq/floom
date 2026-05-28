@@ -2,14 +2,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { IconSprite } from "@/components/IconSprite";
 import { ConnectionRow } from "@/components/connections/ConnectionRow";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { ConnectionSkeleton } from "@/components/connections/ConnectionSkeleton";
 import { ConnectionsEmptyState } from "@/components/connections/ConnectionsEmptyState";
+import { BrandLogo } from "@/components/connections/BrandLogo";
 import {
   getLastUsedByConnection,
   toConnectionView,
@@ -17,7 +21,7 @@ import {
   type ConnectionView,
 } from "@/components/connections/connection-data";
 import { api } from "@/lib/api";
-import type { WorkerDetail } from "@/lib/types";
+import type { SecretItem, WorkerDetail } from "@/lib/types";
 
 type ConnectedAccountMetadata = {
   connected_at?: string;
@@ -38,6 +42,13 @@ export default function ConnectionsPage() {
   const [testing, setTesting] = useState<string | null>(null);
   const [scopesByConnectionId, setScopesByConnectionId] = useState<Record<string, string[]>>({});
   const [connectionSearch, setConnectionSearch] = useState("");
+  const [secrets, setSecrets] = useState<SecretItem[]>([]);
+  const [mcpFormOpen, setMcpFormOpen] = useState(false);
+  const [mcpLabel, setMcpLabel] = useState("");
+  const [mcpUrl, setMcpUrl] = useState("");
+  const [mcpAuthSecret, setMcpAuthSecret] = useState("");
+  const [mcpAllowedTools, setMcpAllowedTools] = useState("");
+  const [savingMcp, setSavingMcp] = useState(false);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const hydrateOneConnection = useCallback(async (record: ConnectionRecord) => {
@@ -62,7 +73,7 @@ export default function ConnectionsPage() {
 
   const hydrateConnectionMetadata = useCallback(
     (records: ConnectionRecord[]) => {
-      records.forEach((record) => {
+      records.filter((record) => (record.kind ?? "composio") === "composio").forEach((record) => {
         void hydrateOneConnection(record);
       });
     },
@@ -96,7 +107,13 @@ export default function ConnectionsPage() {
   }, [refresh]);
 
   useEffect(() => {
-    const hasInitiated = connections.some((connection) => connection.status === "initiated");
+    api.secrets.list().then(setSecrets).catch(() => setSecrets([]));
+  }, []);
+
+  useEffect(() => {
+    const hasInitiated = connections.some(
+      (connection) => (connection.kind ?? "composio") === "composio" && connection.status === "initiated"
+    );
     if (hasInitiated && !pollIntervalRef.current) {
       pollIntervalRef.current = setInterval(() => {
         void refresh();
@@ -148,9 +165,12 @@ export default function ConnectionsPage() {
     const q = connectionSearch.trim().toLowerCase();
     if (!q) return connectionViews;
     return connectionViews.filter((v) =>
-      [v.displayName, v.accountLabel, v.app_name].filter(Boolean).some((s) => s!.toLowerCase().includes(q))
+      [v.displayName, v.accountLabel, v.app_name, v.mcp_url].filter(Boolean).some((s) => s!.toLowerCase().includes(q))
     );
   }, [connectionViews, connectionSearch]);
+
+  const oauthConnections = filteredConnections.filter((connection) => (connection.kind ?? "composio") === "composio");
+  const mcpConnections = filteredConnections.filter((connection) => connection.kind === "mcp");
 
   function handleConnect(slug: string) {
     // PR S17: route through our pre-confirm page instead of going straight to OAuth.
@@ -208,6 +228,29 @@ export default function ConnectionsPage() {
     }
   }
 
+  async function handleCreateMcp() {
+    setSavingMcp(true);
+    try {
+      const created = await api.connections.createMcp({
+        label: mcpLabel,
+        url: mcpUrl,
+        auth_secret: mcpAuthSecret || null,
+        allowed_tools: parseAllowedTools(mcpAllowedTools),
+      });
+      toast.success(`${created.mcp_label || created.app_name} MCP server saved`);
+      setMcpLabel("");
+      setMcpUrl("");
+      setMcpAuthSecret("");
+      setMcpAllowedTools("");
+      setMcpFormOpen(false);
+      await refresh();
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Failed to save MCP server");
+    } finally {
+      setSavingMcp(false);
+    }
+  }
+
   return (
     <>
       <IconSprite />
@@ -220,6 +263,132 @@ export default function ConnectionsPage() {
         </header>
         <ConnectionsTabs />
 
+        <section aria-label="MCP servers" className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-medium text-foreground">MCP servers</h2>
+              <p className="text-sm text-muted-foreground">Custom tool servers available to agent workers.</p>
+            </div>
+            <Button type="button" size="sm" onClick={() => setMcpFormOpen((open) => !open)}>
+              <Plus className="size-4" />
+              Add MCP server
+            </Button>
+          </div>
+
+          {mcpFormOpen && (
+            <div className="rounded-md border border-line bg-card p-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="mcp-label" className="text-xs text-muted-foreground">Label</Label>
+                  <Input
+                    id="mcp-label"
+                    value={mcpLabel}
+                    onChange={(event) => setMcpLabel(event.target.value)}
+                    placeholder="github"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mcp-auth-secret" className="text-xs text-muted-foreground">Auth secret</Label>
+                  <select
+                    id="mcp-auth-secret"
+                    value={mcpAuthSecret}
+                    onChange={(event) => setMcpAuthSecret(event.target.value)}
+                    className="flex h-9 w-full rounded-lg border border-line-strong bg-paper px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+                  >
+                    <option value="">No bearer token</option>
+                    {secrets.map((secret) => (
+                      <option key={secret.name} value={secret.name}>{secret.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label htmlFor="mcp-url" className="text-xs text-muted-foreground">URL</Label>
+                  <Input
+                    id="mcp-url"
+                    value={mcpUrl}
+                    onChange={(event) => setMcpUrl(event.target.value)}
+                    placeholder="https://example.com/mcp"
+                  />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label htmlFor="mcp-tools" className="text-xs text-muted-foreground">Allowed tools</Label>
+                  <Textarea
+                    id="mcp-tools"
+                    value={mcpAllowedTools}
+                    onChange={(event) => setMcpAllowedTools(event.target.value)}
+                    placeholder="list_pull_requests, get_repo"
+                    className="min-h-20"
+                  />
+                </div>
+              </div>
+              <div className="mt-4 flex items-center gap-2">
+                <Button type="button" size="sm" onClick={handleCreateMcp} disabled={savingMcp}>
+                  {savingMcp ? "Saving..." : "Save MCP server"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setMcpFormOpen(false)}
+                  disabled={savingMcp}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-md border border-border bg-card overflow-hidden">
+            <div className="hidden md:grid grid-cols-[40px_minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 px-3 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] font-medium text-muted-foreground">
+              <span />
+              <span>Label</span>
+              <span>URL</span>
+              <span>Auth</span>
+              <span>Tools</span>
+              <span className="text-right pr-1">Actions</span>
+            </div>
+            {mcpConnections.length > 0 ? (
+              mcpConnections.map((connection) => (
+                <div
+                  key={connection.id}
+                  className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-3 md:gap-4 items-center px-3 py-2.5 border-b border-line last:border-b-0"
+                >
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-line bg-[var(--paper)]">
+                    <BrandLogo icon="" className="size-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate text-foreground">{connection.displayName}</p>
+                    <p className="md:hidden text-xs text-muted-foreground truncate">{connection.mcp_url}</p>
+                  </div>
+                  <span className="hidden md:inline text-xs text-muted-foreground truncate">{connection.mcp_url}</span>
+                  <span className="hidden md:inline text-xs text-muted-foreground truncate">
+                    {connection.mcp_auth_secret ? `bearer:${connection.mcp_auth_secret}` : "None"}
+                  </span>
+                  <span className="hidden md:inline text-xs text-muted-foreground truncate">
+                    {(connection.mcp_allowed_tools ?? []).length > 0
+                      ? (connection.mcp_allowed_tools ?? []).join(", ")
+                      : "All tools"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => void handleDelete(connection)}
+                    disabled={deleting === connection.id}
+                    title="Delete MCP server"
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
+              ))
+            ) : (
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                {connectionSearch ? "No MCP servers match the search." : "No MCP servers saved."}
+              </div>
+            )}
+          </div>
+        </section>
+
         <section aria-label="Connected tools">
           {loading ? (
             <div className="rounded-md border border-border bg-card overflow-hidden">
@@ -227,7 +396,7 @@ export default function ConnectionsPage() {
                 <ConnectionSkeleton key={index} />
               ))}
             </div>
-          ) : connectionViews.length === 0 ? (
+          ) : connectionViews.filter((connection) => (connection.kind ?? "composio") === "composio").length === 0 ? (
             <ConnectionsEmptyState onConnect={() => { window.location.href = "/connections/browse"; }} />
           ) : (
             // S27 (kept after S28 revert): compact row table. Federico
@@ -252,7 +421,7 @@ export default function ConnectionsPage() {
                   <span>Status</span>
                   <span className="text-right pr-1">Actions</span>
                 </div>
-                {filteredConnections.map((connection) => (
+                {oauthConnections.map((connection) => (
                   <ConnectionRow
                     key={connection.id}
                     connection={connection}
@@ -266,7 +435,7 @@ export default function ConnectionsPage() {
                     onTest={handleTest}
                   />
                 ))}
-                {filteredConnections.length === 0 && connectionSearch && (
+                {oauthConnections.length === 0 && connectionSearch && (
                   <div className="px-4 py-8 text-center text-sm text-muted-foreground">
                     No connections match &quot;{connectionSearch}&quot;.
                   </div>
@@ -287,6 +456,13 @@ export default function ConnectionsPage() {
       </div>
     </>
   );
+}
+
+function parseAllowedTools(value: string) {
+  return value
+    .split(/[,\n]/g)
+    .map((tool) => tool.trim())
+    .filter(Boolean);
 }
 
 async function loadWorkerDetails() {
