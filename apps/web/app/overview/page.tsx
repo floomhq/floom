@@ -1,5 +1,5 @@
 import { OverviewDashboard } from "@/components/overview/OverviewDashboard";
 
-export default function HomePage() {
+export default function OverviewPage() {
   return <OverviewDashboard />;
 }

@@ -138,7 +138,7 @@ def test_overview_shape_and_auth_gate(api_ctx):
     assert refreshed.json()["outcomes"][0] == {
         "worker_id": worker_id,
         "worker_name": "lead-research-bot",
-        "label": "Leads researched",
+        "label": "Work shipped",
         "count": 1,
     }
 
