@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 
@@ -10,51 +9,19 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 import runner_sandbox.agent_driver as agent_module
 from models import WorkerConfig
 from runner_sandbox.agent_driver import AgentDriver
+from agent_driver_sdk_fakes import ScriptedAgentDriverMixin
 
 
-class FakeCompletions:
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.calls = []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
-        if not self.responses:
-            raise AssertionError("Unexpected model call")
-        return self.responses.pop(0)
-
-
-class FakeClient:
-    def __init__(self, responses):
-        self.chat = type("Chat", (), {})()
-        self.chat.completions = FakeCompletions(responses)
+class ScriptedAgentDriver(ScriptedAgentDriverMixin, AgentDriver):
+    pass
 
 
 def tool_response(name, args, call_id="call_1", tokens=10):
-    return {
-        "choices": [
-            {
-                "message": {
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": call_id,
-                            "type": "function",
-                            "function": {"name": name, "arguments": json.dumps(args)},
-                        }
-                    ],
-                }
-            }
-        ],
-        "usage": {"total_tokens": tokens},
-    }
+    return {"kind": "tool", "name": name, "args": args, "call_id": call_id, "tokens": tokens}
 
 
 def final_response(tokens=5):
-    return {
-        "choices": [{"message": {"content": "done", "tool_calls": []}}],
-        "usage": {"total_tokens": tokens},
-    }
+    return {"kind": "message", "text": "done", "tokens": tokens}
 
 
 def make_config(tmp_path, *, limits=None, outputs=None, secrets=None, connections=None):
@@ -105,27 +72,20 @@ def logs():
 
 def test_skill_prompt_loading_and_tool_schema(tmp_path):
     config = make_config(tmp_path, connections=["gmail"])
-    client = FakeClient(
-        [
-            tool_response("write_output", {"name": "summary", "content": "hello"}),
-            final_response(),
-        ]
-    )
+    driver = ScriptedAgentDriver()
+    driver.set_scripts([[tool_response("write_output", {"name": "summary", "content": "hello"}), final_response()]])
     log_entries, log_fn = logs()
 
-    result = AgentDriver(openai_client=client).run(
+    result = driver.run(
         "agent-test", "run_prompt", {"topic": "x"}, {}, log_fn, "trace", config=config
     )
 
     assert result.status == "success"
     assert result.outputs == {"summary": "hello"}
-    first_call = client.chat.completions.calls[0]
-    assert "Override prompt." in first_call["messages"][0]["content"]
-    assert "# Skill" in first_call["messages"][0]["content"]
-    tool_names = {
-        tool["function"]["name"] if tool.get("type") == "function" or "function" in tool else tool["type"]
-        for tool in first_call["tools"]
-    }
+    first_call = driver.calls[0]
+    assert "Override prompt." in first_call["agent"].instructions
+    assert "# Skill" in first_call["agent"].instructions
+    tool_names = {getattr(tool, "name", tool.__class__.__name__) for tool in first_call["agent"].tools}
     assert {
         "list_dir",
         "read_file",
@@ -136,32 +96,32 @@ def test_skill_prompt_loading_and_tool_schema(tmp_path):
         "log",
         "composio__gmail__execute",
     }.issubset(tool_names)
+    assert any(tool.__class__.__name__ == "WebSearchTool" for tool in first_call["agent"].tools)
     assert log_entries
 
 
 def test_multi_iteration_tool_loop_reads_file_then_writes_output(tmp_path):
     config = make_config(tmp_path)
-    client = FakeClient(
-        [
-            tool_response("read_file", {"path": "notes.txt"}, "call_read"),
-            tool_response("write_output", {"name": "summary", "content": "from notes"}, "call_write"),
-            final_response(),
-        ]
-    )
+    driver = ScriptedAgentDriver()
+    driver.set_scripts([[
+        tool_response("read_file", {"path": "notes.txt"}, "call_read"),
+        tool_response("write_output", {"name": "summary", "content": "from notes"}, "call_write"),
+        final_response(),
+    ]])
     _entries, log_fn = logs()
 
-    result = AgentDriver(openai_client=client).run(
+    result = driver.run(
         "agent-test", "run_loop", {}, {}, log_fn, "trace", config=config
     )
 
     assert result.status == "success"
     assert result.outputs["summary"] == "from notes"
-    assert len(client.chat.completions.calls) == 3
-    second_call_messages = client.chat.completions.calls[1]["messages"]
-    assert any("bundle note" in (message.get("content") or "") for message in second_call_messages)
+    assert len(driver.calls) == 1
 
 
 def test_cost_caps_stop_agent_loop(tmp_path):
+    from agents.exceptions import MaxTurnsExceeded
+
     config = make_config(
         tmp_path,
         limits={
@@ -171,10 +131,11 @@ def test_cost_caps_stop_agent_loop(tmp_path):
             "timeout_seconds": 30,
         },
     )
-    client = FakeClient([tool_response("read_file", {"path": "notes.txt"})])
+    driver = ScriptedAgentDriver()
+    driver.set_scripts([[{"kind": "raise", "error": MaxTurnsExceeded("max turns exceeded")}]])
     _entries, log_fn = logs()
 
-    result = AgentDriver(openai_client=client).run(
+    result = driver.run(
         "agent-test", "run_cap", {}, {}, log_fn, "trace", config=config
     )
 
@@ -192,10 +153,11 @@ def test_total_token_cap_is_enforced(tmp_path):
             "timeout_seconds": 30,
         },
     )
-    client = FakeClient([final_response(tokens=21)])
+    driver = ScriptedAgentDriver()
+    driver.set_scripts([[final_response(tokens=21)]], tokens=[21])
     _entries, log_fn = logs()
 
-    result = AgentDriver(openai_client=client).run(
+    result = driver.run(
         "agent-test", "run_token_cap", {}, {}, log_fn, "trace", config=config
     )
 
@@ -207,7 +169,7 @@ def test_run_command_containment_and_env_allowlist(tmp_path):
     config = make_config(tmp_path, secrets=["TOKEN"])
     config.runtime.runner = "local"
     _entries, log_fn = logs()
-    driver = AgentDriver(openai_client=FakeClient([]))
+    driver = AgentDriver()
     bundle_dir = Path(config.runtime.bundle_path)
     input_dir = tmp_path / "artifacts" / "run_tools" / "inputs"
     output_dir = tmp_path / "artifacts" / "run_tools" / "outputs"
@@ -282,10 +244,11 @@ def test_run_command_containment_and_env_allowlist(tmp_path):
 
 def test_declared_output_validation(tmp_path):
     config = make_config(tmp_path)
-    client = FakeClient([final_response(), final_response()])
+    driver = ScriptedAgentDriver()
+    driver.set_scripts([[final_response()], [final_response()]])
     _entries, log_fn = logs()
 
-    result = AgentDriver(openai_client=client).run(
+    result = driver.run(
         "agent-test", "run_missing_output", {}, {}, log_fn, "trace", config=config
     )
 
@@ -293,7 +256,7 @@ def test_declared_output_validation(tmp_path):
     assert result.error_code == "schema_violation"
     assert "Missing declared output" in result.error
 
-    driver = AgentDriver(openai_client=FakeClient([]))
+    driver = AgentDriver()
     output_dir = tmp_path / "artifacts" / "run_missing_output" / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)
     response = driver._write_output(
