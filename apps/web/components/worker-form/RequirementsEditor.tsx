@@ -51,7 +51,7 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
 
   if (status === "set") {
     return (
-      <div className="flex items-center justify-between py-2 px-3 rounded-md border border-border bg-[#f0fdf4]">
+      <div className="flex items-center justify-between py-2 px-3 rounded-[var(--radius-button)] border border-border bg-[#f0fdf4]">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
           <span className="text-sm font-mono font-medium text-[#15803d]">{name}</span>
@@ -65,7 +65,7 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
   }
 
   return (
-    <div className="rounded-md border border-border bg-card p-3 space-y-2">
+    <div className="rounded-[var(--radius-button)] border border-border bg-card p-3 space-y-2">
       <div className="flex items-center gap-2">
         <span className="text-sm font-mono font-medium text-foreground">{name}</span>
         <span className="text-xs text-[#e67e22] bg-[#fef3c7] px-1.5 py-0.5 rounded border border-[#fde68a]">required</span>
@@ -240,7 +240,7 @@ function InlineRequirementRow({
 
   if (isReady) {
     return (
-      <div className="rounded-md border border-border bg-[#f0fdf4] p-3 space-y-2">
+      <div className="rounded-[var(--radius-button)] border border-border bg-[#f0fdf4] p-3 space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
@@ -266,7 +266,7 @@ function InlineRequirementRow({
   }
 
   return (
-    <div className="rounded-md border border-border bg-card p-3 space-y-2">
+    <div className="rounded-[var(--radius-button)] border border-border bg-card p-3 space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-foreground">{app.displayName}</span>
@@ -519,7 +519,7 @@ export function RequirementsEditor({
                     {connectionStates.map((c) => {
                       const appData = getSupportedApp(c.slug);
                       return (
-                        <div key={c.slug} className="flex items-center justify-between py-2 px-3 rounded-md border border-border bg-card">
+                        <div key={c.slug} className="flex items-center justify-between py-2 px-3 rounded-[var(--radius-button)] border border-border bg-card">
                           <span className="text-sm font-medium text-foreground">{appData.displayName}</span>
                           {c.connected ? (
                             <div className="flex items-center gap-2">

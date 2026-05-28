@@ -153,9 +153,9 @@ export function ConnectionEventPicker({
 
   if (connectedApps.length === 0) {
     return (
-      <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+      <div className="rounded-[var(--radius-button)] border border-border bg-muted/30 p-3 space-y-2">
         <p className="text-sm text-muted-foreground">No connected integrations yet.</p>
-        <a href="/connections/browse" className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs hover:bg-muted">
+        <a href="/connections/browse" className="inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-card px-2 py-1 text-xs hover:bg-muted">
           <Plus className="w-3 h-3" />
           Connect an integration
         </a>
