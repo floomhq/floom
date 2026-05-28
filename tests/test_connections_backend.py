@@ -5,15 +5,17 @@ Run from repo root:
 """
 
 import importlib
-import json
 import sys
 import types
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
+
+
+AUTH_HEADERS = {"x-floom-secret": "test-secret-connections"}
 
 
 def _load_api(monkeypatch, tmp_path):
@@ -26,9 +28,7 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("COMPOSIO_API_KEY", "test-key")
-    # Dev mode: empty FLOOM_SECRET = no auth gate. Set before import so
-    # load_dotenv(override=False) in main.py does not overwrite it.
-    monkeypatch.setenv("FLOOM_SECRET", "")
+    monkeypatch.setenv("FLOOM_SECRET", AUTH_HEADERS["x-floom-secret"])
 
     sys.path.insert(0, str(api_dir))
     for name in ["main", "db", "models", "worker_registry", "run_service", "composio_client"]:
@@ -54,7 +54,7 @@ def _seed_connection(client: TestClient, app_name: str = "gmail") -> dict:
         resp = client.post(
             "/connections",
             json={"app_name": app_name},
-            headers={},
+            headers=AUTH_HEADERS,
         )
     assert resp.status_code == 200, resp.text
     return resp.json()
@@ -81,12 +81,12 @@ class TestAccountInfoEndpoint:
             }
             resp = client.get(
                 f"/connections/{local_id}/account-info",
-                headers={},
+                headers=AUTH_HEADERS,
             )
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["email"] == "user@example.com"
+        assert body["email"] is None
         assert "https://www.googleapis.com/auth/gmail.readonly" in body["scopes"]
         assert "auth_config_id" not in body
         assert "user_id" not in body
@@ -97,7 +97,7 @@ class TestAccountInfoEndpoint:
         client = TestClient(main.app, raise_server_exceptions=True)
         resp = client.get(
             "/connections/nonexistent-id/account-info",
-            headers={},
+            headers=AUTH_HEADERS,
         )
         assert resp.status_code == 404
 
@@ -118,16 +118,16 @@ class TestAccountInfoEndpoint:
             }
             client.get(
                 f"/connections/{local_id}/account-info",
-                headers={},
+                headers=AUTH_HEADERS,
             )
 
         # Now list should have the cached values
-        list_resp = client.get("/connections", headers={"x-floom-secret": ""})
+        list_resp = client.get("/connections", headers=AUTH_HEADERS)
         assert list_resp.status_code == 200
         items = list_resp.json()
         item = next((c for c in items if c["id"] == local_id), None)
         assert item is not None
-        assert item["account_label"] == "fede@example.com"
+        assert item["account_label"] == "Connected account"
         assert "r_liteprofile" in item["scopes"]
 
 
@@ -140,7 +140,7 @@ class TestConnectionsListProjection:
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
         _seed_connection(client)
-        resp = client.get("/connections", headers={"x-floom-secret": ""})
+        resp = client.get("/connections", headers=AUTH_HEADERS)
         assert resp.status_code == 200
         items = resp.json()
         assert len(items) >= 1
@@ -169,18 +169,94 @@ class TestConnectionsListProjection:
             }
             client.get(
                 f"/connections/{local_id}/account-info",
-                headers={},
+                headers=AUTH_HEADERS,
             )
 
         with patch("main._fetch_composio_account_info") as mock_no_call:
-            list_resp = client.get("/connections", headers={"x-floom-secret": ""})
-            # List should NOT call Composio (scopes cached)
+            list_resp = client.get("/connections", headers=AUTH_HEADERS)
+            # Cached scopes keep the list endpoint local.
             mock_no_call.assert_not_called()
 
         items = list_resp.json()
         item = next((c for c in items if c["id"] == local_id), None)
         assert item is not None
         assert set(item["scopes"]) == {"channels:read", "chat:write"}
+
+    def test_list_refreshes_stale_initiated_status(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="github")
+        local_id = conn["id"]
+        composio_id = conn["composio_connection_id"]
+        stale_time = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
+
+        with main.get_db() as db:
+            db.execute(
+                """
+                UPDATE composio_connections
+                SET status = 'initiated', updated_at = ?, last_checked_at = NULL, last_check_status = NULL
+                WHERE id = ?
+                """,
+                (stale_time, local_id),
+            )
+
+        with patch("composio_client.check_status", return_value="active") as mock_check:
+            resp = client.get("/connections", headers=AUTH_HEADERS)
+
+        assert resp.status_code == 200
+        mock_check.assert_called_once_with(composio_id)
+        item = next((c for c in resp.json() if c["id"] == local_id), None)
+        assert item is not None
+        assert item["status"] == "active"
+        assert item["last_checked_at"] is not None
+        assert item["last_check_status"] == "active"
+
+    def test_list_skips_fresh_initiated_status(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="github")
+        local_id = conn["id"]
+
+        with main.get_db() as db:
+            db.execute(
+                "UPDATE composio_connections SET status = 'initiated', updated_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), local_id),
+            )
+
+        with patch("composio_client.check_status") as mock_check:
+            resp = client.get("/connections", headers=AUTH_HEADERS)
+
+        assert resp.status_code == 200
+        mock_check.assert_not_called()
+        item = next((c for c in resp.json() if c["id"] == local_id), None)
+        assert item is not None
+        assert item["status"] == "initiated"
+
+    def test_list_uses_last_checked_cache_for_pending_status(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="gmail")
+        local_id = conn["id"]
+        stale_time = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
+
+        with main.get_db() as db:
+            db.execute(
+                """
+                UPDATE composio_connections
+                SET status = 'pending', updated_at = ?, last_checked_at = ?
+                WHERE id = ?
+                """,
+                (stale_time, datetime.now(timezone.utc).isoformat(), local_id),
+            )
+
+        with patch("composio_client.check_status") as mock_check:
+            resp = client.get("/connections", headers=AUTH_HEADERS)
+
+        assert resp.status_code == 200
+        mock_check.assert_not_called()
+        item = next((c for c in resp.json() if c["id"] == local_id), None)
+        assert item is not None
+        assert item["status"] == "pending"
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +273,7 @@ class TestConnectionTestEndpoint:
         with patch("composio_client.check_status", return_value="active"):
             resp = client.post(
                 f"/connections/{local_id}/test",
-                headers={},
+                headers=AUTH_HEADERS,
             )
 
         assert resp.status_code == 200
@@ -215,7 +291,7 @@ class TestConnectionTestEndpoint:
         with patch("composio_client.check_status", return_value="expired"):
             resp = client.post(
                 f"/connections/{local_id}/test",
-                headers={},
+                headers=AUTH_HEADERS,
             )
 
         assert resp.status_code == 200
@@ -231,7 +307,7 @@ class TestConnectionTestEndpoint:
         with patch("composio_client.check_status", side_effect=RuntimeError("network error")):
             resp = client.post(
                 f"/connections/{local_id}/test",
-                headers={},
+                headers=AUTH_HEADERS,
             )
 
         assert resp.status_code == 200
@@ -248,10 +324,10 @@ class TestConnectionTestEndpoint:
         with patch("composio_client.check_status", return_value="active"):
             client.post(
                 f"/connections/{local_id}/test",
-                headers={},
+                headers=AUTH_HEADERS,
             )
 
-        list_resp = client.get("/connections", headers={"x-floom-secret": ""})
+        list_resp = client.get("/connections", headers=AUTH_HEADERS)
         items = list_resp.json()
         item = next((c for c in items if c["id"] == local_id), None)
         assert item is not None
@@ -263,7 +339,7 @@ class TestConnectionTestEndpoint:
         client = TestClient(main.app, raise_server_exceptions=True)
         resp = client.post(
             "/connections/no-such-id/test",
-            headers={},
+            headers=AUTH_HEADERS,
         )
         assert resp.status_code == 404
 
@@ -274,7 +350,7 @@ class TestConnectionTestEndpoint:
 
 class TestMigration18:
     def test_migration_adds_columns_to_connections(self, monkeypatch, tmp_path):
-        main = _load_api(monkeypatch, tmp_path)
+        _load_api(monkeypatch, tmp_path)
         import db as db_module
         with db_module.get_db() as conn:
             cols = {row["name"] for row in conn.execute("PRAGMA table_info(composio_connections)")}
@@ -285,7 +361,7 @@ class TestMigration18:
         assert "account_label" in cols
 
     def test_migration_adds_columns_to_secrets(self, monkeypatch, tmp_path):
-        main = _load_api(monkeypatch, tmp_path)
+        _load_api(monkeypatch, tmp_path)
         import db as db_module
         with db_module.get_db() as conn:
             cols = {row["name"] for row in conn.execute("PRAGMA table_info(secrets)")}
@@ -295,8 +371,8 @@ class TestMigration18:
 
     def test_migration_idempotent(self, monkeypatch, tmp_path):
         """Running apply_migrations twice does not raise."""
-        main = _load_api(monkeypatch, tmp_path)
+        _load_api(monkeypatch, tmp_path)
         import db as db_module
-        # Should not raise
+        # No exception is expected.
         db_module.apply_migrations()
         db_module.apply_migrations()
