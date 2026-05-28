@@ -159,7 +159,10 @@ export default function ConnectionsPage() {
     // PR S17: route through our pre-confirm page instead of going straight to OAuth.
     // workeros-cloud: prepend basePath /app since window.location bypasses
     // Next.js basePath rewriting (unlike router.push).
-    window.location.href = `/app/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/app/connections")}`;
+    // return_to MUST be the basePath-stripped path. The connect interstitial
+    // uses Next <Link href> + router.push which auto-prepend basePath; passing
+    // "/app/connections" produces "/app/app/connections".
+    window.location.href = `/app/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`;
   }
 
   async function handleRefresh(connection: ConnectionView) {

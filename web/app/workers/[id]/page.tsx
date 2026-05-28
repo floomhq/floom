@@ -206,8 +206,23 @@ export default function WorkerDetailPage() {
     try {
       const result = await api.workers.run(worker.id, inputs);
       if (!result.run_id) throw new Error("Run ID missing from API response");
-      toast.success("Run started");
+      // Persisted feedback: toast + auto-switch to History so the user sees
+      // the new run row appear at the top. The inline RunDetailSplitPane on
+      // the Run tab depends on loadActiveRun() succeeding immediately after
+      // POST, which can race; switching to History always works because the
+      // refetched worker.recent_runs contains the new row.
+      toast.success("Run started", {
+        description: "Switching to History so you can watch it.",
+      });
       setActiveRunId(result.run_id);
+      setSection("runs");
+      // Refetch worker so recent_runs includes the new row.
+      try {
+        const updated = await api.workers.get(worker.id);
+        setWorker(updated);
+      } catch {
+        // Non-fatal; the next manual refresh will pick it up.
+      }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to start run");
     } finally {
