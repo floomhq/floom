@@ -3864,6 +3864,35 @@ async def draft_and_create_worker(
             raw_manifest = pyyaml.safe_load(worker_yml_str)
             if not isinstance(raw_manifest, dict):
                 raise ValueError("worker_yml must be a YAML mapping")
+            # Auto-repair: the LLM frequently emits exec.mode=pure-script
+            # without exec.command, which the strict validator rejects. The
+            # platform's pure-script convention is `python run.py`, so when
+            # both mode=pure-script and command is missing AND entry/runner
+            # match the convention, inject the canonical command rather than
+            # burning another LLM retry. Same patch for "hybrid". This was
+            # the dominant failure path that caused /api/workers/draft-and-create
+            # to 502 (Bug #38).
+            exec_block = raw_manifest.get("exec")
+            if isinstance(exec_block, dict):
+                exec_mode = (exec_block.get("mode") or "").strip().lower()
+                exec_command = (exec_block.get("command") or "").strip()
+                exec_entry = (exec_block.get("entry") or "").strip()
+                if exec_mode in ("pure-script", "hybrid") and not exec_command:
+                    inferred_entry = exec_entry or "run.py"
+                    if inferred_entry.endswith(".py"):
+                        exec_block["command"] = f"python {inferred_entry}"
+                        if not exec_block.get("entry"):
+                            exec_block["entry"] = inferred_entry
+                        # Re-serialize so downstream code sees the repaired yml
+                        worker_yml_str = pyyaml.safe_dump(
+                            raw_manifest, sort_keys=False, default_flow_style=False
+                        )
+                        logger.info(
+                            "draft-and-create auto-repair: injected "
+                            "exec.command=%r for mode=%r",
+                            exec_block["command"],
+                            exec_mode,
+                        )
             parse_worker_manifest(raw_manifest)
             last_yaml_error = None
             break
