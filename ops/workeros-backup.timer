@@ -1,10 +1,10 @@
 [Unit]
-Description=Daily Workeros SQLite snapshot
+Description=Hourly Workeros data snapshot
 Requires=workeros-backup.service
 
 [Timer]
-OnCalendar=daily
-RandomizedDelaySec=15m
+OnCalendar=hourly
+RandomizedDelaySec=5m
 Persistent=true
 Unit=workeros-backup.service
 
