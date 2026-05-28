@@ -192,7 +192,7 @@ def test_stock_agent_workers_do_not_require_user_openai_secret():
         assert "OPENAI_API_KEY" not in capability_secrets
 
 
-def test_agent_tool_schemas_do_not_emit_native_web_search(monkeypatch, tmp_path):
+def test_agent_tool_schemas_emit_native_web_search(monkeypatch, tmp_path):
     _load_api(monkeypatch, tmp_path)
     from runner_sandbox.agent_driver import AgentDriver
 
@@ -204,5 +204,5 @@ def test_agent_tool_schemas_do_not_emit_native_web_search(monkeypatch, tmp_path)
 
     tools = AgentDriver()._tool_schemas(config)
 
-    assert all(tool.get("type") in {"function", "custom"} for tool in tools)
-    assert all(tool.get("type") != "web_search" for tool in tools)
+    assert any(tool.get("type") == "web_search" for tool in tools)
+    assert all(tool.get("type") in {"function", "custom", "web_search"} for tool in tools)
