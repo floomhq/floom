@@ -7,9 +7,9 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Save } from "lucide-react";
+import { Folder, Save } from "lucide-react";
 import { load as parseYaml } from "js-yaml";
-import type { ConnectionItem, TriggerSpec, WorkerDetail, WorkerFile } from "@/lib/types";
+import type { ConnectionItem, ContextSummary, TriggerSpec, WorkerContextSpec, WorkerDetail, WorkerFile } from "@/lib/types";
 import {
   ExecModePicker,
   FilesEditor,
@@ -63,6 +63,117 @@ function detectEntry(files: { path: string; content: string }[]): {
   return { entry: "none", legacyFallback: true };
 }
 
+function contextNameFromSpec(spec: WorkerContextSpec): string | null {
+  if (typeof spec === "string") return spec;
+  if (spec && typeof spec.name === "string") return spec.name;
+  return null;
+}
+
+function readContextSpecs(workerYaml: string): WorkerContextSpec[] {
+  try {
+    const parsed = parseYaml(workerYaml) as { contexts?: unknown } | null;
+    if (!parsed || !Array.isArray(parsed.contexts)) return [];
+    return parsed.contexts.filter((item): item is WorkerContextSpec => (
+      typeof item === "string" ||
+      (typeof item === "object" && item !== null && "name" in item)
+    ));
+  } catch {
+    return [];
+  }
+}
+
+function quoteYaml(value: string): string {
+  return JSON.stringify(value);
+}
+
+function contextSpecLines(spec: WorkerContextSpec): string[] {
+  if (typeof spec === "string") return [`  - ${quoteYaml(spec)}`];
+  const lines = [`  - name: ${quoteYaml(spec.name)}`];
+  if (spec.writeable) lines.push("    writeable: true");
+  if (spec.source && spec.source !== "local") lines.push(`    source: ${quoteYaml(spec.source)}`);
+  return lines;
+}
+
+function replaceContextsBlock(workerYaml: string, specs: WorkerContextSpec[]): string {
+  const block = specs.length ? ["contexts:", ...specs.flatMap(contextSpecLines)] : [];
+  const lines = workerYaml.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^contexts:\s*(?:#.*)?$/.test(line));
+  if (start === -1) {
+    const trimmed = workerYaml.replace(/\s*$/, "");
+    return block.length ? `${trimmed}\n${block.join("\n")}\n` : `${trimmed}\n`;
+  }
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end];
+    if (/^\S/.test(line) && line.trim()) break;
+    end += 1;
+  }
+  lines.splice(start, end - start, ...block);
+  return lines.join("\n").replace(/\s*$/, "\n");
+}
+
+function ContextsEditor({
+  contexts,
+  workerYaml,
+  onWorkerYamlChange,
+}: {
+  contexts: ContextSummary[];
+  workerYaml: string;
+  onWorkerYamlChange: (content: string) => void;
+}) {
+  const existingSpecs = readContextSpecs(workerYaml);
+  const existingByName = new Map<string, WorkerContextSpec>();
+  for (const spec of existingSpecs) {
+    const name = contextNameFromSpec(spec);
+    if (name) existingByName.set(name, spec);
+  }
+  const selected = new Set(existingByName.keys());
+
+  function toggle(name: string, checked: boolean) {
+    const names = new Set(selected);
+    if (checked) names.add(name);
+    else names.delete(name);
+    const ordered = contexts
+      .map((context) => context.name)
+      .filter((contextName) => names.has(contextName));
+    for (const nameInYaml of selected) {
+      if (names.has(nameInYaml) && !ordered.includes(nameInYaml)) ordered.push(nameInYaml);
+    }
+    const nextSpecs = ordered.map((contextName) => existingByName.get(contextName) || contextName);
+    onWorkerYamlChange(replaceContextsBlock(workerYaml, nextSpecs));
+  }
+
+  return (
+    <section className="border border-line bg-card">
+      <div className="border-b border-line px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Folder className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">Contexts</h2>
+        </div>
+      </div>
+      <div className="space-y-2 p-3">
+        {contexts.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No contexts found.</p>
+        ) : contexts.map((context) => (
+          <label
+            key={context.name}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(context.name)}
+              onChange={(event) => toggle(context.name, event.target.checked)}
+              className="size-4 accent-foreground"
+            />
+            <span className="min-w-0 flex-1 truncate font-mono text-xs">{context.name}</span>
+            <span className="text-xs text-muted-foreground">{context.file_count}</span>
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Loading skeleton
 // ---------------------------------------------------------------------------
@@ -107,6 +218,7 @@ export default function EditWorkerPage() {
 
   const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([defaultTriggerRow()]);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
+  const [contexts, setContexts] = useState<ContextSummary[]>([]);
   const [saving, setSaving] = useState(false);
   const { entry: detectedEntry, legacyFallback } = detectEntry(files);
 
@@ -114,7 +226,8 @@ export default function EditWorkerPage() {
     Promise.all([
       api.workers.get(id as string),
       api.connections.list().catch(() => [] as ConnectionItem[]),
-    ]).then(([loadedWorker, connectionItems]) => {
+      api.contexts.list().catch(() => [] as ContextSummary[]),
+    ]).then(([loadedWorker, connectionItems, contextItems]) => {
       setWorker(loadedWorker);
 
       const workerFiles = (loadedWorker.files || [])
@@ -143,6 +256,7 @@ export default function EditWorkerPage() {
         : [loadedWorker.config.trigger];
       setTriggerRows(specs.map((s) => makeTriggerRow(s)));
       setConnections(connectionItems);
+      setContexts(contextItems);
       setLoading(false);
     }).catch((e) => {
       toast.error(e instanceof Error ? e.message : "Failed to load worker");
@@ -268,6 +382,12 @@ export default function EditWorkerPage() {
           <McpConnectionsEditor
             workerYaml={getContent("worker.yml")}
             connections={connections}
+            onWorkerYamlChange={updateWorkerYaml}
+          />
+
+          <ContextsEditor
+            contexts={contexts}
+            workerYaml={getContent("worker.yml")}
             onWorkerYamlChange={updateWorkerYaml}
           />
 
