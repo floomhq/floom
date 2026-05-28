@@ -226,42 +226,11 @@ export default function ConnectionsBrowsePage() {
     return `${start}-${end} of ${catalog.total_items.toLocaleString()} integrations`;
   }, [catalog, loading, loadError]);
 
-  async function handleConnect(slug: string) {
+  function handleConnect(slug: string) {
     setConnecting(slug);
-    const oauthTab = window.open("", "_blank");
-    if (oauthTab) oauthTab.opener = null;
-    try {
-      const result = await api.connections.initiate(slug);
-      if (result.redirect_url) {
-        if (oauthTab) {
-          oauthTab.location.href = result.redirect_url;
-        } else {
-          window.open(result.redirect_url, "_blank");
-        }
-        toast.success(`OAuth opened for ${slug}`);
-      } else {
-        oauthTab?.close();
-        toast.success(`Connection initiated for ${slug}`);
-      }
-    } catch (error) {
-      oauthTab?.close();
-      const msg = error instanceof Error ? error.message : `Failed to connect ${slug}`;
-      // Backend returns "api_key_only: ..." when the app uses API-key auth, not OAuth.
-      // Redirect to secrets so the user can add the key there instead.
-      if (msg.startsWith("api_key_only:")) {
-        toast.info(`${slug} uses an API key, not OAuth. Add the key in Secrets.`, {
-          action: {
-            label: "Go to Secrets",
-            onClick: () => router.push("/secrets"),
-          },
-          duration: 8000,
-        });
-      } else {
-        toast.error(msg);
-      }
-    } finally {
-      setConnecting(null);
-    }
+    router.push(
+      `/connections/redirect?app=${encodeURIComponent(slug)}&return_to=${encodeURIComponent("/connections/browse")}`
+    );
   }
 
   return (
