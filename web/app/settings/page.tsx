@@ -17,6 +17,14 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { AlertTriangle, CheckCircle2, Check, Copy } from "lucide-react";
 
@@ -358,10 +366,11 @@ function CloudAccessPanel() {
     }
   }
 
-  async function handleSignOut() {
-    // workeros-cloud: route through the proxy so we don't hardcode the
-    // backend host (paired with the sidebar Sign out). Post-logout lands on
-    // the marketing /login instead of the marketing root.
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  async function confirmSignOut() {
+    setSigningOut(true);
     try {
       await fetch("/app/api/proxy/auth/logout", { method: "POST" });
     } finally {
@@ -379,12 +388,36 @@ function CloudAccessPanel() {
               <div className="text-xs text-muted-foreground">Signed in as</div>
               <div className="font-medium">{me?.email ?? "—"}</div>
             </div>
-            <Button variant="outline" size="sm" onClick={handleSignOut}>
+            <Button variant="outline" size="sm" onClick={() => setSignOutOpen(true)}>
               Sign out
             </Button>
           </div>
         </div>
       </section>
+
+      <Dialog open={signOutOpen} onOpenChange={setSignOutOpen}>
+        <DialogContent className="sm:max-w-[380px]">
+          <DialogHeader>
+            <DialogTitle>Sign out?</DialogTitle>
+            <DialogDescription>
+              You will be signed out of {me?.email ?? "this account"} and returned to the sign-in page.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSignOutOpen(false)}
+              disabled={signingOut}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" onClick={() => void confirmSignOut()} disabled={signingOut}>
+              {signingOut ? "Signing out…" : "Sign out"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">Setup commands</h2>

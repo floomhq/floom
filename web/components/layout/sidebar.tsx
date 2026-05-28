@@ -8,6 +8,14 @@ import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 function FloomMark({ size = 28 }: { size?: number }) {
   return (
@@ -209,16 +217,14 @@ function UserProfileFooter() {
   const initial = email
     ? email.split("@")[0]?.slice(0, 2).toUpperCase() ?? "??"
     : "—";
-  const handleSignOut = async () => {
-    // workeros-cloud: go through the dashboard proxy instead of hardcoding
-    // the backend host. Proxy now supports /auth/* and forwards Set-Cookie
-    // so the backend's session-cookie clear actually reaches the browser.
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const confirmSignOut = async () => {
+    setSigningOut(true);
     try {
       await fetch("/app/api/proxy/auth/logout", { method: "POST" });
     } finally {
-      // Land on the marketing /login (NOT the marketing root) so the user
-      // is one click away from signing back in. /login is served by the
-      // marketing project at the apex (no /app basePath).
       window.location.href = "/login";
     }
   };
@@ -234,7 +240,7 @@ function UserProfileFooter() {
           </p>
           <button
             type="button"
-            onClick={handleSignOut}
+            onClick={() => setSignOutOpen(true)}
             className="text-[10px] text-muted-foreground hover:text-foreground truncate"
           >
             Sign out
@@ -242,6 +248,58 @@ function UserProfileFooter() {
         </div>
       </div>
       <ThemeModeButton />
+      <SignOutDialog
+        open={signOutOpen}
+        onOpenChange={setSignOutOpen}
+        onConfirm={confirmSignOut}
+        loading={signingOut}
+        email={email}
+      />
     </div>
+  );
+}
+
+function SignOutDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+  loading,
+  email,
+}: {
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  onConfirm: () => void | Promise<void>;
+  loading: boolean;
+  email: string | null;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[380px]">
+        <DialogHeader>
+          <DialogTitle>Sign out?</DialogTitle>
+          <DialogDescription>
+            You will be signed out of {email ?? "this account"} and returned to the sign-in page.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="inline-flex h-9 items-center justify-center rounded-md border border-line bg-card px-4 text-sm font-medium hover:bg-muted transition-colors"
+            disabled={loading}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void onConfirm()}
+            disabled={loading}
+            className="inline-flex h-9 items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background hover:opacity-90 disabled:opacity-60 transition-opacity"
+          >
+            {loading ? "Signing out…" : "Sign out"}
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
