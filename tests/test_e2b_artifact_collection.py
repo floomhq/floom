@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,56 @@ def _config(outputs):
         runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
         outputs=outputs,
     )
+
+
+class FakeRunResult:
+    exit_code = 0
+    stdout = "stdout after exit\n"
+    stderr = "stderr after exit\n"
+
+
+class FakeCommandRunner:
+    def __init__(self, files):
+        self.files = files
+        self.run_calls = []
+
+    def run(self, command, **kwargs):
+        self.run_calls.append((command, kwargs))
+        if command == "python run.py":
+            kwargs["on_stdout"]("live stdout\n")
+            kwargs["on_stderr"]("live stderr\n")
+            self.files.write(
+                "/home/user/worker/result.json",
+                '{"status":"success","outputs":{"ok":true},"artifacts":[]}',
+            )
+        return FakeRunResult()
+
+
+class FakeFullSandbox:
+    instances = []
+
+    def __init__(self):
+        self.files = FakeWritableFiles({})
+        self.commands = FakeCommandRunner(self.files)
+        self.killed = False
+        FakeFullSandbox.instances.append(self)
+
+    @classmethod
+    def create(cls, **_kwargs):
+        return cls()
+
+    def kill(self):
+        self.killed = True
+
+
+class FakeWritableFiles(FakeFiles):
+    def make_dir(self, _path):
+        return None
+
+    def write(self, path, content):
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        self._files[path] = bytes(content)
 
 
 def test_collects_declared_sandbox_artifacts(tmp_path, monkeypatch):
@@ -117,6 +168,51 @@ def test_skips_path_traversal_artifact(tmp_path, monkeypatch):
     assert artifacts == []
     assert not any(tmp_path.rglob("secret.txt"))
     assert any("Skipping invalid artifact path" in msg for _level, msg in logs)
+
+
+def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
+    monkeypatch.setenv("E2B_API_KEY", "e2b-test")
+    monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeFullSandbox))
+    FakeFullSandbox.instances = []
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('unused')\n")
+    (worker_dir / "requirements.txt").write_text("")
+    config = WorkerConfig(
+        id="stream-test",
+        name="Stream Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        outputs=[],
+    )
+    logs = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="stream-test",
+        run_id="run_stream",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((level, msg)),
+        trace_id="trace_stream",
+        timeout_seconds=300,
+        config=config,
+    )
+
+    assert result.status == "success"
+    assert result.outputs == {"ok": True}
+    sandbox = FakeFullSandbox.instances[-1]
+    command, kwargs = sandbox.commands.run_calls[-1]
+    assert command == "python run.py"
+    assert callable(kwargs["on_stdout"])
+    assert callable(kwargs["on_stderr"])
+    assert logs.count(("info", "[e2b] live stdout")) == 1
+    assert logs.count(("warning", "[e2b] stderr: live stderr")) == 1
+    assert not any("stdout after exit" in message for _level, message in logs)
 
 
 def test_long_worker_timeout_extends_install_and_sandbox_lifetime():
