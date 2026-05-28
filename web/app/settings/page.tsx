@@ -17,9 +17,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Check, Copy } from "lucide-react";
 
 // S22f: Notifications tab is currently hidden. The TabKey type still includes
 // it so the URL ?tab=notifications doesn't blow up; we just silently fall back
@@ -149,8 +148,8 @@ function SettingsContent() {
           <TabsTrigger value="danger">Danger zone</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="api" className="space-y-4">
-          <CliCommandPanel />
+        <TabsContent value="api" className="space-y-6">
+          <CloudAccessPanel />
         </TabsContent>
 
         <TabsContent value="system" className="space-y-8">
@@ -326,6 +325,114 @@ function Row({
     <div className="flex items-center justify-between">
       <span className="text-muted-foreground">{label}</span>
       <span className={`font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+// workeros-cloud Settings → API access tab. Replaces the OSS-engine
+// CliCommandPanel which assumed a single static FLOOM_SECRET. In cloud
+// the user authenticates via Supabase + the CLI does a device-code login,
+// so there's no token to "reveal/copy" in the dashboard.
+function CloudAccessPanel() {
+  const [me, setMe] = useState<{ email?: string; user_id?: string } | null>(null);
+  const [copied, setCopied] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/app/api/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setMe(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const snippets = {
+    cli: "npm i -g @floomhq/workeros\nfloom login",
+    mcp: "npx @floomhq/workeros install --target claude",
+    api: 'curl -sS https://workeros-api.floom.dev/api/workers \\\n  -H "Authorization: Bearer $WORKEROS_TOKEN"',
+  };
+
+  async function copy(key: keyof typeof snippets) {
+    try {
+      await navigator.clipboard.writeText(snippets[key]);
+      setCopied(key);
+      window.setTimeout(() => setCopied(""), 1200);
+    } catch {
+      toast.error("Could not copy");
+    }
+  }
+
+  async function handleSignOut() {
+    try {
+      await fetch("https://workeros-api.floom.dev/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } finally {
+      window.location.href = "/";
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Account</h2>
+        <div className="rounded-md border border-border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs text-muted-foreground">Signed in as</div>
+              <div className="font-medium">{me?.email ?? "—"}</div>
+            </div>
+            <Button variant="outline" size="sm" onClick={handleSignOut}>
+              Sign out
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Setup commands</h2>
+        <p className="text-sm text-muted-foreground">
+          Install the CLI, hook up the MCP server, or call the API directly.
+          The CLI walks you through device-code login the first time.
+        </p>
+        <Tabs defaultValue="cli">
+          <TabsList>
+            <TabsTrigger value="cli">CLI</TabsTrigger>
+            <TabsTrigger value="mcp">MCP</TabsTrigger>
+            <TabsTrigger value="api">API</TabsTrigger>
+          </TabsList>
+          {(["cli", "mcp", "api"] as const).map((key) => (
+            <TabsContent key={key} value={key} className="mt-3">
+              <div className="relative rounded-md border border-border bg-[var(--paper-2)] p-3">
+                <pre className="overflow-x-auto whitespace-pre text-xs font-mono text-foreground">
+                  {snippets[key]}
+                </pre>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="absolute right-2 top-2"
+                  onClick={() => copy(key)}
+                >
+                  {copied === key ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                  {copied === key ? "Copied" : "Copy"}
+                </Button>
+              </div>
+              {key === "api" && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  $WORKEROS_TOKEN comes from{" "}
+                  <code className="text-foreground">floom login</code> (CLI prints
+                  the personal access token). Treat it like a password.
+                </p>
+              )}
+            </TabsContent>
+          ))}
+        </Tabs>
+      </section>
     </div>
   );
 }
