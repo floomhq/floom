@@ -20,15 +20,16 @@ import { toast } from "sonner";
 import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
-  Trash2, ArrowLeft, BookOpen,
+  Trash2, ArrowLeft, BookOpen, Save, X,
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { FileInputUpload } from "@/components/FileInputUpload";
-import { FilesEditor, TriggersEditor, makeTriggerRow, buildTriggersYaml, replaceTriggerBlock } from "@/components/worker-form";
+import { FilesEditor, TriggersEditor, WorkerMetadataForm, makeTriggerRow, buildTriggersYaml, replaceTriggerBlock } from "@/components/worker-form";
 import type { TriggerRow } from "@/components/worker-form";
+import type { WorkerMetadataValues } from "@/components/worker-form";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { formatRelative, formatDuration } from "@/lib/formatters";
 import { RunStatusBadge } from "@/components/RunStatus";
@@ -72,112 +73,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
 ];
 
-function triggerTypeLabel(type?: string) {
-  const value = (type || "manual").toLowerCase();
-  if (value === "schedule" || value === "scheduled") return "Schedule";
-  if (value === "webhook") return "Webhook";
-  if (value === "composio") return "App event";
-  return "Manual";
-}
-
-function triggerHeadline(spec: TriggerSpec) {
-  const type = (spec.type || "manual").toLowerCase();
-  if (type === "schedule" || type === "scheduled") {
-    if (spec.cron) return "Cron";
-    return "Recurring schedule";
-  }
-  if (type === "webhook") return "Webhook endpoint";
-  if (type === "composio") {
-    const event = spec.composio?.event;
-    return event ? `On ${event}` : "Connected app event";
-  }
-  return "Manual run";
-}
-
-function triggerDetails(spec: TriggerSpec) {
-  const type = (spec.type || "manual").toLowerCase();
-  if (type === "schedule" || type === "scheduled") {
-    return [
-      spec.cron ? { label: "Cron", value: spec.cron, code: true } : null,
-      spec.timezone ? { label: "Timezone", value: spec.timezone, code: false } : null,
-    ].filter(Boolean) as { label: string; value: string; code: boolean }[];
-  }
-  if (type === "webhook") {
-    const methods = spec.webhook?.allowed_methods?.length
-      ? spec.webhook.allowed_methods.join(", ")
-      : "POST";
-    return [
-      { label: "Methods", value: methods, code: false },
-      { label: "Secret", value: spec.webhook?.secret ? "Required" : "Not required", code: false },
-    ];
-  }
-  if (type === "composio") {
-    return [
-      spec.composio?.connection_id
-        ? { label: "Connection", value: spec.composio.connection_id, code: true }
-        : null,
-      spec.composio?.event
-        ? { label: "Event", value: spec.composio.event, code: true }
-        : null,
-    ].filter(Boolean) as { label: string; value: string; code: boolean }[];
-  }
-  return [{ label: "Source", value: "Manual Run tab", code: false }];
-}
-
-function ConfiguredTriggersSummary({ specs }: { specs: TriggerSpec[] }) {
-  if (specs.length === 0) return null;
-
-  return (
-    <div className="rounded-md border border-line bg-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Configured in worker.yml
-          </p>
-          <h3 className="text-sm font-medium text-foreground">
-            {specs.length === 1 ? "Declared trigger" : "Declared triggers"}
-          </h3>
-        </div>
-        <Badge variant="outline" className="shrink-0 border-line text-muted-foreground">
-          {specs.length}
-        </Badge>
-      </div>
-      <div className="mt-4 space-y-3">
-        {specs.map((spec, index) => (
-          <div
-            key={`${spec.type || "manual"}-${spec.cron || spec.composio?.event || index}`}
-            className="rounded-md border border-line bg-background/60 p-3"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="rounded text-xs">
-                {triggerTypeLabel(spec.type)}
-              </Badge>
-              <span className="text-sm font-medium text-foreground">
-                {triggerHeadline(spec)}
-              </span>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {triggerDetails(spec).map((detail) => (
-                <span
-                  key={`${detail.label}-${detail.value}`}
-                  className="inline-flex items-center gap-1.5 rounded border border-line bg-card px-2 py-1 text-xs text-muted-foreground"
-                >
-                  <span>{detail.label}</span>
-                  {detail.code ? (
-                    <code className="font-mono text-foreground">{detail.value}</code>
-                  ) : (
-                    <span className="text-foreground">{detail.value}</span>
-                  )}
-                </span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Main page component
 // ---------------------------------------------------------------------------
@@ -186,6 +81,9 @@ export default function WorkerDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // S42: edit mode lives in ?edit=1 URL param (no separate /edit route).
+  const isEditMode = searchParams.get("edit") === "1";
 
   // S22b: Overview is the default landing section.
   // S28: tab state now lives in URL hash (#run, #triggers, etc.) instead of
@@ -216,10 +114,37 @@ export default function WorkerDetailPage() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const activeRunStream = useRunStream(activeRunId);
 
-  // Triggers edit state
+  // Triggers edit state (always editable regardless of edit mode)
   const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([]);
   const [savingTriggers, setSavingTriggers] = useState(false);
   const [triggersDirty, setTriggersDirty] = useState(false);
+
+  // S42: edit mode — files editor state (Source tab in edit mode)
+  const [editFiles, setEditFiles] = useState<{ path: string; content: string }[]>([]);
+  const [editFilesOriginal, setEditFilesOriginal] = useState<Record<string, string>>({});
+  const [editSelectedPath, setEditSelectedPath] = useState<string>("worker.yml");
+
+  // S42: edit mode — metadata state (About tab in edit mode)
+  const [metaValues, setMetaValues] = useState<WorkerMetadataValues>({
+    workerId: "",
+    name: "",
+    description: "",
+  });
+  const [metaOriginal, setMetaOriginal] = useState<WorkerMetadataValues>({
+    workerId: "",
+    name: "",
+    description: "",
+  });
+
+  // S42: saving state
+  const [saving, setSaving] = useState(false);
+
+  // Derived dirty flags
+  const filesDirty = editFiles.some((f) => f.content !== (editFilesOriginal[f.path] ?? ""));
+  const metaDirty =
+    metaValues.name !== metaOriginal.name ||
+    metaValues.description !== metaOriginal.description;
+  const anyDirty = filesDirty || metaDirty;
 
   const setSection = useCallback((s: Section) => {
     setActiveSection(s);
@@ -285,6 +210,23 @@ export default function WorkerDetailPage() {
         const files = w.files || [];
         const defaultFile = files.find((f) => f.path === "SKILL.md") || files.find((f) => f.path === "worker.yml") || files[0];
         if (defaultFile) setSelectedFile(defaultFile.path);
+        // S42: init edit-mode file state
+        const editableFiles = files
+          .filter((f: WorkerFile) => !f.binary)
+          .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+        setEditFiles(editableFiles);
+        const snap: Record<string, string> = {};
+        for (const f of editableFiles) snap[f.path] = f.content;
+        setEditFilesOriginal(snap);
+        setEditSelectedPath("worker.yml");
+        // S42: init metadata state
+        const meta: WorkerMetadataValues = {
+          workerId: w.id,
+          name: w.name,
+          description: w.description || "",
+        };
+        setMetaValues(meta);
+        setMetaOriginal(meta);
         // Init trigger rows from triggers_spec
         const specs: TriggerSpec[] = w.triggers_spec || [];
         if (specs.length > 0) {
@@ -378,6 +320,74 @@ export default function WorkerDetailPage() {
       toast.success("Sample applied. Upload a file for the file field(s)");
     } else {
       toast.success("Sample input applied");
+    }
+  }
+
+  // S42: toggle edit mode via URL param
+  function enterEditMode() {
+    const url = new URL(window.location.href);
+    url.searchParams.set("edit", "1");
+    router.push(url.toString());
+  }
+
+  function exitEditMode(force = false) {
+    if (!force && anyDirty && !confirm("Discard unsaved changes?")) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("edit");
+    router.push(url.toString());
+  }
+
+  // S42: save all edit-mode changes (metadata + files)
+  async function handleSave() {
+    if (!worker) return;
+    setSaving(true);
+    try {
+      const patchedFiles: { path: string; content: string }[] = [...editFiles];
+
+      // Patch metadata into worker.yml if name/description changed
+      if (metaDirty) {
+        const ymlFile = patchedFiles.find((f) => f.path === "worker.yml");
+        if (ymlFile) {
+          let yml = ymlFile.content;
+          // Update name field
+          yml = yml.replace(/^name:\s*.*/m, `name: ${JSON.stringify(metaValues.name)}`);
+          // Update description field
+          if (/^description:\s*/m.test(yml)) {
+            yml = yml.replace(/^description:\s*.*/m, `description: ${JSON.stringify(metaValues.description || "")}`);
+          } else if (metaValues.description) {
+            yml = yml.replace(/^name:\s*.*/m, (m) => `${m}\ndescription: ${JSON.stringify(metaValues.description || "")}`);
+          }
+          patchedFiles[patchedFiles.indexOf(ymlFile)] = { ...ymlFile, content: yml };
+        }
+      }
+
+      await api.workers.updateFiles(worker.id, patchedFiles);
+      toast.success("Worker saved");
+      // Reload worker and reset dirty state
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      const updatedFiles = (updated.files || [])
+        .filter((f: WorkerFile) => !f.binary)
+        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+      const newMeta: WorkerMetadataValues = {
+        workerId: updated.id,
+        name: updated.name,
+        description: updated.description || "",
+      };
+      setMetaValues(newMeta);
+      setMetaOriginal(newMeta);
+      // Exit edit mode after save
+      const url = new URL(window.location.href);
+      url.searchParams.delete("edit");
+      router.push(url.toString());
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -566,12 +576,39 @@ export default function WorkerDetailPage() {
             <p className="text-xs text-muted-foreground mt-2">Last run {formatRelativeTime(lastRunAt)}</p>
           )}
         </div>
-        <Link href={`/workers/${worker.id}/edit`} className="shrink-0">
-          <Button variant="outline" size="sm">
+        {isEditMode ? (
+          <div className="flex items-center gap-2 shrink-0">
+            {anyDirty && (
+              <span className="text-xs text-muted-foreground">Unsaved changes</span>
+            )}
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saving || !anyDirty}
+            >
+              <Save className="w-4 h-4 mr-1.5" />
+              {saving ? "Saving..." : "Save"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => exitEditMode()}
+            >
+              <X className="w-4 h-4 mr-1.5" />
+              {anyDirty ? "Discard" : "Done"}
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={enterEditMode}
+          >
             <Pencil className="w-4 h-4 mr-1.5" />
             Edit
           </Button>
-        </Link>
+        )}
       </div>
 
       {/* Top tabs (shadcn) */}
@@ -595,7 +632,17 @@ export default function WorkerDetailPage() {
       {/* Section content */}
       <div>
         {activeSection === "about" && (
-          <AboutSection worker={worker} />
+          isEditMode ? (
+            <div className="max-w-xl">
+              <WorkerMetadataForm
+                mode="edit"
+                values={metaValues}
+                onChange={setMetaValues}
+              />
+            </div>
+          ) : (
+            <AboutSection worker={worker} />
+          )
         )}
         {activeSection === "run" && (
           activeRun ? (
@@ -659,25 +706,27 @@ export default function WorkerDetailPage() {
         )}
 
         {activeSection === "code" && (
-          <FilesEditor
-            mode="view"
-            files={worker.files || []}
-            selectedPath={selectedFile}
-            onSelect={setSelectedFile}
-          />
+          isEditMode ? (
+            <FilesEditor
+              mode="edit"
+              files={editFiles}
+              selectedPath={editSelectedPath}
+              onSelect={setEditSelectedPath}
+              onSelectedPathChange={setEditSelectedPath}
+              onChange={setEditFiles}
+            />
+          ) : (
+            <FilesEditor
+              mode="view"
+              files={worker.files || []}
+              selectedPath={selectedFile}
+              onSelect={setSelectedFile}
+            />
+          )
         )}
 
         {activeSection === "triggers" && (
           <div className="max-w-2xl space-y-6">
-            <ConfiguredTriggersSummary
-              specs={
-                worker.triggers_spec?.length
-                  ? worker.triggers_spec
-                  : worker.config.trigger
-                    ? [worker.config.trigger as TriggerSpec]
-                    : []
-              }
-            />
             <TriggersEditor
               rows={triggerRows}
               onChange={(rows) => {
