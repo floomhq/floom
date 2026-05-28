@@ -158,7 +158,10 @@ export function WorkspaceSwitcher() {
               return (
                 <DropdownMenuItem
                   key={w.id}
-                  onSelect={() => handleSwitch(w.id)}
+                  // base-ui's Menu.Item exposes onClick, NOT onSelect (that
+                  // was the Radix API). The previous onSelect prop was
+                  // silently dropped, so clicking a workspace did nothing.
+                  onClick={() => handleSwitch(w.id)}
                   className="flex items-center gap-2"
                   disabled={isLoading}
                 >
@@ -173,7 +176,7 @@ export function WorkspaceSwitcher() {
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            onSelect={() => {
+            onClick={() => {
               setCreateName("");
               setCreateOpen(true);
             }}
