@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Box, Clock, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
+import { Activity, Box, Clock, Folder, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -35,6 +35,7 @@ function FloomMark({ size = 28 }: { size?: number }) {
 const nav = [
   { href: "/", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box },
+  { href: "/contexts", label: "Contexts", icon: Folder },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/connections", label: "Connections", icon: Plug },
   { href: "/settings", label: "Settings", icon: Settings },

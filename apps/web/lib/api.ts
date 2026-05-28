@@ -26,6 +26,21 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+async function fetchRaw(path: string, options?: RequestInit): Promise<Response> {
+  const res = await fetch(`${API_BASE}${path}`, options);
+  if (!res.ok) {
+    let err = "";
+    try {
+      const body = await res.json();
+      err = body.detail || JSON.stringify(body);
+    } catch {
+      err = res.statusText || `HTTP ${res.status}`;
+    }
+    throw new Error(err);
+  }
+  return res;
+}
+
 export const api = {
   workers: {
     list: () => fetchJson<import("./types").WorkerSummary[]>("/workers"),
@@ -131,6 +146,58 @@ export const api = {
       fetchJson<{ status: string; reason?: string }>(`/secrets/${name}/test`, {
         method: "POST",
       }),
+  },
+  contexts: {
+    list: () => fetchJson<import("./types").ContextSummary[]>("/contexts"),
+    get: (name: string) =>
+      fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}`),
+    create: (name: string, writeable = false) =>
+      fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}`, {
+        method: "POST",
+        body: JSON.stringify({ writeable }),
+      }),
+    delete: (name: string, force = false) =>
+      fetchJson<{ status: string; referenced_by: string[] }>(
+        `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
+        { method: "DELETE" }
+      ),
+    saveTextFile: (name: string, path: string, content: string) =>
+      fetchJson<import("./types").ContextFileItem>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+        { method: "PUT", body: JSON.stringify({ content }) }
+      ),
+    deleteFile: (name: string, path: string) =>
+      fetchJson<import("./types").ContextDetail>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+        { method: "DELETE" }
+      ),
+    readTextFile: async (name: string, path: string) => {
+      const res = await fetchRaw(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`
+      );
+      return res.text();
+    },
+    upload: async (name: string, files: FileList | File[]) => {
+      const form = new FormData();
+      Array.from(files).forEach((file) => form.append("files", file, file.name));
+      const res = await fetch(`${API_BASE}/contexts/${encodeURIComponent(name)}/upload`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        let err = "";
+        try {
+          const body = await res.json();
+          err = body.detail || JSON.stringify(body);
+        } catch {
+          err = res.statusText || `HTTP ${res.status}`;
+        }
+        throw new Error(err);
+      }
+      return res.json() as Promise<{ files: import("./types").ContextFileItem[]; total_size_bytes: number }>;
+    },
+    fileUrl: (name: string, path: string) =>
+      `${API_BASE}/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
   },
   system: {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
