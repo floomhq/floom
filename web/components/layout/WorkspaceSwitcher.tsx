@@ -40,7 +40,6 @@ function shortInitial(name: string): string {
 export function WorkspaceSwitcher() {
   const [state, setState] = useState<WorkspaceState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -68,7 +67,6 @@ export function WorkspaceSwitcher() {
 
   async function handleSwitch(workspaceId: string) {
     if (state && state.activeId === workspaceId) {
-      setOpen(false);
       return;
     }
     setSwitchingTo(workspaceId);
@@ -129,7 +127,7 @@ export function WorkspaceSwitcher() {
 
   return (
     <div className="px-3 pb-2">
-      <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
             "flex h-10 w-full items-center gap-2 rounded-md border border-line bg-transparent px-2.5 text-sm font-medium text-ink transition-colors duration-150",
@@ -158,10 +156,7 @@ export function WorkspaceSwitcher() {
             return (
               <DropdownMenuItem
                 key={w.id}
-                onSelect={(event) => {
-                  event.preventDefault();
-                  handleSwitch(w.id);
-                }}
+                onSelect={() => handleSwitch(w.id)}
                 className="flex items-center gap-2"
                 disabled={isLoading}
               >
@@ -175,9 +170,7 @@ export function WorkspaceSwitcher() {
           })}
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            onSelect={(event) => {
-              event.preventDefault();
-              setOpen(false);
+            onSelect={() => {
               setCreateName("");
               setCreateOpen(true);
             }}
