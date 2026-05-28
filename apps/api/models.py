@@ -991,6 +991,8 @@ class WorkerSummary(BaseModel):
     triggers_spec: List[TriggerSpec] = Field(default_factory=list)  # structured trigger objects
     recent_stats: Optional[RecentStats] = None
     timeseries: Optional[List[TimeseriesDay]] = None  # 14-day sparkline data; None when not loaded
+    connections: List[str] = Field(default_factory=list)  # Composio app slugs declared in worker.yml
+    runtime: Optional[str] = None  # exec.runtime ("skill", "python311", "node22", …)
 
 
 class WorkerFile(BaseModel):
