@@ -2469,6 +2469,7 @@ async def upload_context_files(
 
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers(
+    include_system: bool = False,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[WorkerSummary]:
@@ -2478,6 +2479,12 @@ def list_workers(
     # keeps the old behavior so a fresh install with no DB rows yet still
     # enumerates the on-disk workers for first-time UX.
     workers = db_workers if (db_workers or _is_cloud_deploy()) else discover_workers(use_cache=True)
+    # Filter out system_worker: true workers unless explicitly requested.
+    if not include_system:
+        workers = [
+            w for w in workers
+            if not (w.get("manifest") or {}).get("system_worker", False)
+        ]
     worker_ids = [w["id"] for w in workers]
     stats_by_id = _get_stats_batch(worker_ids, user_id=auth.user_id, repos=repos)
     timeseries_by_id = _get_timeseries_batch(worker_ids, user_id=auth.user_id, repos=repos, days=14)
@@ -3598,6 +3605,94 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
         inputs=inputs,
         outputs=outputs,
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /workers/new/from-prompt — streamed worker-author run
+# ---------------------------------------------------------------------------
+# Replaces the sync draft-from-prompt pattern with a real worker run.
+# Returns 202 + run_id immediately. The client subscribes to
+#   GET /runs/{run_id}/events  (or /runs/{run_id}/stream for AI SDK parts)
+# to observe the agent thinking and tool calls.
+#
+# On completion the run outputs a bundle.json artifact the client reads via
+#   GET /runs/{run_id}/artifacts/bundle
+#
+# This eliminates the Vercel 60s timeout on draft-from-prompt (task #18).
+# ---------------------------------------------------------------------------
+
+class NewWorkerFromPromptRequest(BaseModel):
+    prompt: str
+    mode: str = "draft"  # "draft" | "create"
+    parent_worker_id: Optional[str] = None
+
+
+class NewWorkerFromPromptResponse(BaseModel):
+    run_id: str
+    worker_id: str = "worker-author"
+    status: str = "running"
+
+
+_WORKER_AUTHOR_ID = "worker-author"
+
+
+@app.post("/workers/new/from-prompt", response_model=NewWorkerFromPromptResponse)
+def new_worker_from_prompt(
+    payload: NewWorkerFromPromptRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> NewWorkerFromPromptResponse:
+    """Create a worker-author run to generate a new worker bundle.
+
+    Returns 202-style (run_id, status=running). The client polls
+    GET /runs/{run_id}/events for progress and GET /runs/{run_id}/artifacts
+    for the final bundle.json when the run completes.
+    """
+    prompt = (payload.prompt or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+    if len(prompt) > 4000:
+        raise HTTPException(status_code=400, detail="prompt must be 4000 characters or fewer")
+
+    mode = (payload.mode or "draft").strip()
+    if mode not in ("draft", "create"):
+        raise HTTPException(status_code=400, detail="mode must be 'draft' or 'create'")
+
+    # Ensure worker-author bundle is registered
+    worker = _get_db_worker(_WORKER_AUTHOR_ID, user_id=auth.user_id, repos=repos) or get_worker(_WORKER_AUTHOR_ID)
+    if not worker:
+        # Auto-discover and register the worker-author bundle on first use
+        invalidate_worker_cache()
+        workers = discover_workers(use_cache=False)
+        with get_db() as conn:
+            try:
+                _persist_discovered_workers(conn, workers, user_id=auth.user_id)
+            except Exception as exc:
+                logger.warning("Failed to auto-register worker-author: %s", exc)
+        worker = _get_db_worker(_WORKER_AUTHOR_ID, user_id=auth.user_id, repos=repos) or get_worker(_WORKER_AUTHOR_ID)
+        if not worker:
+            raise HTTPException(
+                status_code=503,
+                detail="worker-author bundle not found. Ensure workers/worker-author/ exists on disk.",
+            )
+
+    inputs: Dict[str, Any] = {
+        "prompt": prompt,
+        "mode": mode,
+    }
+    if payload.parent_worker_id:
+        inputs["parent_worker_id"] = payload.parent_worker_id
+
+    run_id = create_run(
+        _WORKER_AUTHOR_ID,
+        inputs,
+        "manual",
+        user_id=auth.user_id,
+        repos=repos,
+    )
+    start_run(run_id, _WORKER_AUTHOR_ID, inputs, user_id=auth.user_id, repos=repos)
+    return NewWorkerFromPromptResponse(run_id=run_id)
 
 
 # ---------------------------------------------------------------------------
