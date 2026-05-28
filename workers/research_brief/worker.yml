@@ -1,4 +1,5 @@
 schema_version: '0.3'
+is_example: true
 name: research-brief
 title: Research Brief
 description: Generates a markdown research brief on any topic.

@@ -1,4 +1,5 @@
 schema_version: '0.3'
+is_example: true
 name: csv-enricher
 title: CSV Enricher
 description: Enriches CSV rows using a custom instruction.

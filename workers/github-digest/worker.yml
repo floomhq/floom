@@ -1,4 +1,5 @@
 schema_version: "0.3"
+is_example: true
 name: "github-digest"
 title: "GitHub Digest Sender"
 description: "Every morning at 9am, send a digest of unread GitHub PRs and open issues."

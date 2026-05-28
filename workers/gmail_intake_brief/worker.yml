@@ -1,4 +1,5 @@
 schema_version: '0.3'
+is_example: true
 name: gmail-intake-brief
 title: Gmail Intake Brief
 description: Fetches recent Gmail messages matching a query and returns a markdown summary.
