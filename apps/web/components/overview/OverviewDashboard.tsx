@@ -284,7 +284,7 @@ function NeedsAttention({
         {failures.map((item) => (
           <div
             key={`failure-${item.worker_id}`}
-            className="rounded-xl border-l-2 border-l-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_4%,transparent)] px-4 py-3"
+            className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-3"
           >
             <div className="flex items-start gap-3">
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--warning)]" aria-hidden="true" />

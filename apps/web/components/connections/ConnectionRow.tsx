@@ -76,9 +76,9 @@ export function ConnectionRow({
   onTest: (connection: ConnectionView) => void;
 }) {
   return (
-    <div className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-3 md:gap-4 items-center px-3 py-2.5 border-b border-line last:border-b-0 hover:bg-muted/50 transition-colors">
+    <div className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-3 md:gap-4 items-center px-3 py-2.5 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors">
       {/* Logo */}
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-line bg-[var(--paper)]">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)]">
         <BrandLogo icon={connection.icon} className="size-4" />
       </div>
 
