@@ -144,6 +144,20 @@ export function toConnectionView(
 ): ConnectionView {
   const metadata = metadataByConnectionId[conn.id] ?? {};
   const merged = { ...conn, ...metadata };
+  if (merged.kind === "mcp") {
+    return {
+      ...merged,
+      accountLabel: merged.mcp_url || "MCP server",
+      authConfigId: undefined,
+      displayName: merged.mcp_label || merged.app_name.replace(/^mcp:/, ""),
+      icon: "",
+      lastUsedAt: merged.last_used_at || merged.last_used,
+      lastCheckedAt: conn.last_checked_at ?? undefined,
+      lastCheckStatus: conn.last_check_status ?? undefined,
+      scopes: merged.mcp_allowed_tools ?? [],
+    };
+  }
+
   const app = getSupportedApp(merged.app_name);
   // Use scopes from: (1) hydrated metadata, (2) API-returned scopes, (3) auth_config scopes
   const apiScopes = Array.isArray(conn.scopes) ? conn.scopes : [];
@@ -173,6 +187,7 @@ export async function getLastUsedByConnection(workers: WorkerDetail[]) {
     const latest = getLatestRunTime(worker.recent_runs ?? []);
     if (!latest) continue;
     for (const appName of connections) {
+      if (typeof appName !== "string") continue;
       const slug = normalizeAppSlug(appName);
       const current = lastUsed[slug];
       if (!current || new Date(latest).getTime() > new Date(current).getTime()) {

@@ -490,7 +490,14 @@ export default function WorkerDetailPage() {
   // Derived state
   // ---------------------------------------------------------------------------
 
-  const requiredConnections: string[] = worker.config.connections ?? [];
+  const connectionSpecs = worker.config.connections ?? [];
+  const requiredConnections: string[] = connectionSpecs.filter(
+    (connection): connection is string => typeof connection === "string"
+  );
+  const configuredMcpConnections = connectionSpecs.flatMap((connection) => {
+    if (typeof connection === "string" || !connection.mcp) return [];
+    return [connection.mcp];
+  });
   const activeConnectionSlugs = new Set(
     connections.filter((c) => c.status === "active").map((c) => c.app_name.toLowerCase())
   );
@@ -699,6 +706,7 @@ export default function WorkerDetailPage() {
           <ConnectionsSection
             worker={worker}
             requiredConnections={requiredConnections}
+            configuredMcpConnections={configuredMcpConnections}
             activeConnectionSlugs={activeConnectionSlugs}
             requiredSecrets={requiredSecrets}
           />
@@ -999,11 +1007,18 @@ function RunSection({
 function ConnectionsSection({
   worker,
   requiredConnections,
+  configuredMcpConnections,
   activeConnectionSlugs,
   requiredSecrets,
 }: {
   worker: WorkerDetail;
   requiredConnections: string[];
+  configuredMcpConnections: {
+    label: string;
+    url: string;
+    auth?: string | null;
+    allowed_tools?: string[] | null;
+  }[];
   activeConnectionSlugs: Set<string>;
   requiredSecrets: string[];
 }) {
@@ -1041,6 +1056,25 @@ function ConnectionsSection({
         </section>
       ) : (
         <p className="text-sm text-muted-foreground">This worker requires no integrations.</p>
+      )}
+
+      {configuredMcpConnections.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-base font-semibold text-foreground">MCP servers</h2>
+          <ul className="space-y-2">
+            {configuredMcpConnections.map((connection) => (
+              <li key={`${connection.label}:${connection.url}`} className="py-2 border-b border-line last:border-0">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium">{connection.label}</span>
+                  {connection.auth ? (
+                    <span className="text-xs text-muted-foreground">{connection.auth}</span>
+                  ) : null}
+                </div>
+                <p className="mt-1 truncate text-xs text-muted-foreground">{connection.url}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {requiredSecrets.length > 0 && (

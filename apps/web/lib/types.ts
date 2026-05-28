@@ -59,6 +59,16 @@ export interface WorkerRuntime {
   runner: string;
 }
 
+export interface WorkerMcpConnection {
+  label: string;
+  url: string;
+  auth?: string | null;
+  allowed_tools?: string[] | null;
+  require_approval?: "never" | "always";
+}
+
+export type WorkerConnectionSpec = string | { mcp: WorkerMcpConnection };
+
 export interface WorkerConfig {
   id: string;
   name: string;
@@ -67,7 +77,7 @@ export interface WorkerConfig {
   runtime: WorkerRuntime;
   inputs: WorkerInput[];
   secrets: string[];
-  connections: string[];  // Composio app slugs required by this worker
+  connections: WorkerConnectionSpec[];  // Composio app slugs and MCP server specs
   outputs: WorkerOutput[];
   csv_required_columns?: string[];
 }
@@ -326,11 +336,16 @@ export interface ConnectionItem {
   status: ConnectionStatus;
   created_at: string;
   updated_at: string;
+  kind?: "composio" | "mcp";
   scopes?: string[];
   account_label?: string | null;
   display_name?: string | null;
   last_checked_at?: string | null;
   last_check_status?: string | null;
+  mcp_label?: string | null;
+  mcp_url?: string | null;
+  mcp_auth_secret?: string | null;
+  mcp_allowed_tools?: string[];
 }
 
 export interface ConnectionTestResult {
