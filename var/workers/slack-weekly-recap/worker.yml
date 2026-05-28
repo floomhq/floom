@@ -1,0 +1,28 @@
+schema_version: "0.3"
+name: "slack-weekly-recap"
+title: "Slack Weekly Recap"
+description: "Generate a Friday-afternoon recap of the week's themes for a Slack channel digest."
+version: "0.1.0"
+targets: ["generic"]
+exec:
+  entry: "SKILL.md"
+runtime: "skill"
+running: "e2b"
+inputs:
+- name: channel_topic
+  kind: scalar
+  type: string
+  required: false
+  label: "Channel Topic"
+  default: "engineering team weekly themes, shipped work, blockers, next-week focus"
+outputs:
+- name: recap
+  kind: file
+  media_type: text/markdown
+  path: out/recap.md
+  required: true
+  label: "Weekly Recap"
+trigger:
+  type: schedule
+  cron: "0 17 * * 5"
+  timezone: "Europe/Berlin"
