@@ -5959,6 +5959,13 @@ class OverviewRunItem(BaseModel):
     trigger_source: str
 
 
+class OverviewOutcomeItem(BaseModel):
+    worker_id: str
+    worker_name: str
+    label: str
+    count: int
+
+
 class OverviewScheduledItem(BaseModel):
     worker_id: str
     worker_name: str
@@ -5981,9 +5988,34 @@ class OverviewAttentionItem(BaseModel):
 
 class OverviewResponse(BaseModel):
     stats: OverviewStats
+    outcomes: List[OverviewOutcomeItem]
     recent_runs: List[OverviewRunItem]
     scheduled_today: List[OverviewScheduledItem]
     needs_attention: List[OverviewAttentionItem]
+
+
+def _overview_outcome_label(worker_name: str) -> str:
+    normalized = re.sub(r"[_-]+", " ", (worker_name or "")).lower()
+    if "lead" in normalized:
+        return "Leads researched"
+    if "invoice" in normalized:
+        return "Invoices processed"
+    if "follow" in normalized or "gmail" in normalized or "email" in normalized:
+        return "Follow-ups drafted"
+    if "github" in normalized or "pull request" in normalized or " pr " in f" {normalized} ":
+        return "PRs summarized"
+    if "blog" in normalized or "article" in normalized or "post" in normalized:
+        return "Articles drafted"
+    if "draft" in normalized or "paper" in normalized or "research" in normalized:
+        return "Drafts produced"
+    if "csv" in normalized or "row" in normalized or "enrich" in normalized:
+        return "Rows enriched"
+    if "meeting" in normalized or "crm" in normalized or "hubspot" in normalized:
+        return "Meetings processed"
+    if "update" in normalized or "digest" in normalized:
+        return "Updates drafted"
+    cleaned = (worker_name or "Worker").strip()
+    return f"{cleaned} completed"
 
 
 @app.get("/system/overview", response_model=OverviewResponse)
@@ -6025,6 +6057,27 @@ def system_overview(
 
     workers = repos.workers.list(user_id=auth.user_id)
     active_workers_count = sum(1 for row in workers if row.get("enabled"))
+    worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
+
+    outcome_counts: Dict[str, int] = collections.Counter(
+        row["worker_id"]
+        for row in _runs_7d_rows
+        if row.get("worker_id")
+        and str(row.get("status") or "").lower() in {"completed", "approved", "success"}
+    )
+    outcomes = [
+        OverviewOutcomeItem(
+            worker_id=worker_id,
+            worker_name=worker_names.get(worker_id, worker_id),
+            label=_overview_outcome_label(worker_names.get(worker_id, worker_id)),
+            count=int(count),
+        )
+        for worker_id, count in sorted(
+            outcome_counts.items(),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:3]
+    ]
 
     connections = repos.connections.list(user_id=auth.user_id)
     connections_total = len(connections)
@@ -6167,6 +6220,7 @@ def system_overview(
             connections_healthy=connections_healthy,
             connections_total=connections_total,
         ),
+        outcomes=outcomes,
         recent_runs=recent_runs,
         scheduled_today=scheduled_today,
         needs_attention=attention_items,
