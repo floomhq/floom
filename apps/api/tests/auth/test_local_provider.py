@@ -30,6 +30,32 @@ def test_valid_secret_returns_auth_context(monkeypatch):
     assert ctx.scopes == ("admin",)
 
 
+def test_configured_local_user_id(monkeypatch):
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret")
+    monkeypatch.setenv("WORKEROS_USER_ID", "local-user")
+
+    provider = SharedSecretAuthProvider()
+
+    ctx = asyncio.run(provider.verify(_request({"x-floom-secret": "test-secret"})))
+
+    assert ctx.user_id == "local-user"
+
+
+def test_user_header_scope_is_opt_in(monkeypatch):
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret")
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+
+    provider = SharedSecretAuthProvider()
+
+    ctx = asyncio.run(
+        provider.verify(
+            _request({"x-floom-secret": "test-secret", "x-floom-user": "user-a"})
+        )
+    )
+
+    assert ctx.user_id == "user-a"
+
+
 def test_missing_header_returns_401(monkeypatch):
     monkeypatch.setenv("FLOOM_SECRET", "test-secret")
 
