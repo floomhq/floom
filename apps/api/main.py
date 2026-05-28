@@ -2528,6 +2528,13 @@ def list_workers(
         recent_stats = stats_by_id.get(w["id"])
         timeseries = timeseries_by_id.get(w["id"])
 
+        # Extract Composio app slug connections for the card tool-logo strip.
+        conn_slugs: list[str] = []
+        if config and config.connections:
+            for c in config.connections:
+                if isinstance(c, str):
+                    conn_slugs.append(c)
+
         result.append(
             WorkerSummary(
                 id=w["id"],
@@ -2550,6 +2557,8 @@ def list_workers(
                 triggers_spec=triggers_spec,
                 recent_stats=recent_stats,
                 timeseries=None if list_shape else timeseries,
+                connections=conn_slugs,
+                runtime=config.runtime.type if config else None,
             )
         )
     return result
