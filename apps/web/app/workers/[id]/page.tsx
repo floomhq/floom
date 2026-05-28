@@ -438,14 +438,14 @@ export default function WorkerDetailPage() {
           <Skeleton className="h-8 w-16 shrink-0 rounded" />
         </div>
         {/* Tabs row */}
-        <div className="flex gap-2 border-b border-line pb-px">
+        <div className="flex gap-2 border-b border-[var(--border-default)] pb-px">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <Skeleton key={i} className="h-8 w-20 rounded" />
           ))}
         </div>
         {/* Run-form card (the default section is "run") */}
         <div className="max-w-xl space-y-4">
-          <div className="rounded-md border border-line bg-card p-5 space-y-4">
+          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-5 space-y-4">
             <Skeleton className="h-4 w-20 rounded" />
             <div className="space-y-3">
               <div className="space-y-1.5">

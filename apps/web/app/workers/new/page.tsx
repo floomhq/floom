@@ -315,7 +315,7 @@ function NewWorkerContent() {
 
       {/* S25: hero textarea card sized to feel like the centerpiece, not a
           form field. Bigger min-height + tighter footer. */}
-      <div className="rounded-none border border-border bg-card p-5 shadow-[var(--shadow-sm)] space-y-4">
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)] space-y-4">
         <Textarea
           ref={textareaRef}
           placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
@@ -411,7 +411,7 @@ function NewWorkerContent() {
               type="button"
               disabled={isBusy}
               onClick={() => setPrompt(ex.prompt)}
-              className="group flex flex-col items-start gap-1.5 border border-line bg-card px-4 py-3 text-left hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="group flex flex-col items-start gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-3 text-left hover:bg-[var(--active-nav-bg)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <span className="text-sm font-medium text-foreground">{ex.label}</span>
               <span className="text-xs text-muted-foreground line-clamp-2">{ex.prompt}</span>
@@ -510,7 +510,7 @@ function GeneratingPanel({
       </div>
 
       {prompt && (
-        <div className="rounded-lg border border-line bg-[var(--bg-2)] px-4 py-3">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-2)] px-4 py-3">
           <p className="text-[11px] text-muted-foreground mb-1">Your prompt</p>
           <p className="text-sm text-foreground whitespace-pre-wrap">{prompt}</p>
         </div>

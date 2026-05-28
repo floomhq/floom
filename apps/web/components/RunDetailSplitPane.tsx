@@ -124,7 +124,7 @@ export function RunDetailSplitPane({
 
       <RunMetricsStrip run={run} parts={transcriptParts} />
 
-      <div className="flex min-h-[520px] gap-0 border border-line bg-card overflow-hidden">
+      <div className="flex min-h-[520px] gap-0 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
         <aside className="w-[320px] min-w-[240px] max-w-[460px] resize-x overflow-auto border-r border-border bg-muted/25">
           {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
               The timeline IS the panel; the label was dead weight (ChatGPT
@@ -171,7 +171,7 @@ export function RunDetailSplitPane({
 
 function RunMetricsStrip({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
   return (
-    <dl className="grid gap-px overflow-hidden border border-line bg-border text-sm sm:grid-cols-2 lg:grid-cols-5">
+    <dl className="grid gap-px overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-5">
       <RunMetric label="Status" value={statusLabel(latestStatus(run, parts))} />
       <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
       <RunMetric label="Duration" value={run.duration_ms != null ? formatDuration(run.duration_ms) : "Running"} />
@@ -329,7 +329,7 @@ function OutputSummary({ run }: { run: RunDetail }) {
       </div>
 
       {metricEntries.length > 0 && (
-        <dl className="grid gap-px overflow-hidden border border-line bg-border sm:grid-cols-2 lg:grid-cols-4">
+        <dl className="grid gap-px overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--border-default)] sm:grid-cols-2 lg:grid-cols-4">
           {metricEntries.map(([key, value]) => (
             <div key={key} className="min-w-0 bg-card px-3 py-2">
               <dt className="truncate text-[11px] font-medium uppercase text-muted-foreground">{humanizeKey(key)}</dt>
@@ -357,7 +357,7 @@ function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; p
     <a
       href={href}
       download
-      className="flex min-w-0 items-center justify-between gap-3 border border-line bg-card px-3 py-2 text-sm hover:bg-muted/40"
+      className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)] px-3 py-2 text-sm hover:bg-[var(--active-nav-bg)] transition-colors"
     >
       <span className="flex min-w-0 items-center gap-2">
         <FileText className="size-4 shrink-0 text-muted-foreground" />
@@ -393,7 +393,7 @@ function ArtifactsList({ run }: { run: RunDetail }) {
             key={artifact.id}
             href={api.runs.artifactUrl(run.id, artifact.id)}
             download
-            className="flex min-w-0 items-center justify-between gap-3 border border-line bg-card px-3 py-2 text-sm hover:bg-muted/40"
+            className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)] px-3 py-2 text-sm hover:bg-[var(--active-nav-bg)] transition-colors"
           >
             <span className="min-w-0">
               <span className="block truncate font-mono text-xs">{artifact.name}</span>
@@ -418,9 +418,9 @@ function RecentLogsPreview({ run }: { run: RunDetail }) {
         <h2 className="text-sm font-semibold">Recent logs</h2>
         <p className="text-xs text-muted-foreground">Last {recent.length} server-side log entr{recent.length === 1 ? "y" : "ies"}.</p>
       </div>
-      <div className="overflow-hidden border border-line">
+      <div className="overflow-hidden rounded-xl border border-[var(--border-default)]">
         {recent.map((log, index) => (
-          <div key={`${log.timestamp}-${index}`} className="grid gap-2 border-b border-line bg-card px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[8.5rem_5rem_1fr]">
+          <div key={`${log.timestamp}-${index}`} className="grid gap-2 border-b border-[var(--border-default)] bg-[var(--bg-card)] px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[8.5rem_5rem_1fr]">
             <span className="font-mono text-muted-foreground">{formatTime(log.timestamp)}</span>
             <span className={cn("font-medium uppercase", log.level === "error" || log.level === "critical" ? "text-error" : "text-muted-foreground")}>
               {log.level}
