@@ -500,6 +500,12 @@ def _ensure_mcp_connection_columns(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_runs_artifacts_archived_column(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "runs")
+    if "artifacts_archived" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN artifacts_archived INTEGER DEFAULT 0 NOT NULL")
+
+
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
@@ -806,6 +812,8 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE runs ADD COLUMN artifacts_archived INTEGER DEFAULT 0 NOT NULL;
     """,
+    # -- migration 32: repair DBs where version 31 was already consumed --------
+    _ensure_runs_artifacts_archived_column,
 ]
 
 
