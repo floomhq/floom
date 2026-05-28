@@ -362,6 +362,16 @@ def test_upload_returns_owner_scoped_download_url(monkeypatch, tmp_path):
     tampered = client.get(body["url"].replace("download_token=", "download_token=x"), headers=_AUTH_HEADER)
     assert tampered.status_code == 404, tampered.text
 
+    dedup = client.post(
+        "/uploads",
+        headers={**_AUTH_HEADER, "x-floom-user": "second-owner"},
+        files={"file": ("audit.txt", b"upload body", "text/plain")},
+    )
+    assert dedup.status_code == 200, dedup.text
+    dedup_download = client.get(dedup.json()["url"], headers=_AUTH_HEADER)
+    assert dedup_download.status_code == 200, dedup_download.text
+    assert dedup_download.content == b"upload body"
+
 
 def test_get_with_body_is_rejected(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
