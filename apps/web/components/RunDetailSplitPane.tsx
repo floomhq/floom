@@ -197,7 +197,7 @@ function TimelineRow({ item }: { item: TimelineItem }) {
         <RunStatusGlyph status={item.status} className="size-4" />
         <div className="mt-1 h-full w-px bg-border" />
       </div>
-      <div className="min-w-0 flex-1 rounded-sm px-2 py-1 hover:bg-muted">
+      <div className="min-w-0 flex-1 rounded-[var(--radius-button)] px-2 py-1 hover:bg-muted">
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-sm font-medium">{item.label}</p>
           <span className="shrink-0 text-[11px] text-muted-foreground">{item.duration}</span>
@@ -247,7 +247,7 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
         }
         if (part.type === "text" || part.type === "reasoning") {
           return (
-            <div key={`${part.type}-${index}`} className="rounded-md border border-border bg-muted/40 p-3">
+            <div key={`${part.type}-${index}`} className="rounded-[var(--radius-button)] border border-border bg-muted/40 p-3">
               <p className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">
                 {part.type === "reasoning" ? "Reasoning" : "Text"}
               </p>
@@ -456,7 +456,7 @@ function OutputView({ run }: { run: RunDetail }) {
       {Object.entries(run.output).map(([key, value]) => (
         <div key={key} className="space-y-1">
           <p className="text-xs font-medium uppercase text-muted-foreground">{key}</p>
-          <pre className="overflow-auto rounded-md bg-muted p-3 font-mono text-xs">
+          <pre className="overflow-auto rounded-[var(--radius-button)] bg-muted p-3 font-mono text-xs">
             {formatUnknown(value)}
           </pre>
         </div>
@@ -527,7 +527,7 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
         {parts.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">No parts captured.</p>
         ) : (
-          <pre className="rounded-md border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
+          <pre className="rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
             {parts.map((p, i) => `[${i.toString().padStart(3, "0")}] ${p.type}\n${JSON.stringify(p, null, 2)}`).join("\n\n")}
           </pre>
         )}
@@ -538,7 +538,7 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
         {run.logs.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">No logs captured.</p>
         ) : (
-          <pre className="rounded-md border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
+          <pre className="rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
             {run.logs.map((l) => `${l.timestamp} [${l.level.toUpperCase()}]${l.trace_id ? ` ${l.trace_id}` : ""} ${l.message}`).join("\n")}
           </pre>
         )}
@@ -567,7 +567,7 @@ function MetadataView({ run }: { run: RunDetail }) {
     })),
   };
   return (
-    <pre className="max-h-[620px] overflow-auto rounded-md bg-muted p-3 font-mono text-xs leading-relaxed">
+    <pre className="max-h-[620px] overflow-auto rounded-[var(--radius-button)] bg-muted p-3 font-mono text-xs leading-relaxed">
       {JSON.stringify(metadata, null, 2)}
     </pre>
   );

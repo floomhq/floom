@@ -87,6 +87,10 @@
   --radius-2xl: var(--r-2xl);
   --radius-3xl: calc(var(--r-2xl) + 6px);
   --radius-4xl: calc(var(--r-2xl) + 12px);
+  /* S45: design-system radius scale */
+  --radius-card: var(--radius-card);
+  --radius-button: var(--radius-button);
+  --radius-pill: var(--radius-pill);
 }
 
 :root {
@@ -103,7 +107,10 @@
   --success: #2F8F5B;
   --pending: #E0B349;
   --radius-card: 18px;
+  --radius-button: 12px;
+  --radius-pill: 9999px;
   --shadow-card: 0 12px 30px rgba(0,0,0,0.04);
+  /* S45: light mode uses same color-mix pattern for active nav */
   --active-nav-bg: #F1EEE8;
   --active-nav-text: #111111;
 
@@ -213,9 +220,11 @@ html.dark {
   --ink-faint: oklch(0.42 0.01 286.067);
   --emerald: oklch(0.7 0.16 152);
   --emerald-dark: oklch(0.8 0.13 152);
-  /* Matte dark + Floom blue. Blue lifted for contrast against dark bg. */
+  /* S45: ONE blue hue in dark mode. --accent is canonical Floom blue.
+     --accent-soft is replaced by color-mix usage at call sites (18% alpha).
+     Keeping --accent-soft as alias for backwards compat (selection, etc.) */
   --accent: oklch(0.72 0.14 250);
-  --accent-soft: oklch(0.32 0.06 250);
+  --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
   --accent-line: oklch(0.45 0.1 250);
   --accent-hover-bg: hsl(0 0% 100% / 0.06);
   --solid: var(--accent);
@@ -248,9 +257,12 @@ html.dark {
   --border-soft: var(--line-soft);
   --primary-text: var(--solid-fg);
   --radius-card: var(--r-2xl);
+  --radius-button: 12px;
+  --radius-pill: 9999px;
   --shadow-card: var(--shadow-sm);
-  --active-nav-bg: var(--accent-soft);
-  --active-nav-text: var(--ink);
+  /* S45: active nav bg uses single-blue alpha blend — same hue as accent */
+  --active-nav-bg: color-mix(in srgb, var(--accent) 18%, transparent);
+  --active-nav-text: var(--accent);
 
   --background: var(--bg);
   --foreground: var(--ink);

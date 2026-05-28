@@ -91,7 +91,7 @@ function OutputJSON({ value, filename }: { value: unknown; filename: string }) {
   }
   return (
     <div className="space-y-2">
-      <pre className="text-xs bg-muted p-3 rounded-md overflow-auto font-mono leading-relaxed whitespace-pre-wrap">
+      <pre className="text-xs bg-muted p-3 rounded-[var(--radius-button)] overflow-auto font-mono leading-relaxed whitespace-pre-wrap">
         {formatted}
       </pre>
       <DownloadButton
@@ -126,7 +126,7 @@ const markdownComponents = {
     inline ? (
       <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{children}</code>
     ) : (
-      <pre className="bg-muted p-3 rounded-md overflow-auto text-xs font-mono mb-3 whitespace-pre-wrap">
+      <pre className="bg-muted p-3 rounded-[var(--radius-button)] overflow-auto text-xs font-mono mb-3 whitespace-pre-wrap">
         <code>{children}</code>
       </pre>
     ),
@@ -164,7 +164,7 @@ export function OutputRenderer({
       <p className="text-xs font-medium text-muted-foreground mb-2">{label || name}</p>
       {type === "markdown" ? (
         <div className="space-y-2">
-          <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-md border border-border">
+          <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-[var(--radius-button)] border border-border">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as Parameters<typeof ReactMarkdown>[0]["components"]}>
               {String(value)}
             </ReactMarkdown>
@@ -179,12 +179,12 @@ export function OutputRenderer({
       ) : type === "csv" ? (
         <OutputCSV value={String(value)} filename={`${baseFilename}.csv`} />
       ) : type === "file" ? (
-        <div className="bg-muted p-3 rounded-md text-sm text-muted-foreground">
+        <div className="bg-muted p-3 rounded-[var(--radius-button)] text-sm text-muted-foreground">
           <span className="font-mono text-xs">{String(value)}</span>
         </div>
       ) : (
         <div className="space-y-2">
-          <div className="bg-muted p-3 rounded-md text-sm whitespace-pre-wrap font-mono leading-relaxed">
+          <div className="bg-muted p-3 rounded-[var(--radius-button)] text-sm whitespace-pre-wrap font-mono leading-relaxed">
             {String(value)}
           </div>
           <DownloadButton

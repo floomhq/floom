@@ -207,7 +207,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
               key={f}
               type="button"
               onClick={() => handleFreqChange(f)}
-              className={`h-7 rounded-md border px-2.5 text-xs font-medium transition-colors ${
+              className={`h-7 rounded-[var(--radius-button)] border px-2.5 text-xs font-medium transition-colors ${
                 freq === f
                   ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]"
                   : "border-line bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -265,7 +265,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                 key={v}
                 type="button"
                 onClick={() => toggleDow(v)}
-                className={`h-7 w-10 rounded-md border text-xs font-medium transition-colors ${
+                className={`h-7 w-10 rounded-[var(--radius-button)] border text-xs font-medium transition-colors ${
                   dow.includes(v)
                     ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]"
                     : "border-line bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -299,7 +299,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
 
       {/* Human preview */}
       {preview && (
-        <p className="text-xs text-muted-foreground bg-muted rounded-md px-3 py-2 font-medium">
+        <p className="text-xs text-muted-foreground bg-muted rounded-[var(--radius-button)] px-3 py-2 font-medium">
           {preview}
         </p>
       )}

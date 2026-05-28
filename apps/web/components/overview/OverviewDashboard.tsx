@@ -1,18 +1,14 @@
 "use client";
 
 // S44: accepts server-fetched initialData to eliminate client-side fetch round-trip.
+// S45: sparklines on metric tiles, alerts moved to AlertsBell in header.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import yaml from "js-yaml";
 import {
-  AlertTriangle,
   ArrowUp,
   CalendarClock,
   ChevronRight,
-  Plug,
 } from "lucide-react";
-import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import type {
@@ -31,6 +27,8 @@ import {
   formatTimeOfDay,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+
+export type { SystemOverviewAttentionItem };
 
 const cardClass =
   "rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
@@ -81,6 +79,7 @@ function MetricCard({
   trend,
   warning,
   loading,
+  sparkline,
 }: {
   value: number | string;
   label: string;
@@ -88,33 +87,47 @@ function MetricCard({
   trend?: number | null;
   warning?: boolean;
   loading: boolean;
+  sparkline?: OverviewSparklineBucket[];
 }) {
   return (
-    <div className={cn(cardClass, "p-6")}>
-      <div className="min-h-[84px]">
-        {loading ? (
-          <Skeleton className="h-9 w-20 rounded-lg" />
-        ) : (
-          <div className="text-3xl font-medium text-[var(--text-primary)]">{value}</div>
-        )}
-        <div className="mt-2 flex items-center gap-2">
-          {warning ? (
-            <span
-              className="size-2 rounded-full bg-[var(--warning)]"
-              aria-label="Has failures"
-            />
-          ) : null}
-          <p className="text-sm text-[var(--text-muted)]">{label}</p>
+    <div className={cn(cardClass, "p-4")}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          {loading ? (
+            <Skeleton className="h-7 w-16 rounded-[var(--radius-button)]" />
+          ) : (
+            <div className="text-2xl font-semibold text-[var(--text-primary)]">{value}</div>
+          )}
+          <div className="mt-1 flex items-center gap-1.5">
+            {warning ? (
+              <span
+                className="size-1.5 rounded-[var(--radius-pill)] bg-[var(--warning)]"
+                aria-label="Has failures"
+              />
+            ) : null}
+            <p className="text-xs text-[var(--text-muted)]">{label}</p>
+          </div>
         </div>
-        <p className="mt-2 flex items-center gap-1 text-xs text-[var(--text-muted)]">
-          {trend !== null && trend !== undefined && trend > 0 ? (
-            <ArrowUp className="size-3 opacity-50" aria-hidden="true" />
-          ) : null}
-          <span className={trend !== null && trend !== undefined ? "opacity-70" : undefined}>
-            {context}
-          </span>
-        </p>
+        {sparkline && sparkline.length > 0 && !loading ? (
+          <Sparkline
+            data={sparkline}
+            width={72}
+            height={32}
+            tone="overview"
+            className="shrink-0 opacity-60"
+          />
+        ) : loading ? (
+          <Skeleton className="h-8 w-[72px] rounded-[var(--radius-button)]" />
+        ) : null}
       </div>
+      <p className="mt-2 flex items-center gap-1 text-xs text-[var(--text-muted)]">
+        {trend !== null && trend !== undefined && trend > 0 ? (
+          <ArrowUp className="size-3 opacity-50" aria-hidden="true" />
+        ) : null}
+        <span className={trend !== null && trend !== undefined ? "opacity-70" : undefined}>
+          {context}
+        </span>
+      </p>
     </div>
   );
 }
@@ -174,183 +187,7 @@ function useOverview(initialData: SystemOverview | null) {
   return { data, loading, reload: load };
 }
 
-function groupAttention(items: SystemOverviewAttentionItem[]) {
-  const failures = items.filter((item) => item.kind === "failing" || item.type === "failure_cluster");
-  const connections = items.filter((item) =>
-    ["connection_expired", "connection_expiring"].includes(item.kind || item.type),
-  );
-  return { failures, connections };
-}
 
-function ActionButton({
-  children,
-  onClick,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="inline-flex h-7 items-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)] px-3 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--active-nav-bg)] disabled:pointer-events-none disabled:opacity-50"
-    >
-      {children}
-    </button>
-  );
-}
-
-function LinkAction({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex h-7 items-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)] px-3 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--active-nav-bg)]"
-    >
-      {children}
-    </Link>
-  );
-}
-
-function setYamlPaused(content: string) {
-  const parsed = yaml.load(content);
-  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-    const next = { ...(parsed as Record<string, unknown>), paused: true };
-    return yaml.dump(next, { lineWidth: 100, noRefs: true, sortKeys: false });
-  }
-  return `paused: true\n${content}`;
-}
-
-function NeedsAttention({
-  items,
-  onRefresh,
-}: {
-  items: SystemOverviewAttentionItem[];
-  onRefresh: () => void;
-}) {
-  const router = useRouter();
-  const [busy, setBusy] = useState<string | null>(null);
-  const { failures, connections } = groupAttention(items);
-  const openCount = failures.length + (connections.length > 0 ? 1 : 0);
-
-  async function retry(workerId: string) {
-    setBusy(`retry:${workerId}`);
-    try {
-      await api.workers.run(workerId, {});
-      toast.success("Run queued");
-      onRefresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Retry failed");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function disable(workerId: string) {
-    setBusy(`disable:${workerId}`);
-    try {
-      const worker = await api.workers.get(workerId);
-      if (worker.files.some((file) => file.binary)) {
-        throw new Error("Worker has binary files. Open the worker editor to disable it.");
-      }
-      const files = worker.files
-        .filter((file) => typeof file.content === "string")
-        .map((file) => ({
-          path: file.path,
-          content: file.path === "worker.yml" ? setYamlPaused(file.content || "") : file.content || "",
-        }));
-      if (!files.some((file) => file.path === "worker.yml")) {
-        throw new Error("worker.yml was not available for this worker.");
-      }
-      await api.workers.updateFiles(workerId, files);
-      toast.success("Worker disabled");
-      onRefresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Disable failed");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  if (items.length === 0) return null;
-
-  return (
-    <section className={cn(cardClass, "p-6")}>
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Needs your attention</h2>
-        <span className="rounded-full bg-[var(--active-nav-bg)] px-2.5 py-1 text-xs text-[var(--text-muted)]">
-          {openCount} open
-        </span>
-      </div>
-      <div className="space-y-2">
-        {failures.map((item) => (
-          <div
-            key={`failure-${item.worker_id}`}
-            className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-3"
-          >
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[var(--warning)]" aria-hidden="true" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-[var(--text-primary)]">
-                  {item.worker_name || humanizeSlug(item.worker_id, "Worker")} is failing
-                </p>
-                <p className="mt-1 text-xs text-[var(--text-muted)]">
-                  {item.recent_failure_count !== null && item.recent_failure_count !== undefined
-                    ? `${item.recent_failure_count} failures in 24h`
-                    : item.message}
-                  {item.last_failed_at ? ` · last failed ${formatRelative(item.last_failed_at)}` : ""}
-                  {item.cause ? ` · ${item.cause}` : ""}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <LinkAction href={`/runs?worker=${item.worker_id}&status=failed`}>View logs</LinkAction>
-                  {item.worker_id ? (
-                    <ActionButton
-                      onClick={() => retry(item.worker_id!)}
-                      disabled={busy === `retry:${item.worker_id}`}
-                    >
-                      Retry
-                    </ActionButton>
-                  ) : null}
-                  {item.worker_id ? (
-                    <ActionButton
-                      onClick={() => disable(item.worker_id!)}
-                      disabled={busy === `disable:${item.worker_id}`}
-                    >
-                      Disable
-                    </ActionButton>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {connections.length > 0 ? (
-          <div className="rounded-xl px-4 py-3">
-            <div className="flex items-start gap-3">
-              <Plug className="mt-0.5 size-4 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-[var(--text-primary)]">
-                  {connections.length} {connections.length === 1 ? "connection needs" : "connections need"} re-auth
-                </p>
-                <p className="mt-1 text-xs text-[var(--text-muted)]">
-                  {connections
-                    .map((item) => formatProviderName(item.provider_display_name || item.provider_names?.[0] || item.provider_slug))
-                    .join(", ")}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <ActionButton onClick={() => router.push("/connections")}>Reconnect all</ActionButton>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </section>
-  );
-}
 
 function WorkerActivity({
   runs,
@@ -377,7 +214,7 @@ function WorkerActivity({
         <p className="py-8 text-center text-sm text-[var(--text-muted)]">No runs yet.</p>
       ) : (
         <div className="divide-y divide-[var(--border-soft)]">
-          {runs.slice(0, 10).map((run) => {
+          {runs.slice(0, 8).map((run) => {
             const meta = statusMeta(run.status);
             return (
               <Link
@@ -480,42 +317,18 @@ function ComingUp({
   );
 }
 
-function fallbackSparklineBuckets(values: number[] | undefined): OverviewSparklineBucket[] {
-  return (values ?? []).map((value, index) => ({
-    label: `Hour ${index + 1}`,
-    started_at: String(index),
-    total: value,
-    failed: 0,
-  }));
-}
 
-function LastSevenDays({ data }: { data: SystemOverview | null }) {
-  const sparkline =
-    data?.stats.runs_7d_sparkline?.length
-      ? data.stats.runs_7d_sparkline
-      : fallbackSparklineBuckets(data?.stats.runs_24h_sparkline);
-  return (
-    <section className={cn(cardClass, "p-6")}>
-      <h2 className="text-sm font-semibold text-[var(--text-primary)]">Last 7 days</h2>
-      <div className="mt-4 h-12">
-        <Sparkline
-          data={sparkline}
-          width={760}
-          height={48}
-          tone="overview"
-          className="h-12 w-full"
-        />
-      </div>
-      <div className="mt-3 grid grid-cols-7 text-xs text-[var(--text-muted)]">
-        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
-          <span key={day}>{day}</span>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-export function OverviewDashboard({ initialData = null }: { initialData?: import("@/lib/types").SystemOverview | null }) {
+export function OverviewDashboard({
+  initialData = null,
+  onAttentionItems,
+  onReloadRef,
+}: {
+  initialData?: import("@/lib/types").SystemOverview | null;
+  /** Called after each data load so parent (header) can update the bell count */
+  onAttentionItems?: (items: SystemOverviewAttentionItem[]) => void;
+  /** Mutable ref that receives the reload fn so parent (bell) can trigger refresh */
+  onReloadRef?: React.MutableRefObject<(() => void) | null>;
+}) {
   const { data, loading, reload } = useOverview(initialData);
   const workerNames = useMemo(() => {
     const names = new Map<string, string>();
@@ -546,6 +359,16 @@ export function OverviewDashboard({ initialData = null }: { initialData?: import
     [data?.needs_attention, workerNames],
   );
 
+  // S45: bubble attention items up so the AlertsBell in the header can show a badge
+  useEffect(() => {
+    if (onAttentionItems) onAttentionItems(attentionItems);
+  }, [attentionItems, onAttentionItems]);
+
+  // S45: expose reload to parent via ref so bell buttons can trigger a refresh
+  useEffect(() => {
+    if (onReloadRef) onReloadRef.current = reload;
+  }, [reload, onReloadRef]);
+
   const completedThisWeek =
     data?.stats.work_shipped_7d ??
     data?.outcomes?.reduce((total, item) => total + item.count, 0) ??
@@ -562,6 +385,12 @@ export function OverviewDashboard({ initialData = null }: { initialData?: import
   const failedToday = data?.stats.failed_today;
   const hasRunBreakdown = completedToday !== undefined || failedToday !== undefined;
 
+  // S45: sparklines per metric tile
+  const runs7dSparkline = useMemo(
+    () => data?.stats.runs_7d_sparkline ?? [],
+    [data?.stats.runs_7d_sparkline],
+  );
+
   const metrics = useMemo(
     () => [
       {
@@ -569,65 +398,66 @@ export function OverviewDashboard({ initialData = null }: { initialData?: import
         label: "Work shipped",
         context:
           workTrend !== null
-            ? `This week (${workTrend >= 0 ? "+" : ""}${workTrend}% vs last)`
+            ? `${workTrend >= 0 ? "+" : ""}${workTrend}% vs last week`
             : "This week",
         trend: workTrend,
+        sparkline: runs7dSparkline,
       },
       {
         value: runsToday,
         label: "Runs today",
         context: hasRunBreakdown
-          ? `${completedToday ?? 0} completed · ${failedToday ?? 0} failed`
+          ? `${completedToday ?? 0} ok · ${failedToday ?? 0} failed`
           : `${runsToday} in last 24h`,
         warning: Boolean(failedToday),
+        sparkline: runs7dSparkline,
       },
       {
         value: data?.stats.active_workers_count ?? 0,
         label: "Workers active",
         context: `${data?.stats.paused_workers_count ?? 0} paused`,
+        sparkline: runs7dSparkline,
       },
       {
         value: data?.stats.scheduled_24h_count ?? data?.scheduled_today?.length ?? 0,
         label: "Coming up today",
         context: nextScheduled,
+        sparkline: runs7dSparkline,
       },
     ],
-    [completedThisWeek, completedToday, data, failedToday, hasRunBreakdown, nextScheduled, runsToday, workTrend],
+    [completedThisWeek, completedToday, data, failedToday, hasRunBreakdown, nextScheduled, runsToday, workTrend, runs7dSparkline],
   );
 
   return (
-    <div className="space-y-6 pt-10">
+    <div className="space-y-5 pt-6">
+      {/* Hero — compact */}
       <section>
-        <h1 className="text-2xl font-semibold tracking-normal text-[var(--text-primary)]">Work done</h1>
-        <p className="mt-2 text-sm text-[var(--text-muted)]">
-          Your workers completed {heroCount} outcomes this week.
+        <h1 className="text-xl font-semibold tracking-normal text-[var(--text-primary)]">Work done</h1>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">
+          {heroCount} outcomes this week.
         </p>
       </section>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      {/* Metric tiles with sparklines — S45 */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => (
           <MetricCard key={metric.label} {...metric} loading={loading} />
         ))}
       </div>
 
-      <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-        <span className="size-2 rounded-full bg-[var(--success)] motion-safe:animate-pulse" aria-hidden="true" />
+      <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+        <span className="size-1.5 rounded-[var(--radius-pill)] bg-[var(--success)] motion-safe:animate-pulse" aria-hidden="true" />
         <span>
-          {data?.stats.running_now ?? 0} workers running now · {data?.stats.queued_now ?? 0} queued ·{" "}
+          {data?.stats.running_now ?? 0} running · {data?.stats.queued_now ?? 0} queued ·{" "}
           {data?.stats.completed_today ?? 0} completed today
         </span>
       </div>
 
-      {attentionItems.length ? (
-        <NeedsAttention items={attentionItems} onRefresh={reload} />
-      ) : null}
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      {/* Activity + Coming up — 2-col, capped at 8 rows each */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <WorkerActivity runs={data?.recent_runs ?? []} loading={loading} />
         <ComingUp items={data?.scheduled_today ?? []} loading={loading} />
       </div>
-
-      <LastSevenDays data={data} />
     </div>
   );
 }
