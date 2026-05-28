@@ -1,6 +1,7 @@
 "use client";
 
-import { Plus, X, Copy, Hand, Clock as ClockIcon, Webhook, Plug as PlugIcon } from "lucide-react";
+import { useState } from "react";
+import { Plus, X, Copy, Hand, Clock as ClockIcon, Webhook, Plug as PlugIcon, Pencil } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -104,58 +105,140 @@ export function replaceTriggerBlock(yaml: string, triggerYaml: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// TriggerRowEditor — single trigger row UI
+// Kind metadata — icons + labels used in both the picker and the summary row
+// ---------------------------------------------------------------------------
+
+const TRIGGER_TYPES: { value: TriggerType; label: string; icon: typeof Hand; subtitle: string }[] = [
+  { value: "manual",   label: "Manual",    icon: Hand,       subtitle: "Run only on demand from the Run tab." },
+  { value: "schedule", label: "Schedule",  icon: ClockIcon,  subtitle: "Recurring on a cron schedule." },
+  { value: "webhook",  label: "Webhook",   icon: Webhook,    subtitle: "Run when an HTTP POST hits a unique URL." },
+  { value: "composio", label: "App event", icon: PlugIcon,   subtitle: "Run on an event from a connected app." },
+];
+
+function kindMeta(type: TriggerType) {
+  return TRIGGER_TYPES.find((t) => t.value === type) ?? TRIGGER_TYPES[0];
+}
+
+// ---------------------------------------------------------------------------
+// Summary headline helpers (ported from the deleted ConfiguredTriggersSummary)
+// ---------------------------------------------------------------------------
+
+function triggerSummaryLine(row: TriggerRow): string {
+  if (row.type === "schedule") {
+    const cron = row.cronExpr || "0 9 * * *";
+    const tz = row.cronTimezone || "UTC";
+    return `${cron} ${tz}`;
+  }
+  if (row.type === "webhook") return "HTTP POST endpoint";
+  if (row.type === "composio") {
+    if (row.composioEvent) return row.composioEvent;
+    return "Connected app event";
+  }
+  return "Manual run";
+}
+
+// ---------------------------------------------------------------------------
+// TriggerRowSummary — collapsed one-line view with edit / remove buttons
+// ---------------------------------------------------------------------------
+
+interface TriggerRowSummaryProps {
+  row: TriggerRow;
+  onEdit: () => void;
+  onRemove: () => void;
+}
+
+function TriggerRowSummary({ row, onEdit, onRemove }: TriggerRowSummaryProps) {
+  const meta = kindMeta(row.type);
+  const Icon = meta.icon;
+  const summary = triggerSummaryLine(row);
+
+  return (
+    <div className="flex items-center gap-3 py-2.5 px-3 rounded-md border border-line bg-card hover:bg-muted/30 transition-colors group">
+      <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+      <div className="flex-1 min-w-0 flex items-center gap-2 overflow-hidden">
+        <span className="text-xs font-medium text-foreground shrink-0">{meta.label}</span>
+        <span className="text-muted-foreground text-xs select-none">·</span>
+        <span className="text-xs text-muted-foreground font-mono truncate">{summary}</span>
+      </div>
+      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+          onClick={onEdit}
+          title="Edit trigger"
+        >
+          <Pencil className="w-3 h-3" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+          onClick={onRemove}
+          title="Remove trigger"
+        >
+          <X className="w-3 h-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TriggerRowEditor — single trigger row expanded UI (unchanged logic)
 // ---------------------------------------------------------------------------
 
 interface TriggerRowEditorProps {
   row: TriggerRow;
-  index: number;
-  total: number;
   connections: ConnectionItem[];
   webhookUrl?: string;
   onChange: (updated: TriggerRow) => void;
+  onCollapse: () => void;
   onRemove: () => void;
 }
 
 // S29e (F8.8): radio-cards-with-subtitles replaced with a single inline
 // segmented control. Subtitle lives once under the picker (changes with
 // the active type) so the visual hierarchy is type-picker -> config -> done.
-const TRIGGER_TYPES: { value: TriggerType; label: string; icon: typeof Hand; subtitle: string }[] = [
-  { value: "manual",   label: "Manual",   icon: Hand,       subtitle: "Run only on demand from the Run tab." },
-  { value: "schedule", label: "Schedule", icon: ClockIcon,  subtitle: "Recurring on a cron schedule." },
-  { value: "webhook",  label: "Webhook",  icon: Webhook,    subtitle: "Run when an HTTP POST hits a unique URL." },
-  { value: "composio", label: "App event", icon: PlugIcon,  subtitle: "Run on an event from a connected app." },
-];
-
 function TriggerRowEditor({
   row,
-  index,
-  total,
   connections,
   webhookUrl,
   onChange,
+  onCollapse,
   onRemove,
 }: TriggerRowEditorProps) {
-  const isOnly = total === 1;
   const activeMeta = TRIGGER_TYPES.find((t) => t.value === row.type) ?? TRIGGER_TYPES[0];
 
   return (
-    <div className="space-y-4">
-      {!isOnly && (
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-medium text-muted-foreground ">
-            Trigger {index + 1}
-          </span>
-          <button
+    <div className="rounded-md border border-line bg-card p-4 space-y-4">
+      {/* header: kind label + collapse + remove */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Edit trigger</span>
+        <div className="flex items-center gap-1">
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+            onClick={onCollapse}
+          >
+            Done
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
             onClick={onRemove}
-            className="text-muted-foreground hover:text-destructive transition-colors"
             title="Remove trigger"
           >
             <X className="w-3.5 h-3.5" />
-          </button>
+          </Button>
         </div>
-      )}
+      </div>
 
       <div className="space-y-2">
         <div className="inline-flex items-center rounded-md border border-line bg-card p-0.5">
@@ -190,7 +273,7 @@ function TriggerRowEditor({
             onChange={(v) => onChange({ ...row, cronExpr: v })}
           />
           <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground ">Timezone</Label>
+            <Label className="text-xs text-muted-foreground">Timezone</Label>
             <Input
               value={row.cronTimezone}
               onChange={(e) => onChange({ ...row, cronTimezone: e.target.value })}
@@ -213,7 +296,7 @@ function TriggerRowEditor({
 
       {row.type === "webhook" && webhookUrl && (
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground ">Webhook URL</Label>
+          <Label className="text-xs text-muted-foreground">Webhook URL</Label>
           <div className="flex items-center gap-2">
             <code className="flex-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1.5 break-all">
               {webhookUrl}
@@ -256,7 +339,7 @@ function TriggerRowEditor({
 }
 
 // ---------------------------------------------------------------------------
-// TriggersEditor — full multi-trigger editor card
+// TriggersEditor — list-of-triggers with + Add trigger at the top
 // ---------------------------------------------------------------------------
 
 interface TriggersEditorProps {
@@ -283,19 +366,41 @@ export function TriggersEditor({
   onSave,
   onDiscard,
 }: TriggersEditorProps) {
+  // Track which row IDs are currently expanded (open for editing)
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  function isExpanded(id: string) {
+    return expandedIds.has(id);
+  }
+
+  function expand(id: string) {
+    setExpandedIds((prev) => new Set([...prev, id]));
+  }
+
+  function collapse(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+
   function updateRow(index: number, updated: TriggerRow) {
     onChange(rows.map((r, i) => (i === index ? updated : r)));
   }
 
   function addRow() {
-    onChange([...rows, defaultTriggerRow()]);
+    const newRow = defaultTriggerRow();
+    // New trigger goes to the top, starts expanded
+    onChange([newRow, ...rows]);
+    setExpandedIds((prev) => new Set([newRow.id, ...prev]));
   }
 
   function removeRow(index: number) {
+    const removed = rows[index];
+    collapse(removed.id);
     onChange(rows.filter((_, i) => i !== index));
   }
-
-  const showActionBar = Boolean(onSave) || rows.length > 0;
 
   return (
     <div className="space-y-6">
@@ -306,54 +411,68 @@ export function TriggersEditor({
         </p>
       </div>
 
-      <div className="space-y-6">
-        {rows.map((row, index) => (
-          <div key={row.id} className={index > 0 ? "pt-6 border-t border-line" : ""}>
-            <TriggerRowEditor
-              row={row}
-              index={index}
-              total={rows.length}
-              connections={connections}
-              webhookUrl={row.type === "webhook" ? webhookUrl : undefined}
-              onChange={(updated) => updateRow(index, updated)}
-              onRemove={() => removeRow(index)}
-            />
-          </div>
-        ))}
-      </div>
+      {/* Primary action: + Add trigger — ABOVE the list (Federico 2026-05-29 explicit) */}
+      <button
+        type="button"
+        onClick={addRow}
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-line text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Add trigger
+      </button>
 
-      {showActionBar && (
+      {/* Trigger list */}
+      {rows.length === 0 ? (
+        <div className="rounded-md border border-dashed border-line p-8 text-center space-y-2">
+          <p className="text-sm text-muted-foreground">This worker has no triggers.</p>
+          <p className="text-xs text-muted-foreground">Add one to schedule it or connect an event.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((row, index) =>
+            isExpanded(row.id) ? (
+              <TriggerRowEditor
+                key={row.id}
+                row={row}
+                connections={connections}
+                webhookUrl={row.type === "webhook" ? webhookUrl : undefined}
+                onChange={(updated) => updateRow(index, updated)}
+                onCollapse={() => collapse(row.id)}
+                onRemove={() => removeRow(index)}
+              />
+            ) : (
+              <TriggerRowSummary
+                key={row.id}
+                row={row}
+                onEdit={() => expand(row.id)}
+                onRemove={() => removeRow(index)}
+              />
+            )
+          )}
+        </div>
+      )}
+
+      {/* Save / Discard action bar (optional — only shown when onSave is provided) */}
+      {onSave && (
         <div className="flex items-center gap-2 pt-2">
-          <button
-            type="button"
-            onClick={addRow}
-            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-line text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+          <Button
+            size="sm"
+            className="h-8"
+            onClick={onSave}
+            disabled={!dirty || saving}
           >
-            <Plus className="w-3.5 h-3.5" />
-            Add trigger
-          </button>
-          {onSave && (
-            <>
-              <Button
-                size="sm"
-                className="h-8"
-                onClick={onSave}
-                disabled={!dirty || saving}
-              >
-                {saving ? "Saving..." : "Save triggers"}
-              </Button>
-              {onDiscard && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8"
-                  onClick={onDiscard}
-                  disabled={!dirty || saving}
-                >
-                  Discard
-                </Button>
-              )}
-            </>
+            {saving ? "Saving..." : "Save triggers"}
+          </Button>
+          {onDiscard && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8"
+              onClick={onDiscard}
+              disabled={!dirty || saving}
+            >
+              Discard
+            </Button>
           )}
         </div>
       )}
