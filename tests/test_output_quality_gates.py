@@ -79,6 +79,49 @@ def test_file_output_content_is_materialized_before_validation(tmp_path, monkeyp
     assert (tmp_path / "artifacts" / run_id / "out" / "update.md").is_file()
 
 
+def test_optional_file_output_can_be_absent(tmp_path, monkeypatch):
+    run_id = "run_optional_missing"
+    monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    config = _config([
+        WorkerOutput(
+            name="preview_html",
+            label="Preview HTML",
+            type="file",
+            kind="file",
+            media_type="text/html",
+            path="out/preview.html",
+            required=False,
+        )
+    ])
+
+    error, warnings = run_service._validate_run_outputs(run_id, config, {}, [])
+
+    assert error is None
+    assert warnings == []
+
+
+def test_optional_file_output_is_validated_when_emitted(tmp_path, monkeypatch):
+    run_id = "run_optional_emitted"
+    monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    config = _config([
+        WorkerOutput(
+            name="preview_html",
+            label="Preview HTML",
+            type="file",
+            kind="file",
+            media_type="text/html",
+            path="out/preview.html",
+            required=False,
+        )
+    ])
+    artifact = _artifact(tmp_path, run_id, "out/preview.html", "tiny", "text/html")
+
+    error, warnings = run_service._validate_run_outputs(run_id, config, {"preview_html": "out/preview.html"}, [artifact])
+
+    assert warnings == []
+    assert "file is too small" in error
+
+
 def test_json_file_output_must_parse(tmp_path, monkeypatch):
     run_id = "run_json"
     monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
