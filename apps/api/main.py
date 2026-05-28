@@ -4932,6 +4932,69 @@ def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
     return []
 
 
+_CONNECTION_LIST_REFRESH_STATUSES = {"initiated", "pending"}
+_CONNECTION_LIST_REFRESH_INTERVAL = timedelta(seconds=30)
+
+
+def _connection_list_refresh_due(row: Dict[str, Any], now: datetime) -> bool:
+    status = str(row.get("status") or "").lower()
+    if status not in _CONNECTION_LIST_REFRESH_STATUSES:
+        return False
+
+    updated_at = _parse_iso8601(row.get("updated_at"))
+    if updated_at is None or now - updated_at < _CONNECTION_LIST_REFRESH_INTERVAL:
+        return False
+
+    last_checked_at = _parse_iso8601(row.get("last_checked_at"))
+    if last_checked_at is not None and now - last_checked_at < _CONNECTION_LIST_REFRESH_INTERVAL:
+        return False
+
+    return True
+
+
+def _refresh_connection_status_for_list(
+    row: Dict[str, Any],
+    *,
+    user_id: str,
+    repos: Repositories,
+    now: datetime,
+) -> Dict[str, Any]:
+    if not _connection_list_refresh_due(row, now):
+        return row
+
+    checked_at = now.isoformat()
+    try:
+        from composio_client import check_status
+
+        remote_status = (check_status(row["composio_connection_id"]) or "").strip().lower()
+    except Exception as exc:
+        logger.warning("Could not refresh Composio status for %s during list: %s", row.get("id"), exc)
+        updated = repos.connections.update(
+            user_id=user_id,
+            composio_id=row["id"],
+            last_checked_at=checked_at,
+            last_check_status="failed",
+            last_check_error=str(exc)[:500],
+        )
+        return row_to_dict(updated) if updated else row
+
+    updates: Dict[str, Any] = {
+        "last_checked_at": checked_at,
+        "last_check_status": remote_status or "unknown",
+        "last_check_error": None,
+    }
+    if remote_status and remote_status != "not_found" and remote_status != str(row.get("status") or "").lower():
+        updates["status"] = remote_status
+        updates["updated_at"] = checked_at
+
+    updated = repos.connections.update(
+        user_id=user_id,
+        composio_id=row["id"],
+        **updates,
+    )
+    return row_to_dict(updated) if updated else row
+
+
 def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
@@ -5071,10 +5134,12 @@ def list_connections(
     repos: Repositories = Depends(get_repos),
 ) -> List[ConnectionItem]:
     rows = repos.connections.list(user_id=auth.user_id)
+    now = datetime.now(timezone.utc)
 
     result = []
     for row in rows:
         d = row_to_dict(row)
+        d = _refresh_connection_status_for_list(d, user_id=auth.user_id, repos=repos, now=now)
         d["scopes"] = _parse_scopes_json(d.pop("scopes_json", None))
         result.append(_public_connection_item(d))
     return result
