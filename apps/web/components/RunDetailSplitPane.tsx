@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Copy, Check, Download, Pencil, RotateCcw, Square } from "lucide-react";
+import { Copy, Check, Download, FileText, Pencil, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -122,6 +122,8 @@ export function RunDetailSplitPane({
         </div>
       </div>
 
+      <RunMetricsStrip run={run} parts={transcriptParts} />
+
       <div className="flex min-h-[520px] gap-0 border border-line bg-card overflow-hidden">
         <aside className="w-[320px] min-w-[240px] max-w-[460px] resize-x overflow-auto border-r border-border bg-muted/25">
           {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
@@ -138,7 +140,7 @@ export function RunDetailSplitPane({
           <Tabs defaultValue="transcript" className="h-full">
             <div className="border-b border-border px-3 py-2">
               <TabsList variant="line">
-                <TabsTrigger value="transcript">Transcript</TabsTrigger>
+                <TabsTrigger value="transcript">Result</TabsTrigger>
                 <TabsTrigger value="logs">Logs</TabsTrigger>
                 <TabsTrigger value="output">Output</TabsTrigger>
                 <TabsTrigger value="raw">Raw</TabsTrigger>
@@ -167,6 +169,27 @@ export function RunDetailSplitPane({
   );
 }
 
+function RunMetricsStrip({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
+  return (
+    <dl className="grid gap-px overflow-hidden border border-line bg-border text-sm sm:grid-cols-2 lg:grid-cols-5">
+      <RunMetric label="Status" value={statusLabel(latestStatus(run, parts))} />
+      <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
+      <RunMetric label="Duration" value={run.duration_ms != null ? formatDuration(run.duration_ms) : "Running"} />
+      <RunMetric label="Output" value={`${outputItemCount(run)} item${outputItemCount(run) === 1 ? "" : "s"}`} />
+      <RunMetric label="Files" value={`${run.artifacts.length} file${run.artifacts.length === 1 ? "" : "s"}`} />
+    </dl>
+  );
+}
+
+function RunMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 bg-card px-3 py-2">
+      <dt className="text-[11px] font-medium uppercase text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 truncate font-medium text-foreground">{value}</dd>
+    </div>
+  );
+}
+
 function TimelineRow({ item }: { item: TimelineItem }) {
   return (
     <div className="relative flex gap-2 pb-3 pl-1">
@@ -188,6 +211,18 @@ function TimelineRow({ item }: { item: TimelineItem }) {
 function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
   if (parts.length === 0) {
     return <Task title="Waiting for transcript" status={run.status === "failed" ? "failed" : "pending"} detail="No stream parts recorded yet." />;
+  }
+
+  if (!hasReadableTranscript(parts)) {
+    if (run.status === "failed") {
+      return (
+        <div className="space-y-5">
+          <StackTrace error={run.error || "Run failed"} />
+          <RecentLogsPreview run={run} />
+        </div>
+      );
+    }
+    return <RunResultOverview run={run} />;
   }
 
   return (
@@ -241,6 +276,160 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
         return null;
       })}
     </div>
+  );
+}
+
+function RunResultOverview({ run }: { run: RunDetail }) {
+  return (
+    <div className="space-y-6">
+      <section className="border border-line bg-muted/20 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">{run.status === "completed" ? "Run completed" : statusLabel(run.status)}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {run.worker_name || run.worker_id} produced {outputItemCount(run)} output item{outputItemCount(run) === 1 ? "" : "s"}
+              {run.artifacts.length > 0 ? ` and ${run.artifacts.length} result file${run.artifacts.length === 1 ? "" : "s"}` : ""}.
+            </p>
+          </div>
+          <a href={api.runs.downloadUrl(run.id)} download>
+            <Button variant="outline" size="sm">
+              <Download className="size-3.5 mr-1.5" />
+              Download run
+            </Button>
+          </a>
+        </div>
+      </section>
+
+      <OutputSummary run={run} />
+      <ArtifactsList run={run} />
+      <RecentLogsPreview run={run} />
+    </div>
+  );
+}
+
+function OutputSummary({ run }: { run: RunDetail }) {
+  const metricEntries = Object.entries(run.output || {}).filter(([, value]) => isScalarOutput(value)).slice(0, 8);
+  const schemaFields = (run.output_schema || []).filter((field) => field.value != null && field.value !== "");
+  const fileFields = schemaFields.filter((field) => typeof field.value === "string" && field.value.includes("/"));
+
+  if (metricEntries.length === 0 && schemaFields.length === 0) {
+    return (
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold">Output</h2>
+        <p className="text-sm text-muted-foreground">No structured output was recorded.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold">Output</h2>
+        <p className="text-xs text-muted-foreground">Primary result values and generated output paths.</p>
+      </div>
+
+      {metricEntries.length > 0 && (
+        <dl className="grid gap-px overflow-hidden border border-line bg-border sm:grid-cols-2 lg:grid-cols-4">
+          {metricEntries.map(([key, value]) => (
+            <div key={key} className="min-w-0 bg-card px-3 py-2">
+              <dt className="truncate text-[11px] font-medium uppercase text-muted-foreground">{humanizeKey(key)}</dt>
+              <dd className="mt-0.5 truncate text-sm font-medium">{String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      {fileFields.length > 0 && (
+        <div className="grid gap-2 lg:grid-cols-2">
+          {fileFields.map((field) => (
+            <OutputFileLink key={field.name} run={run} label={field.label || field.name} path={String(field.value)} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; path: string }) {
+  const artifact = run.artifacts.find((candidate) => candidate.name === path);
+  const href = artifact ? api.runs.artifactUrl(run.id, artifact.id) : api.runs.bundleUrl(run.id, path);
+  return (
+    <a
+      href={href}
+      download
+      className="flex min-w-0 items-center justify-between gap-3 border border-line bg-card px-3 py-2 text-sm hover:bg-muted/40"
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <FileText className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0">
+          <span className="block truncate font-medium">{label}</span>
+          <span className="block truncate font-mono text-xs text-muted-foreground">{path}</span>
+        </span>
+      </span>
+      <Download className="size-4 shrink-0 text-muted-foreground" />
+    </a>
+  );
+}
+
+function ArtifactsList({ run }: { run: RunDetail }) {
+  if (run.artifacts.length === 0) return null;
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Result files</h2>
+          <p className="text-xs text-muted-foreground">{run.artifacts.length} downloadable artifact{run.artifacts.length === 1 ? "" : "s"}.</p>
+        </div>
+        <a href={api.runs.downloadUrl(run.id)} download>
+          <Button variant="outline" size="sm">
+            <Download className="size-3.5 mr-1.5" />
+            Download all
+          </Button>
+        </a>
+      </div>
+      <div className="grid gap-2 lg:grid-cols-2">
+        {run.artifacts.map((artifact) => (
+          <a
+            key={artifact.id}
+            href={api.runs.artifactUrl(run.id, artifact.id)}
+            download
+            className="flex min-w-0 items-center justify-between gap-3 border border-line bg-card px-3 py-2 text-sm hover:bg-muted/40"
+          >
+            <span className="min-w-0">
+              <span className="block truncate font-mono text-xs">{artifact.name}</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {[artifact.type || "file", artifact.size_bytes != null ? formatBytes(artifact.size_bytes) : null].filter(Boolean).join(" · ")}
+              </span>
+            </span>
+            <Download className="size-4 shrink-0 text-muted-foreground" />
+          </a>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecentLogsPreview({ run }: { run: RunDetail }) {
+  const recent = run.logs.slice(-8);
+  if (recent.length === 0) return null;
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold">Recent logs</h2>
+        <p className="text-xs text-muted-foreground">Last {recent.length} server-side log entr{recent.length === 1 ? "y" : "ies"}.</p>
+      </div>
+      <div className="overflow-hidden border border-line">
+        {recent.map((log, index) => (
+          <div key={`${log.timestamp}-${index}`} className="grid gap-2 border-b border-line bg-card px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[8.5rem_5rem_1fr]">
+            <span className="font-mono text-muted-foreground">{formatTime(log.timestamp)}</span>
+            <span className={cn("font-medium uppercase", log.level === "error" || log.level === "critical" ? "text-error" : "text-muted-foreground")}>
+              {log.level}
+            </span>
+            <span className="min-w-0 break-words text-foreground">{log.message}</span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -434,6 +623,10 @@ function latestStatus(run: RunDetail, parts: RunPart[]): string {
   return run.status;
 }
 
+function hasReadableTranscript(parts: RunPart[]): boolean {
+  return parts.some((part) => part.type === "text" || part.type === "reasoning" || part.type === "tool-call" || part.type === "step-start");
+}
+
 function partsFromRun(run: RunDetail): RunPart[] {
   const parts = transcriptRowsToParts(run.transcript || []);
   if (run.status === "completed") parts.push({ type: "finish", status: "completed" });
@@ -499,6 +692,34 @@ function parseMaybeJson(value: unknown): unknown {
 function formatUnknown(value: unknown): string {
   if (typeof value === "string") return value;
   return JSON.stringify(value, null, 2);
+}
+
+function isScalarOutput(value: unknown): value is string | number | boolean {
+  return typeof value === "number" || typeof value === "boolean" || (typeof value === "string" && !value.includes("/") && value.length <= 120);
+}
+
+function outputItemCount(run: RunDetail): number {
+  return run.output_schema?.length || Object.keys(run.output || {}).length;
+}
+
+function humanizeKey(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function statusLabel(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function clip(value: string): string {
