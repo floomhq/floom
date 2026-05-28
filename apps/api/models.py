@@ -916,6 +916,7 @@ class RecentStats(BaseModel):
     last_run_at: Optional[str] = None   # ISO timestamp of most recent run
     runs_7d: int = 0                     # total runs in last 7 days
     success_rate_7d: Optional[float] = None  # fraction (0.0-1.0) or None if no runs
+    success_rate_change_7d: Optional[float] = None  # current 7d rate minus previous 7d rate
 
 
 class TimeseriesDay(BaseModel):
