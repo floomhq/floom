@@ -486,6 +486,8 @@ def _validate_run_outputs(
             return f"output_validation_failed: {name} missing required output", warnings
 
         if kind == "file":
+            if not output.required and name not in outputs and not _output_artifact(output, artifacts):
+                continue
             path = _candidate_output_path(run_id, output, outputs, artifacts)
             if path is None:
                 return f"output_validation_failed: {name} missing output file", warnings
