@@ -25,7 +25,10 @@ import { AlertTriangle, CheckCircle2, Check, Copy } from "lucide-react";
 // to "api" when a hidden tab is requested.
 type TabKey = "api" | "system" | "notifications" | "appearance" | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "appearance", "danger"];
+// workeros-cloud: "system" tab exposed engine internals (Python version,
+// FLOOM_SECRET required-secret badge) that are misleading for cloud users.
+// Hidden until we wire up a tenant-scoped system view.
+const VISIBLE_TAB_KEYS: TabKey[] = ["api", "appearance", "danger"];
 const TAB_KEYS: TabKey[] = ["api", "system", "notifications", "appearance", "danger"];
 
 function isValidTab(value: string | null): value is TabKey {
@@ -143,7 +146,6 @@ function SettingsContent() {
       <Tabs value={tab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="api">API access</TabsTrigger>
-          <TabsTrigger value="system">System</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
           <TabsTrigger value="danger">Danger zone</TabsTrigger>
         </TabsList>
