@@ -5,14 +5,21 @@ title: "GitHub Digest Sender"
 description: "Every morning at 9am, send a digest of unread GitHub PRs and open issues."
 version: "0.1.0"
 targets: ["generic"]
+limits:
+  max_tool_iterations: 20
+  max_output_tokens: 12000
+  max_total_tokens: 50000
+  timeout_seconds: 300
 exec:
   entry: "SKILL.md"
-runtime: "skill"
-runners: "e2b"
+  runtime: "skill"
+  runner: "e2b"
 trigger:
   type: "schedule"
   cron: "0 9 * * *"
   timezone: "UTC"
+connections:
+- github
 outputs:
 - name: "digest"
   kind: "file"
