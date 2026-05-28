@@ -128,6 +128,38 @@ class FakeOOMSandbox:
         self.killed = True
 
 
+class FakeRaisingOOMCommandError(Exception):
+    pass
+
+
+class FakeRaisingOOMCommandRunner:
+    def __init__(self, files):
+        self.files = files
+
+    def run(self, _command, **_kwargs):
+        raise FakeRaisingOOMCommandError(
+            "Command exited with code 137 and error:\n"
+            "memory cgroup out of memory\n"
+        )
+
+
+class FakeRaisingOOMSandbox:
+    instances = []
+
+    def __init__(self):
+        self.files = FakeWritableFiles({})
+        self.commands = FakeRaisingOOMCommandRunner(self.files)
+        self.killed = False
+        FakeRaisingOOMSandbox.instances.append(self)
+
+    @classmethod
+    def create(cls, **_kwargs):
+        return cls()
+
+    def kill(self):
+        self.killed = True
+
+
 def test_collects_declared_sandbox_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr(e2b_driver, "ARTIFACTS_DIR", tmp_path)
     config = _config([
@@ -285,6 +317,45 @@ def test_e2b_driver_maps_oom_exit_to_sandbox_oom(tmp_path, monkeypatch):
     assert result.status == "error"
     assert result.error_code == "sandbox_oom"
     assert FakeOOMSandbox.instances[-1].killed is True
+    assert active_sandbox_count() == 0
+
+
+def test_e2b_driver_maps_oom_command_exception_to_sandbox_oom(tmp_path, monkeypatch):
+    monkeypatch.setenv("E2B_API_KEY", "e2b-test")
+    monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeRaisingOOMSandbox))
+    FakeRaisingOOMSandbox.instances = []
+    with e2b_driver._active_sandboxes_lock:
+        e2b_driver._active_sandboxes.clear()
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('unused')\n")
+    config = WorkerConfig(
+        id="oom-exception-test",
+        name="OOM Exception Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        outputs=[],
+    )
+
+    result = E2BSandboxDriver().run(
+        worker_id="oom-exception-test",
+        run_id="run_oom_exception",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_args, **_kwargs: None,
+        trace_id="trace_oom_exception",
+        timeout_seconds=300,
+        config=config,
+    )
+
+    assert result.status == "error"
+    assert result.error_code == "sandbox_oom"
+    assert FakeRaisingOOMSandbox.instances[-1].killed is True
     assert active_sandbox_count() == 0
 
 
