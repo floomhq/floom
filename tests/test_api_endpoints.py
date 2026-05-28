@@ -16,8 +16,10 @@ import sys
 import tempfile
 import threading
 import time
+import shutil
 import unittest
 import uuid as _uuid_mod
+from pathlib import Path
 from unittest.mock import patch
 
 # Point to the API source before importing
@@ -37,6 +39,8 @@ db.DB_PATH = _tmp_db.name
 
 # Now import main (which calls init_db)
 import main as app_module  # noqa: E402
+import contexts as contexts_module  # noqa: E402
+from auth.factory import get_auth_provider  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 client = TestClient(app_module.app, raise_server_exceptions=True)
@@ -293,6 +297,102 @@ class TestPatchWorker(unittest.TestCase):
         r = client.patch(f"/workers/{self.worker_id}", json={})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["id"], self.worker_id)
+
+
+class TestContextsAPI(unittest.TestCase):
+    """Binary-safe filesystem contexts API."""
+
+    def setUp(self):
+        self.old_secret = os.environ.get("FLOOM_SECRET")
+        os.environ["FLOOM_SECRET"] = "context-test-secret"
+        get_auth_provider.cache_clear()
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="workeros-contexts-test-"))
+        self.old_contexts_dir = contexts_module.CONTEXTS_DIR
+        self.old_metadata_path = contexts_module.CONTEXT_METADATA_PATH
+        self.old_app_contexts_dir = app_module.CONTEXTS_DIR
+        contexts_module.CONTEXTS_DIR = self.tmpdir
+        contexts_module.CONTEXT_METADATA_PATH = self.tmpdir / ".workeros-contexts.json"
+        app_module.CONTEXTS_DIR = self.tmpdir
+
+    def tearDown(self):
+        if self.old_secret is None:
+            os.environ.pop("FLOOM_SECRET", None)
+        else:
+            os.environ["FLOOM_SECRET"] = self.old_secret
+        get_auth_provider.cache_clear()
+        contexts_module.CONTEXTS_DIR = self.old_contexts_dir
+        contexts_module.CONTEXT_METADATA_PATH = self.old_metadata_path
+        app_module.CONTEXTS_DIR = self.old_app_contexts_dir
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _headers(self) -> dict:
+        return {"x-floom-secret": "context-test-secret"}
+
+    def test_context_crud_supports_text_binary_and_multipart_upload(self):
+        created = client.post("/contexts/kb-test", json={"writeable": True}, headers=self._headers())
+        self.assertEqual(created.status_code, 200, created.text)
+        self.assertTrue(created.json()["writeable"])
+
+        text_saved = client.put(
+            "/contexts/kb-test/files/docs/faq.md",
+            json={"content": "# FAQ\n\nHello"},
+            headers=self._headers(),
+        )
+        self.assertEqual(text_saved.status_code, 200, text_saved.text)
+        self.assertEqual(text_saved.json()["mime_type"], "text/markdown")
+        self.assertFalse(text_saved.json()["is_binary"])
+
+        code_saved = client.put(
+            "/contexts/kb-test/files/src/index.ts",
+            json={"content": "export const answer = 42;\n"},
+            headers=self._headers(),
+        )
+        self.assertEqual(code_saved.status_code, 200, code_saved.text)
+        self.assertFalse(code_saved.json()["is_binary"])
+
+        pdf_bytes = b"%PDF-1.4\n\x00binary"
+        binary_saved = client.put(
+            "/contexts/kb-test/files/files/spec.pdf",
+            content=pdf_bytes,
+            headers={**self._headers(), "content-type": "application/octet-stream"},
+        )
+        self.assertEqual(binary_saved.status_code, 200, binary_saved.text)
+        self.assertEqual(binary_saved.json()["mime_type"], "application/pdf")
+        self.assertTrue(binary_saved.json()["is_binary"])
+
+        uploaded = client.post(
+            "/contexts/kb-test/upload",
+            files=[("files", ("image.png", b"\x89PNG\r\n", "image/png"))],
+            headers=self._headers(),
+        )
+        self.assertEqual(uploaded.status_code, 200, uploaded.text)
+        self.assertEqual(uploaded.json()["files"][0]["path"], "image.png")
+
+        detail = client.get("/contexts/kb-test", headers=self._headers())
+        self.assertEqual(detail.status_code, 200)
+        paths = {item["path"] for item in detail.json()["files"]}
+        self.assertEqual(paths, {"docs/faq.md", "files/spec.pdf", "image.png", "src/index.ts"})
+
+        text_download = client.get("/contexts/kb-test/files/docs/faq.md", headers=self._headers())
+        self.assertEqual(text_download.status_code, 200)
+        self.assertEqual(text_download.text, "# FAQ\n\nHello")
+
+        binary_download = client.get("/contexts/kb-test/files/files/spec.pdf", headers=self._headers())
+        self.assertEqual(binary_download.status_code, 200)
+        self.assertEqual(binary_download.content, pdf_bytes)
+        self.assertIn("attachment", binary_download.headers.get("content-disposition", ""))
+
+    def test_context_paths_reject_traversal(self):
+        created = client.post("/contexts/kb-test", json={}, headers=self._headers())
+        self.assertEqual(created.status_code, 200, created.text)
+
+        r = client.put(
+            "/contexts/kb-test/files/%2e%2e/secret.txt",
+            content=b"nope",
+            headers={**self._headers(), "content-type": "application/octet-stream"},
+        )
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertFalse((self.tmpdir.parent / "secret.txt").exists())
 
 
 # ===========================================================================
