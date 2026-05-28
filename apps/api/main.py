@@ -47,6 +47,7 @@ from contexts import (
     context_mount_names,
     context_total_size,
     context_updated_at,
+    current_contexts_root,
     delete_context_metadata,
     ensure_contexts_dir,
     guess_mime_type,
@@ -2325,10 +2326,11 @@ def list_contexts(
     _ = auth
     ensure_contexts_dir()
     metadata = load_context_metadata()
+    root = current_contexts_root()
     items = [
         _context_summary(folder.name, metadata)
-        for folder in sorted(CONTEXTS_DIR.iterdir(), key=lambda p: p.name)
-        if folder.is_dir() and not folder.is_symlink()
+        for folder in sorted(root.iterdir(), key=lambda p: p.name)
+        if folder.is_dir() and not folder.is_symlink() and not folder.name.startswith(".")
     ]
     return items
 

@@ -13,13 +13,81 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONTEXTS_DIR = Path(os.environ.get("FLOOM_CONTEXTS_DIR", str(PROJECT_ROOT / "contexts"))).resolve()
 CONTEXT_METADATA_PATH = CONTEXTS_DIR / ".workeros-contexts.json"
 MAX_CONTEXT_BYTES = 50 * 1024 * 1024
+
+
+# --- Multi-tenant scoping (cloud mode) ---------------------------------------
+#
+# In single-tenant local/OSS mode every context lives directly under
+# CONTEXTS_DIR (e.g. /var/contexts/<name>). In multi-tenant cloud mode the
+# same FS root is shared across workspaces; without scoping every authed
+# user sees every other tenant's contexts (P0 cross-tenant leak).
+#
+# The cloud wrapper registers a resolver callable via
+# ``set_context_scope_resolver()`` that returns the active workspace_id for
+# the current request. When set + returning a non-empty safe string, every
+# context path becomes ``CONTEXTS_DIR/<workspace_id>/<name>/...`` and the
+# per-scope metadata file lives at
+# ``CONTEXTS_DIR/<workspace_id>/.workeros-contexts.json``.
+#
+# When the resolver is unset or returns None (OSS local mode, scheduler /
+# background tasks, tests), paths fall back to the legacy unscoped layout
+# so existing single-tenant installs see no behavior change.
+
+_CONTEXT_SCOPE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_scope_resolver: Optional[Callable[[], Optional[str]]] = None
+
+
+def set_context_scope_resolver(resolver: Optional[Callable[[], Optional[str]]]) -> None:
+    """Register a callable returning the active scope id (workspace_id) for
+    the current request. Pass ``None`` to clear the resolver (OSS mode).
+
+    The resolver MUST return either a safe scope id matching
+    ``_CONTEXT_SCOPE_NAME_RE`` or ``None``. Invalid scope ids cause the
+    request to fall back to the unscoped root (defensive: no traversal
+    risk).
+    """
+    global _scope_resolver
+    _scope_resolver = resolver
+
+
+def _current_scope() -> Optional[str]:
+    if _scope_resolver is None:
+        return None
+    try:
+        raw = _scope_resolver()
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text or not _CONTEXT_SCOPE_NAME_RE.fullmatch(text):
+        return None
+    return text
+
+
+def current_contexts_root() -> Path:
+    """Return the active CONTEXTS_DIR root for the current request.
+
+    Scoped to a per-workspace subdir in cloud mode; equal to CONTEXTS_DIR
+    otherwise. The returned path may not exist yet (callers should
+    ``mkdir(parents=True, exist_ok=True)`` before iterating).
+    """
+    scope = _current_scope()
+    if scope is None:
+        return CONTEXTS_DIR
+    return (CONTEXTS_DIR / scope).resolve()
+
+
+def current_metadata_path() -> Path:
+    """Return the active metadata file path for the current request."""
+    return current_contexts_root() / ".workeros-contexts.json"
 
 CONTEXT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 TEXT_FILE_EXTENSIONS = {
@@ -86,9 +154,10 @@ def validate_context_name(name: str) -> str:
 
 def context_dir(name: str) -> Path:
     safe_name = validate_context_name(name)
-    target = (CONTEXTS_DIR / safe_name).resolve()
+    root = current_contexts_root()
+    target = (root / safe_name).resolve()
     try:
-        target.relative_to(CONTEXTS_DIR)
+        target.relative_to(root)
     except ValueError as exc:
         raise ValueError(f"Path traversal attempt: {target}") from exc
     return target
@@ -115,14 +184,15 @@ def normalize_context_file_path(raw_path: str) -> str:
 
 
 def ensure_contexts_dir() -> None:
-    CONTEXTS_DIR.mkdir(parents=True, exist_ok=True)
+    current_contexts_root().mkdir(parents=True, exist_ok=True)
 
 
 def load_context_metadata() -> dict[str, dict[str, Any]]:
-    if not CONTEXT_METADATA_PATH.is_file():
+    metadata_path = current_metadata_path()
+    if not metadata_path.is_file():
         return {}
     try:
-        parsed = json.loads(CONTEXT_METADATA_PATH.read_text())
+        parsed = json.loads(metadata_path.read_text())
     except Exception:
         return {}
     if not isinstance(parsed, dict):
@@ -136,9 +206,10 @@ def load_context_metadata() -> dict[str, dict[str, Any]]:
 
 def save_context_metadata(metadata: dict[str, dict[str, Any]]) -> None:
     ensure_contexts_dir()
-    tmp_path = CONTEXT_METADATA_PATH.with_suffix(".tmp")
+    metadata_path = current_metadata_path()
+    tmp_path = metadata_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
-    os.replace(tmp_path, CONTEXT_METADATA_PATH)
+    os.replace(tmp_path, metadata_path)
 
 
 def set_context_metadata(name: str, *, writeable: bool | None = None) -> None:
