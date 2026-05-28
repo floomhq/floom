@@ -65,6 +65,7 @@ RUN_EXPORT_FORBIDDEN_FILES = (
     "logs.txt",
     "artifacts/transcript.jsonl",
 )
+RUN_CREATE_QUOTA_RESET_SECONDS = 61
 
 
 def now_slug() -> str:
@@ -410,14 +411,24 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
     )
 
     runs = request(api, "GET", "/runs?limit=5", secret=secret)
+    run_rows: list[dict[str, Any]] = []
     run_ids: list[str] = []
+    terminal_run_ids: list[str] = []
     if runs["status"] == 200:
         try:
             payload = json.loads(runs["body"])
             if isinstance(payload, list):
-                run_ids = [str(item.get("id")) for item in payload if item.get("id")]
+                run_rows = [item for item in payload if isinstance(item, dict) and item.get("id")]
+                run_ids = [str(item.get("id")) for item in run_rows]
+                terminal_run_ids = [
+                    str(item.get("id"))
+                    for item in run_rows
+                    if str(item.get("status") or "") in {"completed", "failed"} and item.get("id")
+                ]
         except Exception:
+            run_rows = []
             run_ids = []
+            terminal_run_ids = []
     export_details: list[dict[str, Any]] = []
     export_ok = runs["status"] == 200
     for run_id in run_ids[:5]:
@@ -488,10 +499,11 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
         {"runs_checked": detail_details},
     )
 
-    cancel_ok = runs["status"] == 200 and bool(run_ids)
+    cancel_ok = runs["status"] == 200 and bool(terminal_run_ids)
     cancel_details: list[dict[str, Any]] = []
-    if run_ids:
-        existing_cancel = request(api, "POST", f"/runs/{run_ids[0]}/cancel", secret=secret)
+    if terminal_run_ids:
+        terminal_run_id = terminal_run_ids[0]
+        existing_cancel = request(api, "POST", f"/runs/{terminal_run_id}/cancel", secret=secret)
         missing_cancel = request(api, "POST", "/runs/run_missing_cancel_probe/cancel", secret=secret)
         existing_body = existing_cancel["body"]
         missing_body = missing_cancel["body"]
@@ -500,10 +512,10 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
             and missing_cancel["status"] == 404
             and existing_body == missing_body
             and "completed" not in existing_body.lower()
-            and run_ids[0] not in existing_body
+            and terminal_run_id not in existing_body
         )
         cancel_details = [
-            {"run_id": run_ids[0], "status": existing_cancel["status"], "body": snippet(existing_body, secret, 400)},
+            {"run_id": terminal_run_id, "status": existing_cancel["status"], "body": snippet(existing_body, secret, 400)},
             {"run_id": "run_missing_cancel_probe", "status": missing_cancel["status"], "body": snippet(missing_body, secret, 400)},
         ]
     record(
@@ -627,47 +639,6 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
         get_body,
     )
 
-    run_quota_names = [f"audit-runquota-{uuid.uuid4().hex[:8]}-{idx}" for idx in range(3)]
-    run_quota_creates: list[dict[str, Any]] = []
-    run_quota_statuses: list[Any] = []
-    run_quota_cleanups: list[dict[str, Any]] = []
-    for name in run_quota_names:
-        request(api, "DELETE", f"/workers/{name}", secret=secret)
-        created = request(
-            api,
-            "POST",
-            "/workers",
-            secret=secret,
-            json={
-                "worker_yml": make_worker_yml(name),
-                "run_py": "def run(inputs, context):\n    return {'status': 'success', 'outputs': {'ok': True}, 'artifacts': []}\n",
-            },
-        )
-        run_quota_creates.append(created)
-    if all(item["status"] == 200 for item in run_quota_creates):
-        for idx in range(11):
-            created_run = request(
-                api,
-                "POST",
-                f"/workers/{run_quota_names[idx % len(run_quota_names)]}/runs",
-                secret=secret,
-                headers={"X-Forwarded-For": f"198.51.100.{idx + 1}"},
-                json={"inputs": {}, "trigger_source": "audit"},
-                timeout=10,
-            )
-            run_quota_statuses.append(created_run["status"])
-            if created_run["status"] == 429:
-                break
-    for name in run_quota_names:
-        run_quota_cleanups.append(request(api, "DELETE", f"/workers/{name}", secret=secret))
-    record(
-        results,
-        "run-create-global-rate-limit",
-        429 in run_quota_statuses,
-        f"creates={[item['status'] for item in run_quota_creates]} run_statuses={run_quota_statuses} cleanups={[item['status'] for item in run_quota_cleanups]}",
-        {"creates": run_quota_creates, "run_statuses": run_quota_statuses, "cleanups": run_quota_cleanups},
-    )
-
     runs_clear = request(api, "POST", "/runs/clear", secret=secret)
     record(
         results,
@@ -738,6 +709,51 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
         bundle_traversal.get("status") == 400,
         f"status={bundle_traversal.get('status')}",
         bundle_traversal,
+    )
+
+    # Replay shares the same global run-create bucket as direct create. Reset the
+    # default 60-second window before the direct create quota probe.
+    time.sleep(RUN_CREATE_QUOTA_RESET_SECONDS)
+
+    run_quota_names = [f"audit-runquota-{uuid.uuid4().hex[:8]}-{idx}" for idx in range(3)]
+    run_quota_creates: list[dict[str, Any]] = []
+    run_quota_statuses: list[Any] = []
+    run_quota_cleanups: list[dict[str, Any]] = []
+    for name in run_quota_names:
+        request(api, "DELETE", f"/workers/{name}", secret=secret)
+        created = request(
+            api,
+            "POST",
+            "/workers",
+            secret=secret,
+            json={
+                "worker_yml": make_worker_yml(name),
+                "run_py": "def run(inputs, context):\n    return {'status': 'success', 'outputs': {'ok': True}, 'artifacts': []}\n",
+            },
+        )
+        run_quota_creates.append(created)
+    if all(item["status"] == 200 for item in run_quota_creates):
+        for idx in range(11):
+            created_run = request(
+                api,
+                "POST",
+                f"/workers/{run_quota_names[idx % len(run_quota_names)]}/runs",
+                secret=secret,
+                headers={"X-Forwarded-For": f"198.51.100.{idx + 1}"},
+                json={"inputs": {}, "trigger_source": "audit"},
+                timeout=10,
+            )
+            run_quota_statuses.append(created_run["status"])
+            if created_run["status"] == 429:
+                break
+    for name in run_quota_names:
+        run_quota_cleanups.append(request(api, "DELETE", f"/workers/{name}", secret=secret))
+    record(
+        results,
+        "run-create-global-rate-limit",
+        429 in run_quota_statuses,
+        f"creates={[item['status'] for item in run_quota_creates]} run_statuses={run_quota_statuses} cleanups={[item['status'] for item in run_quota_cleanups]}",
+        {"creates": run_quota_creates, "run_statuses": run_quota_statuses, "cleanups": run_quota_cleanups},
     )
 
     stock_rotate = request(api, "POST", "/workers/research_brief/webhook-secret/rotate", secret=secret)
