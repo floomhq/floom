@@ -14,16 +14,16 @@ exec:
   entry: "SKILL.md"
   runtime: "skill"
   runner: "e2b"
+  outputs:
+  - name: "digest"
+    kind: "file"
+    media_type: "text/markdown"
+    path: "out/digest.md"
+    required: true
+    label: "Daily Digest"
 trigger:
   type: "schedule"
   cron: "0 9 * * *"
   timezone: "UTC"
 connections:
 - github
-outputs:
-- name: "digest"
-  kind: "file"
-  media_type: "text/markdown"
-  path: "out/digest.md"
-  required: true
-  label: "Daily Digest"
