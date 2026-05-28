@@ -539,6 +539,11 @@ function WorkerCard({
           <WorkerAvatar seed={worker.id} name={worker.name} size="size-10" />
           <div className="min-w-0 flex-1">
             <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
+            {worker.is_example && (
+              <span className="mt-1 inline-flex items-center rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                Example
+              </span>
+            )}
           </div>
           <button
             type="button"
