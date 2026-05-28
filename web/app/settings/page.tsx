@@ -334,7 +334,7 @@ function Row({
 // the user authenticates via Supabase + the CLI does a device-code login,
 // so there's no token to "reveal/copy" in the dashboard.
 function CloudAccessPanel() {
-  const [me, setMe] = useState<{ email?: string; user_id?: string } | null>(null);
+  const [me, setMe] = useState<{ email?: string; id?: string } | null>(null);
   const [copied, setCopied] = useState<string>("");
 
   useEffect(() => {
@@ -342,7 +342,7 @@ function CloudAccessPanel() {
     fetch("/app/api/me", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled && data) setMe(data);
+        if (!cancelled && data?.user) setMe(data.user);
       })
       .catch(() => {});
     return () => {
