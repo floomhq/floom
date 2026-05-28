@@ -30,15 +30,17 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_BLOBS_DIR", str(tmp_path / "blobs"))
     monkeypatch.setenv("FLOOM_SECRET", AUTH["x-floom-secret"])
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
-    monkeypatch.setenv("WORKEROS_USER_ID", "user-a")
+    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
     monkeypatch.setenv("trusted_proxies", "*")
     monkeypatch.delenv("WORKEROS_ENABLE_INTERNAL_AUTH_CONFIGS", raising=False)
     monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
     monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     monkeypatch.delenv("WORKEROS_DEV", raising=False)
 
-    for name in [
+    reset_prefixes = ("auth.", "db.")
+    reset_exact = {
         "main",
+        "auth",
         "db",
         "files",
         "models",
@@ -46,8 +48,10 @@ def _load_api(monkeypatch, tmp_path):
         "run_service",
         "composio_client",
         "scheduler",
-    ]:
-        sys.modules.pop(name, None)
+    }
+    for name in list(sys.modules):
+        if name in reset_exact or name.startswith(reset_prefixes):
+            sys.modules.pop(name, None)
 
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
@@ -56,11 +60,12 @@ def _load_api(monkeypatch, tmp_path):
     main = importlib.import_module("main")
     main._ENV_PATH = tmp_path / ".env"
     main._rate_buckets.clear()
-    main._cli_auth_devices.clear()
+    with main.get_db() as conn:
+        conn.execute("DELETE FROM cli_auth_devices")
     return main
 
 
-def _headers(user_id: str = "user-a") -> dict[str, str]:
+def _headers(user_id: str = "federico") -> dict[str, str]:
     return {**AUTH, "x-floom-user": user_id}
 
 
@@ -71,7 +76,7 @@ def _stored_zip(size_bytes: int) -> bytes:
     return buffer.getvalue()
 
 
-def _insert_connection(main, *, user_id: str = "user-a") -> str:
+def _insert_connection(main, *, user_id: str = "federico") -> str:
     local_id = str(uuid.uuid4())
     now = main.now_iso()
     with main.get_db() as conn:
@@ -118,7 +123,7 @@ def _insert_minimal_worker(main, worker_id: str) -> None:
         conn.execute(
             """
             INSERT INTO workers (id, skill_version_id, name, trigger_type, created_at, owner_id)
-            VALUES (?, ?, ?, 'manual', ?, 'user-a')
+            VALUES (?, ?, ?, 'manual', ?, 'federico')
             """,
             (worker_id, skill_version_id, worker_id, now),
         )
@@ -221,8 +226,9 @@ def test_cli_auth_store_bounded(monkeypatch, tmp_path):
         if index == 0:
             first_device_code = resp.json()["device_code"]
 
-    assert len(main._cli_auth_devices) == 100
-    assert first_device_code not in main._cli_auth_devices
+    records = main.get_repositories().cli_auth.list(user_id="federico")
+    assert len(records) == 100
+    assert first_device_code not in {record["device_code"] for record in records}
 
 
 def test_cli_auth_requires_typed_code():
@@ -267,10 +273,14 @@ def test_ratelimit_uses_cf_connecting_ip(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
     worker_id = "rate-worker"
-    monkeypatch.setattr(main, "_get_db_worker", lambda _worker_id: {"id": worker_id})
+    monkeypatch.setattr(main, "_get_db_worker", lambda _worker_id, **_kwargs: {"id": worker_id})
     monkeypatch.setattr(main, "get_worker_config_for_run", lambda _worker_id: None)
-    monkeypatch.setattr(main, "create_run", lambda _worker_id, _inputs, _trigger_source: f"run_{uuid.uuid4().hex}")
-    monkeypatch.setattr(main, "start_run", lambda _run_id, _worker_id, _inputs: None)
+    monkeypatch.setattr(
+        main,
+        "create_run",
+        lambda _worker_id, _inputs, _trigger_source, **_kwargs: f"run_{uuid.uuid4().hex}",
+    )
+    monkeypatch.setattr(main, "start_run", lambda _run_id, _worker_id, _inputs, **_kwargs: None)
 
     responses = [
         client.post(
@@ -320,10 +330,11 @@ def test_account_info_strips_internal_ids(monkeypatch, tmp_path):
     assert resp.status_code == 200
     body = resp.json()
     assert body == {
-        "email": "user@example.com",
+        "email": None,
         "scopes": ["gmail.readonly"],
         "connected_at": body["connected_at"],
     }
+    assert "user@example.com" not in resp.text
     assert "user_id" not in body
     assert "auth_config_id" not in body
 
