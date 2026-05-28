@@ -1,5 +1,6 @@
 "use client";
 
+// S44: accepts server-fetched initialData to eliminate client-side fetch round-trip.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -132,9 +133,10 @@ function statusMeta(status: string) {
   return { label: "Running", color: "var(--pending)" };
 }
 
-function useOverview() {
-  const [data, setData] = useState<SystemOverview | null>(null);
-  const [loading, setLoading] = useState(true);
+function useOverview(initialData: SystemOverview | null) {
+  // S44: start with server-fetched data — no loading flash on first render.
+  const [data, setData] = useState<SystemOverview | null>(initialData);
+  const [loading, setLoading] = useState(initialData === null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -149,6 +151,8 @@ function useOverview() {
   }, []);
 
   useEffect(() => {
+    // If we already have server-fetched data, skip the initial client fetch.
+    if (initialData !== null) return;
     let cancelled = false;
     async function loadOnce() {
       setLoading(true);
@@ -165,7 +169,7 @@ function useOverview() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { data, loading, reload: load };
 }
@@ -511,8 +515,8 @@ function LastSevenDays({ data }: { data: SystemOverview | null }) {
   );
 }
 
-export function OverviewDashboard() {
-  const { data, loading, reload } = useOverview();
+export function OverviewDashboard({ initialData = null }: { initialData?: import("@/lib/types").SystemOverview | null }) {
+  const { data, loading, reload } = useOverview(initialData);
   const workerNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const run of data?.recent_runs ?? []) {
