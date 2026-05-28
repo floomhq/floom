@@ -798,6 +798,10 @@ MIGRATIONS: list[Migration] = [
     """,
     # -- migration 29: repair DBs where version 28 was already consumed --------
     _ensure_mcp_connection_columns,
+    # -- migration 30: persist machine-readable run failure causes ------------
+    """
+    ALTER TABLE runs ADD COLUMN error_code TEXT;
+    """,
 ]
 
 
@@ -825,7 +829,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",

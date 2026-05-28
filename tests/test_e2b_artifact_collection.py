@@ -11,7 +11,10 @@ from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import (
     E2BSandboxDriver,
     _install_timeout_for_run,
+    _register_sandbox,
     _sandbox_lifetime_timeout,
+    active_sandbox_count,
+    cancel_sandbox,
 )
 
 
@@ -92,6 +95,37 @@ class FakeWritableFiles(FakeFiles):
         if isinstance(content, str):
             content = content.encode("utf-8")
         self._files[path] = bytes(content)
+
+
+class FakeOOMRunResult:
+    exit_code = 137
+    stdout = ""
+    stderr = "Killed process 123 (python) total-vm: memory cgroup out of memory\n"
+
+
+class FakeOOMCommandRunner:
+    def __init__(self, files):
+        self.files = files
+
+    def run(self, _command, **_kwargs):
+        return FakeOOMRunResult()
+
+
+class FakeOOMSandbox:
+    instances = []
+
+    def __init__(self):
+        self.files = FakeWritableFiles({})
+        self.commands = FakeOOMCommandRunner(self.files)
+        self.killed = False
+        FakeOOMSandbox.instances.append(self)
+
+    @classmethod
+    def create(cls, **_kwargs):
+        return cls()
+
+    def kill(self):
+        self.killed = True
 
 
 def test_collects_declared_sandbox_artifacts(tmp_path, monkeypatch):
@@ -213,6 +247,65 @@ def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
     assert logs.count(("info", "[e2b] live stdout")) == 1
     assert logs.count(("warning", "[e2b] stderr: live stderr")) == 1
     assert not any("stdout after exit" in message for _level, message in logs)
+
+
+def test_e2b_driver_maps_oom_exit_to_sandbox_oom(tmp_path, monkeypatch):
+    monkeypatch.setenv("E2B_API_KEY", "e2b-test")
+    monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeOOMSandbox))
+    FakeOOMSandbox.instances = []
+    with e2b_driver._active_sandboxes_lock:
+        e2b_driver._active_sandboxes.clear()
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('unused')\n")
+    config = WorkerConfig(
+        id="oom-test",
+        name="OOM Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        outputs=[],
+    )
+
+    result = E2BSandboxDriver().run(
+        worker_id="oom-test",
+        run_id="run_oom",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_args, **_kwargs: None,
+        trace_id="trace_oom",
+        timeout_seconds=300,
+        config=config,
+    )
+
+    assert result.status == "error"
+    assert result.error_code == "sandbox_oom"
+    assert FakeOOMSandbox.instances[-1].killed is True
+    assert active_sandbox_count() == 0
+
+
+def test_cancel_sandbox_kills_registered_sandbox():
+    class KillableSandbox:
+        def __init__(self):
+            self.killed = False
+
+        def kill(self):
+            self.killed = True
+
+    with e2b_driver._active_sandboxes_lock:
+        e2b_driver._active_sandboxes.clear()
+    sandbox = KillableSandbox()
+    _register_sandbox("run_cancel", sandbox)
+
+    assert active_sandbox_count() == 1
+    assert cancel_sandbox("run_cancel", reason="test cancel") is True
+    assert sandbox.killed is True
+    assert active_sandbox_count() == 0
+    assert cancel_sandbox("run_cancel", reason="second cancel") is False
 
 
 def test_long_worker_timeout_extends_install_and_sandbox_lifetime():
