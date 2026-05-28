@@ -2,13 +2,30 @@ import { chmodSync, existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+// AuthMode determines how the CLI hits the API:
+// - "oss" -> single-tenant OSS engine, x-floom-secret header, no workspaces
+// - "cloud" -> workeros-cloud, Supabase refresh token + JWT bearer, workspace header
+export type AuthMode = "oss" | "cloud";
+
 export type StoredCredentials = {
   api_base: string;
-  api_secret: string;
+  mode: AuthMode;
+  // OSS mode: per-CLI shared secret minted by /cli-auth/devices.
+  api_secret?: string;
+  // Cloud mode: Supabase refresh token (returned by /auth/cli-exchange).
+  refresh_token?: string;
+  // Cloud mode: Supabase project URL (so the CLI can refresh JWTs).
+  supabase_url?: string;
+  // Cloud mode: Supabase anon key (needed for the /auth/v1/token refresh call).
+  supabase_anon_key?: string;
+  // Cloud mode: currently-active workspace id. Sent as X-Workeros-Workspace.
+  workspace_id?: string;
+  // Cloud mode: human-readable workspace name (for `floom workspaces show`).
+  workspace_name?: string;
   authed_at: string;
 };
 
-const DEFAULT_API_BASE = "https://workers-api.floom.dev";
+const DEFAULT_OSS_API_BASE = "https://workers-api.floom.dev";
 
 function resolveHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "";
@@ -32,12 +49,24 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     return null;
   }
   const parsed = JSON.parse(raw) as Partial<StoredCredentials>;
-  if (!parsed.api_secret) {
+  // Back-compat: existing creds files only have api_base + api_secret +
+  // authed_at. Treat them as OSS mode.
+  const mode: AuthMode = parsed.mode === "cloud" ? "cloud" : "oss";
+  if (mode === "oss" && !parsed.api_secret) {
+    return null;
+  }
+  if (mode === "cloud" && (!parsed.refresh_token || !parsed.supabase_url)) {
     return null;
   }
   return {
-    api_base: (parsed.api_base || DEFAULT_API_BASE).replace(/\/+$/, ""),
+    api_base: (parsed.api_base || DEFAULT_OSS_API_BASE).replace(/\/+$/, ""),
+    mode,
     api_secret: parsed.api_secret,
+    refresh_token: parsed.refresh_token,
+    supabase_url: parsed.supabase_url ? parsed.supabase_url.replace(/\/+$/, "") : undefined,
+    supabase_anon_key: parsed.supabase_anon_key,
+    workspace_id: parsed.workspace_id,
+    workspace_name: parsed.workspace_name,
     authed_at: parsed.authed_at || new Date().toISOString(),
   };
 }
@@ -48,6 +77,18 @@ export async function writeCredentials(credentials: StoredCredentials): Promise<
   const payload = JSON.stringify(credentials, null, 2);
   await writeFile(path, `${payload}\n`, "utf8");
   chmodSync(path, 0o600);
+}
+
+export async function updateCredentials(
+  partial: Partial<StoredCredentials>,
+): Promise<StoredCredentials> {
+  const current = await readCredentials();
+  if (!current) {
+    throw new Error("Not logged in. Run floom login first.");
+  }
+  const next: StoredCredentials = { ...current, ...partial };
+  await writeCredentials(next);
+  return next;
 }
 
 export async function clearCredentials(): Promise<boolean> {

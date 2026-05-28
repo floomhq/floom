@@ -5,20 +5,37 @@ import { log, printJson } from "../lib/output.js";
 export async function runWhoamiCommand(options: { json?: boolean } = {}): Promise<number> {
   try {
     const { client, credentials } = await createAuthenticatedClient();
-    const info = await client.requestJson("GET", "/system/info");
-    const payload = {
+    // /system/info lives on the engine app. In cloud the engine is mounted
+    // under /api, so cloud-mode whoami needs the /api prefix.
+    const path = credentials.mode === "cloud" ? "/api/system/info" : "/system/info";
+    const info = await client.requestJson("GET", path);
+    const payload: Record<string, unknown> = {
+      mode: credentials.mode,
       api_base: credentials.api_base,
-      api_secret_masked: maskSecret(credentials.api_secret),
       authed_at: credentials.authed_at,
       system_info: info,
     };
+    if (credentials.mode === "cloud") {
+      payload.workspace_id = credentials.workspace_id || null;
+      payload.workspace_name = credentials.workspace_name || null;
+      payload.refresh_token_masked = maskSecret(credentials.refresh_token || "");
+    } else {
+      payload.api_secret_masked = maskSecret(credentials.api_secret || "");
+    }
     if (options.json) {
       printJson(payload);
     } else {
       log.heading("Identity");
-      log.kv("API base", payload.api_base);
-      log.kv("API secret", payload.api_secret_masked);
-      log.kv("Authed at", payload.authed_at);
+      log.kv("Mode", credentials.mode);
+      log.kv("API base", credentials.api_base);
+      if (credentials.mode === "cloud") {
+        const ws = credentials.workspace_name || credentials.workspace_id;
+        log.kv("Workspace", ws ? ws : "(none, run `floom workspaces use <name>`)");
+        log.kv("Refresh token", maskSecret(credentials.refresh_token || ""));
+      } else {
+        log.kv("API secret", maskSecret(credentials.api_secret || ""));
+      }
+      log.kv("Authed at", credentials.authed_at);
       log.ok("System reachable");
     }
     return 0;
