@@ -28,17 +28,63 @@ class WorkerContractProjectionTest(unittest.TestCase):
         self.assertIsNone(config.runtime.command)
         self.assertEqual(config.outputs[0].name, "brief")
 
-    def test_code_runtime_contract_still_projects_to_local_runner(self):
-        raw = yaml.safe_load((ROOT / "workers" / "input_types_test" / "worker.yml").read_text())
+    def test_code_runtime_contract_projects_to_e2b_runner(self):
+        raw = yaml.safe_load(
+            """
+schema_version: "0.3"
+name: script-worker
+title: Script Worker
+description: Runs a Python script.
+version: 0.1.0
+exec:
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  entry: run.py
+  inputs: []
+  outputs: []
+"""
+        )
         parsed = parse_worker_manifest(raw)
         self.assertIsInstance(parsed, WorkerContract)
 
-        config = worker_contract_to_worker_config(parsed, "input_types_test")
+        config = worker_contract_to_worker_config(parsed, "script-worker")
 
         self.assertEqual(config.runtime.type, "python311")
-        self.assertEqual(config.runtime.runner, "local")
+        self.assertEqual(config.runtime.runner, "e2b")
         self.assertEqual(config.runtime.entrypoint, "run.py")
         self.assertEqual(config.runtime.command, "python run.py")
+
+    def test_worker_contract_projects_contexts(self):
+        raw = yaml.safe_load(
+            """
+schema_version: "0.3"
+name: context-worker
+title: Context Worker
+description: Reads context folders.
+version: 0.1.0
+exec:
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  entry: run.py
+  inputs: []
+  outputs: []
+contexts:
+  - knowledge-base
+  - name: history
+    writeable: true
+    source: local
+"""
+        )
+        parsed = parse_worker_manifest(raw)
+        self.assertIsInstance(parsed, WorkerContract)
+
+        config = worker_contract_to_worker_config(parsed, "context-worker")
+
+        self.assertEqual(config.contexts[0], "knowledge-base")
+        self.assertEqual(config.contexts[1].name, "history")
+        self.assertTrue(config.contexts[1].writeable)
 
 
 if __name__ == "__main__":
