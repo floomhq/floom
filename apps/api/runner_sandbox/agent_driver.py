@@ -783,7 +783,14 @@ class AgentDriver(SandboxDriver):
                 "type": "function",
                 "function": {
                     "name": "write_output",
-                    "description": "Record a declared worker output.",
+                    "description": (
+                        "Record a declared worker output. `content` MUST be the FINAL "
+                        "output content itself: the complete markdown text, the full "
+                        "JSON object, the full CSV body, etc. DO NOT pass a file path "
+                        "or filename string (e.g. 'out/update.md') — the runtime writes "
+                        "the content to the declared output path automatically. "
+                        "Example: write_output(name='update', content='# Weekly update\\n\\n## Highlights\\n- Shipped X\\n- ...')."
+                    ),
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -798,7 +805,14 @@ class AgentDriver(SandboxDriver):
                 "type": "function",
                 "function": {
                     "name": "finish_with_outputs",
-                    "description": "Write declared worker outputs and end the agent run successfully.",
+                    "description": (
+                        "Write declared worker outputs and end the agent run successfully. "
+                        "Each property in the arguments must be the FINAL CONTENT for "
+                        "that named output (the complete markdown / JSON / text), NOT a "
+                        "file path or filename. If a property is a markdown output, pass "
+                        "the full markdown body inline. The runtime persists it to the "
+                        "declared output path."
+                    ),
                     "parameters": self._finish_with_outputs_schema(config),
                 },
             },
