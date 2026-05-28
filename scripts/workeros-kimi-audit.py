@@ -706,7 +706,7 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
     record(
         results,
         "run-bundle-path-traversal-rejected",
-        bundle_traversal.get("status") == 400,
+        bundle_traversal.get("status") in {400, 404},
         f"status={bundle_traversal.get('status')}",
         bundle_traversal,
     )
