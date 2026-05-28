@@ -1,4 +1,12 @@
-from ._legacy_sqlite import DB_PATH, apply_migrations, get_current_version, get_db, init_db, now_iso
+from ._legacy_sqlite import (
+    DB_PATH,
+    apply_migrations,
+    get_current_version,
+    get_db,
+    init_db,
+    now_iso,
+    sqlite_runtime_settings,
+)
 from .dependency import get_repos
 from .factory import Repositories, get_repositories, register_repositories
 from .interface import (
@@ -17,6 +25,7 @@ __all__ = [
     "get_db",
     "init_db",
     "now_iso",
+    "sqlite_runtime_settings",
     "Repositories",
     "get_repositories",
     "get_repos",
