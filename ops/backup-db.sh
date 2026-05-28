@@ -14,6 +14,7 @@
 #
 # Override via env:
 #   WORKEROS_ROOT            repo root (default: /root/workeros)
+#   WORKEROS_API_DIR         API dir for relative FLOOM_DB paths (default: $WORKEROS_ROOT/apps/api)
 #   FLOOM_DB                 SQLite path (default: $WORKEROS_ROOT/data/floom.db)
 #   FLOOM_ARTIFACTS_DIR      artifacts dir (default: $WORKEROS_ROOT/data/artifacts)
 #   WORKEROS_BACKUP_ROOT     destination root (default: /root/backups)
@@ -24,12 +25,34 @@
 set -euo pipefail
 
 WORKEROS_ROOT="${WORKEROS_ROOT:-/root/workeros}"
+WORKEROS_API_DIR="${WORKEROS_API_DIR:-$WORKEROS_ROOT/apps/api}"
 DB_PATH="${FLOOM_DB:-$WORKEROS_ROOT/data/floom.db}"
 ARTIFACTS_DIR="${FLOOM_ARTIFACTS_DIR:-$WORKEROS_ROOT/data/artifacts}"
 BACKUP_ROOT="${WORKEROS_BACKUP_ROOT:-/root/backups}"
 HOURLY_KEEP="${WORKEROS_BACKUP_HOURLY:-48}"
 DAILY_KEEP="${WORKEROS_BACKUP_DAILY:-7}"
 WEEKLY_KEEP="${WORKEROS_BACKUP_WEEKLY:-4}"
+
+resolve_path() {
+  local base="$1"
+  local raw="$2"
+  python3 - "$base" "$raw" <<'PY'
+from pathlib import Path
+import sys
+
+base = Path(sys.argv[1])
+raw = Path(sys.argv[2])
+print((raw if raw.is_absolute() else base / raw).resolve())
+PY
+}
+
+if [[ "$DB_PATH" != /* ]]; then
+  DB_PATH="$(resolve_path "$WORKEROS_API_DIR" "$DB_PATH")"
+fi
+
+if [[ "$ARTIFACTS_DIR" != /* ]]; then
+  ARTIFACTS_DIR="$(resolve_path "$WORKEROS_API_DIR" "$ARTIFACTS_DIR")"
+fi
 
 if [[ ! -f "$DB_PATH" ]]; then
   echo "[backup-db] source database not found: $DB_PATH" >&2
