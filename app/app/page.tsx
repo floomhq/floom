@@ -1,148 +1,108 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { readSession } from "@/lib/session";
-import { API_BASE } from "@/lib/api";
-import { SignOutButton } from "./SignOutButton";
+import { apiGetJson } from "@/lib/api-server";
 
 export const dynamic = "force-dynamic";
 
-type WorkersResponse = { workers?: Array<{ id: string; name: string }> } | Array<{ id: string; name: string }>;
+type Counts = { workers: number | null; runs: number | null; connections: number | null };
 
-async function fetchWorkerCount(accessToken: string | null): Promise<number | null> {
-  if (!accessToken) return null;
-  try {
-    const res = await fetch(`${API_BASE}/api/workers`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    const data: WorkersResponse = await res.json();
-    const list = Array.isArray(data) ? data : data?.workers ?? [];
-    return list.length;
-  } catch {
-    return null;
-  }
+async function fetchCounts(): Promise<Counts> {
+  const [workers, runs, connections] = await Promise.all([
+    apiGetJson<unknown[]>("/api/workers"),
+    apiGetJson<unknown[]>("/api/runs"),
+    apiGetJson<unknown[]>("/api/connections"),
+  ]);
+  return {
+    workers: workers ? workers.length : null,
+    runs: runs ? runs.length : null,
+    connections: connections ? connections.length : null,
+  };
 }
 
 export default async function AppPage() {
   const session = await readSession();
-  if (!session) {
-    redirect("/");
-  }
-
-  const workerCount = await fetchWorkerCount(session.accessToken);
+  const counts = await fetchCounts();
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: "48px 24px",
-        fontFamily:
-          "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-        color: "#0d0d0d",
-      }}
-    >
-      <section
-        style={{
-          width: "100%",
-          maxWidth: 560,
-          background: "#fff",
-          border: "1px solid rgba(15,15,15,0.08)",
-          borderRadius: 16,
-          padding: 32,
-          boxShadow: "0 1px 0 rgba(15,15,15,0.04), 0 12px 40px rgba(15,15,15,0.06)",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 12,
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            color: "#6b6b6b",
-            marginBottom: 12,
-          }}
-        >
-          Workspace
-        </div>
-        <h1 style={{ fontSize: 24, fontWeight: 600, margin: "0 0 4px", lineHeight: 1.25 }}>
+    <section style={{ display: "grid", gap: 24 }}>
+      <div>
+        <div style={eyebrow}>Workspace</div>
+        <h1 style={{ fontSize: 28, fontWeight: 600, margin: "4px 0 4px", lineHeight: 1.2 }}>
           Welcome back
         </h1>
-        <p style={{ fontSize: 14, color: "#5b5b5b", margin: "0 0 28px" }}>
-          Signed in as <strong style={{ color: "#0d0d0d" }}>{session.email ?? "—"}</strong>
+        <p style={{ fontSize: 14, color: "#5b5b5b", margin: 0 }}>
+          Signed in as <strong style={{ color: "#0d0d0d" }}>{session?.email ?? "—"}</strong> · Free plan
         </p>
+      </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 12,
-            marginBottom: 28,
-          }}
-        >
-          <div
-            style={{
-              border: "1px solid rgba(15,15,15,0.08)",
-              borderRadius: 10,
-              padding: 14,
-            }}
-          >
-            <div style={{ fontSize: 11, color: "#6b6b6b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Workers
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 600, marginTop: 6 }}>
-              {workerCount ?? "—"}
-            </div>
-          </div>
-          <div
-            style={{
-              border: "1px solid rgba(15,15,15,0.08)",
-              borderRadius: 10,
-              padding: 14,
-            }}
-          >
-            <div style={{ fontSize: 11, color: "#6b6b6b", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-              Plan
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 600, marginTop: 6 }}>free</div>
-          </div>
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+        <StatTile label="Workers" value={counts.workers} href="/app/workers" />
+        <StatTile label="Runs" value={counts.runs} href="/app/runs" />
+        <StatTile label="Connections" value={counts.connections} href="/app/connections" />
+      </div>
 
-        <p style={{ fontSize: 13, color: "#5b5b5b", margin: "0 0 20px", lineHeight: 1.5 }}>
-          You&apos;re signed in to the Workeros cloud. The dashboard is minimal for now —
-          create workers via the MCP server or the CLI:
+      <div style={card}>
+        <div style={eyebrow}>Get started</div>
+        <h2 style={{ fontSize: 18, fontWeight: 600, margin: "4px 0 12px" }}>
+          Create your first worker
+        </h2>
+        <p style={{ fontSize: 14, color: "#5b5b5b", margin: "0 0 16px", lineHeight: 1.5 }}>
+          Workers run inside E2B sandboxes. Drive them from Claude, Cursor, or any MCP-capable
+          agent — install the Workeros MCP server:
         </p>
-        <pre
-          style={{
-            background: "#0d0d0d",
-            color: "#e8e8e8",
-            padding: "12px 14px",
-            borderRadius: 8,
-            fontSize: 13,
-            margin: "0 0 24px",
-            overflowX: "auto",
-            fontFamily:
-              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
-          }}
-        >
-          npx -y @floomhq/workeros-mcp
-        </pre>
+        <pre style={preBlack}>npx -y @floomhq/workeros</pre>
+        <p style={{ fontSize: 13, color: "#6b6b6b", margin: "12px 0 0", lineHeight: 1.5 }}>
+          Or browse the open-source engine at{" "}
+          <a href="https://github.com/floomhq/workeros" style={{ color: "#0d0d0d" }} target="_blank" rel="noopener noreferrer">
+            github.com/floomhq/workeros
+          </a>
+          .
+        </p>
+      </div>
+    </section>
+  );
+}
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
-          <Link
-            href="/"
-            style={{
-              fontSize: 13,
-              color: "#5b5b5b",
-              textDecoration: "none",
-            }}
-          >
-            ← Back to landing
-          </Link>
-          <SignOutButton />
-        </div>
-      </section>
-    </main>
+const card = {
+  border: "1px solid rgba(15,15,15,0.08)",
+  borderRadius: 14,
+  padding: 24,
+  background: "#fff",
+} as const;
+
+const eyebrow = {
+  fontSize: 11,
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.08em",
+  color: "#6b6b6b",
+};
+
+const preBlack = {
+  background: "#0d0d0d",
+  color: "#e8e8e8",
+  padding: "12px 14px",
+  borderRadius: 8,
+  fontSize: 13,
+  margin: 0,
+  fontFamily:
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
+};
+
+function StatTile({ label, value, href }: { label: string; value: number | null; href: string }) {
+  return (
+    <Link
+      href={href}
+      style={{
+        display: "block",
+        ...card,
+        padding: 18,
+        textDecoration: "none",
+        color: "inherit",
+        transition: "border-color 0.15s",
+      }}
+    >
+      <div style={eyebrow}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 600, marginTop: 4 }}>{value ?? "—"}</div>
+    </Link>
   );
 }

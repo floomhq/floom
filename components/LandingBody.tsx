@@ -340,7 +340,7 @@ export function LandingBody() {
   useNavScroll();
 
   const [copied, setCopied] = useState(false);
-  const CMD = "npx -y @floomhq/workeros-mcp";
+  const CMD = "npx -y @floomhq/workeros";
   async function copyCmd() {
     try {
       await navigator.clipboard.writeText(CMD);

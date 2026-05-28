@@ -2,3 +2,6 @@ export const API_BASE = process.env.NEXT_PUBLIC_WORKEROS_API_BASE ?? "https://wo
 
 export const OAUTH_LOGIN_URL = (next = "/app") =>
   `${API_BASE}/auth/login?provider=google&next=${encodeURIComponent(next)}`;
+
+export const OAUTH_LOGIN_URL_GITHUB = (next = "/app") =>
+  `${API_BASE}/auth/login?provider=github&next=${encodeURIComponent(next)}`;
