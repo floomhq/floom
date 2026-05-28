@@ -1061,6 +1061,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         status: str,
         output_json: dict[str, Any] | None = None,
         error: str | None = None,
+        error_code: str | None = None,
     ) -> None:
         run = self.get(user_id=user_id, run_id=run_id)
         if run is None:
@@ -1070,6 +1071,8 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             updates["output_json"] = output_json
         if error is not None:
             updates["error"] = error
+        if error_code is not None:
+            updates["error_code"] = error_code
         if status == RunStatus.RUNNING.value:
             updates["started_at"] = datetime.now(timezone.utc).isoformat()
         if status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
@@ -1185,6 +1188,51 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             cancel_requested=True,
             cancelled_at=cancelled_at,
         )
+
+    def fail_running(self, *, user_id: str, error: str, error_code: str | None = None) -> list[str]:
+        """Mark every still-running run for this user as failed.
+
+        Mirrors :meth:`SqliteRunRepository.fail_running` (engine
+        ``apps/api/db/sqlite.py``). Used by
+        ``fail_interrupted_runs_on_startup`` to clean up rows that were
+        in flight when a prior API process exited. Only called from the
+        engine's local-mode lifespan today, but kept on the cloud repo
+        too so the interface contract holds for a future cloud-startup
+        recovery sweep.
+        """
+        # Find all running runs scoped to this user (or active workspace,
+        # if the contextvar happens to be set — unlikely at startup).
+        builder = self._client.table("runs").select("id,started_at")
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.eq("status", RunStatus.RUNNING.value).execute()
+        rows = _response_rows(response)
+        if not rows:
+            return []
+        completed_at_str = datetime.now(timezone.utc).isoformat()
+        completed_dt = datetime.fromisoformat(completed_at_str)
+        failed_ids: list[str] = []
+        for row in rows:
+            run_id = str(row.get("id") or "")
+            if not run_id:
+                continue
+            updates: dict[str, Any] = {
+                "status": RunStatus.FAILED.value,
+                "error": error,
+                "error_code": error_code,
+                "completed_at": completed_at_str,
+            }
+            started_at = row.get("started_at")
+            if started_at:
+                try:
+                    started_dt = datetime.fromisoformat(str(started_at))
+                    updates["duration_ms"] = int(
+                        (completed_dt - started_dt).total_seconds() * 1000
+                    )
+                except Exception:
+                    pass
+            self.update(user_id=user_id, run_id=run_id, **updates)
+            failed_ids.append(run_id)
+        return failed_ids
 
     def count_running_for_worker(self, *, user_id: str, worker_id: str) -> int:
         # Scoped by workspace_id when called inside a web request; falls
