@@ -2198,6 +2198,13 @@ class ContextSummary(BaseModel):
     total_size_bytes: int
     updated_at: Optional[str] = None
     writeable: bool = False
+    worker_count: int = 0
+    description: Optional[str] = None
+
+
+class ContextWorkerRef(BaseModel):
+    worker_id: str
+    worker_name: str
 
 
 class ContextFileItem(BaseModel):
@@ -2206,10 +2213,13 @@ class ContextFileItem(BaseModel):
     mime_type: str
     updated_at: str
     is_binary: bool
+    description: Optional[str] = None
+    display_type: str = "Binary"
 
 
 class ContextDetail(ContextSummary):
     files: List[ContextFileItem] = Field(default_factory=list)
+    used_by: List[ContextWorkerRef] = Field(default_factory=list)
 
 
 class ContextCreateRequest(BaseModel):
@@ -2251,17 +2261,133 @@ def _safe_context_file_or_400(name: str, path: str) -> Path:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _extract_md_description(text: str, max_chars: int = 80) -> Optional[str]:
+    """Extract a 1-line description from markdown: first H1 or first non-empty paragraph."""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("# "):
+            desc = line[2:].strip()
+            return desc[:max_chars] if desc else None
+        if line and not line.startswith("#"):
+            return line[:max_chars]
+    return None
+
+
+def _extract_yml_description(text: str) -> Optional[str]:
+    """Extract description or title field from YAML front matter."""
+    try:
+        import yaml as _yaml
+        data = _yaml.safe_load(text)
+        if isinstance(data, dict):
+            for key in ("description", "title", "name"):
+                val = data.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()[:80]
+    except Exception:
+        pass
+    return None
+
+
+def _file_display_type(path: str, mime_type: str) -> str:
+    """Return a human-friendly file type label."""
+    p = path.lower()
+    if p.endswith(".md") or p.endswith(".mdx"):
+        return "Markdown"
+    if p.endswith(".yml") or p.endswith(".yaml"):
+        return "YAML"
+    if p.endswith(".py"):
+        return "Python"
+    if p.endswith(".js") or p.endswith(".jsx"):
+        return "JavaScript"
+    if p.endswith(".ts") or p.endswith(".tsx"):
+        return "TypeScript"
+    if p.endswith(".json"):
+        return "JSON"
+    if p.endswith(".sh"):
+        return "Shell"
+    if p.endswith(".sql"):
+        return "SQL"
+    if p.endswith(".txt"):
+        return "Text"
+    if p.endswith(".csv"):
+        return "CSV"
+    if p.endswith(".html") or p.endswith(".htm"):
+        return "HTML"
+    if p.endswith(".pdf"):
+        return "PDF"
+    mime = mime_type.lower()
+    if mime.startswith("image/"):
+        return "Image"
+    if "text/" in mime:
+        return "Text"
+    return "Binary"
+
+
+def _file_description(root: Path, path: Path) -> Optional[str]:
+    """Auto-extract a 1-line description from a file."""
+    rel = path.relative_to(root).as_posix().lower()
+    try:
+        if rel.endswith(".md") or rel.endswith(".mdx"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            return _extract_md_description(text)
+        if rel.endswith(".yml") or rel.endswith(".yaml"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            return _extract_yml_description(text)
+    except Exception:
+        pass
+    return None
+
+
+def _context_readme_description(root: Path) -> Optional[str]:
+    """Extract description from README.md in context root."""
+    for name in ("README.md", "readme.md", "README.MD"):
+        readme = root / name
+        if readme.is_file():
+            try:
+                text = readme.read_text(encoding="utf-8", errors="replace")
+                return _extract_md_description(text, max_chars=120)
+            except Exception:
+                pass
+    return None
+
+
+def _workers_using_context(name: str) -> List[ContextWorkerRef]:
+    """Return list of workers that reference this context via contexts: field."""
+    refs: List[ContextWorkerRef] = []
+    for worker in discover_workers(use_cache=False):
+        try:
+            contexts = (worker.get("config") or {}).get("contexts") or []
+            if name in context_mount_names(contexts):
+                refs.append(ContextWorkerRef(
+                    worker_id=str(worker["id"]),
+                    worker_name=str(worker.get("name") or worker["id"]),
+                ))
+        except Exception:
+            continue
+    return refs
+
+
 def _context_summary(name: str, metadata: dict[str, dict[str, Any]]) -> ContextSummary:
     root = context_dir(name)
     files = list(iter_context_files(root))
     total_size = sum(path.stat().st_size for path in files)
+    workers = _workers_using_context(name)
     return ContextSummary(
         name=name,
         file_count=len(files),
         total_size_bytes=total_size,
         updated_at=context_updated_at(root),
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
+        worker_count=len(workers),
+        description=_context_readme_description(root),
     )
+
+
+def _context_file_item(root: Path, path: Path) -> ContextFileItem:
+    base = context_file_metadata(root, path)
+    desc = _file_description(root, path)
+    display_type = _file_display_type(base["path"], base["mime_type"])
+    return ContextFileItem(**base, description=desc, display_type=display_type)
 
 
 def _context_detail(name: str, metadata: dict[str, dict[str, Any]] | None = None) -> ContextDetail:
@@ -2270,11 +2396,12 @@ def _context_detail(name: str, metadata: dict[str, dict[str, Any]] | None = None
         raise HTTPException(status_code=404, detail="Context not found")
     meta = metadata if metadata is not None else load_context_metadata()
     files = [
-        ContextFileItem(**context_file_metadata(root, path))
+        _context_file_item(root, path)
         for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
     ]
+    used_by = _workers_using_context(name)
     summary = _context_summary(name, meta)
-    return ContextDetail(**summary.model_dump(), files=files)
+    return ContextDetail(**summary.model_dump(), files=files, used_by=used_by)
 
 
 def _raise_context_quota_if_needed(name: str) -> None:
@@ -2303,7 +2430,7 @@ def _write_context_file(name: str, file_path: str, data: bytes) -> ContextFileIt
             destination.write_bytes(previous)
         raise
     set_context_metadata(name)
-    return ContextFileItem(**context_file_metadata(root, destination))
+    return _context_file_item(root, destination)
 
 
 def _workers_referencing_context(name: str) -> List[str]:
