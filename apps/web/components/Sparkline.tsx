@@ -1,11 +1,14 @@
 "use client";
 
 import type { TimeseriesDay } from "@/lib/types";
+import type { OverviewSparklineBucket } from "@/lib/types";
 
 interface SparklineProps {
-  data: TimeseriesDay[] | number[];
+  data: TimeseriesDay[] | OverviewSparklineBucket[] | number[];
   width?: number;
   height?: number;
+  className?: string;
+  tone?: "status" | "overview";
 }
 
 /**
@@ -20,12 +23,18 @@ interface SparklineProps {
  * failed-counts there, callers can switch to TimeseriesDay[] without changing
  * this component.
  */
-export function Sparkline({ data, width = 120, height = 32 }: SparklineProps) {
+export function Sparkline({
+  data,
+  width = 120,
+  height = 32,
+  className,
+  tone = "status",
+}: SparklineProps) {
   if (!data || data.length === 0) return null;
 
   const isStructured = typeof data[0] === "object" && data[0] !== null;
   const counts = isStructured
-    ? (data as TimeseriesDay[]).map((d) => d.total)
+    ? (data as Array<TimeseriesDay | OverviewSparklineBucket>).map((d) => d.total)
     : (data as number[]);
 
   const maxTotal = Math.max(...counts, 1);
@@ -39,14 +48,35 @@ export function Sparkline({ data, width = 120, height = 32 }: SparklineProps) {
       viewBox={`0 0 ${width} ${height}`}
       aria-hidden="true"
       style={{ display: "block" }}
+      className={className}
     >
       {data.map((entry, i) => {
         const x = i * (barW + gap);
         const total = isStructured
-          ? (entry as TimeseriesDay).total
+          ? (entry as TimeseriesDay | OverviewSparklineBucket).total
           : (entry as number);
         const totalH =
           total > 0 ? Math.max(2, Math.round((total / maxTotal) * (height - 2))) : 0;
+
+        if (tone === "overview" && isStructured) {
+          const bucket = entry as OverviewSparklineBucket;
+          const failed = bucket.failed ?? 0;
+          const title = `${bucket.label} · ${total} ${total === 1 ? "run" : "runs"} · ${failed} failed`;
+          return (
+            <rect
+              key={bucket.started_at ?? i}
+              x={x}
+              y={totalH === 0 ? height - 2 : height - totalH}
+              width={barW}
+              height={totalH === 0 ? 2 : totalH}
+              fill="var(--text-primary)"
+              opacity={failed > 0 ? 1 : totalH === 0 ? 0.16 : 0.3}
+              rx={1}
+            >
+              <title>{title}</title>
+            </rect>
+          );
+        }
 
         if (!isStructured) {
           if (totalH === 0) {
@@ -57,7 +87,7 @@ export function Sparkline({ data, width = 120, height = 32 }: SparklineProps) {
                 y={height - 2}
                 width={barW}
                 height={2}
-                fill="#e4e4e7"
+                fill="var(--border-soft)"
                 rx={1}
               />
             );
@@ -69,7 +99,7 @@ export function Sparkline({ data, width = 120, height = 32 }: SparklineProps) {
               y={height - totalH}
               width={barW}
               height={totalH}
-              fill="#22c55e"
+              fill="var(--success)"
               rx={1}
             />
           );
@@ -90,7 +120,7 @@ export function Sparkline({ data, width = 120, height = 32 }: SparklineProps) {
                 y={height - completedH}
                 width={barW}
                 height={completedH}
-                fill="#22c55e"
+                fill="var(--success)"
                 rx={1}
               />
             )}
@@ -100,7 +130,7 @@ export function Sparkline({ data, width = 120, height = 32 }: SparklineProps) {
                 y={height - totalH}
                 width={barW}
                 height={failedH}
-                fill="#ef4444"
+                fill="var(--warning)"
                 rx={1}
               />
             )}
@@ -110,7 +140,7 @@ export function Sparkline({ data, width = 120, height = 32 }: SparklineProps) {
                 y={height - 2}
                 width={barW}
                 height={2}
-                fill="#e4e4e7"
+                fill="var(--border-soft)"
                 rx={1}
               />
             )}
