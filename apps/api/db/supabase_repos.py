@@ -339,6 +339,91 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             raise RuntimeError(f"failed to create worker {worker_id}")
         return created
 
+    def upsert(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
+        """Insert-or-update a worker row in Supabase.
+
+        Called by the engine's _persist_discovered_workers after a worker
+        is drafted, created, or updated. Idempotent across repeated
+        discovery passes. Verifies ownership when updating: rows owned by
+        a different user are NOT clobbered (raises).
+        """
+        worker_id = fields["worker_id"]
+        manifest_json = _json_storage_value(fields.get("manifest_json"), {})
+        name = (
+            fields.get("name")
+            or manifest_json.get("title")
+            or manifest_json.get("name")
+            or worker_id
+        )
+        created_at = fields.get("created_at") or datetime.now(timezone.utc).isoformat()
+        skill_version_id = fields.get("skill_version_id") or _skill_version_id(
+            worker_id, manifest_json
+        )
+
+        # Ownership guard: if the row exists under a different user_id,
+        # refuse rather than reassign. Worker IDs are globally unique by
+        # PK so two tenants can't legitimately own the same id, but a
+        # filesystem rename + re-discover could surface a collision and
+        # we should fail loud rather than steal someone else's worker.
+        existing_owner = self.get_owner(worker_id=worker_id)
+        if existing_owner is not None and existing_owner != user_id:
+            raise RuntimeError(
+                f"worker {worker_id!r} already exists for a different user"
+            )
+
+        self._client.table("skill_versions").upsert(
+            {
+                "id": skill_version_id,
+                "user_id": user_id,
+                "name": manifest_json.get("name") or name,
+                "version": str(manifest_json.get("version") or "0.1.0"),
+                "manifest_json": manifest_json,
+                "bundle_path": fields.get("bundle_path") or f"workers/{worker_id}",
+                "created_at": created_at,
+            },
+            on_conflict="id",
+        ).execute()
+
+        worker_payload: dict[str, Any] = {
+            "id": worker_id,
+            "user_id": user_id,
+            "skill_version_id": skill_version_id,
+            "name": name,
+            "trigger_type": fields.get("trigger_type") or "manual",
+            "cron_expr": fields.get("cron_expr"),
+            "cron_timezone": fields.get("cron_timezone"),
+            "grants_json": _json_storage_value(fields.get("grants_json"), {}),
+            "input_values_json": _json_storage_value(fields.get("input_values_json"), {}),
+            "enabled": bool(fields.get("enabled", True)),
+            "created_at": created_at,
+            "composio_trigger_id": fields.get("composio_trigger_id"),
+            "composio_event": fields.get("composio_event"),
+            "triggers_json": _json_storage_value(fields.get("triggers_json"), []),
+        }
+        # Don't clobber notify_* and next_run_at on update; only set on
+        # insert. PostgREST upsert applies the whole payload on conflict,
+        # so we have to branch.
+        if existing_owner is None:
+            worker_payload.update(
+                {
+                    "next_run_at": fields.get("next_run_at"),
+                    "last_scheduled_run_at": fields.get("last_scheduled_run_at"),
+                    "webhook_secret_hash": _bytea_literal(fields.get("webhook_secret_hash")),
+                    "notify_email": bool(fields.get("notify_email")),
+                    "notify_webhook_url": fields.get("notify_webhook_url"),
+                }
+            )
+            self._client.table("workers").insert(worker_payload).execute()
+        else:
+            self._client.table("workers").update(worker_payload).eq(
+                "id", worker_id
+            ).eq("user_id", user_id).execute()
+
+        upserted = self.get(user_id=user_id, worker_id=worker_id)
+        if upserted is None:
+            raise RuntimeError(f"failed to upsert worker {worker_id}")
+        return upserted
+
     def update(self, *, user_id: str, worker_id: str, **fields: Any) -> dict[str, Any] | None:
         worker = self.get(user_id=user_id, worker_id=worker_id)
         if worker is None:
