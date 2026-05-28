@@ -864,6 +864,7 @@ class RunSummary(BaseModel):
     completed_at: Optional[str] = None
     duration_ms: Optional[int] = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
 
 
 class LogEntry(BaseModel):
@@ -904,6 +905,7 @@ class RunDetail(BaseModel):
     artifacts: List[Artifact] = Field(default_factory=list)
     transcript: List[Dict[str, Any]] = Field(default_factory=list)
     error: Optional[str] = None
+    error_code: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     duration_ms: Optional[int] = None

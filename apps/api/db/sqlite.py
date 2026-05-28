@@ -507,7 +507,7 @@ class SqliteWorkerRepository:
             rows = conn.execute(
                 """
                 SELECT r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
-                       r.started_at, r.completed_at, r.duration_ms, r.error
+                       r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 WHERE w.owner_id = ? AND r.worker_id = ?
@@ -786,7 +786,7 @@ class SqliteRunRepository:
             rows = conn.execute(
                 """
                 SELECT r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
-                       r.started_at, r.completed_at, r.duration_ms, r.error
+                       r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 WHERE w.owner_id = ? AND r.worker_id = ?
@@ -827,7 +827,8 @@ class SqliteRunRepository:
             SELECT r.id, r.worker_id,
                    COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
                    r.status, r.trigger_source, r.created_at, r.started_at,
-                   r.completed_at, r.duration_ms, r.error, r.quality_warning
+                   r.completed_at, r.duration_ms, r.error, r.error_code,
+                   r.quality_warning
             FROM runs r
             JOIN workers w ON w.id = r.worker_id
             LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
@@ -851,7 +852,7 @@ class SqliteRunRepository:
                 SELECT r.id, r.worker_id,
                        COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
                        r.status, r.trigger_source, r.runner, r.input_json, r.output_json,
-                       r.error, r.started_at, r.completed_at, r.duration_ms, r.created_at,
+                       r.error, r.error_code, r.started_at, r.completed_at, r.duration_ms, r.created_at,
                        r.cancel_requested, r.cancelled_at, r.bundle_snapshot_path,
                        r.quality_warning
                 FROM runs r
@@ -922,6 +923,7 @@ class SqliteRunRepository:
             "output_json",
             "approval_status",
             "error",
+            "error_code",
             "started_at",
             "completed_at",
             "duration_ms",
@@ -985,6 +987,7 @@ class SqliteRunRepository:
         status: str,
         output_json: dict[str, Any] | None = None,
         error: str | None = None,
+        error_code: str | None = None,
     ) -> None:
         run = self.get(user_id=user_id, run_id=run_id)
         if run is None:
@@ -994,6 +997,8 @@ class SqliteRunRepository:
             updates["output_json"] = output_json
         if error is not None:
             updates["error"] = error
+        if error_code is not None:
+            updates["error_code"] = error_code
         if status == RunStatus.RUNNING.value:
             updates["started_at"] = now_iso()
         if status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
@@ -1107,7 +1112,7 @@ class SqliteRunRepository:
             cancelled_at=cancelled_at,
         )
 
-    def fail_running(self, *, user_id: str, error: str) -> list[str]:
+    def fail_running(self, *, user_id: str, error: str, error_code: str | None = None) -> list[str]:
         completed_at = now_iso()
         with get_db() as conn:
             rows = conn.execute(
@@ -1136,12 +1141,13 @@ class SqliteRunRepository:
                 conn.execute(
                     """
                     UPDATE runs
-                    SET status = ?, error = ?, completed_at = ?, duration_ms = ?
+                    SET status = ?, error = ?, error_code = ?, completed_at = ?, duration_ms = ?
                     WHERE id = ?
                     """,
                     (
                         RunStatus.FAILED.value,
                         error,
+                        error_code,
                         completed_at,
                         duration_ms,
                         row["id"],

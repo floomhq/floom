@@ -8,6 +8,7 @@ MUST write result.json with:
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any, Callable, Dict, Optional
@@ -20,6 +21,55 @@ from worker_registry import WORKERS_DIR
 logger = logging.getLogger("floom.runner_sandbox.e2b")
 
 MAX_E2B_SANDBOX_LIFETIME_SECONDS = 3600
+_OOM_EXIT_CODES = {137, -9}
+_OOM_MARKERS = (
+    "out of memory",
+    "oom-kill",
+    "oom killed",
+    "memory cgroup out of memory",
+    "killed process",
+)
+_active_sandboxes: dict[str, Any] = {}
+_active_sandboxes_lock = threading.Lock()
+
+
+def _register_sandbox(run_id: str, sandbox: Any) -> None:
+    with _active_sandboxes_lock:
+        _active_sandboxes[run_id] = sandbox
+
+
+def _unregister_sandbox(run_id: str, sandbox: Any) -> None:
+    with _active_sandboxes_lock:
+        if _active_sandboxes.get(run_id) is sandbox:
+            _active_sandboxes.pop(run_id, None)
+
+
+def active_sandbox_count() -> int:
+    with _active_sandboxes_lock:
+        return len(_active_sandboxes)
+
+
+def cancel_sandbox(run_id: str, *, reason: str | None = None) -> bool:
+    with _active_sandboxes_lock:
+        sandbox = _active_sandboxes.get(run_id)
+    if sandbox is None:
+        return False
+    try:
+        sandbox.kill()
+        logger.warning("Killed active E2B sandbox for run %s: %s", run_id, reason or "cancel requested")
+        return True
+    except Exception as exc:
+        logger.warning("Failed to kill active E2B sandbox for run %s: %s", run_id, exc)
+        return False
+    finally:
+        _unregister_sandbox(run_id, sandbox)
+
+
+def _looks_like_sandbox_oom(exit_code: int | None, stdout: str | None, stderr: str | None) -> bool:
+    if exit_code in _OOM_EXIT_CODES:
+        return True
+    text = f"{stdout or ''}\n{stderr or ''}".lower()
+    return any(marker in text for marker in _OOM_MARKERS)
 
 
 def _emit_command_output(raw: str, level: str, prefix: str, log_fn: Callable[[str, str], None]) -> None:
@@ -267,6 +317,7 @@ class E2BSandboxDriver(SandboxDriver):
                 "FLOOM_TRACE_ID": trace_id,
             },
         )
+        _register_sandbox(run_id, sandbox)
 
         try:
             workdir = "/home/user/worker"
@@ -439,6 +490,18 @@ class E2BSandboxDriver(SandboxDriver):
                 _emit_command_output(proc.stderr, "warning", "[e2b] stderr: ", log_fn)
 
             if proc.exit_code != 0:
+                if _looks_like_sandbox_oom(proc.exit_code, proc.stdout, proc.stderr):
+                    err = "Sandbox ran out of memory"
+                    stderr_snippet = (proc.stderr or proc.stdout or "")[:200].strip()
+                    if stderr_snippet:
+                        err += f": {stderr_snippet}"
+                    log_fn(f"[e2b] {err}", "error")
+                    return WorkerResult(
+                        status="error",
+                        error=err,
+                        error_code="sandbox_oom",
+                        retryable=False,
+                    )
                 err = f"Worker exited with code {proc.exit_code}"
                 stderr_snippet = (proc.stderr or "")[:200].strip()
                 if stderr_snippet:
@@ -497,6 +560,7 @@ class E2BSandboxDriver(SandboxDriver):
             )
 
         finally:
+            _unregister_sandbox(run_id, sandbox)
             try:
                 # e2b 2.x: kill() may raise if the sandbox already exited.
                 # We attempt gracefully; any exception is a warning, not a failure.

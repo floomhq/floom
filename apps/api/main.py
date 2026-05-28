@@ -79,6 +79,7 @@ from run_service import (
     get_worker_config_for_run,
     start_run,
     update_run_status,
+    request_active_run_shutdown,
 )
 from run_service import register_sse_publisher, register_part_publisher
 
@@ -134,6 +135,16 @@ async def lifespan(app: FastAPI):
         from scheduler import stop_scheduler
 
         stop_scheduler()
+        try:
+            drain_timeout = float(os.environ.get("WORKEROS_SHUTDOWN_RUN_DRAIN_SECONDS", "75"))
+        except ValueError:
+            drain_timeout = 75.0
+        cancelled_runs = await asyncio.to_thread(
+            request_active_run_shutdown,
+            timeout_seconds=drain_timeout,
+        )
+        if cancelled_runs:
+            logger.warning("Shutdown requested cancellation for %d active run(s)", cancelled_runs)
         if _sweep_task:
             _sweep_task.cancel()
             try:
@@ -932,6 +943,7 @@ def _make_run_summary(row: Any) -> RunSummary:
         completed_at=d.get("completed_at"),
         duration_ms=d.get("duration_ms"),
         error=d.get("error"),
+        error_code=d.get("error_code"),
     )
 
 
@@ -4359,6 +4371,7 @@ def get_run(
         artifacts=artifacts,
         transcript=transcript,
         error=run.get("error"),
+        error_code=run.get("error_code"),
         started_at=run.get("started_at"),
         completed_at=run.get("completed_at"),
         duration_ms=run.get("duration_ms"),
