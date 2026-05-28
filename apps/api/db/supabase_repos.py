@@ -72,6 +72,29 @@ def _skill_version_id(worker_id: str, manifest: dict[str, Any]) -> str:
     return f"sv_{worker_id}_{version}"
 
 
+def _lift_legacy_manifest_fields(manifest_raw: Any) -> Any:
+    """Lift legacy top-level inputs/outputs/secrets into exec block.
+
+    Authoring tools and our own example workers still emit the OSS schema
+    (top-level ``inputs:`` etc.) even with ``schema_version: "0.3"``, while
+    the 0.3 WorkerContract requires them under ``exec``. Without this lift,
+    pydantic silently drops the unknown top-level fields and the UI shows
+    "This worker has no inputs", breaking the run form. Idempotent: a
+    manifest that already has fields under exec is unchanged.
+    """
+    if not (
+        isinstance(manifest_raw, dict)
+        and manifest_raw.get("schema_version") == "0.3"
+        and isinstance(manifest_raw.get("exec"), dict)
+    ):
+        return manifest_raw
+    exec_block = manifest_raw["exec"]
+    for legacy_key in ("inputs", "outputs", "secrets"):
+        if manifest_raw.get(legacy_key) and not exec_block.get(legacy_key):
+            exec_block[legacy_key] = manifest_raw[legacy_key]
+    return manifest_raw
+
+
 def _config_from_manifest(
     *,
     worker_id: str,
@@ -87,6 +110,10 @@ def _config_from_manifest(
         manifest_raw = manifest_json
     else:
         manifest_raw = {}
+    # Read-side leniency: workers ingested before the write-side lift may
+    # still have top-level inputs/outputs/secrets. Lift them here too so a
+    # data migration isn't required.
+    manifest_raw = _lift_legacy_manifest_fields(manifest_raw)
     parsed = parse_worker_manifest(manifest_raw)
     if isinstance(parsed, WorkerContract):
         config = worker_contract_to_worker_config(parsed, worker_id)
@@ -295,7 +322,9 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
 
     def create(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         worker_id = fields["worker_id"]
-        manifest_json = _json_storage_value(fields.get("manifest_json"), {})
+        manifest_json = _lift_legacy_manifest_fields(
+            _json_storage_value(fields.get("manifest_json"), {})
+        )
         name = fields.get("name") or manifest_json.get("title") or manifest_json.get("name") or worker_id
         created_at = fields.get("created_at") or datetime.now(timezone.utc).isoformat()
         skill_version_id = fields.get("skill_version_id") or _skill_version_id(worker_id, manifest_json)
@@ -348,7 +377,9 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         a different user are NOT clobbered (raises).
         """
         worker_id = fields["worker_id"]
-        manifest_json = _json_storage_value(fields.get("manifest_json"), {})
+        manifest_json = _lift_legacy_manifest_fields(
+            _json_storage_value(fields.get("manifest_json"), {})
+        )
         name = (
             fields.get("name")
             or manifest_json.get("title")
