@@ -175,11 +175,11 @@ function SnippetBox({
   onCopy: () => void;
 }) {
   return (
-    <div className="relative rounded-md border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a]">
+    <div className="relative rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a]">
       <button
         type="button"
         onClick={onCopy}
-        className="absolute right-2 top-2 inline-flex h-7 items-center gap-1 rounded-md border border-line bg-card px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        className="absolute right-2 top-2 inline-flex h-7 items-center gap-1 rounded-[var(--radius-button)] border border-line bg-card px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         aria-label={copied ? "Copied" : "Copy snippet"}
       >
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
