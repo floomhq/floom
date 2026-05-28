@@ -47,6 +47,17 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // S42: /workers/<id>/edit is gone; redirect bookmarks to the unified detail
+  // page with edit mode toggled on via ?edit=1.
+  async redirects() {
+    return [
+      {
+        source: "/workers/:id/edit",
+        destination: "/workers/:id?edit=1",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {
