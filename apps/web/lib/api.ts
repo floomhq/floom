@@ -43,7 +43,9 @@ async function fetchRaw(path: string, options?: RequestInit): Promise<Response> 
 
 export const api = {
   workers: {
-    list: () => fetchJson<import("./types").WorkerSummary[]>("/workers"),
+    // S44 Win 3: use list shape (~15 KB vs 47 KB full) for the web UI.
+    // CLI consumers that call GET /workers directly get full payload (no ?shape=list).
+    list: () => fetchJson<import("./types").WorkerSummary[]>("/workers?shape=list"),
     get: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}`),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
