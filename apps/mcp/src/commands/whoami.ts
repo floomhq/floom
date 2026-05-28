@@ -1,6 +1,6 @@
 import { createAuthenticatedClient } from "../lib/api.js";
 import { maskSecret } from "../lib/credentials.js";
-import { printJson } from "../lib/output.js";
+import { log, printJson } from "../lib/output.js";
 
 export async function runWhoamiCommand(options: { json?: boolean } = {}): Promise<number> {
   try {
@@ -15,16 +15,18 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
     if (options.json) {
       printJson(payload);
     } else {
-      console.log(`API base: ${payload.api_base}`);
-      console.log(`API secret: ${payload.api_secret_masked}`);
-      console.log(`Authed at: ${payload.authed_at}`);
-      console.log(`System info: ok`);
+      log.heading("Identity");
+      log.kv("API base", payload.api_base);
+      log.kv("API secret", payload.api_secret_masked);
+      log.kv("Authed at", payload.authed_at);
+      log.ok("System reachable");
     }
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("Not logged in")) {
-      console.error("Not logged in. Run floom login first.");
+      log.err("Not logged in.");
+      log.info("Run: floom login");
       return 1;
     }
     throw error;

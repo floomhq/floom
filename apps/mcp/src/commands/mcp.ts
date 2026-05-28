@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readCredentials } from "../lib/credentials.js";
+import { log } from "../lib/output.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -130,7 +131,9 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
   const resolvedSecret = credentials?.api_secret || fallbackSecret;
   const resolvedBase = credentials?.api_base || process.env.WORKEROS_API_BASE || "https://workers-api.floom.dev";
   if (!resolvedSecret) {
-    throw new Error("Not logged in. Run floom login first.");
+    log.err("Not logged in. Cannot install MCP config without credentials.");
+    log.info("Run: floom login");
+    return 1;
   }
 
   const candidates = selectClients(options.target);
@@ -144,11 +147,12 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
       ? patchContinueConfig(config, resolvedSecret, resolvedBase)
       : patchObjectConfig(config, resolvedSecret, resolvedBase);
     await writeJson(path, patched);
-    console.log(`Installed Workeros MCP config for ${client.name} at ~/${client.path}`);
+    log.ok(`Installed Workeros MCP config for ${client.name}`);
+    log.kv("Config path", `~/${client.path}`);
     return 0;
   }
 
-  console.log(manualSnippets());
+  process.stdout.write(manualSnippets() + "\n");
   return 0;
 }
 
@@ -162,9 +166,11 @@ export async function mcpUninstallCommand(options: { target?: ClientTarget }): P
     const config = readJson(path);
     const patched = client.kind === "array" ? removeContinueConfig(config) : removeObjectConfig(config);
     await writeJson(path, patched);
-    console.log(`Removed Workeros MCP config from ${client.name} at ~/${client.path}`);
+    log.ok(`Removed Workeros MCP config from ${client.name}`);
+    log.kv("Config path", `~/${client.path}`);
     return 0;
   }
-  console.log("No Workeros MCP config entries were found.");
+  log.warn("No Workeros MCP config entries were found.");
+  log.info("Install first: floom mcp install");
   return 0;
 }
