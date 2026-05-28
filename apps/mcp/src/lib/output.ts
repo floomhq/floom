@@ -1,40 +1,25 @@
+import chalk from "chalk";
+
+export const log = {
+  info: (msg: string): void => { process.stdout.write(`${msg}\n`); },
+  ok: (msg: string): void => { process.stdout.write(`${chalk.green("✓ ")}${msg}\n`); },
+  warn: (msg: string): void => { process.stderr.write(`${chalk.yellow("! ")}${msg}\n`); },
+  err: (msg: string): void => { process.stderr.write(`${chalk.red("✗ ")}${msg}\n`); },
+  step: (msg: string): void => { process.stdout.write(`${chalk.dim("· ")}${msg}\n`); },
+  heading: (msg: string): void => { process.stdout.write(`\n${chalk.bold(msg)}\n`); },
+  kv: (key: string, value: string): void => { process.stdout.write(`  ${chalk.dim(key.padEnd(18))}${value}\n`); },
+  blank: (): void => { process.stdout.write("\n"); },
+};
+
+export function exitWith(code: number, msg?: string): never {
+  if (msg) log.err(msg);
+  process.exit(code);
+}
+
 type TableColumn<T> = {
   key: keyof T;
   label: string;
 };
-
-const COLOR = {
-  reset: "\u001b[0m",
-  dim: "\u001b[2m",
-  green: "\u001b[32m",
-  yellow: "\u001b[33m",
-  red: "\u001b[31m",
-};
-
-function supportsColor(): boolean {
-  return Boolean(process.stdout.isTTY);
-}
-
-function paint(text: string, color: keyof typeof COLOR): string {
-  if (!supportsColor()) return text;
-  return `${COLOR[color]}${text}${COLOR.reset}`;
-}
-
-export function ok(text: string): string {
-  return paint(text, "green");
-}
-
-export function warn(text: string): string {
-  return paint(text, "yellow");
-}
-
-export function errorText(text: string): string {
-  return paint(text, "red");
-}
-
-export function dim(text: string): string {
-  return paint(text, "dim");
-}
 
 export function renderTable<T extends Record<string, unknown>>(rows: T[], columns: TableColumn<T>[]): string {
   if (!rows.length) return "(no rows)";

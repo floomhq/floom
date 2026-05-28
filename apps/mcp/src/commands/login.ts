@@ -1,8 +1,8 @@
 import open from "open";
 import { createPublicClient, WorkerosApiError } from "../lib/api.js";
 import { promptYesNo } from "../lib/prompt.js";
-import { ok } from "../lib/output.js";
-import { writeCredentials } from "../lib/credentials.js";
+import { log } from "../lib/output.js";
+import { writeCredentials, credentialsPath } from "../lib/credentials.js";
 
 type DeviceResponse = {
   device_code: string;
@@ -21,13 +21,16 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function runLoginCommand(): Promise<number> {
+  log.heading("Login");
+  log.step("Requesting device authorization...");
+
   const client = createPublicClient();
   const started = (await client.requestJson("POST", "/cli-auth/devices", {
     auth: false,
     body: { client_name: "floom-cli", scopes: [] },
   })) as DeviceResponse;
 
-  console.log(`Visit ${started.verification_url} and approve.`);
+  log.ok(`Open: ${started.verification_url}`);
   const shouldOpen = await promptYesNo("Or open the URL automatically? [Y/n] ", true);
   if (shouldOpen) {
     try {
@@ -36,6 +39,8 @@ export async function runLoginCommand(): Promise<number> {
       // Best effort only.
     }
   }
+
+  log.step("Waiting for approval... (Ctrl+C to cancel)");
 
   const deadline = Date.now() + started.expires_in_seconds * 1000;
   while (Date.now() < deadline) {
@@ -56,24 +61,37 @@ export async function runLoginCommand(): Promise<number> {
           api_secret: polled.api_secret,
           authed_at: authedAt,
         });
-        console.log(ok(`✓ Logged in to ${polled.api_base}`));
+        const credsPath = credentialsPath();
+        log.ok(`Logged in`);
+        log.kv("API", polled.api_base);
+        log.kv("Token saved to", credsPath);
+        log.blank();
+        log.info("Try: floom workers list");
         return 0;
       }
       await sleep(started.polling_interval_seconds * 1000);
     } catch (error) {
       if (error instanceof WorkerosApiError) {
         if (error.status === 403) {
-          throw new Error("CLI authorization was denied.");
+          log.err("CLI authorization was denied.");
+          log.info("Run: floom login to try again");
+          return 1;
         }
         if (error.status === 410) {
-          throw new Error("Device code expired before approval.");
+          log.err("Device code expired before approval.");
+          log.info("Run: floom login to start a new session");
+          return 1;
         }
         if (error.status === 404) {
-          throw new Error("Device code not found. Start login again.");
+          log.err("Device code not found.");
+          log.info("Run: floom login to start a new session");
+          return 1;
         }
       }
       throw error;
     }
   }
-  throw new Error("Timed out waiting for CLI approval.");
+  log.err("Timed out waiting for CLI approval.");
+  log.info("Run: floom login to try again");
+  return 1;
 }

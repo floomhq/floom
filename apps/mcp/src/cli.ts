@@ -7,7 +7,7 @@ import { runLoginCommand } from "./commands/login.js";
 import { runLogoutCommand } from "./commands/logout.js";
 import { runWhoamiCommand } from "./commands/whoami.js";
 import { runWorkerCommand } from "./commands/run.js";
-import { workersListCommand, workersShowCommand } from "./commands/workers.js";
+import { workersListCommand, workersShowCommand, workersInfoCommand } from "./commands/workers.js";
 import {
   runsDownloadCommand,
   runsListCommand,
@@ -21,6 +21,7 @@ import {
 } from "./commands/secrets.js";
 import { mcpInstallCommand, mcpUninstallCommand } from "./commands/mcp.js";
 import { completionCommand } from "./commands/completion.js";
+import { doctorCommand } from "./commands/doctor.js";
 import { main as runServer } from "./server.js";
 
 type RunResult = Promise<number> | number;
@@ -82,6 +83,11 @@ export function buildCliProgram(): Command {
     .argument("<id>", "Worker id")
     .option("--json", "Print raw JSON")
     .action(async (id: string, options: { json?: boolean }) => runAction(workersShowCommand(id, options)));
+  workers.command("info")
+    .description("Pretty single-worker summary (description, trigger, connections, last run)")
+    .argument("<id>", "Worker id")
+    .option("--json", "Print raw JSON")
+    .action(async (id: string, options: { json?: boolean }) => runAction(workersInfoCommand(id, options)));
 
   const runs = program.command("runs").description("Inspect worker runs");
   runs.command("list")
@@ -147,6 +153,11 @@ export function buildCliProgram(): Command {
   program.command("install")
     .description("Install MCP config (deprecated alias for mcp install)")
     .action(async () => runAction(mcpInstallCommand({})));
+
+  program.command("doctor")
+    .description("Check CLI setup: API reachable, auth valid, MCP installed, runs endpoint working")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(doctorCommand(options)));
 
   return program;
 }
