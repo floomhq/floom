@@ -27,10 +27,12 @@ client = TestClient(app_module.app, raise_server_exceptions=True)
 
 @pytest.fixture(autouse=True)
 def reset_cli_auth_devices():
-    app_module._cli_auth_devices.clear()
+    with app_module.get_db() as conn:
+        conn.execute("DELETE FROM cli_auth_devices")
     app_module._rate_buckets.clear()
     yield
-    app_module._cli_auth_devices.clear()
+    with app_module.get_db() as conn:
+        conn.execute("DELETE FROM cli_auth_devices")
     app_module._rate_buckets.clear()
 
 
@@ -90,13 +92,34 @@ def test_poll_returns_approved_once_then_404_after_consumption():
     assert consumed.status_code == 404
 
 
-def test_poll_returns_410_for_expired_device():
+def test_poll_returns_404_for_expired_device():
     created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
     device_code = created["device_code"]
-    app_module._cli_auth_devices[device_code]["expires_at"] = time.time() - 1
+    app_module.get_repositories().cli_auth.update(
+        device_code=device_code,
+        expires_at=time.time() - 1,
+    )
 
     expired = client.get(f"/cli-auth/poll/{device_code}")
-    assert expired.status_code == 410
+    assert expired.status_code == 404
+    assert expired.json() == {"detail": "Device code not found"}
+
+
+def test_poll_returns_404_for_denied_device():
+    created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
+    device_code = created["device_code"]
+    user_code = created["user_code"]
+
+    denied = client.post(
+        "/cli-auth/deny",
+        json={"user_code": user_code},
+        headers={"x-floom-secret": "test-secret-s15"},
+    )
+    assert denied.status_code == 200
+
+    poll = client.get(f"/cli-auth/poll/{device_code}")
+    assert poll.status_code == 404
+    assert poll.json() == {"detail": "Device code not found"}
 
 
 def test_poll_returns_404_for_unknown_device_code():
