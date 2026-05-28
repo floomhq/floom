@@ -352,11 +352,19 @@ class E2BSandboxDriver(SandboxDriver):
                 json.dumps(connection_ids, indent=2),
             )
 
-            # Install requirements if present and non-empty
+            # Install dependencies if present.
+            #
+            # Python: requirements.txt -> `pip install -r`.
+            # Node:   package.json     -> `npm install --omit=dev --no-audit --no-fund`
+            #         (uses package-lock.json when present for reproducibility).
+            #
+            # Federico 2026-05-28 hit the Node gap shipping the Kugelaudio
+            # bug-intake worker (Node, needs google-auth-library). E2B can
+            # run any language; we just had no install hook for non-Python
+            # bundles.
             req_path = worker_dir / "requirements.txt"
             if req_path.exists() and req_path.read_text().strip():
                 log_fn("[e2b] Installing requirements.txt...", "info")
-                # e2b 2.x: commands.run() is synchronous — returns CommandResult directly
                 install_result = sandbox.commands.run(
                     f"pip install -q -r {workdir}/requirements.txt",
                     timeout=install_timeout,
@@ -373,6 +381,26 @@ class E2BSandboxDriver(SandboxDriver):
                         error_code="install_failed",
                     )
                 log_fn("[e2b] Requirements installed", "info")
+
+            pkg_path = worker_dir / "package.json"
+            if pkg_path.exists() and pkg_path.read_text().strip():
+                log_fn("[e2b] Installing package.json (npm)...", "info")
+                npm_install_result = sandbox.commands.run(
+                    f"cd {workdir} && npm install --omit=dev --no-audit --no-fund --loglevel=error",
+                    timeout=install_timeout,
+                )
+                if npm_install_result.exit_code != 0:
+                    err = (
+                        f"npm install failed (exit {npm_install_result.exit_code}): "
+                        f"{(npm_install_result.stderr or npm_install_result.stdout or '')[:500]}"
+                    )
+                    log_fn(f"[e2b] {err}", "error")
+                    return WorkerResult(
+                        status="error",
+                        error=err,
+                        error_code="install_failed",
+                    )
+                log_fn("[e2b] npm install complete", "info")
 
             # Run the worker — commands.run() is sync, returns CommandResult directly
             command = "python run.py"
