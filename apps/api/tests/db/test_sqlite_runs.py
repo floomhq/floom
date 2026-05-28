@@ -87,12 +87,17 @@ def test_run_repo_fails_running_rows_by_owner(repo_bundle):
         runner="e2b",
     )
 
-    failed = repos.runs.fail_running(user_id="user-a", error="interrupted")
+    failed = repos.runs.fail_running(
+        user_id="user-a",
+        error="interrupted",
+        error_code="interrupted_by_restart",
+    )
 
     assert failed == ["run-a"]
     row_a = repos.runs.get(user_id="user-a", run_id="run-a")
     row_b = repos.runs.get(user_id="user-b", run_id="run-b")
     assert row_a["status"] == RunStatus.FAILED.value
     assert row_a["error"] == "interrupted"
+    assert row_a["error_code"] == "interrupted_by_restart"
     assert row_a["completed_at"]
     assert row_b["status"] == RunStatus.RUNNING.value

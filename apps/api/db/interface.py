@@ -131,6 +131,7 @@ class RunRepository(Protocol):
         status: str,
         output_json: dict[str, Any] | None = None,
         error: str | None = None,
+        error_code: str | None = None,
     ) -> None: ...
 
     def add_log(

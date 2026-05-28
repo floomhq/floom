@@ -7,6 +7,8 @@ import threading
 import re
 import logging
 import shutil
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 from datetime import datetime, timezone
@@ -301,6 +303,7 @@ def update_run_status(
     status: str,
     output: Optional[Dict[str, Any]] = None,
     error: Optional[str] = None,
+    error_code: Optional[str] = None,
     *,
     user_id: str | None = None,
     repos: Repositories | None = None,
@@ -318,6 +321,7 @@ def update_run_status(
         status=status,
         output_json=output,
         error=error,
+        error_code=error_code,
     )
 
     # Publish SSE event for the status change
@@ -326,6 +330,7 @@ def update_run_status(
         "run_id": run_id,
         "status": status,
         "error": error,
+        "error_code": error_code,
     })
 
 
@@ -616,6 +621,99 @@ def get_secrets_for_worker(
 # ---------------------------------------------------------------------------
 
 INTERRUPTED_RUN_ERROR = "Run was interrupted by an API restart before completion."
+INTERRUPTED_RUN_ERROR_CODE = "interrupted_by_restart"
+
+
+@dataclass
+class _ActiveRun:
+    run_id: str
+    worker_id: str
+    user_id: str | None
+    thread: threading.Thread
+
+
+_active_runs: dict[str, _ActiveRun] = {}
+_active_runs_lock = threading.Lock()
+_shutdown_cancelled_runs: set[str] = set()
+
+
+def _register_active_run(active_run: _ActiveRun) -> None:
+    with _active_runs_lock:
+        _active_runs[active_run.run_id] = active_run
+
+
+def _unregister_active_run(run_id: str) -> None:
+    with _active_runs_lock:
+        _active_runs.pop(run_id, None)
+        _shutdown_cancelled_runs.discard(run_id)
+
+
+def active_run_count() -> int:
+    with _active_runs_lock:
+        return len(_active_runs)
+
+
+def was_shutdown_cancelled(run_id: str) -> bool:
+    with _active_runs_lock:
+        return run_id in _shutdown_cancelled_runs
+
+
+def request_active_run_shutdown(
+    *,
+    repos: Repositories | None = None,
+    timeout_seconds: float = 30.0,
+) -> int:
+    """Ask active worker threads to stop before the API process exits."""
+    repos_obj = _repos(repos)
+    with _active_runs_lock:
+        active = list(_active_runs.values())
+        _shutdown_cancelled_runs.update(run.run_id for run in active)
+    if not active:
+        return 0
+
+    logger.warning("Shutdown requested; cancelling %d active run(s)", len(active))
+    try:
+        from runner_sandbox.e2b_driver import cancel_sandbox
+    except Exception:
+        cancel_sandbox = None
+
+    cancelled_at = _now_iso()
+    for run in active:
+        if run.user_id:
+            try:
+                repos_obj.runs.cancel(
+                    user_id=run.user_id,
+                    run_id=run.run_id,
+                    cancelled_at=cancelled_at,
+                )
+                repos_obj.runs.add_log(
+                    user_id=run.user_id,
+                    run_id=run.run_id,
+                    level="error",
+                    message=INTERRUPTED_RUN_ERROR,
+                    timestamp=cancelled_at,
+                    trace_id=None,
+                )
+            except Exception as exc:
+                logger.warning("Failed to mark run %s cancelled on shutdown: %s", run.run_id, exc)
+        if cancel_sandbox is not None:
+            try:
+                cancel_sandbox(run.run_id, reason=INTERRUPTED_RUN_ERROR)
+            except Exception:
+                logger.debug("E2B shutdown cancel failed for run %s", run.run_id, exc_info=True)
+
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    for run in active:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        run.thread.join(timeout=remaining)
+
+    with _active_runs_lock:
+        remaining_ids = [run_id for run_id in _active_runs if run_id in {run.run_id for run in active}]
+    if remaining_ids:
+        logger.warning("Shutdown timed out waiting for active runs: %s", ", ".join(sorted(remaining_ids)))
+    return len(active)
 
 
 def fail_interrupted_runs_on_startup(
@@ -633,6 +731,7 @@ def fail_interrupted_runs_on_startup(
     failed = repos_obj.runs.fail_running(
         user_id=user_id,
         error=INTERRUPTED_RUN_ERROR,
+        error_code=INTERRUPTED_RUN_ERROR_CODE,
     )
     for run_id in failed:
         try:
@@ -684,14 +783,14 @@ def execute_run(
 
     if not config:
         err = "Worker config not found"
-        update_run_status(run_id, RunStatus.FAILED.value, error=err, user_id=owner_id, repos=repos_obj)
+        update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="invalid_worker", user_id=owner_id, repos=repos_obj)
         publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
         log_fn(err, level="error")
         return
 
     if instance and not instance.get("enabled", True):
         err = "Worker is disabled"
-        update_run_status(run_id, RunStatus.FAILED.value, error=err, user_id=owner_id, repos=repos_obj)
+        update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="worker_disabled", user_id=owner_id, repos=repos_obj)
         publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
         log_fn(err, level="error")
         return
@@ -700,7 +799,7 @@ def execute_run(
     for inp in config.inputs:
         if inp.required and (inp.name not in effective_inputs or effective_inputs[inp.name] in (None, "")):
             err = f"Missing required input: {inp.name}"
-            update_run_status(run_id, RunStatus.FAILED.value, error=err, user_id=owner_id, repos=repos_obj)
+            update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_required_input", user_id=owner_id, repos=repos_obj)
             publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
             log_fn(err, level="error")
             return
@@ -710,7 +809,7 @@ def execute_run(
     missing = [s for s in config.secrets if s not in secrets]
     if missing:
         err = f"Missing secrets: {', '.join(missing)}"
-        update_run_status(run_id, RunStatus.FAILED.value, error=err, user_id=owner_id, repos=repos_obj)
+        update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
         publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
         log_fn(err, level="error")
         return
@@ -722,7 +821,7 @@ def execute_run(
         from runner_utils import _resolve_connections
         connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config)
         if conn_err:
-            update_run_status(run_id, RunStatus.FAILED.value, error=conn_err, user_id=owner_id, repos=repos_obj)
+            update_run_status(run_id, RunStatus.FAILED.value, error=conn_err, error_code="missing_connection", user_id=owner_id, repos=repos_obj)
             publish_run_part(run_id, {"type": "finish", "status": "failed", "error": conn_err})
             log_fn(conn_err, level="error")
             return
@@ -759,6 +858,22 @@ def execute_run(
         connection_ids=connection_ids,
     )
 
+    if was_shutdown_cancelled(run_id):
+        update_run_status(
+            run_id,
+            RunStatus.FAILED.value,
+            error=INTERRUPTED_RUN_ERROR,
+            error_code=INTERRUPTED_RUN_ERROR_CODE,
+            user_id=owner_id,
+            repos=repos_obj,
+        )
+        publish_run_part(
+            run_id,
+            {"type": "finish", "status": "failed", "error": INTERRUPTED_RUN_ERROR},
+        )
+        log_fn(INTERRUPTED_RUN_ERROR, level="error")
+        return
+
     outputs = result.outputs
     artifacts = result.artifacts
     _materialize_declared_file_outputs(run_id, config, outputs, artifacts)
@@ -766,18 +881,30 @@ def execute_run(
 
     # Both "error" and "failed" terminal statuses map to a failed run
     if result.status in ("error", "failed"):
-        update_run_status(run_id, RunStatus.FAILED.value, error=result.error, user_id=owner_id, repos=repos_obj)
+        result_error = result.error
+        result_error_code = result.error_code
+        if was_shutdown_cancelled(run_id):
+            result_error = INTERRUPTED_RUN_ERROR
+            result_error_code = INTERRUPTED_RUN_ERROR_CODE
+        update_run_status(
+            run_id,
+            RunStatus.FAILED.value,
+            error=result_error,
+            error_code=result_error_code,
+            user_id=owner_id,
+            repos=repos_obj,
+        )
         finish_status = "timeout" if (result.error_code or "").lower().find("timeout") >= 0 else "failed"
         publish_run_part(
             run_id,
-            {"type": "finish", "status": finish_status, "error": result.error or "Run failed"},
+            {"type": "finish", "status": finish_status, "error": result_error or "Run failed"},
         )
-        log_fn(f"Run failed: {result.error}", level="error")
+        log_fn(f"Run failed: {result_error}", level="error")
         return
 
     quality_error, quality_warnings = _validate_run_outputs(run_id, config, outputs, artifacts)
     if quality_error:
-        update_run_status(run_id, RunStatus.FAILED.value, error=quality_error, user_id=owner_id, repos=repos_obj)
+        update_run_status(run_id, RunStatus.FAILED.value, error=quality_error, error_code="quality_gate_failed", user_id=owner_id, repos=repos_obj)
         publish_run_part(run_id, {"type": "finish", "status": "failed", "error": quality_error})
         log_fn(quality_error, level="error")
         return
@@ -804,8 +931,23 @@ def start_run(
     repos: Repositories | None = None,
 ) -> None:
     thread = threading.Thread(
-        target=execute_run,
+        target=_run_thread_entry,
         args=(run_id, worker_id, inputs, user_id, repos),
         daemon=True,
+        name=f"workeros-run-{run_id}",
     )
+    _register_active_run(_ActiveRun(run_id=run_id, worker_id=worker_id, user_id=user_id, thread=thread))
     thread.start()
+
+
+def _run_thread_entry(
+    run_id: str,
+    worker_id: str,
+    inputs: Dict[str, Any],
+    user_id: str | None = None,
+    repos: Repositories | None = None,
+) -> None:
+    try:
+        execute_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
+    finally:
+        _unregister_active_run(run_id)
