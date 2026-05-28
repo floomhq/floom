@@ -80,7 +80,9 @@ export function ConnectionEventPicker({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const activeConnections = connections.filter((c) => c.status === "active");
+  const activeConnections = connections.filter(
+    (c) => (c.kind ?? "composio") === "composio" && c.status === "active"
+  );
 
   // Unique connected apps
   const connectedApps = Array.from(

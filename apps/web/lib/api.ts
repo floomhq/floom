@@ -146,6 +146,16 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ app_name }),
       }),
+    createMcp: (payload: {
+      label: string;
+      url: string;
+      auth_secret?: string | null;
+      allowed_tools?: string[];
+    }) =>
+      fetchJson<import("./types").ConnectionItem>("/connections/mcp", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
     status: (id: string) =>
       fetchJson<import("./types").ConnectionItem>(`/connections/${id}/status`),
     delete: (id: string) =>
