@@ -4,6 +4,7 @@ import json
 import sqlite3
 import os
 import logging
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Generator
@@ -19,6 +20,45 @@ def _configured_db_path() -> str:
 
 DB_PATH = _configured_db_path()
 logger = logging.getLogger("floom.db")
+_WAL_LOCK = threading.Lock()
+_WAL_INITIALIZED_PATHS: set[str] = set()
+
+
+def _busy_timeout_ms() -> int:
+    try:
+        return max(1000, int(os.environ.get("WORKEROS_SQLITE_BUSY_TIMEOUT_MS", "30000")))
+    except ValueError:
+        return 30000
+
+
+def _enable_wal_once(conn: sqlite3.Connection, db_path: str) -> None:
+    if db_path == ":memory:":
+        return
+    cache_key = os.path.abspath(db_path)
+    if cache_key in _WAL_INITIALIZED_PATHS:
+        return
+    with _WAL_LOCK:
+        if cache_key in _WAL_INITIALIZED_PATHS:
+            return
+        mode_row = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        mode = str(mode_row[0] if mode_row else "").lower()
+        if mode != "wal":
+            raise sqlite3.OperationalError(f"failed to enable SQLite WAL mode, journal_mode={mode!r}")
+        _WAL_INITIALIZED_PATHS.add(cache_key)
+
+
+def sqlite_runtime_settings() -> dict[str, Any]:
+    with get_db() as conn:
+        journal_mode_row = conn.execute("PRAGMA journal_mode").fetchone()
+        synchronous_row = conn.execute("PRAGMA synchronous").fetchone()
+        foreign_keys_row = conn.execute("PRAGMA foreign_keys").fetchone()
+        busy_timeout_row = conn.execute("PRAGMA busy_timeout").fetchone()
+    return {
+        "journal_mode": journal_mode_row[0] if journal_mode_row else None,
+        "synchronous": synchronous_row[0] if synchronous_row else None,
+        "foreign_keys": foreign_keys_row[0] if foreign_keys_row else None,
+        "busy_timeout": busy_timeout_row[0] if busy_timeout_row else None,
+    }
 
 # ---------------------------------------------------------------------------
 # Connection management
@@ -31,8 +71,15 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
     global DB_PATH
     DB_PATH = _configured_db_path()
     os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else ".", exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
+    conn = sqlite3.connect(
+        DB_PATH,
+        detect_types=sqlite3.PARSE_DECLTYPES,
+        timeout=_busy_timeout_ms() / 1000,
+    )
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {_busy_timeout_ms()}")
+    _enable_wal_once(conn, DB_PATH)
+    conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn

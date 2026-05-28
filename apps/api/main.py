@@ -43,7 +43,7 @@ try:
 except Exception:  # pragma: no cover - fallback only used when dependency is absent locally
     _slowapi_get_remote_address = None
 
-from db import DB_PATH, Repositories, get_db, get_repos, get_repositories, init_db, now_iso
+from db import DB_PATH, Repositories, get_db, get_repos, get_repositories, init_db, now_iso, sqlite_runtime_settings
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from models import (
     RunCreate,
@@ -156,7 +156,6 @@ DEFAULT_RATE_LIMIT = (60, 60.0)
 BODYLESS_METHODS = {"GET", "HEAD", "OPTIONS"}
 RATE_LIMIT_RULES = [
     (re.compile(r"^/cli-auth/devices$"), (5, 60.0)),
-    (re.compile(r"^/workers/[^/]+/runs$"), (10, 60.0)),
     (re.compile(r"^/workers/from-bundle$"), (10, 60.0)),
     (re.compile(r"^/workers$"), (20, 60.0)),
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
@@ -380,17 +379,14 @@ _rate_buckets: Dict[str, list[float]] = {}
 
 
 def _rate_caller_keys(request: Request, path: str) -> List[str]:
-    keys = [f"ip:{_client_ip(request)}:{path}"]
-    if request.method.upper() == "POST" and re.fullmatch(r"^/workers/[^/]+/runs$", path):
-        keys.append(f"ip:{_client_ip(request)}:/workers/*/runs")
-    return keys
+    return [f"ip:{_client_ip(request)}:{path}"]
 
 
 def _run_create_quota_config() -> tuple[int, float]:
     try:
-        limit = int(os.environ.get("WORKEROS_RUN_CREATE_RATE_LIMIT", "10"))
+        limit = int(os.environ.get("WORKEROS_RUN_CREATE_RATE_LIMIT", "30"))
     except ValueError:
-        limit = 10
+        limit = 30
     try:
         window = float(os.environ.get("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60"))
     except ValueError:
@@ -398,18 +394,18 @@ def _run_create_quota_config() -> tuple[int, float]:
     return max(0, limit), max(1.0, window)
 
 
-def _run_create_quota_keys(auth: AuthContext, request: Request) -> List[str]:
-    return [f"user:{auth.user_id}", f"ip:{_client_ip(request)}"]
+def _run_create_quota_key(auth: AuthContext, worker_id: str) -> str:
+    return f"user:{auth.user_id}:worker:{worker_id}"
 
 
-def _enforce_run_create_quota(auth: AuthContext, request: Request) -> None:
+def _enforce_run_create_quota(auth: AuthContext, worker_id: str) -> None:
     limit, window = _run_create_quota_config()
     if limit <= 0:
         return
 
     now = time.time()
     cutoff = now - window
-    keys = _run_create_quota_keys(auth, request)
+    key = _run_create_quota_key(auth, worker_id)
     with get_db() as conn:
         conn.execute(
             """
@@ -423,24 +419,20 @@ def _enforce_run_create_quota(auth: AuthContext, request: Request) -> None:
             "CREATE INDEX IF NOT EXISTS idx_run_create_rate_limits_key_ts ON run_create_rate_limits(key, ts)"
         )
         conn.execute("DELETE FROM run_create_rate_limits WHERE ts <= ?", (cutoff,))
-        for key in keys:
-            row = conn.execute(
-                "SELECT COUNT(*) AS count, MIN(ts) AS oldest_ts FROM run_create_rate_limits WHERE key = ?",
-                (key,),
-            ).fetchone()
-            count = int(row["count"] or 0) if row else 0
-            if count >= limit:
-                oldest_ts = float(row["oldest_ts"] or now) if row else now
-                retry_after = max(1, int(window - (now - oldest_ts)))
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Run creation rate limit exceeded: {limit}/{int(window)}s",
-                    headers={"Retry-After": str(retry_after)},
-                )
-        conn.executemany(
-            "INSERT INTO run_create_rate_limits (key, ts) VALUES (?, ?)",
-            [(key, now) for key in keys],
-        )
+        row = conn.execute(
+            "SELECT COUNT(*) AS count, MIN(ts) AS oldest_ts FROM run_create_rate_limits WHERE key = ?",
+            (key,),
+        ).fetchone()
+        count = int(row["count"] or 0) if row else 0
+        if count >= limit:
+            oldest_ts = float(row["oldest_ts"] or now) if row else now
+            retry_after = max(1, int(window - (now - oldest_ts)))
+            raise HTTPException(
+                status_code=429,
+                detail=f"Run creation rate limit exceeded: {limit}/{int(window)}s",
+                headers={"Retry-After": str(retry_after)},
+            )
+        conn.execute("INSERT INTO run_create_rate_limits (key, ts) VALUES (?, ?)", (key, now))
 
 
 @app.middleware("http")
@@ -1699,15 +1691,14 @@ def _resolve_file_input_references(
                     bound_by,
                 )
                 try:
-                    with get_db() as audit_conn:
-                        audit_conn.execute(
-                            """
-                            INSERT INTO file_binding_audit
-                                (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
-                        )
+                    conn.execute(
+                        """
+                        INSERT INTO file_binding_audit
+                            (run_id, worker_id, input_name, file_id, uploaded_by, bound_by, bound_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (run_id, worker_id, inp.name, row["id"], file_owner, bound_by, now_iso()),
+                    )
                 except sqlite3.OperationalError as exc:
                     logger.debug("file_binding_audit write skipped: %s", exc)
                 raise HTTPException(status_code=403, detail=f"Uploaded file not found: {inp.name}")
@@ -3986,7 +3977,7 @@ def create_worker_run(
                 detail=f"Missing required inputs: {', '.join(missing)}",
             )
 
-    _enforce_run_create_quota(auth, request)
+    _enforce_run_create_quota(auth, worker_id)
 
     # Create the run record first so we have a run_id for per-run file staging.
     run_id = create_run(
@@ -4046,7 +4037,7 @@ def replay_run(
 
     source_inputs = json.loads(row["input_json"] or "{}")
     replay_inputs = json.loads(json.dumps(source_inputs))
-    _enforce_run_create_quota(auth, request)
+    _enforce_run_create_quota(auth, worker_id)
     new_run_id = create_run(
         worker_id,
         replay_inputs,

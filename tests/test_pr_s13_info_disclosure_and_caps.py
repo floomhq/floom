@@ -399,29 +399,29 @@ def test_get_with_body_is_rejected(monkeypatch, tmp_path):
     assert resp.json() == {"detail": "Request body not allowed"}
 
 
-def test_run_creation_quota_is_shared_across_workers_and_ips(monkeypatch, tmp_path):
-    main = _load_api(monkeypatch, tmp_path, run_create_rate_minute=3)
+def test_run_creation_quota_is_per_worker_not_ip_global(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, run_create_rate_minute=1)
     client = TestClient(main.app)
     monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
-    worker_ids = [f"s13-run-quota-{idx}" for idx in range(3)]
+    worker_ids = [f"s13-run-quota-{idx}" for idx in range(2)]
     for worker_id in worker_ids:
         _insert_minimal_worker(main, worker_id)
 
     statuses = []
     bodies = []
-    for idx in range(4):
+    for idx, worker_id in enumerate([worker_ids[0], worker_ids[1], worker_ids[0]]):
         headers = {**_AUTH_HEADER, "x-forwarded-for": f"203.0.113.{idx + 1}"}
         resp = client.post(
-            f"/workers/{worker_ids[idx % len(worker_ids)]}/runs",
+            f"/workers/{worker_id}/runs",
             headers=headers,
             json={"inputs": {}, "trigger_source": "manual"},
         )
         statuses.append(resp.status_code)
         bodies.append(resp.text)
 
-    assert statuses == [200, 200, 200, 429], bodies
+    assert statuses == [200, 200, 429], bodies
     assert "Retry-After" in resp.headers
-    assert resp.json() == {"detail": "Run creation rate limit exceeded: 3/60s"}
+    assert resp.json() == {"detail": "Run creation rate limit exceeded: 1/60s"}
 
 
 def test_replay_route_shares_run_creation_quota(monkeypatch, tmp_path):
