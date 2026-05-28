@@ -62,9 +62,9 @@ const PlugIcon = () => (
   </svg>
 );
 
-const ActivityIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-    <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
+const FolderIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
   </svg>
 );
 
@@ -98,12 +98,6 @@ const SparkIcon = () => (
   </svg>
 );
 
-const ChatIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-  </svg>
-);
-
 const TrendIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M3 3v18h18" />
@@ -124,21 +118,9 @@ const PlayIcon = () => (
   </svg>
 );
 
-const ListIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M8 6h12M8 12h12M8 18h12" />
-    <circle cx="4" cy="6" r="1.1" />
-    <circle cx="4" cy="12" r="1.1" />
-    <circle cx="4" cy="18" r="1.1" />
-  </svg>
-);
-
-const GridIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="3.5" y="3.5" width="7" height="7" rx="1.4" />
-    <rect x="13.5" y="3.5" width="7" height="7" rx="1.4" />
-    <rect x="13.5" y="13.5" width="7" height="7" rx="1.4" />
-    <rect x="3.5" y="13.5" width="7" height="7" rx="1.4" />
+const ChevronIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M7 9l5-5 5 5M7 15l5 5 5-5" />
   </svg>
 );
 
@@ -218,7 +200,7 @@ function useNavScroll() {
   }, []);
 }
 
-type DemoView = "neutral" | "workers" | "conns" | "runs" | "act";
+type DemoView = "neutral" | "workers" | "runs" | "conns" | "contexts";
 
 interface WorkerCardData {
   id: string;
@@ -237,103 +219,112 @@ interface WorkerCardData {
   detailBody2: string;
 }
 
+/* Workers reflect a real Rocketlist-flavoured workspace: recruiter-ops + GTM
+   automation, not generic "Gmail intake" templates. These are the kinds of
+   workers Federico actually runs in his Rocketlist workspace today. */
 const CARDS: WorkerCardData[] = [
   {
-    id: "gmail",
+    id: "applicants",
     icon: <MailIcon />,
-    name: "gmail_intake_brief",
-    desc: "Read inbox, summarize each thread, draft replies.",
-    tags: ["#email", "#cron", "#gmail"],
-    sync: "next run · 14h 22m",
-    version: "v1.4.0",
-    detailTitle: "gmail_intake_brief",
-    detailMeta: "@fede · v1.4.0 · python",
-    detailTag: "cron · 09:00 MON-FRI · runner=e2b",
+    name: "applicant_followup",
+    desc: "Reply to new applicants in Federico's voice, log to ATS.",
+    tags: ["#recruiting", "#webhook", "#gmail"],
+    sync: "last run · 4m ago",
+    version: "v2.3.1",
+    detailTitle: "applicant_followup",
+    detailMeta: "@fede · v2.3.1 · python · Rocketlist",
+    detailTag: "webhook · supabase event · runner=e2b",
     detailC1: "# worker.yml",
-    detailBody: "name: gmail_intake_brief\nruntime:\n  type: python\n  runner: e2b\ntrigger:\n  type: schedule\n  cron: \"0 9 * * MON-FRI\"",
-    detailC2: "# connections",
-    detailBody2: "- gmail (depontefede@gmail.com)",
-  },
-  {
-    id: "leads",
-    icon: <GlobeIcon />,
-    name: "lead_enrichment",
-    desc: "Enrich a row of leads with web data and LinkedIn.",
-    tags: ["#leads", "#webhook", "#linkedin"],
-    sync: "running now · step 3/6",
-    version: "v2.1.0",
-    detailTitle: "lead_enrichment",
-    detailMeta: "@fede · v2.1.0 · python",
-    detailTag: "webhook · HMAC · runner=local",
-    detailC1: "# worker.yml",
-    detailBody: "name: lead_enrichment\nruntime:\n  type: python\n  runner: local\ntrigger:\n  type: webhook\n  hmac: required",
-    detailC2: "# inputs",
-    detailBody2: "rows: array · 24 lead rows last run",
-  },
-  {
-    id: "research",
-    icon: <FileTextIcon />,
-    name: "research_brief",
-    desc: "Deep research on a topic. Markdown brief out.",
-    tags: ["#research", "#manual"],
-    sync: "last run · 42s",
-    version: "v1.0.4",
-    detailTitle: "research_brief",
-    detailMeta: "@fede · v1.0.4 · python",
-    detailTag: "manual · runner=local",
-    detailC1: "# worker.yml",
-    detailBody: "name: research_brief\nruntime:\n  type: python\n  runner: local\ntrigger:\n  type: manual",
-    detailC2: "# inputs",
-    detailBody2: "topic: string\ndepth: enum(shallow, deep)",
+    detailBody: "name: applicant_followup\nruntime:\n  type: python\n  runner: e2b\ntrigger:\n  type: webhook\nconnections:\n  - gmail\ncontexts:\n  - voice-guide",
+    detailC2: "# last run",
+    detailBody2: "input: applicant_id=ap_82af\noutput: draft saved to gmail",
   },
   {
     id: "digest",
     icon: <TrendIcon />,
-    name: "weekly_digest",
-    desc: "Investor update from changelog and run metrics.",
+    name: "job_market_digest",
+    desc: "Daily roundup of new jobs scraped, score deltas, top movers.",
     tags: ["#reports", "#cron", "#slack"],
-    sync: "next run · Fri 18:00",
-    version: "v1.1.0",
-    detailTitle: "weekly_digest",
-    detailMeta: "@fede · v1.1.0 · python",
-    detailTag: "cron · 18:00 FRI · runner=local",
+    sync: "next run · 09:00 daily",
+    version: "v1.7.0",
+    detailTitle: "job_market_digest",
+    detailMeta: "@fede · v1.7.0 · python · Rocketlist",
+    detailTag: "cron · 09:00 daily · runner=e2b",
     detailC1: "# worker.yml",
-    detailBody: "name: weekly_digest\nruntime:\n  type: python\n  runner: local\ntrigger:\n  type: schedule\n  cron: \"0 18 * * FRI\"",
-    detailC2: "# connections",
-    detailBody2: "- slack (floom · #updates)",
+    detailBody: "name: job_market_digest\nruntime:\n  type: python\n  runner: e2b\ntrigger:\n  type: schedule\n  cron: \"0 9 * * *\"\nconnections:\n  - slack",
+    detailC2: "# output",
+    detailBody2: "posts to slack #market-digest\nartifact: digest.md (4.2 KB)",
   },
   {
-    id: "support",
-    icon: <ChatIcon />,
-    name: "support_replies",
-    desc: "Draft ticket replies in your team voice.",
-    tags: ["#support", "#webhook"],
-    sync: "last run · 6m ago",
-    version: "v1.3.1",
-    detailTitle: "support_replies",
-    detailMeta: "@fede · v1.3.1 · python",
-    detailTag: "webhook · runner=local",
+    id: "sourcing",
+    icon: <GlobeIcon />,
+    name: "sourcing_brief",
+    desc: "Research a role from a JD, return ranked candidate angles.",
+    tags: ["#recruiting", "#manual", "#linkedin"],
+    sync: "running now · step 4/7",
+    version: "v1.2.0",
+    detailTitle: "sourcing_brief",
+    detailMeta: "@fede · v1.2.0 · python · Rocketlist",
+    detailTag: "manual · runner=e2b · context=role-playbook",
     detailC1: "# worker.yml",
-    detailBody: "name: support_replies\nruntime:\n  type: python\n  runner: local\ntrigger:\n  type: webhook",
-    detailC2: "# approvals",
-    detailBody2: "send: required · drafts only by default",
+    detailBody: "name: sourcing_brief\nruntime:\n  type: agent\n  runner: e2b\ntrigger:\n  type: manual\nconnections:\n  - linkedin\ncontexts:\n  - role-playbook",
+    detailC2: "# inputs",
+    detailBody2: "jd_text: string\ngeo: enum(EU, US, remote)",
   },
   {
-    id: "update",
+    id: "investor",
     icon: <SparkIcon />,
     name: "investor_update",
-    desc: "Monthly metrics into a tight update draft.",
+    desc: "Monthly metrics into a tight investor update draft.",
     tags: ["#reports", "#monthly"],
     sync: "next run · 1st of month",
     version: "v2.1.0",
     detailTitle: "investor_update",
-    detailMeta: "@fede · v2.1.0 · python",
+    detailMeta: "@fede · v2.1.0 · python · Rocketlist",
     detailTag: "cron · 09:00 1st of month · runner=local",
     detailC1: "# worker.yml",
-    detailBody: "name: investor_update\nruntime:\n  type: python\n  runner: local\ntrigger:\n  type: schedule\n  cron: \"0 9 1 * *\"",
+    detailBody: "name: investor_update\nruntime:\n  type: python\n  runner: local\ntrigger:\n  type: schedule\n  cron: \"0 9 1 * *\"\ncontexts:\n  - 2026-OKRs",
     detailC2: "# output",
     detailBody2: "draft: gmail (review before send)",
   },
+  {
+    id: "csv",
+    icon: <FileTextIcon />,
+    name: "csv_enricher",
+    desc: "Enrich a CSV of leads with web data, write back to Sheets.",
+    tags: ["#leads", "#webhook"],
+    sync: "last run · 1h ago",
+    version: "v1.4.2",
+    detailTitle: "csv_enricher",
+    detailMeta: "@fede · v1.4.2 · python · Rocketlist",
+    detailTag: "webhook · HMAC · runner=e2b",
+    detailC1: "# worker.yml",
+    detailBody: "name: csv_enricher\nruntime:\n  type: python\n  runner: e2b\ntrigger:\n  type: webhook\n  hmac: required\nconnections:\n  - google_sheets",
+    detailC2: "# inputs",
+    detailBody2: "rows: array · 86 leads last run",
+  },
+  {
+    id: "outbound",
+    icon: <PlugIcon />,
+    name: "outbound_pitch",
+    desc: "Draft cold-outbound pitches per mandate, in the team voice.",
+    tags: ["#bd", "#cron"],
+    sync: "next run · Mon 07:00",
+    version: "v1.1.0",
+    detailTitle: "outbound_pitch",
+    detailMeta: "@fede · v1.1.0 · python · Rocketlist",
+    detailTag: "cron · MON 07:00 · runner=e2b",
+    detailC1: "# worker.yml",
+    detailBody: "name: outbound_pitch\nruntime:\n  type: agent\n  runner: e2b\ntrigger:\n  type: schedule\n  cron: \"0 7 * * MON\"\nconnections:\n  - gmail\ncontexts:\n  - outbound-canonical",
+    detailC2: "# approvals",
+    detailBody2: "send: required · drafts by default",
+  },
+];
+
+const WORKSPACES = [
+  { id: "rocketlist", short: "RL", name: "Rocketlist", role: "Owner · 6 workers", active: true },
+  { id: "floom",      short: "FL", name: "Floom",       role: "Owner · 3 workers" },
+  { id: "personal",   short: "FD", name: "Personal",    role: "Owner · 2 workers" },
 ];
 
 export function LandingBody() {
@@ -354,7 +345,7 @@ export function LandingBody() {
   const navRunsRef = useRef<HTMLDivElement | null>(null);
   const navWorkersRef = useRef<HTMLDivElement | null>(null);
   const navConnsRef = useRef<HTMLDivElement | null>(null);
-  const navActRef = useRef<HTMLDivElement | null>(null);
+  const navCtxRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const appRef = useRef<HTMLDivElement | null>(null);
 
@@ -402,16 +393,16 @@ export function LandingBody() {
     const steps: Array<() => void> = [
       () => { showView("neutral"); moveTo(navWorkersRef.current, 0.5, 0.5); },
       () => { tap(); showView("workers"); },
-      () => { moveTo(cardRefs.current["gmail"], 0.5, 0.4); },
+      () => { moveTo(cardRefs.current["applicants"], 0.5, 0.4); },
       () => { tap(); selectCard(CARDS[0]); },
-      () => { moveTo(cardRefs.current["leads"], 0.5, 0.4); },
-      () => { tap(); selectCard(CARDS[1]); },
+      () => { moveTo(cardRefs.current["sourcing"], 0.5, 0.4); },
+      () => { tap(); selectCard(CARDS[2]); },
       () => { moveTo(navRunsRef.current, 0.5, 0.5); },
       () => { tap(); showView("runs"); },
+      () => { moveTo(navCtxRef.current, 0.5, 0.5); },
+      () => { tap(); showView("contexts"); },
       () => { moveTo(navConnsRef.current, 0.5, 0.5); },
       () => { tap(); showView("conns"); },
-      () => { moveTo(navActRef.current, 0.5, 0.5); },
-      () => { tap(); showView("act"); },
       () => { moveTo(navWorkersRef.current, 0.55, 1.6); },
       () => { tap(); showView("neutral"); },
     ];
@@ -510,7 +501,8 @@ export function LandingBody() {
             </h1>
 
             <p className="ln-sub">
-              Workers, triggers, and connections in one place. Driven by{" "}
+              Workspaces, workers, triggers, connections, and contexts in one
+              place. Drive it from{" "}
               <span className="flogo">
                 <ClaudeSVG />
                 Claude
@@ -525,7 +517,7 @@ export function LandingBody() {
                 <CursorSVG />
                 Cursor
               </span>
-              , or any agent that speaks MCP. One operating layer.
+              , or any agent that speaks MCP.
             </p>
 
             <div className="ln-ctas">
@@ -557,7 +549,7 @@ export function LandingBody() {
                 </div>
                 <div className="ln-chrome-url">
                   <LockSVG />
-                  workeros.floom.dev
+                  workeros.floom.dev/app
                 </div>
                 <button className="ln-chrome-burger" type="button" aria-label="Menu">
                   <BurgerIcon />
@@ -572,10 +564,23 @@ export function LandingBody() {
                 data-sel={selCard ? "1" : "0"}
               >
                 <aside className="ln-sidebar">
-                  <div className="ln-sb-brand">
-                    <MarkSVG size={17} />
-                    Workeros
+                  {/* Workspace switcher chip (mirrors the real dashboard:
+                      bottom-left in the live app, surfaced top-left here so
+                      it is the first thing the visitor sees). */}
+                  <div
+                    className="ln-sb-ws"
+                    style={{ marginTop: 0, marginBottom: 14 }}
+                  >
+                    <i>RL</i>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="wn">Rocketlist</div>
+                      <div className="wr">Owner · 6 workers</div>
+                    </div>
+                    <span style={{ color: "var(--ink-mute)", display: "inline-flex" }}>
+                      <ChevronIcon />
+                    </span>
                   </div>
+
                   <div className="ln-sb-lbl">Workspace</div>
 
                   <div
@@ -585,13 +590,13 @@ export function LandingBody() {
                   >
                     <BoxIcon />
                     Workers
-                    <span className="badge">8</span>
+                    <span className="badge">6</span>
                   </div>
 
                   <div className="ln-sb-folders">
-                    <div className="ln-sb-folder"><span className="nm">Email</span><span className="ct">3</span></div>
+                    <div className="ln-sb-folder"><span className="nm">Recruiting</span><span className="ct">2</span></div>
+                    <div className="ln-sb-folder"><span className="nm">Reports</span><span className="ct">2</span></div>
                     <div className="ln-sb-folder"><span className="nm">Leads</span><span className="ct">2</span></div>
-                    <div className="ln-sb-folder"><span className="nm">Reports</span><span className="ct">3</span></div>
                   </div>
 
                   <div
@@ -601,7 +606,7 @@ export function LandingBody() {
                   >
                     <ClockIcon />
                     Runs
-                    <span className="badge">214</span>
+                    <span className="badge">142</span>
                   </div>
 
                   <div
@@ -611,26 +616,20 @@ export function LandingBody() {
                   >
                     <PlugIcon />
                     Connections
-                    <span className="badge">4</span>
+                    <span className="badge">7</span>
                   </div>
 
                   <div
-                    ref={navActRef}
-                    className={"ln-sb-item" + (activeView === "act" ? " on" : "")}
-                    id="lnNavAct"
+                    ref={navCtxRef}
+                    className={"ln-sb-item" + (activeView === "contexts" ? " on" : "")}
+                    id="lnNavCtx"
                   >
-                    <ActivityIcon />
-                    Activity
+                    <FolderIcon />
+                    Contexts
+                    <span className="badge">3</span>
                   </div>
 
                   <div style={{ marginTop: "auto", paddingTop: "12px" }}>
-                    <div className="ln-sb-ws">
-                      <i>FD</i>
-                      <div>
-                        <div className="wn">Federico&apos;s Workspace</div>
-                        <div className="wr">Owner · 8 workers</div>
-                      </div>
-                    </div>
                     <div className="lp-sa-fg">
                       <span className="lp-sa-fl">Sandbox</span>
                       <span className="lp-sa-chip">local</span>
@@ -645,20 +644,20 @@ export function LandingBody() {
                       <div className="ln-neutral-mark">
                         <MarkSVG size={22} />
                       </div>
-                      <div className="ln-neutral-h">Federico&apos;s Workspace</div>
-                      <div className="ln-neutral-sub">Eight workers. Always on.</div>
+                      <div className="ln-neutral-h">Rocketlist</div>
+                      <div className="ln-neutral-sub">Six workers. Always on.</div>
                       <div className="ln-neutral-stats">
-                        <div className="ln-ns"><b>8</b><span>Workers</span></div>
-                        <div className="ln-ns"><b>4</b><span>Connections</span></div>
-                        <div className="ln-ns"><b>214</b><span>Runs today</span></div>
+                        <div className="ln-ns"><b>23</b><span>Replies drafted</span></div>
+                        <div className="ln-ns"><b>4</b><span>Briefs shipped</span></div>
+                        <div className="ln-ns"><b>86</b><span>Leads enriched</span></div>
                       </div>
                       <div className="ln-neutral-hint">Pick a section</div>
                     </div>
                   </div>
 
                   <div className={"ln-view" + (activeView === "workers" ? " on" : "")} id="lnViewWorkers">
-                    <div className="ln-pane-h">All workers</div>
-                    <div className="ln-pane-sub">Files in <code>/workers</code>. Floom discovers each one.</div>
+                    <div className="ln-pane-h">Workers</div>
+                    <div className="ln-pane-sub">Describe one in English, upload a bundle, or pick a template.</div>
                     <div className="ln-filters">
                       <div className="ln-filters-chips">
                         <span className="ln-ffl">TRIGGER</span>
@@ -671,10 +670,6 @@ export function LandingBody() {
                         <span className="ln-chip">local</span>
                         <span className="ln-chip">e2b</span>
                       </div>
-                      <span className="ln-view-seg">
-                        <span className="ln-view-btn"><ListIcon />List</span>
-                        <span className="ln-view-btn on"><GridIcon />Grid</span>
-                      </span>
                     </div>
                     <div className="ln-grid">
                       {CARDS.map((card) => (
@@ -706,100 +701,90 @@ export function LandingBody() {
 
                   <div className={"ln-view" + (activeView === "conns" ? " on" : "")} id="lnViewConns">
                     <div className="ln-pane-h">Connections</div>
-                    <div className="ln-pane-sub">OAuth once via Composio. Workers reuse the same token.</div>
+                    <div className="ln-pane-sub">1,043 apps via OAuth, plus any MCP server. One token, every worker.</div>
                     <div className="ln-context-list">
                       <div className="ln-context-row on">
                         <span className="ln-context-path">gmail · depontefede@gmail.com</span>
-                        <span className="ln-context-meta">live · 2 workers</span>
+                        <span className="ln-context-meta">live · 3 workers</span>
                       </div>
                       <div className="ln-context-row">
                         <span className="ln-context-path">linkedin · @fedeponte</span>
                         <span className="ln-context-meta">live · expires 12d</span>
                       </div>
                       <div className="ln-context-row">
-                        <span className="ln-context-path">slack · floom · #updates</span>
+                        <span className="ln-context-path">slack · rocketlist · #market-digest</span>
                         <span className="ln-context-meta">live · 1 worker</span>
                       </div>
                       <div className="ln-context-row">
-                        <span className="ln-context-path">notion</span>
-                        <span className="ln-context-meta">not connected</span>
+                        <span className="ln-context-path">google_sheets · fede@</span>
+                        <span className="ln-context-meta">live · 2 workers</span>
+                      </div>
+                      <div className="ln-context-row">
+                        <span className="ln-context-path">mcp · rocketlist-internal · 12 tools</span>
+                        <span className="ln-context-meta">live · 2 workers</span>
                       </div>
                     </div>
                     <div className="ln-context-preview">
                       <span className="ln-sysi-k">How workers use it</span>
-                      <p>Declare <code>connections: [gmail]</code> in worker.yml. Floom injects the live token at run time. No secrets in code.</p>
+                      <p>Declare <code>connections: [gmail, mcp:rocketlist-internal]</code> in worker.yml. Floom injects fresh tokens at run time and exposes the MCP tools to the agent.</p>
                     </div>
                   </div>
 
                   <div className={"ln-view" + (activeView === "runs" ? " on" : "")} id="lnViewRuns">
                     <div className="ln-pane-h">Recent runs</div>
-                    <div className="ln-pane-sub">Every execution on the record. Logs, output, duration.</div>
+                    <div className="ln-pane-sub">Every execution on the record. Logs, output, artifacts.</div>
                     <div className="ln-sysi">
                       <div className="ln-sysi-hd">
                         <div className="ln-sysi-ic"><ClockIcon /></div>
                         <div className="ln-sysi-id">
-                          <div className="ln-sysi-nm">gmail_intake_brief · run 0193abf2</div>
-                          <div className="ln-sysi-mt">cron · 12 threads · 4 drafts · 8.2s</div>
+                          <div className="ln-sysi-nm">applicant_followup · run 0193f7c4</div>
+                          <div className="ln-sysi-mt">webhook · ap_82af · draft saved · 3.4s</div>
                         </div>
                         <span className="ln-sysi-ver">done <i /></span>
                       </div>
                       <div className="ln-sysi-body">
                         <div className="ln-sysi-blk">
                           <span className="ln-sysi-k">Step timings</span>
-                          <p>[fetch] 12 threads · [summarize] 12/12 · [draft] 4/12 · [save] 314 lines</p>
+                          <p>[fetch applicant] 220ms · [load voice-guide] 84ms · [draft] 2.6s · [save] 510ms</p>
                         </div>
                         <div className="ln-sysi-blk">
                           <span className="ln-sysi-k">Output</span>
-                          <p>output.json · 4 drafts saved to gmail</p>
+                          <p>draft.eml · 1 reply queued in gmail (awaiting approval)</p>
                         </div>
                         <div className="ln-sysi-blk">
                           <span className="ln-sysi-k">Logs</span>
-                          <p>09:00:01 INFO · 09:00:09 ✓ completed in 8.2s</p>
+                          <p>09:42:12 INFO mounted context voice-guide (12 files) · 09:42:15 ✓ completed in 3.4s</p>
                         </div>
                       </div>
                       <div className="ln-sysi-ft">
                         <span className="ln-sysi-ft-lbl">Next runs</span>
-                        <span className="ln-sysi-tag">lead_enrichment · now</span>
-                        <span className="ln-sysi-tag">weekly_digest · Fri 18:00</span>
+                        <span className="ln-sysi-tag">job_market_digest · 09:00</span>
+                        <span className="ln-sysi-tag">outbound_pitch · MON 07:00</span>
                         <span className="ln-sysi-tag">investor_update · 1st</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className={"ln-view" + (activeView === "act" ? " on" : "")} id="lnViewAct">
-                    <div className="ln-pane-h">Activity</div>
-                    <div className="ln-pane-sub">Every change, on the record.</div>
-                    <div className="ln-act">
-                      <div className="ln-act-day">Today</div>
-                      <div className="ln-ar">
-                        <span className="ln-ar-dot" />
-                        <span className="ae">run.completed</span>
-                        <span className="as">gmail_intake_brief <em>· 4 drafts</em></span>
-                        <span className="aw">cron</span>
-                        <span className="at">2h</span>
+                  <div className={"ln-view" + (activeView === "contexts" ? " on" : "")} id="lnViewContexts">
+                    <div className="ln-pane-h">Contexts</div>
+                    <div className="ln-pane-sub">Shared folders mounted into every run. Your knowledge, not retrieval guesses.</div>
+                    <div className="ln-context-list">
+                      <div className="ln-context-row on">
+                        <span className="ln-context-path">voice-guide</span>
+                        <span className="ln-context-meta">12 files · used by 2 workers</span>
                       </div>
-                      <div className="ln-ar">
-                        <span className="ln-ar-dot" />
-                        <span className="ae">worker.published</span>
-                        <span className="as">lead_enrichment <em>→ v2.1.0</em></span>
-                        <span className="aw">you</span>
-                        <span className="at">5h</span>
+                      <div className="ln-context-row">
+                        <span className="ln-context-path">role-playbook</span>
+                        <span className="ln-context-meta">8 files · used by 1 worker</span>
                       </div>
-                      <div className="ln-act-day">Yesterday</div>
-                      <div className="ln-ar">
-                        <span className="ln-ar-dot" />
-                        <span className="ae">connection.linked</span>
-                        <span className="as">Gmail <em>· depontefede@gmail.com</em></span>
-                        <span className="aw">you</span>
-                        <span className="at">1d</span>
+                      <div className="ln-context-row">
+                        <span className="ln-context-path">2026-OKRs</span>
+                        <span className="ln-context-meta">3 files · used by 1 worker</span>
                       </div>
-                      <div className="ln-ar">
-                        <span className="ln-ar-dot" />
-                        <span className="ae">worker.created</span>
-                        <span className="as">investor_update <em>· via MCP</em></span>
-                        <span className="aw">claude</span>
-                        <span className="at">1d</span>
-                      </div>
+                    </div>
+                    <div className="ln-context-preview">
+                      <span className="ln-sysi-k">How workers use it</span>
+                      <p>Add <code>contexts: [voice-guide]</code> to worker.yml. Floom mounts the folder read-only at <code>/contexts/voice-guide</code> in the E2B sandbox before run.</p>
                     </div>
                   </div>
                 </div>
@@ -874,14 +859,76 @@ export function LandingBody() {
         </section>
 
         <section className="ln-feat lp1">
+          {/* Workspaces — the multi-tenant story. Your work life is not one
+              pile; neither is your worker fleet. */}
           <div className="ln-feat-row">
+            <div className="ln-ft-txt">
+              <div className="ln-ft-eye">Workspaces</div>
+              <h2>One account. As many workspaces as you run.</h2>
+              <p>
+                Rocketlist work, your investment thesis, your personal
+                automations: keep them separate. Workers, runs, connections,
+                secrets, and contexts are scoped per workspace, with one
+                click to switch.
+              </p>
+              <a href={SIGN_IN_HREF} className="ln-ft-lnk">
+                Create your first workspace
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </a>
+            </div>
+            <div className="ln-ft-vis">
+              <div className="ln-ftv-bar">
+                <i /><i /><i />
+                <span>workeros.floom.dev/app</span>
+              </div>
+              <div className="ln-ftv-body ln-sync">
+                <div className="ln-sync-hd">
+                  <span className="ln-sync-t">Switch workspace</span>
+                  <span className="ln-sync-sub">3 yours</span>
+                </div>
+                {WORKSPACES.map((w) => (
+                  <div key={w.id} className="ln-sync-row">
+                    <span className="ln-sync-ag">
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          display: "inline-grid",
+                          placeItems: "center",
+                          width: 20,
+                          height: 20,
+                          borderRadius: 6,
+                          background: "color-mix(in srgb, var(--accent) 18%, transparent)",
+                          color: "var(--accent)",
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: "0.02em",
+                        }}
+                      >
+                        {w.short}
+                      </span>
+                      {w.name}
+                      <span className="ln-sync-d">{w.role}</span>
+                    </span>
+                    <span className={"ln-sync-st" + (w.active ? " ok" : "")}>
+                      {w.active ? "Active" : "Switch"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="ln-feat-row rev">
             <div className="ln-ft-txt">
               <div className="ln-ft-eye">Source of truth</div>
               <h2>One worker file. Every trigger reads the same thing.</h2>
               <p>
-                A worker is a folder with <code>worker.yml</code> plus your code.
-                Declare the trigger, secrets, and connections. Floom handles cron,
-                webhooks, manual runs, and the MCP surface from the same file.
+                A worker is a folder with <code>worker.yml</code> plus your
+                code. Declare the trigger, the connections, the contexts.
+                Floom handles cron, webhooks, manual runs, and the MCP
+                surface from the same file.
               </p>
               <a
                 href="https://github.com/floomhq/workeros"
@@ -898,18 +945,18 @@ export function LandingBody() {
             <div className="ln-ft-vis">
               <div className="ln-ftv-bar">
                 <i /><i /><i />
-                <span>workeros.floom.dev/workers</span>
+                <span>workeros.floom.dev/app/workers</span>
               </div>
               <div className="ln-ftv-body ln-sot">
                 <div className="ln-sot-src">
                   <div className="ln-sot-ic"><MailIcon /></div>
                   <div className="ln-sot-id">
-                    <div className="ln-sot-nm">gmail_intake_brief</div>
-                    <div className="ln-sot-mt">@fede · one source of truth</div>
+                    <div className="ln-sot-nm">applicant_followup</div>
+                    <div className="ln-sot-mt">@fede · Rocketlist · one source of truth</div>
                   </div>
                   <div className="ln-sot-ver">
-                    <span className="ln-sot-vchip">v1.4.0</span>
-                    <span className="ln-sot-vsub">active · 3 prior versions</span>
+                    <span className="ln-sot-vchip">v2.3.1</span>
+                    <span className="ln-sot-vsub">active · 6 prior versions</span>
                   </div>
                 </div>
                 <div className="ln-sot-fan">
@@ -938,22 +985,21 @@ export function LandingBody() {
             </div>
           </div>
 
-          <div className="ln-feat-row rev">
+          {/* Contexts — Federico's S36 feature. Shared folders mounted into
+              every run, so the worker has your knowledge without you wiring
+              retrieval. */}
+          <div className="ln-feat-row">
             <div className="ln-ft-txt">
-              <div className="ln-ft-eye">Live by default</div>
-              <h2>Every connection, fresh. Every run, on the record.</h2>
+              <div className="ln-ft-eye">Contexts</div>
+              <h2>Your knowledge, mounted into every run.</h2>
               <p>
-                Workers reuse the same OAuth token Floom holds for each service.
-                No secrets in code, no expired tokens silently failing in cron.
-                Stream logs live; export every run to CSV with one click.
+                Style guide, CRM playbook, OKRs, prior emails: drop them in a
+                Context folder. Floom mounts it read-only into the E2B
+                sandbox at run time. Your worker reads it like local files.
+                No vector store, no retrieval guessing.
               </p>
-              <a
-                href="https://github.com/floomhq/workeros"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ln-ft-lnk"
-              >
-                See observability
+              <a href={SIGN_IN_HREF} className="ln-ft-lnk">
+                See contexts in action
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" aria-hidden="true">
                   <path d="M5 12h14M13 6l6 6-6 6" />
                 </svg>
@@ -962,12 +1008,72 @@ export function LandingBody() {
             <div className="ln-ft-vis">
               <div className="ln-ftv-bar">
                 <i /><i /><i />
-                <span>workeros.floom.dev/connections</span>
+                <span>workeros.floom.dev/app/contexts</span>
               </div>
               <div className="ln-ftv-body ln-sync">
                 <div className="ln-sync-hd">
-                  <span className="ln-sync-t">Connections</span>
-                  <span className="ln-sync-sub">4 linked</span>
+                  <span className="ln-sync-t">Contexts in Rocketlist</span>
+                  <span className="ln-sync-sub">3 folders</span>
+                </div>
+                <div className="ln-sync-row">
+                  <span className="ln-sync-ag">
+                    <FolderIcon />
+                    voice-guide
+                    <span className="ln-sync-d">12 files · 84 KB · used by 2 workers</span>
+                  </span>
+                  <span className="ln-sync-st ok">Mounted</span>
+                </div>
+                <div className="ln-sync-row">
+                  <span className="ln-sync-ag">
+                    <FolderIcon />
+                    role-playbook
+                    <span className="ln-sync-d">8 files · 31 KB · used by 1 worker</span>
+                  </span>
+                  <span className="ln-sync-st ok">Mounted</span>
+                </div>
+                <div className="ln-sync-row">
+                  <span className="ln-sync-ag">
+                    <FolderIcon />
+                    2026-OKRs
+                    <span className="ln-sync-d">3 files · 14 KB · used by 1 worker</span>
+                  </span>
+                  <span className="ln-sync-st ok">Mounted</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="ln-feat-row rev">
+            <div className="ln-ft-txt">
+              <div className="ln-ft-eye">Live by default</div>
+              <h2>1,043 apps via OAuth. Any MCP server as a tool.</h2>
+              <p>
+                Workers reuse the same OAuth token Floom holds for each
+                service. Add any MCP server with a URL and an auth header to
+                expose its tools to your worker. No secrets in code, no
+                expired tokens silently failing in cron.
+              </p>
+              <a
+                href="https://github.com/floomhq/workeros"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ln-ft-lnk"
+              >
+                See connections
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" aria-hidden="true">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </a>
+            </div>
+            <div className="ln-ft-vis">
+              <div className="ln-ftv-bar">
+                <i /><i /><i />
+                <span>workeros.floom.dev/app/connections</span>
+              </div>
+              <div className="ln-ftv-body ln-sync">
+                <div className="ln-sync-hd">
+                  <span className="ln-sync-t">Connected</span>
+                  <span className="ln-sync-sub">7 active</span>
                 </div>
                 <div className="ln-sync-row">
                   <span className="ln-sync-ag">
@@ -978,25 +1084,26 @@ export function LandingBody() {
                 </div>
                 <div className="ln-sync-row">
                   <span className="ln-sync-ag">
-                    <GlobeIcon />
-                    LinkedIn · @fedeponte
+                    <SparkIcon />
+                    Slack · rocketlist · #market-digest
                   </span>
                   <span className="ln-sync-st ok">Live</span>
                 </div>
                 <div className="ln-sync-row pending">
                   <span className="ln-sync-ag">
-                    <SparkIcon />
-                    Slack · floom · #updates
+                    <GlobeIcon />
+                    LinkedIn · @fedeponte
                     <span className="ln-sync-d">token rotates in 12d</span>
                   </span>
                   <span className="ln-sync-pull">Refresh</span>
                 </div>
                 <div className="ln-sync-row">
                   <span className="ln-sync-ag">
-                    <FileTextIcon />
-                    Notion
+                    <PlugIcon />
+                    MCP · rocketlist-internal
+                    <span className="ln-sync-d">12 tools exposed</span>
                   </span>
-                  <span className="ln-sync-st ok">Connect</span>
+                  <span className="ln-sync-st ok">Live</span>
                 </div>
               </div>
             </div>
@@ -1007,8 +1114,9 @@ export function LandingBody() {
               <div className="ln-ft-eye">Agent-native</div>
               <h2>Your agent creates the worker. Floom runs it.</h2>
               <p>
-                Install one MCP server and Claude, Cursor, or any agent can call
-                <code>workers.create</code>, schedule a cron, or trigger a run.
+                Run <code>floom login</code> once, then call{" "}
+                <code>workers.create</code>, <code>workspaces.switch</code>,
+                or <code>runs.tail</code> from Claude, Codex, or Cursor.
                 Skip the canvas. The brief is the workflow.
               </p>
               <a
@@ -1031,21 +1139,22 @@ export function LandingBody() {
                     <b>Claude</b>
                     <span className="ln-share-time">via MCP · 2h</span>
                   </div>
-                  <div className="ln-share-msg">Every weekday 9am, summarize new Gmail threads and draft replies.</div>
+                  <div className="ln-share-msg">In the Rocketlist workspace, every weekday at 9am send a digest of new jobs scraped and post it to #market-digest.</div>
                 </div>
               </div>
               <div className="ln-share-body">
                 <div className="ln-share-sk">
-                  <div className="ln-share-si"><MailIcon /></div>
+                  <div className="ln-share-si"><TrendIcon /></div>
                   <div className="ln-share-skid">
-                    <div className="ln-share-sn">gmail_intake_brief</div>
-                    <div className="ln-share-sm">cron · 09:00 MON-FRI · gmail</div>
+                    <div className="ln-share-sn">job_market_digest</div>
+                    <div className="ln-share-sm">cron · 09:00 daily · slack</div>
                   </div>
                   <span className="ln-share-badge"><i />Active</span>
                 </div>
                 <div className="ln-share-trust">
                   <SparkIcon />
-                  Created via <code>workers.create</code>. Scheduled before you finish the sentence.
+                  Created via <code>workers.create</code> in workspace{" "}
+                  <code>rocketlist</code>. Scheduled before you finish the sentence.
                 </div>
                 <div className="ln-share-actions">
                   <div className="ln-share-btn p">
