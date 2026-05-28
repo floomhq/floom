@@ -19,6 +19,8 @@ from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.e2b")
 
+MAX_E2B_SANDBOX_LIFETIME_SECONDS = 3600
+
 
 def _format_env_line(key: str, value: str) -> str:
     """Format a single KEY=value line for .env.local.
@@ -58,7 +60,8 @@ def _install_timeout_for_run(timeout_seconds: int) -> int:
 
 def _sandbox_lifetime_timeout(timeout_seconds: int, install_timeout: int) -> int:
     """Sandbox lifetime must cover dependency install plus worker execution."""
-    return max(int(timeout_seconds) + int(install_timeout) + 60, 180)
+    requested_timeout = max(int(timeout_seconds) + int(install_timeout) + 60, 180)
+    return min(requested_timeout, MAX_E2B_SANDBOX_LIFETIME_SECONDS)
 
 
 def _normalize_sandbox_relative_path(raw_path: str) -> str:
@@ -238,11 +241,20 @@ class E2BSandboxDriver(SandboxDriver):
 
         log_fn(f"[e2b] Spawning sandbox for run {run_id}", "info")
         install_timeout = _install_timeout_for_run(timeout_seconds)
+        sandbox_timeout = _sandbox_lifetime_timeout(timeout_seconds, install_timeout)
+        requested_sandbox_timeout = max(timeout_seconds + install_timeout + 60, 180)
+        if sandbox_timeout < requested_sandbox_timeout:
+            log_fn(
+                "[e2b] Capping sandbox lifetime at "
+                f"{sandbox_timeout}s, the E2B API maximum; worker command "
+                f"timeout remains {timeout_seconds}s",
+                "warning",
+            )
 
         # e2b 2.x: use Sandbox.create()
         sandbox = Sandbox.create(
             api_key=api_key,
-            timeout=_sandbox_lifetime_timeout(timeout_seconds, install_timeout),
+            timeout=sandbox_timeout,
             envs={
                 "FLOOM_RUN_ID": run_id,
                 "FLOOM_TRACE_ID": trace_id,
