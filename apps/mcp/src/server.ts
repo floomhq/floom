@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { Buffer } from "node:buffer";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -163,6 +164,83 @@ async function request(
     );
   }
   return parsed;
+}
+
+async function requestBytes(
+  method: string,
+  path: string,
+  body: Uint8Array,
+  contentType = "application/octet-stream",
+): Promise<unknown> {
+  const response = await fetch(buildUrl(path), {
+    method,
+    headers: {
+      "accept": "application/json",
+      "content-type": contentType,
+      "x-floom-secret": apiSecret(),
+    },
+    body: Buffer.from(body),
+  });
+
+  const parsed = await parseResponse(response);
+  if (!response.ok) {
+    const safeParsed = redactSecrets(parsed);
+    const detail =
+      typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
+        ? redactSecretText(String((safeParsed as { detail: unknown }).detail))
+        : JSON.stringify(safeParsed);
+    throw new WorkerosApiError(
+      `Workeros API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
+      response.status,
+      parsed,
+    );
+  }
+  return parsed;
+}
+
+async function readContextFile(name: string, path: string): Promise<unknown> {
+  const detail = await request("GET", `/contexts/${encodeURIComponent(name)}`) as JsonObject;
+  const files = Array.isArray(detail.files) ? detail.files as JsonObject[] : [];
+  const file = files.find((item) => item.path === path);
+  if (!file) {
+    throw new WorkerosApiError(`Context file ${name}/${path} was not found`, 404);
+  }
+  const downloadPath = `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+  if (file.is_binary) {
+    return {
+      name,
+      path,
+      size: file.size,
+      mime_type: file.mime_type,
+      is_binary: true,
+      download_url: buildUrl(downloadPath),
+      note: "Binary context file. Use the HTTP API download URL to fetch bytes.",
+    };
+  }
+
+  const response = await fetch(buildUrl(downloadPath), {
+    method: "GET",
+    headers: {
+      "accept": "text/plain, application/json, text/*",
+      "x-floom-secret": apiSecret(),
+    },
+  });
+  if (!response.ok) {
+    const parsed = await parseResponse(response);
+    throw new WorkerosApiError(
+      `Workeros API GET ${downloadPath} failed with HTTP ${response.status}: ${JSON.stringify(redactSecrets(parsed))}`,
+      response.status,
+      parsed,
+    );
+  }
+  return {
+    name,
+    path,
+    size: file.size,
+    mime_type: file.mime_type,
+    is_binary: false,
+    content: await response.text(),
+  };
 }
 
 async function listTriggers(workerId?: string, app?: string): Promise<unknown> {
@@ -608,6 +686,83 @@ export function createServer(): McpServer {
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async () => callTool(async () => jsonResult(await request("GET", "/connections"))),
+  );
+
+  server.registerTool(
+    "contexts.list",
+    {
+      title: "List Contexts",
+      description: "List Workeros context folders.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => callTool(async () => jsonResult(await request("GET", "/contexts"))),
+  );
+
+  server.registerTool(
+    "contexts.read",
+    {
+      title: "Read Context File",
+      description: "Read a UTF-8 context file, or return metadata and a download URL for binary files.",
+      inputSchema: {
+        name: z.string().min(1).describe("Context name."),
+        path: z.string().min(1).describe("File path inside the context."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ name, path }) =>
+      callTool(async () => jsonResult(await readContextFile(name, path))),
+  );
+
+  server.registerTool(
+    "contexts.write",
+    {
+      title: "Write Context File",
+      description: "Create or update a UTF-8 text file inside a context.",
+      inputSchema: {
+        name: z.string().min(1).describe("Context name."),
+        path: z.string().min(1).describe("File path inside the context."),
+        content: z.string().describe("UTF-8 text content."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ name, path, content }) =>
+      callTool(async () =>
+        jsonResult(
+          await request(
+            "PUT",
+            `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+            { content },
+          ),
+          "Context file saved.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "contexts.upload",
+    {
+      title: "Upload Context File",
+      description: "Create or update a binary file inside a context from base64 bytes.",
+      inputSchema: {
+        name: z.string().min(1).describe("Context name."),
+        path: z.string().min(1).describe("File path inside the context."),
+        base64_bytes: z.string().min(1).describe("Base64-encoded file bytes."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ name, path, base64_bytes }) =>
+      callTool(async () => {
+        const bytes = Buffer.from(base64_bytes, "base64");
+        return jsonResult(
+          await requestBytes(
+            "PUT",
+            `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+            bytes,
+          ),
+          "Context file uploaded.",
+        );
+      }),
   );
 
   server.registerTool(

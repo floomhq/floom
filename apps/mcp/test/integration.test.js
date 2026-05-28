@@ -71,6 +71,14 @@ async function readBody(request) {
   return text ? JSON.parse(text) : {};
 }
 
+async function readRaw(request) {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 function makeWorkerDetail(id, overrides = {}) {
   return {
     id,
@@ -111,6 +119,76 @@ async function startMockApi() {
 
     if (request.method === "GET" && url.pathname === "/workers") {
       json(response, 200, []);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/contexts") {
+      json(response, 200, [{
+        name: "kb-test",
+        file_count: 2,
+        total_size_bytes: 32,
+        updated_at: "2026-05-28T00:00:00Z",
+        writeable: false,
+      }]);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/contexts/kb-test") {
+      json(response, 200, {
+        name: "kb-test",
+        file_count: 2,
+        total_size_bytes: 32,
+        updated_at: "2026-05-28T00:00:00Z",
+        writeable: false,
+        files: [
+          {
+            path: "faq.md",
+            size: 12,
+            mime_type: "text/markdown",
+            updated_at: "2026-05-28T00:00:00Z",
+            is_binary: false,
+          },
+          {
+            path: "deck.pdf",
+            size: 20,
+            mime_type: "application/pdf",
+            updated_at: "2026-05-28T00:00:00Z",
+            is_binary: true,
+          },
+        ],
+      });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/contexts/kb-test/files/faq.md") {
+      response.writeHead(200, { "content-type": "text/markdown" });
+      response.end("# FAQ\n");
+      return;
+    }
+
+    if (request.method === "PUT" && url.pathname === "/contexts/kb-test/files/notes.txt") {
+      const body = await readBody(request);
+      assert.equal(body.content, "hello context");
+      json(response, 200, {
+        path: "notes.txt",
+        size: 13,
+        mime_type: "text/plain",
+        updated_at: "2026-05-28T00:00:00Z",
+        is_binary: false,
+      });
+      return;
+    }
+
+    if (request.method === "PUT" && url.pathname === "/contexts/kb-test/files/deck.pdf") {
+      const body = await readRaw(request);
+      assert.equal(body.toString("utf8"), "pdf bytes");
+      json(response, 200, {
+        path: "deck.pdf",
+        size: body.length,
+        mime_type: "application/pdf",
+        updated_at: "2026-05-28T00:00:00Z",
+        is_binary: true,
+      });
       return;
     }
 
@@ -278,7 +356,7 @@ async function runCli(args, env = {}, stdin = "") {
   };
 }
 
-test("workeros MCP exposes nine tools and covers lifecycle happy paths", async (t) => {
+test("workeros MCP exposes context tools and covers lifecycle happy paths", async (t) => {
   const mock = await startMockApi();
   t.after(() => mock.server.close());
 
@@ -287,6 +365,10 @@ test("workeros MCP exposes nine tools and covers lifecycle happy paths", async (
     const names = tools.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
       "connections.list",
+      "contexts.list",
+      "contexts.read",
+      "contexts.upload",
+      "contexts.write",
       "runs.get",
       "runs.list",
       "runs.watch",
@@ -304,6 +386,24 @@ test("workeros MCP exposes nine tools and covers lifecycle happy paths", async (
 
     const listed = await client.callTool({ name: "workers.list", arguments: {} });
     assert.deepEqual(listed.structuredContent, { data: [] });
+
+    const contexts = await client.callTool({ name: "contexts.list", arguments: {} });
+    assert.equal(contexts.structuredContent.data[0].name, "kb-test");
+
+    const contextFile = await client.callTool({ name: "contexts.read", arguments: { name: "kb-test", path: "faq.md" } });
+    assert.equal(contextFile.structuredContent.content, "# FAQ\n");
+
+    const writtenContext = await client.callTool({
+      name: "contexts.write",
+      arguments: { name: "kb-test", path: "notes.txt", content: "hello context" },
+    });
+    assert.equal(writtenContext.structuredContent.path, "notes.txt");
+
+    const uploadedContext = await client.callTool({
+      name: "contexts.upload",
+      arguments: { name: "kb-test", path: "deck.pdf", base64_bytes: Buffer.from("pdf bytes").toString("base64") },
+    });
+    assert.equal(uploadedContext.structuredContent.is_binary, true);
 
     const created = await client.callTool({
       name: "workers.create",
@@ -351,6 +451,11 @@ test("workeros MCP exposes nine tools and covers lifecycle happy paths", async (
 
   assert.deepEqual(mock.seen, [
     "GET /workers",
+    "GET /contexts",
+    "GET /contexts/kb-test",
+    "GET /contexts/kb-test/files/faq.md",
+    "PUT /contexts/kb-test/files/notes.txt",
+    "PUT /contexts/kb-test/files/deck.pdf",
     "POST /workers",
     "GET /workers/mcp-test-worker",
     "PATCH /workers/mcp-test-worker",
