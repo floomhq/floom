@@ -9,13 +9,17 @@ import json
 import logging
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Callable, Dict, Optional
 
 from .base import SandboxDriver
 from models import WorkerConfig, WorkerResult
+from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.e2b")
+
+MAX_E2B_SANDBOX_LIFETIME_SECONDS = 3600
 
 
 def _format_env_line(key: str, value: str) -> str:
@@ -47,6 +51,102 @@ def _safe_path(base: Path, *parts: str) -> Path:
     except ValueError:
         raise ValueError(f"Path traversal attempt: {target}")
     return target
+
+
+def _install_timeout_for_run(timeout_seconds: int) -> int:
+    """Give large real-engine bundles enough time to install dependencies."""
+    return max(180, min(int(timeout_seconds), 900))
+
+
+def _sandbox_lifetime_timeout(timeout_seconds: int, install_timeout: int) -> int:
+    """Sandbox lifetime must cover dependency install plus worker execution."""
+    requested_timeout = max(int(timeout_seconds) + int(install_timeout) + 60, 180)
+    return min(requested_timeout, MAX_E2B_SANDBOX_LIFETIME_SECONDS)
+
+
+def _normalize_sandbox_relative_path(raw_path: str) -> str:
+    path = PurePosixPath(str(raw_path).strip())
+    if not str(path) or str(path) == ".":
+        raise ValueError("artifact path is required")
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"invalid artifact path: {raw_path!r}")
+    return path.as_posix()
+
+
+def _artifact_type_for_output(output: Any) -> str:
+    if output and output.media_type:
+        return output.media_type
+    if output and output.type == "markdown":
+        return "text/markdown"
+    if output and output.type == "csv":
+        return "text/csv"
+    if output and output.type == "json":
+        return "application/json"
+    return "application/octet-stream"
+
+
+def _default_output_path(output: Any) -> str:
+    extension_by_type = {
+        "markdown": "md",
+        "csv": "csv",
+        "json": "json",
+        "text": "txt",
+        "file": "bin",
+    }
+    extension = extension_by_type.get(getattr(output, "type", ""), "bin")
+    return f"out/{output.name}.{extension}"
+
+
+def _artifact_specs_from_result(result_artifacts: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    specs: list[Dict[str, Any]] = []
+    for artifact in result_artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        raw_path = artifact.get("relative_path") or artifact.get("path")
+        if not raw_path:
+            continue
+        specs.append({
+            "name": artifact.get("name") or raw_path,
+            "path": raw_path,
+            "type": artifact.get("type") or "application/octet-stream",
+        })
+    return specs
+
+
+def _artifact_specs_from_declared_outputs(config: Optional[WorkerConfig]) -> list[Dict[str, Any]]:
+    if not config:
+        return []
+    specs: list[Dict[str, Any]] = []
+    for output in config.outputs:
+        if output.kind and output.kind != "file":
+            continue
+        raw_path = output.path or _default_output_path(output)
+        specs.append({
+            "output_name": output.name,
+            "name": raw_path,
+            "path": raw_path,
+            "type": _artifact_type_for_output(output),
+            "required": bool(output.required),
+        })
+    return specs
+
+
+def _merge_artifacts(
+    result_artifacts: list[Dict[str, Any]],
+    collected_artifacts: list[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    merged: list[Dict[str, Any]] = []
+    replaced: set[str] = {
+        str(artifact.get("relative_path") or artifact.get("name") or artifact.get("path"))
+        for artifact in collected_artifacts
+    }
+    for artifact in result_artifacts:
+        key = str(artifact.get("relative_path") or artifact.get("name") or artifact.get("path"))
+        if key and key in replaced:
+            continue
+        merged.append(artifact)
+    merged.extend(collected_artifacts)
+    return merged
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
@@ -140,11 +240,21 @@ class E2BSandboxDriver(SandboxDriver):
             )
 
         log_fn(f"[e2b] Spawning sandbox for run {run_id}", "info")
+        install_timeout = _install_timeout_for_run(timeout_seconds)
+        sandbox_timeout = _sandbox_lifetime_timeout(timeout_seconds, install_timeout)
+        requested_sandbox_timeout = max(timeout_seconds + install_timeout + 60, 180)
+        if sandbox_timeout < requested_sandbox_timeout:
+            log_fn(
+                "[e2b] Capping sandbox lifetime at "
+                f"{sandbox_timeout}s, the E2B API maximum; worker command "
+                f"timeout remains {timeout_seconds}s",
+                "warning",
+            )
 
         # e2b 2.x: use Sandbox.create()
         sandbox = Sandbox.create(
             api_key=api_key,
-            timeout=max(timeout_seconds + 60, 180),
+            timeout=sandbox_timeout,
             envs={
                 "FLOOM_RUN_ID": run_id,
                 "FLOOM_TRACE_ID": trace_id,
@@ -161,6 +271,12 @@ class E2BSandboxDriver(SandboxDriver):
                 rel = fpath.relative_to(worker_dir)
                 # Skip any stale inputs/ dir that may exist in older bundles.
                 if rel.parts and rel.parts[0] == "inputs":
+                    continue
+                if (
+                    "__pycache__" in rel.parts
+                    or rel.suffix == ".pyc"
+                    or (rel.parts and rel.parts[0] in {".pytest_cache", ".ruff_cache"})
+                ):
                     continue
                 dest = f"{workdir}/{rel.as_posix()}"
                 if fpath.is_dir():
@@ -236,7 +352,7 @@ class E2BSandboxDriver(SandboxDriver):
                 # e2b 2.x: commands.run() is synchronous — returns CommandResult directly
                 install_result = sandbox.commands.run(
                     f"pip install -q -r {workdir}/requirements.txt",
-                    timeout=180,
+                    timeout=install_timeout,
                 )
                 if install_result.exit_code != 0:
                     err = (
@@ -310,11 +426,28 @@ class E2BSandboxDriver(SandboxDriver):
                     error_code="missing_result",
                 )
 
+            outputs = result_data.get("outputs", {})
+            if not isinstance(outputs, dict):
+                outputs = {}
+            result_artifacts = result_data.get("artifacts", [])
+            if not isinstance(result_artifacts, list):
+                result_artifacts = []
+            collected_artifacts = self._collect_sandbox_artifacts(
+                sandbox=sandbox,
+                workdir=workdir,
+                run_id=run_id,
+                result_artifacts=result_artifacts,
+                config=config,
+                outputs=outputs,
+                log_fn=log_fn,
+            )
+            artifacts = _merge_artifacts(result_artifacts, collected_artifacts)
+
             log_fn("[e2b] Run completed successfully", "info")
             return WorkerResult(
                 status=result_data.get("status", "success"),
-                outputs=result_data.get("outputs", {}),
-                artifacts=result_data.get("artifacts", []),
+                outputs=outputs,
+                artifacts=artifacts,
                 error=result_data.get("error"),
                 error_code=result_data.get("error_code"),
             )
@@ -328,3 +461,68 @@ class E2BSandboxDriver(SandboxDriver):
             except Exception as close_exc:
                 # Sandbox may have self-terminated (timeout, OOM) — not an error.
                 logger.debug("E2B sandbox already gone (kill suppressed): %s", close_exc)
+
+    def _collect_sandbox_artifacts(
+        self,
+        *,
+        sandbox: Any,
+        workdir: str,
+        run_id: str,
+        result_artifacts: list[Dict[str, Any]],
+        config: Optional[WorkerConfig],
+        outputs: Dict[str, Any],
+        log_fn: Callable[[str, str], None],
+    ) -> list[Dict[str, Any]]:
+        specs = _artifact_specs_from_result(result_artifacts)
+        specs.extend(_artifact_specs_from_declared_outputs(config))
+
+        artifact_dir = _safe_path(ARTIFACTS_DIR, run_id)
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        collected: list[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for spec in specs:
+            try:
+                relative_path = _normalize_sandbox_relative_path(str(spec["path"]))
+            except (KeyError, ValueError) as exc:
+                log_fn(f"[e2b] Skipping invalid artifact path: {exc}", "warning")
+                continue
+            if relative_path in seen:
+                continue
+            seen.add(relative_path)
+
+            remote_path = f"{workdir}/{relative_path}"
+            try:
+                if not sandbox.files.exists(remote_path, request_timeout=30):
+                    if spec.get("required"):
+                        log_fn(f"[e2b] Required output artifact missing: {relative_path}", "warning")
+                    continue
+                raw_content = sandbox.files.read(
+                    remote_path,
+                    format="bytes",
+                    request_timeout=120,
+                )
+            except Exception as exc:
+                log_fn(f"[e2b] Failed to download artifact {relative_path}: {exc}", "warning")
+                continue
+
+            local_path = _safe_path(artifact_dir, *PurePosixPath(relative_path).parts)
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_bytes(bytes(raw_content))
+            artifact = {
+                "name": spec.get("name") or relative_path,
+                "type": spec.get("type") or "application/octet-stream",
+                "path": str(local_path),
+                "relative_path": relative_path,
+                "size_bytes": local_path.stat().st_size,
+            }
+            output_name = spec.get("output_name")
+            if output_name and output_name not in outputs:
+                outputs[str(output_name)] = relative_path
+            collected.append(artifact)
+            log_fn(
+                f"[e2b] Downloaded artifact {relative_path} ({artifact['size_bytes']} bytes)",
+                "debug",
+            )
+
+        return collected
