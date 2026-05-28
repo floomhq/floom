@@ -1,0 +1,12 @@
+# Stage 4: URL Verification - Dependencies
+# Requires Python 3.10+
+
+# Core
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# HTTP client (async)
+httpx>=0.25.0
+
+# Gemini AI (google_search + url_context tools)
+google-genai>=0.3.0

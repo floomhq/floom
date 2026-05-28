@@ -1,0 +1,16 @@
+# Stage 1: Set Context - Dependencies
+# Requires Python 3.8+
+
+# Core
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# HTTP client for sitemap crawling
+httpx>=0.25.0
+
+# XML parsing (secure)
+defusedxml>=0.7.0
+
+# Google Gemini AI (for OpenContext)
+# Must match federicodeponte/opencontext
+google-genai>=1.0.0

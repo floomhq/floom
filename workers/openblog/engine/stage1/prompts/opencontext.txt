@@ -1,0 +1,177 @@
+You are an expert business analyst, content strategist, and visual designer. Analyze the company website at {url} and extract comprehensive company context INCLUDING a detailed writing persona AND visual identity for image generation.
+
+IMPORTANT INSTRUCTIONS:
+1. Use the URL Context tool to fetch and analyze the actual content at {url}
+2. Use Google Search to find additional real information about this company
+3. Do NOT make up or hallucinate data - only use information you actually retrieve
+4. If you cannot find information about the company, return an error field in the JSON
+5. **CRITICAL: Find and analyze existing blog post images for visual style reference**
+
+Analyze all retrieved information to provide:
+
+1. Company basics (name, website, industry)
+2. Products/services offered
+3. Target audience and ideal customers
+4. Brand voice and tone
+5. Key value propositions
+6. Customer pain points they address
+7. Common use cases
+8. Content themes they focus on
+9. Main competitors (based on industry and offerings)
+10. **CRITICAL: A detailed voice_persona for content writing**
+11. **CRITICAL: Visual identity for image generation**
+12. **Blog authors (extract from existing blog articles)**
+
+## VOICE PERSONA
+
+The voice_persona is critical - it defines HOW to write content that RESONATES WITH THE TARGET AUDIENCE (ICP).
+
+**CRITICAL: The voice must match what the ICP responds to, not just the company's brand voice.**
+
+Consider the ICP (Ideal Customer Profile):
+- Who are they? (role, seniority, technical level)
+- What do they value? (speed, accuracy, innovation, ROI, simplicity)
+- How do they consume content? (skim vs deep-read, mobile vs desktop)
+- What tone resonates with them? (peer-to-peer, expert-to-learner, consultant-to-executive)
+- What makes them trust content? (data, case studies, peer validation, credentials)
+
+Examples of ICP-aligned voice:
+- **ICP: CTOs/DevOps** → Direct, technical, code examples, benchmark data, "here's how it actually works"
+- **ICP: Marketing Directors** → ROI-focused, competitive insights, "here's how to beat competitors"
+- **ICP: Small Business Owners** → Practical, cost-conscious, "here's what you can do today"
+- **ICP: Enterprise Procurement** → Risk mitigation, compliance, vendor comparison, "here's why this is safe"
+
+The voice_persona must help writers AVOID robotic AI patterns like:
+- Starting every section with "What is X?"
+- Using "According to experts..." constantly
+- Filler phrases like "In today's rapidly evolving landscape..."
+- Over-hedging with "may", "might", "potentially"
+
+## VISUAL IDENTITY (for Image Generation)
+
+Analyze the website's visual design and existing blog images to extract:
+
+1. **Brand Colors**: Extract primary and secondary colors as hex codes from the website design
+2. **Visual Style**: Is it minimalist, bold, corporate, playful, technical, etc.?
+3. **Design Elements**: What patterns do they use? (gradients, icons, illustrations, photos, abstract shapes)
+4. **Typography Feel**: Modern sans-serif, classic serif, technical monospace, etc.
+5. **Mood**: Professional, friendly, innovative, trustworthy, cutting-edge, etc.
+
+**BLOG IMAGE STYLE ANALYSIS - CRITICAL:**
+- Navigate to the company's blog/magazine section
+- Analyze 3-5 existing blog post images (hero images, featured images)
+- For each image, provide a DETAILED DESCRIPTION of:
+  - Visual style (photo, illustration, abstract, infographic)
+  - Color palette used (specific colors you observe)
+  - Composition and layout (centered, asymmetric, full-bleed, etc.)
+  - Any text overlays or design elements
+  - The overall mood/feeling
+  - Subject matter and themes
+
+**IMPORTANT about image URLs:**
+- The URL field is OPTIONAL - only provide a URL if you are 100% certain it exists
+- DO NOT guess or fabricate image URLs - hallucinated URLs will be rejected
+- If you cannot find the exact image URL, leave the url field empty ("")
+- The DESCRIPTION is the valuable part - it will be used to guide image generation
+- Focus your effort on writing rich, detailed descriptions rather than finding URLs
+
+Use these style descriptions to create an `image_style_prompt` - a base prompt that can be used with AI image generation to create images matching the company's visual style.
+
+## BLOG AUTHORS
+
+Extract author information from existing blog articles:
+
+1. Navigate to the company's blog/magazine section
+2. Find 2-5 blog articles and look for author information
+3. For each author found, extract:
+   - Full name
+   - Job title/role (if visible)
+   - Short bio (if available on the page)
+   - Profile image URL (if visible)
+   - LinkedIn or Twitter/X links (if available)
+
+**IMPORTANT:**
+- Only include authors you can actually find on the website
+- Do NOT make up or hallucinate author information
+- If no author info is visible on articles, return an empty authors array
+- Some blogs show "Company Name" as author - skip these, we want real people
+
+Return ONLY valid JSON in exactly this format:
+{{
+  "company_name": "Official company name",
+  "company_url": "Normalized company website URL",
+  "industry": "Primary industry category",
+  "description": "Clear 2-3 sentence company description",
+  "products": ["Product 1", "Product 2"],
+  "target_audience": "Ideal customer profile description",
+  "competitors": ["Competitor 1", "Competitor 2"],
+  "tone": "Brand voice description (e.g., professional, friendly, authoritative)",
+  "pain_points": ["Pain point 1", "Pain point 2"],
+  "value_propositions": ["Value prop 1", "Value prop 2"],
+  "use_cases": ["Use case 1", "Use case 2"],
+  "content_themes": ["Theme 1", "Theme 2"],
+  "voice_persona": {{
+    "icp_profile": "Brief description of the ICP this voice is tailored for.",
+    "voice_style": "2-3 sentence description of the writing voice that resonates with this ICP.",
+    "language_style": {{
+      "formality": "Level of formality (casual/professional/formal)",
+      "complexity": "Vocabulary complexity (simple/moderate/technical/expert)",
+      "sentence_length": "Preferred sentence structure (short and punchy / mixed / detailed)",
+      "perspective": "How to address reader (peer-to-peer / expert-to-learner / consultant-to-executive)"
+    }},
+    "sentence_patterns": [
+      "Pattern 1",
+      "Pattern 2"
+    ],
+    "vocabulary_level": "Description of technical vocabulary expectations",
+    "authority_signals": [
+      "What makes this ICP trust content"
+    ],
+    "do_list": [
+      "Specific behaviors that resonate with this ICP"
+    ],
+    "dont_list": [
+      "Anti-patterns that turn off this ICP"
+    ],
+    "example_phrases": [
+      "Phrases that capture the right tone"
+    ],
+    "opening_styles": [
+      "Section openers that engage this ICP"
+    ]
+  }},
+  "visual_identity": {{
+    "brand_colors": ["#HEX1", "#HEX2"],
+    "secondary_colors": ["#HEX3", "#HEX4"],
+    "visual_style": "Overall visual style (minimalist, bold, corporate, playful, technical)",
+    "design_elements": ["gradients", "icons", "illustrations", "photos"],
+    "typography_style": "Typography feel (modern sans-serif, classic serif, etc.)",
+    "mood": "Overall mood (professional, friendly, innovative, trustworthy)",
+    "image_style_prompt": "A detailed prompt for AI image generation that captures this brand's visual style. Example: 'Modern minimalist illustration with blue gradient background, simple geometric shapes, clean lines, professional corporate feel, no text overlays'",
+    "blog_image_examples": [
+      {{
+        "url": "",
+        "description": "Detailed description of visual style, colors, composition, mood, subject matter. Be specific about what you observe in the image.",
+        "image_type": "hero"
+      }},
+      {{
+        "url": "",
+        "description": "Another detailed description. The description is the important part - URLs are optional and will be validated.",
+        "image_type": "inline"
+      }}
+    ],
+    "avoid_in_images": ["stock photo clichés", "cluttered compositions", "specific elements to avoid"]
+  }},
+  "authors": [
+    {{
+      "name": "Author's full name (required)",
+      "title": "Job title/role if available",
+      "bio": "Short bio if available on the page",
+      "image_url": "Profile image URL if visible",
+      "linkedin_url": "LinkedIn profile URL if available",
+      "twitter_url": "Twitter/X profile URL if available"
+    }}
+  ]
+}}
+
+Analyze: {url}

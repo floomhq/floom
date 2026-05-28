@@ -1,0 +1,57 @@
+These URLs are dead/broken and need replacements:
+
+{urls_list}
+
+Topic: {keyword}
+
+CRITICAL: You MUST use Google Search to find REAL, WORKING replacement URLs.
+- Search for each topic and ONLY return URLs that appear in your search results
+- DO NOT make up or guess URLs - they will be verified and rejected if they don't exist
+- If you cannot find a working replacement via search, OMIT that URL from the response
+
+IMPORTANT - Source preferences (in order):
+1. Industry blogs and publications (TechCrunch, Wired, The Verge, company blogs)
+2. Reputable news outlets (Forbes, Business Insider, CNBC)
+3. Official product/company pages
+4. Well-known tech publications (Ars Technica, ZDNet, VentureBeat)
+
+AVOID:
+- Academic papers (arxiv.org, IEEE, ACM) - too technical for blog readers
+- Wikipedia - not authoritative enough
+- Social media posts
+- Forums (Reddit, Stack Overflow)
+
+Each replacement should:
+1. Cover the same or similar topic as the original
+2. Be accessible and readable for a general audience
+3. Have current/up-to-date information
+
+CRITICAL - Generate anchor_text that flows naturally in the sentence:
+- Look at the "Context" showing the original sentence
+- The anchor_text REPLACES the text inside <a>...</a>
+- Read the result out loud - it must sound natural
+
+Example context: "According to a study at <a href=\"...\">Example Research</a>, teams..."
+- WRONG anchor_text: "GitHub" -> "According to a study at GitHub, teams..." (awkward)
+- WRONG anchor_text: "a recent study" -> "According to a study at a recent study, teams..." (redundant)
+- CORRECT anchor_text: "GitHub's research" -> "According to a study at GitHub's research, teams..." (flows naturally)
+
+RESPOND WITH JSON (note anchor_text examples):
+{{
+    "replacements": [
+        {{
+            "old_url": "https://example-dead-link.com/study",
+            "new_url": "https://github.blog/research-copilot-productivity",
+            "source_name": "GitHub Blog",
+            "anchor_text": "GitHub's productivity research",
+            "reason": "Comprehensive study on AI code review impact"
+        }}
+    ]
+}}
+
+More anchor_text examples that flow naturally:
+- "GitHub's latest findings" (not just "GitHub")
+- "research from Microsoft" (not just "Microsoft")
+- "a Stripe engineering report" (not just "Stripe")
+
+For URLs with no good replacement, omit from the replacements array.

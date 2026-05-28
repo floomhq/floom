@@ -1,68 +1,49 @@
 schema_version: '0.3'
 is_example: true
 name: openblog
-title: OpenBlog Article Draft
-description: Generates an AEO-optimized blog article draft from a topic, target keyword, audience, and word-count target.
+title: OpenBlog SEO Pipeline
+description: Runs the upstream OpenBlog 5-stage pipeline to generate grounded SEO articles, images, verified URLs, internal links, and export artifacts.
 long_description: |
-  Manual-shim port of the OpenBlog Neo pipeline (federicodeponte/openblog). The upstream pipeline
-  has 5 stages: Set Context, Blog Gen + Images, Quality Check, URL Verify, Internal Links. It uses
-  Gemini 3 Flash with Google Search grounding, generates hero / mid / bottom images via Imagen,
-  validates external URLs, embeds internal links from a sitemap, and exports to HTML / Markdown /
-  JSON / CSV / XLSX / PDF. That full pipeline requires GEMINI_API_KEY, defusedxml + httpx +
-  openpyxl + markdownify deps, and (for the sitemap stage) network access to the user's domain.
+  This worker bundles and runs the real federicodeponte/openblog engine inside
+  the Workeros E2B sandbox. It executes the upstream 5-stage pipeline:
+  Set Context, Blog Generation plus Images, Quality Check, URL Verification,
+  and Internal Links.
 
-  This worker runs a single-pass agent version of the article generator stage. It writes a
-  publishable first draft in markdown with H1/H2/H3 structure, an opening hook, key sections,
-  pull-quote candidates, suggested internal-link anchor opportunities (described by intent, not
-  specific URLs), and an SEO meta block. It does NOT verify URLs, generate images, or fetch a
-  sitemap. Live web search and Google Search grounding are not currently available in the agent
-  runtime; any time-sensitive claims must be qualified.
+  The run uses GEMINI_API_KEY from Workeros secrets, fetches company context
+  and sitemap data over the network, runs Gemini 3 Flash with Google Search
+  grounding, requests Imagen article images unless explicitly disabled, and
+  writes the exported article files plus raw pipeline metadata. Missing images
+  or missing requested export formats are returned as an explicit failed run
+  with an export report, not hidden as a successful partial result.
 use_cases:
-- Generate a publishable draft for a target keyword before final editing.
-- Spin out 5 article drafts on the same topic at different angles for an editorial sprint.
-- Produce a structured outline + draft that a writer can extend with verified sources.
+- Generate a complete SEO article from a company URL and one or more target keywords.
+- Produce grounded content with URL verification, internal links, and structured raw output.
+- Stress-test the full OpenBlog engine, including image generation and export formats, inside E2B.
 example_input:
-  topic: How small recruiting firms in DACH use AI for candidate writeups
-  target_keyword: ai candidate writeup tool
-  audience: recruiting-operator
-  word_count: 1500
-  format: article
+  url: https://www.floom.com
+  keywords: |
+    background workers
+  language: en
+  market: US
+  default_word_count: 2000
+  skip_images: false
+  export_formats: html markdown json csv xlsx pdf
 example_output: |
-  # How small recruiting firms in DACH use AI for candidate writeups
-
-  > **TL;DR.** Small DACH recruiting firms are adopting AI tools to turn raw CVs into client-ready
-  > writeups. The wedge is hour-savings per submission, not full automation.
-
-  ## Why writeups are the bottleneck
-
-  In a five-person Berlin search firm, the recruiter spends 30–45 minutes per submission turning a
-  CV into a client-ready writeup...
-
-  ## The current tooling landscape
-
-  ...
-
-  ## What "good" looks like in 2026
-
-  ...
-
-  ## Adoption playbook for a 5-person firm
-
-  ...
-
-  ## SEO meta
-
-  - title: AI candidate writeup tool — DACH recruiting playbook
-  - meta_description: How small DACH recruiting firms use AI candidate writeup tools to cut prep time per submission.
-  - target_keyword: ai candidate writeup tool
+  {
+    "markdown": "out/markdown.md",
+    "raw": "out/raw.json",
+    "export_report": "out/export_report.json",
+    "articles_archive": "out/openblog_articles.zip",
+    "images_archive": "out/openblog_images.zip"
+  }
 how_it_works: |
-  Topic + target keyword + audience + word_count + format
-    -> draft a working angle and TL;DR
-    -> outline H2/H3 structure scaled to word_count
-    -> write the body with concrete sections (no fabricated stats / dates / sources)
-    -> add internal-link anchor opportunities (described by intent)
-    -> append SEO meta block (title, meta_description, target_keyword)
-    -> return a publishable markdown draft
+  Company URL + target keywords
+    -> run Stage 1 company context and sitemap discovery
+    -> run Stage 2 article generation plus Imagen images
+    -> run Stage 3 quality fixes
+    -> run Stage 4 URL verification and replacement
+    -> run Stage 5 internal link embedding
+    -> export article files and return raw metadata, images, and archives
 folder: Content/Blog
 tags:
 - blog
@@ -71,97 +52,229 @@ tags:
 - openblog
 - content
 - marketing
-version: 0.1.0
-entrypoint: SKILL.md
+version: 0.2.0
+entrypoint: run.py
 targets:
 - generic
 entrypoints:
 - name: main
-  path: SKILL.md
-  type: markdown
+  path: run.py
+  type: python
 limits:
   max_tool_iterations: 12
-  max_output_tokens: 8192
+  max_output_tokens: 6144
   max_total_tokens: 60000
-  timeout_seconds: 300
+  timeout_seconds: 1800
 exec:
-  runtime: skill
+  mode: pure-script
+  command: python run.py
+  runtime: python311
   runner: e2b
+  entry: run.py
   inputs:
-  - name: topic
+  - name: url
     kind: scalar
     type: string
     required: true
-    label: Article topic
-    placeholder: e.g. "How small recruiting firms in DACH use AI for candidate writeups"
-  - name: target_keyword
+    label: Company website URL
+    placeholder: e.g. "https://www.floom.com"
+  - name: keywords
+    kind: scalar
+    type: textarea
+    required: true
+    label: Target keywords
+    placeholder: One keyword per line
+  - name: language
+    kind: scalar
+    type: select
+    required: true
+    default: en
+    enum:
+    - en
+    - de
+    - fr
+    - es
+    - it
+    label: Article language
+    options:
+    - en
+    - de
+    - fr
+    - es
+    - it
+  - name: market
+    kind: scalar
+    type: select
+    required: true
+    default: US
+    enum:
+    - US
+    - UK
+    - DE
+    - FR
+    - ES
+    - IT
+    - CA
+    - AU
+    label: Target market
+    options:
+    - US
+    - UK
+    - DE
+    - FR
+    - ES
+    - IT
+    - CA
+    - AU
+  - name: default_word_count
+    kind: scalar
+    type: select
+    required: true
+    default: '2000'
+    enum:
+    - '1000'
+    - '2000'
+    - '3000'
+    - '4000'
+    label: Default word count
+    options:
+    - '1000'
+    - '2000'
+    - '3000'
+    - '4000'
+  - name: batch_instructions
+    kind: scalar
+    type: textarea
+    required: false
+    label: Batch instructions
+    placeholder: Optional instructions applied to every article
+  - name: max_parallel
+    kind: scalar
+    type: select
+    required: false
+    default: '3'
+    enum:
+    - '1'
+    - '2'
+    - '3'
+    label: Max parallel articles
+    options:
+    - '1'
+    - '2'
+    - '3'
+  - name: model_name
     kind: scalar
     type: string
-    required: true
-    label: Target SEO keyword
-    placeholder: e.g. "ai candidate writeup tool"
-  - name: audience
+    required: false
+    label: Gemini model override
+    placeholder: Defaults to gemini-3-flash-preview
+  - name: skip_images
     kind: scalar
-    type: select
-    required: true
-    default: general
-    enum:
-    - general
-    - executive
-    - technical
-    - recruiting-operator
-    - founder
-    label: Target audience
-    options:
-    - general
-    - executive
-    - technical
-    - recruiting-operator
-    - founder
-  - name: word_count
+    type: boolean
+    required: false
+    default: false
+    label: Skip Imagen image generation
+  - name: export_formats
     kind: scalar
-    type: select
-    required: true
-    default: '1500'
-    enum:
-    - '800'
-    - '1500'
-    - '2500'
-    label: Target word count
-    options:
-    - '800'
-    - '1500'
-    - '2500'
-  - name: format
-    kind: scalar
-    type: select
-    required: true
-    default: article
-    enum:
-    - article
-    - listicle
-    - guide
-    - comparison
-    label: Article format
-    options:
-    - article
-    - listicle
-    - guide
-    - comparison
+    type: string
+    required: false
+    default: html markdown json csv xlsx pdf
+    label: Export formats
+    placeholder: html markdown json csv xlsx pdf
+  secrets:
+  - GEMINI_API_KEY
   outputs:
-  - name: draft
+  - name: markdown
     kind: file
     media_type: text/markdown
-    path: out/draft.md
+    path: out/markdown.md
     required: true
-    label: Article draft
-  entry: SKILL.md
+    label: Markdown article
+  - name: raw
+    kind: file
+    media_type: application/json
+    path: out/raw.json
+    required: true
+    label: Raw pipeline output
+  - name: run_metadata
+    kind: file
+    media_type: application/json
+    path: out/run_metadata.json
+    required: true
+    label: Run metadata
+  - name: export_report
+    kind: file
+    media_type: application/json
+    path: out/export_report.json
+    required: true
+    label: Export and image report
+  - name: preview_html
+    kind: file
+    media_type: text/html
+    path: out/preview.html
+    required: false
+    label: Preview HTML
+  - name: article_html
+    kind: file
+    media_type: text/html
+    path: out/article.html
+    required: false
+    label: First article HTML
+  - name: article_json
+    kind: file
+    media_type: application/json
+    path: out/article.json
+    required: false
+    label: First article JSON
+  - name: article_csv
+    kind: file
+    media_type: text/csv
+    path: out/article.csv
+    required: false
+    label: First article CSV
+  - name: article_xlsx
+    kind: file
+    media_type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+    path: out/article.xlsx
+    required: false
+    label: First article XLSX
+  - name: article_pdf
+    kind: file
+    media_type: application/pdf
+    path: out/article.pdf
+    required: false
+    label: First article PDF
+  - name: articles_archive
+    kind: file
+    media_type: application/zip
+    path: out/openblog_articles.zip
+    required: true
+    label: Exported articles archive
+  - name: images_archive
+    kind: file
+    media_type: application/zip
+    path: out/openblog_images.zip
+    required: false
+    label: Generated images archive
+  - name: workspace_archive
+    kind: file
+    media_type: application/zip
+    path: out/openblog_workspace.zip
+    required: true
+    label: Workspace archive
+  - name: error_report
+    kind: file
+    media_type: application/json
+    path: out/error_report.json
+    required: false
+    label: Error report
 capabilities:
-  secrets: []
+  secrets:
+  - GEMINI_API_KEY
   network:
     egress: true
 approvals:
   required: false
-  label: Approve article draft
+  label: Approve blog article
 trigger:
   type: manual
