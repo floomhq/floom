@@ -1,4 +1,5 @@
 schema_version: '0.3'
+is_example: true
 name: openblog
 title: OpenBlog Article Draft
 description: Generates an AEO-optimized blog article draft from a topic, target keyword, audience, and word-count target.

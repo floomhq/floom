@@ -1,4 +1,5 @@
 schema_version: '0.3'
+is_example: true
 name: opendraft
 title: OpenDraft Research Outline
 description: Generates an academic research outline from a topic, level, and length target, modeled on the OpenDraft engine.

@@ -390,6 +390,7 @@ class WorkerContract(BaseModel):
     example_input: Optional[Dict[str, Any]] = None
     example_output: Optional[str] = None
     how_it_works: Optional[str] = None
+    is_example: Optional[bool] = None
     folder: Optional[str] = None
     version: str
     entrypoint: Optional[str] = "SKILL.md"
@@ -879,6 +880,7 @@ class WorkerSummary(BaseModel):
     example_input: Optional[Dict[str, Any]] = None
     example_output: Optional[str] = None
     how_it_works: Optional[str] = None
+    is_example: Optional[bool] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
@@ -908,6 +910,7 @@ class WorkerDetail(BaseModel):
     example_input: Optional[Dict[str, Any]] = None
     example_output: Optional[str] = None
     how_it_works: Optional[str] = None
+    is_example: Optional[bool] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
