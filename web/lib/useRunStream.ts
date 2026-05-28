@@ -19,7 +19,11 @@ export function useRunStream(runId: string | null | undefined) {
     let closed = false;
     let sawEvent = false;
     let sawFinish = false;
-    const source = new EventSource(`/api/proxy/runs/${encodeURIComponent(runId)}/stream`);
+    // workeros-cloud: EventSource (like raw fetch) bypasses Next.js basePath
+    // (/app). Without the prefix the SSE URL hits the marketing project at
+    // the apex and 404s — log streaming silently never connects. Sister rule
+    // documented in lib/api.ts.
+    const source = new EventSource(`/app/api/proxy/runs/${encodeURIComponent(runId)}/stream`);
 
     source.addEventListener("open", () => {
       if (!closed) setConnected(true);
