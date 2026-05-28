@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 
@@ -8,51 +7,19 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 import runner_sandbox.agent_driver as agent_module
 from models import WorkerConfig
 from runner_sandbox.agent_driver import AgentDriver
+from agent_driver_sdk_fakes import ScriptedAgentDriverMixin
 
 
-class FakeCompletions:
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.calls = []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
-        if not self.responses:
-            raise AssertionError("Unexpected model call")
-        return self.responses.pop(0)
-
-
-class FakeClient:
-    def __init__(self, responses):
-        self.chat = type("Chat", (), {})()
-        self.chat.completions = FakeCompletions(responses)
+class ScriptedAgentDriver(ScriptedAgentDriverMixin, AgentDriver):
+    pass
 
 
 def final_response(content="done", tokens=5):
-    return {
-        "choices": [{"message": {"content": content, "tool_calls": []}}],
-        "usage": {"total_tokens": tokens},
-    }
+    return {"kind": "message", "text": content, "tokens": tokens}
 
 
 def tool_response(name, args, call_id="call_1", tokens=10):
-    return {
-        "choices": [
-            {
-                "message": {
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": call_id,
-                            "type": "function",
-                            "function": {"name": name, "arguments": json.dumps(args)},
-                        }
-                    ],
-                }
-            }
-        ],
-        "usage": {"total_tokens": tokens},
-    }
+    return {"kind": "tool", "name": name, "args": args, "call_id": call_id, "tokens": tokens}
 
 
 def make_config(tmp_path, outputs=None, limits=None):
@@ -119,7 +86,7 @@ def logs():
 
 
 def tool_by_name(tools, name):
-    return next(tool for tool in tools if tool["function"]["name"] == name)
+    return next(tool for tool in tools if (tool.get("function") or {}).get("name") == name)
 
 
 def test_system_prompt_includes_outputs_block(tmp_path):
@@ -177,22 +144,21 @@ def test_write_output_enum_rejects_wrong_name(tmp_path):
 
 def test_corrective_retry_on_missing_output(tmp_path):
     config = make_config(tmp_path)
-    client = FakeClient(
-        [
-            final_response("I wrote the brief in prose only."),
-            tool_response("finish_with_outputs", {"brief": "# Brief\n\nDone."}),
-        ]
-    )
+    driver = ScriptedAgentDriver()
+    driver.set_scripts([
+        [final_response("I wrote the brief in prose only.")],
+        [tool_response("finish_with_outputs", {"brief": "# Brief\n\nDone."})],
+    ])
     _entries, log_fn = logs()
 
-    result = AgentDriver(openai_client=client).run(
+    result = driver.run(
         "agent-contract-test", "run_corrective", {}, {}, log_fn, "trace", config=config
     )
 
     assert result.status == "success"
     assert result.outputs == {"brief": "# Brief\n\nDone."}
-    assert len(client.chat.completions.calls) == 2
-    assert client.chat.completions.calls[1]["tool_choice"]["function"]["name"] == "finish_with_outputs"
+    assert len(driver.calls) == 2
+    assert driver.calls[1]["agent"].model_settings.tool_choice == "finish_with_outputs"
 
 
 def test_transcript_persisted_on_failure(tmp_path):
@@ -208,10 +174,11 @@ def test_transcript_persisted_on_failure(tmp_path):
         }
     ]
     config = make_config(tmp_path, outputs=outputs)
-    client = FakeClient([final_response("no output"), final_response("still no output")])
+    driver = ScriptedAgentDriver()
+    driver.set_scripts([[final_response("no output")], [final_response("still no output")]])
     _entries, log_fn = logs()
 
-    result = AgentDriver(openai_client=client).run(
+    result = driver.run(
         "agent-contract-test", "run_failure", {}, {}, log_fn, "trace", config=config
     )
 
@@ -236,10 +203,11 @@ def test_declared_path_honored(tmp_path):
             }
         ],
     )
-    client = FakeClient([tool_response("finish_with_outputs", {"brief": "# Brief"})])
+    driver = ScriptedAgentDriver()
+    driver.set_scripts([[tool_response("finish_with_outputs", {"brief": "# Brief"})]])
     _entries, log_fn = logs()
 
-    result = AgentDriver(openai_client=client).run(
+    result = driver.run(
         "agent-contract-test", "run_declared_path", {}, {}, log_fn, "trace", config=config
     )
 
