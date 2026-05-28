@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import uuid
@@ -30,6 +31,7 @@ logger = logging.getLogger("floom.runner_sandbox.agent")
 _CWD_LOCK = threading.Lock()
 _STDOUT_CAP = 12000
 _STDERR_CAP = 12000
+_PATH_VALUE_RE = re.compile(r"^(?:\.?/)?(?:out|outputs|output|artifacts|inputs)/[A-Za-z0-9._/@ -]+$")
 
 
 def _safe_path(base: Path, *parts: str) -> Path:
@@ -84,6 +86,17 @@ def _scrub(value: str, secrets: Dict[str, str]) -> str:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, default=str)
+
+
+def _looks_like_relative_path_value(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text or "\n" in text or "://" in text or text.startswith("/"):
+        return False
+    if _PATH_VALUE_RE.fullmatch(text):
+        return True
+    return "/" in text and text.lower().endswith((".md", ".txt", ".json", ".csv", ".html", ".pdf", ".docx"))
 
 
 @dataclass
@@ -1002,9 +1015,14 @@ class AgentDriver(SandboxDriver):
             allowed = ", ".join(sorted(declared_names))
             return {"ok": False, "error": f"Undeclared output: {name}. Declared outputs: {allowed}"}
         content = args.get("content")
+        declared = self._declared_output(config, name)
+        if self._scalar_output_leaked_path(declared, content):
+            return {
+                "ok": False,
+                "error": f"Scalar output {name} looks like a file path. Provide the actual output content.",
+            }
         outputs[name] = content
         serialized = content if isinstance(content, str) else json.dumps(content, indent=2)
-        declared = self._declared_output(config, name)
         artifact_root = output_dir.parent
         relative_path = declared.path if declared and declared.path else f"outputs/{name}.txt"
         path = _safe_path(artifact_root, relative_path)
@@ -1037,6 +1055,12 @@ class AgentDriver(SandboxDriver):
                 "error": f"Undeclared outputs: {', '.join(unexpected)}",
             }
         for name, content in args.items():
+            declared = self._declared_output(config, name)
+            if self._scalar_output_leaked_path(declared, content):
+                return {
+                    "ok": False,
+                    "error": f"Scalar output {name} looks like a file path. Provide the actual output content.",
+                }
             result = self._write_output(
                 {"name": name, "content": content},
                 output_dir,
@@ -1059,6 +1083,12 @@ class AgentDriver(SandboxDriver):
             if output.name == name:
                 return output
         return None
+
+    def _scalar_output_leaked_path(self, output: Any, content: Any) -> bool:
+        if not output:
+            return False
+        kind = output.kind or ("file" if output.type == "file" else "scalar")
+        return kind != "file" and _looks_like_relative_path_value(content)
 
     def _artifact_media_type(self, output: Any) -> str:
         if output and output.media_type:

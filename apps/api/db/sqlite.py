@@ -740,7 +740,7 @@ class SqliteRunRepository:
             SELECT r.id, r.worker_id,
                    COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
                    r.status, r.trigger_source, r.created_at, r.started_at,
-                   r.completed_at, r.duration_ms, r.error
+                   r.completed_at, r.duration_ms, r.error, r.quality_warning
             FROM runs r
             JOIN workers w ON w.id = r.worker_id
             LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
@@ -765,7 +765,8 @@ class SqliteRunRepository:
                        COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
                        r.status, r.trigger_source, r.runner, r.input_json, r.output_json,
                        r.error, r.started_at, r.completed_at, r.duration_ms, r.created_at,
-                       r.cancel_requested, r.cancelled_at, r.bundle_snapshot_path
+                       r.cancel_requested, r.cancelled_at, r.bundle_snapshot_path,
+                       r.quality_warning
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
@@ -799,8 +800,8 @@ class SqliteRunRepository:
                 INSERT INTO runs
                     (id, worker_id, status, trigger_source, runner, input_json, output_json,
                      approval_status, error, started_at, completed_at, duration_ms,
-                     created_at, bundle_snapshot_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, bundle_snapshot_path, quality_warning)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -817,6 +818,7 @@ class SqliteRunRepository:
                     fields.get("duration_ms"),
                     fields.get("created_at") or now_iso(),
                     fields.get("bundle_snapshot_path"),
+                    fields.get("quality_warning"),
                 ),
             )
         created = self.get(user_id=user_id, run_id=run_id)
@@ -839,6 +841,7 @@ class SqliteRunRepository:
             "cancel_requested",
             "cancelled_at",
             "bundle_snapshot_path",
+            "quality_warning",
         }
         updates: list[str] = []
         params: list[Any] = []
