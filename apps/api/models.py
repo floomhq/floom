@@ -6,6 +6,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 
 
+def _model_data(value: Any) -> Any:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -592,7 +598,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         model=contract.model or "gpt-5-mini",
         system_prompt=contract.system_prompt,
         disable_tools=list(contract.exec.disable_tools or []),
-        limits=contract.limits,
+        limits=_model_data(contract.limits),
     )
 
     inputs = [
