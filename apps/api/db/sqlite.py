@@ -1020,6 +1020,48 @@ class SqliteRunRepository:
             cancelled_at=cancelled_at,
         )
 
+    def fail_running(self, *, user_id: str, error: str) -> list[str]:
+        completed_at = now_iso()
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.id, r.started_at
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE w.owner_id = ? AND r.status = 'running'
+                """,
+                (user_id,),
+            ).fetchall()
+            if not rows:
+                return []
+            for row in rows:
+                duration_ms = None
+                started_at = row["started_at"]
+                if started_at:
+                    try:
+                        import datetime as _dt
+
+                        started = _dt.datetime.fromisoformat(started_at)
+                        completed = _dt.datetime.fromisoformat(completed_at)
+                        duration_ms = int((completed - started).total_seconds() * 1000)
+                    except Exception:
+                        duration_ms = None
+                conn.execute(
+                    """
+                    UPDATE runs
+                    SET status = ?, error = ?, completed_at = ?, duration_ms = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        RunStatus.FAILED.value,
+                        error,
+                        completed_at,
+                        duration_ms,
+                        row["id"],
+                    ),
+                )
+        return [row["id"] for row in rows]
+
     def count_running_for_worker(self, *, user_id: str, worker_id: str) -> int:
         with get_db() as conn:
             row = conn.execute(

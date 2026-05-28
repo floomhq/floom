@@ -22,6 +22,13 @@ logger = logging.getLogger("floom.runner_sandbox.e2b")
 MAX_E2B_SANDBOX_LIFETIME_SECONDS = 3600
 
 
+def _emit_command_output(raw: str, level: str, prefix: str, log_fn: Callable[[str, str], None]) -> None:
+    for line in str(raw or "").splitlines():
+        line = line.strip()
+        if line:
+            log_fn(f"{prefix}{line}", level)
+
+
 def _format_env_line(key: str, value: str) -> str:
     """Format a single KEY=value line for .env.local.
 
@@ -372,6 +379,17 @@ class E2BSandboxDriver(SandboxDriver):
             if config and config.runtime and config.runtime.command:
                 command = config.runtime.command
             log_fn(f"[e2b] Executing worker command: {command}", "info")
+            streamed_stdout: list[str] = []
+            streamed_stderr: list[str] = []
+
+            def on_stdout(chunk: str) -> None:
+                streamed_stdout.append(chunk)
+                _emit_command_output(chunk, "info", "[e2b] ", log_fn)
+
+            def on_stderr(chunk: str) -> None:
+                streamed_stderr.append(chunk)
+                _emit_command_output(chunk, "warning", "[e2b] stderr: ", log_fn)
+
             proc = sandbox.commands.run(
                 command,
                 cwd=workdir,
@@ -379,20 +397,18 @@ class E2BSandboxDriver(SandboxDriver):
                     "FLOOM_RUN_ID": run_id,
                     "FLOOM_TRACE_ID": trace_id,
                 },
+                on_stdout=on_stdout,
+                on_stderr=on_stderr,
                 timeout=float(timeout_seconds),
             )
 
-            # Capture logs
-            if proc.stdout:
-                for line in proc.stdout.splitlines():
-                    line = line.strip()
-                    if line:
-                        log_fn(f"[e2b] {line}", "info")
-            if proc.stderr:
-                for line in proc.stderr.splitlines():
-                    line = line.strip()
-                    if line:
-                        log_fn(f"[e2b] stderr: {line}", "warning")
+            # E2B streams stdout/stderr through callbacks while the process is
+            # running. Keep the fallback for SDKs or test doubles that only
+            # return aggregate stdout/stderr after process exit.
+            if proc.stdout and not streamed_stdout:
+                _emit_command_output(proc.stdout, "info", "[e2b] ", log_fn)
+            if proc.stderr and not streamed_stderr:
+                _emit_command_output(proc.stderr, "warning", "[e2b] stderr: ", log_fn)
 
             if proc.exit_code != 0:
                 err = f"Worker exited with code {proc.exit_code}"

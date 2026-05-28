@@ -73,7 +73,13 @@ from worker_registry import (
     get_worker,
     invalidate_worker_cache,
 )
-from run_service import create_run, get_worker_config_for_run, start_run, add_log, update_run_status
+from run_service import (
+    create_run,
+    fail_interrupted_runs_on_startup,
+    get_worker_config_for_run,
+    start_run,
+    update_run_status,
+)
 from run_service import register_sse_publisher, register_part_publisher
 
 load_dotenv()
@@ -114,7 +120,9 @@ async def lifespan(app: FastAPI):
     _validate_startup_configuration()
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy == "local":
-        _reload_workers_for_user(_bootstrap_user_id())
+        bootstrap_user_id = _bootstrap_user_id()
+        _reload_workers_for_user(bootstrap_user_id)
+        fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
         from scheduler import start_scheduler
 
         start_scheduler()

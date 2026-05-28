@@ -615,6 +615,42 @@ def get_secrets_for_worker(
 # Execution orchestration
 # ---------------------------------------------------------------------------
 
+INTERRUPTED_RUN_ERROR = "Run was interrupted by an API restart before completion."
+
+
+def fail_interrupted_runs_on_startup(
+    *,
+    user_id: str,
+    repos: Repositories | None = None,
+) -> int:
+    """Fail runs left in-flight by a prior API process.
+
+    Worker execution currently runs in process-local threads. A service restart
+    terminates those threads, so any row that is still `running` at the next
+    startup no longer has an executor attached.
+    """
+    repos_obj = _repos(repos)
+    failed = repos_obj.runs.fail_running(
+        user_id=user_id,
+        error=INTERRUPTED_RUN_ERROR,
+    )
+    for run_id in failed:
+        try:
+            repos_obj.runs.add_log(
+                user_id=user_id,
+                run_id=run_id,
+                level="error",
+                message=INTERRUPTED_RUN_ERROR,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                trace_id=None,
+            )
+        except Exception as exc:
+            logger.warning("Failed to add interrupted-run log for %s: %s", run_id, exc)
+    if failed:
+        logger.warning("Marked %d interrupted run(s) as failed on startup", len(failed))
+    return len(failed)
+
+
 def execute_run(
     run_id: str,
     worker_id: str,
