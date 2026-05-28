@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Loader2 } from "lucide-react";
-import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,7 +20,7 @@ export default function ConnectAppPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const slug = (params?.app || "").toLowerCase();
-  const returnTo = searchParams.get("return_to") || "/connections";
+  const returnTo = normalizeReturnTo(searchParams.get("return_to"));
 
   const [meta, setMeta] = useState<AppMeta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,31 +55,12 @@ export default function ConnectAppPage() {
     };
   }, [slug]);
 
-  async function handleConnect() {
+  function handleConnect() {
     if (connecting) return;
     setConnecting(true);
-    const oauthTab = window.open("", "_blank");
-    if (oauthTab) oauthTab.opener = null;
-    try {
-      const result = await api.connections.initiate(slug);
-      if (result.redirect_url) {
-        if (oauthTab) {
-          oauthTab.location.href = result.redirect_url;
-        } else {
-          window.open(result.redirect_url, "_blank", "noopener,noreferrer");
-        }
-        toast.success(`Authorize ${meta?.name || slug} in the new tab`);
-        router.push(returnTo);
-      } else {
-        oauthTab?.close();
-        toast.success("Connection initiated");
-        router.push(returnTo);
-      }
-    } catch (e) {
-      oauthTab?.close();
-      toast.error(e instanceof Error ? e.message : "Failed to start connection");
-      setConnecting(false);
-    }
+    router.push(
+      `/connections/redirect?app=${encodeURIComponent(slug)}&return_to=${encodeURIComponent(returnTo)}`
+    );
   }
 
   const providerName = meta?.name || slug;
@@ -157,4 +137,9 @@ export default function ConnectAppPage() {
       </div>
     </div>
   );
+}
+
+function normalizeReturnTo(value: string | null): string {
+  if (value && value.startsWith("/") && !value.startsWith("//")) return value;
+  return "/connections";
 }
