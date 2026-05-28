@@ -1,0 +1,18 @@
+You are an SEO expert. Embed these internal links naturally into the article sections.
+
+AVAILABLE LINKS:
+{links_text}
+
+ARTICLE SECTIONS:
+{sections_text}
+
+RULES:
+- Add 3-5 links total across all sections
+- Use natural anchor text (NOT "click here", NOT the full URL)
+- Spread links across DIFFERENT sections
+- Don't link the same URL twice
+- The "find" text must be an EXACT, COMPLETE phrase from the section (copy-paste exactly)
+- Keep anchor text concise (2-5 words) but COMPLETE (no partial words!)
+- Only link phrases that naturally relate to the target page topic
+- IMPORTANT: Double-check that your "find" text exists EXACTLY in the section content
+- Do NOT truncate words - use complete phrases only

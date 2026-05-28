@@ -1,0 +1,81 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Test outputs
+test_run/
+test_output/
+output/
+results/
+inspection_output_*/
+
+# Test files in root (generated during testing)
+test_*.html
+test_*.json
+test_*.py
+batch_*.html
+batch_*.json
+*_TEST*.html
+*_OUTPUT*.html
+*_BLOG*.html
+preview_*.html
+*_test_*.json
+variance_test_results.json
+
+# Pipeline output files
+*_pipeline_*.json
+*_result*.json
+*_output*.json
+*_audit*.json
+railway*.json
+simple_*.json
+
+# Generated artifacts
+*.db
+debug_*.png
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/

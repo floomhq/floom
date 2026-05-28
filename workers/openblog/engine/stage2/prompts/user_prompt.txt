@@ -1,0 +1,105 @@
+Write a comprehensive, engaging blog article.
+
+TOPIC: {keyword}
+
+COMPANY CONTEXT:
+{company_context}
+
+LOCALIZATION:
+- Language: {language}
+- Country/Region: {country}
+
+PARAMETERS:
+- Word count: {word_count}
+- Sections: 4-6 content sections
+- PAA: 4 People Also Ask questions with answers
+- FAQ: 5-6 FAQ questions with answers
+- Takeaways: 3 key takeaways
+
+OPTIONAL (include when it enhances the article - use your judgment):
+- tables: comparison tables for topics involving multiple options, tools, pricing
+- TLDR: 2-3 sentence summary for longer articles
+- pros_cons: structured pros/cons for product reviews or tool comparisons
+- cta_text: specific call-to-action relevant to the topic and company
+- related_keywords: secondary keywords naturally covered in the content
+- content_type: classify as "listicle", "how-to", "comparison", "guide", or "explainer"
+- reading_time_min: estimated reading time based on word count
+- video_url + video_title: ONLY if you find a REAL YouTube video via search - prioritize company's own channel, leave EMPTY if unsure or none found
+
+Create the best possible article for this topic, like a skilled human writer would.
+
+{custom_instructions_section}
+
+Return ONLY valid JSON matching this exact schema:
+{{
+  "Headline": "Main headline with primary keyword (max 70 chars)",
+  "Subtitle": "Optional sub-headline for context",
+  "Teaser": "2-3 sentence hook highlighting pain point or benefit",
+  "Direct_Answer": "40-60 word direct answer to the primary question (for featured snippets)",
+  "Intro": "Opening paragraph (80-120 words) framing the problem",
+  "Meta_Title": "SEO title max 55 chars with primary keyword",
+  "Meta_Description": "SEO description max 130 chars with CTA",
+  "section_01_title": "First section heading",
+  "section_01_content": "<p>HTML content...</p>",
+  "section_02_title": "Second section heading",
+  "section_02_content": "<p>HTML content...</p>",
+  "section_03_title": "Third section heading",
+  "section_03_content": "<p>HTML content...</p>",
+  "section_04_title": "Fourth section heading",
+  "section_04_content": "<p>HTML content...</p>",
+  "section_05_title": "",
+  "section_05_content": "",
+  "section_06_title": "",
+  "section_06_content": "",
+  "section_07_title": "",
+  "section_07_content": "",
+  "section_08_title": "",
+  "section_08_content": "",
+  "section_09_title": "",
+  "section_09_content": "",
+  "key_takeaway_01": "Key insight #1",
+  "key_takeaway_02": "Key insight #2",
+  "key_takeaway_03": "Key insight #3",
+  "paa_01_question": "People Also Ask question #1",
+  "paa_01_answer": "Concise answer",
+  "paa_02_question": "People Also Ask question #2",
+  "paa_02_answer": "Concise answer",
+  "paa_03_question": "People Also Ask question #3",
+  "paa_03_answer": "Concise answer",
+  "paa_04_question": "People Also Ask question #4",
+  "paa_04_answer": "Concise answer",
+  "faq_01_question": "FAQ question #1",
+  "faq_01_answer": "Detailed answer",
+  "faq_02_question": "FAQ question #2",
+  "faq_02_answer": "Detailed answer",
+  "faq_03_question": "FAQ question #3",
+  "faq_03_answer": "Detailed answer",
+  "faq_04_question": "FAQ question #4",
+  "faq_04_answer": "Detailed answer",
+  "faq_05_question": "FAQ question #5",
+  "faq_05_answer": "Detailed answer",
+  "faq_06_question": "",
+  "faq_06_answer": "",
+  "TLDR": "2-3 sentence summary (optional)",
+  "tables": [
+    {{
+      "title": "Comparison of Top Options",
+      "headers": ["Feature", "Option A", "Option B"],
+      "rows": [["Pricing", "$10/mo", "$25/mo"]]
+    }}
+  ],
+  "pros_cons": {{"pros": ["Benefit 1", "Benefit 2"], "cons": ["Drawback 1"]}},
+  "cta_text": "Call-to-action text (optional)",
+  "related_keywords": ["secondary keyword 1", "secondary keyword 2"],
+  "content_type": "comparison",
+  "reading_time_min": 8,
+  "video_url": "https://youtube.com/watch?v=... (prefer company channel)",
+  "video_title": "Video title for embed",
+  "Sources": [
+    {{"title": "Source Title 1", "url": "https://exact-url-from-search.com/page"}},
+    {{"title": "Source Title 2", "url": "https://another-real-url.com/article"}}
+  ],
+  "Search_Queries": "Q1: query used\\nQ2: query used"
+}}
+
+CRITICAL: The "Sources" field is REQUIRED. Include 3-5 real URLs from your Google Search results. Use exact URLs you found - do not invent or guess URLs. Each source must have both "title" and "url" fields.

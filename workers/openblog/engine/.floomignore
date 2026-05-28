@@ -1,0 +1,16 @@
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.local
+examples/
+openapi.json
+floom.json
+test_*.py
+CLAUDE.md
+README.md
+LICENSE
+.gitignore
