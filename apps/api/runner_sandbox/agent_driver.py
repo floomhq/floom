@@ -1441,16 +1441,27 @@ class AgentDriver(SandboxDriver):
         if not api_key:
             return {"ok": False, "error": "COMPOSIO_API_KEY is not configured"}
         log_fn(f"Executing Composio tool {tool}", "debug")
+        # Composio v3 requires entity_id alongside connected_account_id, even
+        # for single-tenant. Smoke run_c4d428a0d4f4 failed every call with
+        # `ActionExecute_ConnectedAccountEntityIdRequired` until we started
+        # passing one. Workeros is single-user; "federico" matches what the
+        # OAuth flow uses on auth-config setup.
+        entity_id = os.environ.get("FLOOM_USER_ID", "federico")
         response = requests.post(
             f"https://backend.composio.dev/api/v3/tools/execute/{tool}",
             headers={"x-api-key": api_key, "Content-Type": "application/json"},
             json={
                 "connected_account_id": row["composio_connection_id"],
+                "entity_id": entity_id,
                 "arguments": arguments,
             },
             timeout=30,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            return {
+                "ok": False,
+                "error": f"{response.status_code} {response.reason}: {response.text[:400]}",
+            }
         result = response.json()
         return {"ok": True, "result": result}
 
