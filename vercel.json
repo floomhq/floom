@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/app",
+      "destination": "https://workeros-cloud-dashboard.vercel.app/app"
+    },
+    {
+      "source": "/app/:path*",
+      "destination": "https://workeros-cloud-dashboard.vercel.app/app/:path*"
+    }
+  ]
+}

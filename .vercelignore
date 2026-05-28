@@ -1,0 +1,6 @@
+engine/
+web/
+apps/
+supabase/
+tests/
+*.py
