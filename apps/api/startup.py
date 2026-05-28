@@ -29,6 +29,56 @@ def _activate_cloud_deploy() -> None:
     os.environ.setdefault("WORKEROS_DEPLOY", "cloud")
 
 
+def _disable_postgrest_http2() -> None:
+    """Force postgrest's sync client onto HTTP/1.1.
+
+    Supabase silently closes idle HTTP/2 streams after ~minutes. The next
+    Postgrest call gets ``httpx.RemoteProtocolError: Server disconnected``,
+    which Starlette swallows into a useless "Internal server error". This
+    bit us on the Re-run flow: the second within-request DB call after a
+    quiet period failed with no UI explanation.
+
+    Even with per-request clients (no lru_cache, see below), MULTIPLE
+    calls inside one request reuse the same client; HTTP/2 idle drops
+    can land between any two of them. HTTP/1.1 keep-alive doesn't have
+    the same idle-stream-tracking problem — a dead conn errors with a
+    clean recoverable signal on send, and httpx reopens transparently.
+
+    Monkey-patching postgrest's session factory is the smallest fix; the
+    public SyncClientOptions doesn't expose http2 toggling.
+    """
+    try:
+        from postgrest._sync import client as _pg_client
+    except Exception:
+        return
+    base_class = getattr(_pg_client, "BasePostgrestClient", None) or _pg_client.SyncPostgrestClient
+    orig = base_class.create_session
+    if getattr(orig, "_workeros_http1_patched", False):
+        return
+
+    def _create_session_http1(  # type: ignore[no-redef]
+        self,
+        base_url,
+        headers,
+        timeout,
+        verify=True,
+        proxy=None,
+    ):
+        from postgrest.utils import SyncClient
+        return SyncClient(
+            base_url=base_url,
+            headers=headers,
+            timeout=timeout,
+            verify=verify,
+            proxy=proxy,
+            follow_redirects=True,
+            http2=False,
+        )
+
+    _create_session_http1._workeros_http1_patched = True  # type: ignore[attr-defined]
+    base_class.create_session = _create_session_http1
+
+
 def _cloud_repositories() -> Repositories:
     return Repositories(
         workers=SupabaseWorkerRepository(),
@@ -43,6 +93,7 @@ def register_cloud_components() -> None:
     _activate_cloud_deploy()
     get_cloud_settings()
     ensure_secret_crypto_ready()
+    _disable_postgrest_http2()
     register_auth_provider("cloud", lambda: SupabaseAuthProvider())
     register_repositories("cloud", _cloud_repositories)
     apply_engine_overrides()
