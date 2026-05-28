@@ -23,6 +23,11 @@ logger = logging.getLogger("floom.runner_sandbox.e2b")
 MAX_E2B_SANDBOX_LIFETIME_SECONDS = 3600
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
+    "code 137",
+    "exit 137",
+    "exit code 137",
+    "exited with code 137",
+    "memoryerror",
     "out of memory",
     "oom-kill",
     "oom killed",
@@ -66,7 +71,11 @@ def cancel_sandbox(run_id: str, *, reason: str | None = None) -> bool:
 
 
 def _looks_like_sandbox_oom(exit_code: int | None, stdout: str | None, stderr: str | None) -> bool:
-    if exit_code in _OOM_EXIT_CODES:
+    try:
+        normalized_exit_code = int(exit_code) if exit_code is not None else None
+    except (TypeError, ValueError):
+        normalized_exit_code = None
+    if normalized_exit_code in _OOM_EXIT_CODES:
         return True
     text = f"{stdout or ''}\n{stderr or ''}".lower()
     return any(marker in text for marker in _OOM_MARKERS)
@@ -249,6 +258,20 @@ class E2BSandboxDriver(SandboxDriver):
                 timeout_seconds, config, connection_ids or {},
             )
         except Exception as exc:
+            exc_stdout = getattr(exc, "stdout", None)
+            exc_stderr = getattr(exc, "stderr", None)
+            exc_exit_code = getattr(exc, "exit_code", None)
+            if _looks_like_sandbox_oom(exc_exit_code, exc_stdout, f"{exc_stderr or ''}\n{exc}"):
+                logger.exception(
+                    "E2B sandbox OOM for worker %s run %s: %s", worker_id, run_id, exc
+                )
+                log_fn(f"E2B sandbox OOM: {exc}", "error")
+                return WorkerResult(
+                    status="error",
+                    error=str(exc),
+                    error_code="sandbox_oom",
+                    retryable=False,
+                )
             logger.exception(
                 "E2B sandbox failed for worker %s run %s: %s", worker_id, run_id, exc
             )
