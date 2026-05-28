@@ -162,8 +162,19 @@ def render_summary(db: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _load_secret(name: str) -> str:
+    val = os.environ.get(name, "").strip()
+    if val:
+        return val
+    try:
+        with open("secrets.json") as fh:
+            return (json.load(fh).get(name) or "").strip()
+    except FileNotFoundError:
+        return ""
+
+
 def run(inputs: dict, context) -> dict:
-    api_key = os.environ.get("APIFY_API_KEY", "").strip()
+    api_key = _load_secret("APIFY_API_KEY")
     if not api_key:
         raise RuntimeError("APIFY_API_KEY not set; add it via /secrets")
 
@@ -208,7 +219,28 @@ def run(inputs: dict, context) -> dict:
     }
 
 
+def _read_inputs() -> dict:
+    if Path("inputs.json").is_file():
+        return json.loads(Path("inputs.json").read_text() or "{}")
+    if not sys.stdin.isatty():
+        payload = json.loads(sys.stdin.read() or "{}")
+        return payload.get("inputs", payload) or {}
+    return {}
+
+
 if __name__ == "__main__":
-    payload = json.loads(sys.stdin.read() or "{}") if not sys.stdin.isatty() else {}
-    inputs_arg = payload.get("inputs", {})
-    run(inputs_arg, None)
+    inputs_arg = _read_inputs()
+    try:
+        outputs = run(inputs_arg, None)
+        Path("result.json").write_text(json.dumps({
+            "status": "completed",
+            "outputs": outputs,
+            "artifacts": [],
+        }))
+    except Exception as exc:
+        Path("result.json").write_text(json.dumps({
+            "status": "error",
+            "outputs": {},
+            "error": str(exc),
+        }))
+        raise
