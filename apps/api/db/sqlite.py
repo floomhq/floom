@@ -339,6 +339,93 @@ class SqliteWorkerRepository:
             raise RuntimeError(f"failed to create worker {worker_id}")
         return created
 
+    def upsert(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
+        """Insert-or-update a worker row from a discovered-worker dict.
+
+        Matches the legacy _persist_discovered_workers SQL (INSERT OR
+        REPLACE on skill_versions by (name, version); INSERT ON
+        CONFLICT(id) DO UPDATE on workers). Idempotent across repeated
+        discovery passes; safe to call multiple times for the same id.
+        """
+        worker_id = fields["worker_id"]
+        manifest_json = fields.get("manifest_json") or {}
+        if isinstance(manifest_json, str):
+            manifest_json = json.loads(manifest_json or "{}")
+        name = (
+            fields.get("name")
+            or manifest_json.get("title")
+            or manifest_json.get("name")
+            or worker_id
+        )
+        bundle_path = fields.get("bundle_path") or f"workers/{worker_id}"
+        created_at = fields.get("created_at") or now_iso()
+        skill_version_id = fields.get("skill_version_id") or _skill_version_id(
+            worker_id, manifest_json
+        )
+        trigger_type = fields.get("trigger_type") or "manual"
+        triggers_json = fields.get("triggers_json")
+        manifest_str = _json_dump(manifest_json)
+        version = str(manifest_json.get("version") or "0.1.0")
+
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO skill_versions
+                    (id, name, version, manifest_json, bundle_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name, version) DO UPDATE SET
+                    manifest_json=excluded.manifest_json,
+                    bundle_path=excluded.bundle_path
+                """,
+                (
+                    skill_version_id,
+                    manifest_json.get("name") or name,
+                    version,
+                    manifest_str,
+                    bundle_path,
+                    created_at,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO workers
+                    (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
+                     next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
+                     notify_webhook_url, grants_json, input_values_json, enabled, created_at,
+                     owner_id, composio_trigger_id, composio_event, triggers_json)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    skill_version_id=excluded.skill_version_id,
+                    name=excluded.name,
+                    trigger_type=excluded.trigger_type,
+                    cron_expr=excluded.cron_expr,
+                    cron_timezone=excluded.cron_timezone,
+                    owner_id=excluded.owner_id,
+                    composio_trigger_id=excluded.composio_trigger_id,
+                    composio_event=excluded.composio_event,
+                    triggers_json=excluded.triggers_json
+                """,
+                (
+                    worker_id,
+                    skill_version_id,
+                    name,
+                    trigger_type,
+                    fields.get("cron_expr"),
+                    fields.get("cron_timezone"),
+                    _json_dump(fields.get("grants_json") or {}),
+                    _json_dump(fields.get("input_values_json") or {}),
+                    created_at,
+                    user_id,
+                    fields.get("composio_trigger_id"),
+                    fields.get("composio_event"),
+                    _json_dump(triggers_json) if triggers_json is not None else None,
+                ),
+            )
+        upserted = self.get(user_id=user_id, worker_id=worker_id)
+        if upserted is None:
+            raise RuntimeError(f"failed to upsert worker {worker_id}")
+        return upserted
+
     def update(self, *, user_id: str, worker_id: str, **fields: Any) -> dict[str, Any] | None:
         worker = self.get(user_id=user_id, worker_id=worker_id)
         if worker is None:
