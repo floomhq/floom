@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from db.factory import Repositories, get_repositories
+from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR, get_worker_config
 from runner_sandbox import get_driver as get_sandbox_driver
 from models import (
@@ -25,6 +26,15 @@ logger = logging.getLogger("floom.run_service")
 
 API_ENV_PATH = Path("/root/.config/workeros/api.env")
 LOCAL_ENV_PATH = Path(__file__).resolve().parent / ".env"
+MIN_OUTPUT_BYTES = int(os.environ.get("WORKEROS_MIN_OUTPUT_BYTES", "100"))
+_PLACEHOLDER_MARKERS = (
+    "i don't have access",
+    "i cannot fetch",
+    "i can't fetch",
+    "please provide an api key",
+    "placeholder",
+)
+_PATH_VALUE_RE = re.compile(r"^(?:\.?/)?(?:out|outputs|output|artifacts|inputs)/[A-Za-z0-9._/@ -]+$")
 
 # ---------------------------------------------------------------------------
 # SSE event publisher hook
@@ -368,6 +378,148 @@ def _store_run_artifacts(
             log_fn(f"Failed to store artifact: {exc}", level="warning")
 
 
+def _looks_like_relative_path(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text or "\n" in text or "://" in text or text.startswith("/"):
+        return False
+    if _PATH_VALUE_RE.fullmatch(text):
+        return True
+    suffixes = (".md", ".txt", ".json", ".csv", ".html", ".pdf", ".docx")
+    return "/" in text and text.lower().endswith(suffixes)
+
+
+def _placeholder_warning(value: Any, output_name: str) -> str | None:
+    if not isinstance(value, str):
+        return None
+    first = value.strip().lower()[:200]
+    if not first:
+        return None
+    if any(marker in first for marker in _PLACEHOLDER_MARKERS):
+        return f"{output_name}: output looks like placeholder/apology content"
+    if first.startswith("note:"):
+        return f"{output_name}: output starts with Note:"
+    return None
+
+
+def _output_artifact(output: Any, artifacts: list[Dict[str, Any]]) -> Dict[str, Any] | None:
+    expected = (getattr(output, "path", None) or "").strip()
+    output_name = getattr(output, "name", "")
+    for artifact in artifacts:
+        names = {
+            str(artifact.get("relative_path") or ""),
+            str(artifact.get("name") or ""),
+        }
+        if expected and expected in names:
+            return artifact
+        if output_name and output_name in names:
+            return artifact
+        if expected and any(name.endswith(f"/{expected}") for name in names):
+            return artifact
+    return None
+
+
+def _candidate_output_path(run_id: str, output: Any, outputs: Dict[str, Any], artifacts: list[Dict[str, Any]]) -> Path | None:
+    artifact = _output_artifact(output, artifacts)
+    if artifact and artifact.get("path"):
+        return Path(str(artifact["path"]))
+    root = ARTIFACTS_DIR / run_id
+    declared_path = getattr(output, "path", None)
+    if declared_path:
+        return (root / declared_path).resolve()
+    value = outputs.get(getattr(output, "name", ""))
+    if isinstance(value, str) and _looks_like_relative_path(value):
+        return (root / value.strip()).resolve()
+    return None
+
+
+def _safe_artifact_path(run_id: str, relative_path: str) -> Path:
+    root = (ARTIFACTS_DIR / run_id).resolve()
+    target = (root / relative_path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        raise ValueError(f"output path escapes artifact directory: {relative_path}")
+    return target
+
+
+def _materialize_declared_file_outputs(
+    run_id: str,
+    config: WorkerConfig,
+    outputs: Dict[str, Any],
+    artifacts: list[Dict[str, Any]],
+) -> None:
+    for output in config.outputs:
+        kind = output.kind or ("file" if output.type == "file" else "scalar")
+        if kind != "file" or output.name not in outputs or _output_artifact(output, artifacts):
+            continue
+        relative_path = output.path or f"outputs/{output.name}.txt"
+        path = _safe_artifact_path(run_id, relative_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        value = outputs[output.name]
+        path.write_text(value if isinstance(value, str) else json.dumps(value, indent=2))
+        artifacts.append(
+            {
+                "name": relative_path,
+                "relative_path": relative_path,
+                "type": output.media_type or "text/plain",
+                "path": str(path),
+                "size_bytes": path.stat().st_size,
+            }
+        )
+
+
+def _validate_run_outputs(
+    run_id: str,
+    config: WorkerConfig,
+    outputs: Dict[str, Any],
+    artifacts: list[Dict[str, Any]],
+) -> tuple[str | None, list[str]]:
+    warnings: list[str] = []
+    for output in config.outputs:
+        name = output.name
+        kind = output.kind or ("file" if output.type == "file" else "scalar")
+        value = outputs.get(name)
+
+        if output.required and name not in outputs:
+            return f"output_validation_failed: {name} missing required output", warnings
+
+        if kind == "file":
+            path = _candidate_output_path(run_id, output, outputs, artifacts)
+            if path is None:
+                return f"output_validation_failed: {name} missing output file", warnings
+            if not path.is_file():
+                return f"output_validation_failed: {name} file not found at {path.name}", warnings
+            size = path.stat().st_size
+            if size < MIN_OUTPUT_BYTES:
+                return (
+                    f"output_validation_failed: {name} file is too small "
+                    f"({size} bytes, minimum {MIN_OUTPUT_BYTES})"
+                ), warnings
+            media_type = (output.media_type or "").lower()
+            if media_type == "application/json":
+                try:
+                    json.loads(path.read_text())
+                except Exception as exc:
+                    return f"output_validation_failed: {name} JSON file is invalid: {exc}", warnings
+            if media_type.startswith("text/"):
+                warning = _placeholder_warning(path.read_text(errors="ignore")[:1000], name)
+                if warning:
+                    warnings.append(warning)
+            continue
+
+        if output.required and (value is None or value == ""):
+            return f"output_validation_failed: {name} scalar output is empty", warnings
+        if _looks_like_relative_path(value):
+            return f"output_validation_failed: {name} scalar output leaked a path string", warnings
+        warning = _placeholder_warning(value, name)
+        if warning:
+            warnings.append(warning)
+
+    return None, warnings
+
+
 def _load_runtime_env_files() -> None:
     load_dotenv(LOCAL_ENV_PATH, override=False)
     if API_ENV_PATH.is_file():
@@ -571,6 +723,7 @@ def execute_run(
 
     outputs = result.outputs
     artifacts = result.artifacts
+    _materialize_declared_file_outputs(run_id, config, outputs, artifacts)
     _store_run_artifacts(run_id, artifacts, log_fn, user_id=owner_id, repos=repos_obj)
 
     # Both "error" and "failed" terminal statuses map to a failed run
@@ -584,7 +737,21 @@ def execute_run(
         log_fn(f"Run failed: {result.error}", level="error")
         return
 
+    quality_error, quality_warnings = _validate_run_outputs(run_id, config, outputs, artifacts)
+    if quality_error:
+        update_run_status(run_id, RunStatus.FAILED.value, error=quality_error, user_id=owner_id, repos=repos_obj)
+        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": quality_error})
+        log_fn(quality_error, level="error")
+        return
+
     update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
+    if quality_warnings and owner_id:
+        repos_obj.runs.update(
+            user_id=owner_id,
+            run_id=run_id,
+            quality_warning="; ".join(quality_warnings),
+        )
+        log_fn(f"Quality warning: {'; '.join(quality_warnings)}", level="warning")
     publish_run_part(run_id, {"type": "finish", "status": "completed"})
     log_fn("Output generated")
     log_fn("Run completed")
