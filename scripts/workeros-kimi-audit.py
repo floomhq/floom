@@ -671,6 +671,16 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
             json={"inputs": {"topic": "audit"}, "trigger_source": "audit"},
             timeout=10,
         )
+        if replay_seed["status"] == 429:
+            time.sleep(RUN_CREATE_QUOTA_RESET_SECONDS)
+            replay_seed = request(
+                api,
+                "POST",
+                f"/workers/{replay_name}/runs",
+                secret=secret,
+                json={"inputs": {"topic": "audit"}, "trigger_source": "audit"},
+                timeout=10,
+            )
         if replay_seed["status"] == 200:
             try:
                 replay_seed_body = json.loads(replay_seed["body"])
