@@ -92,7 +92,7 @@ def _resolve_connections(
 
     with get_db() as conn:
         cursor = conn.cursor()
-        for app_name in config.connections:
+        for app_name in (connection for connection in config.connections if isinstance(connection, str)):
             cursor.execute(
                 "SELECT composio_connection_id, status FROM composio_connections WHERE app_name = ?",
                 (app_name.lower(),),
