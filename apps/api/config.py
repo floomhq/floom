@@ -134,5 +134,10 @@ def get_supabase_service_client() -> Client:
 
 def reset_cloud_caches() -> None:
     get_cloud_settings.cache_clear()
-    get_supabase_anon_client.cache_clear()
-    get_supabase_service_client.cache_clear()
+    # The supabase client factories are no longer @lru_cache'd (see comment
+    # above their definitions). cache_clear is a no-op for plain functions
+    # but we guard with getattr to keep this resilient to either shape.
+    for fn in (get_supabase_anon_client, get_supabase_service_client):
+        clear = getattr(fn, "cache_clear", None)
+        if clear:
+            clear()

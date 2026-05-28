@@ -57,9 +57,12 @@ def register_cloud_components() -> None:
     # "No response returned". Rebuilding per request costs ~5ms but
     # stays reliable indefinitely.
     if hasattr(engine_db_factory.get_repositories, "__wrapped__"):
-        engine_db_factory.get_repositories = (
-            engine_db_factory.get_repositories.__wrapped__
-        )
+        unwrapped = engine_db_factory.get_repositories.__wrapped__
+        # The engine's register_repositories() calls cache_clear() on
+        # get_repositories after every registration. Give the unwrapped
+        # function a no-op cache_clear so that path still works.
+        unwrapped.cache_clear = lambda: None  # type: ignore[attr-defined]
+        engine_db_factory.get_repositories = unwrapped
 
 
 register_cloud_components()
