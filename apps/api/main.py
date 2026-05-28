@@ -1987,15 +1987,15 @@ def download_upload(
         raise HTTPException(status_code=404, detail="Uploaded file not found")
 
     download_token = request.query_params.get("download_token", "")
-    uploaded_by = _verify_upload_download_token(file_id, download_token)
+    _verify_upload_download_token(file_id, download_token)
     with get_db() as conn:
         row = conn.execute(
             """
             SELECT filename, media_type
             FROM files
-            WHERE id = ? AND uploaded_by = ?
+            WHERE id = ?
             """,
-            (file_id, uploaded_by),
+            (file_id,),
         ).fetchone()
 
     path = blob_path(file_id)
