@@ -42,8 +42,9 @@ ls -la /root/backups
 
 Tunables:
 - `WORKEROS_ROOT` repo root, default `/root/workeros`
-- `FLOOM_DB` source SQLite path, default `$WORKEROS_ROOT/data/floom.db`
-- `FLOOM_ARTIFACTS_DIR` artifacts dir, default `$WORKEROS_ROOT/data/artifacts`
+- `WORKEROS_API_DIR` API dir used to resolve relative `FLOOM_DB`, default `$WORKEROS_ROOT/apps/api`
+- `FLOOM_DB` source SQLite path, default `$WORKEROS_ROOT/data/floom.db`; relative paths resolve from `WORKEROS_API_DIR`
+- `FLOOM_ARTIFACTS_DIR` artifacts dir, default `$WORKEROS_ROOT/data/artifacts`; relative paths resolve from `WORKEROS_API_DIR`
 - `WORKEROS_BACKUP_ROOT` destination root, default `/root/backups`
 - `WORKEROS_BACKUP_HOURLY` hourly retention count, default `48`
 - `WORKEROS_BACKUP_DAILY` daily retention count, default `7`
