@@ -5668,8 +5668,14 @@ def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
 def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
     item = dict(data)
     item["kind"] = item.get("kind") or "composio"
+    # E2 fix: display_name carries the real unredacted email/login so the UI
+    # can show "user@example.com" instead of "Connected account".
+    # Prefer the explicit display_name column; fall back to account_label
+    # (which may be raw email from the sweeper). account_label is kept as-is
+    # for backward compat with any callers that already parse it.
+    raw_display = item.get("display_name") or item.get("account_label") or ""
+    item["display_name"] = raw_display.strip() or None
     item["account_label"] = _redact_connection_account_label(item.get("account_label"))
-    item["display_name"] = _redact_connection_account_label(item.get("display_name"))
     item["mcp_allowed_tools"] = _parse_json_string_list(item.pop("mcp_allowed_tools_json", None))
     return ConnectionItem(**item)
 
@@ -5781,18 +5787,34 @@ def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict
         if not isinstance(account, dict):
             return {}
 
+        params = account.get("params") or {}
+        metadata = account.get("metadata") or {}
         email = (
             account.get("email")
             or account.get("account_email")
+            or params.get("userEmail")
+            or params.get("email")
             or (account.get("connection_data") or {}).get("email")
             or (account.get("data") or {}).get("email")
-            or (account.get("metadata") or {}).get("email")
+            or metadata.get("email")
             or (account.get("user") or {}).get("email")
         )
-        raw_scopes = account.get("scopes") or []
+        # Composio v3: granted scopes may be in params.scopes, metadata.scopes,
+        # or the top-level scopes array.
+        raw_scopes = (
+            account.get("scopes")
+            or params.get("scopes")
+            or metadata.get("scopes")
+            or []
+        )
         if not isinstance(raw_scopes, list):
             raw_scopes = []
         scopes = [s for s in raw_scopes if isinstance(s, str)]
+        # Composio v3: entity_id is often the user's email for OAuth integrations.
+        entity_id = account.get("entity_id") or ""
+        if not email and "@" in entity_id:
+            email = entity_id
+
         # Fallback: Composio doesn't return email for managed-OAuth connections
         # and masks the raw access_token, so we cannot call provider userinfo
         # directly. Use Composio's /tools/execute proxy to invoke a per-provider
@@ -6069,7 +6091,9 @@ def get_connection_account_info(
     if not info:
         raise HTTPException(status_code=502, detail="Unable to fetch account info from upstream")
 
-    # Cache scopes + account_label in DB for list endpoint
+    # Cache scopes + account_label in DB for list endpoint.
+    # E2 fix: also write display_name (unredacted email) so the list
+    # endpoint can surface the real identity without stripping it.
     if info.get("scopes") is not None or info.get("email"):
         now = now_iso()
         account_label = info.get("email") or ""
@@ -6078,6 +6102,7 @@ def get_connection_account_info(
             composio_id=connection_id,
             scopes_json=info.get("scopes") or [],
             account_label=account_label,
+            display_name=account_label or None,
             updated_at=now,
         )
 
@@ -6330,10 +6355,14 @@ async def _run_connection_sweep() -> None:
                 info = _fetch_composio_account_info(composio_conn_id, user_id=row["user_id"])
                 email_or_user = info.get("email") or info.get("user_id") or ""
                 if email_or_user:
+                    # E2 fix: write to both account_label (legacy) and
+                    # display_name (new, unredacted) so the list endpoint
+                    # surfaces the real email without stripping it.
                     repos.connections.update(
                         user_id=row["user_id"],
                         composio_id=conn_id,
                         account_label=email_or_user,
+                        display_name=email_or_user,
                         updated_at=tested_at,
                     )
             except Exception as exc:
