@@ -417,6 +417,11 @@ export default function WorkerDetailPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-semibold tracking-tight">{worker.name}</h1>
             <StatusPill status={worker.status} />
+            {worker.is_example && (
+              <span className="inline-flex items-center rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                Example
+              </span>
+            )}
           </div>
           {worker.description && (
             <p className="text-muted-foreground text-sm mt-1">{worker.description}</p>
