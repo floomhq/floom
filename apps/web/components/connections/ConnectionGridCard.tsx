@@ -59,10 +59,10 @@ export function ConnectionGridCard({
   const { label, cls } = statusBadgeStyle(connection.status);
 
   return (
-    <article className="group grid h-[172px] grid-rows-[auto_1fr_auto] rounded-lg border border-line bg-[var(--paper)] p-4 shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-[var(--ease)] hover:-translate-y-px hover:border-[var(--accent-line)] hover:shadow-md">
+    <article className="group grid h-[172px] grid-rows-[auto_1fr_auto] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[border-color,box-shadow,transform] duration-150 ease-[var(--ease)] hover:-translate-y-px hover:border-[var(--accent-line)] hover:shadow-md">
       {/* Top row: logo + name + slug (account label) */}
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line bg-[var(--paper-2)]">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-2)]">
           <BrandLogo icon={connection.icon} className="size-6" />
         </div>
         <div className="min-w-0">

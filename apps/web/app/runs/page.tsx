@@ -209,13 +209,13 @@ function RunsContent() {
           Worker | Trigger | Duration | Status | Started. Click row to
           navigate to /runs/<id>. */}
       {loading ? (
-        <div className="rounded-md border border-border bg-card overflow-hidden">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-11 w-full rounded-none border-b border-line last:border-b-0" />
+            <Skeleton key={i} className="h-11 w-full rounded-none border-b border-[var(--border-default)] last:border-b-0" />
           ))}
         </div>
       ) : runs.length === 0 ? (
-        <div className="rounded-md border border-border bg-card py-12 flex flex-col items-center gap-3 text-center">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] py-12 flex flex-col items-center gap-3 text-center">
           <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
             <Play className="w-5 h-5 text-muted-foreground" />
           </div>
@@ -250,8 +250,8 @@ function RunsContent() {
       ) : (
         <div className="space-y-4">
           {groupedRuns.map((group) => (
-            <section key={group.key} className="rounded-md border border-border bg-card overflow-hidden">
-              <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-line bg-[var(--bg-2)]">
+            <section key={group.key} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border-default)] bg-[var(--bg-2)]">
                 <h2 className="text-xs font-semibold uppercase text-muted-foreground">
                   {group.label}
                 </h2>
@@ -259,7 +259,7 @@ function RunsContent() {
                   {formatRunCountSummary(group.runs)}
                 </span>
               </div>
-              <div className="hidden md:grid grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-2 border-b border-line text-[11px] font-medium text-muted-foreground">
+              <div className="hidden md:grid grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-2 border-b border-[var(--border-default)] text-[11px] font-medium text-muted-foreground">
                 <span>Worker</span>
                 <span>Trigger</span>
                 <span>Duration</span>
@@ -271,7 +271,7 @@ function RunsContent() {
                   key={r.id}
                   href={`/runs/${r.id}`}
                   title={r.id}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-3 border-b border-line last:border-b-0 hover:bg-muted transition-colors items-center cursor-pointer"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-3 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors items-center cursor-pointer"
                 >
                   <span className="min-w-0">
                     <span className="flex items-center gap-2.5 min-w-0">
@@ -306,7 +306,7 @@ function RunsContent() {
             </section>
           ))}
           {hasMore && (
-            <div className="px-4 py-3 text-center rounded-md border border-border bg-card">
+            <div className="px-4 py-3 text-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)]">
               <Button
                 variant="outline"
                 size="sm"

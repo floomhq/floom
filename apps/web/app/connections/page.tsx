@@ -276,7 +276,7 @@ export default function ConnectionsPage() {
           </div>
 
           {mcpFormOpen && (
-            <div className="rounded-md border border-line bg-card p-4">
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="mcp-label" className="text-xs text-muted-foreground">Label</Label>
@@ -338,8 +338,8 @@ export default function ConnectionsPage() {
             </div>
           )}
 
-          <div className="rounded-md border border-border bg-card overflow-hidden">
-            <div className="hidden md:grid grid-cols-[40px_minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 px-3 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] font-medium text-muted-foreground">
+          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+            <div className="hidden md:grid grid-cols-[40px_minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 px-3 py-2 border-b border-[var(--border-default)] bg-[var(--bg-2)] text-[11px] font-medium text-muted-foreground">
               <span />
               <span>Label</span>
               <span>URL</span>
@@ -351,9 +351,9 @@ export default function ConnectionsPage() {
               mcpConnections.map((connection) => (
                 <div
                   key={connection.id}
-                  className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-3 md:gap-4 items-center px-3 py-2.5 border-b border-line last:border-b-0"
+                  className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-3 md:gap-4 items-center px-3 py-2.5 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors"
                 >
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-line bg-[var(--paper)]">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)]">
                     <BrandLogo icon="" className="size-4" />
                   </div>
                   <div className="min-w-0">
@@ -391,7 +391,7 @@ export default function ConnectionsPage() {
 
         <section aria-label="Connected tools">
           {loading ? (
-            <div className="rounded-md border border-border bg-card overflow-hidden">
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
               {Array.from({ length: 4 }).map((_, index) => (
                 <ConnectionSkeleton key={index} />
               ))}
@@ -412,8 +412,8 @@ export default function ConnectionsPage() {
                   className="pl-9 h-9"
                 />
               </div>
-              <div className="rounded-md border border-border bg-card overflow-hidden">
-                <div className="hidden md:grid grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-4 px-3 py-2 border-b border-line bg-[var(--bg-2)] text-[11px] font-medium text-muted-foreground">
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+                <div className="hidden md:grid grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-4 px-3 py-2 border-b border-[var(--border-default)] bg-[var(--bg-2)] text-[11px] font-medium text-muted-foreground">
                   <span />
                   <span>App / Account</span>
                   <span>Scopes</span>

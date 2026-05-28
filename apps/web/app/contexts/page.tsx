@@ -273,8 +273,8 @@ export default function ContextsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_320px_1fr]">
-        <section className="min-h-[520px] border border-line bg-card">
-          <div className="border-b border-line p-3">
+        <section className="min-h-[520px] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+          <div className="border-b border-[var(--border-default)] p-3">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -332,7 +332,7 @@ export default function ContextsPage() {
         </section>
 
         <section
-          className={`min-h-[520px] border border-line bg-card ${dragActive ? "bg-muted/60" : ""}`}
+          className={`min-h-[520px] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden ${dragActive ? "bg-[var(--active-nav-bg)]" : ""}`}
           onDragOver={(event) => {
             event.preventDefault();
             setDragActive(true);
@@ -440,8 +440,8 @@ export default function ContextsPage() {
           </div>
         </section>
 
-        <section className="min-h-[520px] border border-line bg-card">
-          <div className="flex items-center justify-between gap-3 border-b border-line p-3">
+        <section className="min-h-[520px] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--border-default)] p-3">
             <div className="min-w-0">
               <p className="truncate font-mono text-sm">{selectedFile?.path || "Select a file"}</p>
               {selectedFile && (
