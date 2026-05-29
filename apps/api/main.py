@@ -2453,44 +2453,82 @@ _UPLOAD_HOURLY_WINDOW_SECONDS = 3600.0
 _UPLOAD_ALLOWED_MEDIA_TYPES = frozenset({
     "application/json",
     "application/pdf",
+    "application/rtf",
+    "application/sql",
+    "application/toml",
+    "application/typescript",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/x-yaml",
+    "application/xml",
     "application/yaml",
     "application/zip",
     "image/gif",
     "image/jpeg",
     "image/png",
+    "image/svg+xml",
     "image/webp",
+    "text/css",
     "text/csv",
+    "text/html",
     "text/markdown",
     "text/plain",
+    "text/tab-separated-values",
+    "text/x-python",
+    "text/xml",
+    "text/yaml",
 })
+# Text/code/data/doc/image formats a worker can read as context or a user can
+# attach. Mirrors what Mac/GitHub treat as ordinary repo files. True
+# executables / scripts stay in the blocklist below.
 _UPLOAD_ALLOWED_EXTENSIONS = frozenset({
-    ".csv",
-    ".docx",
-    ".gif",
-    ".jpeg",
-    ".jpg",
-    ".json",
-    ".md",
-    ".markdown",
+    ".c", ".cpp", ".cc", ".h", ".hpp",
+    ".csv", ".tsv",
+    ".css", ".scss",
+    ".docx", ".pptx", ".xlsx", ".rtf", ".odt",
+    ".gif", ".jpeg", ".jpg", ".png", ".webp", ".svg",
+    ".go", ".rs", ".rb", ".java", ".kt", ".swift",
+    ".htm", ".html", ".xml",
+    ".ini", ".toml", ".env", ".conf", ".cfg",
+    ".ipynb",
+    ".json", ".jsonl", ".ndjson",
+    ".log",
+    ".md", ".markdown", ".mdx", ".rst",
     ".pdf",
-    ".png",
-    ".txt",
-    ".webp",
-    ".xlsx",
-    ".yaml",
-    ".yml",
+    ".py",
+    ".sql",
+    ".ts", ".tsx", ".jsx",
+    ".txt", ".text",
+    ".yaml", ".yml",
     ".zip",
 })
+# Declared media types we reject outright (defense-in-depth), even when the
+# file extension is benign — these signal an executable/script payload.
+_UPLOAD_DANGEROUS_MEDIA_TYPES = frozenset({
+    "application/javascript",
+    "application/x-dosexec",
+    "application/x-executable",
+    "application/x-msdownload",
+    "application/x-msdos-program",
+    "application/x-sh",
+    "application/x-shellscript",
+    "application/vnd.microsoft.portable-executable",
+    "text/javascript",
+})
+# Active/executable formats: blocked regardless of the allowlist (a blocked
+# extension always wins, see _validate_upload_filename).
 _UPLOAD_BLOCKED_EXTENSIONS = frozenset({
     ".bat",
     ".cmd",
+    ".com",
     ".dll",
     ".exe",
     ".js",
+    ".mjs",
     ".php",
     ".ps1",
+    ".scr",
     ".sh",
 })
 _upload_quota_lock = threading.Lock()
@@ -2679,7 +2717,25 @@ async def upload_file(
     media_type = normalize_media_type(
         file.content_type or mimetypes.guess_type(raw_filename)[0]
     )
-    if media_type not in _UPLOAD_ALLOWED_MEDIA_TYPES:
+    # The extension allowlist (enforced above, with executables blocked) is the
+    # authoritative gate, and downloads are always served as attachments with
+    # nosniff, so stored files can't execute. Browsers send code/data files
+    # (.py, .ts, .toml, .go) as application/octet-stream or text/*, so we defer
+    # to the extension for those — EXCEPT for explicitly dangerous declared
+    # media types, which we reject as defense-in-depth regardless of extension.
+    suffix = Path(raw_filename).suffix.lower()
+    if media_type in _UPLOAD_DANGEROUS_MEDIA_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload media type {media_type!r} is not allowed",
+        )
+    media_type_ok = (
+        media_type in _UPLOAD_ALLOWED_MEDIA_TYPES
+        or suffix in _UPLOAD_ALLOWED_EXTENSIONS
+        or media_type in {"application/octet-stream", ""}
+        or media_type.startswith("text/")
+    )
+    if not media_type_ok:
         raise HTTPException(
             status_code=400,
             detail=f"Upload media type {media_type!r} is not allowed",
@@ -8696,11 +8752,34 @@ def list_connections(
     rows = repos.connections.list(user_id=auth.user_id)
     now = datetime.now(timezone.utc)
 
-    result = []
+    refreshed: List[Dict[str, Any]] = []
     for row in rows:
         d = row_to_dict(row)
         d = _refresh_connection_status_for_list(d, user_id=auth.user_id, repos=repos, now=now)
         d["scopes"] = _parse_scopes_json(d.pop("scopes_json", None))
+        refreshed.append(d)
+
+    # Hide superseded dead rows: once an app has a live (active/valid) composio
+    # connection, its leftover expired/initiated/pending/error siblings are dead
+    # Composio sessions from earlier reconnects and only confuse the operator
+    # ("reconnect did nothing — still Expired"). Suppress them. API-key rows and
+    # apps with no live connection are always kept.
+    def _is_live(status: object) -> bool:
+        return str(status or "").lower() in ("active", "valid", "connected")
+
+    live_apps = {
+        d.get("app_name")
+        for d in refreshed
+        if (d.get("kind") or "composio") == "composio" and _is_live(d.get("status"))
+    }
+    result = []
+    for d in refreshed:
+        if (
+            (d.get("kind") or "composio") == "composio"
+            and d.get("app_name") in live_apps
+            and not _is_live(d.get("status"))
+        ):
+            continue
         result.append(_public_connection_item(d))
     return result
 
@@ -8735,6 +8814,9 @@ def initiate_connection(
     redirect_url = result["redirect_url"]
     # Always insert a new row — multiple accounts per app are allowed.
     # Each Composio connected_account is a distinct row identified by its own UUID.
+    # (Stale expired siblings are hidden from the UI by list_connections once an
+    # active connection exists for the app — see the suppression there. We do NOT
+    # reuse/replace rows here, which would break genuine multi-account support.)
     conn_id = str(_uuid_mod.uuid4())
     now = now_iso()
     repos.connections.upsert(
