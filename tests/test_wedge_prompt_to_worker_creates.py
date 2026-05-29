@@ -169,6 +169,74 @@ def test_register_authored_worker_reads_bundle_and_registers(monkeypatch, tmp_pa
     assert (workers_dir / worker_id / "SKILL.md").exists()
 
 
+def test_register_authored_worker_normalizes_invalid_use_cases(monkeypatch, tmp_path):
+    """LIVE-FOUND BUG (2026-05-29): the worker-author LLM emitted a worker.yml
+    with use_cases of <3 items, which passes worker-author's loose validator but
+    FAILS the canonical WorkerContract schema (use_cases must be 3-5 items), so
+    registration 400'd and the worker never got created. The backend must strip
+    the violating OPTIONAL metadata and still register a functional worker."""
+    import worker_registry
+    import run_service
+
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    monkeypatch.setattr(worker_registry, "WORKERS_DIR", workers_dir)
+
+    # A worker.yml that is functionally valid but carries 1 use_case (<3) and
+    # 9 tags (>8) — both violate the schema's optional-metadata validators.
+    bad_meta_yml = _valid_worker_yml().rstrip() + (
+        "\n\nuse_cases:\n  - \"Get a daily PR summary by email\"\n"
+        "tags:\n" + "".join(f"  - \"tag{i}\"\n" for i in range(9))
+    )
+
+    bundle_path = tmp_path / "artifacts" / "run_meta" / "out" / "bundle.json"
+    bundle_path.parent.mkdir(parents=True)
+    bundle_path.write_text(json.dumps({
+        "worker_yml": bad_meta_yml,
+        "skill_md": "# GitHub PR Digest\n\nFetch and email unread PRs.",
+        "run_code": None,
+        "requirements_txt": None,
+        "created_worker_id": None,
+    }), encoding="utf-8")
+
+    artifacts = [{
+        "name": "bundle.json",
+        "relative_path": "out/bundle.json",
+        "path": str(bundle_path),
+    }]
+
+    worker_id = run_service._register_authored_worker(
+        "run_meta",
+        outputs={},
+        artifacts=artifacts,
+        user_id="federico",
+        repos=None,
+        log_fn=lambda *a, **k: None,
+    )
+
+    assert worker_id == "github-pr-digest", "functional worker must register despite bad optional metadata"
+    import yaml as pyyaml
+    raw = pyyaml.safe_load((workers_dir / worker_id / "worker.yml").read_text())
+    # Violating optional metadata is stripped (lossless to function).
+    assert "use_cases" not in raw
+    assert "tags" not in raw
+
+
+def test_normalize_authored_worker_yml_keeps_valid_metadata(monkeypatch):
+    """The normalizer must NOT touch metadata that already satisfies the schema."""
+    import run_service
+
+    good_yml = _valid_worker_yml().rstrip() + (
+        "\n\nuse_cases:\n  - \"A\"\n  - \"B\"\n  - \"C\"\n"
+        "tags:\n  - \"x\"\n  - \"y\"\n"
+    )
+    out = run_service._normalize_authored_worker_yml(good_yml, lambda *a, **k: None)
+    import yaml as pyyaml
+    raw = pyyaml.safe_load(out)
+    assert raw.get("use_cases") == ["A", "B", "C"]
+    assert raw.get("tags") == ["x", "y"]
+
+
 def test_register_authored_worker_is_idempotent(monkeypatch, tmp_path):
     """If the run output already has created_worker_id, no second worker is
     made (guards against duplicate creation on resume/re-execution)."""
