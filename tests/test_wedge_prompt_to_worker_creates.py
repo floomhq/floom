@@ -191,6 +191,59 @@ def test_register_authored_worker_reads_bundle_and_registers(monkeypatch, tmp_pa
     assert (workers_dir / worker_id / "SKILL.md").exists()
 
 
+def test_register_authored_worker_rejects_empty_bundle(monkeypatch, tmp_path):
+    """GAP 2 (2026-05-29): a bundle with NEITHER skill_md NOR run_code must NOT
+    register a worker. Otherwise the run.py stub backfill ships a worker that
+    "runs green" with empty outputs — a silent no-op the operator thinks works.
+    The hook returns None (the drafted bundle stays viewable)."""
+    import worker_registry
+    import run_service
+
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    monkeypatch.setattr(worker_registry, "WORKERS_DIR", workers_dir)
+
+    artifacts_dir = tmp_path / "artifacts"
+    bundle_path = artifacts_dir / "run_empty" / "out" / "bundle.json"
+    bundle_path.parent.mkdir(parents=True)
+    bundle = {
+        "worker_yml": _valid_worker_yml(),
+        "skill_md": None,
+        "run_code": None,  # neither executable form present
+        "requirements_txt": None,
+        "suggested_id": "github-pr-digest",
+        "sample_input_json": "{}",
+        "created_worker_id": None,
+    }
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+    artifacts = [{
+        "name": "bundle.json",
+        "relative_path": "out/bundle.json",
+        "path": str(bundle_path),
+        "type": "application/json",
+        "size_bytes": bundle_path.stat().st_size,
+    }]
+
+    worker_id = run_service._register_authored_worker(
+        "run_empty", outputs={}, artifacts=artifacts,
+        user_id="federico", repos=None, log_fn=lambda *a, **k: None,
+    )
+
+    assert worker_id is None
+    # nothing written to disk — no silent no-op worker
+    assert not any(workers_dir.iterdir())
+
+
+def test_placeholder_stub_marker_matches_main_stub():
+    """GAP 2 coupling guard: the smoke's placeholder marker MUST be a substring
+    of main._DEFAULT_RUN_PY_STUB, or the smoke would silently pass a no-op stub
+    worker as green. Catches the stub comment being edited out of sync."""
+    import main
+    import run_service
+
+    assert run_service._PLACEHOLDER_RUN_PY_MARKER in main._DEFAULT_RUN_PY_STUB
+
+
 def test_register_authored_worker_normalizes_invalid_use_cases(monkeypatch, tmp_path):
     """LIVE-FOUND BUG (2026-05-29): the worker-author LLM emitted a worker.yml
     with use_cases of <3 items, which passes worker-author's loose validator but
