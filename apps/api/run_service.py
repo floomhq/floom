@@ -87,6 +87,110 @@ def _minimum_free_disk_bytes() -> int:
     except ValueError:
         return 1024 * 1024 * 1024
 
+
+# The meta-worker whose completed runs auto-register the worker they drafted.
+# Mirrors main._WORKER_AUTHOR_ID (asserted equal in tests).
+_WORKER_AUTHOR_WORKER_ID = "worker-author"
+
+
+def _find_bundle_artifact(run_id: str, artifacts: list[Dict[str, Any]]) -> Optional[Path]:
+    """Locate the worker-author bundle.json on local disk.
+
+    The E2B driver downloads ``out/bundle.json`` into
+    ``ARTIFACTS_DIR/<run_id>/out/bundle.json`` and records the artifact with
+    ``relative_path == "out/bundle.json"`` and an absolute ``path``. Fall back
+    to the conventional location if the artifact list is unexpectedly empty.
+    """
+    for art in artifacts or []:
+        rel = str(art.get("relative_path") or "")
+        name = str(art.get("name") or "")
+        if rel == "out/bundle.json" or name == "bundle.json" or rel.endswith("/bundle.json"):
+            candidate = art.get("path")
+            if candidate and Path(candidate).is_file():
+                return Path(candidate)
+    fallback = (ARTIFACTS_DIR / run_id / "out" / "bundle.json")
+    return fallback if fallback.is_file() else None
+
+
+def _register_authored_worker(
+    run_id: str,
+    outputs: Dict[str, Any],
+    artifacts: list[Dict[str, Any]],
+    *,
+    user_id: str | None,
+    repos: Repositories | None,
+    log_fn: Callable[..., None],
+) -> Optional[str]:
+    """Register the worker drafted by a completed worker-author run.
+
+    Reads the run's ``bundle.json`` artifact (produced by
+    ``workers/worker-author/run.py``), assembles the worker bundle files
+    (worker.yml + SKILL.md or run.py + requirements.txt), and registers them
+    through the shared ``main._register_worker_from_files`` path. Returns the
+    new ``worker_id`` (or None if the bundle is missing / invalid — in which
+    case the run still completes and the bundle stays viewable).
+
+    Idempotency: if the run output already carries a ``created_worker_id``
+    (e.g. a resumed/re-executed run), no second worker is created.
+    """
+    if isinstance(outputs, dict) and outputs.get("created_worker_id"):
+        return str(outputs["created_worker_id"])  # already registered
+
+    bundle_path = _find_bundle_artifact(run_id, artifacts)
+    if bundle_path is None:
+        log_fn("worker-author produced no bundle.json — nothing to register", level="warning")
+        return None
+
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log_fn(f"worker-author bundle.json unreadable: {exc}", level="warning")
+        return None
+    if not isinstance(bundle, dict):
+        log_fn("worker-author bundle.json is not an object", level="warning")
+        return None
+
+    # If the author could not produce valid YAML after its retries it embeds an
+    # `error`. Don't register a broken worker; leave the run viewable so the
+    # operator sees the drafted (broken) bundle. This is the rare degenerate
+    # case (LLM retries 3x first).
+    if bundle.get("error"):
+        log_fn(
+            f"worker-author bundle has a validation error, not auto-registering: {bundle['error']}",
+            level="warning",
+        )
+        return None
+
+    worker_yml = (bundle.get("worker_yml") or "").strip()
+    if not worker_yml:
+        log_fn("worker-author bundle missing worker_yml — nothing to register", level="warning")
+        return None
+
+    skill_md = bundle.get("skill_md")
+    run_code = bundle.get("run_code")
+    requirements_txt = bundle.get("requirements_txt")
+
+    # Lazy import: main imports run_service at startup, so importing main here
+    # (at run-completion time, long after startup) avoids the circular import.
+    import main as _main
+
+    files = [_main.DraftFile(path="worker.yml", content=worker_yml)]
+    if isinstance(skill_md, str) and skill_md.strip():
+        files.append(_main.DraftFile(path="SKILL.md", content=skill_md))
+    if isinstance(run_code, str) and run_code.strip():
+        files.append(_main.DraftFile(path="run.py", content=run_code))
+    if isinstance(requirements_txt, str) and requirements_txt.strip():
+        files.append(_main.DraftFile(path="requirements.txt", content=requirements_txt))
+
+    worker_id = _main._register_worker_from_files(
+        files,
+        user_id=user_id,
+        repos=repos,
+        dedupe_id=True,
+    )
+    log_fn(f"Registered worker {worker_id!r} from drafted bundle")
+    return worker_id
+
 # ---------------------------------------------------------------------------
 # SSE event publisher hook
 # ---------------------------------------------------------------------------
@@ -1247,7 +1351,47 @@ def execute_run(
             log_fn(quality_error, level="error")
             return
 
+        # Wedge fix (2026-05-29): the prompt-to-worker flow runs the
+        # worker-author meta-worker, which drafts a bundle.json but cannot
+        # register a worker from inside its sandbox. Register it here, on the
+        # backend, the moment the author run completes — using the SAME
+        # registration path /workers/draft-and-create uses — so the operator
+        # gets a REAL, editable, runnable worker instead of a dead-end bundle.
+        # The new worker id is stored on the run output AND broadcast via SSE
+        # so /workers/new can navigate to /workers/<id>?edit=1.
+        if worker_id == _WORKER_AUTHOR_WORKER_ID:
+            try:
+                created_worker_id = _register_authored_worker(
+                    run_id,
+                    outputs,
+                    artifacts,
+                    user_id=owner_id,
+                    repos=repos_obj,
+                    log_fn=log_fn,
+                )
+                if created_worker_id:
+                    # Persist on the run output so a client that reconnects to an
+                    # already-terminal run can still read the new worker id from
+                    # GET /runs/{id}.output.created_worker_id (the minimal
+                    # already-terminal SSE event does not carry custom fields).
+                    outputs = dict(outputs or {})
+                    outputs["created_worker_id"] = created_worker_id
+            except Exception as exc:
+                # Never fail the run on registration trouble — the bundle is
+                # still viewable. Log so the operator/engineer can see why.
+                logger.exception("worker-author registration failed for run %s", run_id)
+                log_fn(f"Could not auto-register the drafted worker: {exc}", level="warning")
+
         update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
+        # Broadcast the new worker id on the live stream so the create flow can
+        # navigate straight to the editor without a follow-up fetch.
+        if worker_id == _WORKER_AUTHOR_WORKER_ID and isinstance(outputs, dict) and outputs.get("created_worker_id"):
+            _publish_sse(run_id, {
+                "type": "status",
+                "run_id": run_id,
+                "status": RunStatus.COMPLETED.value,
+                "created_worker_id": outputs["created_worker_id"],
+            })
         if quality_warnings and owner_id:
             repos_obj.runs.update(
                 user_id=owner_id,
