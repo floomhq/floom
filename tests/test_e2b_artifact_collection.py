@@ -251,6 +251,9 @@ def test_skips_path_traversal_artifact(tmp_path, monkeypatch):
 def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeFullSandbox))
+    # Pin WORKERS_DIR so the bundle_path traversal guard (_worker_dir_for_run
+    # rejects bundles outside WORKERS_DIR.parent) accepts the tmp worker dir.
+    monkeypatch.setattr(e2b_driver, "WORKERS_DIR", tmp_path / "workers")
     FakeFullSandbox.instances = []
     worker_dir = tmp_path / "worker"
     worker_dir.mkdir()
@@ -444,6 +447,7 @@ def test_persists_writeable_context_tar_under_owner_scope(tmp_path, monkeypatch)
 def test_e2b_driver_maps_oom_exit_to_sandbox_oom(tmp_path, monkeypatch):
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeOOMSandbox))
+    monkeypatch.setattr(e2b_driver, "WORKERS_DIR", tmp_path / "workers")
     FakeOOMSandbox.instances = []
     with e2b_driver._active_sandboxes_lock:
         e2b_driver._active_sandboxes.clear()
@@ -483,6 +487,7 @@ def test_e2b_driver_maps_oom_exit_to_sandbox_oom(tmp_path, monkeypatch):
 def test_e2b_driver_maps_oom_command_exception_to_sandbox_oom(tmp_path, monkeypatch):
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeRaisingOOMSandbox))
+    monkeypatch.setattr(e2b_driver, "WORKERS_DIR", tmp_path / "workers")
     FakeRaisingOOMSandbox.instances = []
     with e2b_driver._active_sandboxes_lock:
         e2b_driver._active_sandboxes.clear()

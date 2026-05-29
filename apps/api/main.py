@@ -6589,6 +6589,39 @@ def count_pending_approvals(
     return {"pending": count}
 
 
+def _publish_approval_terminal_status(
+    run_id: str,
+    decision: str,
+    user_id: str,
+    repos: Repositories,
+    *,
+    follow_up_run_id: str | None = None,
+) -> None:
+    """Publish a terminal `status` SSE event for an approve/reject decision.
+
+    The original run has just transitioned off PENDING_APPROVAL to COMPLETED.
+    Live SSE consumers (the run page) track `type:"status"` events; the
+    `approval_decided` event alone does not move their status, so without this
+    the UI would never observe the run leaving pending_approval.
+    """
+    completed_at: str | None = None
+    try:
+        run_row = repos.runs.get(user_id=user_id, run_id=run_id)
+        if run_row is not None:
+            completed_at = row_to_dict(run_row).get("completed_at")
+    except Exception:
+        completed_at = None
+    event: Dict[str, Any] = {
+        "type": "status",
+        "run_id": run_id,
+        "status": decision,
+        "completed_at": completed_at,
+    }
+    if follow_up_run_id is not None:
+        event["follow_up_run_id"] = follow_up_run_id
+    _sse_publish(run_id, event)
+
+
 @app.post("/runs/{run_id}/approve", response_model=ActionResponse)
 def approve_run(
     run_id: str,
@@ -6684,6 +6717,13 @@ def approve_run(
         "follow_up_run_id": follow_up_run_id,
     })
 
+    # Emit a terminal status event so live SSE consumers (the run page) observe
+    # the original run leaving pending_approval. The frontend tracks
+    # `type:"status"` events; without this it never sees the resolution.
+    _publish_approval_terminal_status(
+        run_id, "approved", auth.user_id, repos, follow_up_run_id=follow_up_run_id
+    )
+
     return ActionResponse(status="approved", run_id=follow_up_run_id)
 
 
@@ -6730,6 +6770,11 @@ def reject_run(
         "decision": "rejected",
         "reason": body.reason,
     })
+
+    # Emit a terminal status event so live SSE consumers (the run page) observe
+    # the original run leaving pending_approval. The frontend tracks
+    # `type:"status"` events; without this it never sees the resolution.
+    _publish_approval_terminal_status(run_id, "rejected", auth.user_id, repos)
 
     return ActionResponse(status="rejected", run_id=run_id)
 
@@ -7923,7 +7968,19 @@ def composio_execute_proxy(
 # Secrets — CRUD + test
 # ---------------------------------------------------------------------------
 
-# Path to the .env file used by the API
+# Path to the .env file used by the API. Overridable via WORKEROS_API_ENV_FILE /
+# FLOOM_API_ENV_FILE (same knob the db.sqlite secrets writer honours) so tests
+# can redirect secret persistence away from the checkout's apps/api/.env.
+def _env_file_path() -> Path:
+    override = (
+        os.environ.get("WORKEROS_API_ENV_FILE")
+        or os.environ.get("FLOOM_API_ENV_FILE")
+    )
+    if override:
+        return Path(override)
+    return Path(__file__).parent / ".env"
+
+
 _ENV_PATH = Path(__file__).parent / ".env"
 
 
@@ -7941,19 +7998,21 @@ SecretName = Annotated[str, PathParam(min_length=1, max_length=64, pattern=r"^[A
 
 def _read_env_lines() -> list[str]:
     """Read .env lines; return [] if file does not exist."""
-    if not _ENV_PATH.exists():
+    env_path = _env_file_path()
+    if not env_path.exists():
         return []
-    with open(_ENV_PATH, "r") as f:
+    with open(env_path, "r") as f:
         return f.readlines()
 
 
 def _write_env_lines(lines: list[str]) -> None:
     """Atomically write .env lines with fcntl lock."""
-    _ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_ENV_PATH, "a+") as lock_fd:
+    env_path = _env_file_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(env_path, "a+") as lock_fd:
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         try:
-            with open(_ENV_PATH, "w") as f:
+            with open(env_path, "w") as f:
                 f.writelines(lines)
         finally:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)

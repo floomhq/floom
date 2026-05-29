@@ -2211,8 +2211,17 @@ def execute_run(
                 )
             except Exception as exc:
                 logger.error("Failed to create approval row for run %s: %s", run_id, exc)
-            # Store the proposed outputs on the run so the approval page can show them
-            update_run_status(run_id, RunStatus.PENDING_APPROVAL.value, output=outputs, user_id=owner_id, repos=repos_obj)
+            # Store the proposed outputs on the run so the approval page can show
+            # them. Persist via the repo directly (not update_run_status) so we
+            # emit exactly ONE pending_approval status SSE event below — the
+            # richer one carrying approval_id + label. Calling update_run_status
+            # here would publish a second, leaner status event (duplicate).
+            repos_obj.runs.update_status(
+                user_id=owner_id,
+                run_id=run_id,
+                status=RunStatus.PENDING_APPROVAL.value,
+                output_json=outputs,
+            )
             _publish_sse(run_id, {
                 "type": "status",
                 "run_id": run_id,

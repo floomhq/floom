@@ -470,7 +470,14 @@ class TestMCPConnections:
             "mcp_allowed_tools_json",
             "display_name",
         } <= columns
-        assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 36
+        # The repaired DB must be migrated to the latest version. Derive it from
+        # the migration registry rather than hardcoding a number that goes stale
+        # every time a migration is appended (was 36, now len(MIGRATIONS)).
+        expected_version = len(legacy_db.MIGRATIONS)
+        assert (
+            conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+            == expected_version
+        )
         file_owner_tables = {
             row[0]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
