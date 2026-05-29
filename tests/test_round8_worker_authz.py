@@ -26,6 +26,8 @@ def _load_api(monkeypatch, tmp_path, *, stock_workers: tuple[str, ...] = ()):
     workers_dir.mkdir()
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir()
+    contexts_dir = tmp_path / "contexts"
+    contexts_dir.mkdir()
     for worker_id in stock_workers:
         shutil.copytree(REPO_WORKERS_DIR / worker_id, workers_dir / worker_id)
 
@@ -33,6 +35,7 @@ def _load_api(monkeypatch, tmp_path, *, stock_workers: tuple[str, ...] = ()):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_BLOBS_DIR", str(tmp_path / "blobs"))
+    monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
     monkeypatch.setenv("FLOOM_SECRET", AUTH["x-floom-secret"])
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
     monkeypatch.setenv("WORKEROS_USER_ID", "user-a")
@@ -44,6 +47,8 @@ def _load_api(monkeypatch, tmp_path, *, stock_workers: tuple[str, ...] = ()):
     reset_exact = {
         "main",
         "auth",
+        "chat_service",
+        "contexts",
         "db",
         "files",
         "models",
@@ -401,6 +406,201 @@ def test_foreign_webhook_secret_rotate_returns_404(monkeypatch, tmp_path):
     )
 
     assert response.status_code == 404, response.text
+
+
+def test_foreign_custom_worker_restore_returns_404(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("restore-probe", title="Restore Probe"),
+    )
+    assert created.status_code == 200, created.text
+
+    worker_yml_path = tmp_path / "workers" / "restore-probe" / "worker.yml"
+    worker_yml_path.write_text(worker_yml_path.read_text() + "\narchived: true\narchive_reason: test\n")
+
+    foreign = client.post("/workers/restore-probe/restore", headers=_headers("user-b"))
+    owner = client.post("/workers/restore-probe/restore", headers=_headers("user-a"))
+
+    assert foreign.status_code == 404, foreign.text
+    assert owner.status_code == 200, owner.text
+    assert "archived: true" not in worker_yml_path.read_text()
+
+
+def test_protected_stock_worker_restore_is_blocked(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief",))
+    client = TestClient(main.app)
+
+    response = client.post("/workers/research_brief/restore", headers=_headers("user-a"))
+
+    assert response.status_code == 403, response.text
+
+
+def test_sample_input_hidden_for_foreign_custom_worker(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("sample-probe", title="Sample Probe"),
+    )
+    assert created.status_code == 200, created.text
+
+    sample_path = tmp_path / "docs" / "workers" / "inputs"
+    sample_path.mkdir(parents=True)
+    (sample_path / "sample-probe.json").write_text('{"topic":"launch"}')
+
+    owner = client.get("/workers/sample-probe/sample-input", headers=_headers("user-a"))
+    foreign = client.get("/workers/sample-probe/sample-input", headers=_headers("user-b"))
+
+    assert owner.status_code == 200, owner.text
+    assert owner.json() == {"topic": "launch"}
+    assert foreign.status_code == 404, foreign.text
+
+
+def test_stock_worker_detail_omits_sensitive_fields(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief",))
+    client = TestClient(main.app)
+
+    detail = client.get("/workers/research_brief", headers=_headers("user-a"))
+
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert not body.get("new_webhook_secret")
+    assert "bundle_url" not in body
+    assert "source" not in body
+    assert "env" not in body["config"]
+    assert "webhook_secret" not in body["config"]
+    assert all(item["path"] != ".env" for item in body["files"])
+
+
+def test_worker_write_routes_reject_owner_mass_assignment(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    create_with_owner = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json={**_worker_payload("mass-owner-create", title="Mass Owner Create"), "owner_id": "user-b"},
+    )
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("mass-owner-update", title="Mass Owner Update"),
+    )
+    assert created.status_code == 200, created.text
+
+    patch_with_owner = client.patch(
+        "/workers/mass-owner-update",
+        headers=_headers("user-a"),
+        json={"trigger_type": "manual", "owner_id": "user-b"},
+    )
+    put_with_owner = client.put(
+        "/workers/mass-owner-update",
+        headers=_headers("user-a"),
+        json={**_worker_payload("mass-owner-update", title="Mass Owner Update"), "owner_id": "user-b"},
+    )
+
+    with main.get_db() as conn:
+        owner_row = conn.execute(
+            "SELECT owner_id FROM workers WHERE id = ?",
+            ("mass-owner-update",),
+        ).fetchone()
+        missing_row = conn.execute(
+            "SELECT owner_id FROM workers WHERE id = ?",
+            ("mass-owner-create",),
+        ).fetchone()
+
+    assert create_with_owner.status_code == 422, create_with_owner.text
+    assert patch_with_owner.status_code == 422, patch_with_owner.text
+    assert put_with_owner.status_code == 422, put_with_owner.text
+    assert owner_row is not None
+    assert owner_row["owner_id"] == "user-a"
+    assert missing_row is None
+    assert client.get("/workers/mass-owner-update", headers=_headers("user-b")).status_code == 404
+
+
+def test_run_replay_cross_worker_same_user_returns_404(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    worker_a = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("replay-a", title="Replay A"),
+    )
+    worker_b = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("replay-b", title="Replay B"),
+    )
+    assert worker_a.status_code == 200, worker_a.text
+    assert worker_b.status_code == 200, worker_b.text
+
+    source_run = client.post(
+        "/workers/replay-a/runs",
+        headers=_headers("user-a"),
+        json={"inputs": {}, "trigger_source": "audit"},
+    )
+    assert source_run.status_code == 200, source_run.text
+    run_id = source_run.json()["run_id"]
+
+    wrong_worker = client.post(
+        f"/workers/replay-b/runs/{run_id}/replay",
+        headers=_headers("user-a"),
+    )
+    right_worker = client.post(
+        f"/workers/replay-a/runs/{run_id}/replay",
+        headers=_headers("user-a"),
+    )
+
+    assert wrong_worker.status_code == 404, wrong_worker.text
+    assert right_worker.status_code == 200, right_worker.text
+    assert right_worker.json()["run_id"] != run_id
+
+
+def test_context_symlink_traversal_is_blocked(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post("/contexts/audit-ctx", headers=_headers("user-a"), json={"writeable": True})
+    assert created.status_code == 200, created.text
+
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    os.symlink(outside, main.context_dir("audit-ctx") / "escape.txt")
+
+    get_response = client.get("/contexts/audit-ctx/files/escape.txt", headers=_headers("user-a"))
+    put_response = client.put(
+        "/contexts/audit-ctx/files/escape.txt",
+        headers=_headers("user-a"),
+        content=b"hijack",
+    )
+    delete_response = client.delete("/contexts/audit-ctx/files/escape.txt", headers=_headers("user-a"))
+
+    assert get_response.status_code == 400, get_response.text
+    assert put_response.status_code == 400, put_response.text
+    assert delete_response.status_code == 400, delete_response.text
+    assert outside.read_text() == "outside"
+
+
+def test_chat_rejects_oversized_message(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/chat",
+        headers=_headers("user-a"),
+        json={"message": "x" * 20001},
+    )
+
+    assert response.status_code == 413, response.text
+    assert "character limit" in response.text
 
 
 def test_reload_preserves_existing_owner_on_conflict(monkeypatch, tmp_path):
