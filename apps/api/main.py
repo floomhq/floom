@@ -269,6 +269,28 @@ _INTERNAL_WORKER_ID_PREFIXES = (
     "smoke-",
 )
 
+# 1.5.2: trigger sources that belong in the operator /runs view. Everything
+# else (audit, test, smoke runs like s35_concurrency_*, synthetic data, etc.)
+# is internal telemetry and is hidden from the default view. Data is preserved
+# and reachable via GET /runs?include_system=true.
+_OPERATOR_TRIGGER_SOURCES = frozenset({
+    "manual",
+    "schedule",
+    "approval",
+    "composio",
+    "webhook",
+    "workspace-agent",
+})
+
+
+def _is_operator_run(row: Any) -> bool:
+    source = (row_to_dict(row).get("trigger_source") or "").strip().lower()
+    # Treat unknown/empty as operator-facing only if explicitly allowlisted;
+    # blank trigger_source is legacy "manual" and stays visible.
+    if not source:
+        return True
+    return source in _OPERATOR_TRIGGER_SOURCES
+
 
 def _cors_allowed_origins() -> List[str]:
     configured = os.environ.get("ALLOWED_ORIGINS", "")
@@ -1932,6 +1954,7 @@ def _list_visible_runs(
     until: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    include_system: bool = False,
 ) -> tuple[list[Any], int]:
     batch_size = max(limit, 100)
     raw_offset = 0
@@ -1954,6 +1977,10 @@ def _list_visible_runs(
         raw_offset += len(rows)
         for row in rows:
             if not _run_visible_to_api(row, user_id=user_id, repos=repos):
+                continue
+            # 1.5.2: hide audit/system/test telemetry from the default
+            # operator view unless explicitly requested.
+            if not include_system and not _is_operator_run(row):
                 continue
             visible_total += 1
             if visible_total <= offset:
@@ -5305,6 +5332,10 @@ def list_runs(
     until: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    include_system: bool = Query(
+        False,
+        description="Include internal/system runs (audit, test, smoke). Hidden by default.",
+    ),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[RunSummary]:
@@ -5331,6 +5362,7 @@ def list_runs(
         until=until_dt.isoformat() if until_dt else None,
         limit=limit,
         offset=offset,
+        include_system=include_system,
     )
     response.headers["X-Total-Count"] = str(visible_total)
     return [_make_run_summary(r) for r in visible_rows]
