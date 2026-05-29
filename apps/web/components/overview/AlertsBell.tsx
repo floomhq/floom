@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Bell, Plug } from "lucide-react";
+import { AlertTriangle, Bell, CheckCircle, Plug } from "lucide-react";
 import { toast } from "sonner";
 import yaml from "js-yaml";
 
@@ -70,8 +70,27 @@ interface AlertsBellProps {
 export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchApprovalCount() {
+      try {
+        const res = await api.approvals.count();
+        if (!cancelled) setPendingApprovals(res.pending);
+      } catch {
+        // ignore
+      }
+    }
+    fetchApprovalCount();
+    const interval = setInterval(fetchApprovalCount, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   // Close on outside click
   useEffect(() => {
@@ -106,7 +125,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
   const connections = items.filter((item) =>
     ["connection_expired", "connection_expiring"].includes(item.kind ?? item.type),
   );
-  const count = failures.length + (connections.length > 0 ? 1 : 0);
+  const count = failures.length + (connections.length > 0 ? 1 : 0) + (pendingApprovals > 0 ? 1 : 0);
 
   const retry = useCallback(
     async (workerId: string) => {
@@ -293,6 +312,34 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                             className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                           >
                             Reconnect all
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {pendingApprovals > 0 && (
+                  <div className="px-4 py-3">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle
+                        className="mt-0.5 h-4 w-4 shrink-0 text-[var(--primary)]"
+                        aria-hidden="true"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-[var(--ink)]">
+                          {pendingApprovals} approval{pendingApprovals === 1 ? "" : "s"} awaiting
+                        </p>
+                        <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+                          Workers are waiting for your decision before executing.
+                        </p>
+                        <div className="mt-2">
+                          <Link
+                            href="/approvals"
+                            onClick={() => setOpen(false)}
+                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                          >
+                            Review approvals
                           </Link>
                         </div>
                       </div>

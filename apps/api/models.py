@@ -29,6 +29,7 @@ class RunStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    PENDING_APPROVAL = "pending_approval"
 
 
 class LogLevel(str, Enum):
@@ -72,6 +73,12 @@ class WorkerOutput(BaseModel):
     path: Optional[str] = None
     columns: Optional[List[str]] = None  # For CSV: declared expected column headers in order
     json_required_keys: Optional[List[str]] = None  # For JSON: declared required top-level keys
+
+
+class WorkerApprovals(BaseModel):
+    """HITL approval configuration for a worker."""
+    required: bool = False
+    label: str = "Approve action"
 
 
 class WorkerWebhookConfig(BaseModel):
@@ -224,6 +231,7 @@ class WorkerConfig(BaseModel):
     contexts: List[WorkerContextMountSpec] = []
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
+    approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
 
     @model_validator(mode="after")
     def validate_webhook_secret(self) -> "WorkerConfig":
@@ -508,6 +516,7 @@ class WorkerContract(BaseModel):
     connections: List[WorkerConnectionSpec] = Field(default_factory=list)
     contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
     csv_required_columns: Optional[List[str]] = None
+    approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
 
     @field_validator("name")
     @classmethod
@@ -781,6 +790,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         ],
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
+        approvals=contract.approvals,
     )
 
 
@@ -1203,6 +1213,9 @@ class WorkerResult(BaseModel):
     error: Optional[str] = None
     error_code: Optional[str] = None  # e.g. "validation_error", "timeout"
     retryable: bool = False
+    # S47 HITL: present when a worker requests human approval before executing.
+    # Contains {label: str, preview: str} as emitted by the worker in result.json.
+    decision_required: Optional[Dict[str, Any]] = None
 
 
 class StructuredLog(BaseModel):
