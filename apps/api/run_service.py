@@ -177,7 +177,7 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
     # is unambiguously a string-ish scalar — default it to "string" (lossless;
     # the schema's own default for scalar inputs is also string-ish). We fix the
     # ENGINE, not just the generation prompt, because the LLM is non-deterministic.
-    def _default_scalar_output_type(fields: Any) -> bool:
+    def _fix_output_kind(fields: Any) -> bool:
         touched = False
         if not isinstance(fields, list):
             return False
@@ -186,19 +186,34 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
                 continue
             kind = str(field.get("kind") or "").strip().lower()
             has_file_markers = bool(field.get("path") or field.get("media_type"))
+            if kind == "scalar" and has_file_markers:
+                # Contradictory: kind:scalar but carries file markers
+                # (path/media_type). The schema rejects this. The generated run.py
+                # for this shape returns the LITERAL value in outputs[name] (a
+                # scalar) while also happening to write a file, so the output is
+                # genuinely SCALAR — strip the stray file markers and give it the
+                # required scalar `type` (default string). This matches what the
+                # run.py actually returns and is the least-surprise resolution.
+                field.pop("path", None)
+                field.pop("media_type", None)
+                if not field.get("type"):
+                    field["type"] = "string"
+                touched = True
+                continue
             is_scalar = kind == "scalar" or (not kind and not has_file_markers)
             if is_scalar and not field.get("type") and not has_file_markers:
+                # Pure scalar output missing its required `type` -> default string.
                 field["type"] = "string"
                 touched = True
         return touched
 
-    if _default_scalar_output_type(raw.get("outputs")):
+    if _fix_output_kind(raw.get("outputs")):
         changed = True
-        log_fn("Defaulted a scalar output's missing type to 'string' so the worker registers", level="info")
+        log_fn("Normalized a generated output kind/type so the worker registers", level="info")
     exec_block = raw.get("exec")
-    if isinstance(exec_block, dict) and _default_scalar_output_type(exec_block.get("outputs")):
+    if isinstance(exec_block, dict) and _fix_output_kind(exec_block.get("outputs")):
         changed = True
-        log_fn("Defaulted a scalar output's missing type to 'string' so the worker registers", level="info")
+        log_fn("Normalized a generated output kind/type so the worker registers", level="info")
 
     if not changed:
         return worker_yml
