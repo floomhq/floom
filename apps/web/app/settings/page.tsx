@@ -98,6 +98,12 @@ function SettingsContent() {
 
   // Lazy-load the workspace agent prompt + tools only when the tab is opened —
   // the system prompt can be large, so we don't fetch it on every settings view.
+  // NOTE: workspaceAgentLoading is intentionally excluded from the dep array.
+  // Including it caused the effect to re-run (and cancel the in-flight fetch)
+  // the moment setWorkspaceAgentLoading(true) was called, leaving loading=true
+  // forever. The guard below still reads the current value via closure; the only
+  // triggers we want are a tab switch or data arriving (workspaceAgent).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (tab !== "assistant" || workspaceAgent || workspaceAgentLoading) return;
     let cancelled = false;
@@ -117,7 +123,7 @@ function SettingsContent() {
     return () => {
       cancelled = true;
     };
-  }, [tab, workspaceAgent, workspaceAgentLoading]);
+  }, [tab, workspaceAgent]);
 
   function handleTabChange(value: string) {
     if (!isValidTab(value)) return;
