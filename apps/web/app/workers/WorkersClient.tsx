@@ -15,7 +15,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
-import { BrandLogo } from "@/components/connections/BrandLogo";
+import { BrandLogo, normalizeBrandSlug } from "@/components/connections/BrandLogo";
 import { Sparkline } from "@/components/Sparkline";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
@@ -520,22 +520,12 @@ function EmptyWorkersState() {
 // Runtimes that invoke an LLM and should show the AI icon.
 const LLM_RUNTIMES = new Set(["skill", "agent"]);
 
-// Slug normalization mirror of ProviderLogos.tsx (keeps BrandLogo lookup happy).
-const SLUG_ALIASES: Record<string, string> = {
-  googlecalendar: "google-calendar",
-  googledrive: "google-drive",
-  googledocs: "google-docs",
-  googlesheets: "google-sheets",
-  googlemeet: "google-meet",
-};
-function normalizeSlug(slug: string): string {
-  const lower = slug.toLowerCase();
-  return SLUG_ALIASES[lower] ?? lower;
-}
-
+// Langdock-style tool-logo row: a horizontal strip of real, colored brand
+// logos in rounded chips, with a "+N" overflow chip. Slug normalization +
+// fallback live in BrandLogo (single source of truth).
 function WorkerToolStrip({ worker }: { worker: WorkerSummary }) {
   const isLlmWorker = LLM_RUNTIMES.has(worker.runtime ?? "");
-  const connSlugs = (worker.connections ?? []).map(normalizeSlug);
+  const connSlugs = (worker.connections ?? []).map(normalizeBrandSlug);
 
   // Build ordered tool list: connections first, then AI icon at the end.
   type Tool = { type: "connection"; slug: string } | { type: "ai" };
@@ -550,32 +540,24 @@ function WorkerToolStrip({ worker }: { worker: WorkerSummary }) {
   const visible = tools.slice(0, MAX_VISIBLE);
   const overflow = tools.length - MAX_VISIBLE;
 
+  const chip =
+    "inline-flex size-5 items-center justify-center rounded-md border border-border bg-card";
+
   return (
     <div className="flex items-center gap-1">
       {visible.map((tool, i) =>
         tool.type === "connection" ? (
-          <span
-            key={`conn-${tool.slug}-${i}`}
-            className="inline-flex size-5 items-center justify-center rounded-[4px] border border-border bg-card"
-            title={tool.slug}
-          >
+          <span key={`conn-${tool.slug}-${i}`} className={chip} title={tool.slug}>
             <BrandLogo icon={tool.slug} className="size-3" />
           </span>
         ) : (
-          <span
-            key="ai-icon"
-            className="inline-flex size-5 items-center justify-center rounded-[4px] border border-border bg-card"
-            title="AI / LLM"
-          >
-            {/* Anthropic-style AI mark — minimal A shape */}
-            <svg viewBox="0 0 24 24" className="size-3 text-[#C96442]" fill="currentColor" aria-hidden>
-              <use href="#icon-anthropic" />
-            </svg>
+          <span key="ai-icon" className={chip} title="AI / LLM">
+            <BrandLogo icon="anthropic" className="size-3 text-[#C96442]" />
           </span>
         )
       )}
       {overflow > 0 && (
-        <span className="inline-flex h-5 items-center rounded-[4px] border border-border bg-card px-1 text-[10px] font-medium text-muted-foreground">
+        <span className="inline-flex h-5 items-center rounded-md border border-border bg-card px-1 text-[10px] font-medium text-muted-foreground">
           +{overflow}
         </span>
       )}
