@@ -577,57 +577,73 @@ function WorkerCard({
               </span>
             ) : (
               <WorkerIconPills
+                worker={worker}
                 connections={worker.connections}
                 triggerType={worker.trigger_type}
                 size="sm"
               />
             )}
             {!worker.archived && (
-              <button
-                type="button"
-                title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onFavoriteToggle(worker.id);
-                }}
-                className={`size-7 -mt-0.5 -mr-1 flex items-center justify-center rounded transition-colors shrink-0 ${
-                  isFavorite
-                    ? "text-[var(--accent)] hover:opacity-80"
-                    : "text-muted-foreground/40 hover:text-[var(--accent)]"
-                }`}
-              >
-                <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* FIX 2 (Federico 2026-05-29): the "Example" tag moved OFF the
+                    title row to a subtle top-right corner chip, aligned with
+                    the star. Quiet (--bg-2, muted, text-[10px]) so the title
+                    row reads clean — just the title. */}
+                {worker.is_example && (
+                  <span className="inline-flex items-center rounded-[var(--radius-button)] border border-[var(--line-soft)] bg-[var(--bg-2)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--ink-mute)]">
+                    Example
+                  </span>
+                )}
+                <button
+                  type="button"
+                  title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onFavoriteToggle(worker.id);
+                  }}
+                  className={`size-7 -mt-0.5 -mr-1 flex items-center justify-center rounded transition-colors shrink-0 ${
+                    isFavorite
+                      ? "text-[var(--accent)] hover:opacity-80"
+                      : "text-muted-foreground/40 hover:text-[var(--accent)]"
+                  }`}
+                >
+                  <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
+                </button>
+              </div>
             )}
           </div>
 
-          {/* 2. Title (line-clamp-2) + inline Example/status badge. */}
-          <div className="flex items-start gap-2 min-w-0">
+          {/* 2. Title + description form ONE bounded body block (flex-1,
+              min-h-0) that absorbs the space between the top pill row and the
+              pinned footer. FIX 3 (Federico 2026-05-29): the description used
+              to bleed into the footer when the title ran 2 lines and/or a
+              status pill appeared. Reserving the title at a fixed 2-line
+              height and clamping the description inside a min-h-0 flex body
+              means the footer is laid out (never overlapped) and every card
+              holds the same height. */}
+          <div className="flex-1 min-h-0 flex flex-col gap-1.5">
             <h3
-              className={`font-medium text-[15px] leading-snug line-clamp-2 min-w-0 ${
+              className={`font-medium text-[15px] leading-snug line-clamp-2 min-h-[2.7em] ${
                 worker.archived ? "text-muted-foreground" : ""
               }`}
             >
               {worker.name}
             </h3>
-            {!worker.archived && worker.is_example && (
-              <span className="mt-0.5 shrink-0 inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                Example
-              </span>
+
+            {!worker.archived && worker.status !== "healthy" && worker.status !== "ready" && worker.status && (
+              <CardStatusPill status={worker.status} />
             )}
+
+            {/* Description — clamped to 2 lines; overflow hidden so it can never
+                grow past its slot into the footer. */}
+            <p className="text-sm text-muted-foreground line-clamp-2 overflow-hidden">
+              {description}
+            </p>
           </div>
 
-          {!worker.archived && worker.status !== "healthy" && worker.status !== "ready" && worker.status && (
-            <CardStatusPill status={worker.status} />
-          )}
-
-          {/* 3. Description — exactly 2 lines. */}
-          <p className="text-sm text-muted-foreground line-clamp-2">{description}</p>
-
-          {/* 4. Quiet footer — one line: relative last-run + a small success
-              bar (filled % of last-7d success). Replaces the dense
-              "N runs in 7d · X% success" sentence. */}
+          {/* 3. Quiet footer — one line: relative last-run + a small success
+              bar (filled % of last-7d success). Pinned below the body block. */}
           <CardFooterLine stats={stats} />
         </CardContent>
       </Link>

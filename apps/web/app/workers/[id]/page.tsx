@@ -733,11 +733,6 @@ export default function WorkerDetailPage() {
             ) : (
               <StatusPill status={worker.status} />
             )}
-            {!worker.archived && worker.is_example && (
-              <span className="inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                Example
-              </span>
-            )}
           </div>
           {worker.archived && worker.archive_reason && (
             <p className="text-muted-foreground text-xs mt-1 italic">{worker.archive_reason}</p>
@@ -753,6 +748,16 @@ export default function WorkerDetailPage() {
               when the worker has no inputs/connections/trigger. */}
           {!worker.archived && !isEditMode && (
             <WorkerIconPills
+              worker={{
+                id: worker.id,
+                name: worker.name,
+                description: worker.description,
+                folder: worker.folder,
+                tags: worker.tags,
+                connections: (worker.config.connections ?? []).filter(
+                  (c): c is string => typeof c === "string",
+                ),
+              }}
               inputs={worker.config.inputs}
               connections={(worker.config.connections ?? []).filter(
                 (c): c is string => typeof c === "string",
@@ -815,15 +820,24 @@ export default function WorkerDetailPage() {
             Restore
           </Button>
         ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={enterEditMode}
-          >
-            <Pencil className="w-4 h-4 mr-1.5" />
-            Edit
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* FIX 2 (Federico 2026-05-29): "Example" tag relocated OFF the
+                title row to the quiet top-right cluster next to Edit, so the
+                title reads clean. Same treatment as the /workers card chip. */}
+            {worker.is_example && (
+              <span className="inline-flex items-center rounded-[var(--radius-button)] border border-[var(--line-soft)] bg-[var(--bg-2)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--ink-mute)]">
+                Example
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={enterEditMode}
+            >
+              <Pencil className="w-4 h-4 mr-1.5" />
+              Edit
+            </Button>
+          </div>
         )}
       </div>
 
@@ -1016,6 +1030,16 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
   const diagram = (
     <WorkerAsciiDiagram
       workerName={worker.name}
+      worker={{
+        id: worker.id,
+        name: worker.name,
+        description: worker.description,
+        folder: worker.folder,
+        tags: worker.tags,
+        connections: (worker.config.connections ?? []).filter(
+          (c): c is string => typeof c === "string",
+        ),
+      }}
       inputs={worker.config.inputs}
       outputs={worker.config.outputs}
       connections={(worker.config.connections ?? []).filter(
