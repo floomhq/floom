@@ -80,9 +80,15 @@ def _load_api(monkeypatch, tmp_path):
 
 def _insert_run(main, run_id="run_s22d"):
     manifest = {
+        # schema_version 0.3 selects the WorkerContract (exec-based) shape in
+        # parse_worker_manifest. Without it the manifest is parsed as a legacy
+        # WorkerConfig, which requires a top-level `runtime` this exec-shaped
+        # manifest lacks -> ValidationError -> the endpoint returned 422.
+        "schema_version": "0.3",
         "name": "s22d-worker",
         "version": "0.1.0",
         "title": "S22d Worker",
+        "description": "Worker used by the s22d streaming tests.",
         "inputs": [],
         "outputs": [],
         "trigger": {"type": "manual"},

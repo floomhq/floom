@@ -330,14 +330,20 @@ def test_account_info_strips_internal_ids(monkeypatch, tmp_path):
 
     assert resp.status_code == 200
     body = resp.json()
+    # Single-tenant owner view (#233): account-info returns the OWNER's own
+    # connected account identity (their real Google/GitHub email) so the UI can
+    # show the real login instead of a placeholder. This is the owner's own
+    # data, not a cross-tenant leak. INTERNAL identifiers (user_id,
+    # auth_config_id) are still stripped — that is the actual security invariant.
     assert body == {
-        "email": None,
+        "email": "user@example.com",
         "scopes": ["gmail.readonly"],
         "connected_at": body["connected_at"],
     }
-    assert "user@example.com" not in resp.text
     assert "user_id" not in body
     assert "auth_config_id" not in body
+    assert "ac_internal" not in resp.text
+    assert "federico" not in resp.text
 
 
 def test_auth_configs_endpoint_internal_only(monkeypatch, tmp_path):

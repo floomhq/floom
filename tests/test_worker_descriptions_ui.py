@@ -20,7 +20,11 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 
 # Point worker_registry at the repo workers dir
-os.environ.setdefault("FLOOM_WORKERS_DIR", str(REPO_ROOT / "workers"))
+# Explicit override (not setdefault): conftest pins a temp WORKERS_DIR for the
+# suite, but these stock-worker tests must discover the real repo bundles. The
+# module flag tells the conftest isolation fixture not to reset us each test.
+_USE_REAL_WORKERS_DIR = True
+os.environ["FLOOM_WORKERS_DIR"] = str(REPO_ROOT / "workers")
 
 from models import parse_worker_manifest
 
@@ -459,74 +463,57 @@ def tmp_db(tmp_path, monkeypatch):
     return db_file
 
 
-@pytest.mark.asyncio
-async def test_api_workers_list_exposes_t2b_fields(tmp_db, monkeypatch):
-    """GET /workers returns T2-B metadata for filesystem-discovered workers."""
-    try:
-        import httpx
-    except ImportError:
-        pytest.skip("httpx not installed")
+def test_api_workers_list_exposes_t2b_fields(tmp_db, monkeypatch):
+    """GET /workers returns T2-B metadata for filesystem-discovered workers.
 
-    import importlib
-    import db as _db
-    monkeypatch.setattr(_db, "DB_PATH", str(tmp_db))
-
-    # Re-import app after DB patching
+    Uses the synchronous fastapi TestClient (the suite has no pytest-asyncio
+    plugin, so the former async def / httpx.AsyncClient version never actually
+    ran and was collected as a failure).
+    """
+    from fastapi.testclient import TestClient
     import main as _main
-    importlib.reload(_main)
-    app = _main.app
 
     from worker_registry import invalidate_worker_cache
     invalidate_worker_cache()
 
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/workers")
-        assert resp.status_code == 200
-        workers = resp.json()
-        assert isinstance(workers, list)
-        cv = next((w for w in workers if w["id"] == "cv_writeup"), None)
-        assert cv is not None, "cv_writeup must appear in GET /workers"
-        assert "folder" in cv
-        assert cv["folder"] == "Recruiting/NovaSearch"
-        assert isinstance(cv.get("tags"), list)
-        example = cv.get("example_input") or {}
-        # cv_file must be null, not a filename string
-        assert example.get("cv_file") is None
+    client = TestClient(_main.app)
+    resp = client.get("/workers")
+    assert resp.status_code == 200, resp.text
+    workers = resp.json()
+    assert isinstance(workers, list)
+    cv = next((w for w in workers if w["id"] == "cv_writeup"), None)
+    assert cv is not None, "cv_writeup must appear in GET /workers"
+    assert "folder" in cv
+    assert cv["folder"] == "Recruiting/NovaSearch"
+    assert isinstance(cv.get("tags"), list)
+    example = cv.get("example_input") or {}
+    # cv_file must be null, not a filename string
+    assert example.get("cv_file") is None
 
 
-@pytest.mark.asyncio
-async def test_api_worker_detail_exposes_t2b_fields(tmp_db, monkeypatch):
-    """GET /workers/{id} returns T2-B metadata for a filesystem worker."""
-    try:
-        import httpx
-    except ImportError:
-        pytest.skip("httpx not installed")
+def test_api_worker_detail_exposes_t2b_fields(tmp_db, monkeypatch):
+    """GET /workers/{id} returns T2-B metadata for a filesystem worker.
 
-    import importlib
-    import db as _db
-    monkeypatch.setattr(_db, "DB_PATH", str(tmp_db))
-
+    Synchronous TestClient version (see the list test above for why).
+    """
+    from fastapi.testclient import TestClient
     import main as _main
-    importlib.reload(_main)
-    app = _main.app
 
     from worker_registry import invalidate_worker_cache
     invalidate_worker_cache()
 
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get("/workers/cv_writeup")
-        assert resp.status_code == 200
-        w = resp.json()
-        assert w["folder"] == "Recruiting/NovaSearch"
-        assert isinstance(w.get("tags"), list)
-        assert "cv" in w["tags"]
-        assert w.get("long_description") is not None
-        example = w.get("example_input") or {}
-        assert example.get("cv_file") is None, (
-            "cv_file example_input must be null — filename string causes base64 decode failure"
-        )
+    client = TestClient(_main.app)
+    resp = client.get("/workers/cv_writeup")
+    assert resp.status_code == 200, resp.text
+    w = resp.json()
+    assert w["folder"] == "Recruiting/NovaSearch"
+    assert isinstance(w.get("tags"), list)
+    assert "cv" in w["tags"]
+    assert w.get("long_description") is not None
+    example = w.get("example_input") or {}
+    assert example.get("cv_file") is None, (
+        "cv_file example_input must be null — filename string causes base64 decode failure"
+    )
 
 
 # ---------------------------------------------------------------------------

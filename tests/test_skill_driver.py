@@ -88,7 +88,30 @@ def config_for(worker_dir: Path, *, connections=None, entrypoint="SKILL.md") -> 
     )
 
 
-class SkillRuntimeDriverTest(unittest.TestCase):
+class _SkillDriverDirsMixin:
+    """Save/restore skill_driver module-level dir handles.
+
+    The driver resolves the worker bundle and artifacts against module-level
+    WORKERS_DIR / ARTIFACTS_DIR (bound at import to the repo `../../workers`).
+    Tests run the driver against per-test temp dirs, and the path-traversal
+    guard in `_worker_dir_for_run` rejects any bundle_path outside
+    WORKERS_DIR.parent. Each test therefore pins both handles to its temp base;
+    restoring on tearDown keeps the mutation from leaking into other modules in
+    a full-suite run.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._orig_workers_dir = skill_driver.WORKERS_DIR
+        self._orig_artifacts_dir = skill_driver.ARTIFACTS_DIR
+
+    def tearDown(self):
+        skill_driver.WORKERS_DIR = self._orig_workers_dir
+        skill_driver.ARTIFACTS_DIR = self._orig_artifacts_dir
+        super().tearDown()
+
+
+class SkillRuntimeDriverTest(_SkillDriverDirsMixin, unittest.TestCase):
     def test_tool_loop_writes_output_and_transcript(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -97,6 +120,7 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             worker_dir.mkdir()
             (worker_dir / "SKILL.md").write_text("Write a brief and call write_output.", encoding="utf-8")
             skill_driver.ARTIFACTS_DIR = artifacts_dir
+            skill_driver.WORKERS_DIR = base / "workers"
 
             fake_client = FakeOpenAIClient([
                 assistant_message(
@@ -145,6 +169,7 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             worker_dir.mkdir()
             (worker_dir / "SKILL.md").write_text("Write a brief.", encoding="utf-8")
             skill_driver.ARTIFACTS_DIR = artifacts_dir
+            skill_driver.WORKERS_DIR = base / "workers"
 
             fake_client = FakeOpenAIClient([
                 assistant_message(
@@ -182,6 +207,7 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             worker_dir.mkdir()
             (worker_dir / "SKILL.md").write_text("Invoke another skill.", encoding="utf-8")
             skill_driver.ARTIFACTS_DIR = artifacts_dir
+            skill_driver.WORKERS_DIR = base / "workers"
 
             fake_client = FakeOpenAIClient([
                 assistant_message(
@@ -222,6 +248,7 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             worker_dir.mkdir()
             (worker_dir / "CUSTOM_SKILL.md").write_text("Custom entrypoint.", encoding="utf-8")
             skill_driver.ARTIFACTS_DIR = artifacts_dir
+            skill_driver.WORKERS_DIR = base / "workers"
 
             fake_client = FakeOpenAIClient([
                 assistant_message(content="# Brief\nFrom custom entrypoint"),
@@ -250,6 +277,7 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             worker_dir.mkdir()
             (worker_dir / "SKILL.md").write_text("Write a brief.", encoding="utf-8")
             skill_driver.ARTIFACTS_DIR = artifacts_dir
+            skill_driver.WORKERS_DIR = base / "workers"
 
             fake_client = FakeOpenAIClient([
                 assistant_message(
@@ -286,6 +314,7 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             worker_dir.mkdir()
             (worker_dir / "SKILL.md").write_text("Write a brief.", encoding="utf-8")
             skill_driver.ARTIFACTS_DIR = artifacts_dir
+            skill_driver.WORKERS_DIR = base / "workers"
 
             driver = skill_driver.SkillRuntimeDriver(openai_client=FailingOpenAIClient())
 
@@ -308,7 +337,7 @@ class SkillRuntimeDriverTest(unittest.TestCase):
             self.assertIn("simulated model failure", transcript_text)
 
 
-class ComposioToolDispatchTest(unittest.TestCase):
+class ComposioToolDispatchTest(_SkillDriverDirsMixin, unittest.TestCase):
     """Unhappy-path coverage for the Composio tool dispatch surface."""
 
     def _setup(self, tmp, *, connections=None):
@@ -318,6 +347,7 @@ class ComposioToolDispatchTest(unittest.TestCase):
         worker_dir.mkdir()
         (worker_dir / "SKILL.md").write_text("Call composio.gmail.execute.", encoding="utf-8")
         skill_driver.ARTIFACTS_DIR = artifacts_dir
+        skill_driver.WORKERS_DIR = base / "workers"
         return base, worker_dir, artifacts_dir
 
     def _run_tool_call(self, worker_dir, run_id, fake_client, mock_requests, *, connections):
@@ -732,6 +762,7 @@ class ComposioToolDispatchTest(unittest.TestCase):
             worker_dir.mkdir()
             (worker_dir / "SKILL.md").write_text("noop", encoding="utf-8")
             skill_driver.ARTIFACTS_DIR = artifacts_dir
+            skill_driver.WORKERS_DIR = base / "workers"
 
             fake_client = FakeOpenAIClient([assistant_message(content="# Brief")])
             driver = skill_driver.SkillRuntimeDriver(openai_client=fake_client)
