@@ -590,9 +590,6 @@ function WorkerCard({
     >
       <Link href={`/workers/${worker.id}`} className="block h-full" target="_blank" rel="noopener noreferrer">
       <CardContent className="h-full flex flex-col p-4 gap-1.5">
-        {/* Tool-logo strip */}
-        <WorkerToolStrip worker={worker} />
-
         {/* Avatar + title row */}
         <div className="flex items-start justify-between gap-3">
           <WorkerAvatar seed={worker.id} name={worker.name} size="size-10" />
@@ -639,6 +636,9 @@ function WorkerCard({
             ? worker.archive_reason
             : worker.description || "No description."}
         </p>
+
+        {/* Tool-logo strip — Langdock-style row of real brand logos */}
+        <WorkerToolStrip worker={worker} />
 
         {(worker.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
@@ -721,12 +721,6 @@ function WorkerCardSkeleton() {
   return (
     <Card className="h-full overflow-hidden">
       <CardContent className="p-4 space-y-1.5">
-        {/* Tool strip skeleton */}
-        <div className="flex gap-1">
-          <Skeleton className="size-5 rounded-[4px]" />
-          <Skeleton className="size-5 rounded-[4px]" />
-          <Skeleton className="size-5 rounded-[4px]" />
-        </div>
         {/* Avatar + title row */}
         <div className="flex items-start justify-between gap-2">
           <Skeleton className="size-10 rounded-lg shrink-0" />
@@ -734,6 +728,12 @@ function WorkerCardSkeleton() {
           <Skeleton className="size-5 rounded-full shrink-0" />
         </div>
         <Skeleton className="h-3 w-full" />
+        {/* Tool strip skeleton */}
+        <div className="flex gap-1">
+          <Skeleton className="size-5 rounded-md" />
+          <Skeleton className="size-5 rounded-md" />
+          <Skeleton className="size-5 rounded-md" />
+        </div>
         <div className="flex gap-1.5">
           <Skeleton className="h-5 w-14 rounded-full" />
           <Skeleton className="h-5 w-16 rounded-full" />
