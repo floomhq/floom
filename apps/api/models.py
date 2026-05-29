@@ -3,7 +3,7 @@
 import re
 import warnings
 from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
 
 
@@ -951,6 +951,8 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
 # ---------------------------------------------------------------------------
 
 class WorkerUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     trigger_type: Optional[Literal["manual", "schedule", "webhook"]] = None
     cron_expr: Optional[str] = None
     cron_timezone: Optional[str] = None

@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from dotenv import load_dotenv
 
 from auth import AuthContext, get_auth_context, get_auth_provider
@@ -204,6 +204,7 @@ async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDi
 
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
+DEFAULT_CHAT_MESSAGE_MAX_CHARS = 20_000
 DEFAULT_RATE_LIMIT = (60, 60.0)
 BODYLESS_METHODS = {"GET", "HEAD", "OPTIONS"}
 RATE_LIMIT_RULES = [
@@ -2054,6 +2055,10 @@ def _positive_int_env(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def _chat_message_max_chars() -> int:
+    return _positive_int_env("WORKEROS_CHAT_MESSAGE_MAX_CHARS", DEFAULT_CHAT_MESSAGE_MAX_CHARS)
+
+
 def _upload_max_bytes() -> int:
     return _positive_int_env("WORKEROS_UPLOAD_MAX_BYTES", _DEFAULT_UPLOAD_MAX_BYTES)
 
@@ -2933,6 +2938,12 @@ def restore_worker(
     """
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
     import re as _re
+
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
     worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
     if not worker_yml_path.exists():
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -2956,6 +2967,7 @@ def restore_worker(
 def get_worker_sample_input(
     worker_id: str,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> Any:
     """Return the sample input JSON for a worker if present.
 
@@ -2963,6 +2975,10 @@ def get_worker_sample_input(
     repo root (one level above the workers/ directory).
     Returns 404 if no sample input exists for the worker.
     """
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
     safe_id = worker_id.replace("..", "").replace("/", "").replace("\\", "")
     # Walk from WORKERS_DIR up one level to the repo root, then into docs/workers/inputs/
     sample_path = WORKERS_DIR.parent / "docs" / "workers" / "inputs" / f"{safe_id}.json"
@@ -3222,6 +3238,8 @@ def delete_worker(
 # ---------------------------------------------------------------------------
 
 class WorkerCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker_yml: str
     run_py: str
     skill_md: Optional[str] = None
@@ -8230,6 +8248,8 @@ def deny_cli_device(
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: str
     conversation_id: Optional[str] = None
 
@@ -8292,6 +8312,12 @@ async def post_chat(
     message = payload.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="message is required")
+    max_chars = _chat_message_max_chars()
+    if len(message) > max_chars:
+        raise HTTPException(
+            status_code=413,
+            detail=f"message exceeds {max_chars} character limit",
+        )
 
     part_queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
     loop = asyncio.get_running_loop()
