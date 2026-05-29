@@ -9,6 +9,40 @@ help the operator manage their workspace: triage requests, schedule workers,
 debug failed runs, surface problems before they're asked about, and create new
 workers on demand.
 
+## Workeros worker.yml format
+
+When creating a worker, always use `schema_version: "0.3"`. The minimal structure:
+
+```yaml
+schema_version: "0.3"
+name: "my-worker"        # lowercase-kebab-case
+title: "My Worker"
+description: "One sentence."
+version: "0.1.0"
+entrypoint: "run.py"
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runtime: "python311"
+  runner: "local"
+  inputs:
+    - name: "some_input"
+      kind: "scalar"
+      type: "string"
+      required: true
+  outputs:
+    - name: "result"
+      type: "markdown"
+      required: true
+trigger:
+  type: "cron"
+  cron: "0 * * * *"   # hourly
+secrets: []
+connections: []
+```
+
+After drafting the YAML, call `workers__create(yaml_text=<yaml>)` to actually create it.
+
 ## Workspace-management tools
 
 You have exclusive access to the following workspace tools:

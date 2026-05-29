@@ -431,34 +431,70 @@ def _workspace_tools(user_id: str) -> List[Any]:
 # ---------------------------------------------------------------------------
 
 def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    from db import get_repositories
-    repos = get_repositories()
-    workers = repos.workers.list(user_id=user_id)
+    from db import get_db as _get_db
     result = []
-    for w in workers:
-        manifest = w.get("manifest") or {}
+    with _get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT w.id, w.name, w.trigger_type, w.enabled, w.owner_id,
+                   sv.manifest_json
+            FROM workers w
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+            WHERE w.owner_id = ?
+            ORDER BY w.name
+            """,
+            (user_id,),
+        ).fetchall()
+    for row in rows:
+        try:
+            manifest = json.loads(row["manifest_json"] or "{}") if row["manifest_json"] else {}
+        except Exception:
+            manifest = {}
         result.append({
-            "id": w.get("id"),
-            "name": w.get("name"),
-            "title": manifest.get("title") or w.get("name"),
-            "trigger": w.get("trigger_type") or "manual",
-            "status": w.get("status") or "healthy",
-            "enabled": w.get("enabled", True),
+            "id": row["id"],
+            "name": row["name"],
+            "title": manifest.get("title") or row["name"],
+            "trigger": row["trigger_type"] or "manual",
+            "enabled": bool(row["enabled"]),
             "system_worker": manifest.get("system_worker", False),
+            "is_example": manifest.get("is_example", False),
         })
     return {"ok": True, "workers": result, "count": len(result)}
 
 
 def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    from db import get_repositories
+    from db import get_db as _get_db
     worker_id = str(args.get("id") or "")
     if not worker_id:
         return {"ok": False, "error": "id is required"}
-    repos = get_repositories()
-    worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
-    if not worker:
+    with _get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT w.id, w.name, w.trigger_type, w.enabled, w.cron_expr,
+                   sv.manifest_json
+            FROM workers w
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+            WHERE w.owner_id = ? AND w.id = ?
+            """,
+            (user_id, worker_id),
+        ).fetchone()
+    if not row:
         return {"ok": False, "error": f"Worker not found: {worker_id}"}
-    return {"ok": True, "worker": dict(worker)}
+    try:
+        manifest = json.loads(row["manifest_json"] or "{}") if row["manifest_json"] else {}
+    except Exception:
+        manifest = {}
+    return {
+        "ok": True,
+        "worker": {
+            "id": row["id"],
+            "name": row["name"],
+            "trigger": row["trigger_type"] or "manual",
+            "cron": row["cron_expr"],
+            "enabled": bool(row["enabled"]),
+            "manifest": manifest,
+        },
+    }
 
 
 def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -604,29 +640,43 @@ def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
 
 def _tool_runs_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    from db import get_repositories
-    repos = get_repositories()
+    from db import get_db as _get_db
     worker_id = args.get("worker_id")
     status = args.get("status")
-    limit = int(args.get("limit") or 20)
-    statuses = [status] if status else None
+    limit = min(int(args.get("limit") or 20), 100)
+    where = ["w.owner_id = ?"]
+    params: list = [user_id]
     if worker_id:
-        raw = repos.runs.list_for_worker(user_id=user_id, worker_id=worker_id, limit=limit)
-        # list_for_worker may return list or (list, total)
-        runs = raw[0] if isinstance(raw, tuple) else raw
-    else:
-        raw = repos.runs.list(user_id=user_id, statuses=statuses, limit=limit)
-        # list returns (rows, total)
-        runs = raw[0] if isinstance(raw, tuple) else raw
+        where.append("r.worker_id = ?")
+        params.append(worker_id)
+    if status:
+        where.append("r.status = ?")
+        params.append(status)
+    where_sql = " AND ".join(where)
+    with _get_db() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT r.id, r.worker_id, w.name AS worker_name,
+                   r.status, r.created_at, r.completed_at, r.error, r.duration_ms
+            FROM runs r
+            JOIN workers w ON w.id = r.worker_id
+            WHERE {where_sql}
+            ORDER BY r.created_at DESC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
     result = []
-    for r in runs:
+    for r in rows:
         result.append({
-            "id": r.get("id"),
-            "worker_id": r.get("worker_id"),
-            "status": r.get("status"),
-            "created_at": r.get("created_at"),
-            "completed_at": r.get("completed_at"),
-            "error": r.get("error"),
+            "id": r["id"],
+            "worker_id": r["worker_id"],
+            "worker_name": r["worker_name"],
+            "status": r["status"],
+            "created_at": r["created_at"],
+            "completed_at": r["completed_at"],
+            "duration_ms": r["duration_ms"],
+            "error": r["error"],
         })
     return {"ok": True, "runs": result, "count": len(result)}
 
@@ -886,23 +936,28 @@ async def stream_chat(
     # Load history (last 50 messages)
     history = load_conversation_history(conversation_id, limit=CONVERSATION_WINDOW)
 
-    # Build OpenAI-compatible input list from history + current message
-    input_messages: List[Dict[str, Any]] = []
-    for h in history:
+    # Build input string from history for the Agents SDK.
+    # The SDK accepts a list of user/assistant messages or a plain string.
+    # We construct the conversation as a thread by passing only user/assistant messages
+    # as context, since tool messages use a different format.
+    # The SDK also supports passing history via to_input_list() but we persist
+    # only text content. Build a simple summary of history as a system addition.
+    history_summary_parts: List[str] = []
+    for h in history[:-1]:  # Exclude the just-inserted user message
         role = h["role"]
         if role == "tool":
-            input_messages.append({
-                "role": "tool",
-                "content": h["content"],
-                "tool_call_id": h.get("tool_call_id") or "call_unknown",
-            })
-        else:
-            input_messages.append({"role": role, "content": h["content"]})
+            continue  # Skip raw tool results — too verbose
+        content = h["content"][:500] if len(h["content"]) > 500 else h["content"]
+        history_summary_parts.append(f"{role.upper()}: {content}")
 
-    # The current user message is already in history (just inserted).
-    # If history already ends with this user message, use it as-is.
-    # Otherwise append it (shouldn't happen, but guard).
-    if not input_messages or input_messages[-1].get("content") != message:
+    input_messages: List[Dict[str, Any]] = []
+    if history_summary_parts:
+        context = "\n\n".join(history_summary_parts)
+        input_messages.append({
+            "role": "user",
+            "content": f"[CONVERSATION HISTORY]\n{context}\n\n[CURRENT MESSAGE]\n{message}",
+        })
+    else:
         input_messages.append({"role": "user", "content": message})
 
     system_prompt = _build_system_prompt(user_id)
@@ -913,13 +968,8 @@ async def stream_chat(
 
     final_reply_box: Dict[str, str] = {}
 
-    async def _finish_invoke(_ctx: Any, raw_args: str) -> str:
-        try:
-            args = json.loads(raw_args or "{}")
-        except json.JSONDecodeError:
-            args = {}
-        reply = str(args.get("reply") or "")
-        final_reply_box["reply"] = reply
+    # Placeholder; real handler is wired after assistant_text_parts is defined below
+    async def _finish_placeholder(_ctx: Any, raw_args: str) -> str:
         return json.dumps({"ok": True, "finished": True})
 
     finish_tool = FunctionTool(
@@ -930,7 +980,7 @@ async def stream_chat(
             "properties": {"reply": {"type": "string"}},
             "required": ["reply"],
         },
-        on_invoke_tool=_finish_invoke,
+        on_invoke_tool=_finish_placeholder,
         strict_json_schema=False,
     )
 
@@ -958,6 +1008,22 @@ async def stream_chat(
     # Buffer assistant text and tool messages for persistence
     assistant_text_parts: List[str] = []
     pending_tool_calls: Dict[str, Dict[str, Any]] = {}  # call_id -> {name, args}
+
+    # Wire finish tool to emit the reply as a text part
+    async def _finish_invoke_inner(_ctx: Any, raw_args: str) -> str:
+        try:
+            args = json.loads(raw_args or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        reply = str(args.get("reply") or "")
+        final_reply_box["reply"] = reply
+        # Emit as text part if the agent didn't stream text deltas
+        if reply and not assistant_text_parts:
+            assistant_text_parts.append(reply)
+            await part_queue.put({"type": "text", "text": reply})
+        return json.dumps({"ok": True, "finished": True})
+
+    finish_tool.on_invoke_tool = _finish_invoke_inner
 
     final_message_id: Optional[str] = None
     emitted_text_delta = False
