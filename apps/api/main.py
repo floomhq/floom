@@ -4017,21 +4017,52 @@ class DraftAndCreateResponse(BaseModel):
     worker_id: str
 
 
-def _free_worker_id(base_id: str) -> str:
-    """Return a worker id that does not collide with an existing worker dir.
+def _free_worker_id(base_id: str, repos: "Repositories | None" = None) -> str:
+    """Return a worker id that does not collide with an existing worker.
 
     The LLM author frequently returns the same suggested id (e.g.
     "applicant-followup") regardless of prompt, which made every second
     draft-and-create 409 (#186). Instead of failing, derive a free id by
     appending ``-2``, ``-3``, ... and finally a short random suffix so the
     create always succeeds. Protected stock ids are never reused.
+
+    #54 (follow-up to #200): in a multi-tenant deploy (workeros-cloud) the
+    canonical worker store is the DB, not the request's ephemeral filesystem
+    view, and the worker id is a GLOBAL primary key (``id TEXT PRIMARY KEY``
+    on the ``workers`` table — not a ``(owner_id, id)`` composite). A collision
+    can therefore come from a DB row in a DIFFERENT workspace that is not on
+    this request's filesystem. Checking only the filesystem let the dedupe
+    return an id that then collided on insert (or whose workspace-scoped
+    post-insert ``get`` returned None), producing a hard 409
+    "failed to upsert <id>".
+
+    The repository ``get_any`` is an UNSCOPED, global existence check (by ``id``
+    only). Consulting it in addition to the filesystem makes the dedupe correct
+    for the global id namespace in both modes: in local OSS mode ``repos`` is
+    the SQLite repo (and the filesystem is the source of truth anyway); in
+    cloud mode ``repos`` is the Supabase repo and is the source of truth.
     """
     from worker_registry import WORKERS_DIR
 
     def _is_free(candidate: str) -> bool:
         if candidate in PROTECTED_STOCK_WORKER_IDS:
             return False
-        return not (WORKERS_DIR / candidate).exists()
+        if (WORKERS_DIR / candidate).exists():
+            return False
+        if repos is not None:
+            try:
+                if repos.workers.get_any(worker_id=candidate) is not None:
+                    return False
+            except Exception:
+                # A repo lookup failure must never make dedupe falsely report
+                # an id as free; fall back to filesystem-only for this check.
+                logger.warning(
+                    "repos.workers.get_any failed during dedupe for %r; "
+                    "falling back to filesystem-only availability",
+                    candidate,
+                    exc_info=True,
+                )
+        return True
 
     if _is_free(base_id):
         return base_id
@@ -4250,7 +4281,7 @@ async def draft_and_create_worker(
     # #186: the LLM author often returns the same suggested id regardless of
     # prompt. Rather than 409 on collision, allocate a free id and rewrite the
     # manifest identity so the worker.yml, the dir, and the DB row all agree.
-    free_id = _free_worker_id(worker_id)
+    free_id = _free_worker_id(worker_id, repos=repos)
     if free_id != worker_id:
         worker_id = free_id
         worker_yml_str = _rewrite_worker_yml_id(worker_yml_str, worker_id)
