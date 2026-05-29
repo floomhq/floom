@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Check,
   Copy,
-  Link as LinkIcon,
   Loader2,
   Plus,
   Server,
