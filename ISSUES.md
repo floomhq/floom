@@ -1,146 +1,6 @@
-# ISSUES — Workeros
+# ISSUES (Federico's 2026-05-26 morning walkthrough)
 
-Status legend: OPEN / FIXING / FIXED (merged, unverified) / VERIFIED (confirmed live). Most-recent batch first.
-
----
-
-## 2026-05-29 P0 — /workers/new generation broken end-to-end (PR #240, branch fix/generation-pipeline-p0-2026-05-29)
-
-Federico: "generation, even for example prompts, completely breaks." Two stacked
-root causes. Both fixed, merged (main `66d1fa5`), deployed (API SHA `66d1fa5`,
-Vercel prod aliased to `workers.floom.dev`), and VERIFIED live.
-
-| # | Issue | Root cause | Status | Evidence |
-|---|---|---|---|---|
-| G1 | UI could not read the generation run → GeneratingPanel hung | Regression from #231/#235: the single-run fetch helper `_get_visible_run` applied the LIST-view system/audit worker-visibility filter. `worker-author` is `system_worker: true` + not in `PUBLIC_STOCK_WORKER_IDS` → hidden → every `GET /runs/{id}`, `/logs`, `/stream`, `/events`, `/download`, `/artifacts/../download` 404'd. | **VERIFIED** | New `_get_run_by_explicit_id`: reachable by explicit id if visible OR worker is on `_OPERATOR_REACHABLE_HIDDEN_WORKER_IDS={worker-author}` allowlist (slack-listener etc. still 404 by id). Live prod: `GET /runs/run_8afed13e4b73` → 200, `/logs` → 200, artifact download → 200 (were 404). Run-detail page renders (screenshot `run_de80e5e07196`: STATUS completed, 28.7s, OUTPUT 1 item, FILES 1 file). |
-| G2 | worker-author never produced output → `error_code=missing_result` | worker-author runs as an E2B pure-script worker (`entrypoint: run.py`); the driver runs `python run.py` and reads back `result.json`. But run.py only DEFINED `run(inputs, context)` (never invoked, no `__main__`) and wrote `out/bundle.json` not `result.json`. So it exited 0 with no result. All 4 pre-deploy runs (run_2597eb785ed6 et al) failed this way. | **VERIFIED** | Rewrote run.py to the pure-script contract: read inputs.json, `load_dotenv(.env.local)`, write `out/bundle.json` + `result.json{status,outputs:{bundle},artifacts}`, `if __name__=="__main__": main()`; `_write_error` on failure. Declared `exec.secrets:[OPENAI_API_KEY]` + added python-dotenv. Live prod: 5/5 post-deploy worker-author runs COMPLETED with valid schema-0.3 bundles (suggested_id `github-daily-digest`, `gmail-invoice-processor`); 0 missing_result. |
-| G3 | Generation could dead-end if streaming failed | Frontend only fell back to `draftAndCreate` on an endpoint throw; a run reaching `status=failed` just showed a toast, and `onerror` navigated using a stale `streamRunId` closure. | **VERIFIED** | Extracted `fallbackDraftAndCreate(prompt)`, triggered on endpoint-throw / `status=failed` / SSE-drop-before-completion, guarded against double-fire. Live: fallback created worker `github-pr-issue-digest` when the headless-browser SSE dropped. |
-
-Regression tests (in `tests/test_pr231_correctness.py`): worker-author run reachable
-by explicit id but hidden from list; non-allowlisted hidden worker stays 404 by id.
-`test_pr231_correctness` (5) + `test_round8_worker_authz` (25) pass.
-
-Known residual (NOT the P0, pre-existing): long-lived EventSource (SSE) through the
-prod Vercel+Cloudflare edge is dropped by the headless browser-pool Chrome mid-stream,
-so the panel falls back instead of navigating on completion. A terminal-run SSE
-delivers correctly (verified via curl through the Vercel proxy), so a normal browser
-gets the happy-path navigation; the G3 fallback covers the headless case either way.
-
----
-
-## 2026-05-29 UI regression sweep + Phase 4 polish (lane/ui-regression-sweep)
-
-5 regressions Federico surfaced + Phase 4 polish. Every fix verified with a
-live screenshot (broker desktop @1280 + raw-CDP mobile @375) before claiming
-done. Screenshots in `/tmp/wk-shots/`.
-
-| # | Issue | Sev | Status | Evidence |
-|---|---|---|---|---|
-| R1 | /workers cards changed size on hover → row layout jump | P1 | VERIFIED | CDP measure: card 235x230px identical before/after hover (0 change). Removed group-hover content swap; footer is one stable line. |
-| R2 | Workers/runs opened in a NEW TAB (regression) | P1 | VERIFIED | Removed `target="_blank"` from WorkersClient card link + OverviewDashboard activity/coming-up links. App-wide grep: only the genuinely-external output-renderer link keeps it. |
-| R3 | /workers/<id>#code Source tab EMPTY for all workers | P1 | VERIFIED | Root cause was BACKEND: `_worker_source_visible_to_api` hid source for ALL git-tracked workers (= every example). Opened the gate for PUBLIC_STOCK_WORKER_IDS + added frontend `deriveSourceFiles`. Verified e2e: /workers/opendraft#code renders worker.yml (4957B) + run.py (11696B = 11KB) + 88 files. (05b-opendraft-code-FIXED.png) |
-| R4 | /runs/<id> left panel scrolled into infinity | P1 | VERIFIED | Capped split pane at `max-h-[calc(100vh-13rem)]`; timeline + tab panes scroll internally. Full-page height with 200 logs: 713px desktop / 1205px mobile (bounded, not infinite). (06-run-detail-logs-FULLPAGE.png) |
-| R5 | /workers folder filter opened a new row → content jump | P1 | VERIFIED | Merged breadcrumb + folder chips into ONE wrapping row (min-h-7). Selecting a folder swaps content in place. (03-workers-folder-content.png — breadcrumb+chip at same y as the Folders row) |
-| B3 | Square corners on settings token box + Cmd-K | P2 | VERIFIED | Token box + paste input + Cmd-K dialog now rounded to radius tokens. (04-settings + 07-cmdk-radius.png) |
-| B9 | Mobile responsive pass @375px | P2 | VERIFIED | overview/workers/settings/run-detail @375 — no horizontal scroll, cards/filters/tabs stack, run pane stacks vertically <md. (m01-m04 shots) |
-| P1c | pending_approval rendered as "Running" spinner | P1 | VERIFIED (no change) | Already distinct: RunStatus + Overview statusMeta → "Awaiting approval", static dot, no spinner. |
-| P1d | raw Python dict error in run history | P1 | FIXED | `summarizeError` now also humanises raw dict / JSON errors with no "Error code:" prefix. |
-| P1e | non-employee hero copy on /workers/new | P1 | FIXED | "What should Floom automate?" → "Hire a new AI worker". /workers already "Your AI workers." |
-| B8 | archive affordance icon-only | P2 | N/A (no change) | No archive ACTION button exists in the UI (archive is server/CLI; UI only shows Restore). Card already shows archived as icon-only. The detail "Archived" badge is a status label, not an affordance — left labelled. Surfaced, not silently dropped. |
-
----
-
-## 2026-05-29 /connections data fidelity (lane/connections-data-fidelity, PR #233)
-
-#194 was marked done but the LIVE page still showed every original problem because
-the **data** was placeholder/redacted, not the UI. Root-caused against live
-`workers-api.floom.dev` + the real Composio v3 `/connected_accounts/{id}` shape,
-fixed, deployed (API SHA 861d38b + sweep), and VERIFIED via live screenshot
-`/.screenshots/connections-after-fidelity-20260529.png`.
-
-| # | Issue | Root cause | Status |
-|---|---|---|---|
-| E1 (account name) | Every row showed `"Connected account"` placeholder | `_redact_connection_account_label` (added in #231 security batch) masked the OWNER's own email/login. Single-tenant → owner must see own identity. `_public_connection_item` now shows the real label via `_normalize_owner_account_label`; redaction helper retained for a future cross-user path. | **VERIFIED** — GitHub `federicodeponte`, Gmail `depontefede@gmail.com`, LinkedIn `f.deponte@outlook.com` live |
-| E2 (identity captured) | `account-info` returned `email:null` | Endpoint hardcoded `"email": None`. Now returns the owner's real connected email (still no `auth_config_id`/`user_id` leak). GitHub login no longer suffixed `@github`. | **VERIFIED** live |
-| E3 (fake scopes) | `"default scopes"` placeholder; `scopes=[]` everywhere | Composio v3 returns granted scopes as a delimited `scope` STRING under `data`/`params`/`state.val` (comma for github, space for google), NOT a `scopes` list. `_fetch_composio_account_info` now parses it; sweep caches `scopes_json`. UI shows real count (tooltip lists them) + honest `—` when unloaded — no fake string. | **VERIFIED** — GitHub 7, Gmail 12, LinkedIn 4 scopes live |
-| E4 (Reconnect on active) | GitHub (active) wrongly showed Reconnect; Gmail (active) did not | GitHub reports `last_check_status:"active"` (not `"valid"`), so the old `lastCheckStatus !== "valid"` condition fired. Now Reconnect renders only when broken (expired/failed) and never when `status==="active"`. | **VERIFIED** — only the 4 Expired rows show Reconnect; the 3 active rows show only the `…` menu |
-| E5 (table off) | Columns/cells misaligned | Actions cell right-aligned (`justify-end`) to match the "Actions" header. | **VERIFIED** live |
-
----
-
-## 2026-05-29 backend correctness + security batch (PR #231, merged 8aabe35)
-
-| # | Issue | Fix / evidence | Sev | Status |
-|---|---|---|---|---|
-| R16-SSE | Unlimited concurrent SSE streams per user (DoS) | `/runs/<id>/stream` + `/runs/<id>/events` had no cap (5 opened in 1.23s). Added per-user in-process counter `WORKEROS_MAX_CONCURRENT_STREAMS` (default 10): 429 on exceed, slot freed on disconnect via generator `finally`. Acquire/release logic unit-verified (4th over cap=3 → 429; reused after release; per-user isolated). commit fdd68fa | P1 sec | FIXED |
-| 1.5.1 | Zombie approvals (run stuck pending_approval) | approve/reject now set the original run to terminal `completed` after writing the approvals row; badge already read `approvals.status='pending'` via `/approvals/count`. commit 357bc42 | P0 | FIXED |
-| 1.5.2 / B (archived) | Archived worker detail 404 ("Worker not found") | `_archived_tracked_worker` fallback → GET `/workers/<id>` renders archived workers (badge+reason+Restore). Confirmed `/workers/kugelaudio-bug-intake` 404'd pre-fix. commit 21895da | P1 | FIXED |
-| 1.5.3 / B10b | audit/system trigger runs pollute `/runs` | Default `/runs` allowlists operator sources (manual/schedule/approval/composio/webhook/workspace-agent); `?include_system=true` shows all. Live `/runs` had audit/test/s35_concurrency_*/APPRVORG-* pre-fix. commit 1e5b24c | P1 | FIXED |
-| 1.5.4 | Overview worker count (24/26) ≠ /workers (11/13) | Shared `_list_operator_workers()` filter used by overview + `/workers`. commit 7214abd | P1 | FIXED |
-| CRIT-1 | OpenAI `web_search` "Invalid value" | Root cause = pre-#129 Chat Completions path; #129 Agents-SDK migration fixed it via Responses API. research_brief copy still said web search unavailable → enabled in worker.yml+SKILL.md. Live smoke: weekly_update run_837154286792 + research_brief run_cbe5e4bfa1c4 both completed, no error. commit f5420df | P0 | FIXED |
-
-Tests: `tests/test_round8_worker_authz.py` 25/25 (placeholder trigger_source audit→manual to match new default-hide); full relevant suite = origin/main baseline exactly (39 pre-existing harness failures, 0 new). Re-deploy via `ops/deploy-api.sh` pending an active long opendraft run draining; live re-verification to follow → VERIFIED.
-
----
-
-## 2026-05-29 security + privacy checklist (lane/security-checklist) — 11 items + 3 NEW
-
-Full report: `docs/audits/security-checklist-2026-05-29.md`.
-
-| # | Issue | Sev | Status |
-|---|---|---|---|
-| SEC-P0 | `/api/floom-secret` returned the platform FLOOM_SECRET to ANY unauthenticated visitor (live, HTTP 200). Route removed; token now localStorage + paste-input only. | P0 | FIXED |
-| SEC-11 | `/chat` (OpenAI per request) had no per-user rate quota — bill-burn. Added `_enforce_chat_quota` (default 20/60s). | P1 | FIXED |
-| SEC-1 | No privacy/terms surface. Added `/privacy` + `/terms` (single-tenant statements). | P2 | FIXED |
-| SEC-2 | No data inventory. Added `docs/SECURITY-DATA-MAP.md`. | P2 | FIXED |
-| SEC-7 | `composio_connection_id` (`ca_*`) still in `/connections` response. Frontend currently depends on it; stripping needs a refactor to key off internal UUID. | P2 | OPEN |
-| SEC-NEW2 | cli-auth approval still hands out raw FLOOM_SECRET (confirm-code mitigates blind approval). Mint scoped CLI token instead. | P2 | OPEN |
-| SEC-A06 | `npm audit` / dependency CVE scan not run this pass. | P2 | OPEN |
-
-Items 3,4,5,6,8,10 + NEW-1, NEW-3 verified PASS (no fix needed).
-
----
-
-## 2026-05-29 evening review (Federico) — CURRENT, 13 items
-
-| # | Issue | Detail / evidence | Sev | Status |
-|---|---|---|---|---|
-| B1 | Documentation — too much to track | This section. Keep current. | meta | FIXING |
-| B2 | **/contexts Vercel "page couldn't load"** | Error was on the **context page** specifically. Edge 200 but client/RSC throws. Root-cause it. | P0 | OPEN |
-| B3 | Hard edges remain | Settings boxes (token, setup-commands) + **Cmd+K search bar** still square. S45 radius missed them. [Img #3] | P1 | OPEN |
-| B4 | MCP install — other harnesses | Setup hardcodes `--target claude`. Add cursor/vscode/windsurf/generic. | P1 | OPEN |
-| B5 | Approvals — organise at scale | "what if I need multiple?" grouping/sort/pagination. | P1 | OPEN |
-| B6 | Workers cards — hover sparklines MISSING | S26 not visible on prod. Regression-or-stale. SYSTEMATIC check. | P1 | OPEN |
-| B7 | Workers cards — tool logos MISSING | S41/#68 logo strip not visible. Same systematic check as B6. | P1 | OPEN |
-| B8 | Archive = icon only | Drop the "Archive" text, keep just the icon. | P2 | OPEN |
-| B9 | Mobile optimisation — everywhere | Full 375px pass across all surfaces. | P1 | OPEN |
-| B10 | /runs worker-filter dropdown broken | Clipped text, raw IDs leaking (`audit-local-rate-*`), junk/system workers showing, unstyled. [Img #5] | P1 | OPEN |
-| B11 | Pagination, not "Load more" | /runs + lists should paginate. | P1 | OPEN |
-| B12 | Overview must fit one screen | "Worker activity" pane too tall; "See all" exists, so compress. | P1 | OPEN |
-| B13 | "103 Work shipped this week" unclear + hours-of-work? | Define the metric; consider surfacing hours-saved. | P1 | OPEN |
-
-**B10 is two bugs:** (a) dropdown styling/overflow; (b) junk/system workers (`audit-local-rate-*`, smoke/quality-gate workers) not flagged `system_worker`/archived, leaking into the operator filter.
-**B6/B7 systematic note:** sparklines + logos "missing again" → before fixing piecemeal, confirm whether it's a real regression or stale-build/CSS-scope; fix the root, then sweep all card states.
-
-### Decisions pending Federico
-- **C5 deadlines:** rec = no hard deadline; visible "pending Nh" age + optional soft `expires_in_hours` → `expired` (never auto-decide).
-- **C6 PR #197** (CLI cloud-aware): Cloud-lane PR open on OS repo — merge into OS or leave for Cloud lane?
-
-### Carried over (not done)
-- **C1** ~~No backend deploy script (`ops/deploy-api.sh`)~~ — **FIXED** (PR ops/deploy-script-2026-05-29): `ops/deploy-api.sh` + `ops/verify-schema.py` + `ops/DEPLOY.md` added.
-- **C2** Worker reliability: **90% pass rate achieved** (Phase 2 lane/reliability-2026-05-29). 9/10 tested workers PASS. gmail_intake PASS (Composio proxy endpoint added). csv_enricher/cv_writeup/reverse_match_crm PASS (file output + upload fixes). linkedin ARCHIVED (Apify credits). github-digest FAIL: GitHub connection deleted by parallel agent — Federico must re-auth at /connections/connect/github. opendraft still running (long-running, historically passes).
-- **C3** No alerting (metrics exist, nothing wired).
-- **C4** ~~Migration version desync root-cause~~ — **FIXED** (PR ops/deploy-script-2026-05-29): root cause documented in `ops/DEPLOY.md`; `ops/verify-schema.py` runs on every deploy and fails loudly if any expected table is missing.
-- **C7** approvals user-flow links — PR in flight (`feat/approvals-user-flow`).
-
-### Scores (2026-05-29)
-Claude self (critical): dogfood **72**, design-partner **58**. nvidia/nemotron: **62**. deepseek: timed out. Claude prod-walk: running.
-
----
-
-## (historical) Federico's 2026-05-26 morning walkthrough
-
-Issues raised by Federico from a real browser walkthrough of workers.floom.dev after PRs #29-#33 landed.
+Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from a real browser walkthrough of workers.floom.dev after PRs #29-#33 landed.
 
 ---
 
@@ -1185,3 +1045,116 @@ Tackle order (small-to-impact, with bundling where it makes sense):
 ### I-51 — Tag click on Worker card dumps into search with no indicator
 - **What:** Clicking a tag silently filters via search box but doesn't show "Filtered by tag: X" affordance.
 - **Fix:** Show an active-tag chip above results with an `X` to clear.
+
+---
+
+# 2026-05-29 P0 fixes
+
+## B1 — /contexts/<name> shows "Knowledge pack not found" (VERIFIED 2026-05-29)
+
+**Reported:** 2026-05-29 by Federico. `/contexts/worker-author-style` showed "Knowledge pack not found." even though the pack existed.
+
+**Root cause (from chrome-devtools + journalctl evidence):**
+`GET /api/proxy/contexts/worker-author-style` returned HTTP 500. The browser's `fetchJson` threw, the `useEffect` caught it and toasted, `detail` stayed null, page showed "Knowledge pack not found."
+
+The upstream 500 was NOT the proxy — it was the FastAPI `_context_detail()` in `apps/api/main.py` throwing:
+```
+TypeError: ContextDetail() got multiple values for keyword argument 'worker_count'
+```
+`ContextSummary` has `worker_count` and `description` fields. `_context_summary()` returns a `ContextSummary` with `worker_count=0`. `model_dump()` includes both fields. Then `_context_detail()` passed them AGAIN as explicit kwargs → Python duplicate-kwarg crash.
+
+**Fix:** Set `summary.worker_count = len(used_by)` and `summary.description = description` before `model_dump()`, then remove the duplicate kwargs. PR #221.
+
+**Status:** VERIFIED — PR #221 merged + deployed (SHA 75db6435). `/api/proxy/contexts/worker-author-style` returns HTTP 200 with 9 files + `used_by: [Worker Author]`. Page renders correctly, console clean.
+
+## B2 — /workers/new cold navigation "This page couldn't load" (VERIFIED 2026-05-29)
+
+**Reported:** 2026-05-29 by Federico. `/workers/new` showed "This page couldn't load" on first click from the sidebar (console: `net::ERR_NETWORK_CHANGED` / 404 on a JS chunk).
+
+**Root cause:** `net::ERR_NETWORK_CHANGED` is a browser/OS-level event triggered when the machine's network interface changes (VPN connect/disconnect, interface swap) mid-request. It is NOT a code bug. The page loads cleanly in every fresh isolated browser context.
+
+**Fix:** No code change required. The page loads correctly on every cold navigation. Verified in multiple fresh isolated browser contexts — all chunks return 200, console clean.
+
+**Status:** VERIFIED — multiple cold navigations in isolated contexts confirmed. No code change shipped.
+
+## B15 — /contexts pages render files flat instead of a navigable folder tree (VERIFIED 2026-05-29)
+
+**Reported:** 2026-05-29 by Federico. "context needs nested folders ofc? not just root level." The backend already stores nested paths (e.g. `worker-author-style` has `EXAMPLES/csv-enricher.yml`, `EXAMPLES/github_digest.yml`, `SCHEMA.md`), but the contexts UI rendered every file as a flat list — no folders, no drill-in, no way to create a file in a subfolder.
+
+**Root cause:** UI gap only. The pack-detail page (`apps/web/app/contexts/[name]/page.tsx`) mapped `detail.files` directly into a flat list. The backend (`main.py`) already supported nesting: `PUT /contexts/{name}/files/{file_path:path}` writes slash-separated paths, and `POST /contexts/{name}/upload` accepts an optional `path_prefix` form field.
+
+**Fix (frontend only, PR #226):**
+- Pack-detail page groups files by path prefix into folders. `EXAMPLES/` renders as a folder (file count + size + chevron); root files sit at top level. Breadcrumb folder navigation via `?path=EXAMPLES` — click a folder to drill in, click a breadcrumb segment to go back up. Deep nesting (`a/b/c.md`) handled; empty-folder state with a back-to-root link.
+- "New file" dialog accepts a path with slashes (e.g. `SOP/onboarding.md`) and creates it nested via the existing `saveTextFile` (PUT) call; prefilled with the current folder; drills into the new folder after creation.
+- Upload lands files in the current folder via `api.contexts.upload(..., pathPrefix)` → backend `path_prefix`.
+- File-preview route (`files/[...path]/page.tsx`) breadcrumb splits the nested path into clickable folder segments linking back to the pack-detail folder view.
+- `main.py` untouched. ChatGPT-simplicity bar: single blue accent, no emoji, monochrome icons, sentence case.
+
+**Status:** VERIFIED on prod — PR #226 (squash 05b9fce) merged to main, Vercel production build SUCCESS, `workers.floom.dev` aliased to `workeros-mp6egsupd`. Browser-broker walk on `/contexts/worker-author-style`: (1) `EXAMPLES` renders as a folder ("6 files · 9.6 KB") with the 3 root `.md` files at top level — not flat. (2) Drill-in to `?path=EXAMPLES` shows exactly the 6 YAML files, breadcrumb "Files > EXAMPLES". (3) Breadcrumb "Files" click returns to root. (4) Created `SOP/onboarding/welcome.md` via the dialog (deep nesting) — persisted to disk at `contexts/worker-author-style/SOP/onboarding/welcome.md`, file count 9→10, UI drilled into `?path=SOP/onboarding`, download href `.../files/SOP/onboarding/welcome.md`. (5) File-preview breadcrumb shows "Contexts / worker-author-style / SOP / onboarding / welcome.md" with SOP+onboarding as clickable links. Test file cleaned up afterward (pack back to 9 files). Screenshots: `/tmp/b15-1-pack-detail.png`, `/tmp/b15-2-file-preview-breadcrumb.png`.
+
+**Out of scope (noted, not a regression):** the file-preview LEFT sidebar remains a flat file list by design. B15 scoped tree nav to the pack-detail page + nested breadcrumbs on the preview route, both delivered.
+
+## B5 — /approvals is a flat list; breaks down at scale (VERIFIED 2026-05-29)
+
+**Reported:** 2026-05-29 by Federico. "approvals: what if i need multiple? this has to be organised?" `/approvals` rendered every pending approval as a flat stack of cards — fine for 1-2, a wall of cards at 20+.
+
+**Root cause:** UI gap only. The page (`apps/web/app/approvals/page.tsx`) mapped the pending list straight into a flat `space-y-3` column. No grouping, no sort, no pagination, no per-card age. The backend `GET /approvals` already returns all pending rows (sorted oldest-first), so organisation is purely a frontend concern.
+
+**Fix (frontend only, PR #227):**
+- **Group by worker** — collapsible section headers with per-worker count (e.g. "Outbound approval demo (3)"). 20 pending across 3 workers reads as 3 groups.
+- **Sort** — Newest (default), Most waiting (oldest-first; groups ordered by their oldest member, most-urgent first), By worker (alphabetical).
+- **Pagination** — 20/page, "← Previous / Page N of M / Next →" matching the `/runs` pattern; same worker re-groups correctly across page boundaries.
+- **Per-card age** — "pending Nm/Nh/Nd" on each card. Oldest pending + anything >6h emphasised in amber (sets up the future soft-deadline C5; no auto-expiry).
+- **Light bulk** — per-group "Select all" → "N selected" bar with Approve/Reject; only appears on groups ≥2. Calls the existing per-run `approve`/`reject` endpoints in sequence (no backend change).
+- Standalone page + "Go to platform" links + deep-link `?id=` (now jumps to the containing page + highlights) preserved.
+- `main.py` and the approve/reject/count endpoints UNTOUCHED — zero conflict with the backend-correctness lane. ChatGPT-simplicity bar: single blue accent, sentence case, no emoji, no nested cards.
+
+**Status:** VERIFIED on the PR preview deploy — PR #227 (squash 197f6ff) merged to main, Vercel build SUCCESS. Verified against the live prod backend using 6 synthetic pending approvals across 3 workers (staggered ages incl. 8h), then 16 more to cross the 20/page threshold (22 total). Confirmed grouping, all 3 sorts, pagination (Page 2 of 2, Next disabled on last), per-card age + amber stale emphasis, and per-group bulk select→approve/reject. All 22 synthetic rows cleaned up afterward (backup at `/tmp/floom-backup-apprvorg-*.db`); `/approvals` back to "No pending approvals" + badge gone. Typecheck + eslint clean on the changed file. Screenshots: `/tmp/apprv-default.png` (grouped newest), `/tmp/apprv-mostwaiting.png` (most-waiting + amber), `/tmp/apprv-bulk.png` (bulk bar), `/tmp/apprv-page2.png` (pagination).
+
+## B7 — worker-card tool-icon strip rendered empty white boxes (VERIFIED 2026-05-29)
+
+**Reported:** 2026-05-29 by Federico (screenshot). Worker cards on `/workers` showed empty white boxes top-left instead of tool logos. Reference target = Langdock workflow cards: a horizontal row of real colored app logos with a "+N" overflow chip. Two problems: (1) logos rendered empty, (2) the strip was a detached box floating above the avatar.
+
+**Root cause:** `BrandLogo` (`apps/web/components/connections/BrandLogo.tsx`) resolves logos via an SVG sprite (`<use href="#brand-<slug>">`), but `IconSprite` — which registers the `#brand-*` / `#icon-*` symbols — was only mounted in `ConnectionsClient`. On `/workers` the symbols were absent in the DOM, so every `<use>` resolved to nothing → empty box. (Even slugs that HAD a symbol, like github, were blank because the sprite was simply not on the page.)
+
+**Fix (frontend only, PR #229):**
+- **Root cause** — mount `IconSprite` once in the root layout (`apps/web/app/layout.tsx`) so symbols resolve on every route; removed the redundant per-page mount in `ConnectionsClient` (avoids duplicate symbol IDs).
+- **Robust logos** — `BrandLogo` now normalizes Composio slugs internally (single source of truth via exported `normalizeBrandSlug`), carries brand colors for slack/linkedin/whatsapp/openai/apify/apollo, routes the AI mark (anthropic/cursor/windsurf/continue) to `#icon-*`, and renders a clean lettered glyph for unknown slugs — never an empty box.
+- **New sprite symbols** — added SimpleIcons `brand-whatsapp`, `brand-openai`, `brand-apify`, `brand-google-docs/sheets/meet`.
+- **Placement** — moved the strip from the detached top position to a quiet Langdock-style logo row under the worker description (before tags); skeleton updated to match. `WorkerToolStrip` renders the AI mark via `BrandLogo` and uses the shared `normalizeBrandSlug` (dropped its duplicate alias map). "+N" overflow chip kept.
+
+**Status:** VERIFIED on prod — PR #229 (squash 70fa75a) merged to main, Vercel production build SUCCESS, `workers.floom.dev` aliased to `workeros-21ksvgz6o`. Browser-broker walk of the live `/workers` grid: zero empty boxes anywhere; GitHub Digest Sender shows the GitHub logo + orange anthropic AI mark (was 2 empty boxes); Weekly Update shows the AI mark (was 1 empty box); Gmail Intake Brief shows the red Gmail logo; CSV Enricher / Research Brief show the AI mark; workers with no connections (Node Smoke Test, OpenBlog, Environment Variables) correctly render no strip. Static proof render confirmed slack/hubspot/notion/calendar/drive/linkedin/whatsapp/openai/apify logos + "+N" overflow + lettered "Z" fallback for an unknown slug. Typecheck (exit 0) + production build clean. Screenshots: `/tmp/prod-before.png` (empty boxes), `/tmp/prod-after.png` + `/tmp/prod-after-scrolled.png` (real logos), `/tmp/proof-after.png` (full coverage proof).
+
+## Batch B — overview + workers-list defects (from `docs/audits/all-issues-discovery-2026-05-29.md`) (VERIFIED 2026-05-29)
+
+PR #243 (merged to main). Worktree `/tmp/wk-batchB-overview` off `66d1fa5`, rebased onto `origin/main` pre-merge (no conflicts), `gh auth=federicodeponte`, `baseRefName=main`. Backend deployed via `ops/deploy-api.sh` (HEAD `b516b71` → SHA `57a1754`, health ok, migration v38, schema OK). Frontend aliased `workers.floom.dev` → `workeros-ofqrf9dtr` (custom alias is NOT auto-assigned by push). Screenshots in `docs/audits/shots-batchB-2026-05-29/`. Scope respected: did NOT touch `/workers/<id>`, `/runs`, `/connections`, `/contexts` (other batches).
+
+### P1-5 — overview alert duplicated label "Missing secret: Missing secrets: …"
+**Root cause:** `_overview_failure_cause` (`apps/api/main.py`) built `{humanized error_code}: {message}`. For `error_code="missing_secret"` (→ "Missing secret") the message already carried its own prefix ("Missing secrets: …"), producing the doubled label.
+**Fix:** when the message already leads with the (loose alnum-matched) humanized code, return the message alone; otherwise keep the prefix. Targeted, not blanket.
+**Status:** VERIFIED LIVE — `GET /api/proxy/system/overview` causes read `Missing secrets: SLACK_BOT_TOKEN, LINEAR_API_KEY, …` (single prefix) for kugelaudio-bug-intake + kugelaudio-meeting-pipeline; `Interrupted by restart: …` correctly KEEPS its prefix. Confirmed in the rendered AlertsBell dropdown. Screenshot: `docs/audits/shots-batchB-2026-05-29/02-overview-alerts-dropdown.png`.
+
+### P1-6 — workers-list "+25 more" tag expander did nothing on click (carried regression)
+**Root cause:** `apps/web/app/workers/WorkersClient.tsx` rendered "+N more" as a non-interactive `<span>`.
+**Fix:** button toggling a `showAllTags` state ("+N more" ↔ "Show less"); the tag list expands inline.
+**Status:** VERIFIED LIVE — broker pool-e click on `/workers` expanded the row from 16 → all 38 tags; button became "Show less". Screenshot: `docs/audits/shots-batchB-2026-05-29/03-workers-tags-expanded.png`.
+
+### P1-10 — internal "Node Smoke Test" worker exposed in the operator Operations catalog
+**Root cause:** `node-smoke-test` is a runtime-proof dev artifact (PUBLIC_STOCK_WORKER) but had no `system_worker` flag, so it appeared in `/workers` + overview.
+**Fix:** `system_worker: true` in `workers/node-smoke-test/worker.yml` (same treatment as workspace-agent / worker-author; field already filtered by `_list_operator_workers` + `GET /workers`).
+**Status:** VERIFIED LIVE — `GET /api/proxy/workers?shape=list` 15 → 14 workers, `node-smoke-test` ABSENT; still present with `?include_system=true`. `/workers` grid (broker) shows no Node Smoke Test card.
+
+### P1-11 — "Coming up today" rendered scheduled worker names with strikethrough (reads as cancelled)
+**Root cause:** `OverviewDashboard.tsx` applied `line-through` whenever `item.paused`; strikethrough on an upcoming item reads as cancelled/done.
+**Fix:** removed the strikethrough; paused items now use muted text + a distinct "Paused" pill, normally-scheduled items render as plain primary text.
+**Status:** VERIFIED LIVE — all upcoming items (Invoice Email Processor, GitHub Digest Sender, GitHub PR Summary, GitHub PR and Issue Digest) render with normal non-struck text. Screenshot: `docs/audits/shots-batchB-2026-05-29/01-overview-desktop.png`. (No currently-paused worker is in the upcoming feed to photograph the new pill; the strikethrough-on-normal defect is gone.)
+
+### P2-13 — stale cross-view run status (Overview "Running" while /runs "Completed")
+**Root cause:** `useOverview` skipped the client fetch whenever server-fetched `initialData` was present, so a run that finished after SSR stayed "Running" on `/overview` forever.
+**Fix:** revalidate silently on mount even with `initialData` (no skeleton flash) + re-fetch on window focus, so cross-view status stays current.
+**Status:** VERIFIED LIVE — `/overview` "Worker activity" shows all "Completed" (green) runs, consistent with `/runs`. Screenshot: `docs/audits/shots-batchB-2026-05-29/01-overview-desktop.png`.
+
+### P2-14 — mobile (375) theme-toggle is an oversized outlined circle in the top bar
+**Root cause:** `.theme-mode-button-compact` (mobile top bar) kept the base `.theme-mode-button` border, pill radius and drop shadow, so it rendered as an outlined circle next to the borderless 44×44 search/menu icons.
+**Fix:** restyled the compact variant to a borderless 44×44 icon button with transparent bg and a 20px glyph, matching its siblings.
+**Status:** VERIFIED LIVE — CDP 375px emulation on pool-e: top bar shows search + theme + hamburger at identical icon size, no outlined circle. Screenshot: `docs/audits/shots-batchB-2026-05-29/M01-overview-mobile.png`.
