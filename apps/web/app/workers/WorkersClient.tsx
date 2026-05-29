@@ -15,6 +15,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
+import { WorkerIconPills } from "@/components/WorkerIconPills";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -599,12 +600,20 @@ function WorkerCard({
             : worker.description || "No description."}
         </p>
 
-        {/* FIX 1 (Federico 2026-05-29, ChatGPT-simplicity): the per-card
-            tool-logo strip and tag-chip row were duplicated metadata + visual
-            noise — tags already have a dedicated filter row above the grid, and
-            the brand-logo wall added chrome an operator doesn't need to scan.
-            Dropped both so the card is name + status + what-it-does + last
-            result, calm and scannable. */}
+        {/* FIX 1 (Federico 2026-05-29): Langdock-grade icon-pill row. Real
+            full-color brand logos (reused BrandLogo / IconSprite) for declared
+            connections + a trigger glyph, as squircle pills with a +N overflow.
+            This is the single tasteful "what it uses" signal — NOT the prior
+            brand-logo wall + tag chips that were dropped for noise. Renders
+            nothing when the worker has no connections/trigger. */}
+        {!worker.archived && (
+          <WorkerIconPills
+            connections={worker.connections}
+            triggerType={worker.trigger_type}
+            size="sm"
+            className="pt-0.5"
+          />
+        )}
 
         {/* Stable footer: single line, never changes height on hover (R1 —
             the prior group-hover content swap grew the card on hover and
