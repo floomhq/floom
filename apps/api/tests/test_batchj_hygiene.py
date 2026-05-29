@@ -77,7 +77,19 @@ def test_error_raw_preserves_message_but_no_path() -> None:
 # --------------------------------------------------------------------------
 
 def test_log_message_strips_sandbox_path() -> None:
+    # A traceback FRAME line is now collapsed to the calm note (Batch K) — it
+    # carries no path AND no Python frame noise. The only invariant that matters
+    # is that no host/sandbox path leaks.
     msg = 'File "/home/user/worker/run.py", line 12, in <module>'
+    redacted = main._redact_public_log_message(msg)
+    assert "/home/user" not in redacted
+    assert ", line 12" not in redacted
+
+
+def test_log_message_non_traceback_path_still_relativised() -> None:
+    # A NON-traceback log line that happens to contain a sandbox path is still
+    # scrubbed to [worker file] (not collapsed) so the line stays informative.
+    msg = "reading inputs from /home/user/worker/inputs.json"
     redacted = main._redact_public_log_message(msg)
     assert "/home/user" not in redacted
     assert "[worker file]" in redacted
@@ -212,3 +224,58 @@ def test_smoke_reason_never_carries_error_code_marker() -> None:
     out = main.humanize_smoke_reason(reason)
     assert out is not None
     assert "error_code=" not in out
+
+
+# --------------------------------------------------------------------------
+# Batch K / G5 P1-A — operator "Recent logs" panel must not render raw
+# Python tracebacks or bare-exception jargon (the e2b stderr leak). The calm
+# Error card is the operator surface; raw stays on the debug Raw tab.
+# --------------------------------------------------------------------------
+
+def test_log_e2b_stderr_exception_line_collapsed() -> None:
+    msg = "[e2b] stderr: TypeError: unsupported operand type(s) for /: 'str' and 'float'"
+    out = main._redact_public_log_message(msg)
+    assert "unsupported operand" not in out
+    assert "TypeError" not in out
+    assert "error" in out.lower()
+
+
+def test_log_traceback_frame_line_collapsed() -> None:
+    msg = '[e2b] stderr: File "[worker file]", line 9, in main'
+    out = main._redact_public_log_message(msg)
+    assert ", line 9" not in out
+    assert "[worker file]" not in out
+
+
+def test_log_traceback_header_collapsed() -> None:
+    out = main._redact_public_log_message("Traceback (most recent call last):")
+    assert "Traceback" not in out
+
+
+def test_log_multiline_traceback_block_collapsed_once() -> None:
+    block = (
+        "E2B sandbox error: Command exited with code 1 and error:\n"
+        "Traceback (most recent call last):\n"
+        '  File "[worker file]", line 9, in main\n'
+        "    main()\n"
+        "TypeError: unsupported operand type(s) for /: 'str' and 'float'"
+    )
+    out = main._redact_public_log_message(block)
+    assert "Traceback" not in out
+    assert "unsupported operand" not in out
+    assert "TypeError" not in out
+    # The non-jargon prefix line survives.
+    assert "E2B sandbox error" in out
+    # One calm note, not five.
+    assert out.count("Worker code raised an error") == 1
+
+
+def test_log_clean_lines_unchanged() -> None:
+    for clean in [
+        "Run started",
+        "Worker completed: 9 words, 44 characters",
+        "[e2b] Executing worker command: python run.py",
+        "[e2b] Uploaded run.py",
+        "Output generated",
+    ]:
+        assert main._redact_public_log_message(clean) == clean, clean
