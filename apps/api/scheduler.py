@@ -15,6 +15,7 @@ from croniter import croniter
 
 from db.factory import get_repositories
 from run_service import create_run, start_run
+from alerting import alerting_tick
 
 logger = logging.getLogger("floom.scheduler")
 
@@ -68,7 +69,9 @@ def _list_scheduled_worker_instances() -> list[dict[str, str]]:
 
 
 def _tick() -> None:
-    """One scheduler tick — fire any due scheduled workers."""
+    """One scheduler tick — fire any due scheduled workers + run alerting check."""
+    # Run alerting check (rate-limited internally; fast no-op on off-ticks)
+    alerting_tick()
     repos = get_repositories()
     now = datetime.now(timezone.utc)
     now_iso_str = now.isoformat()
