@@ -97,7 +97,9 @@ function SyntaxHighlightedCode({ content, language }: { content: string; languag
   }, [content, language]);
 
   return (
-    <pre className="text-xs font-mono overflow-auto max-h-[600px] bg-[var(--bg-2)] dark:bg-[#1e1e2e] rounded-b-md whitespace-pre m-0">
+    <pre
+      className="text-xs font-mono overflow-auto max-h-[600px] bg-[var(--bg-2)] dark:bg-[#1e1e2e] whitespace-pre m-0 rounded-b-[var(--radius-card)]"
+    >
       <code
         ref={codeRef}
         className={language ? `language-${language}` : ""}
@@ -165,20 +167,20 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
           desktop there is no top header over <main>, so it simply pins 72px
           from the top while the document scrolls. self-start lets the sticky
           element detach from the flex stretch. */}
-      <div className="w-64 shrink-0 self-start sticky top-[4.5rem] border border-line">
+      <div className="w-64 shrink-0 self-start sticky top-[4.5rem] border border-line rounded-[var(--radius-card)] overflow-hidden">
         <div className="px-3 py-2 border-b border-line">
           <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
             <FolderOpen className="w-3.5 h-3.5" />
             Files
           </p>
         </div>
-        <div className="py-1">
+        <div className="p-1.5 space-y-0.5">
           {files.map((f) => (
             <button
               key={f.path}
               type="button"
               onClick={() => onSelect?.(f.path)}
-              className={`w-full text-left px-3 py-1.5 text-xs font-mono truncate flex items-center gap-1.5 transition-colors ${
+              className={`w-full text-left px-2.5 py-1.5 text-xs font-mono truncate flex items-center gap-1.5 transition-colors rounded-[var(--radius-button)] ${
                 f.path === selectedPath
                   ? "bg-muted text-foreground font-medium"
                   : "text-muted-foreground hover:bg-muted/50"
@@ -194,7 +196,7 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
 
       <div className="flex-1 min-w-0">
         {selected ? (
-          <div className="border border-line">
+          <div className="border border-line rounded-[var(--radius-card)] overflow-hidden">
             <div className="py-2 px-4 border-b border-line">
               <p className="text-xs font-mono text-muted-foreground">{selected.path}</p>
             </div>
@@ -298,10 +300,11 @@ function FilesEditorEdit({
               <Button size="sm" className="h-6 px-2 text-xs" onClick={addFile}>Add</Button>
             </div>
           )}
+          <div className="px-1.5 pb-1.5 space-y-0.5">
           {files.map((f) => (
             <div
               key={f.path}
-              className={`group flex items-center gap-1.5 px-3 py-1.5 cursor-pointer transition-colors ${
+              className={`group flex items-center gap-1.5 px-2.5 py-1.5 cursor-pointer transition-colors rounded-[var(--radius-button)] ${
                 f.path === effectiveSelected
                   ? "bg-muted text-foreground"
                   : "text-muted-foreground hover:bg-muted/50"
@@ -322,6 +325,7 @@ function FilesEditorEdit({
               )}
             </div>
           ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -333,7 +337,7 @@ function FilesEditorEdit({
         </CardHeader>
         <CardContent className="p-0">
           {selectedFile ? (
-            <div className="rounded-b-md overflow-hidden" style={{ minHeight: 640 }}>
+            <div className="rounded-b-[var(--radius-card)] overflow-hidden" style={{ minHeight: 640 }}>
               <Editor
                 key={selectedFile.path}
                 value={selectedFile.content}
