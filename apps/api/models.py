@@ -1,6 +1,7 @@
 """Pydantic models for Floom V0: request schemas, response schemas, and domain types."""
 
 import re
+import warnings
 from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
@@ -617,9 +618,47 @@ def _resolve_legacy_exec_mode(exec_config: WorkerContractExec) -> Literal["agent
     return "agent"
 
 
+def _lift_legacy_manifest_fields(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Lift legacy top-level inputs/outputs/secrets into the exec block.
+
+    Authoring tools and example workers still emit the OSS schema (top-level
+    ``inputs:`` etc.) even with ``schema_version: "0.3"``, while the 0.3
+    ``WorkerContract`` requires them under ``exec``. Without this lift, pydantic
+    silently drops the unknown top-level fields and the UI shows "This worker
+    has no inputs", breaking the run form.
+
+    Idempotent: a manifest that already has the field under ``exec`` is left
+    unchanged. Emits a ``DeprecationWarning`` when it lifts anything so authors
+    are nudged toward the canonical exec-scoped shape.
+    """
+    if not (
+        isinstance(raw, dict)
+        and raw.get("schema_version") == "0.3"
+        and isinstance(raw.get("exec"), dict)
+    ):
+        return raw
+    exec_block = raw["exec"]
+    lifted: List[str] = []
+    for legacy_key in ("inputs", "outputs", "secrets"):
+        if raw.get(legacy_key) and not exec_block.get(legacy_key):
+            exec_block[legacy_key] = raw[legacy_key]
+            lifted.append(legacy_key)
+    if lifted:
+        warnings.warn(
+            "Worker manifest (schema_version 0.3) declares "
+            f"{', '.join(lifted)} at the top level; these belong under `exec`. "
+            "Lifting them automatically for now, but this is deprecated and "
+            "may stop working in a future schema version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    return raw
+
+
 def parse_worker_manifest(raw: Dict[str, Any]) -> WorkerManifest:
     """Parse a worker manifest, using schema_version to select old vs new shape."""
     if raw.get("schema_version") == "0.3":
+        raw = _lift_legacy_manifest_fields(raw)
         return WorkerContract(**raw)
     return WorkerConfig(**raw)
 
