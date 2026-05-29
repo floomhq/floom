@@ -172,3 +172,20 @@ Final report → `docs/audits/overnight-2026-05-28/RELEASE.md` with:
 - Outstanding P1/P2 with severity + size estimates
 - Codex/Kimi/claude-virgin per-agent verdicts
 - Re-run command for Federico to reproduce
+
+## 2026-05-29 follow-up: /connections data fidelity (lane/connections-data-fidelity, PR #233) — VERIFIED
+
+#194 marked the /connections polish "done" but the LIVE page kept all original
+problems because the DATA was placeholder/redacted, not the UI. Re-diagnosed
+against live API + real Composio v3 response shape, fixed all 5 items, deployed,
+and confirmed via live screenshot.
+
+- E1 account name: stop redacting the owner's own label → real GitHub login / Google email. **VERIFIED**
+- E2 identity: account-info returns the real connected email (was hardcoded null). **VERIFIED**
+- E3 scopes: parse Composio `data.scope` STRING (comma/space delimited); sweep caches it; no fake "default scopes". **VERIFIED** (GitHub 7 / Gmail 12 / LinkedIn 4)
+- E4 Reconnect: shows only on expired/failed, never on active (GitHub `last_check_status="active"` bug). **VERIFIED**
+- E5 table: Actions cell right-aligned to header. **VERIFIED**
+
+- API deployed SHA: 861d38b (via ops/deploy-api.sh) + connection sweep.
+- Live screenshot: `/.screenshots/connections-after-fidelity-20260529.png`
+- PR: https://github.com/floomhq/workeros/pull/233 (merged)
