@@ -10,6 +10,7 @@ import {
   FileText,
   Image as ImageIcon,
   Link as LinkIcon,
+  Lock,
   Plus,
   Search,
   Trash2,
@@ -71,7 +72,13 @@ function ContextsPage() {
     const items = await api.contexts.list();
     setContexts(items);
     setSelectedName((current) => {
-      const selected = nextSelected !== undefined ? nextSelected : (current || items[0]?.name || "");
+      // Default to the first operator-owned pack; only fall back to a system
+      // pack when there are no operator packs yet. This keeps the create CTA
+      // front-and-center for a fresh operator instead of opening a read-only
+      // engine pack.
+      const firstOperator = items.find((c) => !c.system)?.name;
+      const fallback = firstOperator || items[0]?.name || "";
+      const selected = nextSelected !== undefined ? nextSelected : (current || fallback);
       if (selected) {
         api.contexts.get(selected).then(setDetail).catch(() => setDetail(null));
       } else {
@@ -123,6 +130,10 @@ function ContextsPage() {
     return contexts.filter((c) => c.name.toLowerCase().includes(q));
   }, [contexts, search]);
 
+  const operatorPacks = useMemo(() => filteredContexts.filter((c) => !c.system), [filteredContexts]);
+  const systemPacks = useMemo(() => filteredContexts.filter((c) => c.system), [filteredContexts]);
+  const hasOperatorPacks = useMemo(() => contexts.some((c) => !c.system), [contexts]);
+
   async function selectContext(name: string) {
     setSelectedName(name);
     try {
@@ -147,6 +158,7 @@ function ContextsPage() {
   }
 
   async function deleteContext(context: ContextSummary) {
+    if (context.read_only) return; // System packs are not deletable.
     if (!confirm(`Delete knowledge pack "${context.name}"? This cannot be undone.`)) return;
     try {
       await api.contexts.delete(context.name, true);
@@ -173,6 +185,10 @@ function ContextsPage() {
 
   async function uploadFiles(files: FileList | File[]) {
     if (!selectedName || files.length === 0) return;
+    if (detail?.read_only) {
+      toast.error("System packs are read-only.");
+      return;
+    }
     try {
       await api.contexts.upload(selectedName, files);
       await loadContexts(selectedName);
@@ -251,28 +267,65 @@ function ContextsPage() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-[var(--border-default)]">
+          <div className="flex-1 overflow-y-auto">
             {filteredContexts.length === 0 && (
               <div className="p-4 text-center">
-                {contexts.length === 0 ? (
-                  <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground">No knowledge packs yet.</p>
-                    <p className="text-xs text-muted-foreground">Add your first one.</p>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No matches.</p>
-                )}
+                <p className="text-sm text-muted-foreground">No matches.</p>
               </div>
             )}
-            {filteredContexts.map((ctx) => (
-              <PackRow
-                key={ctx.name}
-                ctx={ctx}
-                selected={ctx.name === selectedName}
-                onSelect={() => void selectContext(ctx.name)}
-                onDelete={() => void deleteContext(ctx)}
-              />
-            ))}
+
+            {/* Your packs */}
+            {operatorPacks.length > 0 ? (
+              <div className="divide-y divide-[var(--border-default)]">
+                {operatorPacks.map((ctx) => (
+                  <PackRow
+                    key={ctx.name}
+                    ctx={ctx}
+                    selected={ctx.name === selectedName}
+                    onSelect={() => void selectContext(ctx.name)}
+                    onDelete={() => void deleteContext(ctx)}
+                  />
+                ))}
+              </div>
+            ) : (
+              !search.trim() && (
+                <div className="p-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewContext(true)}
+                    className="w-full rounded-[var(--radius-button)] border border-dashed border-[var(--border-default)] px-3 py-4 text-left hover:bg-muted/40 transition-colors"
+                  >
+                    <span className="flex items-center gap-2 text-sm font-medium">
+                      <Plus className="size-4" />
+                      New knowledge pack
+                    </span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Company facts, ICP, and brand voice your workers read before they act.
+                    </span>
+                  </button>
+                </div>
+              )
+            )}
+
+            {/* System packs (read-only) */}
+            {systemPacks.length > 0 && (
+              <div>
+                <p className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  System
+                </p>
+                <div className="divide-y divide-[var(--border-default)]">
+                  {systemPacks.map((ctx) => (
+                    <PackRow
+                      key={ctx.name}
+                      ctx={ctx}
+                      selected={ctx.name === selectedName}
+                      onSelect={() => void selectContext(ctx.name)}
+                      onDelete={() => void deleteContext(ctx)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -284,9 +337,20 @@ function ContextsPage() {
           onDrop={(e) => { e.preventDefault(); setDragActive(false); void uploadFiles(e.dataTransfer.files); }}
         >
           {!selectedName ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center space-y-2">
-                <p className="text-sm text-muted-foreground">Select a knowledge pack to manage it.</p>
+            <div className="flex-1 flex items-center justify-center p-8">
+              <div className="max-w-md text-center space-y-4">
+                <div className="space-y-1.5">
+                  <h2 className="text-base font-semibold">Give your workers knowledge</h2>
+                  <p className="text-sm text-muted-foreground">
+                    A knowledge pack is a small set of files your workers read before they act:
+                    company facts, your ICP, product details, and brand voice. Attach a pack to a
+                    worker and it references that context on every run.
+                  </p>
+                </div>
+                <Button onClick={() => setShowNewContext(true)}>
+                  <Plus className="size-4" />
+                  New knowledge pack
+                </Button>
               </div>
             </div>
           ) : !detail ? (
@@ -354,7 +418,18 @@ function PackRow({
     >
       <span className="mt-0.5 text-muted-foreground">{selected ? "●" : "○"}</span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{ctx.name}</span>
+        <span className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-medium">{ctx.name}</span>
+          {ctx.read_only && (
+            <span
+              className="inline-flex items-center gap-0.5 rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
+              title="Read-only system pack"
+            >
+              <Lock className="size-2.5" />
+              Read-only
+            </span>
+          )}
+        </span>
         {ctx.description && (
           <span className="block truncate text-xs text-muted-foreground mt-0.5">{ctx.description}</span>
         )}
@@ -371,15 +446,17 @@ function PackRow({
         >
           {copied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5 text-muted-foreground" />}
         </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); onDelete(); } }}
-          className="p-1 rounded hover:bg-muted"
-          title={`Delete ${ctx.name}`}
-        >
-          <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
-        </button>
+        {!ctx.read_only && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); onDelete(); } }}
+            className="p-1 rounded hover:bg-muted"
+            title={`Delete ${ctx.name}`}
+          >
+            <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -408,12 +485,25 @@ function PackDetail({
     });
   }
 
+  const readOnly = Boolean(detail.read_only);
+
   return (
-    <div className={`flex flex-col flex-1 overflow-hidden transition-colors ${dragActive ? "bg-muted/30" : ""}`}>
+    <div className={`flex flex-col flex-1 overflow-hidden transition-colors ${dragActive && !readOnly ? "bg-muted/30" : ""}`}>
       {/* Pack header */}
       <div className="border-b border-[var(--border-default)] px-5 py-4 shrink-0">
         <div className="flex items-start justify-between gap-2">
-          <h2 className="text-base font-semibold">{detail.name}</h2>
+          <h2 className="flex items-center gap-2 text-base font-semibold">
+            {detail.name}
+            {readOnly && (
+              <span
+                className="inline-flex items-center gap-0.5 rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                title="Read-only system pack"
+              >
+                <Lock className="size-2.5" />
+                Read-only
+              </span>
+            )}
+          </h2>
           <button
             type="button"
             onClick={copyPackLink}
@@ -423,6 +513,11 @@ function PackDetail({
             {packLinkCopied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5" />}
           </button>
         </div>
+        {readOnly && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            This is a Workeros engine pack. It shapes how workers are generated and is read-only.
+          </p>
+        )}
         {detail.description ? (
           <p className="text-sm text-muted-foreground mt-0.5">{detail.description}</p>
         ) : (
@@ -475,19 +570,27 @@ function PackDetail({
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Files</p>
-            <Button size="sm" variant="outline" onClick={onAddFile} className="h-7 text-xs gap-1">
-              <Plus className="size-3.5" />
-              Add file
-            </Button>
+            {!readOnly && (
+              <Button size="sm" variant="outline" onClick={onAddFile} className="h-7 text-xs gap-1">
+                <Plus className="size-3.5" />
+                Add file
+              </Button>
+            )}
           </div>
 
           {detail.files.length === 0 ? (
             <div className="rounded-[var(--radius-button)] border border-dashed border-[var(--border-default)] p-6 text-center">
-              <p className="text-sm text-muted-foreground">This pack is empty. Add a file to get started.</p>
-              <Button size="sm" variant="outline" className="mt-3" onClick={onAddFile}>
-                <Plus className="size-4" />
-                Add file
-              </Button>
+              {readOnly ? (
+                <p className="text-sm text-muted-foreground">This system pack has no files.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">This pack is empty. Add a file to get started.</p>
+                  <Button size="sm" variant="outline" className="mt-3" onClick={onAddFile}>
+                    <Plus className="size-4" />
+                    Add file
+                  </Button>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-1">
@@ -496,6 +599,7 @@ function PackDetail({
                   key={file.path}
                   file={file}
                   packName={detail.name}
+                  readOnly={readOnly}
                   onOpen={() => onOpenFile(file)}
                   onDelete={() => onDeleteFile(file)}
                 />
@@ -517,11 +621,13 @@ function PackDetail({
 function FileCard({
   file,
   packName,
+  readOnly,
   onOpen,
   onDelete,
 }: {
   file: ContextFileItem;
   packName: string;
+  readOnly?: boolean;
   onOpen: () => void;
   onDelete: () => void;
 }) {
@@ -561,14 +667,16 @@ function FileCard({
         >
           {fileLinkCopied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5 text-muted-foreground" />}
         </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="p-1 rounded hover:bg-muted"
-          title="Delete file"
-        >
-          <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="p-1 rounded hover:bg-muted"
+            title="Delete file"
+          >
+            <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
+          </button>
+        )}
       </div>
     </div>
   );

@@ -967,6 +967,35 @@ def _build_system_prompt(user_id: str) -> str:
     return "\n\n".join(part for part in [workspace_content, skill_md] if part)
 
 
+def workspace_agent_tool_metadata(user_id: str) -> List[Dict[str, str]]:
+    """Return [{name, description}] for the workspace agent's tools.
+
+    No secret values, args, or host paths — names + one-line descriptions only.
+    """
+    tools = _workspace_tools(user_id)
+    meta: List[Dict[str, str]] = []
+    for tool in tools:
+        name = str(getattr(tool, "name", "") or "")
+        description = str(getattr(tool, "description", "") or "")
+        if name:
+            meta.append({"name": name, "description": description})
+    return meta
+
+
+def workspace_agent_info(user_id: str) -> Dict[str, Any]:
+    """Read-only metadata for the workspace agent that powers /chat.
+
+    Returns the resolved system prompt (workspace.md + engine SKILL.md + live
+    workspace snapshot) and the agent's available tools (names + descriptions).
+    Contains no secret values.
+    """
+    return {
+        "agent_id": WORKSPACE_AGENT_ID,
+        "system_prompt": _build_system_prompt(user_id),
+        "tools": workspace_agent_tool_metadata(user_id),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Chat streaming
 # ---------------------------------------------------------------------------
