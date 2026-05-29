@@ -5513,6 +5513,15 @@ def approve_run(
         follow_up_run_id=follow_up_run_id,
     )
 
+    # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
+    # state. Without this the original run is stuck at pending_approval forever
+    # (zombie approval); the decision is recorded in the approvals table.
+    repos.runs.update_status(
+        user_id=auth.user_id,
+        run_id=run_id,
+        status=RunStatus.COMPLETED.value,
+    )
+
     # Kick off the follow-up run
     start_run(follow_up_run_id, worker_id, follow_up_inputs, user_id=auth.user_id, repos=repos)
 
@@ -5553,6 +5562,15 @@ def reject_run(
         run_id=run_id,
         decided_at=decided_at,
         reason=body.reason,
+    )
+
+    # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
+    # state so it is not stuck forever (zombie approval). The rejection itself
+    # is recorded in the approvals table (status='rejected' + reason).
+    repos.runs.update_status(
+        user_id=auth.user_id,
+        run_id=run_id,
+        status=RunStatus.COMPLETED.value,
     )
 
     _sse_publish(run_id, {
