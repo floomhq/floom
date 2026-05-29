@@ -1956,7 +1956,20 @@ def execute_run(
                 run_id,
                 {"type": "finish", "status": finish_status, "error": result_error or "Run failed"},
             )
-            log_fn(f"Run failed: {result_error}", level="error")
+            # G5 P1-A: the "Recent logs" panel renders this line verbatim, so it
+            # must match the calm Error card — never the raw exception/path. Run
+            # the error through the SAME operator-headline path used for the
+            # Error card before logging.
+            _log_failure_line = f"Run failed: {result_error}"
+            try:
+                import main as _main
+
+                _calm = _main._operator_error_message(result_error, result_error_code)
+                if _calm:
+                    _log_failure_line = f"Run failed: {_calm}"
+            except Exception:
+                _log_failure_line = "Run failed."
+            log_fn(_log_failure_line, level="error")
             return
 
         # S47 HITL: if the worker emitted decision_required AND the worker declares
@@ -2074,7 +2087,18 @@ def execute_run(
                 # operator "generated, but its first test run failed: <reason>"
                 # instead of presenting a gated worker as ready.
                 _sse_event["smoke_status"] = _smoke_event.get("status")
-                _sse_event["smoke_reason"] = _smoke_event.get("reason")
+                # G5 P1-A: the smoke reason can carry a sandbox path
+                # (/home/user/worker/run.py) or a bare Python exception. Route
+                # it through the operator-headline/redaction path before it
+                # leaves the backend on the SSE stream.
+                try:
+                    import main as _main
+
+                    _sse_event["smoke_reason"] = _main.humanize_smoke_reason(
+                        _smoke_event.get("reason")
+                    )
+                except Exception:
+                    _sse_event["smoke_reason"] = None
             _publish_sse(run_id, _sse_event)
         if quality_warnings and owner_id:
             repos_obj.runs.update(
