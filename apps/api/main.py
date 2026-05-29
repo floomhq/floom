@@ -4589,6 +4589,30 @@ def _rewrite_worker_yml_id(worker_yml: str, new_id: str) -> str:
     return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
 
 
+# Placeholder run.py for a script worker created without code (e.g. the
+# worker-author drafted a script-mode worker but returned no run_code, or a
+# .md upload). It MUST satisfy BOTH execution contracts:
+#   - E2B pure-script (the default runner): `python run.py` must WRITE
+#     result.json with {"status","outputs","artifacts"} or the run fails with
+#     error_code=missing_result (live-found 2026-05-29 — a runnable worker is
+#     part of the wedge gate).
+#   - Legacy local runner: a `run(inputs, context)` callable.
+_DEFAULT_RUN_PY_STUB = (
+    "import json\n"
+    "from pathlib import Path\n"
+    "from typing import Dict, Any\n\n\n"
+    "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
+    "    # Placeholder worker — edit run.py to do the real work.\n"
+    "    return {\"status\": \"success\", \"outputs\": {}, \"artifacts\": []}\n\n\n"
+    "if __name__ == \"__main__\":\n"
+    "    # E2B pure-script entry: write result.json so the run does not fail\n"
+    "    # with missing_result. Edit this to produce real outputs.\n"
+    "    Path(\"result.json\").write_text(\n"
+    "        json.dumps({\"status\": \"success\", \"outputs\": {}, \"artifacts\": []})\n"
+    "    )\n"
+)
+
+
 def _register_worker_from_files(
     files: List[DraftFile],
     *,
@@ -4656,11 +4680,7 @@ def _register_worker_from_files(
             (dest / parts[-1]).write_text(f.content)
 
         if not (target_dir / "run.py").exists():
-            (target_dir / "run.py").write_text(
-                "from typing import Dict, Any\n\n"
-                "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
-                "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
-            )
+            (target_dir / "run.py").write_text(_DEFAULT_RUN_PY_STUB)
         if not (target_dir / "requirements.txt").exists():
             (target_dir / "requirements.txt").write_text("")
     except HTTPException:
@@ -4841,11 +4861,7 @@ async def draft_and_create_worker(
             (dest / parts[-1]).write_text(f.content)
 
         if not (target_dir / "run.py").exists():
-            (target_dir / "run.py").write_text(
-                "from typing import Dict, Any\n\n"
-                "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
-                "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
-            )
+            (target_dir / "run.py").write_text(_DEFAULT_RUN_PY_STUB)
         if not (target_dir / "requirements.txt").exists():
             (target_dir / "requirements.txt").write_text("")
     except Exception as exc:
@@ -5097,11 +5113,7 @@ async def create_worker_from_bundle(
     # Ensure run.py exists (stub if absent)
     run_py_path = target_dir / "run.py"
     if not run_py_path.exists():
-        run_py_path.write_text(
-            "from typing import Dict, Any\n\n"
-            "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
-            "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
-        )
+        run_py_path.write_text(_DEFAULT_RUN_PY_STUB)
 
     # Ensure requirements.txt exists
     req_path = target_dir / "requirements.txt"
