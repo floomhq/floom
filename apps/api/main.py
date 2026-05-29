@@ -6963,6 +6963,12 @@ def _operator_error_message(
 # the draft-and-create response and the worker-author SSE event.
 _SMOKE_REASON_CODE_RE = re.compile(r"\s*\(error_code=([A-Za-z0-9_]+)\)\s*$")
 
+# The smoke pipeline also builds reasons as "<code>: <raw error>" (e.g.
+# "output_validation_failed: worker reported success but produced no real
+# output"). The leading code prefix must be stripped and routed through the
+# operator-headline path too, never leaked verbatim.
+_SMOKE_REASON_LEADING_CODE_RE = re.compile(r"^([a-z][a-z0-9_]+):\s*")
+
 
 def humanize_smoke_reason(reason: Optional[str]) -> Optional[str]:
     """Calm, operator-safe rendering of a smoke `reason` string.
@@ -6983,6 +6989,17 @@ def humanize_smoke_reason(reason: Optional[str]) -> Optional[str]:
         if code.lower() in ("unknown", "none", ""):
             code = None
         text = _SMOKE_REASON_CODE_RE.sub("", text).strip()
+    # No trailing code? The pipeline may instead prefix the reason as
+    # "<code>: <raw error>" (e.g. "output_validation_failed: …"). Treat the
+    # leading prefix as the code and strip it so it never reaches the operator
+    # verbatim, then route through the same headline/redaction path.
+    if code is None:
+        lead = _SMOKE_REASON_LEADING_CODE_RE.match(text)
+        if lead:
+            lead_code = lead.group(1)
+            if lead_code.lower() not in ("unknown", "none", ""):
+                code = lead_code
+            text = _SMOKE_REASON_LEADING_CODE_RE.sub("", text).strip()
     # A bare quoted token (e.g. "'name'") is a stripped KeyError arg — meaningless
     # to an operator. Treat it as a worker-code error rather than letting the bare
     # key pass through verbatim.
