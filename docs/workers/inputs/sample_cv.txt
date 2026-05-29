@@ -1,0 +1,31 @@
+Anna Keller
+Senior Java Backend Engineer
+Berlin, Germany | anna.keller@example.com | +49 123 456789
+
+EXPERIENCE
+
+Senior Java Backend Engineer — Solaris Bank, Berlin (2021–present)
+- Designed event-driven microservices with Spring Boot and Apache Kafka for real-time payment processing
+- Led migration of legacy monolith to 12 independently deployable services (reduced deployment time by 70%)
+- Mentored 3 junior engineers; established code review standards adopted across the team
+
+Backend Engineer — Zalando SE, Berlin (2018–2021)
+- Built scalable order management APIs handling 50k+ requests/minute
+- Implemented Kubernetes-based autoscaling reducing infrastructure costs by 30%
+- Contributed to open-source Spring Boot tooling (200+ GitHub stars)
+
+Junior Developer — Accenture, Frankfurt (2016–2018)
+- Java EE backend development for a major German retail bank's internal risk system
+
+EDUCATION
+M.Sc. Computer Science — TU Berlin (2016)
+B.Sc. Software Engineering — Universität Hamburg (2014)
+
+SKILLS
+Java, Spring Boot, Apache Kafka, Kubernetes, Docker, PostgreSQL, Redis, REST APIs, Microservices, AWS, CI/CD, Git
+
+LANGUAGES
+German (native), English (C1)
+
+AVAILABILITY
+Available from 1 July 2026. Open to permanent or contract roles. Rate: EUR 95k/year or EUR 750/day.
