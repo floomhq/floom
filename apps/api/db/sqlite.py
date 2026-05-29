@@ -1013,11 +1013,31 @@ class SqliteRunRepository:
             updates["error_code"] = error_code
         if status == RunStatus.RUNNING.value:
             updates["started_at"] = now_iso()
+        # PENDING_APPROVAL marks the END of execution: the worker ran, emitted a
+        # decision_required, and halted to wait for the operator. Capture the real
+        # execution duration NOW. Without this, the later approve/reject COMPLETED
+        # transition would measure completed_at - started_at = execution time PLUS
+        # the entire approval-wait (a HITL run-1 showed "28m" duration that was
+        # mostly the operator thinking time). G5 rescore4 P2 (2026-05-29).
+        if status == RunStatus.PENDING_APPROVAL.value and run.get("duration_ms") is None:
+            started_at = run.get("started_at")
+            if started_at:
+                try:
+                    import datetime as _dt
+
+                    started = _dt.datetime.fromisoformat(started_at)
+                    ended = _dt.datetime.fromisoformat(now_iso())
+                    updates["duration_ms"] = int((ended - started).total_seconds() * 1000)
+                except Exception:
+                    pass
         if status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
             completed_at = now_iso()
             updates["completed_at"] = completed_at
             started_at = run.get("started_at")
-            if started_at:
+            # Preserve a duration_ms already captured at PENDING_APPROVAL park time
+            # — recomputing here would re-add the approval-wait. Only compute when
+            # the run never parked for approval (the normal path).
+            if started_at and run.get("duration_ms") is None:
                 try:
                     import datetime as _dt
 

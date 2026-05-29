@@ -139,27 +139,39 @@ export default function ConnectionsClient({
         lastUsedBySlug
       )
     );
+    const isPlaceholder = (label: string) =>
+      label === "Expired — reconnect to see account" || label.startsWith("account …");
+
+    // G5 rescore4 P2 (2026-05-29): two EXPIRED grants of the same app render as
+    // identical "Google Calendar (Expired)" rows — indistinguishable noise the
+    // operator can't act on differently (both just need a reconnect). Collapse
+    // duplicate placeholder rows per app to a single entry. Real, distinctly
+    // labelled accounts (different emails) are always kept and disambiguated.
+    const seenPlaceholderApp = new Set<string>();
+    const deduped = views.filter((v) => {
+      const key = v.app_name?.toLowerCase() ?? "";
+      if (!isPlaceholder(v.accountLabel)) return true;
+      if (seenPlaceholderApp.has(key)) return false;
+      seenPlaceholderApp.add(key);
+      return true;
+    });
+
     const labelByApp: Record<string, Set<string>> = {};
-    for (const v of views) {
+    for (const v of deduped) {
       const key = v.app_name?.toLowerCase() ?? "";
       if (!labelByApp[key]) labelByApp[key] = new Set();
       labelByApp[key].add(v.accountLabel);
     }
-    return views.map((v) => {
+    return deduped.map((v) => {
       const key = v.app_name?.toLowerCase() ?? "";
       const labelsForApp = labelByApp[key];
-      // P2-7: do not append an ID-suffix disambiguator to the
-      // "Expired — reconnect to see account" placeholder. It is not a real
-      // account label, and tacking a hash onto it just reintroduces the noise
-      // the audit flagged. Two expired rows of the same app reading identically
-      // is fine — neither has account info until reconnect.
-      const isPlaceholderLabel =
-        v.accountLabel === "Expired — reconnect to see account" ||
-        v.accountLabel.startsWith("account …");
+      // Do not append an ID-suffix disambiguator to a placeholder label — it is
+      // not a real account label. Disambiguate only real, distinct accounts of
+      // the same app that happen to share a display label.
       if (
-        !isPlaceholderLabel &&
+        !isPlaceholder(v.accountLabel) &&
         labelsForApp &&
-        labelsForApp.size < views.filter((x) => (x.app_name?.toLowerCase() ?? "") === key).length
+        labelsForApp.size < deduped.filter((x) => (x.app_name?.toLowerCase() ?? "") === key).length
       ) {
         const suffix = v.id.slice(-6);
         return { ...v, accountLabel: `${v.accountLabel} (…${suffix})` };
