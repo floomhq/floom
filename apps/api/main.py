@@ -4730,6 +4730,47 @@ async def draft_and_create_worker(
     import yaml as pyyaml
     from models import parse_worker_manifest
 
+    async def _smoke_gate_and_respond(
+        created_worker_id: str, sample_input: Any
+    ) -> DraftAndCreateResponse:
+        # Wedge safety net (FIX 4, 2026-05-29): unify the raw create path with the
+        # UI worker-author path. Prove the generated SCRIPT-mode worker actually
+        # RUNS (bounded smoke + repair), validate it produces real output, and
+        # gate it: a smoke-failed worker is DISABLED (not deleted — stays
+        # editable) so it is never presented as a clean, ready worker. Runs on a
+        # worker thread so the E2B run does not block the event loop. Never fails
+        # the create.
+        smoke_result: Optional[Dict[str, Any]] = None
+        try:
+            smoke_bundle: Dict[str, Any] = {}
+            if isinstance(sample_input, dict):
+                smoke_bundle["example_input"] = sample_input
+
+            def _draft_smoke_log(msg: str, level: str = "info") -> None:
+                logger.info("draft-and-create smoke %s: %s", created_worker_id, msg)
+
+            smoke_result = await asyncio.to_thread(
+                smoke_and_gate_generated_worker,
+                created_worker_id,
+                smoke_bundle,
+                user_id=auth.user_id,
+                repos=repos,
+                log_fn=_draft_smoke_log,
+            )
+        except Exception:
+            logger.exception("draft-and-create smoke+gate failed for %s", created_worker_id)
+
+        if isinstance(smoke_result, dict) and smoke_result.get("status") == "failed":
+            return DraftAndCreateResponse(
+                worker_id=created_worker_id,
+                smoke_status="failed",
+                smoke_reason=str(smoke_result.get("reason") or "first test run failed"),
+            )
+        return DraftAndCreateResponse(
+            worker_id=created_worker_id,
+            smoke_status=(smoke_result.get("status") if isinstance(smoke_result, dict) else None),
+        )
+
     # ----------------------------------------------------------------
     # Path A: pre-supplied files (upload flow — skip LLM)
     # ----------------------------------------------------------------
@@ -4740,7 +4781,13 @@ async def draft_and_create_worker(
             user_id=auth.user_id,
             repos=repos,
         )
-        return DraftAndCreateResponse(worker_id=worker_id)
+        sample_input = None
+        try:
+            cfg = get_worker_config_for_run(worker_id)
+            sample_input = getattr(cfg, "example_input", None)
+        except Exception:
+            sample_input = None
+        return await _smoke_gate_and_respond(worker_id, sample_input)
 
     # ----------------------------------------------------------------
     # Path B: LLM draft from prompt
@@ -4887,47 +4934,12 @@ async def draft_and_create_worker(
             invalidate_worker_cache()
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    # Wedge safety net (FIX 4, 2026-05-29): unify the raw create path with the UI
-    # worker-author path. Prove the generated SCRIPT-mode worker actually RUNS
-    # (bounded smoke + repair), validate it produces real output, and gate it:
-    # a smoke-failed worker is DISABLED (not deleted — stays editable) so it is
-    # never presented as a clean, ready worker. Runs on a worker thread so the
-    # E2B run does not block the event loop. Never fails the create.
-    smoke_result: Optional[Dict[str, Any]] = None
+    sample_input = None
     try:
-        sample_input = None
-        try:
-            sample_input = getattr(_config2, "example_input", None)
-        except Exception:
-            sample_input = None
-        smoke_bundle: Dict[str, Any] = {}
-        if isinstance(sample_input, dict):
-            smoke_bundle["example_input"] = sample_input
-
-        def _draft_smoke_log(msg: str, level: str = "info") -> None:
-            logger.info("draft-and-create smoke %s: %s", worker_id, msg)
-
-        smoke_result = await asyncio.to_thread(
-            smoke_and_gate_generated_worker,
-            worker_id,
-            smoke_bundle,
-            user_id=auth.user_id,
-            repos=repos,
-            log_fn=_draft_smoke_log,
-        )
+        sample_input = getattr(_config2, "example_input", None)
     except Exception:
-        logger.exception("draft-and-create smoke+gate failed for %s", worker_id)
-
-    if isinstance(smoke_result, dict) and smoke_result.get("status") == "failed":
-        return DraftAndCreateResponse(
-            worker_id=worker_id,
-            smoke_status="failed",
-            smoke_reason=str(smoke_result.get("reason") or "first test run failed"),
-        )
-    return DraftAndCreateResponse(
-        worker_id=worker_id,
-        smoke_status=(smoke_result.get("status") if isinstance(smoke_result, dict) else None),
-    )
+        sample_input = None
+    return await _smoke_gate_and_respond(worker_id, sample_input)
 
 
 def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tuple[str, WorkerConfig]:
