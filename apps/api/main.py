@@ -1871,6 +1871,13 @@ def _worker_hidden_from_api(worker_id: str) -> bool:
 def _worker_source_visible_to_api(worker_id: str) -> bool:
     if _worker_hidden_from_api(worker_id):
         return False
+    # Public stock/example workers ship their source on purpose — the Source
+    # tab is meant to show run.py / SKILL.md / worker.yml so users can learn
+    # from and fork them. These are git-tracked, so the generic
+    # "not tracked" rule below would hide them (R3: /workers/<stock>#code was
+    # empty for every example worker). Make stock source explicitly visible.
+    if worker_id in PUBLIC_STOCK_WORKER_IDS:
+        return True
     return worker_id not in _tracked_worker_ids()
 
 
