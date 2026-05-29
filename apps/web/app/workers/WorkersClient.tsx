@@ -16,6 +16,7 @@ import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { BrandLogo } from "@/components/connections/BrandLogo";
+import { Sparkline } from "@/components/Sparkline";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -247,7 +248,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Workers</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            All available workers. Run, edit, or create.
+            Your AI workers.
           </p>
         </div>
       </div>
@@ -616,9 +617,12 @@ function WorkerCard({
           <div className="min-w-0 flex-1">
             <h3 className={`font-medium text-[15px] leading-snug line-clamp-2 ${worker.archived ? "text-muted-foreground" : ""}`}>{worker.name}</h3>
             {worker.archived ? (
-              <span className="mt-1 inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                <Archive className="size-2.5" />
-                Archived
+              <span
+                className="mt-1 inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1 py-0.5 text-muted-foreground"
+                title="Archived"
+                aria-label="Archived"
+              >
+                <Archive className="size-3" />
               </span>
             ) : worker.is_example && (
               <span className="mt-1 inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
@@ -673,10 +677,26 @@ function WorkerCard({
           </div>
         )}
 
+        {/* Default: bare timestamp. On hover, replaced by extended stats + optional sparkline. */}
         {stats?.last_run_at && (
-          <p className="text-xs text-muted-foreground mt-auto">
+          <p className="text-xs text-muted-foreground mt-auto group-hover:hidden">
             Last run {formatRelativeTime(stats.last_run_at)}
           </p>
+        )}
+
+        {/* Hover-only block: sparkline + extended stats line */}
+        {stats && (stats.last_run_at || stats.runs_7d > 0) && (
+          <div className="hidden group-hover:flex flex-col gap-1.5 mt-auto">
+            {Array.isArray(worker.timeseries) && worker.timeseries.length > 0 && (
+              <Sparkline data={worker.timeseries} width={120} height={24} />
+            )}
+            <p className="text-xs text-muted-foreground">
+              {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
+              {stats.last_run_at && stats.runs_7d > 0 ? " · " : ""}
+              {stats.runs_7d > 0 ? `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d` : ""}
+              {stats.success_rate_7d != null ? ` · ${Math.round(stats.success_rate_7d * 100)}% success` : ""}
+            </p>
+          </div>
         )}
       </CardContent>
       </Link>
