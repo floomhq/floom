@@ -120,8 +120,11 @@ function CatalogCard({
           />
         </div>
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold text-ink">{item.name}</h2>
-          <p className="mt-0.5 truncate text-xs text-[var(--ink-mute)]">{item.slug}</p>
+          {/* P2-8 (audit 2026-05-29): dropped the dev-facing Composio toolkit
+              slug ("Gmail / gmail"). The slug is internal plumbing and only
+              added noise. The human name now gets two lines so it no longer
+              truncates ("Google Calen…" → "Google Calendar"). */}
+          <h2 className="line-clamp-2 text-sm font-semibold text-ink">{item.name}</h2>
         </div>
       </div>
 
@@ -332,7 +335,7 @@ export default function ConnectionsBrowsePage() {
                   Does the app you need expose an API key? Add it as a secret and any worker can read it.
                 </p>
                 <Link
-                  href={`/secrets?prefill=${encodeURIComponent(search.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}
+                  href={`/connections/secrets?prefill=${encodeURIComponent(search.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}
                   className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--accent)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] hover:opacity-90 transition-opacity"
                 >
                   Add {search.trim()} as a secret

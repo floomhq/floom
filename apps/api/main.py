@@ -6573,8 +6573,18 @@ INFRA_PATH_SPECS: list[PlatformSecretSpec] = [
     },
 ]
 
-# Set of platform secret names for fast membership checks (used in list_secrets filtering)
-PLATFORM_SECRETS: frozenset[str] = frozenset(s["name"] for s in PLATFORM_SECRET_SPECS)
+# Set of platform-managed names for fast membership checks. Used to keep
+# system/infra vars out of the operator-facing /secrets list and to refuse
+# upsert/delete/test on them.
+#
+# P1-8 (audit 2026-05-29): this previously covered only PLATFORM_SECRET_SPECS,
+# so the INFRA_PATH_SPECS vars (FLOOM_DB, FLOOM_WORKERS_DIR, FLOOM_ARTIFACTS_DIR,
+# FLOOM_CONTEXTS_DIR, FLOOM_RUN_TIMEOUT) leaked into the user Secrets list with a
+# Delete action — deleting FLOOM_DB from the UI could break the running system.
+# Both spec lists are platform-managed and must be excluded from the user API.
+PLATFORM_SECRETS: frozenset[str] = frozenset(
+    s["name"] for s in (PLATFORM_SECRET_SPECS + INFRA_PATH_SPECS)
+)
 
 
 @app.get("/secrets", response_model=List[SecretItem])
