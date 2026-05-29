@@ -108,7 +108,7 @@ export function CliCommandPanel() {
           </p>
         </div>
         {storedSecret ? (
-          <div className="flex items-center gap-2 border border-line bg-[var(--bg-2)] px-3 py-2">
+          <div className="flex items-center gap-2 rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] px-3 py-2">
             <code className="flex-1 truncate font-mono text-xs">
               {revealed ? storedSecret : maskSecret(storedSecret)}
             </code>
@@ -143,7 +143,7 @@ export function CliCommandPanel() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") saveSecret();
               }}
-              className="flex-1 border border-line bg-[var(--bg-2)] px-3 py-2 font-mono text-xs outline-none"
+              className="flex-1 rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] px-3 py-2 font-mono text-xs outline-none"
             />
             <Button
               variant="outline"

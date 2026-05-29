@@ -74,6 +74,29 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Source-file derivation
+// ---------------------------------------------------------------------------
+
+// R3: on prod the API returns worker.files = [] for many workers (the source
+// dir isn't on disk in that deploy layout), but the source IS present in the
+// dedicated content fields (run_py_content / skill_md_content / manifest_yaml).
+// Build a WorkerFile[] from those fields so the Source tab actually renders.
+function deriveSourceFiles(worker: WorkerDetail | null): WorkerFile[] {
+  if (!worker) return [];
+  if (worker.files && worker.files.length > 0) return worker.files;
+
+  const derived: WorkerFile[] = [];
+  const push = (path: string, language: string, content?: string | null) => {
+    if (!content) return;
+    derived.push({ path, language, content, binary: false, size: content.length });
+  };
+  push("worker.yml", "yaml", worker.manifest_yaml);
+  push("SKILL.md", "markdown", worker.skill_md_content);
+  push("run.py", "python", worker.run_py_content ?? worker.run_py);
+  return derived;
+}
+
+// ---------------------------------------------------------------------------
 // Main page component
 // ---------------------------------------------------------------------------
 
@@ -207,7 +230,7 @@ export default function WorkerDetailPage() {
           else if (inp.type === "boolean") defaults[inp.name] = false;
         });
         setInputs(defaults);
-        const files = w.files || [];
+        const files = deriveSourceFiles(w);
         const defaultFile = files.find((f) => f.path === "SKILL.md") || files.find((f) => f.path === "worker.yml") || files[0];
         if (defaultFile) setSelectedFile(defaultFile.path);
         // S42: init edit-mode file state
@@ -410,7 +433,10 @@ export default function WorkerDetailPage() {
     setSavingTriggers(true);
     try {
       const triggerYaml = buildTriggersYaml(triggerRows);
-      const currentYaml = worker.files?.find((f) => f.path === "worker.yml")?.content || "";
+      const currentYaml =
+        deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
+        worker.manifest_yaml ||
+        "";
       const newYaml = replaceTriggerBlock(currentYaml, triggerYaml);
       await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: newYaml }]);
       toast.success("Triggers saved");
@@ -758,7 +784,7 @@ export default function WorkerDetailPage() {
           ) : (
             <FilesEditor
               mode="view"
-              files={worker.files || []}
+              files={deriveSourceFiles(worker)}
               selectedPath={selectedFile}
               onSelect={setSelectedFile}
             />

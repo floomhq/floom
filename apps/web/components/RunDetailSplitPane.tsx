@@ -124,8 +124,11 @@ export function RunDetailSplitPane({
 
       <RunMetricsStrip run={run} parts={transcriptParts} />
 
-      <div className="flex min-h-[280px] gap-0 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
-        <aside className="w-[320px] min-w-[240px] max-w-[460px] resize-x overflow-auto border-r border-border bg-muted/25">
+      {/* R4: the split pane was unbounded — long transcripts/logs grew the
+          whole page so it scrolled "into infinity". Cap the pane at a
+          viewport-relative height and let each pane scroll WITHIN itself. */}
+      <div className="flex min-h-[280px] max-h-[calc(100vh-13rem)] gap-0 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+        <aside className="w-[320px] min-w-[240px] max-w-[460px] resize-x overflow-y-auto border-r border-border bg-muted/25">
           {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
               The timeline IS the panel; the label was dead weight (ChatGPT
               audit P-1). */}
@@ -136,9 +139,9 @@ export function RunDetailSplitPane({
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1">
-          <Tabs defaultValue="transcript" className="h-full">
-            <div className="border-b border-border px-3 py-2">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <Tabs defaultValue="transcript" className="flex h-full min-h-0 flex-col">
+            <div className="shrink-0 border-b border-border px-3 py-2">
               <TabsList variant="line">
                 <TabsTrigger value="transcript">Result</TabsTrigger>
                 <TabsTrigger value="logs">Logs</TabsTrigger>
@@ -147,19 +150,19 @@ export function RunDetailSplitPane({
                 <TabsTrigger value="metadata">Metadata</TabsTrigger>
               </TabsList>
             </div>
-            <TabsContent value="transcript" className="p-4">
+            <TabsContent value="transcript" className="min-h-0 flex-1 overflow-y-auto p-4">
               <TranscriptView run={run} parts={transcriptParts} />
             </TabsContent>
-            <TabsContent value="logs" className="p-4">
+            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto p-4">
               <Terminal lines={run.logs.map((log) => ({ level: log.level, message: log.message, timestamp: log.timestamp }))} />
             </TabsContent>
-            <TabsContent value="output" className="p-4">
+            <TabsContent value="output" className="min-h-0 flex-1 overflow-y-auto p-4">
               <OutputView run={run} />
             </TabsContent>
-            <TabsContent value="raw" className="p-4">
+            <TabsContent value="raw" className="min-h-0 flex-1 overflow-y-auto p-4">
               <RawView run={run} parts={transcriptParts} />
             </TabsContent>
-            <TabsContent value="metadata" className="p-4">
+            <TabsContent value="metadata" className="min-h-0 flex-1 overflow-y-auto p-4">
               <MetadataView run={run} />
             </TabsContent>
           </Tabs>

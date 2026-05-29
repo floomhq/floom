@@ -16,7 +16,6 @@ import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { BrandLogo, normalizeBrandSlug } from "@/components/connections/BrandLogo";
-import { Sparkline } from "@/components/Sparkline";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -239,7 +238,15 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     return pool;
   }, [workers, archivedWorkers, tab, folderFilter, tagFilter, favorites, searchLower]);
 
-  const showFolders = tab === "all" && subFolders.length > 0 && !searchLower && !tagFilter;
+  // R5: one combined breadcrumb + folder-chip row. Render whenever we're on
+  // the All tab (no search/tag) and there is either a drill-in path or
+  // folders to show — so selecting a folder swaps content within the same
+  // row instead of opening a new one.
+  const showFolderNav =
+    tab === "all" &&
+    !searchLower &&
+    !tagFilter &&
+    (breadcrumbs.length > 0 || subFolders.length > 0);
   const isArchivedTab = tab === "archived";
 
   return (
@@ -283,33 +290,37 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
             </Tabs>
           </div>
 
-          {tab === "all" && breadcrumbs.length > 0 && (
-            <div className="flex items-center gap-1 text-sm text-muted-foreground">
-              <button
-                type="button"
-                onClick={() => setFolder(null)}
-                className="hover:text-foreground transition-colors"
-              >
-                Workers
-              </button>
-              {breadcrumbs.map((bc, i) => (
-                <span key={bc.path} className="flex items-center gap-1">
-                  <ChevronRight className="size-3.5" />
+          {/* R5: breadcrumb + folder chips share ONE wrapping row so
+              selecting a folder never opens a second row / pushes content
+              down. The block renders whenever there are folders to show or
+              a drill-in path is active, on the All tab without search/tag. */}
+          {showFolderNav && (
+            <div className="flex items-center gap-1.5 flex-wrap min-h-7">
+              {breadcrumbs.length > 0 ? (
+                <span className="flex items-center gap-1 text-sm text-muted-foreground mr-1">
                   <button
                     type="button"
-                    onClick={() => setFolder(bc.path)}
+                    onClick={() => setFolder(null)}
                     className="hover:text-foreground transition-colors"
                   >
-                    {bc.label}
+                    Workers
                   </button>
+                  {breadcrumbs.map((bc) => (
+                    <span key={bc.path} className="flex items-center gap-1">
+                      <ChevronRight className="size-3.5" />
+                      <button
+                        type="button"
+                        onClick={() => setFolder(bc.path)}
+                        className="hover:text-foreground transition-colors"
+                      >
+                        {bc.label}
+                      </button>
+                    </span>
+                  ))}
                 </span>
-              ))}
-            </div>
-          )}
-
-          {showFolders && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-muted-foreground mr-1">Folders:</span>
+              ) : (
+                <span className="text-xs text-muted-foreground mr-1">Folders:</span>
+              )}
               {subFolders.map(({ path, label, count }) => (
                 <button
                   key={path}
@@ -585,10 +596,10 @@ function WorkerCard({
 
   return (
     <Card
-      className="group h-full hover:border-border hover:shadow-sm transition-all overflow-hidden"
+      className="group h-full hover:shadow-sm transition-shadow overflow-hidden"
       title={hoverDescription || undefined}
     >
-      <Link href={`/workers/${worker.id}`} className="block h-full" target="_blank" rel="noopener noreferrer">
+      <Link href={`/workers/${worker.id}`} className="block h-full">
       <CardContent className="h-full flex flex-col p-4 gap-1.5">
         {/* Avatar + title row */}
         <div className="flex items-start justify-between gap-3">
@@ -659,26 +670,16 @@ function WorkerCard({
           </div>
         )}
 
-        {/* Default: bare timestamp. On hover, replaced by extended stats + optional sparkline. */}
-        {stats?.last_run_at && (
-          <p className="text-xs text-muted-foreground mt-auto group-hover:hidden">
-            Last run {formatRelativeTime(stats.last_run_at)}
-          </p>
-        )}
-
-        {/* Hover-only block: sparkline + extended stats line */}
+        {/* Stable footer: single line, never changes height on hover (R1 —
+            the prior group-hover content swap grew the card on hover and
+            jumped the whole row). Show the richest stats we have, on one line. */}
         {stats && (stats.last_run_at || stats.runs_7d > 0) && (
-          <div className="hidden group-hover:flex flex-col gap-1.5 mt-auto">
-            {Array.isArray(worker.timeseries) && worker.timeseries.length > 0 && (
-              <Sparkline data={worker.timeseries} width={120} height={24} />
-            )}
-            <p className="text-xs text-muted-foreground">
-              {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
-              {stats.last_run_at && stats.runs_7d > 0 ? " · " : ""}
-              {stats.runs_7d > 0 ? `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d` : ""}
-              {stats.success_rate_7d != null ? ` · ${Math.round(stats.success_rate_7d * 100)}% success` : ""}
-            </p>
-          </div>
+          <p className="text-xs text-muted-foreground mt-auto truncate">
+            {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
+            {stats.last_run_at && stats.runs_7d > 0 ? " · " : ""}
+            {stats.runs_7d > 0 ? `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d` : ""}
+            {stats.success_rate_7d != null ? ` · ${Math.round(stats.success_rate_7d * 100)}% success` : ""}
+          </p>
         )}
       </CardContent>
       </Link>

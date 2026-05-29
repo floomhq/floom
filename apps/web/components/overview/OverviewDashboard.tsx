@@ -223,8 +223,6 @@ function WorkerActivity({
               <Link
                 key={run.run_id}
                 href={`/runs/${run.run_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
                 className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-[var(--active-nav-bg)]"
               >
                 <div className="min-w-0">
@@ -292,8 +290,6 @@ function ComingUp({
             <Link
               key={`${item.worker_id}-${item.next_fire_at}`}
               href={`/workers/${item.worker_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
               className="grid grid-cols-[48px_1fr] gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-[var(--active-nav-bg)]"
             >
               <span className="text-sm font-medium text-[var(--text-primary)]">
