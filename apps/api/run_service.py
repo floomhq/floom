@@ -170,6 +170,36 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
             changed = True
             log_fn("Dropped invalid tags from drafted worker (schema requires <=8 flat strings)", level="warning")
 
+    # gen-quality (2026-05-29): the LLM frequently declares a SCALAR output
+    # (kind: scalar, the result is a short string/number) but OMITS the required
+    # `type`, so registration hard-fails with "scalar field '<name>' must declare
+    # type" and the operator gets a dead-end bundle. A scalar output with no type
+    # is unambiguously a string-ish scalar — default it to "string" (lossless;
+    # the schema's own default for scalar inputs is also string-ish). We fix the
+    # ENGINE, not just the generation prompt, because the LLM is non-deterministic.
+    def _default_scalar_output_type(fields: Any) -> bool:
+        touched = False
+        if not isinstance(fields, list):
+            return False
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            kind = str(field.get("kind") or "").strip().lower()
+            has_file_markers = bool(field.get("path") or field.get("media_type"))
+            is_scalar = kind == "scalar" or (not kind and not has_file_markers)
+            if is_scalar and not field.get("type") and not has_file_markers:
+                field["type"] = "string"
+                touched = True
+        return touched
+
+    if _default_scalar_output_type(raw.get("outputs")):
+        changed = True
+        log_fn("Defaulted a scalar output's missing type to 'string' so the worker registers", level="info")
+    exec_block = raw.get("exec")
+    if isinstance(exec_block, dict) and _default_scalar_output_type(exec_block.get("outputs")):
+        changed = True
+        log_fn("Defaulted a scalar output's missing type to 'string' so the worker registers", level="info")
+
     if not changed:
         return worker_yml
     import yaml as pyyaml

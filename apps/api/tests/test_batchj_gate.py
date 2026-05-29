@@ -153,3 +153,52 @@ def test_paused_worker_detail_reports_enabled_false(client_and_main):
     assert body["enabled"] is False
     # A paused worker that has never run is needs_attention, not healthy/ready.
     assert body["status"] != "healthy"
+
+
+# --------------------------------------------------------------------------
+# Batch L / gen-quality (engine fix) — a generated scalar OUTPUT that omits the
+# required `type` must NOT dead-end registration. _normalize_authored_worker_yml
+# defaults a typeless scalar output to "string" (lossless) so the worker
+# registers, instead of failing with "scalar field '<name>' must declare type".
+# Fix the ENGINE, not just the generation prompt (the LLM is non-deterministic).
+# --------------------------------------------------------------------------
+
+def test_scalar_output_missing_type_defaults_to_string():
+    import run_service as rs
+    import yaml as pyyaml
+
+    yml = (
+        "name: reverse-string\n"
+        "exec:\n  entry: run.py\n"
+        "outputs:\n- name: reversed_string\n  kind: scalar\n  required: true\n  label: Reversed\n"
+    )
+    out = rs._normalize_authored_worker_yml(yml, lambda *a, **k: None)
+    field = pyyaml.safe_load(out)["outputs"][0]
+    assert field.get("type") == "string"
+
+
+def test_normalize_does_not_touch_file_output():
+    import run_service as rs
+    import yaml as pyyaml
+
+    yml = (
+        "name: x\nexec:\n  entry: run.py\n"
+        "outputs:\n- name: report\n  kind: file\n  media_type: text/csv\n  path: out/report.csv\n"
+    )
+    out = rs._normalize_authored_worker_yml(yml, lambda *a, **k: None)
+    field = pyyaml.safe_load(out)["outputs"][0]
+    assert field.get("type") is None
+    assert field.get("media_type") == "text/csv"
+
+
+def test_normalize_handles_exec_outputs_block():
+    import run_service as rs
+    import yaml as pyyaml
+
+    yml = (
+        "name: x\nexec:\n  entry: run.py\n"
+        "  outputs:\n  - name: total\n    kind: scalar\n    required: true\n    label: Total\n"
+    )
+    out = rs._normalize_authored_worker_yml(yml, lambda *a, **k: None)
+    field = pyyaml.safe_load(out)["exec"]["outputs"][0]
+    assert field.get("type") == "string"
