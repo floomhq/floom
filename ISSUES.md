@@ -1377,3 +1377,33 @@ Driver: `docs/audits/final-gate-G5-rescore3-2026-05-29.md` (92/100, gate NOT pas
 **Root cause:** `apps/web/components/RunDetailSplitPane.tsx` — `buildTimeline()` set `detail: part.error` (raw) and the finish-part `StackTrace` used `part.error || run.error` (raw first).
 **Fix:** both operator-facing failure surfaces now render the backend-humanized `run.error`, falling back to `humanizeRunError(part.error)` only when `run.error` is empty. Raw `part.error` stays in the Raw tab. Completed timeline rows drop the stray error subtitle.
 **Status:** VERIFIED LIVE — `/runs/run_12f326066d87` (`agent_runtime_error`, raw "Event loop is closed"): timeline subtitle now reads "This worker hit an internal error and stopped…" (calm headline), Error banner calm. Raw "Event loop is closed" appears ONLY as individual Recent-logs ERROR rows (legitimate engineer escape hatch per the audit), never as a headline. Screenshot: `docs/audits/shots-G5-rescore3-fix-2026-05-29/p1-2-run-detail-clean.png`.
+
+---
+
+## G5 RE-SCORE #4 (2026-05-29) — 3 non-blocking P2 polish items (96/100 gate)
+
+Source: `docs/audits/final-gate-G5-rescore4-2026-05-29.md`. All three closed and VERIFIED LIVE on `https://workers.floom.dev` after deploy. PRs #267 (initial) + #268 (citation-regex correction).
+
+### P2-1 — Raw `citeturn0search9…` citation tokens leaked into worker markdown output
+**Symptom:** Research Brief Output tab rendered OpenAI web_search citation markers inline (`citeturn0search9turn0news12`), visible garbage in the operator-facing artifact.
+**Root cause:** OpenAI Responses-API web_search wraps citations in Unicode Private-Use-Area delimiters (`<U+E200>cite<U+E202>turn0search3<U+E201>`); the PUA chars render zero-width so the visible text collapses to `citeturn…`. The renderer passed the raw string straight to ReactMarkdown.
+**Fix:** new `apps/web/lib/strip-citations.ts` strips the full citation block (PUA-wrapped + bare variants) with a `(?:…turn…)+` guard so words like "cite"/"excited" survive. Applied in `OutputRenderer` (markdown + plain-text render AND the `.md`/`.txt` downloads) and the run-detail transcript text + raw-output fallback — covers every worker's output without re-running historical runs. Contract test `apps/web/tests/strip-citations.test.ts` (10 cases). (Initial #267 regex left `turn…` behind; #268 corrected it.)
+**Status:** VERIFIED LIVE — `/runs/run_e7562889962c` (research_brief; stored output had **62** citation blocks): Output tab renders the full brief with **ZERO** `citeturn`/`turn0search`/PUA tokens anywhere in the body (confirmed via DOM bodyText + visual). Screenshot: `docs/audits/shots-G5-p2polish-2026-05-29/01-after-research-brief-output-no-citation-tokens.png`.
+
+### P2-2 — Raw error string in failed-run Result-tab "Recent logs" preview
+**Symptom:** the failure headline was humanized, but the Result-tab "Recent logs" preview still showed raw `ERROR Agent runtime error: Event loop is closed`.
+**Root cause:** `RecentLogsPreview` rendered `log.message` verbatim; the weak JS `humanizeRunError` only matched snake_case codes, not free-text runtime jargon.
+**Fix:** new `humanizeLogMessage()` in `apps/web/lib/run-format.ts` — error/critical lines matching runtime/infra patterns (Event loop is closed, asyncio, RuntimeError, tracebacks, Python exception names, "Agent runtime error") collapse to the calm runtime headline the failure banner shows. Non-error/clean lines pass through. Full raw stays in the Logs/Raw tabs.
+**Status:** VERIFIED LIVE — `/runs/run_12f326066d87` Result-tab Recent logs now reads `ERROR This worker hit an internal error and stopped. Check the logs, then edit or re-run the worker.` — no raw `Event loop is closed` in the preview. Screenshot: `docs/audits/shots-G5-p2polish-2026-05-29/02-after-recent-logs-humanized-run_12f326066d87.png`.
+
+### P2-3a — Connections: duplicate "Google Calendar (Expired)" rows
+**Symptom:** two expired Google Calendar grants rendered as two identical "Expired — reconnect to see account" rows the operator can't act on differently.
+**Root cause:** `connectionViews` memo (`apps/web/app/connections/ConnectionsClient.tsx`) kept both placeholder rows (a prior pass had decided "two identical is fine").
+**Fix:** collapse duplicate placeholder rows per app to a single entry; real, distinctly-labelled accounts (different emails) are still kept and disambiguated with an id suffix.
+**Status:** VERIFIED LIVE — DB has **2** expired `googlecalendar` grants (both placeholder); the live Connected list shows **ONE** Google Calendar (Expired) row. Screenshot: `docs/audits/shots-G5-p2polish-2026-05-29/03a-after-connections-deduped-google-calendar.png`.
+
+### P2-3b — HITL run-1 duration counted approval-wait time (28m)
+**Symptom:** a HITL run-1 that parked at `pending_approval` then completed on approval showed a 28m "duration" (`run_9d4650ac7f22` = 1,710,425ms) that was mostly operator approval-wait.
+**Root cause:** the approve→COMPLETED transition (`update_status`, `apps/api/db/sqlite.py`) recomputed `duration_ms = completed_at - started_at` = wall-clock including the wait. Execution actually ended when the run parked for approval.
+**Fix:** capture the real execution `duration_ms` at the `PENDING_APPROVAL` park transition; preserve an already-set `duration_ms` on the terminal COMPLETED/FAILED transition instead of recomputing. Normal (non-HITL) runs still compute duration at completion (no regression). Backend tests `test_hitl_duration_excludes_approval_wait` + `test_normal_run_duration_unaffected`.
+**Status:** VERIFIED LIVE — fresh prod HITL run `run_e249f54a1e04`: parked at pending_approval with `duration_ms=3047` (~3s execution), then a 45s approval wait (`started 12:30:47 → completed 12:31:48`, ~61s wall-clock), approved → run-detail shows DURATION **3.0s**, NOT ~61s. Old-logic run `run_9d4650ac7f22` (28.5m) confirms the prior bug. Screenshot: `docs/audits/shots-G5-p2polish-2026-05-29/03b-after-hitl-run-duration-3s-not-wallclock.png`.
