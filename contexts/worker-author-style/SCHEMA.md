@@ -72,6 +72,10 @@ exec:
 
 Use for deterministic transforms, ETL, webhook fan-out, scheduled API calls.
 
+The run.py is a STANDALONE script (`python run.py`), NOT a `run(inputs, context)`
+function. See `RUN_PY_TEMPLATE.py` for the canonical, copy-pasteable contract and
+`workers/csv_enricher/run.py` for a working example.
+
 ```yaml
 exec:
   entry: "run.py"
@@ -79,6 +83,14 @@ exec:
   runtime: "python311"     # python311 | node22 | bash
   runner: "e2b"
   inputs:
+    # SCALAR input: no `path:` — value passed inline in inputs.json.
+    - name: "instruction"
+      kind: "scalar"
+      type: "textarea"
+      required: true
+      label: "Instruction"
+    # FILE input: path MUST be "inputs/<name>"; value read from inputs.json is
+    # that relative path, which run.py open()s.
     - name: "csv_file"
       kind: "file"
       media_type: "text/csv"
@@ -86,13 +98,20 @@ exec:
       required: true
       label: "Input CSV"
   outputs:
-    - name: "result"
+    - name: "enriched_csv"
       kind: "file"
-      media_type: "application/json"
-      path: "out/result.json"
+      media_type: "text/csv"
+      path: "out/enriched_csv.csv"   # always under out/
       required: true
-      label: "Result"
+      label: "Enriched CSV"
 ```
+
+### Input `path` rule (script mode)
+
+- **Scalar inputs** (`type: string | textarea | number | boolean | select | url`):
+  `kind: "scalar"`, **omit `path:`**. The value is the literal value inline.
+- **File inputs**: `kind: "file"`, `path: "inputs/<name>"` (use the input's own
+  `name`). run.py reads the relative path from inputs.json and `open()`s it.
 
 ## Trigger types
 
@@ -203,7 +222,7 @@ exec:
     - name: "input_csv"
       kind: "file"
       media_type: "text/csv"
-      path: "inputs/input.csv"
+      path: "inputs/input_csv"   # file input path = inputs/<name>
       required: true
       label: "Input CSV"
   outputs:

@@ -39,13 +39,14 @@ Call these tools in order at the start of every run:
 1. **`read_context("worker-author-style", "SCHEMA.md")`** — load the schema reference
 2. **`read_context("worker-author-style", "STYLE.md")`** — load naming + style conventions
 3. **`read_context("worker-author-style", "ANTI-PATTERNS.md")`** — load things to avoid
-4. **`read_context("worker-author-style", "EXAMPLES")`** — list the examples directory
-5. **`list_existing_workers()`** — get all worker IDs to avoid collisions
-6. **`read_context("worker-author-style", "EXAMPLES/<name>.yml")`** — read 2-3 relevant examples
-7. Draft the bundle in memory
-8. **`validate_worker_yml(yml_string)`** — validate before returning; fix errors if any
-9. If `mode == "create"`: **`create_worker(worker_yml, skill_md_or_run_code, skill_md)`** then populate `created_worker_id`
-10. **`finish_with_outputs({"bundle": "<json_string>"})`** where json_string is the serialized bundle object
+4. **`read_context("worker-author-style", "RUN_PY_TEMPLATE.py")`** — load the canonical run.py contract (script mode); your `run_code` MUST follow it exactly
+5. **`read_context("worker-author-style", "EXAMPLES")`** — list the examples directory
+6. **`list_existing_workers()`** — get all worker IDs to avoid collisions
+7. **`read_context("worker-author-style", "EXAMPLES/<name>.yml")`** — read 2-3 relevant examples
+8. Draft the bundle in memory
+9. **`validate_worker_yml(yml_string)`** — validate before returning; fix errors if any
+10. If `mode == "create"`: **`create_worker(worker_yml, skill_md_or_run_code, skill_md)`** then populate `created_worker_id`
+11. **`finish_with_outputs({"bundle": "<json_string>"})`** where json_string is the serialized bundle object
 
 ## Execution mode decision
 
@@ -91,15 +92,37 @@ Pick the right mode for the task:
 - Keep it under 500 words
 - No hallucinated tools — only tools that are actually available in the Workeros agent runtime
 
-## run.py rules
+## Input path rules (worker.yml)
 
-- Single `run(inputs, context)` function
-- Read inputs from the `inputs` dict
-- Use `context.write_output(name, content)` for declared outputs
-- Use `context.log("info", message)` for progress
-- Never hardcode secrets — use `context.secrets["SECRET_NAME"]`
-- Import only what's in requirements.txt
-- No unbounded loops; set a timeout if making network calls
+- **Scalar inputs** (`type: string | textarea | number | boolean | select | url`):
+  set `kind: "scalar"` and **NO `path:` field**. The value is passed inline in
+  `inputs.json` (the literal string / number / bool).
+- **File inputs** (an uploaded file): set `kind: "file"` and
+  `path: "inputs/<name>"`, where `<name>` is the input's own `name`. The value
+  the worker reads from `inputs.json` is that relative path; `open()` it.
+
+## run.py rules (script mode — E2B pure-script contract)
+
+run.py runs as `python run.py` in an E2B sandbox. It is a STANDALONE SCRIPT — there
+is NO `run(inputs, context)` function and NO `context` object. The canonical,
+copy-pasteable template is `contexts/worker-author-style/RUN_PY_TEMPLATE.py`
+(load it via `read_context`); mirror `workers/csv_enricher/run.py`. Follow it exactly:
+
+- Read inputs from `inputs.json`: `inputs = json.load(open("inputs.json"))`.
+- **Scalar inputs** are the LITERAL value inline — use them directly, never `open()` them.
+- **File inputs** are a RELATIVE PATH like `inputs/<name>` — `open()` that path to read the file.
+- **Secrets** come from `os.environ` after `load_dotenv(".env.local")`; `secrets.json`
+  is a fallback. Never hardcode a secret.
+- **Connections** (Composio): read `connections.json` when present (app slug -> connection_id).
+- **Import EVERY module you reference** — `os`, `json`, `csv`, `io`, `re`, `statistics`,
+  etc. A missing `import` (e.g. `NameError: name 'os' is not defined`) is the #1
+  generated-worker crash. Put deps in requirements.txt; stdlib needs no requirements.
+- Write output files under `out/` (create it: `os.makedirs("out", exist_ok=True)`).
+- Write `result.json` with the FULL schema on BOTH the success and the error path:
+  `{"status": "success"|"error", "outputs": {"<output_name>": "out/<file>"},
+  "artifacts": [{"name","relative_path","type"}], "error": "<msg if error>"}`.
+- No unbounded loops; bound any retry/iteration and set a timeout on network calls.
+- End the module with `if __name__ == "__main__": main()`.
 
 ## Validation
 
