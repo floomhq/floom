@@ -62,6 +62,26 @@ def _get(path: str, **params: Any) -> Any:
     return r.json()
 
 
+_CATALOG_RETRY_DELAY_SECONDS = 0.25
+
+
+def _get_with_retry(path: str, **params: Any) -> Any:
+    """GET wrapper that retries once after a short delay.
+
+    The Composio catalog fetch is a safe, idempotent GET, but cold starts and
+    transient rate-limiting made the first /integrations/catalog load fail
+    ~50% of the time, surfacing "Could not load integrations" in the UI (#189).
+    Retrying once after a brief pause clears the transient case without masking
+    a genuine outage.
+    """
+    try:
+        return _get(path, **params)
+    except (requests.RequestException, RuntimeError) as exc:
+        logger.warning("Composio GET %s failed (%s); retrying once after %sms", path, exc, int(_CATALOG_RETRY_DELAY_SECONDS * 1000))
+        time.sleep(_CATALOG_RETRY_DELAY_SECONDS)
+        return _get(path, **params)
+
+
 def _post(path: str, body: Dict[str, Any]) -> Any:
     r = requests.post(f"{_BASE}{path}", headers=_headers(), json=body, timeout=15)
     r.raise_for_status()
@@ -142,7 +162,7 @@ def list_catalog_apps(
         if cached and now - cached[0] < _CATALOG_TTL_SECONDS:
             return cached[1]
 
-    data = _get(
+    data = _get_with_retry(
         "/toolkits",
         limit=limit,
         cursor=_catalog_cursor(page, limit),
