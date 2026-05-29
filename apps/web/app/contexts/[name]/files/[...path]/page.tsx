@@ -102,17 +102,34 @@ export default function FilePreviewPage() {
       .finally(() => setLoadingDetail(false));
   }, [loadDetail]);
 
-  // Load file text whenever selected file changes
+  // Load file text whenever the selected file changes.
+  //
+  // P0-2 (2026-05-29): this effect previously depended on the `selectedFile`
+  // OBJECT, which `detail?.files.find(...)` rebuilds with a NEW reference on
+  // every render. On a direct URL load / refresh / shared "Copy link", `detail`
+  // is null on the first paint so `selectedFile` is null and the effect
+  // early-returned; once `detail` resolved, the unstable reference caused the
+  // body to re-run repeatedly, with `setText("")` racing the resolved fetch and
+  // blanking the pane. Keying on STABLE primitives (the resolved path + whether
+  // it is a previewable text file) makes the effect fire exactly once per file
+  // and load the URL-seeded file on first load.
+  const loadableTextPath =
+    selectedFile && isKnownTextFile(selectedFile) && selectedFile.size <= TEXT_PREVIEW_LIMIT
+      ? selectedFile.path
+      : null;
+
   useEffect(() => {
     setEditing(false);
     setText("");
-    if (!selectedFile || !isKnownTextFile(selectedFile) || selectedFile.size > TEXT_PREVIEW_LIMIT) return;
+    if (!loadableTextPath) return;
+    let cancelled = false;
     setLoadingText(true);
-    api.contexts.readTextFile(packName, selectedFile.path)
-      .then(setText)
-      .catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Failed to load file"))
-      .finally(() => setLoadingText(false));
-  }, [packName, selectedFile]);
+    api.contexts.readTextFile(packName, loadableTextPath)
+      .then((value) => { if (!cancelled) setText(value); })
+      .catch((err: unknown) => { if (!cancelled) toast.error(err instanceof Error ? err.message : "Failed to load file"); })
+      .finally(() => { if (!cancelled) setLoadingText(false); });
+    return () => { cancelled = true; };
+  }, [packName, loadableTextPath]);
 
   // Keep URL in sync when selectedPath changes
   useEffect(() => {
@@ -391,7 +408,11 @@ function FileContent({
 
 function MarkdownRenderer({ content }: { content: string }) {
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:border prose-pre:border-[var(--border-default)] prose-pre:rounded-md prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-mono prose-blockquote:border-l prose-blockquote:border-[var(--border-default)] prose-blockquote:not-italic prose-headings:font-semibold prose-headings:tracking-tight">
+    /* P2-11 (2026-05-29): prose's default --tw-prose-pre-code / inline-code
+       colour rendered as a faint grey on the light bg-muted block, hard to
+       read. Force both fenced-code and inline-code text to text-foreground
+       (full contrast against bg-muted in both light and dark themes). */
+    <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:border prose-pre:border-[var(--border-default)] prose-pre:rounded-md prose-pre:text-foreground prose-pre:[&_code]:text-foreground prose-code:bg-muted prose-code:text-foreground prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-mono prose-blockquote:border-l prose-blockquote:border-[var(--border-default)] prose-blockquote:not-italic prose-headings:font-semibold prose-headings:tracking-tight">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
