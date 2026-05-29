@@ -4958,6 +4958,24 @@ async def draft_and_create_worker(
             if f.path == "worker.yml":
                 f.content = worker_yml_str
 
+    # G5 FIX 4: guarantee a runnable "Fill with sample input" even when the LLM
+    # omits example_input — backfill it into the worker.yml from the bundle's
+    # sample_input_json (the realistic values it already produced). Mirrors the
+    # worker-author run path (_backfill_example_input).
+    from run_service import _backfill_example_input as _backfill_ex
+
+    def _draft_backfill_log(msg: str, level: str = "info") -> None:
+        logger.info("draft-and-create %s: %s", worker_id, msg)
+
+    backfilled_yml = _backfill_ex(
+        worker_yml_str, parsed_llm.get("sample_input_json"), _draft_backfill_log
+    )
+    if backfilled_yml != worker_yml_str:
+        worker_yml_str = backfilled_yml
+        for f in draft_files_from_llm:
+            if f.path == "worker.yml":
+                f.content = worker_yml_str
+
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
         raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
@@ -4994,9 +5012,12 @@ async def draft_and_create_worker(
 
     sample_input = None
     try:
-        sample_input = getattr(_config2, "example_input", None)
+        # Read the freshly-persisted config so the smoke run uses the
+        # backfilled example_input (G5 FIX 4), not the pre-backfill parse.
+        _persisted_cfg = get_worker_config_for_run(worker_id)
+        sample_input = getattr(_persisted_cfg, "example_input", None)
     except Exception:
-        sample_input = None
+        sample_input = getattr(_config2, "example_input", None)
     return await _smoke_gate_and_respond(worker_id, sample_input)
 
 
