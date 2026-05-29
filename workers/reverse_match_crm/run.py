@@ -42,7 +42,7 @@ def main():
     except FileNotFoundError:
         connections = {}
 
-    crm_csv = inputs.get("crm_csv", "").strip()
+    crm_csv_input = inputs.get("crm_csv", "").strip()
     job_brief = inputs.get("job_brief", "").strip()
     required_modules_raw = inputs.get("required_modules", "").strip()
     try:
@@ -54,7 +54,7 @@ def main():
     except (ValueError, TypeError):
         top_n = 10
 
-    if not crm_csv:
+    if not crm_csv_input:
         _write_error("Missing required input: crm_csv")
         return
     if not job_brief:
@@ -62,6 +62,22 @@ def main():
         return
 
     required_modules = [m.strip() for m in required_modules_raw.split(",") if m.strip()] if required_modules_raw else []
+
+    # crm_csv_input may be a file path (from E2B file upload) or inline CSV content
+    import os as _os
+    if _os.path.isfile(crm_csv_input):
+        try:
+            with open(crm_csv_input, "r", encoding="utf-8", errors="replace") as fh:
+                crm_csv = fh.read().strip()
+        except Exception as e:
+            _write_error(f"Could not read CRM CSV file: {e}")
+            return
+    else:
+        crm_csv = crm_csv_input
+
+    if not crm_csv:
+        _write_error("CRM CSV is empty")
+        return
 
     try:
         reader = csv.DictReader(io.StringIO(crm_csv))
@@ -219,14 +235,24 @@ Score all {len(rows)} candidates and return the JSON array."""
 {"No candidates above threshold — consider lowering min_score or broadening the job brief." if not above_threshold else f"Prioritise outreach to {top_names}. Review freshness warnings before contact."}
 """
 
+    import os as _os
+    _os.makedirs("out", exist_ok=True)
+    with open("out/top_candidates.csv", "w", encoding="utf-8") as fh:
+        fh.write(top_csv)
+    with open("out/analysis_summary.md", "w", encoding="utf-8") as fh:
+        fh.write(analysis_summary)
+
     result = {
         "status": "success",
         "outputs": {
-            "top_candidates": top_csv,
+            "top_candidates": "out/top_candidates.csv",
             "all_above_threshold_count": str(len(above_threshold)),
-            "analysis_summary": analysis_summary,
+            "analysis_summary": "out/analysis_summary.md",
         },
-        "artifacts": [],
+        "artifacts": [
+            {"name": "out/top_candidates.csv", "relative_path": "out/top_candidates.csv", "type": "text/csv"},
+            {"name": "out/analysis_summary.md", "relative_path": "out/analysis_summary.md", "type": "text/markdown"},
+        ],
     }
     with open("result.json", "w") as f:
         json.dump(result, f)

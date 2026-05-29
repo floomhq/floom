@@ -250,13 +250,24 @@ Write the candidate writeup now."""
         _write_error(f"OpenAI writeup generation failed: {e}")
         return
 
+    import os as _os
+    _os.makedirs("out", exist_ok=True)
+    with open("out/writeup.md", "w", encoding="utf-8") as fh:
+        fh.write(writeup)
+    profile_json = json.dumps(extracted_profile, ensure_ascii=False, indent=2)
+    with open("out/extracted_profile.json", "w", encoding="utf-8") as fh:
+        fh.write(profile_json)
+
     result = {
         "status": "success",
         "outputs": {
-            "writeup": writeup,
-            "extracted_profile": json.dumps(extracted_profile, ensure_ascii=False, indent=2),
+            "writeup": "out/writeup.md",
+            "extracted_profile": "out/extracted_profile.json",
         },
-        "artifacts": [],
+        "artifacts": [
+            {"name": "out/writeup.md", "relative_path": "out/writeup.md", "type": "text/markdown"},
+            {"name": "out/extracted_profile.json", "relative_path": "out/extracted_profile.json", "type": "application/json"},
+        ],
     }
     with open("result.json", "w") as f:
         json.dump(result, f)
