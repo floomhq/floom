@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import type { OutputField } from "@/lib/types";
+import { stripCitationTokens } from "@/lib/strip-citations";
 
 function parseCSV(text: string): string[][] {
   const result = Papa.parse<string[]>(text.trim(), {
@@ -163,17 +164,24 @@ export function OutputRenderer({
     <div>
       <p className="text-xs font-medium text-muted-foreground mb-2">{label || name}</p>
       {type === "markdown" ? (
-        <div className="space-y-2">
-          <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-[var(--radius-button)] border border-border">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as Parameters<typeof ReactMarkdown>[0]["components"]}>
-              {String(value)}
-            </ReactMarkdown>
-          </div>
-          <DownloadButton
-            label=".md"
-            onClick={() => downloadBlob(String(value), `${baseFilename}.md`, "text/markdown")}
-          />
-        </div>
+        (() => {
+          // G5 rescore4 P2: strip OpenAI web_search citation markers
+          // (citeturn0search9 …) before rendering AND before download.
+          const clean = stripCitationTokens(String(value));
+          return (
+            <div className="space-y-2">
+              <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 rounded-[var(--radius-button)] border border-border">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as Parameters<typeof ReactMarkdown>[0]["components"]}>
+                  {clean}
+                </ReactMarkdown>
+              </div>
+              <DownloadButton
+                label=".md"
+                onClick={() => downloadBlob(clean, `${baseFilename}.md`, "text/markdown")}
+              />
+            </div>
+          );
+        })()
       ) : type === "json" ? (
         <OutputJSON value={value} filename={`${baseFilename}.json`} />
       ) : type === "csv" ? (
@@ -183,15 +191,21 @@ export function OutputRenderer({
           <span className="font-mono text-xs">{String(value)}</span>
         </div>
       ) : (
-        <div className="space-y-2">
-          <div className="bg-muted p-3 rounded-[var(--radius-button)] text-sm whitespace-pre-wrap font-mono leading-relaxed">
-            {String(value)}
-          </div>
-          <DownloadButton
-            label=".txt"
-            onClick={() => downloadBlob(String(value), `${baseFilename}.txt`, "text/plain")}
-          />
-        </div>
+        (() => {
+          // G5 rescore4 P2: strip citation markers from plain-text output too.
+          const clean = stripCitationTokens(String(value));
+          return (
+            <div className="space-y-2">
+              <div className="bg-muted p-3 rounded-[var(--radius-button)] text-sm whitespace-pre-wrap font-mono leading-relaxed">
+                {clean}
+              </div>
+              <DownloadButton
+                label=".txt"
+                onClick={() => downloadBlob(clean, `${baseFilename}.txt`, "text/plain")}
+              />
+            </div>
+          );
+        })()
       )}
     </div>
   );
