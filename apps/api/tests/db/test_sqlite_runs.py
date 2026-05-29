@@ -101,3 +101,79 @@ def test_run_repo_fails_running_rows_by_owner(repo_bundle):
     assert row_a["error_code"] == "interrupted_by_restart"
     assert row_a["completed_at"]
     assert row_b["status"] == RunStatus.RUNNING.value
+
+
+def test_hitl_duration_excludes_approval_wait(repo_bundle):
+    """G5 rescore4 P2: a run that parks at PENDING_APPROVAL captures its real
+    execution duration at park time; the later approve->COMPLETED transition
+    must NOT recompute duration to include the operator's approval-wait."""
+    import datetime as _dt
+
+    repos, _db, manifest = repo_bundle
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-hitl",
+        worker_id="worker-a",
+        input_json={"x": 1},
+        trigger_source="manual",
+        runner="e2b",
+    )
+    # Mark RUNNING with a started_at well in the past so execution time is real.
+    repos.runs.update_status(user_id="user-a", run_id="run-hitl", status=RunStatus.RUNNING.value)
+    started = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=5)).isoformat()
+    repos.runs.update(user_id="user-a", run_id="run-hitl", started_at=started)
+
+    # Park for approval -> duration captured now (~5s of execution).
+    repos.runs.update_status(user_id="user-a", run_id="run-hitl", status=RunStatus.PENDING_APPROVAL.value)
+    parked = repos.runs.get(user_id="user-a", run_id="run-hitl")
+    assert parked["duration_ms"] is not None
+    parked_duration = parked["duration_ms"]
+    assert 3000 <= parked_duration <= 8000, parked_duration
+
+    # Simulate a long approval wait, then approve -> COMPLETED.
+    long_ago = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=5)).isoformat()
+    repos.runs.update(user_id="user-a", run_id="run-hitl", started_at=long_ago)
+    # (started_at unchanged in real flow; rewritten here only to prove the
+    # COMPLETED branch does NOT recompute when duration_ms is already set.)
+    repos.runs.update_status(user_id="user-a", run_id="run-hitl", status=RunStatus.COMPLETED.value)
+    done = repos.runs.get(user_id="user-a", run_id="run-hitl")
+    assert done["status"] == RunStatus.COMPLETED.value
+    # Preserved the park-time execution duration; did NOT balloon to wall-clock.
+    assert done["duration_ms"] == parked_duration
+
+
+def test_normal_run_duration_unaffected(repo_bundle):
+    """A run that never parks for approval still gets its duration computed at
+    the COMPLETED transition (no regression)."""
+    import datetime as _dt
+
+    repos, _db, manifest = repo_bundle
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-normal",
+        worker_id="worker-a",
+        input_json={},
+        trigger_source="manual",
+        runner="e2b",
+    )
+    repos.runs.update_status(user_id="user-a", run_id="run-normal", status=RunStatus.RUNNING.value)
+    started = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=2)).isoformat()
+    repos.runs.update(user_id="user-a", run_id="run-normal", started_at=started)
+    repos.runs.update_status(user_id="user-a", run_id="run-normal", status=RunStatus.COMPLETED.value)
+    done = repos.runs.get(user_id="user-a", run_id="run-normal")
+    assert done["duration_ms"] is not None
+    assert done["duration_ms"] >= 1500

@@ -144,3 +144,46 @@ export function humanizeRunError(error: string | null | undefined): string {
 
   return cleaned.length > 160 ? `${cleaned.slice(0, 157)}...` : cleaned;
 }
+
+// ---------------------------------------------------------------------------
+// Operator-facing log-line humanisation (G5 rescore4 P2, 2026-05-29).
+// The Result-tab "Recent logs" preview is a glance surface. Raw runtime/infra
+// error strings ("Agent runtime error: Event loop is closed", tracebacks,
+// asyncio internals) must not leak there — the calm headline already explains
+// the failure. The full raw line stays in the Logs/Raw tabs.
+//
+// Mirrors the backend _RUNTIME_HEADLINE so the preview reads the same calm
+// sentence the failure banner shows, instead of internal jargon.
+// ---------------------------------------------------------------------------
+const RUNTIME_LOG_HEADLINE =
+  "This worker hit an internal error and stopped. Check the logs, then edit or re-run the worker.";
+
+// Patterns that signal a low-level runtime/infra error an operator should never
+// read verbatim. Kept in sync with the backend free-text error rules.
+const INFRA_ERROR_PATTERNS: RegExp[] = [
+  /Event loop is closed/i,
+  /\basyncio\b/i,
+  /\bcoroutine\b/i,
+  /\bTraceback \(most recent call last\)/i,
+  /\bRuntimeError\b/i,
+  /Agent runtime error/i,
+  /\b(?:KeyError|NameError|AttributeError|TypeError|ValueError|ImportError|ModuleNotFoundError)\b/,
+  /\bSyntaxError\b|\bIndentationError\b/,
+];
+
+/**
+ * Humanise a single log line for the operator-facing Result-tab preview.
+ * Error/critical lines that carry raw runtime/infra jargon collapse to the
+ * calm runtime headline; everything else passes through unchanged.
+ */
+export function humanizeLogMessage(level: string, message: string): string {
+  const msg = (message || "").trim();
+  if (!msg) return msg;
+  const isError = level === "error" || level === "critical";
+  if (!isError) return msg;
+  if (INFRA_ERROR_PATTERNS.some((re) => re.test(msg))) {
+    return RUNTIME_LOG_HEADLINE;
+  }
+  // Known machine-code error strings still get the structured humaniser.
+  return humanizeRunError(msg) || msg;
+}
