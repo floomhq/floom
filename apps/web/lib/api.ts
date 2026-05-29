@@ -1,4 +1,9 @@
-const API_BASE = "/api/proxy";
+// Same-origin proxy base. Defaults to "/api/proxy" for the single-tenant OSS
+// build. The Cloud build serves the dashboard under basePath "/app", where raw
+// fetch() calls are NOT auto-prefixed by basePath, so Cloud sets
+// NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
+// Cloud wrapper consume this file unmodified (no fork).
+const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

@@ -57,6 +57,10 @@ const SECURITY_HEADERS = [
 ];
 
 const nextConfig: NextConfig = {
+  // basePath seam: unset for the single-tenant OSS build (served at "/").
+  // The Cloud wrapper serves the dashboard under "/app" and sets
+  // NEXT_PUBLIC_BASE_PATH="/app" so this file is consumed unmodified (no fork).
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,
   turbopack: {
     root: __dirname,
   },

@@ -9,7 +9,10 @@ import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 
-function FloomMark({ size = 28 }: { size?: number }) {
+// Exported so the Cloud wrapper's sidebar overlay can compose the engine's
+// brand mark + nav + primary actions and only add its account/workspace
+// footer — keeping the dashboard UI in sync with the engine (no fork).
+export function FloomMark({ size = 28 }: { size?: number }) {
   return (
     <svg
       width={size}
@@ -43,7 +46,7 @@ const nav = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   // Shared source with /approvals: revalidates on focus + after any
   // approve/reject so the badge never drifts from the list (G5 P2).
   const pendingCount = useApprovalsCount();
@@ -82,7 +85,7 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
   );
 }
 
-function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void }) {
+export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void }) {
   const onSearch = () => {
     onNavigate?.();
     openCommandPalette();
@@ -205,7 +208,7 @@ export function Sidebar() {
 // Today's single-user v0 shows "Local user"; the cloud build (see
 // hosted builds) will swap this for the
 // signed-in Supabase user's email + avatar. Theme toggle stays on the right.
-function UserProfileFooter() {
+export function UserProfileFooter() {
   return (
     <div className="flex items-center justify-between gap-3 border-t border-[var(--border-soft)] px-3 py-3">
       <div className="flex items-center gap-2 min-w-0 flex-1">
