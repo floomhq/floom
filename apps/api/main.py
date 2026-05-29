@@ -260,7 +260,6 @@ PUBLIC_STOCK_WORKER_IDS = frozenset(
 
 _INTERNAL_WORKER_ID_PREFIXES = (
     "_mcp_",
-    "audit-",
     "audit-local-",
     "smoke-",
 )
