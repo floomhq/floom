@@ -83,6 +83,19 @@ def _tick() -> None:
                 "Worker %s has trigger.type=schedule but no cron expression", worker_id
             )
             continue
+        # Belt-and-suspenders: skip if manifest marks worker as archived.
+        # The enabled=0 DB flag should already exclude them, but guard against
+        # stale DB state (e.g. worker.yml updated but reload not yet called).
+        try:
+            from worker_registry import get_worker
+            worker_meta = get_worker(worker_id)
+            if worker_meta and (worker_meta.get("manifest") or {}).get("archived") is True:
+                logger.info(
+                    "Skipping scheduled run for %s — worker is archived", worker_id
+                )
+                continue
+        except Exception:
+            pass
 
         next_at_str = _get_or_init_next_run_at(worker_id, cron_expr)
         if not next_at_str:

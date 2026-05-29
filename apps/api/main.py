@@ -2529,12 +2529,19 @@ def download_upload(
 # Contexts — filesystem-backed worker knowledge/state folders
 # ---------------------------------------------------------------------------
 
+class ContextWorkerRef(BaseModel):
+    worker_id: str
+    worker_name: str
+
+
 class ContextSummary(BaseModel):
     name: str
     file_count: int
     total_size_bytes: int
     updated_at: Optional[str] = None
     writeable: bool = False
+    worker_count: int = 0
+    description: Optional[str] = None
 
 
 class ContextFileItem(BaseModel):
@@ -2543,10 +2550,13 @@ class ContextFileItem(BaseModel):
     mime_type: str
     updated_at: str
     is_binary: bool
+    description: Optional[str] = None
+    display_type: str = "File"
 
 
 class ContextDetail(ContextSummary):
     files: List[ContextFileItem] = Field(default_factory=list)
+    used_by: List[ContextWorkerRef] = Field(default_factory=list)
 
 
 class ContextCreateRequest(BaseModel):
@@ -2636,7 +2646,28 @@ def _context_summary(name: str, metadata: dict[str, dict[str, Any]]) -> ContextS
     )
 
 
-def _context_detail(name: str, metadata: dict[str, dict[str, Any]] | None = None) -> ContextDetail:
+def _context_description(root: Path) -> Optional[str]:
+    """Return the first non-empty line of README.md as the context description, or None."""
+    readme = root / "README.md"
+    if not readme.is_file():
+        return None
+    try:
+        for line in readme.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = line.lstrip("#").strip()
+            if stripped:
+                return stripped[:500]
+    except Exception:
+        pass
+    return None
+
+
+def _context_detail(
+    name: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+    *,
+    repos: Optional[Repositories] = None,
+    user_id: str = "federico",
+) -> ContextDetail:
     root = context_dir(name)
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="Context not found")
@@ -2646,7 +2677,30 @@ def _context_detail(name: str, metadata: dict[str, dict[str, Any]] | None = None
         for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
     ]
     summary = _context_summary(name, meta)
-    return ContextDetail(**summary.model_dump(), files=files)
+    # Compute used_by and worker_count when repos is available.
+    used_by: List[ContextWorkerRef] = []
+    if repos is not None:
+        try:
+            for worker in repos.workers.list(user_id=user_id):
+                try:
+                    contexts = (worker.get("config") or {}).get("contexts") or []
+                    if name in context_mount_names(contexts):
+                        used_by.append(ContextWorkerRef(
+                            worker_id=str(worker["id"]),
+                            worker_name=str(worker.get("name") or worker["id"]),
+                        ))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    description = _context_description(root)
+    return ContextDetail(
+        **summary.model_dump(),
+        files=files,
+        used_by=used_by,
+        worker_count=len(used_by),
+        description=description,
+    )
 
 
 def _raise_context_quota_if_needed(name: str) -> None:
@@ -2732,9 +2786,10 @@ def create_context(
 def get_context(
     name: str,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
     safe_name, metadata = _require_context_for_user(name, user_id=auth.user_id)
-    return _context_detail(safe_name, metadata)
+    return _context_detail(safe_name, metadata, repos=repos, user_id=auth.user_id)
 
 
 @app.delete("/contexts/{name}", response_model=ContextDeleteResponse)
