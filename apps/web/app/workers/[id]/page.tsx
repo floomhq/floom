@@ -677,7 +677,11 @@ export default function WorkerDetailPage() {
   const missingConnections = requiredConnections.filter(
     (slug) => !activeConnectionSlugs.has(slug.toLowerCase())
   );
-  const canRun = !running && missingConnections.length === 0;
+  // P2: a paused worker (enabled === false) must NOT offer a live Run button —
+  // it would only 409. Treat it like a connection block: disabled + a clear
+  // "paused" label so the click is never a dead end.
+  const isPaused = worker.enabled === false && !worker.archived;
+  const canRun = !running && missingConnections.length === 0 && !isPaused;
   // canApplySample: allowed when the worker declares any input. File-only
   // workers are now fillable too — applyExampleInput synthesizes a real upload
   // from the inline example_input content (G5 FIX 4), so a non-technical user
@@ -1044,6 +1048,9 @@ function RunSection({
   // didn't notice it. Moved to a compact action bar at the top with a
   // trash icon to clear all inputs in one click.
   const hasInputs = worker.config.inputs.length > 0;
+  // P2: a paused worker offers no live Run — the button is disabled with a
+  // clear "turn on to run" label instead of a dead-end click that only 409s.
+  const isPaused = worker.enabled === false && !worker.archived;
   const inputsFilled = hasInputs && Object.values(inputs).some(
     (v) => v !== null && v !== undefined && v !== "" && v !== false
   );
@@ -1202,6 +1209,8 @@ function RunSection({
             <Play className="w-4 h-4 mr-1.5" />
             {running
               ? "Starting..."
+              : isPaused
+              ? "Paused — turn on to run"
               : missingConnections.length > 0
               ? `Connect ${missingConnections[0]} first`
               : "Run worker"}
@@ -1420,7 +1429,8 @@ function humanizeOptionLabel(raw: string): string {
 // with healthy green dots).
 function StatusPill({ status }: { status: string }) {
   // S29l: quiet by default. Show only states the user must act on.
-  if (status === "healthy" || !status) return null;
+  // P2: "ready" (never-run) is treated exactly like "healthy" — no pill.
+  if (status === "healthy" || status === "ready" || !status) return null;
   const conf: Record<string, { label: string; classes: string }> = {
     needs_attention: {
       label: "Needs attention",

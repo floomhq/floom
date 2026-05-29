@@ -287,3 +287,154 @@ def test_smoke_reason_bare_keyerror_token_humanized() -> None:
     for raw in ["'name'", '"input_file"', "'name' (error_code=execution_error)"]:
         out = main.humanize_smoke_reason(raw)
         assert out == main._CODE_HEADLINE, raw
+
+
+# --------------------------------------------------------------------------
+# Batch L / G5 P1 — the residual e2b stderr CODE-ECHO leak. Each stderr line is
+# stored as a SEPARATE log row, so the source-line echo, the caret marker
+# (~~~^~~~), and the 'Command exited with code N' boilerplate slipped past the
+# per-row traceback collapse. _collapse_stderr_code_echo_rows drops them on the
+# ordered RAW rows; then per-row redaction calms the frame/header/exception
+# rows into ONE note. SSE 'error' now carries the calm Error-card headline.
+# --------------------------------------------------------------------------
+
+def _div_by_zero_log_rows() -> list[dict]:
+    # The exact verbatim stderr a div-by-zero worker produces, one row per line
+    # (e2b_driver._emit_command_output splits + prefixes each line).
+    return [
+        {"level": "info", "message": "Run started"},
+        {"level": "info", "message": "[e2b] Executing worker command: python run.py"},
+        {"level": "warning", "message": "[e2b] stderr: Traceback (most recent call last):"},
+        {"level": "warning", "message": '[e2b] stderr:   File "/home/user/worker/run.py", line 8, in <module>'},
+        {"level": "warning", "message": "[e2b] stderr:     main()"},
+        {"level": "warning", "message": '[e2b] stderr:   File "/home/user/worker/run.py", line 4, in main'},
+        {"level": "warning", "message": "[e2b] stderr:     quotient = number1 / number2"},
+        {"level": "warning", "message": "[e2b] stderr:                ~~~~~~~~^~~~~~~~~"},
+        {"level": "warning", "message": "[e2b] stderr: ZeroDivisionError: division by zero"},
+        {"level": "warning", "message": "[e2b] stderr: Command exited with code 1"},
+    ]
+
+
+def test_stderr_code_echo_collapsed_and_grep_clean() -> None:
+    rows = _div_by_zero_log_rows()
+    collapsed = main._collapse_stderr_code_echo_rows(rows)
+    final = [main._redact_public_log_message(r["message"]) for r in collapsed]
+    joined = "\n".join(final)
+    for token in ["~~~", "^~", "quotient", "number1 / number2", "main()", "Command exited", "division by zero", "/home/user"]:
+        assert joined.count(token) == 0, f"leaked {token!r}: {joined!r}"
+    # The whole traceback block reads as exactly ONE calm note.
+    assert joined.count("Worker code raised an error") == 1, joined
+
+
+def test_stderr_caret_only_line_dropped() -> None:
+    rows = [{"message": "[e2b] stderr:                ~~~~~~~~^~~~~~~~~"}]
+    assert main._collapse_stderr_code_echo_rows(rows) == []
+
+
+def test_stderr_command_exit_line_dropped() -> None:
+    rows = [{"message": "[e2b] stderr: Command exited with code 1"}]
+    assert main._collapse_stderr_code_echo_rows(rows) == []
+
+
+def test_stderr_collapse_leaves_clean_rows_untouched() -> None:
+    clean = [
+        {"message": "Run started"},
+        {"message": "Worker completed: 9 words, 44 characters"},
+        {"message": "[e2b] Executing worker command: python run.py"},
+        {"message": "[e2b] Uploaded run.py"},
+        {"message": "Output generated"},
+    ]
+    out = main._collapse_stderr_code_echo_rows([dict(r) for r in clean])
+    assert [r["message"] for r in out] == [r["message"] for r in clean]
+
+
+def test_sse_error_field_maps_to_calm_headline() -> None:
+    # SSE finish 'error' must carry the calm Error-card headline, never raw
+    # stderr/source/exception/exit boilerplate (G5 P1 SSE leg).
+    cases = [
+        ("ZeroDivisionError: division by zero", None),
+        ("Run failed: division by zero", None),
+        ("unsupported operand type(s) for /: 'str' and 'float'", "execution_error"),
+        ("Command exited with code 1", None),
+        ("[e2b] stderr: Command exited with code 1", None),
+        ('E2B sandbox error: KeyError: \'name\' at /home/user/worker/run.py', "e2b_sandbox_error"),
+    ]
+    for raw, code in cases:
+        part = {"type": "finish", "status": "failed", "error": raw, "error_code": code}
+        out = main._public_run_part(part)["error"]
+        for bad in ["~~~", "^~", "/home/user", "/root/workeros", "Traceback", "ZeroDivision", "unsupported operand", "Command exited"]:
+            assert bad not in out, f"SSE error leaked {bad!r}: {out!r}"
+
+
+def test_sse_error_field_keeps_clean_input_friendly() -> None:
+    # A clean structured failure (missing input) keeps its friendly headline,
+    # is NOT over-collapsed into the generic code headline.
+    part = {"type": "finish", "status": "failed", "error": "Missing required input: text", "error_code": "missing_required_input"}
+    out = main._public_run_part(part)["error"]
+    assert "input" in out.lower()
+    assert out != main._CODE_HEADLINE
+
+
+# --------------------------------------------------------------------------
+# Batch L / gen-quality — the scalar-vs-file OUTPUT contract. A generated worker
+# that writes a PATH into a SCALAR output is a code bug; it must (a) fail
+# validation with the explicit reason, (b) route into the bounded smoke-repair
+# loop (output_validation_failed in _SMOKE_CODE_FAILURE_CODES), and (c) the
+# repair prompt + template must teach scalar=literal-value / file=out/path.
+# --------------------------------------------------------------------------
+
+def test_scalar_output_path_string_fails_validation() -> None:
+    import run_service as rs
+    from models import WorkerConfig
+
+    config = WorkerConfig(
+        id="t", name="t", trigger={"type": "manual"},
+        runtime={"type": "python", "entrypoint": "run.py"},
+        inputs=[],
+        outputs=[{"name": "reversed", "type": "string", "kind": "scalar", "required": True, "label": "R"}],
+    )
+    err, _ = rs._validate_run_outputs("rid", config, {"reversed": "out/reversed.txt"}, [])
+    assert err is not None and "scalar output leaked a path string" in err
+
+
+def test_scalar_output_literal_value_passes_validation() -> None:
+    import run_service as rs
+    from models import WorkerConfig
+
+    config = WorkerConfig(
+        id="t", name="t", trigger={"type": "manual"},
+        runtime={"type": "python", "entrypoint": "run.py"},
+        inputs=[],
+        outputs=[{"name": "reversed", "type": "string", "kind": "scalar", "required": True, "label": "R"}],
+    )
+    err, _ = rs._validate_run_outputs("rid", config, {"reversed": "olleh"}, [])
+    assert err is None
+
+
+def test_output_validation_failed_routes_to_repair() -> None:
+    import run_service as rs
+
+    # The smoke loop treats output_validation_failed as a code-class failure so
+    # the generator gets a bounded chance to fix the scalar-vs-file contract,
+    # instead of gating on the first try.
+    assert "output_validation_failed" in rs._SMOKE_CODE_FAILURE_CODES
+
+
+def test_smoke_repair_prompt_teaches_scalar_vs_file_output_contract() -> None:
+    import run_service as rs
+
+    prompt = rs._SMOKE_REPAIR_SYSTEM_PROMPT
+    assert "scalar output leaked a path string" in prompt
+    assert "SCALAR output" in prompt and "FILE output" in prompt
+    # Teaches the literal-value rule for scalar outputs.
+    assert "LITERAL VALUE" in prompt
+
+
+def test_template_teaches_scalar_vs_file_output_contract() -> None:
+    from pathlib import Path
+
+    api_dir = Path(main.__file__).resolve().parent
+    template = (api_dir.parents[1] / "contexts" / "worker-author-style" / "RUN_PY_TEMPLATE.py").read_text()
+    assert "OUTPUT CONTRACT" in template
+    assert "scalar output leaked a path string" in template
+    assert 'outputs={"reversed": "olleh"}' in template
