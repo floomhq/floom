@@ -79,3 +79,75 @@ error. Raw traceback stays only in the Raw tab.
   misclassified; setup codes unaffected). 23 pass.
 - `tests/test_wedge_prompt_to_worker_creates.py`: +7 cases (smoke-input scalar/file,
   repair syntax guard, no-key skip, agent-mode skip). 16 pass.
+
+---
+
+# Batch H — wedge-reliability ENGINE fixes (2026-05-29 PM, PRs #283 + #284, deployed SHA `7c86e0f`)
+
+Two independent G5 launch-readiness scorers (A=84, B=58) both said NOT launch-ready and
+independently converged on the same engine defects. Five engine-level fixes, no per-worker
+whack-a-mole.
+
+## FIX 1 — byte-floor false-fail removed (A P1-A + B P1-1)
+`_validate_run_outputs` no longer has any byte floor for non-JSON outputs. A valid non-empty
+result of ANY size/type passes; only empty/whitespace-only content fails ("file is empty");
+near-empty apology/placeholder prose stays a WARNING. JSON parse + scalar checks unchanged.
+`MIN_OUTPUT_BYTES` removed.
+- LIVE: `verify-good-upper` run `run_f170b9f5ed6a` completed, output 2 bytes (`HI`) ACCEPTED.
+- LIVE (UI path): `csv-sorter-2` run `run_dbf65623a9b1` completed, 40-byte sorted CSV;
+  `extract-email-addresses` run `run_a948ab39e954` completed, 34 bytes,
+  `{"emails":["a@b.com","c@d.org"]}` (malformed `bad@` rejected).
+
+## FIX 2 — smoke now GATES creation (B P1-3)
+New `smoke_and_gate_generated_worker()`: a generated script worker whose smoke ends `failed`
+(after bounded repairs) is set `enabled=0` via the existing repo update — the overview stops
+counting it healthy (classified paused), runs are gated `worker_disabled`, and it STAYS
+editable (never deleted). Passing/skipped smoke leaves it enabled. The author-run SSE event
+and the draft-and-create response carry `smoke_status`/`smoke_reason`.
+- LIVE: buggy worker → DB `enabled=0`, overview `paused_workers_count:1`, NOT in
+  `active_workers_count:43`.
+
+## FIX 3 — smoke validates output SUBSTANCE (B P0-2 green-but-empty)
+After `status != failed`, the smoke runs `_validate_run_outputs` against the smoke result
+PLUS `_smoke_empty_output_error` (a required output that parses as an empty container
+`[]`/`{}`/`""`/null is a no-op). Empty/missing → code-class failure → bounded repair loop →
+gated if still empty.
+- Unit: `tests/test_wedge_smoke_gating.py` — `[]` JSON, missing, and whitespace-only required
+  outputs all → smoke=failed; a small valid output → passed.
+
+## FIX 4 — draft-and-create runs the same smoke+gate (A P1-B)
+`/workers/draft-and-create` now runs `smoke_and_gate_generated_worker` (offloaded via
+`asyncio.to_thread`) on BOTH the LLM-prompt path AND the pre-supplied-files upload path, and
+applies the FIX 2 gating. Both creation paths share one safety net.
+- LIVE: buggy script worker (Path A) → `smoke_status:failed`, gated; good worker →
+  `smoke_status:passed`, enabled.
+
+## FIX 5 — error_raw path strip (A P2-C + B P2-1)
+`_run_error_raw` strips `_SANDBOX_PATH_RE` → `[worker file]`. Operator headline unchanged.
+- LIVE: historical path-leaking run `run_89b6d0e0b94b` served via API → `error_raw` shows
+  `File "[worker file]"` (was `/home/user/worker/run.py`); no `/home/user` or `/root/workeros`
+  in `error_raw`.
+
+## Tests
+- NEW `tests/test_wedge_smoke_gating.py` (7): gating disables (not deletes); pass/skip leaves
+  enabled; green-but-empty `[]` gated; missing/empty output gated; small valid output passes.
+- `tests/test_output_quality_gates.py`: small non-empty + small CSV pass; whitespace-only fails.
+- `tests/test_operator_hygiene.py`: error_raw strips `/home/user` and `/root/workeros`.
+- `tests/test_pr_s9_draft_and_create.py`: response model updated for `smoke_status`/`smoke_reason`.
+- All touched tests pass (66/66 with FLOOM_SECRET stable). Full-suite failure count 126 on this
+  branch vs 129 on clean main — the mass failures are the pre-existing FLOOM_SECRET
+  monkeypatch-teardown isolation bug, identical on main; no regression introduced.
+
+## Reliability note (honest)
+Of 5 fresh UI-path prompts, 3 created green workers with real output; 2 did NOT register a
+worker due to a PRE-EXISTING author-bundle schema gap (scalar output without `type`), not these
+fixes. Critically, 0/5 silently shipped a broken-but-green or green-but-empty worker — the gate
+holds. The aggregate `success_rate_7d` was 0.54 at deploy time (historical, dominated by legacy
+broken integration workers); these fixes stop NEW green-but-broken/green-but-empty workers from
+being created, which is the lever, but the historical rate will only move as new cohorts run.
+
+## Residual gaps (surfaced, not hidden)
+- `logs[].message` and `artifacts[].path` still carry absolute paths — engineer surfaces,
+  intentionally out of FIX 5's `error_raw` scope (B P2-1 unaddressed).
+- Author-bundle scalar-output-without-`type` schema rejection drops the worker to a
+  no-registration dead-end (2/5 above). Worth a follow-up; does not ship a broken worker.
