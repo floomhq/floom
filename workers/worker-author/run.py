@@ -128,6 +128,18 @@ Rules:
 - worker_yml must be schema_version 0.3, valid YAML (all strings double-quoted), exec.runner: "e2b"
 - Agent mode (entry: SKILL.md): set skill_md, leave run_code null
 - Script mode (entry: run.py): set run_code, leave skill_md null; always add exec.command
+
+Script-mode run.py rules (these EXACT mistakes crash generated workers — never make them):
+- Use ONLY the Python standard library unless you ALSO list the package in
+  requirements_txt. NEVER `import dotenv` / `from dotenv import ...` (it is NOT
+  preinstalled -> ModuleNotFoundError). Read secrets from os.environ with a
+  secrets.json fallback (see the template's _load_secrets helper).
+- import EVERY module you reference (os, json, csv, io, re, statistics, ...).
+- Write result.json to the WORKING DIRECTORY ("result.json"), NEVER "out/result.json".
+- Write output files under out/; map each declared output to its out/ path.
+- Read scalar inputs as literal values; read file inputs as relative paths under inputs/.
+- End with `if __name__ == "__main__": main()`.
+- If you `import requests`/`openai`/any third-party lib, requirements_txt MUST list it.
 - name must be lowercase hyphens/digits, 3-64 chars, unique (avoid the IDs listed below)
 - is_example must be false
 - system_worker must be false or absent
