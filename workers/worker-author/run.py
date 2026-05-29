@@ -167,6 +167,17 @@ Input-path rule for worker.yml (CRITICAL — gets workers wrong constantly):
   where <name> is the input's own name. The value the worker reads is that
   relative path; open() it to get the bytes.
 
+example_input rule for worker.yml (so the worker is ONE-CLICK runnable from the
+"Fill with sample input" button — non-technical users never hand-craft a file):
+- ALWAYS include an `example_input:` block covering EVERY input the worker
+  declares, scalar AND file.
+- For a FILE input, the example_input value MUST be the file's INLINE TEXT
+  CONTENT as a string (e.g. a small CSV like "name\nalice\nbob\n"), NOT a path
+  and NOT a placeholder. The UI synthesizes a real uploaded file from this
+  string so the operator can run the worker immediately with no manual upload.
+- sample_input_json MUST mirror the same realistic values (file inputs as their
+  inline text content), so the smoke run and the UI sample agree.
+
 run.py rule (CRITICAL — most generated script workers crash on first run):
 - The run_code you emit MUST follow the canonical contract shown below EXACTLY:
   read inputs.json, distinguish scalar (literal) vs file (relative path under

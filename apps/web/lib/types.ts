@@ -330,6 +330,9 @@ export interface SystemOverviewStats {
   runs_24h_sparkline: number[];
   runs_7d_sparkline: OverviewSparklineBucket[];
   success_rate_7d: number | null;
+  /** Denominator scope for success_rate_7d (G5 FIX 3): "active_workers" =
+   *  active, real (non-example/system/paused) workers only. */
+  success_rate_scope?: string;
   active_workers_count: number;
   paused_workers_count: number;
   connections_healthy: number;

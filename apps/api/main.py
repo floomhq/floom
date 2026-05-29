@@ -8549,6 +8549,11 @@ class OverviewStats(BaseModel):
     runs_24h_sparkline: List[int]
     runs_7d_sparkline: List["OverviewSparklineBucket"]
     success_rate_7d: Optional[float] = None
+    # G5 FIX 3: success_rate_7d is scoped to ACTIVE, real (non-example,
+    # non-system, non-paused) workers so the headline reflects what a partner's
+    # live workers actually do — not legacy/paused/example churn. This label
+    # tells the UI which denominator the rate represents.
+    success_rate_scope: str = "active_workers"
     active_workers_count: int
     paused_workers_count: int
     connections_healthy: int
@@ -8830,6 +8835,27 @@ def system_overview(
     paused_workers_count = max(0, len(workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
 
+    # G5 FIX 3: the headline success rate must reflect the partner's ACTIVE,
+    # real workers — not legacy/paused/example/system churn that drags the
+    # aggregate down (the 54.6% both scorers flagged). Build the set of
+    # worker_ids that count: operator-visible (already excludes system/hidden),
+    # not paused, and not an example/stock worker.
+    def _is_example_worker(row: Dict[str, Any]) -> bool:
+        if row.get("is_example") is True:
+            return True
+        manifest = row.get("manifest")
+        if isinstance(manifest, dict) and manifest.get("is_example") is True:
+            return True
+        return row.get("id") in PUBLIC_STOCK_WORKER_IDS or row.get("id") in PROTECTED_STOCK_WORKER_IDS
+
+    _active_real_worker_ids = {
+        row["id"]
+        for row in workers
+        if row.get("id")
+        and not _overview_worker_paused(row)
+        and not _is_example_worker(row)
+    }
+
     outcome_counts: Dict[str, int] = collections.Counter(
         row["worker_id"]
         for row in _runs_7d_rows
@@ -9020,8 +9046,21 @@ def system_overview(
             )
         )
 
-    completed_or_failed_7d = sum(1 for row in _runs_7d_rows if _is_completed(row) or _is_failed(row))
-    success_rate_7d = completed_7d / completed_or_failed_7d if completed_or_failed_7d else None
+    # G5 FIX 3: scope the headline success rate to runs from active, real
+    # workers (see _active_real_worker_ids). This excludes paused, example,
+    # system, and stock-worker runs so the number a partner sees reflects their
+    # live workers, not legacy/test churn. The 24h/7d run COUNTS and sparklines
+    # are intentionally left unscoped (they are activity volume, not quality).
+    _success_scope_rows = [
+        row for row in _runs_7d_rows if row.get("worker_id") in _active_real_worker_ids
+    ]
+    _scoped_completed_7d = sum(1 for row in _success_scope_rows if _is_completed(row))
+    completed_or_failed_7d = sum(
+        1 for row in _success_scope_rows if _is_completed(row) or _is_failed(row)
+    )
+    success_rate_7d = (
+        _scoped_completed_7d / completed_or_failed_7d if completed_or_failed_7d else None
+    )
 
     return OverviewResponse(
         stats=OverviewStats(
@@ -9029,6 +9068,7 @@ def system_overview(
             runs_24h_sparkline=sparkline,
             runs_7d_sparkline=runs_7d_sparkline,
             success_rate_7d=success_rate_7d,
+            success_rate_scope="active_workers",
             active_workers_count=active_workers_count,
             paused_workers_count=paused_workers_count,
             connections_healthy=connections_healthy,
