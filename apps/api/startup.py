@@ -80,6 +80,31 @@ def _disable_postgrest_http2() -> None:
     _create_session_http1._workeros_http1_patched = True  # type: ignore[attr-defined]
     base_class.create_session = _create_session_http1
 
+    # Same stale-HTTP/2 hazard applies to the gotrue (auth) client, which
+    # also hardcodes http2=True (gotrue_base_api.py). It's only used on the
+    # low-frequency /auth routes (login, callback, admin generate_link), so
+    # it never produced the volume of errors postgrest did — but a stale
+    # idle conn there means a failed login with no clean retry. Force its
+    # SyncClient subclass onto HTTP/1.1 too so the whole outbound Supabase
+    # surface is consistent.
+    try:
+        from gotrue import http_clients as _gotrue_http
+    except Exception:
+        return
+    _GotrueSyncClient = getattr(_gotrue_http, "SyncClient", None)
+    if _GotrueSyncClient is None or getattr(
+        _GotrueSyncClient.__init__, "_workeros_http1_patched", False
+    ):
+        return
+    _orig_init = _GotrueSyncClient.__init__
+
+    def _gotrue_init_http1(self, *args, **kwargs):  # type: ignore[no-redef]
+        kwargs["http2"] = False
+        return _orig_init(self, *args, **kwargs)
+
+    _gotrue_init_http1._workeros_http1_patched = True  # type: ignore[attr-defined]
+    _GotrueSyncClient.__init__ = _gotrue_init_http1
+
 
 def _cloud_repositories() -> Repositories:
     return Repositories(
