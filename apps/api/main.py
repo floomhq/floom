@@ -2694,12 +2694,12 @@ def _context_detail(
         except Exception:
             pass
     description = _context_description(root)
+    summary.worker_count = len(used_by)
+    summary.description = description
     return ContextDetail(
         **summary.model_dump(),
         files=files,
         used_by=used_by,
-        worker_count=len(used_by),
-        description=description,
     )
 
 
