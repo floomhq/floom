@@ -279,3 +279,11 @@ def test_log_clean_lines_unchanged() -> None:
         "Output generated",
     ]:
         assert main._redact_public_log_message(clean) == clean, clean
+
+
+def test_smoke_reason_bare_keyerror_token_humanized() -> None:
+    # A stripped KeyError arg ("'name'") must not leak verbatim on the smoke
+    # create surface — it's meaningless to an operator.
+    for raw in ["'name'", '"input_file"', "'name' (error_code=execution_error)"]:
+        out = main.humanize_smoke_reason(raw)
+        assert out == main._CODE_HEADLINE, raw
