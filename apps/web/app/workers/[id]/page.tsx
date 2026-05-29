@@ -25,6 +25,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
+import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { FileInputUpload } from "@/components/FileInputUpload";
@@ -997,15 +998,34 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
     (worker.use_cases && worker.use_cases.length > 0) ||
     worker.how_it_works
   );
+  // FIX (Federico 2026-05-29): polished box-drawing flow diagram of the
+  // worker's pipeline (inputs → worker → outputs + connection logos). Built
+  // deterministically from the config; renders for every worker (handles
+  // 0-input / 0-output / 0-connection gracefully).
+  const diagram = (
+    <WorkerAsciiDiagram
+      workerName={worker.name}
+      inputs={worker.config.inputs}
+      outputs={worker.config.outputs}
+      connections={(worker.config.connections ?? []).filter(
+        (c): c is string => typeof c === "string",
+      )}
+      triggerType={worker.trigger_type || worker.config.trigger?.type}
+    />
+  );
   if (!hasContent) {
     return (
-      <p className="text-sm text-muted-foreground">
-        {worker.description || "No description provided."}
-      </p>
+      <div className="max-w-2xl space-y-6">
+        {diagram}
+        <p className="text-sm text-muted-foreground">
+          {worker.description || "No description provided."}
+        </p>
+      </div>
     );
   }
   return (
     <div className="max-w-2xl space-y-6">
+      {diagram}
       {worker.long_description && (
         <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
           {worker.long_description}
