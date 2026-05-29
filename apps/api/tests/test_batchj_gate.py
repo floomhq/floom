@@ -231,3 +231,31 @@ def test_normalize_resolves_contradictory_scalar_with_file_markers():
     assert "media_type" not in field
     # And it now validates as a real contract (no more "must declare type").
     WorkerContract.model_validate(parsed)
+
+
+def test_normalize_fixes_type_in_kind_slot_input():
+    # The live sum_column failure: input declared kind:textarea (a TYPE value in
+    # the kind slot). Normalize to kind:scalar + type:textarea so it validates.
+    import run_service as rs
+    import yaml as pyyaml
+    from models import WorkerContract
+
+    yml = (
+        "schema_version: '0.3'\nname: sum-column\ntitle: Sum Column\n"
+        "description: Sum numbers.\nversion: 0.1.0\n"
+        "exec:\n  entry: run.py\n  command: python run.py\n  runtime: python311\n  runner: e2b\n"
+        "  inputs:\n  - name: numbers\n    kind: textarea\n    required: true\n    label: Numbers\n"
+        "  outputs:\n  - name: total\n    kind: scalar\n    media_type: text/plain\n    required: true\n    label: Total\n"
+        "  trigger:\n    type: manual\n"
+    )
+    out = rs._normalize_authored_worker_yml(yml, lambda *a, **k: None)
+    parsed = pyyaml.safe_load(out)
+    inp = parsed["exec"]["inputs"][0]
+    assert inp.get("kind") == "scalar"
+    assert inp.get("type") == "textarea"
+    out_field = parsed["exec"]["outputs"][0]
+    assert out_field.get("kind") == "scalar"
+    assert out_field.get("type") == "string"
+    assert "media_type" not in out_field
+    # Whole contract validates now.
+    WorkerContract.model_validate(parsed)
