@@ -3328,6 +3328,19 @@ def _build_worker_detail(
     ):
         status = WorkerStatus.NEEDS_ATTENTION
 
+    # P2 (2026-05-29): a worker that has never run hasn't earned "healthy".
+    # Report neutral READY (rendered identically to healthy in the quiet UI) so
+    # the API never claims health for an unverified worker. Only downgrade from
+    # HEALTHY — a missing-secret / needs-attention worker keeps its real state.
+    worker_enabled = not (isinstance(_recipe, dict) and _recipe.get("enabled") is False)
+    if (
+        status == WorkerStatus.HEALTHY
+        and not recent_runs
+        and not worker.get("archived")
+        and worker_enabled
+    ):
+        status = WorkerStatus.READY
+
     manifest_yaml: Optional[str] = None
     run_py: Optional[str] = None
     skill_md_content: Optional[str] = None
@@ -3365,6 +3378,17 @@ def _build_worker_detail(
 
     triggers_spec = _build_triggers_spec(worker)
 
+    # P2 (2026-05-29): runtime.bundle_path carries the absolute host path
+    # (/root/workeros/workers/<id>) and is serialized into the public `config`.
+    # The UI never renders it, but the API exposed the deploy dir + storage
+    # layout. Relativise to the bundle BASENAME (the worker id) so the value
+    # stays self-consistent (worker_registry resolves it under WORKERS_DIR
+    # server-side) without disclosing the host path. `config` here is freshly
+    # constructed for this response only; mutating it does not affect any
+    # server-side bundle resolution (which reads from disk / a fresh config).
+    if config and config.runtime and config.runtime.bundle_path:
+        config.runtime.bundle_path = Path(config.runtime.bundle_path).name
+
     return WorkerDetail(
         id=worker["id"],
         name=worker["name"],
@@ -3376,6 +3400,7 @@ def _build_worker_detail(
         how_it_works=worker.get("how_it_works"),
         is_example=worker.get("is_example"),
         archived=bool(worker.get("archived", False)),
+        enabled=worker_enabled,
         archive_reason=_sanitize_operator_text(worker.get("archive_reason")),
         tags=worker.get("tags") or [],
         folder=worker.get("folder"),
