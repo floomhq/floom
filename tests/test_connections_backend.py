@@ -86,8 +86,10 @@ class TestAccountInfoEndpoint:
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["email"] is None
+        # Single-tenant owner view: the owner sees their OWN connected email.
+        assert body["email"] == "user@example.com"
         assert "https://www.googleapis.com/auth/gmail.readonly" in body["scopes"]
+        # Still must not leak internal Composio plumbing identifiers.
         assert "auth_config_id" not in body
         assert "user_id" not in body
         assert "connected_at" in body
@@ -121,14 +123,63 @@ class TestAccountInfoEndpoint:
                 headers=AUTH_HEADERS,
             )
 
-        # Now list should have the cached values
+        # Single-tenant owner view: the list endpoint returns the owner's OWN
+        # real account identity (the connected email), not a "Connected account"
+        # placeholder. Redaction is reserved for a future cross-user path.
         list_resp = client.get("/connections", headers=AUTH_HEADERS)
         assert list_resp.status_code == 200
         items = list_resp.json()
         item = next((c for c in items if c["id"] == local_id), None)
         assert item is not None
-        assert item["account_label"] == "Connected account"
+        assert item["account_label"] == "fede@example.com"
+        assert item["display_name"] == "fede@example.com"
         assert "r_liteprofile" in item["scopes"]
+
+
+class TestComposioScopeParsing:
+    """_fetch_composio_account_info must parse the real `scope` STRING that
+    Composio v3 returns under data/params/state.val (no `scopes` list)."""
+
+    def _info(self, main, account_payload):
+        # _fetch_composio_account_info does `import requests as _requests`
+        # locally, so patch the module-level requests.get.
+        with patch("requests.get") as mock_get:
+            mock_get.return_value.ok = True
+            mock_get.return_value.json.return_value = account_payload
+            return main._fetch_composio_account_info("ca_test", user_id="federico")
+
+    def test_parses_comma_delimited_github_scope_string(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        info = self._info(main, {
+            "toolkit": {"slug": "github"},
+            "data": {"scope": "codespace,gist,repo,user,workflow"},
+        })
+        assert info["scopes"] == ["codespace", "gist", "repo", "user", "workflow"]
+
+    def test_parses_space_delimited_google_scope_string(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        info = self._info(main, {
+            "toolkit": {"slug": "gmail"},
+            "params": {"scope": "https://a/x https://a/y"},
+        })
+        assert info["scopes"] == ["https://a/x", "https://a/y"]
+
+    def test_reads_scope_from_state_val(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        info = self._info(main, {
+            "toolkit": {"slug": "github"},
+            "state": {"val": {"scope": "repo,user"}},
+        })
+        assert info["scopes"] == ["repo", "user"]
+
+    def test_prefers_explicit_scopes_list_when_present(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        info = self._info(main, {
+            "toolkit": {"slug": "slack"},
+            "scopes": ["channels:read", "chat:write"],
+            "data": {"scope": "ignored"},
+        })
+        assert info["scopes"] == ["channels:read", "chat:write"]
 
 
 # ---------------------------------------------------------------------------
