@@ -1522,3 +1522,31 @@ Source: `docs/audits/final-gate-G5-rescore4-2026-05-29.md`. All three closed and
 - Tests: 19 new (run-endpoint 409 on disabled, repair-persists-to-recipe, humanizer bare-exc→CODE, log/artifact path scrub, smoke list-input). All pass. Pre-existing 6 failures (`test_pr_s8.py`, `test_db_factory.py`) are stale signatures, untouched by this change.
 
 **Deferred (honest, out of scope):** NEW-7 `composio_connection_id` in `/connections` (longstanding P2); aggregate 54.5% legacy reliability (no fresh-worker-rate surfacing — nice-to-have). A smoke-disabled worker's worker.yml now permanently carries `paused: true`; the operator must edit/re-save (which drops it) or explicitly re-enable to turn it back on — intentional (a broken worker stays off until reviewed), but worth a UI "turn on" affordance that clears it. The scalar-output-without-`type` author-bundle gap is unchanged. Full evidence: `docs/audits/genquality-fix-2026-05-29.md`.
+
+---
+
+## P1/P2 — Batch K: launch-polish leaks + catalog churn + honest metric + samples (G5 final A=88 / B=91, both 0 P0) (2026-05-29)
+
+### #W6 smoke_reason/log-panel jargon leaks; wall-of-red catalog; polluted success metric; file-input workers lacked samples
+
+**Where:** `apps/api/main.py` (`humanize_smoke_reason`, `_redact_public_log_message`, `_DRAFT_SYSTEM_PROMPT`, `system_overview`, draft-and-create), `apps/api/run_service.py` (run-failed log line, `_backfill_example_input`, `_synthesize_example_input_from_schema`), `apps/web/app/workers/[id]/page.tsx` (sample-fill synthesize-upload), `apps/web/app/contexts/page.tsx` (transient toast), `workers/worker-author/run.py` + `contexts/worker-author-style/SCHEMA.md` (example_input rule).
+
+**Fixes (PRs #287, #288, #289, #290 — deployed `2cc8dd2`):**
+1. **FIX 1 (P1, both scorers) — last-mile jargon/path leaks.** `smoke_reason` (draft-and-create response + worker-author SSE) routed through new `humanize_smoke_reason()` (strips `(error_code=…)`, maps to calm headline; bare quoted-token KeyError args → CODE headline); the run "Recent logs" panel `Run failed: <raw>` line routed through `_operator_error_message`; AND the e2b raw-stderr traceback lines in the same panel collapsed to one calm note via `_redact_public_log_message` (the single log-read chokepoint). Widened `_BARE_PYTHON_EXC_MSG_RE` (e.g. `can't multiply sequence by non-int`).
+2. **FIX 2 (P1, both scorers) — catalog cleanup (live DATA op).** DELETED 30 audit test-churn workers (numbered `-2/-3/-4/-5` duplicates + one-off wedge tests created during today's audits) via API; PAUSED 9 base-name 0%-success non-example workers (wrote `paused: true` to manifest + `/workers/reload` → durable `enabled=0`, 409, surfaced as `worker_disabled` in overview — reversible). Catalog 68 → 38 (11 examples + 27 non-example); no 0%-success non-example worker presented as green-ready.
+3. **FIX 3 (P1, scorer A) — honest success metric.** `success_rate_7d` scoped to ACTIVE, real (non-example/system/paused) workers + `success_rate_scope="active_workers"` label. Live: **85.7%** (was 54.6% legacy aggregate).
+4. **FIX 4 (P1, scorer A) — file-input workers ship runnable samples.** Generator prompt + SCHEMA.md now require `example_input` for every input (inline text for files); registration backfills `example_input` from `sample_input_json`; final fallback synthesizes from the input SCHEMA so EVERY generated worker is one-click runnable regardless of LLM compliance; UI synthesizes a real upload from the inline content. `_DRAFT_SYSTEM_PROMPT` now requests `sample_input_json`.
+5. **FIX 5 (P2-A, scorer B) — /contexts transient toast.** Retry once on transient fetch error; never surface raw "Failed to fetch". (P2-B disabled-worker sample-fill no-op + P2-C approvals badge flicker: deferred — intentionally non-runnable / non-blocking cosmetic.)
+
+**Live verification (deployed `2cc8dd2`, local prod backend 8011 = `workeros-api` systemd, the backend `workers-api.floom.dev` proxies):**
+- **FIX 1:** fresh BOOM-input runtime failure → `error` = calm headline; logs panel = every traceback/exception line collapsed to "Worker code raised an error (see the Error card)"; `error_raw` (debug tab) path-scrubbed + jargon-collapsed; draft-and-create `smoke_reason` = calm headline. Full operator-visible surface (error + all logs) grep-CLEAN for `/home/user`, `/root/workeros`, `Traceback`, `unsupported operand`, `TypeError`.
+- **FIX 2:** 30 deleted (HTTP 204), 9 paused (all 409 + `worker_disabled` in overview, durable across 2 reloads). Catalog 68 → 38.
+- **FIX 3:** overview `success_rate_7d=0.857`, `scope=active_workers`, active=27 / paused=11.
+- **FIX 4:** fresh file-input worker `line-counter` shipped `example_input={"text_file":"line 1\nline 2\nline 3\n"}` — one-click runnable.
+- **Regression:** broken generations still smoke-fail → durably 409 (never green); a passing generation runs healthy. **0 silently-broken** holds.
+
+**Tests:** +6 smoke_reason scrub/humanize, +5 e2b-log traceback collapse, +1 bare-key, +9 example_input backfill/synthesis, +2 overview success-scope. 38 client-fixture + hygiene + backfill tests pass together. Pre-existing 2 `test_db_factory.py` failures (missing `approvals` arg) untouched by this change.
+
+**Deferred (honest residual):** Generator first-pass quality remains the ceiling (scorer A 72/100): many fresh script-mode generations smoke-FAIL on `output_validation_failed: <field> scalar output leaked a path string` (run.py writes a file path into a scalar output) — the wedge gate correctly catches these (durable 409, never green), but first-pass reliability is mediocre. This is a generator-engine quality watch-item, not a launch blocker for a hand-held design partner. Paused-worker list cards still show the historical `0% success` stat alongside the Needs-attention badge (honest, not green). The `paused: true`-on-disk re-enable affordance (W5 deferred) is unchanged.
+
+**Status:** VERIFIED LIVE (deployed `2cc8dd2`, 2026-05-29 PM). Full evidence: `docs/audits/genquality-fix-2026-05-29.md`.
