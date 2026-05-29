@@ -1,5 +1,7 @@
 schema_version: "0.3"
 is_example: true
+archived: true
+archive_reason: "Customer secrets unavailable (SLACK_BOT_TOKEN, LINEAR_API_KEY, NOTION_API_KEY)."
 name: kugelaudio-meeting-pipeline
 title: Kugelaudio Meeting Pipeline
 description: Notion Meeting Tracker -> Claude extraction -> Linear issues (dedupe + create) -> Slack digest -> Notion state writeback.

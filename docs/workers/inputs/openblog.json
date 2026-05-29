@@ -1,0 +1,9 @@
+{
+  "url": "https://www.floom.com",
+  "keywords": "background workers",
+  "language": "en",
+  "market": "US",
+  "default_word_count": "2000",
+  "skip_images": true,
+  "export_formats": "html markdown json"
+}

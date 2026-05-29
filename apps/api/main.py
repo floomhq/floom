@@ -1462,7 +1462,9 @@ def _persist_discovered_workers(
         triggers_json_str = json.dumps(triggers_list)
         # Primary trigger type is the first trigger's type
         primary_trigger_type = triggers_list[0].get("type") if triggers_list else "manual"
-        enabled_value = 0 if manifest.get("paused") is True or manifest.get("enabled") is False else 1
+        # Archived workers are disabled from the scheduler: they never fire cron runs.
+        is_archived = manifest.get("archived") is True
+        enabled_value = 0 if is_archived or manifest.get("paused") is True or manifest.get("enabled") is False else 1
 
         conn.execute(
             """
@@ -1577,6 +1579,8 @@ def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         "example_output": manifest_dict.get("example_output"),
         "how_it_works": manifest_dict.get("how_it_works"),
         "is_example": manifest_dict.get("is_example"),
+        "archived": bool(manifest_dict.get("archived", False)),
+        "archive_reason": manifest_dict.get("archive_reason"),
         "tags": manifest_dict.get("tags") or [],
         "folder": manifest_dict.get("folder"),
         "status": "healthy",
@@ -2634,16 +2638,19 @@ async def upload_context_files(
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers(
     include_system: bool = False,
+    include_archived: bool = False,
     shape: str = "full",
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[WorkerSummary]:
     """List workers.
 
-    ?shape=list  — trimmed payload (~15 KB for 18 workers) for the web UI list view.
-                   Drops: long_description, use_cases, example_input, example_output,
-                   how_it_works, timeseries. Keeps all fields needed to render the card.
-    ?shape=full  — full payload (default, backwards-compat for CLI + MCP consumers).
+    ?shape=list           — trimmed payload (~15 KB for 18 workers) for the web UI list view.
+                            Drops: long_description, use_cases, example_input, example_output,
+                            how_it_works, timeseries. Keeps all fields needed to render the card.
+    ?shape=full           — full payload (default, backwards-compat for CLI + MCP consumers).
+    ?include_archived=true — include archived workers (archived:true in worker.yml).
+                             Default: excluded from All/Starred/Recent; shown only in Archived view.
     """
     db_workers = _list_db_workers(user_id=auth.user_id, repos=repos)
     # In cloud (multi-tenant) mode never fall back to the shared filesystem,
@@ -2657,6 +2664,9 @@ def list_workers(
             w for w in workers
             if not (w.get("manifest") or {}).get("system_worker", False)
         ]
+    # Filter out archived workers unless explicitly requested.
+    if not include_archived:
+        workers = [w for w in workers if not w.get("archived", False)]
     worker_ids = [w["id"] for w in workers]
     stats_by_id = _get_stats_batch(worker_ids, user_id=auth.user_id, repos=repos)
     # S44 Win 3: skip expensive timeseries fetch when list shape requested.
@@ -2678,8 +2688,11 @@ def list_workers(
             missing = [s for s in config.secrets if s not in available_secret_names]
             if missing:
                 status = WorkerStatus.MISSING_SECRET
+        # Archived workers never show needs_attention — they're intentionally inactive.
+        is_archived = w.get("archived", False)
         if (
-            status == WorkerStatus.HEALTHY
+            not is_archived
+            and status == WorkerStatus.HEALTHY
             and last_run
             and last_run.status == RunStatus.FAILED
         ):
@@ -2709,6 +2722,8 @@ def list_workers(
                 example_output=None if list_shape else w.get("example_output"),
                 how_it_works=None if list_shape else w.get("how_it_works"),
                 is_example=w.get("is_example"),
+                archived=is_archived,
+                archive_reason=w.get("archive_reason"),
                 tags=w.get("tags") or [],
                 folder=w.get("folder"),
                 status=status,
@@ -2819,6 +2834,8 @@ def _build_worker_detail(
         example_output=worker.get("example_output"),
         how_it_works=worker.get("how_it_works"),
         is_example=worker.get("is_example"),
+        archived=bool(worker.get("archived", False)),
+        archive_reason=worker.get("archive_reason"),
         tags=worker.get("tags") or [],
         folder=worker.get("folder"),
         status=status,
@@ -2843,6 +2860,61 @@ def get_worker_detail(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+@app.post("/workers/{worker_id}/restore", response_model=WorkerDetail)
+def restore_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """Restore an archived worker (set archived: false in worker.yml).
+
+    Writes back to the bundle file so the change survives server restarts.
+    Invalidates the worker cache so the worker reappears in the default list.
+    """
+    from worker_registry import WORKERS_DIR as _WORKERS_DIR
+    import re as _re
+    worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
+    if not worker_yml_path.exists():
+        raise HTTPException(status_code=404, detail="Worker not found")
+    try:
+        raw_yml = worker_yml_path.read_text()
+        # Remove or set archived to false. Match both `archived: true` and `archived:true`.
+        updated = _re.sub(r"(?m)^(archived:\s*)true\s*$", r"\1false\n", raw_yml)
+        if updated == raw_yml:
+            # Field may be missing — just remove it (defaults to false)
+            updated = raw_yml  # already not archived
+        # Also remove archive_reason line when restoring
+        updated = _re.sub(r"(?m)^archive_reason:.*\n?", "", updated)
+        worker_yml_path.write_text(updated)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
+    invalidate_worker_cache()
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+@app.get("/workers/{worker_id}/sample-input")
+def get_worker_sample_input(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Any:
+    """Return the sample input JSON for a worker if present.
+
+    Sample inputs live at docs/workers/inputs/<worker_id>.json relative to the
+    repo root (one level above the workers/ directory).
+    Returns 404 if no sample input exists for the worker.
+    """
+    safe_id = worker_id.replace("..", "").replace("/", "").replace("\\", "")
+    # Walk from WORKERS_DIR up one level to the repo root, then into docs/workers/inputs/
+    sample_path = WORKERS_DIR.parent / "docs" / "workers" / "inputs" / f"{safe_id}.json"
+    if not sample_path.is_file():
+        raise HTTPException(status_code=404, detail=f"No sample input found for worker {worker_id!r}")
+    try:
+        data = json.loads(sample_path.read_text())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to parse sample input: {exc}") from exc
+    return data
 
 
 # ---------------------------------------------------------------------------
