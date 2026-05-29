@@ -639,17 +639,11 @@ def _local_insert_connection(main_module: Any, *, user_id: str, app_name: str = 
 
 
 def _tracked_worker_ids(repo: Path) -> set[str]:
-    proc = subprocess.run(
-        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", "HEAD", "workers"],
-        check=True,
-        text=True,
-        capture_output=True,
-    )
+    workers_dir = repo / "workers"
     tracked_ids: set[str] = set()
-    for raw_path in proc.stdout.splitlines():
-        path = Path(raw_path.strip())
-        if len(path.parts) == 3 and path.parts[0] == "workers" and path.parts[2] == "worker.yml":
-            tracked_ids.add(path.parts[1])
+    for worker_yml in workers_dir.glob("*/worker.yml"):
+        if worker_yml.is_file():
+            tracked_ids.add(worker_yml.parent.name)
     return tracked_ids
 
 
