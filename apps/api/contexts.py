@@ -283,6 +283,44 @@ def iter_context_files(root: Path) -> Iterable[Path]:
     )
 
 
+_EXT_DISPLAY_TYPE: dict[str, str] = {
+    ".md": "Markdown",
+    ".mdx": "Markdown",
+    ".yaml": "YAML",
+    ".yml": "YAML",
+    ".py": "Python",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".json": "JSON",
+    ".sh": "Shell",
+    ".bash": "Shell",
+    ".zsh": "Shell",
+    ".sql": "SQL",
+    ".csv": "CSV",
+    ".txt": "Text",
+    ".toml": "TOML",
+    ".xml": "XML",
+    ".html": "HTML",
+    ".htm": "HTML",
+    ".css": "CSS",
+    ".scss": "CSS",
+}
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp"}
+
+
+def context_file_display_type(path_str: str, mime_type: str) -> str:
+    ext = PurePosixPath(path_str).suffix.lower()
+    if ext in _IMAGE_EXTS or mime_type.startswith("image/"):
+        return "Image"
+    if ext in _EXT_DISPLAY_TYPE:
+        return _EXT_DISPLAY_TYPE[ext]
+    if mime_type.startswith("text/"):
+        return "Text"
+    return "File"
+
+
 def context_file_metadata(root: Path, path: Path) -> dict[str, Any]:
     rel = path.relative_to(root).as_posix()
     stat = path.stat()
@@ -293,6 +331,7 @@ def context_file_metadata(root: Path, path: Path) -> dict[str, Any]:
         "mime_type": mime_type,
         "updated_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
         "is_binary": is_binary_file(rel, mime_type),
+        "display_type": context_file_display_type(rel, mime_type),
     }
 
 
