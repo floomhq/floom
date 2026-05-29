@@ -255,3 +255,40 @@ No backend touched (P0-1 backend pre-deployed via #239). No files outside
 `/workers/<id>` + `/runs`. Shared helper `apps/web/lib/run-format.ts` added.
 Merged → main `8b0a674` (#244) + `4c5b859` (#249, Result-tab log filter
 follow-up); prod auto-aliased to `workers.floom.dev` (`workeros-1z9e9x83u-…`).
+
+### G3 — concurrency `Event loop is closed` (PR #258, fix/agent-driver-event-loop-concurrency-2026-05-29) — DONE ✅ VERIFIED
+
+The sole open G3 blocker from `docs/audits/full-audit-2026-05-29-0841.md`:
+intermittent `RuntimeError: Event loop is closed` failing worker runs whenever
+2+ runs overlap (7 such failures on 2026-05-29).
+
+| Item | Sev | Status | Evidence |
+|------|-----|--------|----------|
+| Intermittent `Event loop is closed` under concurrency | P1 | **VERIFIED LIVE** | 8×2 concurrent `research_brief` runs (16 overlapping) + 6 concurrent `/chat` streams + 5+5 interleaved worker/chat + 1 solo = **33 runs, ZERO closed-loop errors**. Global closed-loop count held at the pre-fix baseline of 7; post-deploy runs show **24 completed + 1 pending_approval, zero errors of any class**. Solo run still passes (`run_5c41d68f8292` completed). |
+
+**Root cause:** the Agents SDK default `MultiProvider` builds `AsyncOpenAI` over a
+process-wide `httpx.AsyncClient` (`OpenAIProvider.shared_http_client`). Each
+worker run executes in its OWN fresh `asyncio.run` loop (`AgentDriver._run_coro_sync`);
+the chat path runs on the persistent uvicorn loop. The httpx client binds to the
+first loop that does I/O on it, so a closing loop poisons a concurrent run →
+`Event loop is closed`.
+
+**Fix (Option A — per-run isolation):** new `apps/api/runner_sandbox/loop_local_provider.py`
+`LoopLocalModelProvider` builds a FRESH `AsyncOpenAI` + `httpx.AsyncClient` inside
+the run's own loop (lazily, on first `get_model`), passed via
+`RunConfig.model_provider`, closed in `finally`. No loop-bound async resource is
+shared across runs. Applied to `agent_driver.py` (worker runs) + `chat_service.py`
+(workspace/author stream). Chose A over B (persistent background loop +
+`run_coroutine_threadsafe`) for full per-run isolation with no shared mutable
+async state. Regression test `tests/test_agent_driver_concurrency.py` reproduces
+the bug (shared httpx client across a closed loop raises; per-loop client does
+not) and drives 16 overlapping `AgentDriver` runs asserting zero closed-loop
+errors — FAILS without the fix, PASSES with it.
+
+Did NOT touch `main.py` `_operator_error_message` (error-string lane).
+Merged → main `e210094` (#258); deployed via `ops/deploy-api.sh` (SHA `e210094`,
+health ok, migration 38). Concurrent run_ids (zero closed-loop):
+- Wave 1 (8 concurrent): `run_d539314c6297 run_627c67a154e0 run_a8c91a56ff6c run_3f5ac77f4544 run_ebc5426e8e95 run_64d67b098df4 run_7b6ed7ad3797 run_c7adc5b5c865`
+- Wave 2 (8 concurrent): `run_4f1609c4f214 run_23e7d7a50049 run_32e42f23a883 run_463f56ff6294 run_299f026ec39b run_c830e8275c36 run_f53febfcd365 run_7a0662d42301`
+- Interleaved worker runs: `run_2cb226d246ba run_318cba8d8198 run_094666c70346 run_630afbf593c4 run_53e4b3a28a5c`
+- Solo: `run_5c41d68f8292` (completed)
