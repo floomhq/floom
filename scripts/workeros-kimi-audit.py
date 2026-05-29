@@ -73,6 +73,100 @@ RUN_EXPORT_FORBIDDEN_FILES = (
     "artifacts/transcript.jsonl",
 )
 RUN_CREATE_QUOTA_RESET_SECONDS = 61
+KIMI_PROBE_SEMANTICS: dict[str, str] = {
+    "local-foreign-custom-worker-routes-404": (
+        "uses a real worker created by user-a plus a real run on that worker; "
+        "user-b GET/PATCH/PUT/PUT-files/DELETE/POST-run/POST-replay/GET-timeseries all return 404."
+    ),
+    "local-foreign-run-routes-404": (
+        "uses a real run owned by user-a; user-b GET bundle/download/events/logs/stream and artifact download all return 404."
+    ),
+    "local-foreign-worker-delete-404": (
+        "user-a creates a real custom worker and user-b DELETEs that existing worker; the delete returns 404."
+    ),
+    "local-contexts-scoped": (
+        "user-a creates a real context and file; user-b list/get/file-get/file-put/upload/delete and worker-create-with-foreign-context are all blocked."
+    ),
+    "local-context-name-collision-isolated": (
+        "user-a and user-b both create the same context name and write different file contents; reads stay isolated and filesystem paths diverge."
+    ),
+    "local-conversations-list-scoped": (
+        "user-a creates a conversation through /chat; GET /conversations shows it only to user-a and not to user-b."
+    ),
+    "local-conversations-list-no-leak": (
+        "GET /conversations for user-b does not contain user-a conversation ids or the seeded chat text."
+    ),
+    "local-chat-foreign-conversation-detached": (
+        "user-b attempts /chat with user-a's conversation_id and receives a fresh conversation_id owned by user-b instead of attaching to user-a's conversation."
+    ),
+    "local-stock-worker-mutations-blocked": (
+        "DELETE/PATCH/PUT/PUT-files against a stock worker all return 403."
+    ),
+    "local-stock-worker-detail-no-secrets": (
+        "GET stock worker detail returns 200 without exposing source files, env keys, bundle URLs, or webhook secrets."
+    ),
+    "local-stock-timeseries-zero-safe": (
+        "GET stock worker /runs/timeseries as user-a and user-b both return 200 with zero-safe aggregate rows and no per-user leakage."
+    ),
+    "local-stock-worker-run-create-rate-limited": (
+        "POST /workers/research_brief/runs as an authenticated user hits the per-worker limiter with statuses [200, 200, 429]."
+    ),
+    "local-draft-and-create-foreign-context-rejected": (
+        "user-a creates a real context; user-b uses draft-and-create with worker.yml referencing that context and receives 400 with no worker written."
+    ),
+    "local-run-create-foreign-file-id-rejected": (
+        "user-a uploads a real file id/SHA; user-b tries to run a file-input worker against that uploaded file and receives 403/404."
+    ),
+    "local-run-create-404-no-secret-leak": (
+        "user-b POST /workers/{foreign_worker}/runs returns 404 without secret names, trace ids, or runner metadata in the body."
+    ),
+    "local-run-env-secret-error-redacted": (
+        "a seeded failed run with error COMPOSIO_API_KEY not set is rendered as Required platform secret is not configured "
+        "across /runs, /runs/{id}, /runs/{id}/logs, /runs/{id}/events, and /runs/{id}/stream."
+    ),
+    "local-runs-list-no-worker-name-leak": (
+        "GET /runs for each user omits the other user's worker id/name from the response body."
+    ),
+    "local-reload-keeps-stock-workers-protected": (
+        "POST /workers/reload succeeds for the caller, then PATCH on a stock worker still returns 403."
+    ),
+    "local-restore-stock-worker-blocked": (
+        "POST /workers/research_brief/restore returns 403 for a stock worker."
+    ),
+    "local-sample-input-foreign-404": (
+        "GET /workers/{foreign_custom_worker}/sample-input by a non-owner returns 404."
+    ),
+    "local-upload-content-type-bypass-rejected": (
+        "POST /uploads with filename .txt but media type image/svg+xml returns 400."
+    ),
+    "local-upload-token-cross-file-rejected": (
+        "a download token minted for file A returns 404 when reused against file B."
+    ),
+    "stock-worker-detail-no-secrets": (
+        "GET /workers/research_brief on prod returns 200 without source files, env keys, bundle URLs, or webhook secrets."
+    ),
+    "stock-worker-run-create-auth-and-shape": (
+        "POST /workers/research_brief/runs on prod returns 403 without auth and 200 with auth, yielding a real run_id."
+    ),
+    "stock-worker-run-replay-auth-and-shape": (
+        "POST /workers/research_brief/runs/{run_id}/replay on prod returns 200 with auth and yields a new run_id."
+    ),
+    "stock-worker-run-events-no-sensitive-leak": (
+        "GET /runs/{run_id}/events for a real stock-worker run returns 200 and does not leak secret names, trace IDs, or runner metadata."
+    ),
+    "stock-worker-run-stream-no-sensitive-leak": (
+        "GET /runs/{run_id}/stream for a real stock-worker run returns 200 and does not leak secret names, trace IDs, or runner metadata."
+    ),
+    "stock-worker-run-logs-no-sensitive-leak": (
+        "GET /runs/{run_id}/logs for a real stock-worker run returns 200 and does not leak secret names, trace IDs, or runner metadata."
+    ),
+    "stock-worker-timeseries-auth-and-safe": (
+        "GET /workers/research_brief/runs/timeseries returns 403 without auth and 200 with auth, with only aggregate day rows."
+    ),
+    "stock-worker-reload-keeps-mutations-blocked": (
+        "POST /workers/reload on prod returns 200, and a subsequent PATCH on a stock worker still returns 403."
+    ),
+}
 
 
 def now_slug() -> str:
@@ -191,6 +285,59 @@ def request_binary(
         }
 
 
+def request_stream_text(
+    base: str,
+    method: str,
+    path: str,
+    *,
+    secret: str | None = None,
+    timeout: float = 30,
+    max_lines: int = 12,
+    max_chars: int = 2000,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    headers = dict(kwargs.pop("headers", {}) or {})
+    audit_client_ip = os.environ.get("WORKEROS_AUDIT_CLIENT_IP", "").strip()
+    if audit_client_ip and "x-forwarded-for" not in {key.lower(): value for key, value in headers.items()}:
+        headers["X-Forwarded-For"] = audit_client_ip
+    if secret:
+        headers["x-floom-secret"] = secret
+    started = time.perf_counter()
+    url = base.rstrip("/") + path
+    try:
+        response = requests.request(method, url, headers=headers, timeout=timeout, stream=True, **kwargs)
+        lines: list[str] = []
+        char_count = 0
+        for raw_line in response.iter_lines(decode_unicode=True):
+            line = raw_line or ""
+            lines.append(line)
+            char_count += len(line) + 1
+            if len(lines) >= max_lines or char_count >= max_chars:
+                break
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        body = "\n".join(lines)
+        return {
+            "method": method.upper(),
+            "path": path,
+            "status": response.status_code,
+            "elapsed_ms": elapsed_ms,
+            "response_bytes": len(body.encode("utf-8")),
+            "location": response.headers.get("location", ""),
+            "body": body,
+        }
+    except Exception as exc:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        return {
+            "method": method.upper(),
+            "path": path,
+            "status": "EXCEPTION",
+            "elapsed_ms": elapsed_ms,
+            "response_bytes": 0,
+            "location": "",
+            "body": f"{type(exc).__name__}: {exc}",
+        }
+
+
 def record(results: list[dict[str, Any]], probe_id: str, ok: bool, detail: str, raw: dict[str, Any] | None = None) -> None:
     results.append({"id": probe_id, "ok": ok, "detail": detail, "raw": raw or {}})
 
@@ -238,6 +385,8 @@ def route_risk_tags(method: str, path: str) -> list[str]:
         tags.append("mutating")
     if "{" in path:
         tags.append("object-id")
+    if any(token in path for token in ("/chat", "/conversation", "/conversations", "/workspace")):
+        tags.append("chat-or-workspace")
     if any(token in path for token in ("/runs", "/artifacts", "/download", "/bundle")):
         tags.append("run-data")
     if any(token in path for token in ("/secrets", "/system", "/settings")):
@@ -259,6 +408,7 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
         "chat-empty-message-rejected",
         "chat-message-length-limit",
         "local-chat-conversations-scoped",
+        "local-chat-foreign-conversation-detached",
         "local-chat-message-length-limit",
     ),
     ("GET", "/workspace"): ("workspace-auth-required", "local-workspace-roundtrip"),
@@ -266,6 +416,8 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/conversations"): (
         "conversations-auth-required",
         "local-chat-conversations-scoped",
+        "local-conversations-list-scoped",
+        "local-conversations-list-no-leak",
     ),
     ("GET", "/conversations/{conversation_id}"): (
         "conversations-auth-required",
@@ -275,14 +427,18 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/integrations/triggers"): ("integrations-routes-require-auth",),
     ("GET", "/metrics"): ("prometheus-metrics-auth-and-shape",),
     ("GET", "/contexts"): ("local-contexts-scoped",),
-    ("POST", "/contexts/{name}"): ("local-contexts-scoped",),
+    ("POST", "/contexts/{name}"): ("local-contexts-scoped", "local-context-name-collision-isolated"),
     ("GET", "/contexts/{name}"): ("local-contexts-scoped",),
     ("DELETE", "/contexts/{name}"): ("local-contexts-scoped",),
     ("GET", "/contexts/{name}/files/{file_path}"): ("local-contexts-scoped", "local-context-file-symlink-traversal"),
     ("PUT", "/contexts/{name}/files/{file_path}"): ("local-contexts-scoped", "local-context-file-symlink-traversal"),
     ("DELETE", "/contexts/{name}/files/{file_path}"): ("local-contexts-scoped", "local-context-file-symlink-traversal"),
     ("POST", "/contexts/{name}/upload"): ("local-contexts-scoped",),
-    ("GET", "/runs"): ("local-runs-list-scoped",),
+    ("GET", "/runs"): (
+        "local-runs-list-scoped",
+        "local-runs-list-no-worker-name-leak",
+        "local-run-env-secret-error-redacted",
+    ),
     ("POST", "/runs/clear"): ("runs-clear-requires-confirm", "local-runs-clear-scoped"),
     ("POST", "/runs/{run_id}/cancel"): (
         "run-cancel-no-terminal-existence-oracle",
@@ -291,6 +447,7 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/runs/{run_id}"): (
         "run-detail-no-sensitive-fields",
         "local-foreign-run-routes-404",
+        "local-run-env-secret-error-redacted",
     ),
     ("GET", "/runs/{run_id}/download"): (
         "run-download-no-sensitive-archive-files",
@@ -308,15 +465,21 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/runs/{run_id}/stream"): (
         "local-foreign-run-routes-404",
         "local-run-stream-no-sensitive-content",
+        "local-run-env-secret-error-redacted",
+        "stock-worker-run-stream-no-sensitive-leak",
     ),
     ("GET", "/runs/{run_id}/events"): (
         "local-foreign-run-routes-404",
         "local-run-events-no-sensitive-stream",
+        "local-run-env-secret-error-redacted",
+        "stock-worker-run-events-no-sensitive-leak",
     ),
     ("GET", "/runs/{run_id}/logs"): (
         "run-detail-no-sensitive-fields",
         "local-foreign-run-routes-404",
+        "local-run-env-secret-error-redacted",
         "run-logs-no-sensitive-leak",
+        "stock-worker-run-logs-no-sensitive-leak",
     ),
     ("POST", "/runs/{run_id}/approve"): (
         "run-approval-routes-require-auth",
@@ -331,14 +494,18 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
         "run-create-body-limit-enforced",
         "local-foreign-custom-worker-routes-404",
         "local-run-file-input-foreign-sha-blocked",
+        "local-run-create-foreign-file-id-rejected",
+        "local-run-create-404-no-secret-leak",
         "local-run-create-per-worker-rate-limit",
         "local-stock-worker-run-create-rate-limited",
+        "stock-worker-run-create-auth-and-shape",
     ),
     ("POST", "/workers/{worker_id}/runs/{run_id}/replay"): (
         "run-replay-shares-global-rate-limit",
         "local-foreign-custom-worker-routes-404",
         "local-run-replay-per-run-rate-limit",
         "local-run-replay-cross-worker-same-user-404",
+        "stock-worker-run-replay-auth-and-shape",
     ),
     ("PATCH", "/workers/{worker_id}"): (
         "local-stock-worker-mutations-blocked",
@@ -367,15 +534,18 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
         "worker-write-routes-require-auth",
         "local-draft-and-create-files-path-rejected",
         "local-draft-and-create-body-limit",
+        "local-draft-and-create-foreign-context-rejected",
     ),
     ("POST", "/workers/reload"): (
         "worker-write-routes-require-auth",
         "local-reload-preserves-owner",
         "local-reload-keeps-stock-workers-protected",
+        "stock-worker-reload-keeps-mutations-blocked",
     ),
     ("POST", "/workers/{worker_id}/restore"): (
         "worker-restore-auth-required",
         "local-worker-restore-scoped",
+        "local-restore-stock-worker-blocked",
     ),
     ("DELETE", "/workers/{worker_id}"): (
         "stock-worker-delete-blocked",
@@ -390,11 +560,13 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/workers/{worker_id}/sample-input"): (
         "sample-input-auth-and-shape",
         "local-sample-input-scoped",
+        "local-sample-input-foreign-404",
     ),
     ("GET", "/workers/{worker_id}/runs/timeseries"): (
         "local-foreign-custom-worker-routes-404",
         "local-foreign-timeseries-no-data-leak",
         "local-stock-timeseries-zero-safe",
+        "stock-worker-timeseries-auth-and-safe",
     ),
     ("POST", "/workers/draft-from-prompt"): (
         "workers-oversized-body",
@@ -419,12 +591,14 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
         "upload-null-byte-filename-rejected",
         "upload-dangerous-double-extension-rejected",
         "upload-path-traversal-filename-rejected",
+        "local-upload-content-type-bypass-rejected",
     ),
     ("GET", "/uploads/{file_id}"): (
         "upload-url-present-and-downloadable",
         "upload-download-requires-signed-token",
         "local-upload-download-user-bound",
         "local-upload-token-expiration-enforced",
+        "local-upload-token-cross-file-rejected",
     ),
     ("GET", "/connections"): ("local-connections-scoped",),
     ("POST", "/connections"): ("connections-init-auth-required",),
@@ -1073,6 +1247,14 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
             owner_messages = []
             if owner_conversation_detail is not None and owner_conversation_detail.status_code == 200:
                 owner_messages = owner_conversation_detail.json().get("messages") or []
+            foreign_chat_status = None
+            foreign_chat_finish = None
+            if chat_conversation_id:
+                foreign_chat_status, _foreign_chat_body, foreign_chat_finish = _stream_chat_body(
+                    user_b,
+                    message="foreign conversation probe",
+                    conversation_id=chat_conversation_id,
+                )
             record(
                 results,
                 "local-chat-conversations-scoped",
@@ -1121,6 +1303,45 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                         else {}
                     ),
                 },
+            )
+            record(
+                results,
+                "local-conversations-list-scoped",
+                owner_conversations.status_code == 200
+                and foreign_conversations.status_code == 200
+                and chat_conversation_id in owner_conversation_ids
+                and chat_conversation_id not in foreign_conversation_ids,
+                (
+                    f"owner={owner_conversations.status_code} foreign={foreign_conversations.status_code} "
+                    f"conv_id={chat_conversation_id!r}"
+                ),
+                {
+                    "owner_list": {"status": owner_conversations.status_code, "body": owner_conversations.text},
+                    "foreign_list": {"status": foreign_conversations.status_code, "body": foreign_conversations.text},
+                },
+            )
+            record(
+                results,
+                "local-conversations-list-no-leak",
+                owner_conversations.status_code == 200
+                and foreign_conversations.status_code == 200
+                and chat_conversation_id not in foreign_conversations.text
+                and "audit chat scoped" not in foreign_conversations.text,
+                f"foreign={foreign_conversations.status_code}",
+                {"status": foreign_conversations.status_code, "body": foreign_conversations.text},
+            )
+            record(
+                results,
+                "local-chat-foreign-conversation-detached",
+                bool(chat_conversation_id)
+                and foreign_chat_status == 200
+                and isinstance(foreign_chat_finish, dict)
+                and str(foreign_chat_finish.get("conversation_id") or "") not in ("", chat_conversation_id),
+                (
+                    f"status={foreign_chat_status} "
+                    f"foreign_conv={str((foreign_chat_finish or {}).get('conversation_id') or '')!r}"
+                ),
+                {"status": foreign_chat_status, "finish": foreign_chat_finish},
             )
 
             chat_oversized_local = client.post("/chat", headers=user_a, json={"message": "x" * 20001})
@@ -1274,6 +1495,13 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                     "worker_yml": restore_path.read_text() if restore_path.exists() else "",
                 },
             )
+            record(
+                results,
+                "local-restore-stock-worker-blocked",
+                restore_stock is not None and restore_stock.status_code == 403,
+                f"status={restore_stock.status_code if restore_stock is not None else None}",
+                {"status": restore_stock.status_code if restore_stock is not None else None, "body": restore_stock.text if restore_stock is not None else ""},
+            )
 
             sample_created = client.post(
                 "/workers",
@@ -1313,6 +1541,13 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                         else {}
                     ),
                 },
+            )
+            record(
+                results,
+                "local-sample-input-foreign-404",
+                foreign_sample is not None and foreign_sample.status_code == 404,
+                f"status={foreign_sample.status_code if foreign_sample is not None else None}",
+                {"status": foreign_sample.status_code if foreign_sample is not None else None, "body": foreign_sample.text if foreign_sample is not None else ""},
             )
 
             draft_capture: dict[str, Any] = {}
@@ -1419,6 +1654,66 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                 draft_body_limit.status_code == 413,
                 f"status={draft_body_limit.status_code}",
                 {"status": draft_body_limit.status_code, "body": draft_body_limit.text},
+            )
+
+            draft_foreign_context = "draft-foreign-context"
+            draft_foreign_context_create = client.post(
+                f"/contexts/{draft_foreign_context}",
+                headers=user_a,
+                json={"writeable": True},
+            )
+            draft_foreign_worker = "draft-foreign-context-probe"
+            draft_foreign_context_attempt = client.post(
+                "/workers/draft-and-create",
+                headers=user_b,
+                json={
+                    "files": [
+                        {
+                            "path": "worker.yml",
+                            "content": _local_worker_payload(
+                                draft_foreign_worker,
+                                title="Draft Foreign Context Probe",
+                                contexts=[draft_foreign_context],
+                            )["worker_yml"],
+                        },
+                        {
+                            "path": "run.py",
+                            "content": _local_worker_payload(
+                                draft_foreign_worker,
+                                title="Draft Foreign Context Probe",
+                                contexts=[draft_foreign_context],
+                            )["run_py"],
+                        },
+                    ]
+                },
+            )
+            draft_foreign_context_delete = client.delete(f"/contexts/{draft_foreign_context}", headers=user_a)
+            record(
+                results,
+                "local-draft-and-create-foreign-context-rejected",
+                draft_foreign_context_create.status_code == 200
+                and draft_foreign_context_attempt.status_code == 400
+                and not (workers_dir / draft_foreign_worker).exists()
+                and draft_foreign_context_delete.status_code == 200,
+                (
+                    f"context_create={draft_foreign_context_create.status_code} "
+                    f"draft={draft_foreign_context_attempt.status_code} "
+                    f"context_delete={draft_foreign_context_delete.status_code}"
+                ),
+                {
+                    "context_create": {
+                        "status": draft_foreign_context_create.status_code,
+                        "body": draft_foreign_context_create.text,
+                    },
+                    "draft": {
+                        "status": draft_foreign_context_attempt.status_code,
+                        "body": draft_foreign_context_attempt.text,
+                    },
+                    "context_delete": {
+                        "status": draft_foreign_context_delete.status_code,
+                        "body": draft_foreign_context_delete.text,
+                    },
+                },
             )
 
             tracked_worker_ids = _tracked_worker_ids(repo)
@@ -1699,6 +1994,21 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                     },
                 },
             )
+            foreign_run_create_body = foreign_worker_checks["create_run"].text
+            record(
+                results,
+                "local-run-create-404-no-secret-leak",
+                foreign_worker_checks["create_run"].status_code == 404
+                and all(
+                    token not in foreign_run_create_body
+                    for token in ("Missing secrets:", "API_KEY", "sk-", "BEGIN PRIVATE KEY", "trace_", "runner=e2b")
+                ),
+                f"status={foreign_worker_checks['create_run'].status_code}",
+                {
+                    "status": foreign_worker_checks["create_run"].status_code,
+                    "body": foreign_run_create_body,
+                },
+            )
             owner_timeseries = client.get(f"/workers/{shared_worker}/runs/timeseries", headers=user_a)
             owner_timeseries_total = 0
             if owner_timeseries.status_code == 200:
@@ -1840,6 +2150,73 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                 stream_status == 200 and all(token not in stream_body for token in sensitive_tokens),
                 f"status={stream_status}",
                 {"status": stream_status, "body": stream_body},
+            )
+
+            env_secret_run_id = _insert_local_run(shared_worker, user_id="user-a", status="queued")
+            env_secret_error = "COMPOSIO_API_KEY not set"
+            run_service_module.add_log(
+                env_secret_run_id,
+                env_secret_error,
+                level="error",
+                user_id="user-a",
+            )
+            run_service_module.update_run_status(
+                env_secret_run_id,
+                main_module.RunStatus.FAILED.value,
+                error=env_secret_error,
+                user_id="user-a",
+            )
+            env_list = client.get("/runs", headers=user_a)
+            env_detail = client.get(f"/runs/{env_secret_run_id}", headers=user_a)
+            env_logs = client.get(f"/runs/{env_secret_run_id}/logs", headers=user_a)
+            env_stream = client.get(f"/runs/{env_secret_run_id}/stream", headers=user_a)
+            env_events = client.get(f"/runs/{env_secret_run_id}/events", headers=user_a)
+            env_expected = "Required platform secret is not configured"
+            env_list_error = None
+            try:
+                env_list_error = next(
+                    item.get("error")
+                    for item in env_list.json()
+                    if item.get("id") == env_secret_run_id
+                )
+            except Exception:
+                env_list_error = None
+            env_leak_tokens = ("COMPOSIO_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GMAIL_SERVICE_ACCOUNT_JSON")
+            env_texts = [
+                env_detail.text,
+                env_logs.text,
+                env_stream.text,
+                env_events.text,
+            ]
+            record(
+                results,
+                "local-run-env-secret-error-redacted",
+                env_list.status_code == 200
+                and env_detail.status_code == 200
+                and env_logs.status_code == 200
+                and env_stream.status_code == 200
+                and env_events.status_code == 200
+                and env_list_error == env_expected
+                and env_detail.json().get("error") == env_expected
+                and bool(env_detail.json().get("logs"))
+                and env_detail.json()["logs"][0].get("message") == env_expected
+                and bool(env_logs.json())
+                and env_logs.json()[0].get("message") == env_expected
+                and env_expected in env_stream.text
+                and env_expected in env_events.text
+                and all(token not in text for token in env_leak_tokens for text in env_texts),
+                (
+                    f"list={env_list.status_code} detail={env_detail.status_code} logs={env_logs.status_code} "
+                    f"stream={env_stream.status_code} events={env_events.status_code}"
+                ),
+                {
+                    "list_status": env_list.status_code,
+                    "list_error": env_list_error,
+                    "detail": {"status": env_detail.status_code, "body": env_detail.text},
+                    "logs": {"status": env_logs.status_code, "body": env_logs.text},
+                    "stream": {"status": env_stream.status_code, "body": env_stream.text},
+                    "events": {"status": env_events.status_code, "body": env_events.text},
+                },
             )
 
             webhook_worker = "shared-webhook"
@@ -2130,6 +2507,75 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                 },
             )
 
+            collision_context = "shared-collision-context"
+            collision_create_a = client.post(
+                f"/contexts/{collision_context}",
+                headers=user_a,
+                json={"writeable": True},
+            )
+            collision_create_b = client.post(
+                f"/contexts/{collision_context}",
+                headers=user_b,
+                json={"writeable": True},
+            )
+            collision_put_a = client.put(
+                f"/contexts/{collision_context}/files/notes.txt",
+                headers=user_a,
+                content=b"owner-a",
+            )
+            collision_put_b = client.put(
+                f"/contexts/{collision_context}/files/notes.txt",
+                headers=user_b,
+                content=b"owner-b",
+            )
+            collision_get_a = client.get(
+                f"/contexts/{collision_context}/files/notes.txt",
+                headers=user_a,
+            )
+            collision_get_b = client.get(
+                f"/contexts/{collision_context}/files/notes.txt",
+                headers=user_b,
+            )
+            collision_root = contexts_dir / collision_context
+            collision_owner_a = contexts_dir / "user-a" / collision_context / "notes.txt"
+            collision_owner_b = contexts_dir / "user-b" / collision_context / "notes.txt"
+            collision_root_exists = collision_root.exists()
+            collision_owner_a_bytes = collision_owner_a.read_bytes() if collision_owner_a.is_file() else b""
+            collision_owner_b_bytes = collision_owner_b.read_bytes() if collision_owner_b.is_file() else b""
+            collision_delete_a = client.delete(f"/contexts/{collision_context}", headers=user_a)
+            collision_delete_b = client.delete(f"/contexts/{collision_context}", headers=user_b)
+            record(
+                results,
+                "local-context-name-collision-isolated",
+                collision_create_a.status_code == 200
+                and collision_create_b.status_code == 200
+                and collision_put_a.status_code == 200
+                and collision_put_b.status_code == 200
+                and collision_get_a.status_code == 200
+                and collision_get_a.content == b"owner-a"
+                and collision_get_b.status_code == 200
+                and collision_get_b.content == b"owner-b"
+                and not collision_root_exists
+                and collision_owner_a_bytes == b"owner-a"
+                and collision_owner_b_bytes == b"owner-b"
+                and collision_delete_a.status_code == 200
+                and collision_delete_b.status_code == 200,
+                (
+                    f"creates={[collision_create_a.status_code, collision_create_b.status_code]} "
+                    f"puts={[collision_put_a.status_code, collision_put_b.status_code]} "
+                    f"gets={[collision_get_a.status_code, collision_get_b.status_code]} "
+                    f"deletes={[collision_delete_a.status_code, collision_delete_b.status_code]}"
+                ),
+                {
+                    "create_a": {"status": collision_create_a.status_code, "body": collision_create_a.text},
+                    "create_b": {"status": collision_create_b.status_code, "body": collision_create_b.text},
+                    "get_a": {"status": collision_get_a.status_code, "body": collision_get_a.text},
+                    "get_b": {"status": collision_get_b.status_code, "body": collision_get_b.text},
+                    "delete_a": {"status": collision_delete_a.status_code, "body": collision_delete_a.text},
+                    "delete_b": {"status": collision_delete_b.status_code, "body": collision_delete_b.text},
+                },
+            )
+
             symlink_context = "symlink-context"
             symlink_context_create = client.post(
                 f"/contexts/{symlink_context}",
@@ -2141,7 +2587,9 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
             symlink_path = contexts_dir / symlink_context / "escape.txt"
             symlink_get = symlink_put = symlink_delete = None
             if symlink_context_create.status_code == 200:
-                symlink_path = main_module.context_dir(symlink_context) / "escape.txt"
+                with main_module.use_context_scope(main_module.context_scope_for_user("user-a")):
+                    symlink_path = main_module.context_dir(symlink_context) / "escape.txt"
+                    symlink_path.parent.mkdir(parents=True, exist_ok=True)
                 os.symlink(outside_target, symlink_path)
                 symlink_get = client.get(
                     f"/contexts/{symlink_context}/files/escape.txt",
@@ -2294,8 +2742,45 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                     "foreign_run": {"status": foreign_file_run.status_code, "body": foreign_file_run.text},
                 },
             )
+            record(
+                results,
+                "local-run-create-foreign-file-id-rejected",
+                file_worker_owner_create.status_code == 200
+                and file_worker_foreign_create.status_code == 200
+                and file_upload.status_code == 200
+                and bool(file_sha)
+                and foreign_file_run.status_code in (403, 404),
+                f"file_id={file_sha!r} foreign_run={foreign_file_run.status_code}",
+                {
+                    "upload": {"status": file_upload.status_code, "body": file_upload.text},
+                    "foreign_run": {"status": foreign_file_run.status_code, "body": foreign_file_run.text},
+                },
+            )
+
+            upload_content_type_bypass = client.post(
+                "/uploads",
+                headers=user_a,
+                files={"file": ("evil.txt", b"<svg><script>alert(1)</script></svg>", "image/svg+xml")},
+            )
+            record(
+                results,
+                "local-upload-content-type-bypass-rejected",
+                upload_content_type_bypass.status_code == 400,
+                f"status={upload_content_type_bypass.status_code}",
+                {"status": upload_content_type_bypass.status_code, "body": upload_content_type_bypass.text},
+            )
 
             expired_upload_token = ""
+            original_upload_token = ""
+            original_upload_url = ""
+            if file_upload.status_code == 200:
+                try:
+                    original_upload_url = str(file_upload.json().get("url") or "")
+                    if "download_token=" in original_upload_url:
+                        original_upload_token = original_upload_url.split("download_token=", 1)[1]
+                except Exception:
+                    original_upload_url = ""
+                    original_upload_token = ""
             if file_sha:
                 expired_payload = main_module._b64url_encode(
                     json.dumps(
@@ -2329,6 +2814,39 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                 {
                     "status": expired_download.status_code if expired_download is not None else None,
                     "body": expired_download.text if expired_download is not None else "",
+                },
+            )
+            second_upload = client.post(
+                "/uploads",
+                headers=user_a,
+                files={"file": ("second.txt", b"second upload", "text/plain")},
+            )
+            second_sha = ""
+            if second_upload.status_code == 200:
+                try:
+                    second_sha = str(second_upload.json().get("sha256") or "")
+                except Exception:
+                    second_sha = ""
+            cross_file_download = (
+                client.get(f"/uploads/{second_sha}?download_token={original_upload_token}", headers=user_a)
+                if second_sha and original_upload_token
+                else None
+            )
+            record(
+                results,
+                "local-upload-token-cross-file-rejected",
+                bool(second_sha)
+                and bool(original_upload_token)
+                and cross_file_download is not None
+                and cross_file_download.status_code == 404,
+                f"status={cross_file_download.status_code if cross_file_download is not None else None}",
+                {
+                    "first_url": original_upload_url,
+                    "second_upload": {"status": second_upload.status_code, "body": second_upload.text},
+                    "cross_file": {
+                        "status": cross_file_download.status_code if cross_file_download is not None else None,
+                        "body": cross_file_download.text if cross_file_download is not None else "",
+                    },
                 },
             )
 
@@ -2454,6 +2972,19 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                 {
                     "owner_list": owner_run_ids,
                     "foreign_list": foreign_run_ids,
+                },
+            )
+            record(
+                results,
+                "local-runs-list-no-worker-name-leak",
+                runs_owner_list.status_code == 200
+                and runs_foreign_list.status_code == 200
+                and runs_foreign_worker not in runs_owner_list.text
+                and runs_owner_worker not in runs_foreign_list.text,
+                f"owner={runs_owner_list.status_code} foreign={runs_foreign_list.status_code}",
+                {
+                    "owner": {"status": runs_owner_list.status_code, "body": runs_owner_list.text},
+                    "foreign": {"status": runs_foreign_list.status_code, "body": runs_foreign_list.text},
                 },
             )
 
@@ -3734,6 +4265,168 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
         {"creates": run_quota_creates, "run_statuses": run_quota_statuses, "cleanups": run_quota_cleanups},
     )
 
+    # Reset the global run-create bucket before exercising real stock-worker routes.
+    time.sleep(RUN_CREATE_QUOTA_RESET_SECONDS)
+
+    stock_sensitive_tokens = (
+        "Missing secrets:",
+        "COMPOSIO_API_KEY",
+        "OPENAI_API_KEY",
+        "NOTION_API_KEY",
+        "SLACK_BOT_TOKEN",
+        "LINEAR_API_KEY",
+        "LINEAR_TEAM_ID",
+        "ANTHROPIC_API_KEY",
+        "GMAIL_SERVICE_ACCOUNT_JSON",
+        "\"trace_id\"",
+        "trace_",
+        "thread_",
+        "runner=e2b",
+        "mode=agent",
+    )
+    stock_inputs = json.loads((repo / "docs" / "workers" / "inputs" / "research_brief.json").read_text())
+    stock_run_noauth = request(
+        api,
+        "POST",
+        "/workers/research_brief/runs",
+        json={"inputs": stock_inputs, "trigger_source": "audit"},
+        timeout=20,
+    )
+    stock_run_auth = request(
+        api,
+        "POST",
+        "/workers/research_brief/runs",
+        secret=secret,
+        json={
+            "inputs": {
+                "topic": "Audit stock probe",
+                "audience": "executive",
+                "depth": "summary",
+            },
+            "trigger_source": "audit",
+        },
+        timeout=30,
+    )
+    stock_run_id = ""
+    if stock_run_auth["status"] == 200:
+        try:
+            stock_run_id = str(json.loads(stock_run_auth["body"]).get("run_id") or "")
+        except Exception:
+            stock_run_id = ""
+    stock_events = (
+        request_stream_text(api, "GET", f"/runs/{stock_run_id}/events", secret=secret, timeout=30)
+        if stock_run_id
+        else {}
+    )
+    stock_stream = (
+        request_stream_text(api, "GET", f"/runs/{stock_run_id}/stream", secret=secret, timeout=30)
+        if stock_run_id
+        else {}
+    )
+    stock_logs = (
+        request(api, "GET", f"/runs/{stock_run_id}/logs", secret=secret, timeout=30)
+        if stock_run_id
+        else {}
+    )
+    stock_replay = (
+        request(
+            api,
+            "POST",
+            f"/workers/research_brief/runs/{stock_run_id}/replay",
+            secret=secret,
+            timeout=30,
+        )
+        if stock_run_id
+        else {}
+    )
+    stock_replay_id = ""
+    if stock_replay.get("status") == 200:
+        try:
+            stock_replay_id = str(json.loads(stock_replay["body"]).get("run_id") or "")
+        except Exception:
+            stock_replay_id = ""
+    stock_timeseries_noauth = request(api, "GET", "/workers/research_brief/runs/timeseries")
+    stock_timeseries_auth = request(api, "GET", "/workers/research_brief/runs/timeseries", secret=secret)
+    stock_reload = request(api, "POST", "/workers/reload", secret=secret, timeout=30)
+    stock_patch_after_reload = request(
+        api,
+        "PATCH",
+        "/workers/research_brief",
+        secret=secret,
+        json={"input_values": {"topic": "blocked"}},
+        timeout=20,
+    )
+    stock_timeseries_rows: list[dict[str, Any]] = []
+    if stock_timeseries_auth.get("status") == 200:
+        try:
+            parsed_stock_timeseries = json.loads(stock_timeseries_auth["body"])
+            if isinstance(parsed_stock_timeseries, list):
+                stock_timeseries_rows = [
+                    row for row in parsed_stock_timeseries if isinstance(row, dict)
+                ]
+        except Exception:
+            stock_timeseries_rows = []
+    record(
+        results,
+        "stock-worker-run-create-auth-and-shape",
+        stock_run_noauth["status"] in (401, 403)
+        and stock_run_auth["status"] == 200
+        and stock_run_id.startswith("run_"),
+        f"noauth={stock_run_noauth['status']} auth={stock_run_auth['status']} run_id={stock_run_id!r}",
+        {"noauth": stock_run_noauth, "auth": stock_run_auth},
+    )
+    record(
+        results,
+        "stock-worker-run-replay-auth-and-shape",
+        stock_run_auth["status"] == 200
+        and stock_replay.get("status") == 200
+        and stock_replay_id.startswith("run_"),
+        f"seed={stock_run_auth['status']} replay={stock_replay.get('status')} replay_run_id={stock_replay_id!r}",
+        {"seed": stock_run_auth, "replay": stock_replay},
+    )
+    record(
+        results,
+        "stock-worker-run-events-no-sensitive-leak",
+        stock_events.get("status") == 200
+        and all(token not in stock_events.get("body", "") for token in stock_sensitive_tokens),
+        f"status={stock_events.get('status')}",
+        stock_events,
+    )
+    record(
+        results,
+        "stock-worker-run-stream-no-sensitive-leak",
+        stock_stream.get("status") == 200
+        and all(token not in stock_stream.get("body", "") for token in stock_sensitive_tokens),
+        f"status={stock_stream.get('status')}",
+        stock_stream,
+    )
+    record(
+        results,
+        "stock-worker-run-logs-no-sensitive-leak",
+        stock_logs.get("status") == 200
+        and all(token not in stock_logs.get("body", "") for token in stock_sensitive_tokens),
+        f"status={stock_logs.get('status')}",
+        stock_logs,
+    )
+    record(
+        results,
+        "stock-worker-timeseries-auth-and-safe",
+        stock_timeseries_noauth["status"] in (401, 403)
+        and stock_timeseries_auth["status"] == 200
+        and bool(stock_timeseries_rows)
+        and all(set(row.keys()) <= {"date", "total", "completed", "failed"} for row in stock_timeseries_rows)
+        and all("user_id" not in json.dumps(row) and "owner_id" not in json.dumps(row) for row in stock_timeseries_rows),
+        f"noauth={stock_timeseries_noauth['status']} auth={stock_timeseries_auth['status']} rows={len(stock_timeseries_rows)}",
+        {"noauth": stock_timeseries_noauth, "auth": stock_timeseries_auth},
+    )
+    record(
+        results,
+        "stock-worker-reload-keeps-mutations-blocked",
+        stock_reload["status"] == 200 and stock_patch_after_reload["status"] == 403,
+        f"reload={stock_reload['status']} patch={stock_patch_after_reload['status']}",
+        {"reload": stock_reload, "patch": stock_patch_after_reload},
+    )
+
     stock_rotate = request(api, "POST", "/workers/research_brief/webhook-secret/rotate", secret=secret)
     record(
         results,
@@ -4075,6 +4768,11 @@ def build_kimi_prompt(profile: str, transcript: dict[str, Any], repo: Path) -> s
         f"- {item.get('id')}: {'PASS' if item.get('ok') else 'FAIL'}; {item.get('detail')}"
         for item in transcript.get("results", [])
     )
+    probe_semantics_lines = "\n".join(
+        f"- {probe_id}: {meaning}"
+        for probe_id, meaning in KIMI_PROBE_SEMANTICS.items()
+        if any(str(item.get("id")) == probe_id for item in transcript.get("results", []))
+    )
     route_lines = "\n".join(
         f"- {route.get('method')} {route.get('path')} "
         f"tags={','.join(route.get('risk_tags') or [])} "
@@ -4098,6 +4796,8 @@ def build_kimi_prompt(profile: str, transcript: dict[str, Any], repo: Path) -> s
         - Live prod probes are primary. Probes prefixed `local-` are scoped local TestClient checks used only for multi-user/authz paths that the prod shared-secret surface cannot express directly.
         - A route has zero deterministic coverage only when `covered_by=none`. If one or more probe IDs are listed, do not call it zero coverage.
         - Do not downgrade a route to zero coverage just because one probe ID covers multiple sibling routes.
+        - Treat the `covered_by=` lists as authoritative for the exact route shown. If a route lists one or more probe IDs, describe it as partially covered rather than uncovered.
+        - Do not invent an object-specific attack on a route that has no object identifier in the path. Example: `POST /workers/reload` has no `worker_id`.
         - Do NOT just summarize passing probes.
         - Your main job is to find what the probes missed.
         - Compare every high-risk route below against the probe IDs.
@@ -4144,6 +4844,9 @@ def build_kimi_prompt(profile: str, transcript: dict[str, Any], repo: Path) -> s
 
         High-risk routes:
         {route_lines}
+
+        Probe semantics:
+        {probe_semantics_lines or "- none"}
 
         Probe transcript:
         {probe_lines}
