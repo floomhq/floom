@@ -91,25 +91,28 @@ export function ConnectionRow({
       </div>
 
       {/* Scopes count (desktop only).
-          E3 fix: when scopes are empty, show muted "default scopes" with an
-          inline Refresh icon that re-fetches via the Test action (which
-          triggers a Composio re-check and repopulates scopes in the DB). */}
+          E3 fix: scopes are now captured from Composio (data.scope string).
+          Show the real granted-scope count. When not yet loaded (no sweep has
+          run for this row), show an honest "—" placeholder with an inline
+          refresh that triggers a re-check — NOT a fake "default scopes" label. */}
       <span className="hidden md:inline-flex items-center gap-1 text-xs text-muted-foreground truncate">
-        {connection.scopes.length > 0
-          ? `${connection.scopes.length} scope${connection.scopes.length === 1 ? "" : "s"}`
-          : (
-            <>
-              <span className="text-muted-foreground/50">default scopes</span>
-              <button
-                type="button"
-                className="inline-flex items-center text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-                title="Refresh to load granted scopes"
-                onClick={() => onTest(connection)}
-              >
-                <RefreshCw className="size-3" />
-              </button>
-            </>
-          )}
+        {connection.scopes.length > 0 ? (
+          <span title={connection.scopes.join(", ")}>
+            {`${connection.scopes.length} scope${connection.scopes.length === 1 ? "" : "s"}`}
+          </span>
+        ) : (
+          <>
+            <span className="text-muted-foreground/50">—</span>
+            <button
+              type="button"
+              className="inline-flex items-center text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+              title="Refresh to load granted scopes"
+              onClick={() => onTest(connection)}
+            >
+              <RefreshCw className="size-3" />
+            </button>
+          </>
+        )}
       </span>
 
       {/* Last used (desktop only) */}
@@ -126,9 +129,17 @@ export function ConnectionRow({
           Disconnect) = 4 actions per row. Now Reconnect (only when needed) + a
           single overflow menu containing Test / Refresh / Disconnect. Row reads
           as one primary action with secondary options behind a click.
-          E1 fix: only show Reconnect when the connection actually needs it. */}
-      <div className="flex shrink-0 items-center gap-1">
-        {(connection.status === "expired" || connection.lastCheckStatus !== "valid") && (
+          E1 fix: Reconnect appears ONLY when the connection is broken
+          (expired / failed / needs-reauth / inactive). An active connection
+          never shows Reconnect — even when last_check_status is "active"
+          rather than "valid" (GitHub reports the former). Active = healthy;
+          only the overflow menu is offered. */}
+      <div className="flex shrink-0 items-center justify-end gap-1 md:pr-1">
+        {connection.status !== "active" &&
+          (connection.status === "expired" ||
+            connection.status === "failed" ||
+            connection.lastCheckStatus === "expired" ||
+            connection.lastCheckStatus === "failed") && (
           <Button
             type="button"
             variant="outline"

@@ -6806,6 +6806,14 @@ def _refresh_connection_status_for_list(
 
 
 def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
+    """Mask an account identity for any CROSS-USER / multi-tenant surface.
+
+    Workeros OS is single-tenant: the owner is the only principal and MUST see
+    their own account identity (the GitHub login, the connected Google email).
+    This helper is retained for a future multi-tenant / shared path where one
+    user must NOT see another user's account identity — call it only there.
+    For the owner's own connections use ``_normalize_owner_account_label``.
+    """
     if not value:
         return None
     text = str(value).strip()
@@ -6816,11 +6824,31 @@ def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
     return text[:32]
 
 
+def _normalize_owner_account_label(value: Optional[str]) -> Optional[str]:
+    """Return the owner's own account identity verbatim (single-tenant view).
+
+    No redaction: in single-tenant the owner is entitled to see their real
+    GitHub login / Google email. The placeholder "Connected account" string is
+    treated as "no real label yet" so the UI can fall back to other fields.
+    """
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text or text == "Connected account":
+        return None
+    return text
+
+
 def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
     item = dict(data)
     item["kind"] = item.get("kind") or "composio"
-    item["account_label"] = _redact_connection_account_label(item.get("account_label"))
-    item["display_name"] = _redact_connection_account_label(item.get("display_name"))
+    # Single-tenant owner view: show the owner their OWN account identity.
+    # display_name carries the real label when present; fall back to
+    # account_label. Both are the owner's own data, so no redaction.
+    raw_label = item.get("display_name") or item.get("account_label")
+    normalized = _normalize_owner_account_label(raw_label)
+    item["account_label"] = normalized
+    item["display_name"] = normalized
     item["mcp_allowed_tools"] = _parse_json_string_list(item.pop("mcp_allowed_tools_json", None))
     return ConnectionItem(**item)
 
@@ -6873,7 +6901,7 @@ def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str, user_id: str
         "linkedin": ("LINKEDIN_GET_MY_INFO", lambda d: d.get("email")),
         "hubspot": ("HUBSPOT_GET_OWNER_BY_ID", lambda d: d.get("email")),
         "slack": ("SLACK_USERS_INFO", lambda d: ((d.get("user") or {}).get("profile") or {}).get("email")),
-        "github": ("GITHUB_GET_THE_AUTHENTICATED_USER", lambda d: d.get("email") or (d.get("login") and f"{d['login']}@github")),
+        "github": ("GITHUB_GET_THE_AUTHENTICATED_USER", lambda d: d.get("email") or d.get("login")),
     }
     spec = PROVIDER_IDENTITY_TOOLS.get(toolkit_slug)
     if not spec:
@@ -6940,10 +6968,33 @@ def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict
             or (account.get("metadata") or {}).get("email")
             or (account.get("user") or {}).get("email")
         )
-        raw_scopes = account.get("scopes") or []
-        if not isinstance(raw_scopes, list):
-            raw_scopes = []
-        scopes = [s for s in raw_scopes if isinstance(s, str)]
+        # Scopes: Composio v3 does NOT return a `scopes` list on the
+        # connected_account. The real granted scopes live as a delimited
+        # `scope` STRING under data/params/state.val (verified 2026-05-29):
+        #   github -> "codespace,gist,repo,..."           (comma-delimited)
+        #   google -> "https://.../auth/x https://.../y"  (space-delimited)
+        # Parse whichever container is present and split on comma OR whitespace.
+        scopes: List[str] = []
+        raw_scopes = account.get("scopes")
+        if isinstance(raw_scopes, list):
+            scopes = [s for s in raw_scopes if isinstance(s, str) and s]
+        if not scopes:
+            scope_str = ""
+            for container in (
+                account.get("data"),
+                account.get("params"),
+                (account.get("state") or {}).get("val"),
+            ):
+                if isinstance(container, dict):
+                    candidate = container.get("scope") or container.get("scopes")
+                    if isinstance(candidate, str) and candidate.strip():
+                        scope_str = candidate
+                        break
+                    if isinstance(candidate, list) and candidate:
+                        scopes = [s for s in candidate if isinstance(s, str) and s]
+                        break
+            if scope_str and not scopes:
+                scopes = [s for s in re.split(r"[,\s]+", scope_str.strip()) if s]
         # Fallback: Composio doesn't return email for managed-OAuth connections
         # and masks the raw access_token, so we cannot call provider userinfo
         # directly. Use Composio's /tools/execute proxy to invoke a per-provider
@@ -7220,10 +7271,10 @@ def get_connection_account_info(
     if not info:
         raise HTTPException(status_code=502, detail="Unable to fetch account info from upstream")
 
-    # Cache scopes + account_label in DB for list endpoint
-    if info.get("scopes") is not None or info.get("email"):
+    # Cache scopes + account_label in DB for the list endpoint.
+    account_label = info.get("email") or ""
+    if info.get("scopes") is not None or account_label:
         now = now_iso()
-        account_label = info.get("email") or ""
         repos.connections.update(
             user_id=auth.user_id,
             composio_id=connection_id,
@@ -7232,8 +7283,10 @@ def get_connection_account_info(
             updated_at=now,
         )
 
+    # Single-tenant owner view: return the owner's own account identity so the
+    # UI can render the real GitHub login / Google email instead of a placeholder.
     return {
-        "email": None,
+        "email": account_label or None,
         "scopes": info.get("scopes") or [],
         "connected_at": row["created_at"],
     }
@@ -7480,15 +7533,21 @@ async def _run_connection_sweep(*, user_id: str | None = None) -> None:
             try:
                 info = _fetch_composio_account_info(composio_conn_id, user_id=row["user_id"])
                 email_or_user = info.get("email") or info.get("user_id") or ""
+                scopes = info.get("scopes") or []
+                update_kwargs: Dict[str, Any] = {}
                 if email_or_user:
+                    update_kwargs["account_label"] = email_or_user
+                if scopes:
+                    update_kwargs["scopes_json"] = scopes
+                if update_kwargs:
                     repos.connections.update(
                         user_id=row["user_id"],
                         composio_id=conn_id,
-                        account_label=email_or_user,
                         updated_at=tested_at,
+                        **update_kwargs,
                     )
             except Exception as exc:
-                logger.debug("account_label refresh failed for %s: %s", conn_id, exc)
+                logger.debug("account_label/scopes refresh failed for %s: %s", conn_id, exc)
         logger.debug("Swept connection %s: %s", conn_id, check)
         await asyncio.sleep(0.5)  # Rate-limit Composio calls
 
