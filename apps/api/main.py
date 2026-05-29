@@ -4015,16 +4015,22 @@ files:
       type: manual
   run.py: |
     import json, csv, io, os
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(".env.local")
-    except ImportError:
-        pass
-    inputs = json.load(open("inputs.json"))
-    # process inputs["csv_data"] ...
-    json.dump({"status": "completed", "outputs": {}, "artifacts": []}, open("result.json", "w"))
+    from pathlib import Path
+    inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+    csv_path = inputs["csv_data"]            # FILE input -> value IS the path
+    rows = list(csv.reader(open(csv_path, encoding="utf-8")))
+    # ...enrich rows...
+    os.makedirs("out", exist_ok=True)
+    out_path = "out/result.csv"
+    with open(out_path, "w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(rows)
+    Path("result.json").write_text(json.dumps({
+        "status": "success",
+        "outputs": {"result": out_path},
+        "artifacts": [{"name": out_path, "relative_path": out_path, "type": "text/csv"}],
+    }), encoding="utf-8")
   requirements.txt: |
-    python-dotenv>=1.0.0
+    # stdlib only — no third-party deps needed
 
 Example C (script that calls an LLM):
 files:
@@ -4060,11 +4066,7 @@ files:
     Input: meeting transcript. Output JSON: {"summary": str, "action_items": [str]}.
   run.py: |
     import json, os
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(".env.local")
-    except ImportError:
-        pass
+    from pathlib import Path
     from agent import run as run_agent
     from lib.granola_client import fetch_recent_meetings
     from lib.hubspot_client import create_note
@@ -4142,6 +4144,44 @@ Respond with ONLY valid JSON (no markdown fences). The `files` array is mandator
   (e.g. a small CSV "name\\nalice\\nbob\\n"), NEVER a path or placeholder. The
   platform turns it into a real uploaded file so the operator can run the worker
   immediately with no manual upload.
+
+=== RUN.PY CONTRACT (script mode — these EXACT mistakes crash generated workers) ===
+When you emit run.py, follow this contract EXACTLY:
+- Read inputs: `inputs = json.loads(Path("inputs.json").read_text())`. A SCALAR
+  input is the literal value inline (use it directly, never open() it). A FILE
+  input's value IS already the relative path (e.g. "inputs/csv_file") — open() it
+  directly; NEVER os.path.join("inputs", value) (double-prepend is a top crash).
+- Use ONLY the Python standard library unless you ALSO list the package in
+  requirements.txt. NEVER `import dotenv` / `from dotenv import ...` (NOT installed
+  -> ModuleNotFoundError). Read secrets from os.environ with a secrets.json fallback.
+- import EVERY module you reference (os, json, csv, io, re, statistics, ...).
+- OUTPUT CONTRACT (scalar vs file): a SCALAR output -> outputs[name] is the LITERAL
+  VALUE (string/number), NEVER a path, no out/ file, no artifact (e.g.
+  outputs={"reversed":"olleh"}). A FILE output -> write under out/ (mkdir it) and
+  put the relative path in outputs[name] + one artifacts[] entry.
+- IMPLEMENT EVERY declared output FULLY: if the prompt asks for several results
+  (words AND sentences AND average length), compute ALL of them — never return
+  only the first.
+- Write result.json to the WORKING DIRECTORY ("result.json", NOT "out/result.json")
+  on BOTH success and error: {"status":"success"|"error","outputs":{...},
+  "artifacts":[{"name","relative_path","type"}],"error":<msg-on-error>}.
+- End with `if __name__ == "__main__": main()`.
+
+Worked run.py examples (copy the matching shape):
+  # reverse a string (scalar in -> scalar out):
+  #   import json; from pathlib import Path
+  #   inputs = json.loads(Path("inputs.json").read_text())
+  #   Path("result.json").write_text(json.dumps({"status":"success",
+  #     "outputs":{"reversed": str(inputs["text"])[::-1]}, "artifacts":[], "error":None}))
+  # word+char+sentence count (scalar in -> json file out, ALL three computed):
+  #   import json, re, os; from pathlib import Path
+  #   t = str(json.loads(Path("inputs.json").read_text()).get("text") or "")
+  #   c = {"words":len(t.split()),"chars":len(t),
+  #        "sentences":len([s for s in re.split(r"[.!?]+",t) if s.strip()])}
+  #   os.makedirs("out",exist_ok=True); Path("out/counts.json").write_text(json.dumps(c))
+  #   Path("result.json").write_text(json.dumps({"status":"success",
+  #     "outputs":{"counts":"out/counts.json"},
+  #     "artifacts":[{"name":"out/counts.json","relative_path":"out/counts.json","type":"application/json"}],"error":None}))
 
 Only include files that are needed. Omit run.py for agent-only (A), omit SKILL.md for pure-script (B).
 The `requirements` array is the authoritative source. `required_connections` = oauth slugs only. `required_secrets` = API_KEY names only."""
@@ -4346,14 +4386,16 @@ def _call_draft_llm(
         system_prompt = f"{system_prompt}\n\n{extra_system_instructions}"
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        from codegen_model import chat_completion_codegen
+
+        response = chat_completion_codegen(
+            client,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
             temperature=0.2,
-            max_tokens=3000,
+            max_output_tokens=8000,
             response_format={"type": "json_object"},
         )
     except Exception as exc:

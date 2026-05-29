@@ -35,6 +35,60 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
+# Code-generation model (kept in sync with apps/api/codegen_model.py).
+# This worker runs in an E2B sandbox and cannot import the API module, so the
+# strong default + the gpt-5.x param handling are duplicated here intentionally.
+# Override with the WORKEROS_CODEGEN_MODEL env var (passed into the sandbox).
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CODEGEN_MODEL = "gpt-5.1"
+
+
+def _codegen_model() -> str:
+    return (os.environ.get("WORKEROS_CODEGEN_MODEL") or "").strip() or _DEFAULT_CODEGEN_MODEL
+
+
+def _codegen_chat(
+    client: Any,
+    *,
+    messages: list,
+    max_output_tokens: int,
+    temperature: float = 0.2,
+    response_format: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """chat.completions.create with the codegen model, param-compatible across
+    gpt-4 (max_tokens) and gpt-5.x/o-series (max_completion_tokens) families."""
+    model = _codegen_model()
+    ml = model.lower()
+    token_kwarg = (
+        "max_completion_tokens"
+        if ml.startswith(("gpt-5", "o1", "o3", "o4"))
+        else "max_tokens"
+    )
+
+    def _create(token_param: str) -> Any:
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            token_param: max_output_tokens,
+        }
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        return client.chat.completions.create(**kwargs)
+
+    try:
+        return _create(token_kwarg)
+    except Exception as exc:  # noqa: BLE001 - retry once on the param-name 400
+        msg = str(exc).lower()
+        if "max_completion_tokens" in msg and token_kwarg == "max_tokens":
+            return _create("max_completion_tokens")
+        if "max_tokens" in msg and token_kwarg == "max_completion_tokens":
+            return _create("max_tokens")
+        raise
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -142,6 +196,10 @@ Script-mode run.py rules (these EXACT mistakes crash generated workers — never
   os.path.join("inputs", inputs["x"]) (double-prepending inputs/ is a top crash).
 - End with `if __name__ == "__main__": main()`.
 - If you `import requests`/`openai`/any third-party lib, requirements_txt MUST list it.
+- IMPLEMENT EVERY DECLARED OUTPUT FULLY: if the prompt asks for several things
+  (e.g. word count AND sentence count AND average word length), declare an output
+  for each and compute ALL of them in run.py. A worker that returns only the first
+  is an under-implemented no-op. Don't under-deliver vs the prompt.
 - name must be lowercase hyphens/digits, 3-64 chars, unique (avoid the IDs listed below)
 - is_example must be false
 - system_worker must be false or absent
@@ -222,7 +280,7 @@ def _build_messages(
             "file inputs as relative paths under inputs/, import every module you "
             "use, write outputs under out/, and write result.json on success AND "
             "error. Do not deviate.\n"
-            f"```python\n{run_py_template[:4000]}\n```"
+            f"```python\n{run_py_template[:9000]}\n```"
         )
 
     if context_style:
@@ -314,7 +372,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
     from openai import OpenAI  # type: ignore
     client = OpenAI(api_key=openai_key)
 
-    log("worker-author: calling LLM")
+    log(f"worker-author: calling LLM (model={_codegen_model()})")
     max_attempts = 3
     parsed: Dict[str, Any] = {}
     last_error: Optional[str] = None
@@ -331,11 +389,11 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
                 ),
             })
 
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=call_messages,  # type: ignore
+        resp = _codegen_chat(
+            client,
+            messages=call_messages,
             temperature=0.2,
-            max_tokens=4000,
+            max_output_tokens=8000,
             response_format={"type": "json_object"},
         )
         raw = resp.choices[0].message.content or ""
