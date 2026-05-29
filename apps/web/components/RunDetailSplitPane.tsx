@@ -15,6 +15,13 @@ import { OutputRenderer } from "@/components/output-renderer";
 import { api } from "@/lib/api";
 import { formatAbsolute } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import {
+  humanizeKey,
+  operatorLogs,
+  isExportSuccessKey,
+  exportSuccessState,
+  exportStateText,
+} from "@/lib/run-format";
 import type { LogEntry, RunDetail, RunPart, TranscriptRow } from "@/lib/types";
 
 type Props = {
@@ -154,7 +161,7 @@ export function RunDetailSplitPane({
               <TranscriptView run={run} parts={transcriptParts} />
             </TabsContent>
             <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto p-4">
-              <Terminal lines={run.logs.map((log) => ({ level: log.level, message: log.message, timestamp: log.timestamp }))} />
+              <OperatorLogs run={run} />
             </TabsContent>
             <TabsContent value="output" className="min-h-0 flex-1 overflow-y-auto p-4">
               <OutputView run={run} />
@@ -168,6 +175,27 @@ export function RunDetailSplitPane({
           </Tabs>
         </main>
       </div>
+    </div>
+  );
+}
+
+// P1-3: the operator Logs view must not show sandbox-provider chatter
+// ([e2b] ...), unsubstituted [redacted-*] placeholders, or per-file upload
+// noise. Filter to operator-meaningful lines here; the full unfiltered
+// stream stays in the Raw tab.
+function OperatorLogs({ run }: { run: RunDetail }) {
+  const visible = operatorLogs(run.logs);
+  const hidden = run.logs.length - visible.length;
+  return (
+    <div className="space-y-2">
+      <Terminal
+        lines={visible.map((log) => ({ level: log.level, message: log.message, timestamp: log.timestamp }))}
+      />
+      {hidden > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {hidden} internal log line{hidden === 1 ? "" : "s"} hidden. See the Raw tab for the full stream.
+        </p>
+      )}
     </div>
   );
 }
@@ -317,11 +345,15 @@ function RunResultOverview({ run }: { run: RunDetail }) {
 }
 
 function OutputSummary({ run }: { run: RunDetail }) {
-  const metricEntries = Object.entries(run.output || {}).filter(([, value]) => isScalarOutput(value)).slice(0, 8);
+  const allScalar = Object.entries(run.output || {}).filter(([, value]) => isScalarOutput(value));
+  // P1-2: export-success booleans (pdf_export_success / docx_export_success)
+  // must NOT render as bare `false`. Pull them out into a clear human state.
+  const exportEntries = allScalar.filter(([key]) => isExportSuccessKey(key));
+  const metricEntries = allScalar.filter(([key]) => !isExportSuccessKey(key)).slice(0, 8);
   const schemaFields = (run.output_schema || []).filter((field) => field.value != null && field.value !== "");
   const fileFields = schemaFields.filter((field) => typeof field.value === "string" && field.value.includes("/"));
 
-  if (metricEntries.length === 0 && schemaFields.length === 0) {
+  if (metricEntries.length === 0 && exportEntries.length === 0 && schemaFields.length === 0) {
     return (
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Output</h2>
@@ -341,11 +373,34 @@ function OutputSummary({ run }: { run: RunDetail }) {
         <dl className="grid gap-px overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--border-default)] sm:grid-cols-2 lg:grid-cols-4">
           {metricEntries.map(([key, value]) => (
             <div key={key} className="min-w-0 bg-card px-3 py-2">
+              {/* P2-1: human label (no raw uppercased JSON key) */}
               <dt className="truncate text-[11px] font-medium uppercase text-muted-foreground">{humanizeKey(key)}</dt>
-              <dd className="mt-0.5 truncate text-sm font-medium">{String(value)}</dd>
+              <dd className="mt-0.5 truncate text-sm font-medium">{formatScalarValue(key, value)}</dd>
             </div>
           ))}
         </dl>
+      )}
+
+      {exportEntries.length > 0 && (
+        <ul className="flex flex-wrap gap-2">
+          {exportEntries.map(([key, value]) => {
+            const state = exportSuccessState(key, value);
+            return (
+              <li
+                key={key}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
+                  state.tone === "ok"
+                    ? "border-success/30 bg-success/10 text-success"
+                    : "border-border bg-muted text-muted-foreground",
+                )}
+              >
+                <span className="size-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
+                {exportStateText(state)}
+              </li>
+            );
+          })}
+        </ul>
       )}
 
       {fileFields.length > 0 && (
@@ -464,7 +519,7 @@ function OutputView({ run }: { run: RunDetail }) {
     <div className="space-y-4">
       {Object.entries(run.output).map(([key, value]) => (
         <div key={key} className="space-y-1">
-          <p className="text-xs font-medium uppercase text-muted-foreground">{key}</p>
+          <p className="text-xs font-medium uppercase text-muted-foreground">{humanizeKey(key)}</p>
           <pre className="overflow-auto rounded-[var(--radius-button)] bg-muted p-3 font-mono text-xs">
             {formatUnknown(value)}
           </pre>
@@ -711,8 +766,15 @@ function outputItemCount(run: RunDetail): number {
   return run.output_schema?.length || Object.keys(run.output || {}).length;
 }
 
-function humanizeKey(value: string): string {
-  return value.replace(/_/g, " ");
+// P2-1: render scalar values readably. Booleans become Yes/No; "*_seconds"
+// durations become a compact duration; everything else is stringified.
+function formatScalarValue(key: string, value: unknown): string {
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number" && /_seconds$/i.test(key)) {
+    const ms = value * 1000;
+    return formatDuration(Math.round(ms));
+  }
+  return String(value);
 }
 
 function statusLabel(value: string): string {
