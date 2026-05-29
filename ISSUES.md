@@ -1432,3 +1432,19 @@ Source: `docs/audits/final-gate-G5-rescore4-2026-05-29.md`. All three closed and
 **Root cause:** the approve→COMPLETED transition (`update_status`, `apps/api/db/sqlite.py`) recomputed `duration_ms = completed_at - started_at` = wall-clock including the wait. Execution actually ended when the run parked for approval.
 **Fix:** capture the real execution `duration_ms` at the `PENDING_APPROVAL` park transition; preserve an already-set `duration_ms` on the terminal COMPLETED/FAILED transition instead of recomputing. Normal (non-HITL) runs still compute duration at completion (no regression). Backend tests `test_hitl_duration_excludes_approval_wait` + `test_normal_run_duration_unaffected`.
 **Status:** VERIFIED LIVE — fresh prod HITL run `run_e249f54a1e04`: parked at pending_approval with `duration_ms=3047` (~3s execution), then a 45s approval wait (`started 12:30:47 → completed 12:31:48`, ~61s wall-clock), approved → run-detail shows DURATION **3.0s**, NOT ~61s. Old-logic run `run_9d4650ac7f22` (28.5m) confirms the prior bug. Screenshot: `docs/audits/shots-G5-p2polish-2026-05-29/03b-after-hitl-run-duration-3s-not-wallclock.png`.
+
+---
+
+## P0 — wedge: generated workers CRASHED on first run (G5 scorer B 84/100, 0/2 ran)
+
+### #W2 Worker-author generated run.py against the wrong contract (2026-05-29)
+
+**Where:** `workers/worker-author/run.py` + `SKILL.md`, `contexts/worker-author-style/`, `apps/api/run_service.py` (smoke/repair), `apps/api/main.py` (humanizer).
+
+**Symptom:** Prompt-to-worker created a well-formed worker, but the generated worker code crashed on first run (FileNotFoundError on scalar inputs, NameError on missing imports, ModuleNotFoundError on `dotenv`, missing_result on `out/result.json`, FileNotFoundError on `os.path.join("inputs", path)`). The G5 scorer found 0/2 generated workers ran.
+
+**Root cause:** SKILL.md taught the agent-mode tool API (`run(inputs, context)`, `context.write_output`, `context.secrets`) not the E2B pure-script contract; the generator fed the LLM no run.py contract at all; no canonical template existed.
+
+**Fix (PRs #277, #278, #279):** (1) rewrote SKILL.md run.py rules + added canonical `RUN_PY_TEMPLATE.py` single source of truth, injected into the generation prompt; (2) post-generation E2B smoke + bounded repair (max 2) so a worker is proven to run before it's presented as ready, outcome on the author run `smoke` field; (3) humanizer maps worker-code tracebacks to the CODE headline (not "internal error"/"took too long"); (4) template is stdlib-only (no dotenv) and writes result.json to the working dir; (5) file-input value is the path — `open(inputs["x"])` directly, never re-prepend `inputs/`.
+
+**Status:** VERIFIED LIVE (deployed SHA `8f4196c`) — drove the real prompt-to-worker flow for 5 diverse script prompts; **smoke passed 5/5** (authoritative "does the generated code run" using each worker's own sample). The CSV worker (the original file-input crash) now opens the path directly and a fresh run with an uploaded CSV completed with real output (`run_f052949ea3c8`). Humanizer confirmed: a ModuleNotFoundError crash (`run_762191e94729`) surfaced as the CODE headline, not "took too long". Two residual fresh-run misses are NOT worker bugs (wrong-shaped harness input; platform 100-byte min-output gate on a valid 67-byte JSON). Full evidence: `docs/audits/genquality-fix-2026-05-29.md`.
