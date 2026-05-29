@@ -31,7 +31,7 @@ const NAV = [
   { href: "/", label: "Overview", icon: Activity, keywords: "home dashboard" },
   { href: "/workers", label: "Workers", icon: Box, keywords: "list jobs" },
   { href: "/runs", label: "Runs", icon: Clock, keywords: "history executions" },
-  { href: "/secrets", label: "Secrets", icon: KeyRound, keywords: "env tokens" },
+  { href: "/connections/secrets", label: "Secrets", icon: KeyRound, keywords: "env tokens" },
   { href: "/connections", label: "Connections", icon: Plug, keywords: "integrations oauth" },
   { href: "/settings", label: "Settings", icon: Settings, keywords: "config danger appearance" },
 ];

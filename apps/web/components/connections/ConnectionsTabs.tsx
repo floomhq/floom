@@ -3,15 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// Shared tabs row at the top of /connections, /connections/browse,
-// /connections/mcp, and /secrets. S41: added "MCP" tab for MCP server management.
+// Shared tabs row at the top of the four Connections surfaces. P2-9 (audit
+// 2026-05-29): Secrets moved from /secrets to /connections/secrets so every
+// tab shares the same /connections/* route prefix (consistent path-state
+// routing). The legacy /secrets path redirects here.
 export function ConnectionsTabs() {
   const pathname = usePathname();
   const tabs = [
     { href: "/connections", label: "Connected", match: (p: string) => p === "/connections" },
     { href: "/connections/browse", label: "Browse", match: (p: string) => p.startsWith("/connections/browse") },
     { href: "/connections/mcp", label: "MCP", match: (p: string) => p.startsWith("/connections/mcp") },
-    { href: "/secrets", label: "Secrets", match: (p: string) => p.startsWith("/secrets") },
+    { href: "/connections/secrets", label: "Secrets", match: (p: string) => p.startsWith("/connections/secrets") || p.startsWith("/secrets") },
   ];
 
   return (

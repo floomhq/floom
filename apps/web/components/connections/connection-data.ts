@@ -118,6 +118,19 @@ export function getConnectionAccountLabel(conn: ConnectionRecord) {
     conn.connected_account?.user_id ||
     conn.user_id;
   if (label) return label;
+  // P2-7 (audit 2026-05-29): when no account info is available the row used to
+  // show an opaque "account …849fe7" hash. For expired/failed connections the
+  // account metadata is genuinely unavailable until reconnect, so say so in
+  // plain language instead of showing a meaningless hash.
+  const status = (conn.status ?? "").toLowerCase();
+  const lastCheck = (conn.last_check_status ?? "").toLowerCase();
+  const isBroken =
+    status === "expired" ||
+    status === "failed" ||
+    status === "inactive" ||
+    lastCheck === "expired" ||
+    lastCheck === "failed";
+  if (isBroken) return "Expired — reconnect to see account";
   // Use the last 6 chars of the connection ID as a short disambiguator
   const idSuffix = conn.id ? conn.id.slice(-6) : "";
   return idSuffix ? `account …${idSuffix}` : "unknown account";

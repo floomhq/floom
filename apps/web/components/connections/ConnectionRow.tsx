@@ -29,10 +29,19 @@ import { formatTimestamp, type ConnectionView } from "./connection-data";
 //   - Disconnect: ghost destructive button
 //   - Refresh status: icon-only
 function StatusPill({ status }: { status: string }) {
-  // S29l (ChatGPT-audit P-2): "Active" on every connection row is decoration.
-  // Only render the pill when the user needs to act (initiated/expired/failed/
-  // inactive). Active state is implied by the absence of a warning pill.
-  if (status === "active") return null;
+  // P1-7 (audit 2026-05-29): the Status column previously rendered nothing for
+  // active connections, so a healthy connection looked state-less while only
+  // Expired/Failed got a pill. The column read as "either Expired or nothing".
+  // Restore a positive "Active" pill for parity — every row now shows its
+  // actual state. (This intentionally reverses the earlier S29l "no decoration"
+  // call: the audit found a blank cell reads as missing data, not as healthy.)
+  if (status === "active") {
+    return (
+      <span className="inline-flex items-center rounded-full border border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] px-2 py-0.5 text-[11px] font-medium text-[var(--positive)]">
+        Active
+      </span>
+    );
+  }
   const map: Record<string, string> = {
     initiated: "border-[color-mix(in_srgb,#9a6a16_24%,var(--line))] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] text-[#8a5d12]",
   };
@@ -100,6 +109,15 @@ export function ConnectionRow({
           <span title={connection.scopes.join(", ")}>
             {`${connection.scopes.length} scope${connection.scopes.length === 1 ? "" : "s"}`}
           </span>
+        ) : connection.status === "expired" ||
+          connection.status === "failed" ||
+          connection.lastCheckStatus === "expired" ||
+          connection.lastCheckStatus === "failed" ? (
+          // P2-6 (audit 2026-05-29): for expired/failed rows the inline
+          // refresh glyph read as a stuck loader ("— ↻") and could never load
+          // scopes anyway (the connection is dead). Show a clean dash only;
+          // the path back is Reconnect, not a scope re-check.
+          <span className="text-muted-foreground/50">—</span>
         ) : (
           <>
             <span className="text-muted-foreground/50">—</span>
