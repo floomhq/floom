@@ -262,6 +262,15 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
     return <RunResultOverview run={run} />;
   }
 
+  // G5 P2 (rescore2 2026-05-29): a failed run with a readable transcript but no
+  // explicit "finish" part (e.g. the agent died mid-step) rendered only a red
+  // "Step 1" with NO error sentence on the default Result tab — the operator
+  // had to dig into Logs/Raw to learn anything. Surface the (already humanized)
+  // error headline at the end of the transcript whenever the run failed and no
+  // finish part carried it.
+  const hasFinishPart = parts.some((p) => p.type === "finish");
+  const showTrailingError = run.status === "failed" && !hasFinishPart;
+
   return (
     <div className="space-y-3">
       {parts.map((part, index) => {
@@ -312,6 +321,9 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
         }
         return null;
       })}
+      {showTrailingError && (
+        <StackTrace error={run.error || "This run failed. Check the logs for details."} />
+      )}
     </div>
   );
 }

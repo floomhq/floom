@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ApprovalRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { notifyApprovalsChanged, useApprovalsListSync } from "@/lib/useApprovalsSync";
 
 const PAGE_SIZE = 20;
 // A pending approval older than this reads as "most-waiting" → subtle emphasis.
@@ -78,6 +79,9 @@ function ApprovalCard({
       }
       const res = await api.runs.approve(approval.run_id, editedOutput);
       toast.success("Approved — follow-up run started");
+      // Tell the nav badge + any other subscriber to revalidate now, so the
+      // badge drops to 0 without a manual reload (G5 P2).
+      notifyApprovalsChanged();
       if (res.run_id) {
         // Brief delay then navigate to follow-up run
         setTimeout(() => {
@@ -97,6 +101,7 @@ function ApprovalCard({
     try {
       await api.runs.reject(approval.run_id, rejectReason || undefined);
       toast.success("Rejected");
+      notifyApprovalsChanged();
       onDecision();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Reject failed");
@@ -291,6 +296,10 @@ function ApprovalsContent() {
     load();
   }, [load]);
 
+  // Revalidate on focus + on the shared change signal so the list never drifts
+  // from the nav badge (G5 P2).
+  useApprovalsListSync(load);
+
   const sortedAll = useMemo(() => {
     const rows = [...approvals];
     if (sort === "oldest") {
@@ -408,6 +417,7 @@ function ApprovalsContent() {
       } else if (failed > 0) {
         toast.error(`${failed} ${action === "approve" ? "approvals" : "rejections"} failed`);
       }
+      if (ok > 0) notifyApprovalsChanged();
       await load();
     },
     [selected, load]

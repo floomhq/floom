@@ -7,7 +7,7 @@ import { Activity, Box, CheckCircle, Clock, Folder, Settings, Menu, X, Plug, Plu
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
-import { api } from "@/lib/api";
+import { useApprovalsCount } from "@/lib/useApprovalsSync";
 
 function FloomMark({ size = 28 }: { size?: number }) {
   return (
@@ -44,25 +44,9 @@ const nav = [
 ];
 
 function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
-  const [pendingCount, setPendingCount] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchCount() {
-      try {
-        const res = await api.approvals.count();
-        if (!cancelled) setPendingCount(res.pending);
-      } catch {
-        // silently ignore
-      }
-    }
-    fetchCount();
-    const interval = setInterval(fetchCount, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+  // Shared source with /approvals: revalidates on focus + after any
+  // approve/reject so the badge never drifts from the list (G5 P2).
+  const pendingCount = useApprovalsCount();
 
   return (
     <nav className="flex-1 px-3 space-y-0.5">
