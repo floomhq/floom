@@ -148,7 +148,19 @@ export default function ConnectionsClient({
     return views.map((v) => {
       const key = v.app_name?.toLowerCase() ?? "";
       const labelsForApp = labelByApp[key];
-      if (labelsForApp && labelsForApp.size < views.filter((x) => (x.app_name?.toLowerCase() ?? "") === key).length) {
+      // P2-7: do not append an ID-suffix disambiguator to the
+      // "Expired — reconnect to see account" placeholder. It is not a real
+      // account label, and tacking a hash onto it just reintroduces the noise
+      // the audit flagged. Two expired rows of the same app reading identically
+      // is fine — neither has account info until reconnect.
+      const isPlaceholderLabel =
+        v.accountLabel === "Expired — reconnect to see account" ||
+        v.accountLabel.startsWith("account …");
+      if (
+        !isPlaceholderLabel &&
+        labelsForApp &&
+        labelsForApp.size < views.filter((x) => (x.app_name?.toLowerCase() ?? "") === key).length
+      ) {
         const suffix = v.id.slice(-6);
         return { ...v, accountLabel: `${v.accountLabel} (…${suffix})` };
       }
