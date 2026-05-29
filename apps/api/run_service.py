@@ -170,14 +170,20 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
             changed = True
             log_fn("Dropped invalid tags from drafted worker (schema requires <=8 flat strings)", level="warning")
 
-    # gen-quality (2026-05-29): the LLM frequently declares a SCALAR output
-    # (kind: scalar, the result is a short string/number) but OMITS the required
-    # `type`, so registration hard-fails with "scalar field '<name>' must declare
-    # type" and the operator gets a dead-end bundle. A scalar output with no type
-    # is unambiguously a string-ish scalar — default it to "string" (lossless;
-    # the schema's own default for scalar inputs is also string-ish). We fix the
-    # ENGINE, not just the generation prompt, because the LLM is non-deterministic.
-    def _fix_output_kind(fields: Any) -> bool:
+    # gen-quality (2026-05-29): the LLM makes a small set of recurring
+    # input/output DECLARATION mistakes that hard-fail registration and dead-end
+    # the operator. We fix the ENGINE (not just the generation prompt, which is
+    # non-deterministic), losslessly, for every input and output field:
+    #   1. type-in-kind-slot: kind is actually a scalar TYPE value (textarea,
+    #      string, number, ...) -> set kind:scalar and move the value to `type`.
+    #   2. scalar + file markers: kind:scalar but carries path/media_type and no
+    #      type -> the run.py returns the literal value, so resolve to a clean
+    #      scalar (strip the stray file markers, default type:string).
+    #   3. scalar missing type: kind:scalar (or no kind + no file markers) and no
+    #      type -> default type:string.
+    _SCALAR_TYPES = {"string", "textarea", "number", "boolean", "select", "url"}
+
+    def _fix_fields(fields: Any) -> bool:
         touched = False
         if not isinstance(fields, list):
             return False
@@ -186,34 +192,38 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
                 continue
             kind = str(field.get("kind") or "").strip().lower()
             has_file_markers = bool(field.get("path") or field.get("media_type"))
+            # (1) type-in-kind-slot (e.g. kind: textarea) -> kind:scalar + type.
+            if kind in _SCALAR_TYPES:
+                if not field.get("type"):
+                    field["type"] = kind
+                field["kind"] = "scalar"
+                kind = "scalar"
+                touched = True
+            # (2) contradictory scalar + file markers -> clean scalar.
             if kind == "scalar" and has_file_markers:
-                # Contradictory: kind:scalar but carries file markers
-                # (path/media_type). The schema rejects this. The generated run.py
-                # for this shape returns the LITERAL value in outputs[name] (a
-                # scalar) while also happening to write a file, so the output is
-                # genuinely SCALAR — strip the stray file markers and give it the
-                # required scalar `type` (default string). This matches what the
-                # run.py actually returns and is the least-surprise resolution.
                 field.pop("path", None)
                 field.pop("media_type", None)
                 if not field.get("type"):
                     field["type"] = "string"
                 touched = True
                 continue
+            # (3) scalar missing the required type -> default string.
             is_scalar = kind == "scalar" or (not kind and not has_file_markers)
             if is_scalar and not field.get("type") and not has_file_markers:
-                # Pure scalar output missing its required `type` -> default string.
                 field["type"] = "string"
                 touched = True
         return touched
 
-    if _fix_output_kind(raw.get("outputs")):
-        changed = True
-        log_fn("Normalized a generated output kind/type so the worker registers", level="info")
+    for block, key in ((raw, "inputs"), (raw, "outputs")):
+        if _fix_fields(block.get(key)):
+            changed = True
+            log_fn(f"Normalized generated {key} kind/type so the worker registers", level="info")
     exec_block = raw.get("exec")
-    if isinstance(exec_block, dict) and _fix_output_kind(exec_block.get("outputs")):
-        changed = True
-        log_fn("Normalized a generated output kind/type so the worker registers", level="info")
+    if isinstance(exec_block, dict):
+        for key in ("inputs", "outputs"):
+            if _fix_fields(exec_block.get(key)):
+                changed = True
+                log_fn(f"Normalized generated {key} kind/type so the worker registers", level="info")
 
     if not changed:
         return worker_yml
