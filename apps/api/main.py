@@ -115,6 +115,7 @@ from run_service import (
     start_drain_loop,
     stop_drain_loop,
     queued_run_position,
+    smoke_and_gate_generated_worker,
     InsufficientDiskSpaceError,
 )
 from run_service import register_sse_publisher, register_part_publisher
@@ -4506,6 +4507,12 @@ class DraftAndCreateRequest(BaseModel):
 
 class DraftAndCreateResponse(BaseModel):
     worker_id: str
+    # FIX 4 (2026-05-29): both creation paths run the smoke+repair safety net.
+    # smoke_status: "passed" | "failed" | "skipped" | None. When "failed" the
+    # worker is created but DISABLED (stays editable) — surface the reason so
+    # the caller does not present it as a clean, ready worker.
+    smoke_status: Optional[str] = None
+    smoke_reason: Optional[str] = None
 
 
 def _free_worker_id(base_id: str, repos: "Repositories | None" = None) -> str:
@@ -4880,7 +4887,47 @@ async def draft_and_create_worker(
             invalidate_worker_cache()
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    return DraftAndCreateResponse(worker_id=worker_id)
+    # Wedge safety net (FIX 4, 2026-05-29): unify the raw create path with the UI
+    # worker-author path. Prove the generated SCRIPT-mode worker actually RUNS
+    # (bounded smoke + repair), validate it produces real output, and gate it:
+    # a smoke-failed worker is DISABLED (not deleted — stays editable) so it is
+    # never presented as a clean, ready worker. Runs on a worker thread so the
+    # E2B run does not block the event loop. Never fails the create.
+    smoke_result: Optional[Dict[str, Any]] = None
+    try:
+        sample_input = None
+        try:
+            sample_input = getattr(_config2, "example_input", None)
+        except Exception:
+            sample_input = None
+        smoke_bundle: Dict[str, Any] = {}
+        if isinstance(sample_input, dict):
+            smoke_bundle["example_input"] = sample_input
+
+        def _draft_smoke_log(msg: str, level: str = "info") -> None:
+            logger.info("draft-and-create smoke %s: %s", worker_id, msg)
+
+        smoke_result = await asyncio.to_thread(
+            smoke_and_gate_generated_worker,
+            worker_id,
+            smoke_bundle,
+            user_id=auth.user_id,
+            repos=repos,
+            log_fn=_draft_smoke_log,
+        )
+    except Exception:
+        logger.exception("draft-and-create smoke+gate failed for %s", worker_id)
+
+    if isinstance(smoke_result, dict) and smoke_result.get("status") == "failed":
+        return DraftAndCreateResponse(
+            worker_id=worker_id,
+            smoke_status="failed",
+            smoke_reason=str(smoke_result.get("reason") or "first test run failed"),
+        )
+    return DraftAndCreateResponse(
+        worker_id=worker_id,
+        smoke_status=(smoke_result.get("status") if isinstance(smoke_result, dict) else None),
+    )
 
 
 def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tuple[str, WorkerConfig]:
@@ -6527,7 +6574,12 @@ def _run_error_raw(
     headline = _operator_error_message(raw, error_code)
     if headline is None or headline == raw:
         return None
-    return _redact_public_log_message(raw) or None
+    redacted = _redact_public_log_message(raw)
+    # FIX 5 (2026-05-29): the debug 'Raw' tab still leaked real filesystem paths
+    # (sandbox /home/user/worker/, server /root/workeros/...). error_raw must
+    # never carry a real path. Strip them — the operator headline is unchanged.
+    redacted = _SANDBOX_PATH_RE.sub("[worker file]", redacted)
+    return redacted or None
 
 
 def _sanitize_operator_text(text: Optional[str]) -> Optional[str]:
