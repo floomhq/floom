@@ -36,6 +36,9 @@ def _load_api(monkeypatch, tmp_path, *, stock_workers: tuple[str, ...] = ()):
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_BLOBS_DIR", str(tmp_path / "blobs"))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
+    # Keep /runs/clear pre-wipe snapshots inside the tmp dir, never the prod
+    # backups path.
+    monkeypatch.setenv("WORKEROS_PRECLEAR_BACKUP_DIR", str(tmp_path / "backups"))
     monkeypatch.setenv("FLOOM_SECRET", AUTH["x-floom-secret"])
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
     monkeypatch.setenv("WORKEROS_USER_ID", "user-a")
@@ -379,7 +382,13 @@ def test_runs_clear_only_deletes_owner_history(monkeypatch, tmp_path):
         headers=_headers("user-a"),
     )
     assert clear_resp.status_code == 200, clear_resp.text
-    assert clear_resp.json()["deleted_runs"] == 1
+    body = clear_resp.json()
+    assert body["deleted_runs"] == 1
+    assert body["cleared_count"] == 1
+    # Hardening: a pre-wipe backup must have been written before deletion.
+    backup_path = Path(body["backup_path"])
+    assert backup_path.is_file()
+    assert backup_path.stat().st_size > 0
 
     owner_after = client.get("/runs", headers=_headers("user-a"))
     foreign_after = client.get("/runs", headers=_headers("user-b"))
