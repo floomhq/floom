@@ -918,6 +918,24 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_approvals_status     ON approvals(status);
     CREATE INDEX IF NOT EXISTS idx_approvals_owner_id   ON approvals(owner_id);
     """,
+    # -- migration 38: alert_incidents table for worker alerting ---------------
+    # Persists fired alert incidents so the same incident is not re-sent and
+    # there is an audit trail.  One row per (worker_id, incident_key) per open
+    # incident; resolved_at is set when the worker recovers.
+    """
+    CREATE TABLE IF NOT EXISTS alert_incidents (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        worker_id   TEXT NOT NULL,
+        incident_key TEXT NOT NULL,
+        reason      TEXT NOT NULL,
+        details     TEXT,
+        fired_at    TEXT NOT NULL,
+        resolved_at TEXT,
+        UNIQUE(worker_id, incident_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_alert_incidents_worker
+        ON alert_incidents(worker_id);
+    """,
 ]
 
 
