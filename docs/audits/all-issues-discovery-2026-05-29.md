@@ -19,6 +19,12 @@
 
 **Verified-FIXED since prior audits (no longer defects):** run-detail H1 now shows worker display name (was slug `research_brief`); Settings no longer has 4-6s "Loading..." flash; Settings CLI/MCP/API picker works (and per-target sub-picker Claude/Cursor/VS Code/Windsurf/Generic); token input is `type=password` masked; Connections shows real account identities + real scopes + Reconnect (PR #233); context file-switch via tree no longer shows a full-page skeleton (in-place swap works on click); worker-detail tabs scroll horizontally on mobile.
 
+**FIXED + VERIFIED LIVE by batch (drive-to-zero progress):**
+- **Batch A** (PR #244): P0-1, P1-1, P1-2, P1-3, P1-4, P2-1, P2-2, P2-3, P2-4, P2-5.
+- **Batch B** (PR #243): P1-5, P1-6, P1-10, P1-11, P2-13, P2-14.
+- **Batch C** (PR #245): P1-7, P1-8, P1-9, P2-6, P2-7, P2-8, P2-9, P2-10, P2-12. Details + per-item live evidence in `ISSUES.md` → "Batch C". Screenshots in `docs/audits/shots-batchC-2026-05-29/`.
+- **Batch D** (PR #242): P0-2, P2-11. Details in `ISSUES.md` → "Batch D".
+
 ---
 
 ## Ranked master list (P0 → P2)
