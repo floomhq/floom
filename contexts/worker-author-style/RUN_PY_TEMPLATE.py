@@ -11,27 +11,32 @@
 #        Use it directly. NEVER open() a scalar.
 #      - For a FILE input (kind: "file") the value is a RELATIVE PATH like
 #        "inputs/<input_name>". open() THAT path to read the uploaded bytes.
-#   2. Secrets are in os.environ (the harness writes `.env.local`; call
-#      load_dotenv(".env.local")). A `secrets.json` file is a fallback.
+#   2. Secrets are available in os.environ (the harness sets them) and ALSO in a
+#      `secrets.json` file. Read os.environ first, fall back to secrets.json.
 #      Connections (Composio) are in `connections.json` when present.
 #   3. The worker writes its output file(s) under `out/` (mkdir it).
-#   4. The worker writes `result.json` with the EXACT schema below on BOTH the
-#      success and the error path, then exits 0.
+#   4. The worker writes `result.json` IN THE WORKING DIRECTORY (NOT under out/),
+#      with the EXACT schema below, on BOTH the success and the error path, then
+#      exits 0.
 #   5. The module ends with `if __name__ == "__main__": main()`.
 #
-# result.json schema (write it on success AND error):
+# result.json schema (written to ./result.json on success AND error):
 #   {
 #     "status": "success" | "error",
 #     "outputs": {"<declared_output_name>": "out/<file>"},   # path under out/
 #     "artifacts": [
 #       {"name": "out/<file>", "relative_path": "out/<file>", "type": "<media_type>"}
 #     ],
-#     "error": "<message when status == 'error', else omit/null>"
+#     "error": "<message when status == 'error', else null>"
 #   }
 #
-# HARD RULES:
+# HARD RULES (these are the exact mistakes that crash generated workers):
+#   - Use ONLY the Python standard library unless you also list the package in
+#     requirements.txt. Do NOT `import dotenv` / `from dotenv import ...` — it is
+#     NOT preinstalled. Read secrets from os.environ + secrets.json (shown below).
 #   - import EVERY module you reference (os, json, csv, io, re, statistics, ...).
-#     A missing `import os` is the #1 generated-worker crash.
+#     A missing `import os` is a top generated-worker crash.
+#   - Write result.json to "result.json" (the working dir), NEVER "out/result.json".
 #   - one declared output -> one out/ file -> one outputs entry + one artifact.
 #   - never open() a scalar input value; never hardcode a secret.
 #   - always write result.json, even when you bail out early on bad input.
@@ -42,18 +47,34 @@ import json
 import os
 from pathlib import Path
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv(".env.local")
-except ImportError:
-    pass  # dotenv optional; secrets.json fallback covers it
+
+def _load_secrets():
+    """Secrets from os.environ, with a secrets.json fallback. No third-party deps."""
+    try:
+        with open("secrets.json") as fh:
+            file_secrets = json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        file_secrets = {}
+
+    def get(name, default=None):
+        return os.environ.get(name) or file_secrets.get(name) or default
+
+    return get
 
 
 def _write_result(status, outputs=None, artifacts=None, error=None):
-    payload = {"status": status, "outputs": outputs or {}, "artifacts": artifacts or []}
-    if error:
-        payload["error"] = error
-    Path("result.json").write_text(json.dumps(payload), encoding="utf-8")
+    # result.json lives in the WORKING DIRECTORY, not out/.
+    Path("result.json").write_text(
+        json.dumps(
+            {
+                "status": status,
+                "outputs": outputs or {},
+                "artifacts": artifacts or [],
+                "error": error,
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def main():
@@ -68,8 +89,9 @@ def main():
     #     with open(csv_path, "r", encoding="utf-8", errors="replace") as fh:
     #         raw = fh.read()
     #
-    # 2c) Secret (declared in exec.secrets) -> os.environ.
-    #     api_key = os.environ.get("OPENAI_API_KEY")
+    # 2c) Secret (declared in exec.secrets) -> via the helper (no dotenv needed).
+    #     secret = _load_secrets()
+    #     api_key = secret("OPENAI_API_KEY")
 
     # Validate required inputs; bail out with a result.json on the error path.
     # if not some_text:
@@ -81,7 +103,7 @@ def main():
     out_path = "out/result.txt"
     Path(out_path).write_text("replace with the real output", encoding="utf-8")
 
-    # 4) Write result.json mapping each declared output name to its out/ path.
+    # 4) Write result.json (working dir) mapping each output name to its out/ path.
     _write_result(
         "success",
         outputs={"result": out_path},
