@@ -450,7 +450,7 @@ def _register_authored_worker(
 # already-acquired execution slot), and never silently ship a broken worker —
 # the outcome is recorded on the author run output as ``smoke``.
 
-_MAX_SMOKE_REPAIRS = 2
+_MAX_SMOKE_REPAIRS = 3
 
 # Distinctive prefix of main._DEFAULT_RUN_PY_STUB's comment. A generated script
 # worker whose run.py is the placeholder stub does nothing (it writes a success
@@ -580,8 +580,13 @@ def _repair_run_py(
     failure: str,
     secrets: Dict[str, str],
     log_fn: Callable[..., None],
+    intent: str = "",
 ) -> Optional[str]:
     """Ask a focused model call to fix a broken script-mode run.py.
+
+    ``intent`` is the worker's own description/long_description so the repair can
+    fix UNDER-implementation (declared outputs the generator only partly filled),
+    not just syntax/contract bugs.
 
     Returns the corrected file, or None if no key / call failed / no change.
     """
@@ -592,24 +597,33 @@ def _repair_run_py(
     try:
         from openai import OpenAI
 
+        from codegen_model import chat_completion_codegen
+
         client = OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+        user_content = (
+            "This run.py failed its first run with:\n"
+            f"{failure[:1500]}\n\n"
+        )
+        if intent:
+            # Feed the worker's INTENT so the repair can fix UNDER-implementation
+            # (a worker that ran green but only produced part of what the prompt
+            # asked for), not just syntax/contract bugs.
+            user_content += f"The worker is supposed to do this:\n{intent[:1200]}\n\n"
+        user_content += (
+            "Here is the current run.py:\n\n"
+            f"{run_code[:8000]}\n\n"
+            "Return the corrected complete run.py. Implement EVERY declared "
+            "output fully — if the task asks for multiple outputs, produce all "
+            "of them, not just the first."
+        )
+        resp = chat_completion_codegen(
+            client,
             messages=[
                 {"role": "system", "content": _SMOKE_REPAIR_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        "This run.py failed its first run with:\n"
-                        f"{failure[:1500]}\n\n"
-                        "Here is the current run.py:\n\n"
-                        f"{run_code[:8000]}\n\n"
-                        "Return the corrected complete run.py."
-                    ),
-                },
+                {"role": "user", "content": user_content},
             ],
             temperature=0.0,
-            max_tokens=4000,
+            max_output_tokens=6000,
         )
         fixed = _strip_code_fences(resp.choices[0].message.content or "")
     except Exception as exc:  # pragma: no cover - network/SDK variance
@@ -850,6 +864,7 @@ def _smoke_and_repair_generated_worker(
                 failure=last_failure,
                 secrets=secrets,
                 log_fn=log_fn,
+                intent=(getattr(config, "description", None) or "").strip(),
             )
             if not fixed:
                 return {
