@@ -147,6 +147,11 @@ copy-pasteable template is `contexts/worker-author-style/RUN_PY_TEMPLATE.py`
   `{"status": "success"|"error", "outputs": {"<output_name>": <value-or-out/path>},
   "artifacts": [{"name","relative_path","type"}], "error": "<msg if error>"}`.
   Writing result.json under out/ makes the run fail with "didn't produce a result".
+- **Implement EVERY declared output FULLY.** If the prompt asks for several
+  things (e.g. word count AND sentence count AND average length), declare an
+  output for each and compute ALL of them. A worker that runs green but only
+  fills the first output is an under-implemented no-op — produce the complete
+  result the prompt described.
 - No unbounded loops; bound any retry/iteration and set a timeout on network calls.
 - End the module with `if __name__ == "__main__": main()`.
 

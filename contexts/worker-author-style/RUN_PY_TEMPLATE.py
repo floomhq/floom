@@ -141,3 +141,96 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# =============================================================================
+# WORKED EXAMPLES — copy the one that matches the task, then adapt.
+# These cover the historical first-run failure classes. Each shows the FULL
+# main() body so the scalar-vs-file output contract is unmissable.
+# =============================================================================
+#
+# --- Example 1: reverse a string  (SCALAR input -> SCALAR output) -----------
+#   worker.yml: input "text" kind:scalar type:string; output "reversed"
+#               kind:scalar type:string (NO path).
+# def main():
+#     inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+#     text = str(inputs.get("text") or "")
+#     _write_result("success", outputs={"reversed": text[::-1]})
+#
+# --- Example 2: sort a CSV by column 2  (FILE input -> FILE output) ---------
+#   worker.yml: input "csv_file" kind:file path:inputs/csv_file;
+#               output "sorted_csv" kind:file media_type:text/csv path:out/sorted.csv.
+# def main():
+#     import csv
+#     inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+#     with open(inputs["csv_file"], newline="", encoding="utf-8") as fh:
+#         rows = list(csv.reader(fh))
+#     header, body = rows[0], rows[1:]
+#     body.sort(key=lambda r: r[1])           # column 2 (zero-based index 1)
+#     os.makedirs("out", exist_ok=True)
+#     out_path = "out/sorted.csv"
+#     with open(out_path, "w", newline="", encoding="utf-8") as fh:
+#         csv.writer(fh).writerows([header] + body)
+#     _write_result("success", outputs={"sorted_csv": out_path},
+#                   artifacts=[{"name": out_path, "relative_path": out_path, "type": "text/csv"}])
+#
+# --- Example 3: min/max/mean/median  (SCALAR input -> JSON FILE output) -----
+#   A structured result is a FILE output media_type:application/json path:out/stats.json
+#   (declaring stats as a scalar would force you to stuff JSON in a string —
+#   prefer a json file output for objects). Implement ALL declared stats.
+# def main():
+#     import statistics
+#     inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+#     raw = str(inputs.get("numbers") or "")
+#     nums = [float(x) for x in raw.replace(",", " ").split()]
+#     stats = {
+#         "min": min(nums), "max": max(nums),
+#         "mean": statistics.mean(nums), "median": statistics.median(nums),
+#     }
+#     os.makedirs("out", exist_ok=True)
+#     out_path = "out/stats.json"
+#     Path(out_path).write_text(json.dumps(stats), encoding="utf-8")
+#     _write_result("success", outputs={"stats": out_path},
+#                   artifacts=[{"name": out_path, "relative_path": out_path, "type": "application/json"}])
+#
+# --- Example 4: dedupe lines  (SCALAR input -> FILE output) -----------------
+#   output "deduped" kind:file media_type:text/plain path:out/deduped.txt.
+# def main():
+#     inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+#     lines = str(inputs.get("text") or "").splitlines()
+#     seen, kept = set(), []
+#     for ln in lines:
+#         if ln not in seen:
+#             seen.add(ln); kept.append(ln)
+#     os.makedirs("out", exist_ok=True)
+#     out_path = "out/deduped.txt"
+#     Path(out_path).write_text("\n".join(kept), encoding="utf-8")
+#     _write_result("success", outputs={"deduped": out_path},
+#                   artifacts=[{"name": out_path, "relative_path": out_path, "type": "text/plain"}])
+#
+# --- Example 5: extract emails  (SCALAR input -> SCALAR output) -------------
+#   output "emails" kind:scalar type:string (a comma-joined literal, NOT a path).
+# def main():
+#     import re
+#     inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+#     text = str(inputs.get("text") or "")
+#     found = re.findall(r"[\w.+-]+@[\w-]+\.[\w.-]+", text)
+#     _write_result("success", outputs={"emails": ", ".join(found)})
+#
+# --- Example 6: word + char + sentence count  (SCALAR -> JSON FILE) ---------
+#   The prompt asks for THREE counts: implement ALL THREE. Under-implementing
+#   (returning only word_count) is a top "ran green but incomplete" failure.
+# def main():
+#     import re
+#     inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+#     text = str(inputs.get("text") or "")
+#     counts = {
+#         "words": len(text.split()),
+#         "chars": len(text),
+#         "sentences": len([s for s in re.split(r"[.!?]+", text) if s.strip()]),
+#     }
+#     os.makedirs("out", exist_ok=True)
+#     out_path = "out/counts.json"
+#     Path(out_path).write_text(json.dumps(counts), encoding="utf-8")
+#     _write_result("success", outputs={"counts": out_path},
+#                   artifacts=[{"name": out_path, "relative_path": out_path, "type": "application/json"}])
