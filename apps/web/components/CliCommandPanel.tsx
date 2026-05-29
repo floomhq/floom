@@ -4,11 +4,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const SECRET_STORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
 const API_BASE = "https://workers-api.floom.dev";
+
+type McpTarget = "claude" | "cursor" | "vscode" | "windsurf" | "generic";
+
+const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
+  { value: "claude",   label: "Claude",   hint: "~/.claude/settings.json" },
+  { value: "cursor",   label: "Cursor",   hint: "~/.cursor/mcp.json" },
+  { value: "vscode",   label: "VS Code",  hint: ".vscode/mcp.json" },
+  { value: "windsurf", label: "Windsurf", hint: "~/.codeium/windsurf/mcp_config.json" },
+  { value: "generic",  label: "Generic",  hint: "prints snippet — paste manually" },
+];
 
 function readStoredSecret(): string {
   if (typeof window === "undefined") return "";
@@ -28,10 +37,15 @@ function maskSecret(secret: string): string {
   return `${secret.slice(0, 4)}${"•".repeat(24)}${secret.slice(-4)}`;
 }
 
+function buildMcpSnippet(target: McpTarget): string {
+  return `npx @floomhq/workeros install --target ${target}`;
+}
+
 export function CliCommandPanel() {
   const [copiedKey, setCopiedKey] = useState("");
   const [storedSecret, setStoredSecret] = useState("");
   const [revealed, setRevealed] = useState(false);
+  const [mcpTarget, setMcpTarget] = useState<McpTarget>("claude");
 
   useEffect(() => {
     const stored = readStoredSecret();
@@ -60,10 +74,10 @@ export function CliCommandPanel() {
   const snippets = useMemo(
     () => ({
       cli: "npm i -g @floomhq/workeros\nfloom login",
-      mcp: "npx @floomhq/workeros install --target claude",
+      mcp: buildMcpSnippet(mcpTarget),
       api: `curl -sS ${API_BASE}/workers \\\n  -H "x-floom-secret: ${apiSecret}"`,
     }),
-    [apiSecret]
+    [apiSecret, mcpTarget]
   );
 
   async function copySnippet(key: "cli" | "mcp" | "api") {
@@ -78,6 +92,8 @@ export function CliCommandPanel() {
     setCopiedKey("token");
     window.setTimeout(() => setCopiedKey(""), 1200);
   }
+
+  const activeMcpTarget = MCP_TARGETS.find((t) => t.value === mcpTarget)!;
 
   return (
     <div className="space-y-8">
@@ -144,7 +160,28 @@ export function CliCommandPanel() {
               onCopy={() => void copySnippet("cli")}
             />
           </TabsContent>
-          <TabsContent value="mcp">
+          <TabsContent value="mcp" className="space-y-2">
+            {/* Target picker — small inline segmented control */}
+            <div className="flex items-center gap-1 flex-wrap">
+              {MCP_TARGETS.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => setMcpTarget(t.value)}
+                  className={
+                    `h-7 px-2.5 text-xs rounded-[var(--radius-button)] border transition-colors ` +
+                    (mcpTarget === t.value
+                      ? "border-blue-500 bg-blue-500 text-white"
+                      : "border-line bg-card text-muted-foreground hover:text-foreground hover:bg-muted")
+                  }
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Writes to <code className="font-mono">{activeMcpTarget.hint}</code>
+            </p>
             <SnippetBox
               text={snippets.mcp}
               copied={copiedKey === "mcp"}
