@@ -198,8 +198,7 @@ class _FakeDriver:
 
 run_service.get_sandbox_driver = lambda *_args, **_kwargs: _FakeDriver()
 
-client = TestClient(app)
-client.headers.update(AUTH_HEADERS)
+client: TestClient | None = None
 failures: list[str] = []
 
 
@@ -219,6 +218,8 @@ def post_upload(
     accepts: list[str] | None = None,
     max_size_mb: float = 1,
 ) -> Any:
+    if client is None:
+        raise RuntimeError("TestClient not initialized")
     data: dict[str, str] = {"max_size_mb": str(max_size_mb)}
     if accepts is not None:
         data["accepts"] = json.dumps(accepts)
@@ -230,6 +231,8 @@ def post_upload(
 
 
 def wait_for_run(run_id: str) -> dict[str, Any]:
+    if client is None:
+        raise RuntimeError("TestClient not initialized")
     for _ in range(200):
         run_response = client.get(f"/runs/{run_id}")
         if run_response.status_code == 200:
@@ -286,7 +289,7 @@ async def run_async_uploads(content: bytes, count: int) -> list[Any]:
     return await asyncio.gather(*(async_upload_bytes(content, i) for i in range(count)))
 
 
-def main() -> int:
+def _main_body() -> int:
     db.init_db()
     reload_response = client.post("/workers/reload")
     check("worker reload succeeds", reload_response.status_code == 200, reload_response.text[:200])
@@ -457,9 +460,7 @@ def main() -> int:
 
     api_main._resolve_file_input_references = fail_bind
     try:
-        no_raise_client = TestClient(app, raise_server_exceptions=False)
-        no_raise_client.headers.update(AUTH_HEADERS)
-        ref_fail_bind = no_raise_client.post(
+        ref_fail_bind = client.post(
             "/workers/file_access_test/runs",
             json={
                 "inputs": {"upload": ref_fail_sha},
@@ -711,6 +712,17 @@ def main() -> int:
         return 1
     print("\nfile_inputs_regression: all checks passed")
     return 0
+
+
+def main() -> int:
+    global client
+    with TestClient(app, raise_server_exceptions=False) as tc:
+        tc.headers.update(AUTH_HEADERS)
+        client = tc
+        try:
+            return _main_body()
+        finally:
+            client = None
 
 
 def test_file_inputs_regression() -> None:
