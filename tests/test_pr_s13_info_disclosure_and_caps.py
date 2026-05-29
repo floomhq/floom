@@ -1315,3 +1315,31 @@ def test_webhook_aliases_match_original_routes(monkeypatch, tmp_path):
     cb_alias = client.get(f"/webhooks/oauth-callback{callback_qs}", follow_redirects=False)
     assert cb_original.status_code == cb_alias.status_code
     assert cb_original.headers.get("location") == cb_alias.headers.get("location")
+
+
+def test_chat_per_user_quota_returns_429(monkeypatch, tmp_path):
+    """/chat calls OpenAI per request; a per-user quota must cap the bill-burn path."""
+    main = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_CHAT_RATE_LIMIT", "2")
+    monkeypatch.setenv("WORKEROS_CHAT_RATE_WINDOW_SECONDS", "60")
+
+    # Stub stream_chat so the test never reaches OpenAI: just emit a finish part.
+    import chat_service
+
+    async def _fake_stream_chat(*, message, user_id, conversation_id, part_queue):
+        await part_queue.put({"type": "finish", "conversation_id": "c1", "message_id": "m1"})
+
+    monkeypatch.setattr(chat_service, "stream_chat", _fake_stream_chat)
+
+    client = TestClient(main.app)
+
+    # First two requests are within quota.
+    for _ in range(2):
+        resp = client.post("/chat", headers=_AUTH_HEADER, json={"message": "hi"})
+        assert resp.status_code == 200, resp.text
+
+    # Third request in the same window is rejected with 429 + Retry-After.
+    blocked = client.post("/chat", headers=_AUTH_HEADER, json={"message": "hi"})
+    assert blocked.status_code == 429, blocked.text
+    assert "Retry-After" in blocked.headers
+    assert "Chat rate limit exceeded" in blocked.json()["detail"]

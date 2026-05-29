@@ -44,30 +44,28 @@ function buildMcpSnippet(target: McpTarget): string {
 export function CliCommandPanel() {
   const [copiedKey, setCopiedKey] = useState("");
   const [storedSecret, setStoredSecret] = useState("");
+  const [secretInput, setSecretInput] = useState("");
   const [revealed, setRevealed] = useState(false);
   const [mcpTarget, setMcpTarget] = useState<McpTarget>("claude");
 
   useEffect(() => {
+    // Security: the token lives only in this browser's localStorage. We do NOT
+    // fetch it from the server. A prior /api/floom-secret route returned the
+    // platform admin secret to ANY unauthenticated visitor (public credential
+    // leak); it has been removed. The user pastes their token once below.
     const stored = readStoredSecret();
-    if (stored) {
-      setStoredSecret(stored);
-      return;
-    }
-    // PR S19 (I-4): fall back to the server-side env var so the user
-    // doesn't have to hand-paste the token into localStorage before
-    // they can see it on Settings -> API access.
-    fetch("/api/floom-secret")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d?.api_secret) {
-          setStoredSecret(d.api_secret);
-          try {
-            window.localStorage.setItem("floom_secret", d.api_secret);
-          } catch {}
-        }
-      })
-      .catch(() => {});
+    if (stored) setStoredSecret(stored);
   }, []);
+
+  function saveSecret() {
+    const value = secretInput.trim();
+    if (!value) return;
+    try {
+      window.localStorage.setItem("floom_secret", value);
+    } catch {}
+    setStoredSecret(value);
+    setSecretInput("");
+  }
 
   const apiSecret = revealed ? (storedSecret || "<YOUR_FLOOM_SECRET>") : maskSecret(storedSecret);
 
@@ -109,30 +107,55 @@ export function CliCommandPanel() {
             host if you ever paste it somewhere by accident.
           </p>
         </div>
-        <div className="flex items-center gap-2 border border-line bg-[var(--bg-2)] px-3 py-2">
-          <code className="flex-1 truncate font-mono text-xs">
-            {revealed ? (storedSecret || "<not configured>") : maskSecret(storedSecret)}
-          </code>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={() => setRevealed((value) => !value)}
-          >
-            {revealed ? <EyeOff className="mr-1 h-3.5 w-3.5" /> : <Eye className="mr-1 h-3.5 w-3.5" />}
-            {revealed ? "Hide" : "Reveal"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            disabled={!storedSecret}
-            onClick={() => void copyTokenValue()}
-          >
-            {copiedKey === "token" ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
-            {copiedKey === "token" ? "Copied" : "Copy"}
-          </Button>
-        </div>
+        {storedSecret ? (
+          <div className="flex items-center gap-2 border border-line bg-[var(--bg-2)] px-3 py-2">
+            <code className="flex-1 truncate font-mono text-xs">
+              {revealed ? storedSecret : maskSecret(storedSecret)}
+            </code>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => setRevealed((value) => !value)}
+            >
+              {revealed ? <EyeOff className="mr-1 h-3.5 w-3.5" /> : <Eye className="mr-1 h-3.5 w-3.5" />}
+              {revealed ? "Hide" : "Reveal"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => void copyTokenValue()}
+            >
+              {copiedKey === "token" ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
+              {copiedKey === "token" ? "Copied" : "Copy"}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Paste your FLOOM_SECRET to store it in this browser"
+              value={secretInput}
+              onChange={(e) => setSecretInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveSecret();
+              }}
+              className="flex-1 border border-line bg-[var(--bg-2)] px-3 py-2 font-mono text-xs outline-none"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 px-3 text-xs"
+              disabled={!secretInput.trim()}
+              onClick={saveSecret}
+            >
+              Save
+            </Button>
+          </div>
+        )}
       </section>
 
       {/* S29f (F8.2): was a nested Card with floating Copy button + small
