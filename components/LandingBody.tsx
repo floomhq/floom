@@ -866,7 +866,7 @@ export function LandingBody() {
             <span className="ln-pillar-ic" aria-hidden="true">
               <FolderIcon />
             </span>
-            <h3>It remembers</h3>
+            <h3>Never starts from scratch</h3>
             <p>
               Drop your style guide, CRM playbook, or 2026 OKRs into a
               Context. It mounts into every run, so your worker carries the
@@ -879,7 +879,7 @@ export function LandingBody() {
             <span className="ln-pillar-ic" aria-hidden="true">
               <TrendIcon />
             </span>
-            <h3>It gets sharper</h3>
+            <h3>Sharper every run</h3>
             <p>
               Every run is captured and every worker is versioned. Read the
               real transcript, tweak the brief, re-run in one click — by hand
@@ -891,7 +891,7 @@ export function LandingBody() {
             <span className="ln-pillar-ic" aria-hidden="true">
               <ClockIcon />
             </span>
-            <h3>No black box</h3>
+            <h3>Glass box, not black box</h3>
             <p>
               Open any run and see the inputs, every step, each tool call, the
               output, the errors, and the cost. Replay it. Nothing your worker
