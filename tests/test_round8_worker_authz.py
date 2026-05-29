@@ -750,7 +750,8 @@ def test_context_symlink_traversal_is_blocked(monkeypatch, tmp_path):
 
     outside = tmp_path / "outside.txt"
     outside.write_text("outside")
-    os.symlink(outside, main.context_dir("audit-ctx") / "escape.txt")
+    with main.use_context_scope(main.context_scope_for_user("user-a")):
+        os.symlink(outside, main.context_dir("audit-ctx") / "escape.txt")
 
     get_response = client.get("/contexts/audit-ctx/files/escape.txt", headers=_headers("user-a"))
     put_response = client.put(
