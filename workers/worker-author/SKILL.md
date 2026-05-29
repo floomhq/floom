@@ -111,16 +111,24 @@ copy-pasteable template is `contexts/worker-author-style/RUN_PY_TEMPLATE.py`
 - Read inputs from `inputs.json`: `inputs = json.load(open("inputs.json"))`.
 - **Scalar inputs** are the LITERAL value inline — use them directly, never `open()` them.
 - **File inputs** are a RELATIVE PATH like `inputs/<name>` — `open()` that path to read the file.
-- **Secrets** come from `os.environ` after `load_dotenv(".env.local")`; `secrets.json`
-  is a fallback. Never hardcode a secret.
+- **Secrets**: read from `os.environ` with a `secrets.json` fallback. Do NOT
+  `import dotenv` / `from dotenv import ...` — it is NOT preinstalled and will
+  crash with `ModuleNotFoundError`. Use the stdlib-only `_load_secrets()` helper
+  in the template. Never hardcode a secret.
 - **Connections** (Composio): read `connections.json` when present (app slug -> connection_id).
+- **Use ONLY the standard library** unless you also add the package to
+  requirements.txt. Generated workers crash on `import dotenv`, `import requests`,
+  etc. when those aren't in requirements. Stdlib (os, json, csv, io, re,
+  statistics, urllib, ...) needs no requirements.
 - **Import EVERY module you reference** — `os`, `json`, `csv`, `io`, `re`, `statistics`,
-  etc. A missing `import` (e.g. `NameError: name 'os' is not defined`) is the #1
-  generated-worker crash. Put deps in requirements.txt; stdlib needs no requirements.
+  etc. A missing `import` (e.g. `NameError: name 'os' is not defined`) is a top
+  generated-worker crash.
 - Write output files under `out/` (create it: `os.makedirs("out", exist_ok=True)`).
-- Write `result.json` with the FULL schema on BOTH the success and the error path:
+- Write `result.json` to the WORKING DIRECTORY (just `"result.json"`, NOT
+  `"out/result.json"`), with the FULL schema, on BOTH the success and error path:
   `{"status": "success"|"error", "outputs": {"<output_name>": "out/<file>"},
   "artifacts": [{"name","relative_path","type"}], "error": "<msg if error>"}`.
+  Writing result.json under out/ makes the run fail with "didn't produce a result".
 - No unbounded loops; bound any retry/iteration and set a timeout on network calls.
 - End the module with `if __name__ == "__main__": main()`.
 
