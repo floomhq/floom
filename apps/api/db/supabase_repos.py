@@ -532,7 +532,19 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                 "id", worker_id
             ).eq("user_id", user_id).execute()
 
-        upserted = self.get(user_id=user_id, worker_id=worker_id)
+        # Verify with the GLOBAL (unscoped) read, not self.get(): self.get()
+        # is workspace-scoped (via _worker_rows -> _scope_by_workspace), so
+        # when the active-workspace contextvar differs from the row's actual
+        # workspace it returns None and we'd falsely raise even though the
+        # write above (insert/update keyed on id+user_id) succeeded.
+        #
+        # This poisoned every draft-and-create: _persist_discovered_workers
+        # re-upserts ALL discovered workers (including stock seed bundles like
+        # applicant-followup, whose DB row lives in another workspace), and
+        # the scoped verify on that pre-existing worker raised
+        # "failed to upsert applicant-followup" — aborting the whole draft
+        # even when the newly authored worker was fine.
+        upserted = self.get_any(worker_id=worker_id)
         if upserted is None:
             raise RuntimeError(f"failed to upsert worker {worker_id}")
         return upserted
