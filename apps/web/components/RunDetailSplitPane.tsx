@@ -127,8 +127,8 @@ export function RunDetailSplitPane({
       {/* R4: the split pane was unbounded — long transcripts/logs grew the
           whole page so it scrolled "into infinity". Cap the pane at a
           viewport-relative height and let each pane scroll WITHIN itself. */}
-      <div className="flex min-h-[280px] max-h-[calc(100vh-13rem)] gap-0 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
-        <aside className="w-[320px] min-w-[240px] max-w-[460px] resize-x overflow-y-auto border-r border-border bg-muted/25">
+      <div className="flex min-h-[280px] max-h-[calc(100vh-13rem)] flex-col gap-0 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] md:flex-row">
+        <aside className="max-h-44 w-full shrink-0 overflow-y-auto border-b border-border bg-muted/25 md:max-h-none md:w-[320px] md:min-w-[240px] md:max-w-[460px] md:resize-x md:border-r md:border-b-0">
           {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
               The timeline IS the panel; the label was dead weight (ChatGPT
               audit P-1). */}
