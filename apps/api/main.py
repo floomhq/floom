@@ -3274,7 +3274,13 @@ files:
 === YAML RULES ===
 
 The WorkerContract YAML must follow schema_version "0.3":
-- `name`: lowercase slug 3-64 chars (letters, digits, hyphens)
+- `name`: lowercase slug 3-64 chars (letters, digits, hyphens). DERIVE IT FROM
+  THE USER'S PROMPT — pick the primary verb + the primary noun/object and slugify
+  them (e.g. "follow up with applicants" -> "applicant-followup", "summarise
+  Granola meetings into HubSpot" -> "granola-hubspot-summary", "chase overdue
+  invoices" -> "invoice-chaser"). The name MUST reflect THIS prompt's task.
+  NEVER reuse a generic placeholder or a name from the examples above when it
+  does not match the prompt. Two different prompts must produce two different names.
 - `title`: human-readable title
 - `description`: 1-2 sentence description (max 500 chars)
 - ALWAYS double-quote every string scalar value (colons inside strings cause parse errors)
@@ -3865,6 +3871,56 @@ class DraftAndCreateResponse(BaseModel):
     worker_id: str
 
 
+def _free_worker_id(base_id: str) -> str:
+    """Return a worker id that does not collide with an existing worker dir.
+
+    The LLM author frequently returns the same suggested id (e.g.
+    "applicant-followup") regardless of prompt, which made every second
+    draft-and-create 409 (#186). Instead of failing, derive a free id by
+    appending ``-2``, ``-3``, ... and finally a short random suffix so the
+    create always succeeds. Protected stock ids are never reused.
+    """
+    from worker_registry import WORKERS_DIR
+
+    def _is_free(candidate: str) -> bool:
+        if candidate in PROTECTED_STOCK_WORKER_IDS:
+            return False
+        return not (WORKERS_DIR / candidate).exists()
+
+    if _is_free(base_id):
+        return base_id
+    for suffix in range(2, 100):
+        candidate = f"{base_id}-{suffix}"
+        if _is_free(candidate):
+            return candidate
+    # Extremely unlikely fallback: append a random suffix.
+    import secrets
+
+    for _ in range(20):
+        candidate = f"{base_id}-{secrets.token_hex(3)}"
+        if _is_free(candidate):
+            return candidate
+    raise HTTPException(status_code=409, detail=f"Could not allocate a free id for {base_id!r}")
+
+
+def _rewrite_worker_yml_id(worker_yml: str, new_id: str) -> str:
+    """Rewrite the worker manifest's identity field to ``new_id``.
+
+    0.3 contracts key off ``name``; legacy configs use ``id``. Preserve which
+    key the manifest already uses so the parsed worker_id matches the dir.
+    """
+    import yaml as pyyaml
+
+    raw = pyyaml.safe_load(worker_yml)
+    if not isinstance(raw, dict):
+        return worker_yml
+    if "id" in raw and not (raw.get("schema_version") == "0.3"):
+        raw["id"] = new_id
+    else:
+        raw["name"] = new_id
+    return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
+
+
 @app.post("/workers/draft-and-create", response_model=DraftAndCreateResponse)
 async def draft_and_create_worker(
     payload: DraftAndCreateRequest,
@@ -4073,6 +4129,17 @@ async def draft_and_create_worker(
 
     # Parse worker_id from validated YAML
     worker_id, _config2 = _parse_worker_payload(worker_yml_str)
+
+    # #186: the LLM author often returns the same suggested id regardless of
+    # prompt. Rather than 409 on collision, allocate a free id and rewrite the
+    # manifest identity so the worker.yml, the dir, and the DB row all agree.
+    free_id = _free_worker_id(worker_id)
+    if free_id != worker_id:
+        worker_id = free_id
+        worker_yml_str = _rewrite_worker_yml_id(worker_yml_str, worker_id)
+        for f in draft_files_from_llm:
+            if f.path == "worker.yml":
+                f.content = worker_yml_str
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
