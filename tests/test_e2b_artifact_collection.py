@@ -324,6 +324,40 @@ def test_uploads_declared_context_files_as_bytes(tmp_path, monkeypatch):
     assert sandbox.files._files["/home/user/worker/context/knowledge-base/deck.pdf"] == b"%PDF-1.4\x00binary"
 
 
+def test_uploads_context_files_from_owner_scoped_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    owner_context = contexts_root / "user-a" / "knowledge-base"
+    foreign_context = contexts_root / "user-b" / "knowledge-base"
+    owner_context.mkdir(parents=True)
+    foreign_context.mkdir(parents=True)
+    (owner_context / "faq.md").write_text("# Owner FAQ\n")
+    (foreign_context / "faq.md").write_text("# Foreign FAQ\n")
+    sandbox = FakeFullSandbox()
+    config = WorkerConfig(
+        id="context-scope-test",
+        name="Context Scope Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
+        contexts=["knowledge-base"],
+        outputs=[],
+    )
+
+    err = E2BSandboxDriver()._upload_contexts_to_sandbox(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        config=config,
+        made_dirs={"/home/user/worker"},
+        log_fn=lambda *_args, **_kwargs: None,
+        user_id="user-a",
+    )
+
+    assert err is None
+    assert sandbox.files._files["/home/user/worker/context/knowledge-base/faq.md"] == b"# Owner FAQ\n"
+
+
 def _tar_bytes(entries: dict[str, bytes]) -> bytes:
     buffer = BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
@@ -347,6 +381,64 @@ def test_persists_writeable_context_tar_safely(tmp_path, monkeypatch):
 
     assert (target / "state.json").read_text() == '{"after": true}\n'
     assert (target / "nested" / "log.bin").read_bytes() == b"\x00\x01"
+
+
+def test_persists_writeable_context_tar_under_owner_scope(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+
+    owner_target = contexts_root / "user-a" / "history"
+    foreign_target = contexts_root / "user-b" / "history"
+    owner_target.mkdir(parents=True)
+    foreign_target.mkdir(parents=True)
+    (owner_target / "state.json").write_text('{"owner": true}\n')
+    (foreign_target / "state.json").write_text('{"foreign": true}\n')
+
+    class _PersistFiles(FakeWritableFiles):
+        def read(self, path, format="text", **_kwargs):
+            content = self._files[path]
+            if format == "bytes":
+                return bytearray(content)
+            return content.decode("utf-8")
+
+    class _PersistCommands:
+        def __init__(self, files):
+            self.files = files
+
+        def run(self, command, **_kwargs):
+            tar_path = command.split("tar -cf ", 1)[1].split(" ", 1)[0]
+            self.files.write(tar_path, _tar_bytes({"state.json": b'{"owner": false}\n'}))
+            return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+    class _PersistSandbox:
+        def __init__(self):
+            self.files = _PersistFiles({})
+            self.files.dirs.add("/home/user/worker/context/history")
+            self.commands = _PersistCommands(self.files)
+
+    sandbox = _PersistSandbox()
+    config = WorkerConfig(
+        id="context-writeback-test",
+        name="Context Writeback Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
+        contexts=[{"name": "history", "writeable": True}],
+        outputs=[],
+    )
+
+    E2BSandboxDriver()._persist_writeable_contexts(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        run_id="run_context_writeback",
+        config=config,
+        log_fn=lambda *_args, **_kwargs: None,
+        user_id="user-a",
+    )
+
+    assert (owner_target / "state.json").read_text() == '{"owner": false}\n'
+    assert (foreign_target / "state.json").read_text() == '{"foreign": true}\n'
 
 
 def test_e2b_driver_maps_oom_exit_to_sandbox_oom(tmp_path, monkeypatch):

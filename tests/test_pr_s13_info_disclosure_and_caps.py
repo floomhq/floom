@@ -776,6 +776,42 @@ trigger:
     assert foreign_worker.json() == {"detail": f"Context not found: {context_name}"}
 
 
+def test_scoped_users_can_reuse_the_same_context_name(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    user_a = {**_AUTH_HEADER, "x-floom-user": "user-a"}
+    user_b = {**_AUTH_HEADER, "x-floom-user": "user-b"}
+
+    create_a = client.post("/contexts/shared-context", headers=user_a, json={"writeable": True})
+    create_b = client.post("/contexts/shared-context", headers=user_b, json={"writeable": True})
+    put_a = client.put(
+        "/contexts/shared-context/files/notes.txt",
+        headers=user_a,
+        content=b"owner-a",
+    )
+    put_b = client.put(
+        "/contexts/shared-context/files/notes.txt",
+        headers=user_b,
+        content=b"owner-b",
+    )
+    get_a = client.get("/contexts/shared-context/files/notes.txt", headers=user_a)
+    get_b = client.get("/contexts/shared-context/files/notes.txt", headers=user_b)
+
+    assert create_a.status_code == 200, create_a.text
+    assert create_b.status_code == 200, create_b.text
+    assert put_a.status_code == 200, put_a.text
+    assert put_b.status_code == 200, put_b.text
+    assert get_a.content == b"owner-a"
+    assert get_b.content == b"owner-b"
+
+    contexts_root = tmp_path / "contexts"
+    assert not (contexts_root / "shared-context").exists()
+    assert (contexts_root / "user-a" / "shared-context" / "notes.txt").read_bytes() == b"owner-a"
+    assert (contexts_root / "user-b" / "shared-context" / "notes.txt").read_bytes() == b"owner-b"
+
+
 def _setup_rate_limited_draft_client(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path, draft_rate_hour=2)
     client = TestClient(main.app)

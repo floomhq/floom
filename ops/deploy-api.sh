@@ -251,7 +251,8 @@ check_endpoint() {
   local method="$1"
   local path="$2"
   local expected_code="$3"
-  local extra_flags="${4:-}"
+  shift 3
+  local -a extra_flags=("$@")
   local url="${API_BASE}${path}"
 
   if [[ $DRY_RUN -eq 1 ]]; then
@@ -259,8 +260,7 @@ check_endpoint() {
     return
   fi
 
-  # shellcheck disable=SC2086
-  actual_code="$(curl -sf -o /dev/null -w "%{http_code}" -X "$method" --max-time 5 $extra_flags "$url" 2>/dev/null || echo "000")"
+  actual_code="$(curl -sS -o /dev/null -w "%{http_code}" -X "$method" --max-time 5 "${extra_flags[@]}" "$url" 2>/dev/null || echo "000")"
   if [[ "$actual_code" == "$expected_code" ]]; then
     log "  OK  $method $path → $actual_code"
   else
@@ -275,9 +275,9 @@ if [[ -f "$ENV_FILE" ]]; then
   FLOOM_SECRET="$(grep '^FLOOM_SECRET=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)"
 fi
 
-AUTH_FLAG=""
+AUTH_FLAGS=()
 if [[ -n "$FLOOM_SECRET" ]]; then
-  AUTH_FLAG="-H 'x-floom-secret: ${FLOOM_SECRET}'"
+  AUTH_FLAGS=(-H "x-floom-secret: ${FLOOM_SECRET}")
 fi
 
 # Auth-exempt endpoints (no secret needed)
@@ -288,10 +288,10 @@ if [[ -z "$FLOOM_SECRET" ]]; then
   warn "FLOOM_SECRET not found in $ENV_FILE — skipping authenticated endpoint checks"
 else
   # Authenticated endpoints
-  check_endpoint GET /workspace         200 "-H 'x-floom-secret: ${FLOOM_SECRET}'"
-  check_endpoint GET /conversations     200 "-H 'x-floom-secret: ${FLOOM_SECRET}'"
-  check_endpoint GET /approvals         200 "-H 'x-floom-secret: ${FLOOM_SECRET}'"
-  check_endpoint GET /workers           200 "-H 'x-floom-secret: ${FLOOM_SECRET}'"
+  check_endpoint GET /workspace     200 "${AUTH_FLAGS[@]}"
+  check_endpoint GET /conversations 200 "${AUTH_FLAGS[@]}"
+  check_endpoint GET /approvals     200 "${AUTH_FLAGS[@]}"
+  check_endpoint GET /workers       200 "${AUTH_FLAGS[@]}"
 fi
 
 # ---------------------------------------------------------------------------

@@ -42,9 +42,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from dotenv import load_dotenv
 
 from auth import AuthContext, get_auth_context, get_auth_provider
+from auth.context import current_auth_user_id
 from contexts import (
     MAX_CONTEXT_BYTES,
     CONTEXTS_DIR,
+    context_scope_for_user,
     context_dir,
     context_file_metadata,
     context_owner_id,
@@ -61,7 +63,9 @@ from contexts import (
     normalize_context_mount,
     normalize_context_file_path,
     safe_context_file_path,
+    set_context_scope_resolver,
     set_context_metadata,
+    use_context_scope,
     validate_context_name,
 )
 
@@ -293,6 +297,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _active_context_scope() -> str | None:
+    return context_scope_for_user(current_auth_user_id())
+
+
+set_context_scope_resolver(_active_context_scope)
 
 
 def _validate_startup_configuration() -> None:
@@ -4551,21 +4562,22 @@ def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tup
     if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
         raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")
     if user_id:
-        metadata = load_context_metadata()
-        for raw_context in config.contexts or []:
-            try:
-                context = normalize_context_mount(raw_context)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            if context["source"] != "local":
-                continue
-            context_name = context["name"]
-            if not context_dir(context_name).is_dir() or not _context_visible_to_user(
-                context_name,
-                user_id=user_id,
-                metadata=metadata,
-            ):
-                raise HTTPException(status_code=400, detail=f"Context not found: {context_name}")
+        with use_context_scope(context_scope_for_user(user_id)):
+            metadata = load_context_metadata()
+            for raw_context in config.contexts or []:
+                try:
+                    context = normalize_context_mount(raw_context)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                if context["source"] != "local":
+                    continue
+                context_name = context["name"]
+                if not context_dir(context_name).is_dir() or not _context_visible_to_user(
+                    context_name,
+                    user_id=user_id,
+                    metadata=metadata,
+                ):
+                    raise HTTPException(status_code=400, detail=f"Context not found: {context_name}")
     _raise_if_protected_worker_mutation(worker_id)
     return worker_id, config
 
