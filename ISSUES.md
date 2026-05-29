@@ -1323,3 +1323,15 @@ Driver: `docs/audits/final-gate-G5-rescore-2026-05-29.md` (88/100, Trust 6/10). 
 ### H7 — Sweep
 `github-pr-summary` + `github-pr-issue-digest` (broken/stub scheduled DB-only artifacts) archived with clean reasons. `TEST_SECRET` deleted. Expired connections / count drift left (real dogfood state, not leaks).
 **Status:** VERIFIED LIVE — see audit doc.
+
+---
+
+# G3 — Concurrency `Event loop is closed` (2026-05-29)
+
+Driver: `docs/audits/full-audit-2026-05-29-0841.md` (G3 FAIL, single open blocker). PR #258 (merged `e210094`, deployed `ops/deploy-api.sh`).
+
+### G3-1 — P1: intermittent `RuntimeError: Event loop is closed` whenever 2+ worker runs overlap
+**Symptom:** solo runs always pass; under burst/scheduled-fanout (queue allows 18 concurrent) a subset of runs fail with `error_code: agent_runtime_error`, `error: "Event loop is closed"`, `retryable: true`. 7 such failures on 2026-05-29.
+**Root cause:** the OpenAI Agents SDK default `MultiProvider` builds `AsyncOpenAI` over a process-wide `httpx.AsyncClient` (`OpenAIProvider.shared_http_client`). `AgentDriver._run_coro_sync` runs each worker in its OWN fresh `asyncio.run` loop (in a thread); `chat_service.stream_chat` runs on the persistent uvicorn loop. The httpx client binds its connection pool to the first loop that does I/O on it, so when one run's loop closes a concurrent run streaming on the shared client hits the closed loop.
+**Fix (Option A — per-run isolation):** new `apps/api/runner_sandbox/loop_local_provider.py` `LoopLocalModelProvider` builds a fresh `AsyncOpenAI` + `httpx.AsyncClient` inside the run's own loop (lazily on first `get_model`), passed via `RunConfig.model_provider`, closed in `finally`. No loop-bound async resource is shared across runs. Applied to `agent_driver.py` + `chat_service.py`. Regression test `tests/test_agent_driver_concurrency.py` reproduces the bug and asserts zero closed-loop errors across 16 overlapping runs (FAILS without fix, PASSES with it).
+**Status:** VERIFIED LIVE — post-deploy stress on prod: 8×2 concurrent `research_brief` (16 overlapping) + 6 concurrent `/chat` streams + 5+5 interleaved worker/chat + 1 solo = **33 runs, ZERO `Event loop is closed`** and zero errors of any class on post-deploy runs (24 completed + 1 pending_approval). Global closed-loop count held at the pre-fix baseline of 7. Solo run `run_5c41d68f8292` completed. Wave run_ids in `WORKPLAN-2026-05-28-overnight.md` G3 section.
