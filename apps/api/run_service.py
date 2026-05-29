@@ -243,6 +243,22 @@ def _register_authored_worker(
     run_code = bundle.get("run_code")
     requirements_txt = bundle.get("requirements_txt")
 
+    # A bundle with NEITHER agent-mode SKILL.md NOR script-mode run.py has nothing
+    # executable. Registering it would backfill the placeholder run.py stub, which
+    # returns success with empty outputs — i.e. a worker that "runs green" yet does
+    # nothing (the worst failure for the operator: it looks ready). Surface as
+    # un-registered (the run + drafted bundle stay viewable) instead of shipping a
+    # silent no-op. The strengthened generation prompt makes this rare.
+    _skill_src = skill_md if isinstance(skill_md, str) else ""
+    _code_src = run_code if isinstance(run_code, str) else ""
+    if not _skill_src.strip() and not _code_src.strip():
+        log_fn(
+            "worker-author bundle has neither SKILL.md nor run.py — not registering "
+            "a no-op worker; the drafted bundle stays viewable",
+            level="warning",
+        )
+        return None
+
     # Lazy import: main imports run_service at startup, so importing main here
     # (at run-completion time, long after startup) avoids the circular import.
     import main as _main
@@ -278,6 +294,11 @@ def _register_authored_worker(
 # the outcome is recorded on the author run output as ``smoke``.
 
 _MAX_SMOKE_REPAIRS = 2
+
+# Distinctive prefix of main._DEFAULT_RUN_PY_STUB's comment. A generated script
+# worker whose run.py is the placeholder stub does nothing (it writes a success
+# result.json with empty outputs and would otherwise PASS the smoke green).
+_PLACEHOLDER_RUN_PY_MARKER = "# Placeholder worker"
 
 # Failure error_codes that mean the worker's own code is broken (worth a repair
 # attempt). Setup/auth/secret/connection failures are NOT code bugs.
@@ -450,6 +471,27 @@ def _smoke_and_repair_generated_worker(
     )
     if not is_script:
         return {"status": "skipped", "reason": "not a script-mode worker"}
+
+    # A script worker whose run.py is the placeholder stub does nothing: the stub
+    # writes a success result.json with empty outputs, so a plain smoke run would
+    # report PASSED. Catch it BEFORE running (and before the secret/connection
+    # skip gates) and surface as failed — the operator must re-generate or edit,
+    # never see a green-but-empty worker.
+    try:
+        if _PLACEHOLDER_RUN_PY_MARKER in (WORKERS_DIR / worker_id / "run.py").read_text(
+            encoding="utf-8"
+        ):
+            log_fn(
+                "Smoke failed — generated worker has only the placeholder stub, no real code",
+                level="warning",
+            )
+            return {
+                "status": "failed",
+                "reason": "generation produced no script code — re-generate or edit the worker",
+                "repairs": 0,
+            }
+    except OSError:
+        pass
 
     secrets = get_secrets_for_worker(worker_id, user_id=user_id, repos=repos_obj)
     missing = [s for s in config.secrets if s not in secrets]
@@ -1070,17 +1112,30 @@ def _validate_run_outputs(
             if not path.is_file():
                 return f"output_validation_failed: {name} file not found at {path.name}", warnings
             size = path.stat().st_size
+            if size == 0:
+                return f"output_validation_failed: {name} file is empty", warnings
+            media_type = (output.media_type or "").lower()
+            if media_type == "application/json":
+                # A valid, parseable JSON document is a legitimate result at any
+                # non-zero size — gate on parseability, never the byte floor.
+                try:
+                    json.loads(path.read_text())
+                except Exception as exc:
+                    return f"output_validation_failed: {name} JSON file is invalid: {exc}", warnings
+                continue
+            if not media_type:
+                # Unknown type: if it parses as JSON, accept as structured data;
+                # otherwise fall back to the prose byte floor below.
+                try:
+                    json.loads(path.read_text())
+                    continue
+                except Exception:
+                    pass
             if size < MIN_OUTPUT_BYTES:
                 return (
                     f"output_validation_failed: {name} file is too small "
                     f"({size} bytes, minimum {MIN_OUTPUT_BYTES})"
                 ), warnings
-            media_type = (output.media_type or "").lower()
-            if media_type == "application/json":
-                try:
-                    json.loads(path.read_text())
-                except Exception as exc:
-                    return f"output_validation_failed: {name} JSON file is invalid: {exc}", warnings
             if media_type.startswith("text/"):
                 warning = _placeholder_warning(path.read_text(errors="ignore")[:1000], name)
                 if warning:
