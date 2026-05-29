@@ -159,7 +159,13 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
   // (256px), no Card wrapper, path shown once as a quiet header above content.
   return (
     <div className="flex gap-6 items-start max-w-5xl">
-      <div className="w-64 shrink-0 border border-line">
+      {/* FIX 2 (Federico 2026-05-29): the file rail must stay visible while a
+          long file (e.g. a big run.py) scrolls. Sticky to the viewport with a
+          top offset that clears the sticky mobile header (h-14 ≈ 56px); on
+          desktop there is no top header over <main>, so it simply pins 72px
+          from the top while the document scrolls. self-start lets the sticky
+          element detach from the flex stretch. */}
+      <div className="w-64 shrink-0 self-start sticky top-[4.5rem] border border-line">
         <div className="px-3 py-2 border-b border-line">
           <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
             <FolderOpen className="w-3.5 h-3.5" />
@@ -260,7 +266,10 @@ function FilesEditorEdit({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6 items-start">
-      <Card className="border-border shadow-none bg-card">
+      {/* FIX 2 (Federico 2026-05-29): keep the file rail pinned while editing a
+          long file. items-start on the grid lets this track sticky; top offset
+          clears the sticky mobile header. */}
+      <Card className="border-border shadow-none bg-card self-start sticky top-[4.5rem]">
         <CardHeader className="py-2 px-3 flex flex-row items-center justify-between">
           <CardTitle className="text-xs font-medium text-muted-foreground">Files</CardTitle>
           <button
