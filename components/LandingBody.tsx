@@ -858,6 +858,49 @@ export function LandingBody() {
           </div>
         </section>
 
+        {/* Three pillars — what makes a Workeros worker different from a
+            fire-and-forget agent: it remembers, it gets sharper from real
+            run history, and nothing it does is hidden. */}
+        <section className="ln-pillars lp1" aria-label="Why Workeros">
+          <div className="ln-pillar">
+            <span className="ln-pillar-ic" aria-hidden="true">
+              <FolderIcon />
+            </span>
+            <h3>It remembers</h3>
+            <p>
+              Drop your style guide, CRM playbook, or 2026 OKRs into a
+              Context. It mounts into every run, so your worker carries the
+              same knowledge across days, triggers, and tools — not a blank
+              slate each time.
+            </p>
+            <span className="ln-pillar-tag">Contexts, mounted per run</span>
+          </div>
+          <div className="ln-pillar">
+            <span className="ln-pillar-ic" aria-hidden="true">
+              <TrendIcon />
+            </span>
+            <h3>It gets sharper</h3>
+            <p>
+              Every run is captured and every worker is versioned. Read the
+              real transcript, tweak the brief, re-run in one click — by hand
+              or from your agent over MCP. Each run teaches the next.
+            </p>
+            <span className="ln-pillar-tag">Versioned + replayable</span>
+          </div>
+          <div className="ln-pillar">
+            <span className="ln-pillar-ic" aria-hidden="true">
+              <ClockIcon />
+            </span>
+            <h3>No black box</h3>
+            <p>
+              Open any run and see the inputs, every step, each tool call, the
+              output, the errors, and the cost. Replay it. Nothing your worker
+              did is hidden behind a spinner.
+            </p>
+            <span className="ln-pillar-tag">Artifact-native runs</span>
+          </div>
+        </section>
+
         <section className="ln-feat lp1">
           {/* Workspaces — the multi-tenant story. Your work life is not one
               pile; neither is your worker fleet. */}
