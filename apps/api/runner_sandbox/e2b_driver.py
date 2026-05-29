@@ -383,13 +383,20 @@ class E2BSandboxDriver(SandboxDriver):
             )
 
         # e2b 2.x: use Sandbox.create()
+        _sandbox_envs = {
+            "FLOOM_RUN_ID": run_id,
+            "FLOOM_TRACE_ID": trace_id,
+        }
+        # Propagate the codegen model override so the worker-author meta-worker
+        # (which generates code from inside the sandbox) uses the same model the
+        # API-side draft/repair calls do. Falls back to its baked-in default.
+        _codegen_model_override = (os.environ.get("WORKEROS_CODEGEN_MODEL") or "").strip()
+        if _codegen_model_override:
+            _sandbox_envs["WORKEROS_CODEGEN_MODEL"] = _codegen_model_override
         sandbox = Sandbox.create(
             api_key=api_key,
             timeout=sandbox_timeout,
-            envs={
-                "FLOOM_RUN_ID": run_id,
-                "FLOOM_TRACE_ID": trace_id,
-            },
+            envs=_sandbox_envs,
         )
         _register_sandbox(run_id, sandbox)
 
