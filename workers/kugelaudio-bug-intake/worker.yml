@@ -1,7 +1,7 @@
 schema_version: "0.3"
 is_example: true
 archived: true
-archive_reason: "Customer secrets unavailable (SLACK_BOT_TOKEN, LINEAR_API_KEY, NOTION_API_KEY)."
+archive_reason: "Paused — needs the customer's Slack, Linear, and Notion accounts connected before it can run."
 name: kugelaudio-bug-intake
 title: Kugelaudio Bug Intake
 description: Scans ext-*-kugel Slack channels + a Gmail label for bug reports, classifies priority, opens Linear issues, posts alerts, syncs thread replies back as Linear comments.
