@@ -1633,3 +1633,104 @@ class SqliteCliAuthRepository:
                     tuple(expired),
                 )
         return expired
+
+
+class SqliteApprovalRepository:
+    """SQLite-backed approval repository for S47 HITL."""
+
+    def create(self, *, owner_id: str, **fields: Any) -> dict[str, Any]:
+        allowed = {
+            "id", "run_id", "worker_id", "status", "label", "preview",
+            "created_at", "decided_at", "reason",
+            "decision_input_json", "edited_output_json", "follow_up_run_id",
+        }
+        cols = list(allowed & fields.keys())
+        cols_str = ", ".join(cols + ["owner_id"])
+        placeholders = ", ".join("?" for _ in cols) + ", ?"
+        values = [fields[c] for c in cols] + [owner_id]
+        with get_db() as conn:
+            conn.execute(
+                f"INSERT INTO approvals ({cols_str}) VALUES ({placeholders})",
+                tuple(values),
+            )
+        return self.get(owner_id=owner_id, approval_id=fields["id"])  # type: ignore[return-value]
+
+    def get(self, *, owner_id: str, approval_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM approvals WHERE id = ? AND owner_id = ?",
+                (approval_id, owner_id),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def get_by_run_id(self, *, run_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM approvals WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def list_pending(self, *, owner_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.*, w.name AS worker_name
+                FROM approvals a
+                LEFT JOIN workers w ON w.id = a.worker_id
+                WHERE a.owner_id = ? AND a.status = 'pending'
+                ORDER BY a.created_at ASC
+                """,
+                (owner_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def count_pending(self, *, owner_id: str) -> int:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM approvals WHERE owner_id = ? AND status = 'pending'",
+                (owner_id,),
+            ).fetchone()
+        return int(row["cnt"] or 0) if row else 0
+
+    def approve(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        edited_output_json: str | None = None,
+        follow_up_run_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE approvals
+                SET status = 'approved',
+                    decided_at = ?,
+                    edited_output_json = ?,
+                    follow_up_run_id = ?
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                """,
+                (decided_at, edited_output_json, follow_up_run_id, run_id, owner_id),
+            )
+        return self.get_by_run_id(run_id=run_id)
+
+    def reject(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE approvals
+                SET status = 'rejected', decided_at = ?, reason = ?
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                """,
+                (decided_at, reason, run_id, owner_id),
+            )
+        return self.get_by_run_id(run_id=run_id)
