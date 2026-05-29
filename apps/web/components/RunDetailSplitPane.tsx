@@ -17,6 +17,7 @@ import { formatAbsolute } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import {
   humanizeKey,
+  humanizeRunError,
   operatorLogs,
   isExportSuccessKey,
   exportSuccessState,
@@ -328,7 +329,16 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
               />
             );
           }
-          return <StackTrace key={`finish-${index}`} error={part.error || run.error || "Run failed"} />;
+          // G5 P1 (rescore3 2026-05-29): the operator-facing failure headline
+          // must be the calm backend-humanized `run.error`, NOT the raw
+          // `part.error` (e.g. "Event loop is closed"). Raw stays in the Raw
+          // tab. Humanize part.error only as a last-resort fallback.
+          return (
+            <StackTrace
+              key={`finish-${index}`}
+              error={run.error || humanizeRunError(part.error) || "Run failed"}
+            />
+          );
         }
         return null;
       })}
@@ -686,9 +696,14 @@ function buildTimeline(run: RunDetail, parts: RunPart[]): TimelineItem[] {
       // live run-detail timeline after the first P3 pass).
       const isCompleted = part.status === "completed";
       const isPending = part.status === "pending_approval";
+      // G5 P1 (rescore3 2026-05-29): the timeline subtitle is an operator
+      // surface 6px from the calm Error banner — it must show the SAME
+      // humanized headline (`run.error`), never the raw `part.error`
+      // ("Event loop is closed"). Raw stays in the Raw tab.
+      const failureDetail = run.error || humanizeRunError(part.error) || undefined;
       rows.push({
         label: isCompleted ? "Completed" : isPending ? "Awaiting approval" : "Failed",
-        detail: isPending ? "Waiting for your decision" : part.error,
+        detail: isPending ? "Waiting for your decision" : isCompleted ? undefined : failureDetail,
         duration: run.duration_ms != null ? formatDuration(run.duration_ms) : "done",
         status: isCompleted ? "completed" : isPending ? "pending_approval" : "failed",
       });
