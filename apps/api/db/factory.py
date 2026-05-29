@@ -5,6 +5,7 @@ from functools import lru_cache
 from typing import Callable, NamedTuple
 
 from .interface import (
+    ApprovalRepository,
     CliAuthRepository,
     ConnectionRepository,
     RunRepository,
@@ -12,6 +13,7 @@ from .interface import (
     WorkerRepository,
 )
 from .sqlite import (
+    SqliteApprovalRepository,
     SqliteCliAuthRepository,
     SqliteConnectionRepository,
     SqliteRunRepository,
@@ -26,6 +28,7 @@ class Repositories(NamedTuple):
     connections: ConnectionRepository
     secrets: SecretRepository
     cli_auth: CliAuthRepository
+    approvals: ApprovalRepository
 
 
 def _local_repositories() -> Repositories:
@@ -35,6 +38,7 @@ def _local_repositories() -> Repositories:
         connections=SqliteConnectionRepository(),
         secrets=SqliteSecretRepository(),
         cli_auth=SqliteCliAuthRepository(),
+        approvals=SqliteApprovalRepository(),
     )
 
 

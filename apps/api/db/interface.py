@@ -219,6 +219,37 @@ class SecretRepository(Protocol):
     def resolve(self, *, user_id: str, names: Iterable[str]) -> dict[str, str]: ...
 
 
+class ApprovalRepository(Protocol):
+    def create(self, *, owner_id: str, **fields: Any) -> RowDict: ...
+
+    def get(self, *, owner_id: str, approval_id: str) -> RowDict | None: ...
+
+    def get_by_run_id(self, *, run_id: str) -> RowDict | None: ...
+
+    def list_pending(self, *, owner_id: str) -> list[RowDict]: ...
+
+    def count_pending(self, *, owner_id: str) -> int: ...
+
+    def approve(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        edited_output_json: str | None = None,
+        follow_up_run_id: str | None = None,
+    ) -> RowDict | None: ...
+
+    def reject(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        reason: str | None = None,
+    ) -> RowDict | None: ...
+
+
 class CliAuthRepository(Protocol):
     def create_device(self, *, user_id: str, **fields: Any) -> RowDict: ...
 
