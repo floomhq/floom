@@ -647,12 +647,16 @@ class E2BSandboxDriver(SandboxDriver):
                 )
 
             log_fn("[e2b] Run completed successfully", "info")
+            decision_required = result_data.get("decision_required")
+            if not isinstance(decision_required, dict):
+                decision_required = None
             return WorkerResult(
                 status=result_status,
                 outputs=outputs,
                 artifacts=artifacts,
                 error=result_data.get("error"),
                 error_code=result_data.get("error_code"),
+                decision_required=decision_required,
             )
 
         finally:

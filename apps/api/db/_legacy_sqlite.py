@@ -887,6 +887,37 @@ MIGRATIONS: list[Migration] = [
     """,
     # -- migration 36: many-to-many upload ownership for dedup-safe auth ------
     _migrate_file_owners,
+    # -- migration 37: restore approvals table (S47 HITL) --------------------
+    # The approvals table was dropped in migration 15 (scope cut #29).
+    # S47 reintroduces it with additional columns for the two-run respawn model:
+    #   decision_input_json  — inputs to spawn the follow-up run
+    #   edited_output_json   — operator edits to the proposed output
+    #   follow_up_run_id     — the run spawned on approval
+    #   owner_id             — scoping for multi-tenant forward-compat
+    """
+    CREATE TABLE IF NOT EXISTS approvals (
+        id                  TEXT PRIMARY KEY,
+        run_id              TEXT NOT NULL,
+        worker_id           TEXT NOT NULL,
+        status              TEXT NOT NULL,
+        label               TEXT,
+        preview             TEXT,
+        created_at          TEXT NOT NULL,
+        decided_at          TEXT,
+        reason              TEXT,
+        decision_input_json TEXT,
+        edited_output_json  TEXT,
+        follow_up_run_id    TEXT,
+        owner_id            TEXT NOT NULL,
+        FOREIGN KEY(run_id)    REFERENCES runs(id) ON DELETE CASCADE,
+        FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_approvals_run_id     ON approvals(run_id);
+    CREATE INDEX IF NOT EXISTS idx_approvals_worker_id  ON approvals(worker_id);
+    CREATE INDEX IF NOT EXISTS idx_approvals_status     ON approvals(status);
+    CREATE INDEX IF NOT EXISTS idx_approvals_owner_id   ON approvals(owner_id);
+    """,
 ]
 
 

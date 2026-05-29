@@ -298,9 +298,80 @@ trigger:
 
 A worker can have multiple triggers (use the `triggers:` plural form). Federico tip: keep it to one when possible; two becomes confusing fast.
 
-### Approvals
+### Approvals (S47 two-run HITL model)
 
-When `approvals.required: true`, the run pauses before completing. The Approvals queue surfaces it; a reviewer Approves or Rejects from the UI. The worker code calls `context.approve(message)` to insert the gate.
+When `approvals.required: true`, runs use a **two-phase respawn model**:
+
+1. **Run 1 — propose.** The worker does its work, drafts the action, then writes
+   `decision_required` to `result.json` before exiting. The engine intercepts this,
+   lands the run as `PENDING_APPROVAL`, and creates an approval record in the database.
+   **Run 1 must NOT perform the real side-effect** (send email, delete data, spend money).
+
+2. **Human decision.** The `/approvals` page (or the inline card on `/runs/[id]`) shows
+   the pending approval. The reviewer can Approve, Edit-then-approve, or Reject.
+
+3. **Run 2 — execute.** On approval, the engine spawns a fresh run of the same worker
+   with the original inputs merged with `{decision: "approved", approved_output: <edited or original output>}`.
+   Run 2 reads `inputs.decision` and `inputs.approved_output` and performs the real action.
+
+#### result.json shape for Run 1
+
+```json
+{
+  "status": "success",
+  "outputs": { "message_draft": "..." },
+  "decision_required": {
+    "label": "Approve outbound message before sending",
+    "preview": "Full message text shown on the approval card"
+  }
+}
+```
+
+#### Run 2 inputs
+
+```python
+inputs = json.loads(os.environ.get("WORKEROS_INPUTS", "{}"))
+decision = inputs.get("decision")        # "approved"
+approved_output = inputs.get("approved_output")  # the (possibly edited) proposed output
+```
+
+#### Idempotency constraint (mandatory)
+
+Workers that use `approvals.required: true` MUST be **re-entrant**:
+
+- Run 1 proposes, never executes.
+- Run 2 executes, using `inputs.approved_output` as the source of truth.
+- If Run 2 crashes and is retried, it must not double-fire the side-effect. Design
+  your side-effect to be idempotent, or check a flag file / database record before acting.
+
+#### Example worker structure (see `workers/outbound-approval-demo/`)
+
+```yaml
+approvals:
+  required: true
+  label: "Approve outbound message before sending"
+```
+
+```python
+# run.py
+decision = inputs.get("decision")
+if decision == "approved":
+    # Phase 2: execute
+    message = inputs["approved_output"]
+    send_email(message)  # real side-effect happens here
+    ...
+else:
+    # Phase 1: propose
+    draft = compose_draft(inputs)
+    result = {
+        "status": "success",
+        "outputs": {"message_draft": draft},
+        "decision_required": {"label": "Approve before sending", "preview": draft},
+    }
+```
+
+Reject path: the approval row is marked rejected, no follow-up run is spawned, and
+the original run stays at PENDING_APPROVAL terminal state.
 
 ---
 

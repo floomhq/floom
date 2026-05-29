@@ -14,7 +14,7 @@ export interface TriggerSpec {
     filters?: Record<string, unknown>;
   };
 }
-export type RunStatus = "queued" | "running" | "completed" | "failed";
+export type RunStatus = "queued" | "running" | "completed" | "failed" | "pending_approval";
 export type LogLevel = "debug" | "info" | "warning" | "error" | "critical";
 export type SecretStatus = "set" | "missing";
 
@@ -290,6 +290,23 @@ export interface ReloadResponse {
 export interface ActionResponse {
   status: string;
   run_id?: string;
+}
+
+export interface ApprovalRow {
+  id: string;
+  run_id: string;
+  worker_id: string;
+  worker_name?: string;
+  status: "pending" | "approved" | "rejected";
+  label?: string;
+  preview?: string;
+  created_at: string;
+  decided_at?: string;
+  reason?: string;
+  decision_input_json?: string;
+  edited_output_json?: string;
+  follow_up_run_id?: string;
+  owner_id: string;
 }
 
 export interface SystemInfo {
