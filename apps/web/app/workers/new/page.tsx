@@ -537,7 +537,7 @@ function NewWorkerContent() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".md,.txt,.py,.zip,application/zip"
+            accept=".md,.markdown,.txt,.py,.yml,.yaml,.json,.toml,.csv,.zip,application/zip"
             multiple
             className="hidden"
             onChange={handleFileInputChange}
