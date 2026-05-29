@@ -49,10 +49,24 @@ const BADGE_STYLE: Record<string, string> = {
 // S29l (ChatGPT-audit P-2): pills are decoration when status is the
 // default-success state. Show only when the user must act (error, running,
 // unknown). The glyph in the row/header already covers "completed".
-export function RunStatusBadge({ status }: { status: string }) {
+export function RunStatusBadge({
+  status,
+  showSuccess = false,
+}: {
+  status: string;
+  // P2-4: opt-in success pill. Default stays quiet (S29l) everywhere; the
+  // History tab passes showSuccess so completed runs get a pill for parity
+  // with failed ones.
+  showSuccess?: boolean;
+}) {
   const kind = classify(status);
-  if (kind === "success") return null;
-  const label = kind === "approval" ? "Awaiting approval" : status.replace(/_/g, " ");
+  if (kind === "success" && !showSuccess) return null;
+  const label =
+    kind === "approval"
+      ? "Awaiting approval"
+      : kind === "success"
+      ? "Completed"
+      : status.replace(/_/g, " ");
   return (
     <Badge variant="outline" className={BADGE_STYLE[kind]}>
       {label}
