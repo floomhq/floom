@@ -176,6 +176,8 @@ def _worker_record_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "example_output": manifest_dict.get("example_output"),
         "how_it_works": manifest_dict.get("how_it_works"),
         "is_example": manifest_dict.get("is_example"),
+        "archived": bool(manifest_dict.get("archived", False)),
+        "archive_reason": manifest_dict.get("archive_reason"),
         "tags": manifest_dict.get("tags") or [],
         "folder": manifest_dict.get("folder"),
         "status": "healthy",

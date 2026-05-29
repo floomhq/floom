@@ -422,13 +422,13 @@ function PackDetail({
         {/* Used by */}
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Used by</p>
-          {detail.used_by.length === 0 ? (
+          {(detail.used_by ?? []).length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No workers reference this pack yet. Workers attach contexts in their <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">worker.yml</code>.
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {detail.used_by.map((ref) => (
+              {(detail.used_by ?? []).map((ref) => (
                 <Link
                   key={ref.worker_id}
                   href={`/workers/${encodeURIComponent(ref.worker_id)}`}
@@ -509,7 +509,7 @@ function FileCard({
 
   return (
     <div className="group flex items-center gap-3 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-2.5 hover:bg-muted/40 transition-colors">
-      {displayTypeIcon(file.display_type)}
+      {displayTypeIcon(file.display_type ?? "File")}
       <div className="min-w-0 flex-1">
         <p className="text-sm font-mono truncate">{file.path}</p>
         <p className="text-xs text-muted-foreground mt-0.5 truncate">
