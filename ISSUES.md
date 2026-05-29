@@ -4,6 +4,30 @@ Status legend: OPEN / FIXING / FIXED (merged, unverified) / VERIFIED (confirmed 
 
 ---
 
+## 2026-05-29 P0 — /workers/new generation broken end-to-end (PR #240, branch fix/generation-pipeline-p0-2026-05-29)
+
+Federico: "generation, even for example prompts, completely breaks." Two stacked
+root causes. Both fixed, merged (main `66d1fa5`), deployed (API SHA `66d1fa5`,
+Vercel prod aliased to `workers.floom.dev`), and VERIFIED live.
+
+| # | Issue | Root cause | Status | Evidence |
+|---|---|---|---|---|
+| G1 | UI could not read the generation run → GeneratingPanel hung | Regression from #231/#235: the single-run fetch helper `_get_visible_run` applied the LIST-view system/audit worker-visibility filter. `worker-author` is `system_worker: true` + not in `PUBLIC_STOCK_WORKER_IDS` → hidden → every `GET /runs/{id}`, `/logs`, `/stream`, `/events`, `/download`, `/artifacts/../download` 404'd. | **VERIFIED** | New `_get_run_by_explicit_id`: reachable by explicit id if visible OR worker is on `_OPERATOR_REACHABLE_HIDDEN_WORKER_IDS={worker-author}` allowlist (slack-listener etc. still 404 by id). Live prod: `GET /runs/run_8afed13e4b73` → 200, `/logs` → 200, artifact download → 200 (were 404). Run-detail page renders (screenshot `run_de80e5e07196`: STATUS completed, 28.7s, OUTPUT 1 item, FILES 1 file). |
+| G2 | worker-author never produced output → `error_code=missing_result` | worker-author runs as an E2B pure-script worker (`entrypoint: run.py`); the driver runs `python run.py` and reads back `result.json`. But run.py only DEFINED `run(inputs, context)` (never invoked, no `__main__`) and wrote `out/bundle.json` not `result.json`. So it exited 0 with no result. All 4 pre-deploy runs (run_2597eb785ed6 et al) failed this way. | **VERIFIED** | Rewrote run.py to the pure-script contract: read inputs.json, `load_dotenv(.env.local)`, write `out/bundle.json` + `result.json{status,outputs:{bundle},artifacts}`, `if __name__=="__main__": main()`; `_write_error` on failure. Declared `exec.secrets:[OPENAI_API_KEY]` + added python-dotenv. Live prod: 5/5 post-deploy worker-author runs COMPLETED with valid schema-0.3 bundles (suggested_id `github-daily-digest`, `gmail-invoice-processor`); 0 missing_result. |
+| G3 | Generation could dead-end if streaming failed | Frontend only fell back to `draftAndCreate` on an endpoint throw; a run reaching `status=failed` just showed a toast, and `onerror` navigated using a stale `streamRunId` closure. | **VERIFIED** | Extracted `fallbackDraftAndCreate(prompt)`, triggered on endpoint-throw / `status=failed` / SSE-drop-before-completion, guarded against double-fire. Live: fallback created worker `github-pr-issue-digest` when the headless-browser SSE dropped. |
+
+Regression tests (in `tests/test_pr231_correctness.py`): worker-author run reachable
+by explicit id but hidden from list; non-allowlisted hidden worker stays 404 by id.
+`test_pr231_correctness` (5) + `test_round8_worker_authz` (25) pass.
+
+Known residual (NOT the P0, pre-existing): long-lived EventSource (SSE) through the
+prod Vercel+Cloudflare edge is dropped by the headless browser-pool Chrome mid-stream,
+so the panel falls back instead of navigating on completion. A terminal-run SSE
+delivers correctly (verified via curl through the Vercel proxy), so a normal browser
+gets the happy-path navigation; the G3 fallback covers the headless case either way.
+
+---
+
 ## 2026-05-29 UI regression sweep + Phase 4 polish (lane/ui-regression-sweep)
 
 5 regressions Federico surfaced + Phase 4 polish. Every fix verified with a
