@@ -655,6 +655,61 @@ def test_public_run_redacts_secret_names_across_read_surfaces(monkeypatch, tmp_p
     assert "OPENAI_API_KEY" not in detail_response.text
 
 
+def test_public_run_redacts_env_style_secret_errors_across_read_surfaces(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief",))
+    client = TestClient(main.app)
+    repos = main.get_repositories()
+    main._reload_workers_for_user("user-a")
+
+    run_id = main.create_run(
+        "research_brief",
+        {},
+        trigger_source="audit",
+        user_id="user-a",
+        repos=repos,
+    )
+    leaked_error = "COMPOSIO_API_KEY not set"
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id=run_id,
+        level="error",
+        message=leaked_error,
+        timestamp=main.now_iso(),
+    )
+    main.update_run_status(
+        run_id,
+        main.RunStatus.FAILED.value,
+        error=leaked_error,
+        user_id="user-a",
+        repos=repos,
+    )
+
+    list_response = client.get("/runs", headers=_headers("user-a"))
+    detail_response = client.get(f"/runs/{run_id}", headers=_headers("user-a"))
+    logs_response = client.get(f"/runs/{run_id}/logs", headers=_headers("user-a"))
+    stream_response = client.get(f"/runs/{run_id}/stream", headers=_headers("user-a"))
+    events_response = client.get(f"/runs/{run_id}/events", headers=_headers("user-a"))
+
+    assert list_response.status_code == 200, list_response.text
+    assert detail_response.status_code == 200, detail_response.text
+    assert logs_response.status_code == 200, logs_response.text
+    assert stream_response.status_code == 200, stream_response.text
+    assert events_response.status_code == 200, events_response.text
+
+    expected = "Required platform secret is not configured"
+    summaries = {item["id"]: item for item in list_response.json()}
+    assert summaries[run_id]["error"] == expected
+    assert detail_response.json()["error"] == expected
+    assert detail_response.json()["logs"][0]["message"] == expected
+    assert logs_response.json()[0]["message"] == expected
+    assert expected in stream_response.text
+    assert expected in events_response.text
+    assert "COMPOSIO_API_KEY" not in stream_response.text
+    assert "COMPOSIO_API_KEY" not in events_response.text
+    assert "COMPOSIO_API_KEY" not in detail_response.text
+    assert "COMPOSIO_API_KEY" not in logs_response.text
+
+
 def test_worker_write_routes_reject_owner_mass_assignment(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
