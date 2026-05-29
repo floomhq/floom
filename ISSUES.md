@@ -1490,3 +1490,35 @@ Source: `docs/audits/final-gate-G5-rescore4-2026-05-29.md`. All three closed and
 - 5 UI-path prompts: 3/5 created green workers with real output (uppercase, sort, email); 2/5 (word-count, reverse) did NOT register a worker — a PRE-EXISTING author-bundle schema gap (`scalar field 'word_count' must declare type`), NOT a regression and NOT in these 5 fixes; they ship the drafted bundle, never a fake-ready or green-empty worker. So the gate holds: 0/5 silently shipped broken/green-empty.
 
 **Residual gaps (honest):** (a) the `logs[].message` engineer-debug surface still contains raw sandbox paths (intentionally — `_redact_public_log_message` keeps them for engineers); only `error_raw` was in scope for FIX 5. `artifacts[].path` (B's P2-1) is also still absolute and out of these 5 fixes. (b) the author-bundle SCALAR-output-without-`type` schema rejection (2/5 above) drops the worker to a no-registration dead-end; worth a follow-up to either coerce or surface it, but it does not ship a broken worker. Full evidence: `docs/audits/genquality-fix-2026-05-29.md`.
+
+---
+
+## P0/P1/P2 — Batch J: smoke-repair persistence + half-wired gate + path leaks (G5 rescore A=62 / B=74 / probe=95) (2026-05-29)
+
+### #W5 Smoke-disable silently reverted; bare-exception leak; run-gate not enforced; disabled worker invisible; logs/artifacts path leak
+
+**Where:** `apps/api/run_service.py` (`smoke_and_gate_generated_worker`, `_smoke_and_repair_generated_worker` repair block, new `_mark_worker_paused_on_disk`, `_build_smoke_inputs`), `apps/api/main.py` (`create_worker_run`, `_build_worker_detail`, `system_overview`, `_operator_error_message`/`_looks_like_*`, `_redact_public_log_message`, new `_public_artifact_path` + `persist_worker_run_py`), `apps/api/models.py` (`WorkerContract.paused`, `Artifact.relative_path`).
+
+**Symptoms (3 independent audits):**
+1. **P0-1 (scorer A) — smoke-repaired/disabled workers ship enabled-but-broken; real runs fail 100% silently.** ROOT CAUSE (found by reproduction): the smoke gate set `workers.enabled=0` in the DB, but `_persist_discovered_workers` recomputes `enabled` from the MANIFEST on every re-discover (cache invalidation, file save, repair persist), and the generated manifest carried no paused flag — so each re-discover flipped a smoke-disabled worker back to `enabled=1`. `WorkerContract` also had no `paused` field, so `model_dump()` dropped any paused flag during discovery. The repair loop additionally only wrote run.py to disk + a dead local-dict mutation + a swallowed cache-invalidate, never re-persisting through the canonical editor path.
+2. **P0-2 (scorer A) — bare Python-exception messages with no class name leak verbatim to the operator `error`** (`unsupported operand type(s) for /: 'str' and 'float'`, error_code=None).
+3. **B-P1-1 — `POST /workers/{id}/runs` never checked `enabled`**, so a smoke-disabled worker still ran on demand.
+4. **B-P1-2 — a disabled worker was invisible**: detail `status=healthy`, not in `needs_attention`.
+5. **P2/PATH-1 (scorer B + probe) — `logs[].message` leaked sandbox paths and `artifacts[].path` leaked the absolute host path** (`/root/workeros/...`).
+
+**Fix (PR #TBD):**
+- P0-1: added `WorkerContract.paused`; smoke gate writes `paused: true` to worker.yml (durable across re-discovery) + `enabled=0`; repair loop now persists the fixed run.py through the canonical `persist_worker_run_py` (write disk + invalidate cache + re-discover + re-persist recipe) and FAILS the smoke (disable) if persistence fails, instead of silently shipping unverified disk state. Also fixed `_build_smoke_inputs` to give list/array inputs a real `[3,1,2]` (number/string unchanged) so legit list workers (median/std-dev) are not false-disabled.
+- P0-2: `_BARE_PYTHON_EXC_MSG_RE` routes bare-exc messages to `_CODE_HEADLINE` and blocks verbatim pass-through; clean structured messages still pass through.
+- B-P1-1: `create_worker_run` returns 409 `worker_disabled` (taxonomy headline) before creating a run.
+- B-P1-2: `_build_worker_detail` reports `needs_attention` for a disabled non-archived worker; `system_overview` adds a `worker_disabled` needs_attention item.
+- P2: `_redact_public_log_message` runs `_SANDBOX_PATH_RE`; new `_public_artifact_path` relativises `artifacts[].path` (+ `Artifact.relative_path`). Download resolves the real path server-side from the artifact id (unchanged).
+
+**Status:** VERIFIED LIVE on a worktree API instance (worktree `/tmp/wk-batchJ`, isolated DB/workers/artifacts, same OPENAI/E2B/Composio keys).
+- **P0-1 (make-or-break):** 7 plain-English prompts via `/workers/draft-and-create`. After the smoke-input fix, list workers recovered: `median-calculator-6` smoke=passed → real run `completed` `{"median":3}`; `compute-standard-deviation-2` → `completed` `{"standard_deviation":2.138...}`; `usd-to-euro-converter-4` → `completed`, artifact `9.2/18.4/27.6` (0.92 rate, correct); `remove-duplicate-strings-2` → `completed`. Genuinely-broken LLM output (`string-reverser-4`, `sort-numbers`, path-leak; `extract-email-addresses-4`, empty file) → smoke=failed, `enabled=0`, **stay disabled across a full `/workers/reload`**, and **every real run returns 409 worker_disabled**. Tally: real-run-green + correctly-gated, **0 silently-broken**.
+- **P1-1:** `compute-standard-deviation` (disabled) `POST .../runs` → **409** `{"detail":"This worker is paused. Turn it on to run it again."}`.
+- **P1-2:** `/system/overview` `paused_workers_count=7`, all 7 disabled workers in `needs_attention` as `type=worker_disabled`; worker detail `status=needs_attention`.
+- **P0-2:** `divide-numbers` 10/0 → operator `error` = `"This worker's code has an error and couldn't run..."`, `error_raw` keeps the traceback with `[worker file]` (no host/sandbox path). Bare-message cases unit-verified.
+- **P2:** real-run JSON → `artifacts[].path="run_xxx/out/converted_prices.csv"` (relative) + `relative_path` set, logs scrubbed (`[redacted-id]`/`[redacted-metadata]`), **ZERO** `/home/user` or `/root/workeros` in the full run JSON. Artifact download still returns the real file.
+- Tests: 19 new (run-endpoint 409 on disabled, repair-persists-to-recipe, humanizer bare-exc→CODE, log/artifact path scrub, smoke list-input). All pass. Pre-existing 6 failures (`test_pr_s8.py`, `test_db_factory.py`) are stale signatures, untouched by this change.
+
+**Deferred (honest, out of scope):** NEW-7 `composio_connection_id` in `/connections` (longstanding P2); aggregate 54.5% legacy reliability (no fresh-worker-rate surfacing — nice-to-have). A smoke-disabled worker's worker.yml now permanently carries `paused: true`; the operator must edit/re-save (which drops it) or explicitly re-enable to turn it back on — intentional (a broken worker stays off until reviewed), but worth a UI "turn on" affordance that clears it. The scalar-output-without-`type` author-bundle gap is unchanged. Full evidence: `docs/audits/genquality-fix-2026-05-29.md`.

@@ -522,6 +522,12 @@ class WorkerContract(BaseModel):
     system_worker: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    # Runtime gate: a smoke-disabled worker (its first test run failed) sets
+    # paused=true in its manifest so the disable survives re-discovery
+    # (`_persist_discovered_workers` reads `manifest.get("paused")` to compute
+    # `enabled`). Without this field WorkerContract.model_dump() would drop it
+    # and a re-discover would silently RE-ENABLE the broken worker (P0-1).
+    paused: bool = False
     folder: Optional[str] = None
     version: str
     entrypoint: Optional[str] = "SKILL.md"
@@ -1001,7 +1007,12 @@ class Artifact(BaseModel):
     run_id: str
     name: str
     type: Optional[str] = None
+    # PATH-1 (2026-05-29): `path` must NOT expose the absolute host path
+    # (/root/workeros/data/artifacts/...). It now carries the path RELATIVE to
+    # the artifacts root (e.g. "run_x/out/sorted.csv"); the download endpoint
+    # resolves the real on-disk path server-side from the artifact id.
     path: str
+    relative_path: Optional[str] = None
     size_bytes: Optional[int] = None
     created_at: str
 
