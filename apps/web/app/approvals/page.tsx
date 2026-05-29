@@ -414,20 +414,27 @@ function ApprovalsContent() {
   );
 
   return (
-    <div className="max-w-2xl">
-      <div className="mb-6 flex items-center justify-between gap-4">
+    // P2-12 (audit 2026-05-29): page was max-w-2xl while Runs/Connections fill
+    // the layout container, so the empty-state card looked half-width. Match
+    // their full-width rhythm; the approval list keeps a comfortable reading
+    // column internally below.
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-[var(--ink)]">Approvals</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--ink)]">Approvals</h1>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
             Workers waiting for your decision before executing.
           </p>
         </div>
-        {/* Link back to the full platform for chat-only operators */}
+        {/* P1-9: link back to the dashboard for chat-only operators who land
+            here from a notification. "Go to platform" was both low-contrast and
+            ambiguous in the single-tenant OS (implied the separate Cloud
+            product). Clearer copy + readable contrast. */}
         <Link
           href="/overview"
-          className="shrink-0 text-xs text-[var(--ink-mute)] hover:text-[var(--ink-soft)] transition-colors"
+          className="shrink-0 text-sm text-[var(--ink-soft)] underline-offset-2 hover:text-[var(--ink)] hover:underline transition-colors"
         >
-          Go to platform
+          Back to dashboard
         </Link>
       </div>
 
@@ -441,18 +448,20 @@ function ApprovalsContent() {
           ))}
         </div>
       ) : approvals.length === 0 ? (
-        <div className="rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] px-6 py-10 text-center">
+        <div className="w-full rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] px-6 py-10 text-center">
           <CheckCircle className="mx-auto h-8 w-8 text-[var(--ink-faint)]" />
           <p className="mt-3 text-sm text-[var(--ink-soft)]">No pending approvals</p>
           <Link
             href="/overview"
-            className="mt-4 inline-block text-xs text-[var(--ink-mute)] hover:text-[var(--ink-soft)] transition-colors"
+            className="mt-4 inline-block text-sm text-[var(--ink-soft)] underline-offset-2 hover:text-[var(--ink)] hover:underline transition-colors"
           >
-            Go to platform
+            Back to dashboard
           </Link>
         </div>
       ) : (
-        <>
+        // Approval cards keep a comfortable reading column; the page header and
+        // empty-state span full width to match Runs/Connections (P2-12).
+        <div className="max-w-2xl">
           {/* Sort + count bar */}
           <div className="mb-4 flex items-center justify-between gap-3">
             <span className="text-xs text-[var(--ink-mute)]">
@@ -599,7 +608,7 @@ function ApprovalsContent() {
               </button>
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );
@@ -608,12 +617,12 @@ function ApprovalsContent() {
 export default function ApprovalsPage() {
   return (
     <Suspense fallback={
-      <div className="max-w-2xl">
-        <div className="mb-6">
-          <div className="h-6 w-28 animate-pulse rounded bg-[var(--bg-2)]" />
+      <div className="space-y-6">
+        <div>
+          <div className="h-7 w-28 animate-pulse rounded bg-[var(--bg-2)]" />
           <div className="mt-1 h-4 w-64 animate-pulse rounded bg-[var(--bg-2)]" />
         </div>
-        <div className="space-y-3">
+        <div className="max-w-2xl space-y-3">
           {[0, 1].map((i) => (
             <div key={i} className="h-28 animate-pulse rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--bg-2)]" />
           ))}
