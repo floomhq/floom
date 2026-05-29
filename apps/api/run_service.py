@@ -380,9 +380,21 @@ def _build_smoke_inputs(
         elif inp.default is not None:
             inputs[inp.name] = inp.default
         elif inp.required:
-            # Deterministic, type-appropriate placeholder so a required scalar
-            # never blocks the smoke on a missing-input gate.
-            inputs[inp.name] = "1" if inp.type == "number" else "sample"
+            # Deterministic, TYPE-APPROPRIATE placeholder so a required input
+            # never blocks the smoke on a missing-input gate AND a list-typed
+            # worker is not false-disabled by feeding it a bare string (e.g. a
+            # median-of-a-list worker received "sample" and crashed on
+            # float("s"), getting wrongly gated). Number/string keep their prior
+            # placeholders ("1"/"sample") to avoid regressing existing workers.
+            itype = (inp.type or "").strip().lower()
+            if itype in ("list", "array"):
+                inputs[inp.name] = [3, 1, 2]
+            elif itype in ("object", "dict", "json"):
+                inputs[inp.name] = {"key": "value"}
+            elif itype == "number":
+                inputs[inp.name] = "1"
+            else:
+                inputs[inp.name] = "sample"
     return inputs
 
 
@@ -684,6 +696,40 @@ def _smoke_and_repair_generated_worker(
         shutil.rmtree(tmp_root, ignore_errors=True)
 
 
+def _mark_worker_paused_on_disk(worker_id: str, *, paused: bool = True) -> None:
+    """Write ``paused: <bool>`` into the worker's manifest (worker.yml) on disk.
+
+    The runtime smoke-disable sets ``workers.enabled = 0`` in the DB, but
+    ``_persist_discovered_workers`` recomputes ``enabled`` from the MANIFEST on
+    every re-discover (cache invalidation, file save, repair persist) and would
+    clobber a DB-only disable back to enabled=1, because the generated manifest
+    carries no paused/enabled flag. Persisting ``paused`` into the manifest makes
+    the disable durable (`manifest.get("paused") is True` -> enabled_value = 0).
+    Best-effort; never raises (the DB enabled=0 stays the primary gate)."""
+    import yaml as _pyyaml
+
+    worker_dir = (WORKERS_DIR / worker_id).resolve()
+    yml_path = (worker_dir / "worker.yml").resolve()
+    try:
+        yml_path.relative_to(worker_dir)
+    except ValueError:
+        return
+    try:
+        raw = _pyyaml.safe_load(yml_path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return
+        if paused:
+            raw["paused"] = True
+        else:
+            raw.pop("paused", None)
+        yml_path.write_text(
+            _pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        logger.warning("Could not write paused flag to manifest for %s", worker_id, exc_info=True)
+
+
 def smoke_and_gate_generated_worker(
     worker_id: str,
     bundle: Dict[str, Any],
@@ -717,6 +763,15 @@ def smoke_and_gate_generated_worker(
     )
     if smoke.get("status") == "failed":
         try:
+            # Persist the disable into the MANIFEST first so it survives any
+            # re-discover (`_persist_discovered_workers` recomputes enabled from
+            # the manifest and would otherwise clobber a DB-only disable back to
+            # enabled=1, because the generated manifest carries no enabled flag).
+            # Then set the DB flag. Both together make the gate durable — the
+            # worker stays disabled until the operator edits/re-enables it.
+            # Done inline (not via main.*) so it cannot fail on a cross-module
+            # import inside the async to_thread create path.
+            _mark_worker_paused_on_disk(worker_id, paused=True)
             repos_obj.workers.update(
                 user_id=user_id,
                 worker_id=worker_id,

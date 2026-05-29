@@ -113,3 +113,44 @@ def test_public_artifact_path_outside_root_falls_back_to_basename() -> None:
 def test_public_artifact_path_empty() -> None:
     assert main._public_artifact_path("") == ""
     assert main._public_artifact_path(None) == ""
+
+
+# --------------------------------------------------------------------------
+# Reliability — smoke placeholder is type-appropriate (no false-disable of
+# list/number workers)
+# --------------------------------------------------------------------------
+
+def test_smoke_inputs_list_placeholder_is_a_list(tmp_path):
+    import run_service
+    from models import WorkerConfig
+
+    config = WorkerConfig(
+        id="t",
+        name="t",
+        trigger={"type": "manual"},
+        runtime={"type": "python", "entrypoint": "run.py"},
+        inputs=[{"name": "numbers", "type": "list", "required": True,
+                 "kind": "scalar", "label": "Numbers"}],
+        outputs=[],
+    )
+    out = run_service._build_smoke_inputs(config, {}, tmp_path)
+    assert isinstance(out["numbers"], list), out
+    # a numeric list so float()/sorted()/statistics work
+    assert all(isinstance(x, (int, float)) for x in out["numbers"])
+
+
+def test_smoke_inputs_string_placeholder_unchanged(tmp_path):
+    import run_service
+    from models import WorkerConfig
+
+    config = WorkerConfig(
+        id="t",
+        name="t",
+        trigger={"type": "manual"},
+        runtime={"type": "python", "entrypoint": "run.py"},
+        inputs=[{"name": "text", "type": "string", "required": True,
+                 "kind": "scalar", "label": "Text"}],
+        outputs=[],
+    )
+    out = run_service._build_smoke_inputs(config, {}, tmp_path)
+    assert out["text"] == "sample"

@@ -522,6 +522,12 @@ class WorkerContract(BaseModel):
     system_worker: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    # Runtime gate: a smoke-disabled worker (its first test run failed) sets
+    # paused=true in its manifest so the disable survives re-discovery
+    # (`_persist_discovered_workers` reads `manifest.get("paused")` to compute
+    # `enabled`). Without this field WorkerContract.model_dump() would drop it
+    # and a re-discover would silently RE-ENABLE the broken worker (P0-1).
+    paused: bool = False
     folder: Optional[str] = None
     version: str
     entrypoint: Optional[str] = "SKILL.md"
