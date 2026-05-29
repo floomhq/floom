@@ -611,6 +611,41 @@ def _enforce_run_replay_quota(auth: AuthContext, worker_id: str, source_run_id: 
         _raise_run_create_quota(replay_limit, window, retry_after)
 
 
+def _chat_quota_config() -> tuple[int, float]:
+    """Per-user /chat quota.
+
+    /chat calls OpenAI on every request (the workspace agent), so an
+    unbounded caller can run up a real LLM bill. The shared IP rate limiter
+    (60/60s) is too loose for a paid-LLM path; enforce a tighter per-user cap
+    keyed on the authenticated user, durable across restarts via the same
+    DB-backed sliding window used for run-create.
+    """
+    try:
+        limit = int(os.environ.get("WORKEROS_CHAT_RATE_LIMIT", "20"))
+    except ValueError:
+        limit = 20
+    try:
+        window = float(os.environ.get("WORKEROS_CHAT_RATE_WINDOW_SECONDS", "60"))
+    except ValueError:
+        window = 60.0
+    return max(0, limit), max(1.0, window)
+
+
+def _enforce_chat_quota(auth: AuthContext) -> None:
+    limit, window = _chat_quota_config()
+    retry_after = _claim_run_create_quota_slot(
+        f"user:{auth.user_id}:chat",
+        limit=limit,
+        window=window,
+    )
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Chat rate limit exceeded: {limit}/{int(window)}s",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     """Apply per-IP and per-secret limits. Exempt webhooks and health checks."""
@@ -8860,6 +8895,10 @@ async def post_chat(
             status_code=413,
             detail=f"message exceeds {max_chars} character limit",
         )
+    # /chat calls OpenAI per request; enforce a per-user quota so a single
+    # caller cannot run up an unbounded LLM bill (the shared IP limiter is too
+    # loose for a paid-LLM path).
+    _enforce_chat_quota(auth)
 
     part_queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
     loop = asyncio.get_running_loop()
