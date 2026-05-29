@@ -11,6 +11,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 
+_AUTH_HEADER = {"x-floom-secret": "test-composio-secret"}
+
+
 def _load_api(monkeypatch, tmp_path):
     api_dir = Path(__file__).resolve().parents[1] / "apps" / "api"
     workers_dir = tmp_path / "workers"
@@ -19,6 +22,7 @@ def _load_api(monkeypatch, tmp_path):
 
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("FLOOM_SECRET", _AUTH_HEADER["x-floom-secret"])
     monkeypatch.setenv("COMPOSIO_API_KEY", "test-composio-key")
     monkeypatch.setenv("COMPOSIO_WEBHOOK_SIGNING_KEY", "test-signing-key")
     monkeypatch.setenv("COMPOSIO_WEBHOOK_URL", "https://example.test/composio-events")
@@ -31,6 +35,9 @@ def _load_api(monkeypatch, tmp_path):
         stop_scheduler=lambda: None,
     )
     main = importlib.import_module("main")
+    run_service = importlib.import_module("run_service")
+    main.start_run = lambda *args, **kwargs: None
+    run_service.start_run = main.start_run
     composio_client = importlib.import_module("composio_client")
     return main, composio_client
 
@@ -100,6 +107,7 @@ def _composio_webhook_headers(body: bytes, key="test-signing-key"):
 def _create_worker(client):
     return client.post(
         "/workers",
+        headers=_AUTH_HEADER,
         json={"worker_yml": _worker_yml(), "run_py": RUN_PY},
     )
 
@@ -157,6 +165,36 @@ def test_composio_events_with_valid_hmac_creates_run(monkeypatch, tmp_path):
     assert json.loads(row["input_json"])["event"]["data"]["subject"] == "Hello"
 
 
+def test_composio_events_replay_same_delivery_is_ignored(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_gmail_123")
+    with TestClient(main.app) as client:
+        created = _create_worker(client)
+        assert created.status_code == 200, created.text
+        body = json.dumps({
+            "id": "msg_replay_123",
+            "type": "composio.trigger.message",
+            "metadata": {
+                "trigger_id": "ct_gmail_123",
+                "trigger_slug": "GMAIL_NEW_EMAIL",
+                "connected_account_id": "conn_gmail_federico_stub",
+            },
+            "data": {"subject": "Replay me"},
+        }).encode()
+        headers = _composio_webhook_headers(body)
+        first = client.post("/composio-events", content=body, headers=headers)
+        second = client.post("/webhooks/composio-events", content=body, headers=headers)
+
+    assert first.status_code == 200, first.text
+    assert first.json()["status"] == "queued"
+    assert second.status_code == 200, second.text
+    assert second.json()["status"] == "duplicate_ignored"
+    assert second.json().get("run_id") is None
+    with main.get_db() as conn:
+        run_count = conn.execute("SELECT COUNT(*) AS count FROM runs").fetchone()["count"]
+    assert run_count == 1
+
+
 def test_composio_events_with_invalid_hmac_returns_401(monkeypatch, tmp_path):
     main, composio_client = _load_api(monkeypatch, tmp_path)
     monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_gmail_123")
@@ -210,9 +248,9 @@ def test_worker_delete_calls_composio_disable(monkeypatch, tmp_path):
     with TestClient(main.app) as client:
         created = _create_worker(client)
         assert created.status_code == 200, created.text
-        deleted = client.delete("/workers/gmail-composio")
+        deleted = client.delete("/workers/gmail-composio", headers=_AUTH_HEADER)
 
-    assert deleted.status_code == 200, deleted.text
+    assert deleted.status_code == 204, deleted.text
     assert disabled == [("GMAIL_NEW_EMAIL", "ct_gmail_123")]
 
 
@@ -234,6 +272,7 @@ def test_worker_update_trigger_change_disables_previous_composio_trigger(monkeyp
         assert created.status_code == 200, created.text
         updated = client.put(
             "/workers/gmail-composio",
+            headers=_AUTH_HEADER,
             json={"worker_yml": _worker_yml(connection_id="conn_gmail_second"), "run_py": RUN_PY},
         )
         assert updated.status_code == 200, updated.text
@@ -272,6 +311,7 @@ def test_worker_update_rolls_back_new_composio_trigger_when_old_disable_fails(mo
         assert created.status_code == 200, created.text
         updated = client.put(
             "/workers/gmail-composio",
+            headers=_AUTH_HEADER,
             json={"worker_yml": _worker_yml(connection_id="conn_gmail_second"), "run_py": RUN_PY},
         )
 
@@ -369,6 +409,25 @@ def test_composio_events_without_trigger_id_can_fallback_to_unique_event_with_da
 def test_gmail_composio_register_and_stub_event_end_to_end(monkeypatch, tmp_path):
     main, composio_client = _load_api(monkeypatch, tmp_path)
     monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_gmail_123")
+
+    def fake_start_run(run_id, _worker_id, _inputs):
+        started_at = main.now_iso()
+        completed_at = main.now_iso()
+        with main.get_db() as conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET status = 'completed',
+                    output_json = ?,
+                    started_at = ?,
+                    completed_at = ?,
+                    duration_ms = 1
+                WHERE id = ?
+                """,
+                (json.dumps({"result": "ok"}), started_at, completed_at, run_id),
+            )
+
+    monkeypatch.setattr(main, "start_run", fake_start_run)
     with TestClient(main.app) as client:
         created = _create_worker(client)
         assert created.status_code == 200, created.text
@@ -392,7 +451,7 @@ def test_gmail_composio_register_and_stub_event_end_to_end(monkeypatch, tmp_path
 
         final_status = None
         for _ in range(30):
-            run_response = client.get(f"/runs/{run_id}")
+            run_response = client.get(f"/runs/{run_id}", headers=_AUTH_HEADER)
             assert run_response.status_code == 200, run_response.text
             final_status = run_response.json()["status"]
             if final_status in {"completed", "failed"}:
@@ -447,7 +506,7 @@ def test_composio_client_uses_current_v3_trigger_endpoints(monkeypatch, tmp_path
     )
     composio_client.disable_trigger("GMAIL_NEW_EMAIL", trigger_id)
 
-    assert ("GET", "/triggers_types", {"limit": 1000}) in calls
+    assert ("GET", "/triggers_types", {"limit": 100}) in calls
     assert (
         "POST",
         "/trigger_instances/GMAIL_NEW_EMAIL/upsert",
@@ -472,8 +531,8 @@ def test_integrations_triggers_proxy_caches_catalog(monkeypatch, tmp_path):
     main._trigger_catalog_cache["expires_at"] = 0.0
 
     with TestClient(main.app) as client:
-        first = client.get("/integrations/triggers")
-        second = client.get("/integrations/triggers")
+        first = client.get("/integrations/triggers", headers=_AUTH_HEADER)
+        second = client.get("/integrations/triggers", headers=_AUTH_HEADER)
 
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
