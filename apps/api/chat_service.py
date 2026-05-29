@@ -1064,10 +1064,19 @@ async def stream_chat(
         tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
     )
 
+    # Per-run, loop-local OpenAI client. Worker runs execute in their own fresh
+    # asyncio loops and would otherwise share the SDK's process-wide httpx
+    # client with this chat stream; a closing worker loop poisons the shared
+    # client with "Event loop is closed". A dedicated client per chat stream
+    # isolates this path from concurrent worker-run loops.
+    from runner_sandbox.loop_local_provider import LoopLocalModelProvider
+
+    loop_local_provider = LoopLocalModelProvider()
     run_config = RunConfig(
         workflow_name="workeros:workspace-agent",
         trace_id=f"chat_{uuid.uuid4().hex[:16]}",
         trace_metadata={"conversation_id": conversation_id, "user_id": user_id},
+        model_provider=loop_local_provider.provider,
     )
 
     # Buffer assistant text and tool messages for persistence
@@ -1203,3 +1212,6 @@ async def stream_chat(
             "conversation_id": conversation_id,
             "message_id": None,
         })
+    finally:
+        # Release the per-stream OpenAI + httpx client on this loop.
+        await loop_local_provider.aclose()
