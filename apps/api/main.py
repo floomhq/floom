@@ -227,6 +227,7 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "node-smoke-test",
         "openblog",
         "opendraft",
+        "outbound-approval-demo",
         "research_brief",
         "reverse_match_crm",
         "slack-listener",

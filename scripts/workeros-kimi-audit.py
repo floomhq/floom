@@ -639,6 +639,24 @@ def _local_insert_connection(main_module: Any, *, user_id: str, app_name: str = 
 
 
 def _tracked_worker_ids(repo: Path) -> set[str]:
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "workers/*/worker.yml"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        tracked = None
+    else:
+        tracked_ids = {
+            Path(line.strip()).parent.name
+            for line in tracked.stdout.splitlines()
+            if line.strip().endswith("/worker.yml")
+        }
+        if tracked_ids:
+            return tracked_ids
+
     workers_dir = repo / "workers"
     tracked_ids: set[str] = set()
     for worker_yml in workers_dir.glob("*/worker.yml"):
@@ -950,16 +968,26 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                 {"status": draft_body_limit.status_code, "body": draft_body_limit.text},
             )
 
-            shipped_worker_ids = _tracked_worker_ids(repo)
+            tracked_worker_ids = _tracked_worker_ids(repo)
             protected = set(main_module.PROTECTED_STOCK_WORKER_IDS)
-            missing_stock = sorted(shipped_worker_ids - protected)
-            extra_stock = sorted(protected - shipped_worker_ids)
+            on_disk_protected = {
+                worker_id
+                for worker_id in protected
+                if (repo / "workers" / worker_id / "worker.yml").is_file()
+            }
+            missing_stock = sorted(protected - on_disk_protected)
+            extra_stock = sorted(tracked_worker_ids - protected)
             record(
                 results,
                 "local-stock-worker-set-complete",
                 not missing_stock and not extra_stock,
                 f"missing={missing_stock} extra={extra_stock}",
-                {"missing": missing_stock, "extra": extra_stock},
+                {
+                    "missing": missing_stock,
+                    "extra": extra_stock,
+                    "tracked": sorted(tracked_worker_ids),
+                    "protected": sorted(protected),
+                },
             )
 
             stock_payload = _local_worker_payload("linkedin-post-engagements", title="Probe Replacement")

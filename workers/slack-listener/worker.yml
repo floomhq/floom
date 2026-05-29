@@ -17,6 +17,7 @@ long_description: |
 use_cases:
   - Embed the workspace agent in Slack so team members can query workers via DM or channel.
   - Route Slack @floom mentions to the workspace agent for ops triage.
+  - Keep Slack thread follow-ups attached to the matching workspace conversation.
 example_input:
   channel: "C01234567"
   lookback_minutes: 10
