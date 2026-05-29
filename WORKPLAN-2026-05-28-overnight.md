@@ -235,3 +235,23 @@ one branch = one worktree = one PR. Each lane verifies LIVE before claiming done
 No backend touched (all frontend). No files outside /contexts + /workers/new.
 Merged → main `57a1754` (rolled up under `8b0a674`); prod aliased to
 `workers.floom.dev` (`workeros-hnnypgguw-…`).
+
+### Batch A — worker-detail + runs (PR #244 + follow-up #249, lane/batchA-workerdetail-2026-05-29) — DONE ✅
+
+| Item | Sev | Status | Live artifact |
+|------|-----|--------|---------------|
+| P0-1 Source/#code "No files found" for every worker | P0 | VERIFIED | `docs/audits/shots-batchA-2026-05-29/P0-1-source-csv_enricher.png` + curl (files len 4/88, content populated). Backend already deployed (sweep #239); frontend reads `worker.files` |
+| P1-1 flaky deep-link "Couldn't load worker — Retry" | P1 | FIXED (retry; build-verified) | `fetchWorkerWithRetry` 3× backoff; transient race not deterministically reproducible live |
+| P1-2 export shown as bare `false` | P1 | VERIFIED | `…/P1-2-P2-1-P1-3-run-result-tab.png` — "PDF/DOCX export: not generated" pills (ground truth: export_report `requested:false`) |
+| P1-3 infra telemetry ([e2b]/[redacted-*]) in Logs | P1 | VERIFIED | `…/P1-3-logs-tab-filtered.png` ("1065 internal lines hidden") + Result-tab preview clean |
+| P1-4 raw error codes leak | P1 | VERIFIED | `…/P1-4-runs-list-humanized-errors.png` ("Missing connection: GitHub") + `…/P2-4-history-completed-pill.png` ("Output validation failed: …") |
+| P2-1 raw uppercased JSON-key stat labels | P2 | VERIFIED | `…/P1-2-P2-1-P1-3-run-result-tab.png` ("WORD COUNT", "DURATION SECONDS 30m") |
+| P2-2 single-line "Enrichment instruction" → textarea | P2 | VERIFIED | `…/P2-2-run-tab-textarea.png` (full-width wrapping textarea) |
+| P2-3 tab hashes don't match labels | P2 | VERIFIED | `#history`/`#apps`/`#source`/`#run`/`#triggers` resolve to correct tab (broker walk); legacy hashes still work |
+| P2-4 History: completed runs got no pill | P2 | VERIFIED | `…/P2-4-history-completed-pill.png` ("Completed" pill for parity) |
+| P2-5 Triggers Save/Discard chrome shown when clean | P2 | VERIFIED | `/workers/csv_enricher#triggers` shows no Save/Discard on a clean tab (broker snapshot) |
+
+No backend touched (P0-1 backend pre-deployed via #239). No files outside
+`/workers/<id>` + `/runs`. Shared helper `apps/web/lib/run-format.ts` added.
+Merged → main `8b0a674` (#244) + `4c5b859` (#249, Result-tab log filter
+follow-up); prod auto-aliased to `workers.floom.dev` (`workeros-1z9e9x83u-…`).
