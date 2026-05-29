@@ -1868,6 +1868,27 @@ def _list_visible_workers(
     return list(visible.values())
 
 
+def _list_operator_workers(
+    *,
+    user_id: str,
+    repos: Repositories,
+    use_cache: bool = True,
+) -> List[Dict[str, Any]]:
+    """Workers shown in the operator's default view.
+
+    Same filter as the default GET /workers view: visible (non-hidden) workers,
+    minus system_worker:true and archived. Shared by /workers and the overview
+    'Workers active' count so the two numbers cannot drift (1.5.4).
+    """
+    workers = _list_visible_workers(user_id=user_id, repos=repos, use_cache=use_cache)
+    workers = [
+        w for w in workers
+        if not (w.get("manifest") or {}).get("system_worker", False)
+    ]
+    workers = [w for w in workers if not w.get("archived", False)]
+    return workers
+
+
 def _get_db_worker(
     worker_id: str,
     *,
@@ -3036,6 +3057,8 @@ def list_workers(
             if not (w.get("manifest") or {}).get("system_worker", False)
         ]
     # Filter out archived workers unless explicitly requested.
+    # NOTE: when include_system and include_archived are both False this matches
+    # _list_operator_workers exactly (shared filter, see 1.5.4).
     if not include_archived:
         workers = [w for w in workers if not w.get("archived", False)]
     worker_ids = [w["id"] for w in workers]
@@ -7981,8 +8004,24 @@ def system_overview(
             )
         )
 
-    workers = repos.workers.list(user_id=auth.user_id)
-    active_workers_count = sum(1 for row in workers if row.get("enabled") and not _overview_worker_paused(row))
+    # 1.5.4: use the SAME operator-visible filter as the default GET /workers
+    # view so the overview 'Workers active' count matches the /workers list
+    # (previously this used the unfiltered repos.workers.list() which counted
+    # hidden/system/internal workers, e.g. 24 vs 11). Prefer the DB row (which
+    # carries `enabled`) for each operator-visible worker, falling back to the
+    # filesystem record for stock workers that have no DB row yet, so the
+    # enabled/paused logic stays correct and the total equals /workers.
+    _db_workers_by_id = {
+        row["id"]: row
+        for row in repos.workers.list(user_id=auth.user_id)
+        if row.get("id")
+    }
+    workers = [
+        _db_workers_by_id.get(w["id"], w)
+        for w in _list_operator_workers(user_id=auth.user_id, repos=repos)
+        if w.get("id")
+    ]
+    active_workers_count = sum(1 for row in workers if not _overview_worker_paused(row))
     paused_workers_count = max(0, len(workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
 
