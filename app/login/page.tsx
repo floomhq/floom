@@ -19,10 +19,11 @@ export default async function LoginPage({
       <header className="px-6 py-5">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-[14px] font-semibold tracking-tight text-[var(--ink)] hover:opacity-80 transition-opacity"
+          className="inline-flex items-center gap-2 text-[15px] font-[660] tracking-[-0.025em] text-[var(--ink)] hover:opacity-80 transition-opacity"
         >
-          <WorkerosMark />
-          <span>Workeros</span>
+          <FloomMark />
+          Floom{" "}
+          <span style={{ color: "var(--ink-mute)", fontWeight: 450, marginLeft: 2 }}>/ workeros</span>
         </Link>
       </header>
 
@@ -103,14 +104,23 @@ export default async function LoginPage({
   );
 }
 
-function WorkerosMark() {
+// Same play-arrow mark + lockup the landing nav uses (.ln-mark / "Floom /
+// workeros"). /login only imports globals.css, not landing.css, so the mark
+// is inlined here from the same SVG path rather than reusing the class.
+function FloomMark({ size = 20 }: { size?: number }) {
   return (
-    <span
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 100 100"
       aria-hidden="true"
-      className="inline-flex items-center justify-center w-5 h-5 bg-[var(--solid)] text-[var(--solid-fg)] text-[10px] font-bold leading-none"
+      style={{ color: "var(--ink)" }}
     >
-      W
-    </span>
+      <path
+        d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z"
+        fill="currentColor"
+      />
+    </svg>
   );
 }
 

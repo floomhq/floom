@@ -2,14 +2,29 @@
 
 **This repo is the hosted, multi-tenant Cloud product** at `workeros.floom.dev`
 (landing) + `workeros-api.floom.dev` (FastAPI). It is a thin Supabase-backed
-wrapper around the open-source engine **`floomhq/workeros`**, vendored as the
-`engine/` git submodule.
+**wrapper** around the **WorkerOS engine `floomhq/workeros`** (private repo,
+single-tenant), vendored as the `engine/` git submodule.
 
-## CRITICAL: Stay in sync with WorkerOS (floomhq/workeros)
+## CRITICAL: ALWAYS stay in sync with WorkerOS. You are building the WRAPPER ONLY.
+
+> **Federico, standing rule (2026-05-30):** "We ALWAYS want to stay in sync with
+> workeros. You are just building the cloud wrapper."
+
+`floomhq/workeros` (`engine/`) is the **single source of truth** for the product —
+the worker model, the run engine, AND the entire dashboard UI. The cloud product
+is `engine` + a thin cloud overlay (auth, workspaces, hosting). **Nothing else.**
+
+**The dashboard UI is NOT a fork to maintain. It IS the engine's `apps/web`.**
+The cloud `web/` must track `engine/apps/web` so closely that bumping the submodule
+pulls in every UI change automatically. If `web/` drifts from `engine/apps/web`
+(different nav order, missing pages like `/approvals`, stale components), that is a
+**bug to eliminate**, not a state to manage. The only differences allowed are the
+cloud seams below. (History: `web/` was once a hand-ported fork and silently fell
+196 commits behind the engine — never again. De-fork tracked in WORKPLAN-20260530.)
 
 There is a hard ownership boundary. Respect it on every change.
 
-### What lives HERE (cloud-owned — edit freely in this repo)
+### What lives HERE (cloud-owned — the ONLY things this repo adds)
 - Supabase **auth** (JWT/JWKS verify, `/auth/*` routes, cli-auth device flow)
 - **Multi-tenancy**: workspaces, `workspace_id` scoping, the workspace switcher,
   per-request workspace context, ownership checks
@@ -18,14 +33,24 @@ There is a hard ownership boundary. Respect it on every change.
 - **Cloud infra glue**: `apps/api/startup.py` (engine overrides, HTTP/1.1
   patches, env-pollution guards), the `/api/proxy` Next route, basePath `/app`
   wiring, `vercel.json` rewrites, RLS migrations, billing
-- The cloud **dashboard** (`web/`) and **landing** (`app/`) — these are forks of
-  the engine's UI, adapted for cloud auth + basePath. UI-only engine changes are
-  ported here manually.
+- The **cloud overlay** on the dashboard `web/`: the auth/account footer, the
+  `WorkspaceSwitcher`, `/api/me`, `/api/cli-auth`, the proxy route, and the
+  `NEXT_PUBLIC_API_PROXY_BASE` / `NEXT_PUBLIC_BASE_PATH` env wiring. **Everything
+  else under `web/` should equal `engine/apps/web` byte-for-byte.** If a page or
+  component needs a real change, it's almost always an **engine** change (below).
+- The **landing** (`app/`, apex project) — the only genuinely cloud-owned UI
+  (marketing pages, `/login`, vertical pages). Even here, match the engine's
+  design system (warm matte, near-black buttons, Geist) — workers.floom.dev is the
+  visual source of truth.
 
 ### What lives in WorkerOS (engine — DO NOT diverge here)
 - The worker model, run engine, E2B execution, scheduler, contexts feature,
   Composio integration, worker-author LLM, MCP server, the FastAPI app
   (`engine/apps/api/main.py`), models/validators (`engine/apps/api/models.py`)
+- **The ENTIRE dashboard UI** (`engine/apps/web`): every page, component, nav
+  item, design token, the worker-builder flow, runs/connections/contexts/
+  approvals/overview screens. A dashboard UI change = an **engine PR**, then a
+  submodule bump here. The cloud `web/` only injects the overlay listed above.
 - Anything in `engine/` is a pinned submodule. **Never hand-edit files under
   `engine/`** to fix a bug — that silently diverges from upstream and the next
   submodule bump wipes it.
@@ -36,12 +61,14 @@ There is a hard ownership boundary. Respect it on every change.
 > we stay in sync — then bump the submodule here. Do NOT patch `engine/` locally.
 
 **Decision test for any fix:**
-1. Is the bug in auth, workspaces, Supabase repos, proxy, basePath, RLS,
-   billing, or the cloud UI fork? → fix in THIS repo.
-2. Is the bug in worker/run/contexts/scheduler/validator/LLM/MCP behavior, or
+1. Is it the cloud overlay — auth, workspaces, Supabase repos, proxy, basePath,
+   RLS, billing, or the apex landing/`/login`? → fix in THIS repo.
+2. Is it ANYTHING in the dashboard UI (a page, component, nav order, design,
+   worker flow) or worker/run/contexts/scheduler/validator/LLM/MCP behavior, or
    anything under `engine/`? → **PR `floomhq/workeros`**, merge it, then bump the
    `engine/` submodule pin here. File an issue first if you can't fix it.
-3. Unsure? It's probably engine. Default to a WorkerOS PR over a local patch.
+3. Unsure? It's the engine. Default to a WorkerOS PR over a local patch — the
+   dashboard UI is the engine's, not ours to fork.
 
 **A cloud-side workaround that duplicates engine logic is tech debt.** If you
 must add one to unblock prod (e.g. a manifest-lift shim), open the matching
