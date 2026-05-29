@@ -422,6 +422,16 @@ def _workspace_tools(user_id: str) -> List[Any]:
             },
             _tool_contexts_write,
         ),
+        _make_tool(
+            "approvals__list_pending",
+            (
+                "List pending approval requests. Returns [{id, worker_id, worker_name, "
+                "run_id, label, preview, created_at, link}] where link is the "
+                "direct URL the operator can open to approve/reject."
+            ),
+            {"type": "object", "properties": {}, "required": []},
+            _tool_approvals_list_pending,
+        ),
     ]
     return tools
 
@@ -842,6 +852,45 @@ def _tool_contexts_write(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+_APPROVALS_BASE_URL = os.environ.get("WORKEROS_PUBLIC_URL", "https://workers.floom.dev")
+
+
+def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    """Return pending approvals with direct links the operator can open."""
+    from db import get_db as _get_db
+    try:
+        with _get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.id, a.run_id, a.worker_id, a.label, a.preview, a.created_at,
+                       w.name AS worker_name
+                FROM approvals a
+                LEFT JOIN workers w ON w.id = a.worker_id
+                WHERE a.owner_id = ? AND a.status = 'pending'
+                ORDER BY a.created_at ASC
+                """,
+                (user_id,),
+            ).fetchall()
+        base = _APPROVALS_BASE_URL.rstrip("/")
+        result = []
+        for row in rows:
+            approval_id = row["id"]
+            result.append({
+                "id": approval_id,
+                "worker_id": row["worker_id"],
+                "worker_name": row["worker_name"] or row["worker_id"],
+                "run_id": row["run_id"],
+                "label": row["label"],
+                "preview": (row["preview"] or "")[:200] or None,
+                "created_at": row["created_at"],
+                "link": f"{base}/approvals?id={approval_id}",
+            })
+        return {"ok": True, "approvals": result, "count": len(result)}
+    except Exception as exc:
+        logger.exception("approvals__list_pending failed")
+        return {"ok": False, "error": str(exc)}
+
+
 # ---------------------------------------------------------------------------
 # Workspace preamble builder
 # ---------------------------------------------------------------------------
@@ -878,6 +927,18 @@ def _build_workspace_preamble(user_id: str) -> str:
         if CONTEXTS_DIR.is_dir():
             context_names = [d.name for d in sorted(CONTEXTS_DIR.iterdir()) if d.is_dir()]
 
+        # Pending approvals count
+        try:
+            with get_db() as _conn:
+                _arow = _conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM approvals WHERE owner_id = ? AND status = 'pending'",
+                    (user_id,),
+                ).fetchone()
+            pending_approvals = int(_arow["cnt"] or 0) if _arow else 0
+        except Exception:
+            pending_approvals = 0
+
+        base = _APPROVALS_BASE_URL.rstrip("/")
         preamble_lines = [
             "## Workspace snapshot",
             f"- Workers: {worker_count}",
@@ -885,6 +946,10 @@ def _build_workspace_preamble(user_id: str) -> str:
         ]
         preamble_lines.extend(run_lines if run_lines else ["  (none)"])
         preamble_lines.append(f"- Contexts: {', '.join(context_names) if context_names else '(none)'}")
+        if pending_approvals > 0:
+            preamble_lines.append(
+                f"- Pending approvals: {pending_approvals} — operator can act at {base}/approvals"
+            )
         return "\n".join(preamble_lines)
     except Exception as exc:
         logger.warning("Failed to build workspace preamble: %s", exc)
