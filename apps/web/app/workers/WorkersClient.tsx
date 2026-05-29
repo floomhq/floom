@@ -14,7 +14,6 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
-import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
@@ -58,16 +57,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     searchParams.get("tab");
   const [tab, setTab] = useState<WorkersTab>(isValidTab(initialTab) ? initialTab : "all");
   const folderFilter = searchParams.get("folder");
-  const tagFilter = searchParams.get("tag");
   const [search, setSearch] = useState("");
-  const [showAllTags, setShowAllTags] = useState(false);
-
-  const setTagFilter = useCallback((tag: string | null) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (tag) params.set("tag", tag);
-    else params.delete("tag");
-    router.replace(`/workers${params.size ? `?${params.toString()}` : ""}`, { scroll: false });
-  }, [router, searchParams]);
 
   // S44: update workers when initialWorkers changes (e.g. after RSC revalidation).
   useEffect(() => {
@@ -176,18 +166,6 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
 
   const searchLower = search.trim().toLowerCase();
 
-  const allTags = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const w of workers) {
-      for (const t of (w.tags || [])) {
-        counts.set(t, (counts.get(t) ?? 0) + 1);
-      }
-    }
-    return Array.from(counts.entries())
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([tag, count]) => ({ tag, count }));
-  }, [workers]);
-
   const displayedWorkers = useMemo(() => {
     if (tab === "archived") {
       let pool = archivedWorkers;
@@ -220,10 +198,10 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
           (w.folder || "").startsWith(`${folderFilter}/`)
       );
     }
-    if (tagFilter) {
-      pool = pool.filter((w) => (w.tags || []).includes(tagFilter));
-    }
     if (searchLower) {
+      // Tag matching is folded into the search box (Federico 2026-05-29): the
+      // blob includes the worker's tags, so typing a tag name filters by tag —
+      // no standing tag-chip wall needed.
       pool = pool.filter((w) => {
         const blob = [
           w.name,
@@ -237,7 +215,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
       });
     }
     return pool;
-  }, [workers, archivedWorkers, tab, folderFilter, tagFilter, favorites, searchLower]);
+  }, [workers, archivedWorkers, tab, folderFilter, favorites, searchLower]);
 
   // R5: one combined breadcrumb + folder-chip row. Render whenever we're on
   // the All tab (no search/tag) and there is either a drill-in path or
@@ -246,9 +224,62 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   const showFolderNav =
     tab === "all" &&
     !searchLower &&
-    !tagFilter &&
     (breadcrumbs.length > 0 || subFolders.length > 0);
   const isArchivedTab = tab === "archived";
+
+  // ESC key ladder (Federico 2026-05-29). Scoped to the page; bails entirely
+  // when a modal dialog (e.g. the Cmd-K palette) is open so its own ESC-to-close
+  // is never hijacked. Order:
+  //   1. dialog open  → no-op here (the dialog handles ESC).
+  //   2. search has text or is focused → clear + blur the search.
+  //   3. a non-default filter (folder, or tab != all) → reset to All / no folder.
+  //   4. nothing active → no-op (must NOT navigate away).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+
+      // 1. A modal dialog is open (Cmd-K palette, etc.) — let it own ESC.
+      if (document.querySelector('[role="dialog"]')) return;
+
+      const active = document.activeElement;
+      const searchEl = document.querySelector<HTMLInputElement>(
+        "input[data-workers-search]"
+      );
+      const searchHasText = search.trim().length > 0;
+      const searchFocused = active === searchEl && searchEl !== null;
+
+      // 2. Search has text or is focused → clear + blur.
+      if (searchHasText || searchFocused) {
+        event.preventDefault();
+        setSearch("");
+        searchEl?.blur();
+        return;
+      }
+
+      // Never hijack ESC inside another editable field/textarea.
+      if (
+        active instanceof HTMLElement &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          active.isContentEditable)
+      ) {
+        return;
+      }
+
+      // 3. A non-default filter is active → reset to All / no folder.
+      if (folderFilter || tab !== "all") {
+        event.preventDefault();
+        setFolder(null);
+        if (tab !== "all") handleTabChange("all");
+        return;
+      }
+
+      // 4. Nothing active → no-op (do NOT navigate away / go back).
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, folderFilter, tab]);
 
   return (
     <div className="space-y-6">
@@ -269,7 +300,8 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
             <div className="relative max-w-sm flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
-                placeholder="Search workers..."
+                data-workers-search
+                placeholder="Search workers or tags..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9"
@@ -337,42 +369,10 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
             </div>
           )}
 
-          {allTags.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-muted-foreground mr-1">Tags:</span>
-              {(showAllTags ? allTags : allTags.slice(0, 12)).map(({ tag, count }) => {
-                const active = tagFilter === tag;
-                return (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => setTagFilter(active ? null : tag)}
-                    className={
-                      active
-                        ? "inline-flex items-center gap-1 rounded-full border border-foreground bg-foreground px-2.5 py-0.5 text-xs font-medium text-background hover:opacity-90 transition-opacity"
-                        : "inline-flex items-center gap-1 rounded-full border border-line bg-card px-2.5 py-0.5 text-xs font-normal text-muted-foreground hover:text-foreground hover:border-muted-foreground/40 transition-colors"
-                    }
-                  >
-                    {tag}
-                    <span className={active ? "text-background/70" : "text-muted-foreground/60"}>
-                      {active ? "×" : count}
-                    </span>
-                  </button>
-                );
-              })}
-              {allTags.length > 12 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllTags((v) => !v)}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {showAllTags ? "Show less" : `+${allTags.length - 12} more`}
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {/* Flat grid (not grouped by folder). Tag matching folded into the
+              search box above; the standing tag-chip wall was removed for
+              digestibility (Federico 2026-05-29). */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {(loading || (isArchivedTab && loadingArchived))
               ? Array.from({ length: 8 }).map((_, i) => (
                   <WorkerCardSkeleton key={i} />
@@ -534,6 +534,11 @@ function EmptyWorkersState() {
 // WorkerCard
 // ---------------------------------------------------------------------------
 
+// Fixed card height — every card is the same height so the grid reads as a
+// clean, scannable matrix. Hover is a subtle lift only (shadow), never a
+// size jump (Federico 2026-05-29).
+const CARD_HEIGHT = "h-[188px]";
+
 function WorkerCard({
   worker,
   isFavorite,
@@ -545,90 +550,115 @@ function WorkerCard({
 }) {
   const hoverDescription = firstLine(worker.long_description);
   const stats = worker.recent_stats;
+  const description =
+    worker.archived && worker.archive_reason
+      ? worker.archive_reason
+      : worker.description || "No description.";
 
   return (
     <Card
-      className="group h-full hover:shadow-sm transition-shadow overflow-hidden"
+      className={`group ${CARD_HEIGHT} hover:shadow-sm transition-shadow overflow-hidden`}
       title={hoverDescription || undefined}
     >
       <Link href={`/workers/${worker.id}`} className="block h-full">
-      <CardContent className="h-full flex flex-col p-4 gap-1.5">
-        {/* Avatar + title row */}
-        <div className="flex items-start justify-between gap-3">
-          <WorkerAvatar seed={worker.id} name={worker.name} size="size-10" />
-          <div className="min-w-0 flex-1">
-            <h3 className={`font-medium text-[15px] leading-snug line-clamp-2 ${worker.archived ? "text-muted-foreground" : ""}`}>{worker.name}</h3>
+        <CardContent className="h-full flex flex-col p-4 gap-2">
+          {/* 1. Composed Langdock-style pill strip at the TOP — the start-node
+              (trigger) + connection brand logos. No letter-avatar: the pills +
+              title carry identity. Never visually empty (start node always
+              renders). */}
+          <div className="flex items-start justify-between gap-2">
             {worker.archived ? (
               <span
-                className="mt-1 inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1 py-0.5 text-muted-foreground"
+                className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
                 title="Archived"
-                aria-label="Archived"
               >
-                <Archive className="size-3" />
+                <Archive className="size-3.5" />
+                Archived
               </span>
-            ) : worker.is_example && (
-              <span className="mt-1 inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+            ) : (
+              <WorkerIconPills
+                connections={worker.connections}
+                triggerType={worker.trigger_type}
+                size="sm"
+              />
+            )}
+            {!worker.archived && (
+              <button
+                type="button"
+                title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onFavoriteToggle(worker.id);
+                }}
+                className={`size-7 -mt-0.5 -mr-1 flex items-center justify-center rounded transition-colors shrink-0 ${
+                  isFavorite
+                    ? "text-[var(--accent)] hover:opacity-80"
+                    : "text-muted-foreground/40 hover:text-[var(--accent)]"
+                }`}
+              >
+                <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
+              </button>
+            )}
+          </div>
+
+          {/* 2. Title (line-clamp-2) + inline Example/status badge. */}
+          <div className="flex items-start gap-2 min-w-0">
+            <h3
+              className={`font-medium text-[15px] leading-snug line-clamp-2 min-w-0 ${
+                worker.archived ? "text-muted-foreground" : ""
+              }`}
+            >
+              {worker.name}
+            </h3>
+            {!worker.archived && worker.is_example && (
+              <span className="mt-0.5 shrink-0 inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
                 Example
               </span>
             )}
           </div>
-          {!worker.archived && (
-            <button
-              type="button"
-              title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onFavoriteToggle(worker.id);
-              }}
-              className={`size-7 flex items-center justify-center rounded transition-colors shrink-0 ${
-                isFavorite
-                  ? "text-[var(--accent)] hover:opacity-80"
-                  : "text-muted-foreground/40 hover:text-[var(--accent)]"
-              }`}
-            >
-              <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
-            </button>
+
+          {!worker.archived && worker.status !== "healthy" && worker.status !== "ready" && worker.status && (
+            <CardStatusPill status={worker.status} />
           )}
-        </div>
 
-        {!worker.archived && <CardStatusPill status={worker.status} />}
+          {/* 3. Description — exactly 2 lines. */}
+          <p className="text-sm text-muted-foreground line-clamp-2">{description}</p>
 
-        <p className="text-sm text-muted-foreground line-clamp-2">
-          {worker.archived && worker.archive_reason
-            ? worker.archive_reason
-            : worker.description || "No description."}
-        </p>
-
-        {/* FIX 1 (Federico 2026-05-29): Langdock-grade icon-pill row. Real
-            full-color brand logos (reused BrandLogo / IconSprite) for declared
-            connections + a trigger glyph, as squircle pills with a +N overflow.
-            This is the single tasteful "what it uses" signal — NOT the prior
-            brand-logo wall + tag chips that were dropped for noise. Renders
-            nothing when the worker has no connections/trigger. */}
-        {!worker.archived && (
-          <WorkerIconPills
-            connections={worker.connections}
-            triggerType={worker.trigger_type}
-            size="sm"
-            className="pt-0.5"
-          />
-        )}
-
-        {/* Stable footer: single line, never changes height on hover (R1 —
-            the prior group-hover content swap grew the card on hover and
-            jumped the whole row). Show the richest stats we have, on one line. */}
-        {stats && (stats.last_run_at || stats.runs_7d > 0) && (
-          <p className="text-xs text-muted-foreground mt-auto truncate">
-            {stats.last_run_at ? `Last run ${formatRelativeTime(stats.last_run_at)}` : ""}
-            {stats.last_run_at && stats.runs_7d > 0 ? " · " : ""}
-            {stats.runs_7d > 0 ? `${stats.runs_7d} run${stats.runs_7d === 1 ? "" : "s"} in 7d` : ""}
-            {stats.success_rate_7d != null ? ` · ${Math.round(stats.success_rate_7d * 100)}% success` : ""}
-          </p>
-        )}
-      </CardContent>
+          {/* 4. Quiet footer — one line: relative last-run + a small success
+              bar (filled % of last-7d success). Replaces the dense
+              "N runs in 7d · X% success" sentence. */}
+          <CardFooterLine stats={stats} />
+        </CardContent>
       </Link>
     </Card>
+  );
+}
+
+function CardFooterLine({ stats }: { stats?: import("@/lib/types").RecentStats | null }) {
+  if (!stats || (!stats.last_run_at && stats.runs_7d === 0)) {
+    // Keep the footer slot present so card content lands at the same baseline.
+    return <div className="mt-auto h-4" aria-hidden />;
+  }
+  const pct =
+    stats.success_rate_7d != null ? Math.round(stats.success_rate_7d * 100) : null;
+  return (
+    <div className="mt-auto flex items-center gap-2 text-xs text-[var(--ink-soft)]">
+      <span className="truncate">
+        {stats.last_run_at ? formatRelativeTime(stats.last_run_at) : "no recent runs"}
+      </span>
+      {pct != null && (
+        <span className="ml-auto flex items-center gap-1.5 shrink-0" title={`${pct}% success (7d)`}>
+          <span className="relative h-1 w-12 overflow-hidden rounded-full bg-[var(--line-soft)]">
+            <span
+              className="absolute inset-y-0 left-0 rounded-full bg-[var(--success)]"
+              style={{ width: `${pct}%` }}
+            />
+          </span>
+          <span className="tabular-nums text-[var(--ink-mute)]">{pct}%</span>
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -666,17 +696,17 @@ function firstLine(value?: string): string {
 
 function WorkerCardSkeleton() {
   return (
-    <Card className="h-full overflow-hidden">
-      <CardContent className="p-4 space-y-1.5">
-        {/* Avatar + title row */}
+    <Card className={`${CARD_HEIGHT} overflow-hidden`}>
+      <CardContent className="h-full flex flex-col p-4 gap-2">
+        {/* Pill strip + star row */}
         <div className="flex items-start justify-between gap-2">
-          <Skeleton className="size-10 rounded-lg shrink-0" />
-          <Skeleton className="h-4 w-3/4 mt-1" />
-          <Skeleton className="size-5 rounded-full shrink-0" />
+          <Skeleton className="h-7 w-20 rounded-[var(--radius-squircle)]" />
+          <Skeleton className="size-5 rounded shrink-0" />
         </div>
+        <Skeleton className="h-4 w-3/4" />
         <Skeleton className="h-3 w-full" />
         <Skeleton className="h-3 w-2/3" />
-        <Skeleton className="h-3 w-20 mt-2" />
+        <Skeleton className="mt-auto h-3 w-24" />
       </CardContent>
     </Card>
   );
