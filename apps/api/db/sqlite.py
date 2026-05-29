@@ -1185,6 +1185,39 @@ class SqliteRunRepository:
         run = self.get(user_id=user_id, run_id=run_id)
         return run.get("bundle_snapshot_path") if run else None
 
+    def get_queued(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Return queued runs ordered by created_at (FIFO), up to *limit* rows.
+
+        Used by the queue drain loop in run_service.  Returns only rows whose
+        cancel_requested flag is 0 so that cancelled-before-dispatch runs are
+        skipped automatically.
+        """
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.id AS run_id, r.worker_id, r.input_json,
+                       w.owner_id AS user_id
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE r.status = 'queued' AND (r.cancel_requested = 0 OR r.cancel_requested IS NULL)
+                ORDER BY r.created_at ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def count_queued(self) -> int:
+        """Return the number of pending queued runs (not yet cancelled)."""
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS cnt FROM runs
+                WHERE status = 'queued' AND (cancel_requested = 0 OR cancel_requested IS NULL)
+                """,
+            ).fetchone()
+        return int(row["cnt"] or 0) if row else 0
+
 
 class SqliteConnectionRepository:
     _columns = """

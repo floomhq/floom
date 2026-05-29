@@ -97,10 +97,14 @@ from worker_registry import (
 from run_service import (
     create_run,
     fail_interrupted_runs_on_startup,
+    re_enqueue_queued_runs_on_startup,
     get_worker_config_for_run,
     start_run,
     update_run_status,
     request_active_run_shutdown,
+    start_drain_loop,
+    stop_drain_loop,
+    queued_run_position,
     InsufficientDiskSpaceError,
 )
 from run_service import register_sse_publisher, register_part_publisher
@@ -146,6 +150,8 @@ async def lifespan(app: FastAPI):
         bootstrap_user_id = _bootstrap_user_id()
         _reload_workers_for_user(bootstrap_user_id)
         fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
+        re_enqueue_queued_runs_on_startup()
+        start_drain_loop()
         from scheduler import start_scheduler
 
         start_scheduler()
@@ -154,6 +160,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     if deploy == "local":
+        stop_drain_loop(timeout=5.0)
         from scheduler import stop_scheduler
 
         stop_scheduler()
@@ -4901,10 +4908,16 @@ def cancel_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
-    """Request cancellation of an in-flight run.
+    """Request cancellation of an in-flight or queued run.
 
-    Sets cancel_requested=1 on the run row. The runner respects this between
+    For queued runs (not yet dispatched to a sandbox): immediately marks the
+    run as failed with error_code=cancelled_queued so no sandbox is ever
+    spawned.  Sets cancel_requested=1 first so the drain loop skips the row
+    if it is already past the get_queued() poll boundary.
+
+    For running runs: sets cancel_requested=1; the runner respects this between
     iterations (AgentDriver) or on the next status write (other drivers).
+
     Returns 404 if no cancellable run is visible, 200 if cancellation was
     recorded.
     """
@@ -4913,11 +4926,29 @@ def cancel_run(
         raise HTTPException(status_code=404, detail="Run not found")
     if row["status"] in _TERMINAL_RUN_STATUSES:
         raise HTTPException(status_code=404, detail="Run not found")
+
+    cancelled_at = now_iso()
     repos.runs.cancel(
         user_id=auth.user_id,
         run_id=run_id,
-        cancelled_at=now_iso(),
+        cancelled_at=cancelled_at,
     )
+
+    if row["status"] == RunStatus.QUEUED.value:
+        # Immediately fail the run so it does not linger in the queued state.
+        # The drain loop checks cancel_requested before dispatching, but marking
+        # it failed here is cleaner for callers that poll status directly.
+        update_run_status(
+            run_id,
+            RunStatus.FAILED.value,
+            error="Run was cancelled before execution started.",
+            error_code="cancelled_queued",
+            user_id=auth.user_id,
+            repos=repos,
+        )
+        logger.info("Cancelled queued run %s before dispatch", run_id)
+        return ActionResponse(status="cancelled", run_id=run_id)
+
     logger.info("Cancel requested for run %s", run_id)
     return ActionResponse(status="cancel_requested", run_id=run_id)
 
@@ -5127,6 +5158,11 @@ def get_run(
     ]
     transcript: List[Dict[str, Any]] = []
 
+    queue_position: Optional[int] = None
+    if run["status"] == RunStatus.QUEUED.value:
+        pos = queued_run_position(run_id)
+        queue_position = pos if pos > 0 else None
+
     return RunDetail(
         id=run["id"],
         worker_id=run["worker_id"],
@@ -5148,6 +5184,7 @@ def get_run(
         completed_at=run.get("completed_at"),
         duration_ms=run.get("duration_ms"),
         created_at=run.get("created_at"),
+        queue_position=queue_position,
     )
 
 
