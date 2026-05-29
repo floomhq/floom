@@ -137,7 +137,9 @@ export type RunPart =
   | { type: "tool-result"; callId: string; result: unknown; isError: boolean }
   | { type: "reasoning"; text: string }
   | { type: "step-start"; stepNumber: number }
-  | { type: "finish"; status: "completed" | "failed" | "timeout"; error?: string };
+  // Backend (run_service.py) also emits a "pending_approval" finish status when
+  // a HITL run parks for approval — it is a parked state, not a failure (G5 P3).
+  | { type: "finish"; status: "completed" | "failed" | "timeout" | "pending_approval"; error?: string };
 
 export interface OutputField {
   name: string;
