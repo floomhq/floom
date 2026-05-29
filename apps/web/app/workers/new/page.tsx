@@ -306,10 +306,10 @@ function NewWorkerContent() {
         Workers
       </Link>
       <div className="space-y-1.5">
-        <h1 className="text-xl font-semibold tracking-tight">What should Floom automate?</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Hire a new AI worker</h1>
         <p className="text-sm text-muted-foreground">
-          Describe a task in plain English. Floom will draft the worker, pick the right
-          integrations, and open the editor so you can review before running.
+          Describe the job in plain English. Floom drafts the worker, picks the right
+          integrations, and opens the editor so you can review before running.
         </p>
       </div>
 

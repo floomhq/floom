@@ -44,7 +44,7 @@ function CommandDialog({
         />
         <DialogPrimitive.Popup
           className={cn(
-            "fixed top-[20%] left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden rounded-none bg-popover p-0 text-popover-foreground ring-1 ring-foreground/10 shadow-pop duration-100 outline-none sm:max-w-xl data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            "fixed top-[20%] left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden rounded-[var(--radius-card)] bg-popover p-0 text-popover-foreground ring-1 ring-foreground/10 shadow-pop duration-100 outline-none sm:max-w-xl data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
             className,
           )}
         >

@@ -4,6 +4,28 @@ Status legend: OPEN / FIXING / FIXED (merged, unverified) / VERIFIED (confirmed 
 
 ---
 
+## 2026-05-29 UI regression sweep + Phase 4 polish (lane/ui-regression-sweep)
+
+5 regressions Federico surfaced + Phase 4 polish. Every fix verified with a
+live screenshot (broker desktop @1280 + raw-CDP mobile @375) before claiming
+done. Screenshots in `/tmp/wk-shots/`.
+
+| # | Issue | Sev | Status | Evidence |
+|---|---|---|---|---|
+| R1 | /workers cards changed size on hover → row layout jump | P1 | VERIFIED | CDP measure: card 235x230px identical before/after hover (0 change). Removed group-hover content swap; footer is one stable line. |
+| R2 | Workers/runs opened in a NEW TAB (regression) | P1 | VERIFIED | Removed `target="_blank"` from WorkersClient card link + OverviewDashboard activity/coming-up links. App-wide grep: only the genuinely-external output-renderer link keeps it. |
+| R3 | /workers/<id>#code Source tab EMPTY for all workers | P1 | VERIFIED | Root cause was BACKEND: `_worker_source_visible_to_api` hid source for ALL git-tracked workers (= every example). Opened the gate for PUBLIC_STOCK_WORKER_IDS + added frontend `deriveSourceFiles`. Verified e2e: /workers/opendraft#code renders worker.yml (4957B) + run.py (11696B = 11KB) + 88 files. (05b-opendraft-code-FIXED.png) |
+| R4 | /runs/<id> left panel scrolled into infinity | P1 | VERIFIED | Capped split pane at `max-h-[calc(100vh-13rem)]`; timeline + tab panes scroll internally. Full-page height with 200 logs: 713px desktop / 1205px mobile (bounded, not infinite). (06-run-detail-logs-FULLPAGE.png) |
+| R5 | /workers folder filter opened a new row → content jump | P1 | VERIFIED | Merged breadcrumb + folder chips into ONE wrapping row (min-h-7). Selecting a folder swaps content in place. (03-workers-folder-content.png — breadcrumb+chip at same y as the Folders row) |
+| B3 | Square corners on settings token box + Cmd-K | P2 | VERIFIED | Token box + paste input + Cmd-K dialog now rounded to radius tokens. (04-settings + 07-cmdk-radius.png) |
+| B9 | Mobile responsive pass @375px | P2 | VERIFIED | overview/workers/settings/run-detail @375 — no horizontal scroll, cards/filters/tabs stack, run pane stacks vertically <md. (m01-m04 shots) |
+| P1c | pending_approval rendered as "Running" spinner | P1 | VERIFIED (no change) | Already distinct: RunStatus + Overview statusMeta → "Awaiting approval", static dot, no spinner. |
+| P1d | raw Python dict error in run history | P1 | FIXED | `summarizeError` now also humanises raw dict / JSON errors with no "Error code:" prefix. |
+| P1e | non-employee hero copy on /workers/new | P1 | FIXED | "What should Floom automate?" → "Hire a new AI worker". /workers already "Your AI workers." |
+| B8 | archive affordance icon-only | P2 | N/A (no change) | No archive ACTION button exists in the UI (archive is server/CLI; UI only shows Restore). Card already shows archived as icon-only. The detail "Archived" badge is a status label, not an affordance — left labelled. Surfaced, not silently dropped. |
+
+---
+
 ## 2026-05-29 /connections data fidelity (lane/connections-data-fidelity, PR #233)
 
 #194 was marked done but the LIVE page still showed every original problem because

@@ -421,6 +421,16 @@ function summarizeError(error: string): string {
     const codeMatch = cleaned.match(/Error code:\s*(\d+)/i);
     if (codeMatch) return `Request error (code ${codeMatch[1]})`;
   }
+  // Raw dict / JSON with no "Error code:" prefix — pull the message out so
+  // the user never sees a raw Python dict (audit P1).
+  if (/^[{[]/.test(cleaned) || /['"]message['"]\s*:/.test(cleaned)) {
+    const msgMatch = cleaned.match(/['"]message['"]\s*:\s*['"]([^'"]{1,200})['"]/i);
+    if (msgMatch) {
+      const msg = msgMatch[1].trim();
+      return msg.length > 120 ? `${msg.slice(0, 117)}...` : msg;
+    }
+    if (/^[{[]/.test(cleaned)) return "Run failed (see run detail for the full error).";
+  }
   if (cleaned.length <= 120) return cleaned;
   return `${cleaned.slice(0, 117)}...`;
 }
