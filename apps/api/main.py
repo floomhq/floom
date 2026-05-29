@@ -269,6 +269,28 @@ _INTERNAL_WORKER_ID_PREFIXES = (
     "smoke-",
 )
 
+# 1.5.2: trigger sources that belong in the operator /runs view. Everything
+# else (audit, test, smoke runs like s35_concurrency_*, synthetic data, etc.)
+# is internal telemetry and is hidden from the default view. Data is preserved
+# and reachable via GET /runs?include_system=true.
+_OPERATOR_TRIGGER_SOURCES = frozenset({
+    "manual",
+    "schedule",
+    "approval",
+    "composio",
+    "webhook",
+    "workspace-agent",
+})
+
+
+def _is_operator_run(row: Any) -> bool:
+    source = (row_to_dict(row).get("trigger_source") or "").strip().lower()
+    # Treat unknown/empty as operator-facing only if explicitly allowlisted;
+    # blank trigger_source is legacy "manual" and stays visible.
+    if not source:
+        return True
+    return source in _OPERATOR_TRIGGER_SOURCES
+
 
 def _cors_allowed_origins() -> List[str]:
     configured = os.environ.get("ALLOWED_ORIGINS", "")
@@ -689,6 +711,59 @@ _TERMINAL_STATUSES = frozenset({
     RunStatus.COMPLETED.value,
     RunStatus.FAILED.value,
 })
+
+
+# ---------------------------------------------------------------------------
+# Per-user concurrent SSE stream cap (Round 16 DoS finding)
+# ---------------------------------------------------------------------------
+# Unlimited concurrent SSE streams (/runs/<id>/stream + /runs/<id>/events) are
+# a DoS vector: each open stream holds a connection + queue + worker slot. Cap
+# the number of simultaneous streams per user with a simple in-process counter
+# keyed by user_id. The slot is always released on disconnect via the
+# contextmanager's finally block, so a dropped client frees its slot.
+_sse_user_stream_counts: Dict[str, int] = {}
+_sse_stream_count_lock = threading.Lock()
+
+
+def _max_concurrent_streams() -> int:
+    try:
+        return max(1, int(os.environ.get("WORKEROS_MAX_CONCURRENT_STREAMS", "10")))
+    except (TypeError, ValueError):
+        return 10
+
+
+def _sse_stream_acquire(user_id: str) -> str:
+    """Reserve a per-user SSE stream slot or raise 429 if the cap is exceeded.
+
+    Returns the registry key to pass to _sse_stream_release. Acquisition happens
+    synchronously in the endpoint body so the 429 is returned before any
+    StreamingResponse is constructed.
+    """
+    cap = _max_concurrent_streams()
+    key = user_id or "anonymous"
+    with _sse_stream_count_lock:
+        current = _sse_user_stream_counts.get(key, 0)
+        if current >= cap:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many concurrent streams. Close existing streams and retry.",
+            )
+        _sse_user_stream_counts[key] = current + 1
+    return key
+
+
+def _sse_stream_release(key: str) -> None:
+    """Free a previously reserved per-user SSE stream slot.
+
+    Called from the generator's finally block so a dropped/disconnected client
+    always frees its slot.
+    """
+    with _sse_stream_count_lock:
+        remaining = _sse_user_stream_counts.get(key, 0) - 1
+        if remaining <= 0:
+            _sse_user_stream_counts.pop(key, None)
+        else:
+            _sse_user_stream_counts[key] = remaining
 
 
 def _sse_publish(run_id: str, event: Dict[str, Any]) -> None:
@@ -1793,6 +1868,27 @@ def _list_visible_workers(
     return list(visible.values())
 
 
+def _list_operator_workers(
+    *,
+    user_id: str,
+    repos: Repositories,
+    use_cache: bool = True,
+) -> List[Dict[str, Any]]:
+    """Workers shown in the operator's default view.
+
+    Same filter as the default GET /workers view: visible (non-hidden) workers,
+    minus system_worker:true and archived. Shared by /workers and the overview
+    'Workers active' count so the two numbers cannot drift (1.5.4).
+    """
+    workers = _list_visible_workers(user_id=user_id, repos=repos, use_cache=use_cache)
+    workers = [
+        w for w in workers
+        if not (w.get("manifest") or {}).get("system_worker", False)
+    ]
+    workers = [w for w in workers if not w.get("archived", False)]
+    return workers
+
+
 def _get_db_worker(
     worker_id: str,
     *,
@@ -1805,6 +1901,22 @@ def _get_db_worker(
         return None
 
 
+def _archived_tracked_worker(worker_id: str) -> Optional[Dict[str, Any]]:
+    """Return a tracked worker's filesystem record iff it is archived.
+
+    Archived workers are intentionally inactive but NOT deleted: the detail
+    page must still render them (archived badge + reason + Restore) instead of
+    404ing (1.5.3). Only archived workers get this fallback — other hidden
+    tracked workers stay hidden.
+    """
+    if worker_id not in _tracked_worker_ids():
+        return None
+    worker = get_worker(worker_id)
+    if worker is not None and worker.get("archived"):
+        return worker
+    return None
+
+
 def _get_visible_worker(
     worker_id: str,
     *,
@@ -1814,9 +1926,20 @@ def _get_visible_worker(
     worker = _get_db_worker(worker_id, user_id=user_id, repos=repos)
     if worker is not None:
         if _worker_hidden_from_api(worker["id"]):
+            # Archived workers stay reachable for detail rendering (not 404).
+            if worker.get("archived"):
+                return worker
+            archived = _archived_tracked_worker(worker["id"])
+            if archived is not None:
+                return archived
             return None
         return worker
     if _worker_hidden_from_api(worker_id):
+        # 1.5.3: archived tracked workers must render, not 404. Archived means
+        # inactive, not deleted.
+        archived = _archived_tracked_worker(worker_id)
+        if archived is not None:
+            return archived
         return None
     if _shared_filesystem_fallback_allowed() or worker_id in PUBLIC_STOCK_WORKER_IDS:
         return get_worker(worker_id)
@@ -1852,6 +1975,7 @@ def _list_visible_runs(
     until: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    include_system: bool = False,
 ) -> tuple[list[Any], int]:
     batch_size = max(limit, 100)
     raw_offset = 0
@@ -1874,6 +1998,10 @@ def _list_visible_runs(
         raw_offset += len(rows)
         for row in rows:
             if not _run_visible_to_api(row, user_id=user_id, repos=repos):
+                continue
+            # 1.5.2: hide audit/system/test telemetry from the default
+            # operator view unless explicitly requested.
+            if not include_system and not _is_operator_run(row):
                 continue
             visible_total += 1
             if visible_total <= offset:
@@ -2929,6 +3057,8 @@ def list_workers(
             if not (w.get("manifest") or {}).get("system_worker", False)
         ]
     # Filter out archived workers unless explicitly requested.
+    # NOTE: when include_system and include_archived are both False this matches
+    # _list_operator_workers exactly (shared filter, see 1.5.4).
     if not include_archived:
         workers = [w for w in workers if not w.get("archived", False)]
     worker_ids = [w["id"] for w in workers]
@@ -5225,6 +5355,10 @@ def list_runs(
     until: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    include_system: bool = Query(
+        False,
+        description="Include internal/system runs (audit, test, smoke). Hidden by default.",
+    ),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[RunSummary]:
@@ -5251,6 +5385,7 @@ def list_runs(
         until=until_dt.isoformat() if until_dt else None,
         limit=limit,
         offset=offset,
+        include_system=include_system,
     )
     response.headers["X-Total-Count"] = str(visible_total)
     return [_make_run_summary(r) for r in visible_rows]
@@ -5460,6 +5595,15 @@ def approve_run(
         follow_up_run_id=follow_up_run_id,
     )
 
+    # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
+    # state. Without this the original run is stuck at pending_approval forever
+    # (zombie approval); the decision is recorded in the approvals table.
+    repos.runs.update_status(
+        user_id=auth.user_id,
+        run_id=run_id,
+        status=RunStatus.COMPLETED.value,
+    )
+
     # Kick off the follow-up run
     start_run(follow_up_run_id, worker_id, follow_up_inputs, user_id=auth.user_id, repos=repos)
 
@@ -5500,6 +5644,15 @@ def reject_run(
         run_id=run_id,
         decided_at=decided_at,
         reason=body.reason,
+    )
+
+    # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
+    # state so it is not stuck forever (zombie approval). The rejection itself
+    # is recorded in the approvals table (status='rejected' + reason).
+    repos.runs.update_status(
+        user_id=auth.user_id,
+        run_id=run_id,
+        status=RunStatus.COMPLETED.value,
     )
 
     _sse_publish(run_id, {
@@ -5765,51 +5918,58 @@ async def stream_run_parts(
 
     last_seen = _parse_last_event_id(request.headers.get("last-event-id"))
 
+    # Per-user concurrent-stream cap (Round 16 DoS finding). Acquire
+    # synchronously so the 429 is returned before the StreamingResponse.
+    stream_slot = _sse_stream_acquire(auth.user_id)
+
     async def event_generator():
-        snapshot = _run_part_snapshot(run_id)
-        if snapshot is None:
-            final_part = _finish_part_from_run_row(row)
-            if final_part is not None:
-                # #188: the in-memory part buffer is gone (terminal run past its
-                # TTL, or a fresh server process). Replay persisted log rows so
-                # the client reconstructs the transcript instead of receiving a
-                # bare finish event.
-                event_id = 0
-                for log_part in _log_replay_parts(repos, auth.user_id, run_id):
-                    if event_id > last_seen:
-                        yield _format_run_part_sse(event_id, log_part)
-                    event_id += 1
-                if event_id > last_seen:
-                    yield _format_run_part_sse(event_id, final_part)
-                return
-            snapshot = {"parts": [], "finished": False}
-
-        for event_id, part in snapshot["parts"]:
-            if event_id > last_seen:
-                yield _format_run_part_sse(event_id, part)
-
-        if snapshot["finished"]:
-            return
-
-        q: asyncio.Queue = asyncio.Queue(maxsize=512)
-        loop = asyncio.get_running_loop()
-        _run_part_register(run_id, q, loop)
         try:
-            while True:
-                if await request.is_disconnected():
-                    break
+            snapshot = _run_part_snapshot(run_id)
+            if snapshot is None:
+                final_part = _finish_part_from_run_row(row)
+                if final_part is not None:
+                    # #188: the in-memory part buffer is gone (terminal run past its
+                    # TTL, or a fresh server process). Replay persisted log rows so
+                    # the client reconstructs the transcript instead of receiving a
+                    # bare finish event.
+                    event_id = 0
+                    for log_part in _log_replay_parts(repos, auth.user_id, run_id):
+                        if event_id > last_seen:
+                            yield _format_run_part_sse(event_id, log_part)
+                        event_id += 1
+                    if event_id > last_seen:
+                        yield _format_run_part_sse(event_id, final_part)
+                    return
+                snapshot = {"parts": [], "finished": False}
 
-                try:
-                    event_id, part = await asyncio.wait_for(q.get(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-                    continue
+            for event_id, part in snapshot["parts"]:
+                if event_id > last_seen:
+                    yield _format_run_part_sse(event_id, part)
 
-                yield _format_run_part_sse(event_id, part)
-                if _run_part_is_finish(part):
-                    break
+            if snapshot["finished"]:
+                return
+
+            q: asyncio.Queue = asyncio.Queue(maxsize=512)
+            loop = asyncio.get_running_loop()
+            _run_part_register(run_id, q, loop)
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+
+                    try:
+                        event_id, part = await asyncio.wait_for(q.get(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    yield _format_run_part_sse(event_id, part)
+                    if _run_part_is_finish(part):
+                        break
+            finally:
+                _run_part_cleanup(run_id, q)
         finally:
-            _run_part_cleanup(run_id, q)
+            _sse_stream_release(stream_slot)
 
     return StreamingResponse(
         event_generator(),
@@ -5849,51 +6009,58 @@ async def stream_run_events(
     initial_status = run_row["status"]
     already_terminal = initial_status in _TERMINAL_STATUSES
 
+    # Per-user concurrent-stream cap (Round 16 DoS finding). Acquire
+    # synchronously so the 429 is returned before the StreamingResponse.
+    stream_slot = _sse_stream_acquire(auth.user_id)
+
     async def event_generator():
-        q: asyncio.Queue = asyncio.Queue(maxsize=512)
-
-        # If run already terminal, emit current state and close immediately
-        if already_terminal:
-            final_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
-            if final_row:
-                evt = _public_sse_event({
-                    "type": "status",
-                    "run_id": run_id,
-                    "status": final_row["status"],
-                    "error": final_row["error"],
-                    "completed_at": final_row["completed_at"],
-                })
-                yield f"data: {json.dumps(evt)}\n\n"
-            yield "data: {\"type\": \"close\"}\n\n"
-            return
-
-        # Register the consumer queue with its bound event loop
-        loop = asyncio.get_running_loop()
-        with _sse_lock:
-            _sse_queues.setdefault(run_id, []).append((q, loop))
-
         try:
-            while True:
-                # Check for client disconnect
-                if await request.is_disconnected():
-                    break
+            q: asyncio.Queue = asyncio.Queue(maxsize=512)
 
-                try:
-                    event = await asyncio.wait_for(q.get(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    # Send keepalive comment
-                    yield ": keepalive\n\n"
-                    continue
+            # If run already terminal, emit current state and close immediately
+            if already_terminal:
+                final_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+                if final_row:
+                    evt = _public_sse_event({
+                        "type": "status",
+                        "run_id": run_id,
+                        "status": final_row["status"],
+                        "error": final_row["error"],
+                        "completed_at": final_row["completed_at"],
+                    })
+                    yield f"data: {json.dumps(evt)}\n\n"
+                yield "data: {\"type\": \"close\"}\n\n"
+                return
 
-                yield f"data: {json.dumps(event)}\n\n"
+            # Register the consumer queue with its bound event loop
+            loop = asyncio.get_running_loop()
+            with _sse_lock:
+                _sse_queues.setdefault(run_id, []).append((q, loop))
 
-                # Close stream if run reached terminal state
-                evt_type = event.get("type")
-                evt_status = event.get("status", "")
-                if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
-                    break
+            try:
+                while True:
+                    # Check for client disconnect
+                    if await request.is_disconnected():
+                        break
+
+                    try:
+                        event = await asyncio.wait_for(q.get(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        # Send keepalive comment
+                        yield ": keepalive\n\n"
+                        continue
+
+                    yield f"data: {json.dumps(event)}\n\n"
+
+                    # Close stream if run reached terminal state
+                    evt_type = event.get("type")
+                    evt_status = event.get("status", "")
+                    if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
+                        break
+            finally:
+                _sse_cleanup(run_id, q)
         finally:
-            _sse_cleanup(run_id, q)
+            _sse_stream_release(stream_slot)
 
     return StreamingResponse(
         event_generator(),
@@ -7837,8 +8004,24 @@ def system_overview(
             )
         )
 
-    workers = repos.workers.list(user_id=auth.user_id)
-    active_workers_count = sum(1 for row in workers if row.get("enabled") and not _overview_worker_paused(row))
+    # 1.5.4: use the SAME operator-visible filter as the default GET /workers
+    # view so the overview 'Workers active' count matches the /workers list
+    # (previously this used the unfiltered repos.workers.list() which counted
+    # hidden/system/internal workers, e.g. 24 vs 11). Prefer the DB row (which
+    # carries `enabled`) for each operator-visible worker, falling back to the
+    # filesystem record for stock workers that have no DB row yet, so the
+    # enabled/paused logic stays correct and the total equals /workers.
+    _db_workers_by_id = {
+        row["id"]: row
+        for row in repos.workers.list(user_id=auth.user_id)
+        if row.get("id")
+    }
+    workers = [
+        _db_workers_by_id.get(w["id"], w)
+        for w in _list_operator_workers(user_id=auth.user_id, repos=repos)
+        if w.get("id")
+    ]
+    active_workers_count = sum(1 for row in workers if not _overview_worker_paused(row))
     paused_workers_count = max(0, len(workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
 
