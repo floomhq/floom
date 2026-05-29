@@ -112,6 +112,20 @@ def _find_bundle_artifact(run_id: str, artifacts: list[Dict[str, Any]]) -> Optio
     return fallback if fallback.is_file() else None
 
 
+def _read_authored_bundle(
+    run_id: str, artifacts: list[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Re-read the worker-author bundle.json (for the post-registration smoke)."""
+    bundle_path = _find_bundle_artifact(run_id, artifacts)
+    if bundle_path is None:
+        return None
+    try:
+        data = json.loads(bundle_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None]) -> str:
     """Strip optional metadata that violates the WorkerContract schema so an
     otherwise-valid drafted worker still registers.
@@ -249,6 +263,318 @@ def _register_authored_worker(
     )
     log_fn(f"Registered worker {worker_id!r} from drafted bundle")
     return worker_id
+
+
+# ---------------------------------------------------------------------------
+# Post-generation smoke + bounded repair (the wedge safety net, 2026-05-29)
+# ---------------------------------------------------------------------------
+# A generated SCRIPT-mode worker must be PROVEN to run before the operator is
+# told it is ready. After registration we run ONE real E2B smoke execution with
+# the bundle's sample input. If it fails with a code-class error, we make a
+# bounded repair pass (max 2): feed the run.py + the failure to a focused model
+# call, rewrite run.py on disk, re-smoke. We never loop unbounded, never spawn
+# more than one sandbox at a time (the smoke runs inline on the author run's
+# already-acquired execution slot), and never silently ship a broken worker —
+# the outcome is recorded on the author run output as ``smoke``.
+
+_MAX_SMOKE_REPAIRS = 2
+
+# Failure error_codes that mean the worker's own code is broken (worth a repair
+# attempt). Setup/auth/secret/connection failures are NOT code bugs.
+_SMOKE_CODE_FAILURE_CODES = frozenset(
+    {"execution_error", "e2b_sandbox_error", "missing_result"}
+)
+
+_SMOKE_REPAIR_SYSTEM_PROMPT = (
+    "You fix Workeros script-mode worker run.py files. The script runs as "
+    "`python run.py` in an E2B sandbox and MUST:\n"
+    "- read inputs.json via json.load(open('inputs.json'));\n"
+    "- treat SCALAR inputs as the literal value inline (never open() them) and "
+    "FILE inputs as a relative path under inputs/ (open() that path);\n"
+    "- import EVERY module it references (os, json, csv, io, re, statistics, ...);\n"
+    "- load secrets from os.environ after load_dotenv('.env.local');\n"
+    "- write output files under out/ (mkdir it);\n"
+    "- write result.json with {\"status\":\"success\"|\"error\",\"outputs\":"
+    "{<name>:\"out/<file>\"},\"artifacts\":[{\"name\",\"relative_path\",\"type\"}],"
+    "\"error\":<msg on error>} on BOTH success and error paths;\n"
+    "- end with `if __name__ == \"__main__\": main()`.\n"
+    "Return ONLY the corrected, complete run.py file. No markdown fences, no "
+    "commentary."
+)
+
+
+def _strip_code_fences(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    return stripped
+
+
+def _build_smoke_inputs(
+    config: WorkerConfig,
+    bundle: Dict[str, Any],
+    tmp_dir: Path,
+) -> Dict[str, Any]:
+    """Build inputs for the smoke run from the bundle's sample input.
+
+    Scalar inputs use the sample literal (or a deterministic default). File
+    inputs are materialised as a temp file (the driver only needs an absolute
+    local file path) seeded with the sample value or a small placeholder.
+    """
+    sample: Dict[str, Any] = {}
+    raw_sample = bundle.get("sample_input_json")
+    if isinstance(raw_sample, str) and raw_sample.strip():
+        try:
+            parsed = json.loads(raw_sample)
+            if isinstance(parsed, dict):
+                sample = parsed
+        except json.JSONDecodeError:
+            sample = {}
+    if not sample and isinstance(bundle.get("example_input"), dict):
+        sample = dict(bundle["example_input"])
+
+    inputs: Dict[str, Any] = {}
+    for inp in config.inputs:
+        is_file = (inp.type == "file") or (getattr(inp, "kind", None) == "file")
+        if is_file:
+            seed = sample.get(inp.name)
+            content = seed if isinstance(seed, str) and seed.strip() else "sample,value\n1,2\n"
+            staged = tmp_dir / f"{inp.name}.dat"
+            staged.write_text(content, encoding="utf-8")
+            inputs[inp.name] = str(staged.resolve())
+            continue
+        if inp.name in sample:
+            inputs[inp.name] = sample[inp.name]
+        elif inp.default is not None:
+            inputs[inp.name] = inp.default
+        elif inp.required:
+            # Deterministic, type-appropriate placeholder so a required scalar
+            # never blocks the smoke on a missing-input gate.
+            inputs[inp.name] = "1" if inp.type == "number" else "sample"
+    return inputs
+
+
+def _repair_run_py(
+    *,
+    run_code: str,
+    failure: str,
+    secrets: Dict[str, str],
+    log_fn: Callable[..., None],
+) -> Optional[str]:
+    """Ask a focused model call to fix a broken script-mode run.py.
+
+    Returns the corrected file, or None if no key / call failed / no change.
+    """
+    api_key = secrets.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        log_fn("Smoke repair skipped: no OPENAI_API_KEY available", level="warning")
+        return None
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": _SMOKE_REPAIR_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        "This run.py failed its first run with:\n"
+                        f"{failure[:1500]}\n\n"
+                        "Here is the current run.py:\n\n"
+                        f"{run_code[:8000]}\n\n"
+                        "Return the corrected complete run.py."
+                    ),
+                },
+            ],
+            temperature=0.0,
+            max_tokens=4000,
+        )
+        fixed = _strip_code_fences(resp.choices[0].message.content or "")
+    except Exception as exc:  # pragma: no cover - network/SDK variance
+        log_fn(f"Smoke repair model call failed: {exc}", level="warning")
+        return None
+
+    if not fixed or fixed.strip() == run_code.strip():
+        return None
+    # Reject output that is not syntactically valid Python — never write a worse
+    # file over a bad one.
+    try:
+        import ast
+
+        ast.parse(fixed)
+    except SyntaxError:
+        log_fn("Smoke repair produced invalid Python; discarding", level="warning")
+        return None
+    return fixed
+
+
+def _smoke_and_repair_generated_worker(
+    worker_id: str,
+    bundle: Dict[str, Any],
+    *,
+    user_id: str | None,
+    repos: Repositories | None,
+    log_fn: Callable[..., None],
+) -> Dict[str, Any]:
+    """Prove a generated SCRIPT-mode worker runs; repair (bounded) if it doesn't.
+
+    Returns a small dict suitable for the author run output ``smoke`` field:
+      {"status": "passed"|"failed"|"skipped", "reason": <str>, "repairs": <int>}
+    Never raises — a smoke failure must not crash the author run.
+    """
+    repos_obj = _repos(repos)
+    loaded = _load_worker_recipe(worker_id, repos_obj)
+    if not loaded:
+        return {"status": "skipped", "reason": "worker recipe not found"}
+    config = loaded[1]
+
+    runtime = config.runtime
+    mode = runtime.mode if runtime else "pure-script"
+    entry = (runtime.entrypoint if runtime else "") or ""
+    is_script = mode in ("pure-script", "hybrid") and entry.lower().endswith(
+        (".py", ".sh", ".js")
+    )
+    if not is_script:
+        return {"status": "skipped", "reason": "not a script-mode worker"}
+
+    secrets = get_secrets_for_worker(worker_id, user_id=user_id, repos=repos_obj)
+    missing = [s for s in config.secrets if s not in secrets]
+    if missing:
+        # Can't prove a run without its credentials; surface, don't fail.
+        reason = f"needs a credential before it can run ({', '.join(missing)})"
+        log_fn(f"Smoke skipped — generated worker {reason}", level="warning")
+        return {"status": "skipped", "reason": reason}
+
+    connection_ids: Dict[str, str] = {}
+    if config.connections:
+        return {
+            "status": "skipped",
+            "reason": "needs a connected account before it can run",
+        }
+
+    worker_dir = WORKERS_DIR / worker_id
+    run_py_path = worker_dir / "run.py"
+
+    repairs = 0
+    last_failure = ""
+    tmp_root = Path(ARTIFACTS_DIR) / f".smoke-{uuid.uuid4().hex[:12]}"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    try:
+        runner = runtime.runner if runtime else "local"
+        timeout_seconds = (
+            runtime.limits.timeout_seconds
+            if runtime and runtime.limits
+            else 120
+        )
+        # Cap the smoke generously below a normal run; a runnable worker proves
+        # itself fast, and we don't want the smoke to dominate the author run.
+        timeout_seconds = min(int(timeout_seconds), 180)
+
+        while True:
+            smoke_inputs = _build_smoke_inputs(config, bundle, tmp_root)
+            smoke_run_id = f"smoke_{uuid.uuid4().hex[:16]}"
+
+            def _smoke_log(msg: str, level: str = "debug") -> None:
+                log_fn(f"[smoke] {msg}", level=level)
+
+            try:
+                driver = get_sandbox_driver(runner, config=config)
+                with use_context_scope(context_scope_for_user(user_id)):
+                    result = driver.run(
+                        worker_id=worker_id,
+                        run_id=smoke_run_id,
+                        inputs=smoke_inputs,
+                        secrets=secrets,
+                        log_fn=_smoke_log,
+                        trace_id=f"smoke_{uuid.uuid4().hex[:12]}",
+                        timeout_seconds=timeout_seconds,
+                        config=config,
+                        connection_ids=connection_ids,
+                        user_id=user_id,
+                    )
+            except Exception as exc:  # pragma: no cover - driver/infra variance
+                last_failure = str(exc)
+                log_fn(f"Smoke run raised: {exc}", level="warning")
+                result = None
+
+            if result is not None and result.status not in ("error", "failed"):
+                msg = (
+                    "Smoke passed — generated worker ran successfully"
+                    + (f" after {repairs} repair(s)" if repairs else "")
+                )
+                log_fn(msg)
+                return {"status": "passed", "reason": "", "repairs": repairs}
+
+            # Failure: decide whether it's a code bug worth repairing.
+            if result is not None:
+                last_failure = (
+                    f"{result.error or 'run failed'} "
+                    f"(error_code={result.error_code or 'unknown'})"
+                )
+                code_failure = (result.error_code or "").lower() in _SMOKE_CODE_FAILURE_CODES
+            else:
+                code_failure = True  # driver raised; treat as code-class
+
+            if not code_failure or repairs >= _MAX_SMOKE_REPAIRS:
+                log_fn(
+                    f"Smoke failed — generated worker did not run on first try: {last_failure}",
+                    level="warning",
+                )
+                return {
+                    "status": "failed",
+                    "reason": last_failure or "first run failed",
+                    "repairs": repairs,
+                }
+
+            # Bounded repair pass.
+            current_code = ""
+            try:
+                current_code = run_py_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+            if not current_code:
+                return {
+                    "status": "failed",
+                    "reason": last_failure or "first run failed",
+                    "repairs": repairs,
+                }
+
+            fixed = _repair_run_py(
+                run_code=current_code,
+                failure=last_failure,
+                secrets=secrets,
+                log_fn=log_fn,
+            )
+            if not fixed:
+                return {
+                    "status": "failed",
+                    "reason": last_failure or "first run failed",
+                    "repairs": repairs,
+                }
+
+            run_py_path.write_text(fixed, encoding="utf-8")
+            # Keep the registered bundle + DB recipe in sync with the repaired file.
+            try:
+                bundle["run_code"] = fixed
+                from worker_registry import invalidate_worker_cache as _invalidate
+
+                _invalidate()
+            except Exception:
+                pass
+            loaded = _load_worker_recipe(worker_id, repos_obj) or loaded
+            config = loaded[1]
+            repairs += 1
+            log_fn(f"Smoke repair {repairs}/{_MAX_SMOKE_REPAIRS} applied; re-running", level="info")
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
 
 # ---------------------------------------------------------------------------
 # SSE event publisher hook
@@ -1435,6 +1761,29 @@ def execute_run(
                     # already-terminal SSE event does not carry custom fields).
                     outputs = dict(outputs or {})
                     outputs["created_worker_id"] = created_worker_id
+
+                    # Wedge safety net: prove the generated SCRIPT-mode worker
+                    # actually RUNS (and bounded-repair it if not) before telling
+                    # the operator it is ready. Inline on this run's execution
+                    # slot — no extra concurrency. Never fails the author run.
+                    try:
+                        smoke_bundle = _read_authored_bundle(run_id, artifacts)
+                        smoke = _smoke_and_repair_generated_worker(
+                            created_worker_id,
+                            smoke_bundle or {},
+                            user_id=owner_id,
+                            repos=repos_obj,
+                            log_fn=log_fn,
+                        )
+                        outputs["smoke"] = smoke
+                    except Exception as smoke_exc:
+                        logger.exception(
+                            "Smoke check failed for generated worker %s", created_worker_id
+                        )
+                        log_fn(
+                            f"Could not smoke-test the generated worker: {smoke_exc}",
+                            level="warning",
+                        )
             except Exception as exc:
                 # Never fail the run on registration trouble — the bundle is
                 # still viewable. Log so the operator/engineer can see why.
