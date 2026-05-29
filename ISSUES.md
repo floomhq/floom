@@ -1234,3 +1234,56 @@ PR #245 (squash `9965187`, merged to main). Worktree `/tmp/wk-batchC-connections
 **Root cause:** `apps/web/components/CliCommandPanel.tsx` printed `npm i -g @floomhq/workeros` then `floom login`. Per `apps/mcp/package.json` the package's `bin` entries are `workeros` and `workeros-mcp` — there is no `floom` binary, so the displayed command does not exist after install. (The CLI brands its help text as `floom`, but that is not an installed executable.)
 **Fix:** the CLI snippet now reads `workeros login` (the real installed binary, matching the package name).
 **Status:** VERIFIED LIVE — `/settings` → API access → CLI tab shows `npm i -g @floomhq/workeros` then `workeros login`.
+
+## Batch A — worker-detail + runs defects (from `docs/audits/all-issues-discovery-2026-05-29.md`) (VERIFIED 2026-05-29)
+
+PR #244 (squash `8b0a674`, merged to main) + follow-up PR #249 (squash `4c5b859`). Worktrees `/tmp/wk-batchA-workerdetail` and `/tmp/wk-batchA-followup` off `66d1fa5`/`origin/main`, rebased pre-merge, `gh auth=federicodeponte`, `baseRefName=main`. No backend touched (all frontend; P0-1 backend was already deployed via sweep #239) → no `ops/deploy-api.sh`. Frontend auto-aliased `workers.floom.dev` → latest prod deploy (`workeros-1z9e9x83u`, verified). Live verification via AX41 Browser Broker pool-e + `curl` against `workers-api.floom.dev` (reachable, not CF-blocked). Screenshots in `docs/audits/shots-batchA-2026-05-29/`. Scope respected: did NOT touch `/connections`, `/contexts`, `/overview`, `/workers` (list) (other batches).
+
+### P0-1 — Worker Source/Code tab showed "No files found" for every worker
+**Root cause / status:** backend already fixed + deployed (sweep #239): `GET /workers/<id>` returns `files[]` populated WITH content (curl: `csv_enricher`=4 files, `opendraft`=88, each `content` non-null). Frontend already reads `worker.files` (+ a `deriveSourceFiles` fallback that synthesises files from `manifest_yaml`/`run_py_content`/`skill_md_content` when `files[]` is empty). No further code change needed.
+**Status:** VERIFIED LIVE — `/workers/csv_enricher#source` (broker pool-e) renders the Files list (worker.yml / SKILL.md / run.py / requirements.txt) with SKILL.md content shown — not "No files found". Screenshot: `docs/audits/shots-batchA-2026-05-29/P0-1-source-csv_enricher.png`. Curl: `csv_enricher` files len 4 all `content` populated.
+
+### P1-1 — Worker detail flaky deep-link "Couldn't load worker — Retry"
+**Root cause:** the load effect surfaced the error state on any non-404 fetch failure, including a transient cold-proxy/network blip; "Retry" recovered it (proving it was a race, not a 404).
+**Fix:** `fetchWorkerWithRetry` retries the worker fetch up to 3 attempts with 250ms·n backoff before surfacing the error; a real 404 short-circuits straight to the not-found state.
+**Status:** FIXED (verified by build + code; transient race not deterministically reproducible live). Typecheck + `next build` clean.
+
+### P1-2 — run "completed" but PDF/DOCX export shown as bare `false`
+**Root cause:** `OutputSummary` rendered scalar `run.output` entries (incl. `pdf_export_success`/`docx_export_success`) via `String(value)` → literal "false". Ground truth from the run's `export_report.json`: `requested:false` — so `false` means "not requested", NOT a failure.
+**Fix:** `*_export_success` keys are pulled out of the scalar grid and rendered as a clear human pill (`PDF export: not generated` / `: generated` when true), never bare `false`. A real failure surfaces via `run.error`/logs, not a silent boolean.
+**Status:** VERIFIED LIVE — `/runs/run_192471d3a456` Result tab shows muted pills "PDF export: not generated" / "DOCX export: not generated". Screenshot: `docs/audits/shots-batchA-2026-05-29/P1-2-P2-1-P1-3-run-result-tab.png`.
+
+### P1-3 — internal infra telemetry leaked into the operator Logs view
+**Root cause:** the Logs tab + Result-tab Recent-logs preview rendered `run.logs` raw, exposing `[e2b] Spawning sandbox`, `[redacted-metadata]`/`[redacted-id]` placeholders, and per-file `[e2b] Uploaded …` chatter.
+**Fix:** `lib/run-format.ts` `operatorLogs()` filters sandbox-provider lines (`[e2b]`/`[firecracker]`/…), `[redacted-*]` placeholders, and low-level lifecycle noise out of BOTH the Logs tab and the Result-tab preview. The full unfiltered stream stays in the Raw tab; the Logs tab shows a "N internal log lines hidden" note.
+**Status:** VERIFIED LIVE — Logs tab shows only `Run started` / `Output generated` / `Run completed` + "1065 internal log lines hidden. See the Raw tab"; Result-tab Recent logs likewise clean (no `[e2b]`/`[redacted]`). Screenshots: `docs/audits/shots-batchA-2026-05-29/P1-3-logs-tab-filtered.png`, `P1-2-P2-1-P1-3-run-result-tab.png`.
+
+### P1-4 — raw internal error codes leaked into operator views
+**Root cause:** machine error prefixes (`missing_connection: github`, `output_validation_failed: …`) rendered verbatim on `/runs` rows + worker History.
+**Fix:** `lib/run-format.ts` `humanizeRunError()` maps coded prefixes to operator language (`Missing connection: GitHub`, `Output validation failed: …`) and title-cases known service slugs; both `/runs` (`summarizeError`) and the History tab route through it.
+**Status:** VERIFIED LIVE — `/runs` failed GitHub Digest rows show "Missing connection: GitHub"; `/workers/csv_enricher#history` failed run shows "Output validation failed: enriched_csv file is too small (82 bytes, minimum 100)". Screenshots: `docs/audits/shots-batchA-2026-05-29/P1-4-runs-list-humanized-errors.png`, `P2-4-history-completed-pill.png`.
+
+### P2-1 — run-detail Output stat labels were raw uppercased JSON keys
+**Root cause:** `humanizeKey` only replaced underscores; the CSS `uppercase` then produced `WORD_COUNT` → `WORD COUNT` with no real humanisation, and `duration_seconds` showed the raw float (`1802.58`).
+**Fix:** `lib/run-format.ts` `humanizeKey` produces sentence-case with acronym preservation (PDF/DOCX/CSV/JSON/…); `formatScalarValue` renders `*_seconds` as a compact duration and booleans as Yes/No.
+**Status:** VERIFIED LIVE — Result tab shows "WORD COUNT 24735", "DURATION SECONDS 30m" (was 1802.58s). Same Result-tab screenshot.
+
+### P2-2 — Run tab "Enrichment instruction" was a single-line input
+**Root cause:** the worker manifest marks free-form fields as `type:"text"`, which the Run form rendered as a single-line `<Input>` that truncated.
+**Fix:** a name/label heuristic (`instruction|brief|notes|summary|prompt|message|context|description|details|jd|paste|body|content`) renders `text`/`string` free-form fields as a wrapping `<Textarea>` spanning both columns; short text fields (location, search query) stay single-line.
+**Status:** VERIFIED LIVE — `/workers/csv_enricher#run` shows "Enrichment instruction" as a full-width multi-line textarea. Screenshot: `docs/audits/shots-batchA-2026-05-29/P2-2-run-tab-textarea.png`.
+
+### P2-3 — worker-detail tab hashes did not match labels
+**Root cause:** NAV ids `runs`/`connections`/`code` were written to the URL hash while the labels read History/Apps/Source.
+**Fix:** `SECTION_TO_HASH`/`HASH_TO_SECTION` maps the visible label to the hash (`#history`/`#apps`/`#source`); legacy hashes (`#runs`/`#connections`/`#code`/`#overview`) still resolve so old deep-links keep working.
+**Status:** VERIFIED LIVE — `#source`→Source, `#history`→History, `#run`→Run, `#triggers`→Triggers all resolve to the correct active tab (broker walk). Screenshots above.
+
+### P2-4 — History tab: completed runs had no status pill, only failed ones
+**Root cause:** `RunStatusBadge` returns `null` for success (intentional "quiet" default, S29l), so History completed rows showed no pill while failed rows did.
+**Fix:** `RunStatusBadge` gains an opt-in `showSuccess` prop; History passes it to show a "Completed" pill for parity. Default stays quiet everywhere else.
+**Status:** VERIFIED LIVE — `/workers/csv_enricher#history` completed run shows a "Completed" pill alongside the failed run's "failed". Screenshot: `docs/audits/shots-batchA-2026-05-29/P2-4-history-completed-pill.png`.
+
+### P2-5 — Triggers tab showed Save/Discard chrome even with no unsaved change
+**Root cause:** the `TriggersEditor` action bar rendered whenever `onSave` was provided (just disabled when clean).
+**Fix:** the action bar now only renders when `dirty || saving`.
+**Status:** VERIFIED LIVE — `/workers/csv_enricher#triggers` shows only Add/Edit/Remove trigger controls, no Save/Discard buttons on a clean tab.
