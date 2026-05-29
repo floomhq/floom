@@ -984,6 +984,7 @@ class RunDetail(BaseModel):
     completed_at: Optional[str] = None
     duration_ms: Optional[int] = None
     created_at: Optional[str] = None
+    queue_position: Optional[int] = None  # 1-based position in queue when status=queued
 
 
 class RecentStats(BaseModel):

@@ -3,13 +3,15 @@ import { Badge } from "@/components/ui/badge";
 
 const SUCCESS_STATES = new Set(["completed", "success", "succeeded"]);
 const ERROR_STATES = new Set(["failed", "error", "cancelled"]);
-const RUNNING_STATES = new Set(["running", "queued", "pending"]);
+const RUNNING_STATES = new Set(["running", "pending"]);
+const QUEUED_STATES = new Set(["queued"]);
 
-function classify(status: string): "success" | "error" | "running" | "unknown" {
+function classify(status: string): "success" | "error" | "running" | "queued" | "unknown" {
   const s = (status || "").toLowerCase();
   if (SUCCESS_STATES.has(s)) return "success";
   if (ERROR_STATES.has(s)) return "error";
   if (RUNNING_STATES.has(s)) return "running";
+  if (QUEUED_STATES.has(s)) return "queued";
   return "unknown";
 }
 
@@ -26,6 +28,8 @@ export function RunStatusGlyph({
   if (kind === "error") return <XCircle className={`${cls} text-error`} />;
   if (kind === "running")
     return <Loader2 className={`${cls} text-pending animate-spin`} />;
+  if (kind === "queued")
+    return <Clock className={`${cls} text-muted-foreground`} />;
   return <Clock className={`${cls} text-muted-foreground`} />;
 }
 
@@ -33,6 +37,7 @@ const BADGE_STYLE: Record<string, string> = {
   success: "bg-success/10 text-success border-success/30 font-medium",
   error: "bg-error/10 text-error border-error/30 font-semibold",
   running: "bg-pending/10 text-pending border-pending/30 font-medium",
+  queued: "bg-muted text-muted-foreground border-border font-medium",
   unknown: "bg-muted text-muted-foreground border-border font-medium",
 };
 
