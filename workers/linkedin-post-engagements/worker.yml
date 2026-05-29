@@ -1,6 +1,6 @@
 schema_version: "0.3"
 archived: true
-archive_reason: "APIFY_API_KEY free credits exhausted (locked until 2026-06-25). Restore when credits renew or a new Apify account is provisioned. Worker code is correct; KeyError guard added in lane/reliability-2026-05-29."
+archive_reason: "Paused — the LinkedIn data provider's quota is used up for now. Resumes automatically on 2026-06-25, or sooner once the data source is topped up."
 name: linkedin-post-engagements
 title: LinkedIn Post Engagements
 description: Pull recent LinkedIn posts from a profile and their public likers via Apify.

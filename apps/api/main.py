@@ -250,13 +250,13 @@ PUBLIC_STOCK_WORKER_IDS = frozenset(
         "csv_enricher",
         "cv_writeup",
         "dach_compliance",
-        "env-vars-worker",
         "github-digest",
         "gmail_intake_brief",
         "linkedin-post-engagements",
         "node-smoke-test",
         "openblog",
         "opendraft",
+        "outbound-approval-demo",
         "research_brief",
         "reverse_match_crm",
         "weekly_update",
@@ -268,6 +268,13 @@ _INTERNAL_WORKER_ID_PREFIXES = (
     "audit-local-",
     "smoke-",
 )
+
+# Engine/system knowledge packs that power Workeros itself (e.g. the
+# worker-generation style guide). They are internal config, not operator
+# content, so they are hidden from the /contexts operator view — the contexts
+# equivalent of system_worker:true. A pack can also opt in via metadata
+# {"system": true}.
+SYSTEM_CONTEXT_PACKS = frozenset({"worker-author-style"})
 
 # 1.5.2: trigger sources that belong in the operator /runs view. Everything
 # else (audit, test, smoke runs like s35_concurrency_*, synthetic data, etc.)
@@ -1308,7 +1315,7 @@ def _make_run_summary(row: Any) -> RunSummary:
         started_at=d.get("started_at"),
         completed_at=d.get("completed_at"),
         duration_ms=d.get("duration_ms"),
-        error=_redact_public_log_message(str(d.get("error") or "")) or None,
+        error=_operator_error_message(d.get("error")),
         error_code=d.get("error_code"),
     )
 
@@ -2831,6 +2838,21 @@ def _unowned_contexts_visible_to_caller() -> bool:
     return os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") != "1" and not _is_cloud_deploy()
 
 
+def _is_system_context_pack(
+    name: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    """True for engine/system packs that must be hidden from operators."""
+    try:
+        safe_name = validate_context_name(name)
+    except ValueError:
+        return False
+    if safe_name in SYSTEM_CONTEXT_PACKS:
+        return True
+    meta = metadata if metadata is not None else load_context_metadata()
+    return bool((meta.get(safe_name) or {}).get("system"))
+
+
 def _context_visible_to_user(
     name: str,
     *,
@@ -2839,6 +2861,9 @@ def _context_visible_to_user(
 ) -> bool:
     safe_name = validate_context_name(name)
     meta = metadata if metadata is not None else load_context_metadata()
+    # Engine/system packs are internal config, never operator-facing.
+    if _is_system_context_pack(safe_name, meta):
+        return False
     owner_id = context_owner_id(safe_name, meta)
     if owner_id:
         return owner_id == user_id
@@ -3218,7 +3243,7 @@ def list_workers(
                 how_it_works=None if list_shape else w.get("how_it_works"),
                 is_example=w.get("is_example"),
                 archived=is_archived,
-                archive_reason=w.get("archive_reason"),
+                archive_reason=_sanitize_operator_text(w.get("archive_reason")),
                 tags=w.get("tags") or [],
                 folder=w.get("folder"),
                 status=status,
@@ -3329,7 +3354,7 @@ def _build_worker_detail(
         how_it_works=worker.get("how_it_works"),
         is_example=worker.get("is_example"),
         archived=bool(worker.get("archived", False)),
-        archive_reason=worker.get("archive_reason"),
+        archive_reason=_sanitize_operator_text(worker.get("archive_reason")),
         tags=worker.get("tags") or [],
         folder=worker.get("folder"),
         status=status,
@@ -5992,7 +6017,14 @@ def get_run(
         logs=logs,
         artifacts=artifacts,
         transcript=transcript,
-        error=_redact_public_log_message(str(run.get("error") or "")) or None,
+        error=_operator_error_message(run.get("error")),
+        # Raw error/traceback kept only for the debug "Raw" tab, secrets redacted.
+        # Surfaced separately so it is never the operator-facing headline.
+        error_raw=(
+            _redact_public_log_message(str(run.get("error") or "")) or None
+            if _has_internal_artifact(str(run.get("error") or ""))
+            else None
+        ),
         error_code=run.get("error_code"),
         started_at=run.get("started_at"),
         completed_at=run.get("completed_at"),
@@ -6187,6 +6219,103 @@ def _redact_public_log_message(message: str) -> str:
     redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", redacted)
     redacted = _LOG_METADATA_RE.sub("[redacted-metadata]", redacted)
     return redacted
+
+
+# ---------------------------------------------------------------------------
+# Operator-surface hygiene (G5): nothing internal is ever shown to operators.
+#
+# Raw Python tracebacks, sandbox paths (/home/user/worker/run.py), and env-var
+# names must never be the operator-facing error or archive reason. We map them
+# to a calm, human, actionable headline. The raw text is preserved separately
+# (run.error_raw / the Logs tab) for engineers who need it.
+# ---------------------------------------------------------------------------
+
+# Sandbox/runtime paths that should never appear in an operator string.
+_SANDBOX_PATH_RE = re.compile(r"(?:/(?:home|root|tmp|usr|opt|app|workspace)\b[^\s\"']*)")
+# Bare ALL_CAPS env-var-style identifiers (FOO_BAR_TOKEN), 2+ segments so we
+# don't eat normal words like "OK" or "JSON".
+_ENV_VAR_NAME_RE = re.compile(r"\b[A-Z][A-Z0-9]{1,40}(?:_[A-Z0-9]{1,40}){1,8}\b")
+# Internal git branch / lane identifiers (lane/x, feat/x, fix/x, chore/x, …).
+_GIT_BRANCH_RE = re.compile(
+    r"\b(?:lane|feat|feature|fix|hotfix|chore|recover|docs|polish|backend|land)/[A-Za-z0-9._/-]+"
+)
+
+# Ordered (pattern, operator-message) map. First hit wins for the headline.
+_OPERATOR_ERROR_RULES: List[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bSyntaxError\b|\bIndentationError\b", re.IGNORECASE),
+     "This worker's code has an error and couldn't start. Edit the worker to fix it, or re-generate it."),
+    (re.compile(r"\bModuleNotFoundError\b|\bImportError\b", re.IGNORECASE),
+     "This worker is missing a required package. Add it to the worker's requirements and re-run."),
+    (re.compile(r"\b(?:401|403|Unauthorized|Forbidden|invalid[_ ]?token|authentication)\b", re.IGNORECASE),
+     "A connected account or key was rejected. Reconnect the account this worker uses, then re-run."),
+    (re.compile(r"\bKeyError\b|\bNameError\b|\bAttributeError\b|\bTypeError\b|\bValueError\b", re.IGNORECASE),
+     "This worker hit an unexpected error while running. Check the run logs, then edit or re-run the worker."),
+    (re.compile(r"\b(?:Timed?\s?out|timeout|deadline exceeded)\b", re.IGNORECASE),
+     "This worker took too long and was stopped. Try again, or simplify the input."),
+    (re.compile(r"\b(?:Connection|Network|DNS|getaddrinfo|ECONN|socket)\b", re.IGNORECASE),
+     "This worker couldn't reach an external service. Check the connection, then re-run."),
+]
+
+
+def _has_internal_artifact(text: str) -> bool:
+    """True when the string contains a traceback, sandbox path, env-var name,
+    or git branch — anything that must never reach an operator surface."""
+    if not text:
+        return False
+    if "Traceback (most recent call last)" in text:
+        return True
+    if _SANDBOX_PATH_RE.search(text):
+        return True
+    if _GIT_BRANCH_RE.search(text):
+        return True
+    if _ENV_VAR_NAME_RE.search(text):
+        return True
+    return False
+
+
+def _operator_error_message(raw_error: Optional[str]) -> Optional[str]:
+    """Map a raw run error (possibly a full Python traceback) to a calm,
+    operator-readable headline. Returns None when raw_error is empty.
+
+    If the raw text contains NO internal artifact (no traceback / path /
+    env-var / branch), it is returned as-is after light log redaction — many
+    errors are already operator-clean (e.g. 'Missing required inputs: …').
+    """
+    if raw_error is None:
+        return None
+    text = str(raw_error).strip()
+    if not text:
+        return None
+    # First apply the existing log redactor. It cleanly maps known structured
+    # errors ("Missing secrets: X" -> "Missing required secrets", env-var "not
+    # configured" -> generic) without losing meaning. Only when the redacted
+    # text STILL carries a raw artifact (real traceback / sandbox path / git
+    # branch) do we fall back to a generic operator headline.
+    redacted = _redact_public_log_message(text)
+    if not _has_internal_artifact(redacted):
+        return redacted
+    for pattern, message in _OPERATOR_ERROR_RULES:
+        if pattern.search(text):
+            return message
+    return "This worker failed to run. Check the run logs for details, then edit or re-run the worker."
+
+
+def _sanitize_operator_text(text: Optional[str]) -> Optional[str]:
+    """Strip internal artifacts from a short operator-facing string (archive
+    reasons, status notes). Never alters strings that are already clean."""
+    if text is None:
+        return None
+    value = str(text).strip()
+    if not value:
+        return None
+    if not _has_internal_artifact(value):
+        return value
+    value = _GIT_BRANCH_RE.sub("an internal change", value)
+    value = _SANDBOX_PATH_RE.sub("the worker's files", value)
+    value = _ENV_VAR_NAME_RE.sub("a required credential", value)
+    value = re.sub(r"\bTraceback \(most recent call last\):.*", "", value, flags=re.DOTALL)
+    value = re.sub(r"\s{2,}", " ", value).strip(" .,;:") + "."
+    return value
 
 
 def _public_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -8025,7 +8154,12 @@ def _overview_human_error_code(error_code: Optional[str]) -> str:
 
 def _overview_failure_cause(row: Dict[str, Any]) -> str:
     error_code = _overview_human_error_code(row.get("error_code"))
-    error_message = str(row.get("error") or "").strip()
+    raw_message = str(row.get("error") or "").strip()
+    # Operator hygiene (G5): never let a raw traceback / sandbox path / env-var
+    # name surface in the overview failure cause. Map it to a calm headline.
+    if raw_message and _has_internal_artifact(raw_message):
+        return _operator_error_message(raw_message) or error_code
+    error_message = raw_message
     if error_message:
         first_line = error_message.splitlines()[0].strip()
         if len(first_line) > 140:

@@ -985,7 +985,7 @@ class RunSummary(BaseModel):
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     duration_ms: Optional[int] = None
-    error: Optional[str] = None
+    error: Optional[str] = None  # operator-readable headline (never a raw traceback)
     error_code: Optional[str] = None
 
 
@@ -1026,7 +1026,8 @@ class RunDetail(BaseModel):
     logs: List[LogEntry] = Field(default_factory=list)
     artifacts: List[Artifact] = Field(default_factory=list)
     transcript: List[Dict[str, Any]] = Field(default_factory=list)
-    error: Optional[str] = None
+    error: Optional[str] = None  # operator-readable headline (never a raw traceback)
+    error_raw: Optional[str] = None  # raw error/traceback for the debug "Raw" tab; redacted of secrets
     error_code: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
