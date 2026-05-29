@@ -132,6 +132,8 @@ Rules:
 - is_example must be false
 - system_worker must be false or absent
 - trigger.type: "manual" unless the prompt explicitly describes a schedule or webhook
+- if you include "use_cases", it MUST contain EXACTLY 3 to 5 short items; otherwise omit the field entirely
+- if you include "tags", it MUST contain 8 or fewer flat (no "/") non-empty strings; otherwise omit it
 - KISS and YAGNI: the smallest bundle that does exactly what was described
 """
 
