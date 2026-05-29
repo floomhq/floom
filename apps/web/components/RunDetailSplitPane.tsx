@@ -18,11 +18,13 @@ import { cn } from "@/lib/utils";
 import {
   humanizeKey,
   humanizeRunError,
+  humanizeLogMessage,
   operatorLogs,
   isExportSuccessKey,
   exportSuccessState,
   exportStateText,
 } from "@/lib/run-format";
+import { stripCitationTokens } from "@/lib/strip-citations";
 import type { LogEntry, RunDetail, RunPart, TranscriptRow } from "@/lib/types";
 
 type Props = {
@@ -299,7 +301,7 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
                 {part.type === "reasoning" ? "Reasoning" : "Text"}
               </p>
               <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                {part.text}
+                {stripCitationTokens(part.text)}
               </p>
             </div>
           );
@@ -524,7 +526,12 @@ function RecentLogsPreview({ run }: { run: RunDetail }) {
             <span className={cn("font-medium uppercase", log.level === "error" || log.level === "critical" ? "text-error" : "text-muted-foreground")}>
               {log.level}
             </span>
-            <span className="min-w-0 break-words text-foreground">{log.message}</span>
+            {/* G5 rescore4 P2: humanize error/critical log lines in the
+                Result-tab preview so raw strings ("ERROR Agent runtime error:
+                Event loop is closed") don't leak. Full raw stays in Raw tab. */}
+            <span className="min-w-0 break-words text-foreground">
+              {humanizeLogMessage(log.level, log.message)}
+            </span>
           </div>
         ))}
       </div>
@@ -556,7 +563,7 @@ function OutputView({ run }: { run: RunDetail }) {
         <div key={key} className="space-y-1">
           <p className="text-xs font-medium uppercase text-muted-foreground">{humanizeKey(key)}</p>
           <pre className="overflow-auto rounded-[var(--radius-button)] bg-muted p-3 font-mono text-xs">
-            {formatUnknown(value)}
+            {stripCitationTokens(formatUnknown(value))}
           </pre>
         </div>
       ))}
