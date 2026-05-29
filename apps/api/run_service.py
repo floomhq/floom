@@ -649,15 +649,33 @@ def _smoke_and_repair_generated_worker(
                     "repairs": repairs,
                 }
 
-            run_py_path.write_text(fixed, encoding="utf-8")
-            # Keep the registered bundle + DB recipe in sync with the repaired file.
+            # Persist the repaired run.py through the SAME canonical path the
+            # editor uses (write disk + invalidate cache + re-discover + persist
+            # recipe). The executor reads run.py from disk on every run, so this
+            # write is what the next REAL run executes. If persistence FAILS we
+            # must NOT keep going: a worker repaired-but-not-persisted is the
+            # silently-ships-stale class. Treat it as a smoke failure so the
+            # gate disables it instead of presenting unverified disk state.
             try:
-                bundle["run_code"] = fixed
-                from worker_registry import invalidate_worker_cache as _invalidate
+                import main as _main
 
-                _invalidate()
-            except Exception:
-                pass
+                _main.persist_worker_run_py(worker_id, fixed, user_id=user_id)
+            except Exception as persist_exc:
+                logger.exception(
+                    "Failed to persist smoke repair for worker %s", worker_id
+                )
+                log_fn(
+                    "Smoke failed — could not persist the repaired code: "
+                    f"{persist_exc}",
+                    level="warning",
+                )
+                return {
+                    "status": "failed",
+                    "reason": f"could not persist repaired code: {persist_exc}",
+                    "repairs": repairs,
+                }
+            # Re-load the recipe so the re-smoke runs against the refreshed
+            # manifest/config (run.py itself is re-read from disk by the driver).
             loaded = _load_worker_recipe(worker_id, repos_obj) or loaded
             config = loaded[1]
             repairs += 1

@@ -1001,7 +1001,12 @@ class Artifact(BaseModel):
     run_id: str
     name: str
     type: Optional[str] = None
+    # PATH-1 (2026-05-29): `path` must NOT expose the absolute host path
+    # (/root/workeros/data/artifacts/...). It now carries the path RELATIVE to
+    # the artifacts root (e.g. "run_x/out/sorted.csv"); the download endpoint
+    # resolves the real on-disk path server-side from the artifact id.
     path: str
+    relative_path: Optional[str] = None
     size_bytes: Optional[int] = None
     created_at: str
 

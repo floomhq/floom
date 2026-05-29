@@ -3306,6 +3306,21 @@ def _build_worker_detail(
         and recent_runs[0].status == RunStatus.FAILED
     ):
         status = WorkerStatus.NEEDS_ATTENTION
+    # B-P1-2 (2026-05-29): a smoke-disabled worker (enabled=False) is broken and
+    # must NOT report `healthy`. The detail row's hardcoded "healthy" hid it; key
+    # off the DB `enabled` flag so the operator sees it needs attention. (Archived
+    # workers are intentionally inactive and keep their own surfacing.)
+    try:
+        _recipe = repos.workers.get_recipe(worker_id=worker_id, user_id=user_id)
+    except Exception:
+        _recipe = None
+    if (
+        isinstance(_recipe, dict)
+        and _recipe.get("enabled") is False
+        and not worker.get("archived")
+        and status == WorkerStatus.HEALTHY
+    ):
+        status = WorkerStatus.NEEDS_ATTENTION
 
     manifest_yaml: Optional[str] = None
     run_py: Optional[str] = None
@@ -4713,6 +4728,46 @@ def _register_worker_from_files(
     return worker_id
 
 
+def persist_worker_run_py(worker_id: str, run_py: str, *, user_id: str | None) -> None:
+    """Persist a repaired ``run.py`` for ``worker_id`` through the canonical path.
+
+    This is the SAME on-disk-write + cache-invalidate + re-discover + recipe
+    re-persist that the editor (`update_worker_files`) uses, factored out so the
+    smoke-repair loop persists a fix exactly the way a manual edit would. The
+    executor reads ``run.py`` from disk (`WORKERS_DIR/worker_id`) on every run, so
+    writing the file here is what reaches the run; the discover+persist keeps the
+    registered recipe/cache in sync so the worker is never registered against a
+    stale manifest after a repair.
+
+    Raises on failure (path-traversal, write error, persist error) so the caller
+    can treat an un-persisted repair as a smoke FAILURE (disable the worker)
+    instead of silently shipping the worker against unverified disk state.
+    """
+    from worker_registry import WORKERS_DIR
+
+    target_dir = (WORKERS_DIR / worker_id).resolve()
+    run_py_path = (target_dir / "run.py").resolve()
+    # Path-safety: the resolved file must stay inside the worker's own dir.
+    try:
+        run_py_path.relative_to(target_dir)
+    except ValueError as exc:
+        raise ValueError(
+            f"refusing to write run.py outside worker dir: {run_py_path}"
+        ) from exc
+    if not target_dir.is_dir():
+        raise FileNotFoundError(f"worker directory not found: {target_dir}")
+
+    run_py_path.write_text(run_py, encoding="utf-8")
+
+    invalidate_worker_cache()
+    workers = discover_workers()
+    this_worker_list = [w for w in workers if w["id"] == worker_id]
+    if not this_worker_list:
+        raise RuntimeError(f"worker {worker_id!r} not found after repair persist")
+    with get_db() as conn:
+        _persist_discovered_workers(conn, this_worker_list, user_id=user_id)
+
+
 @app.post("/workers/draft-and-create", response_model=DraftAndCreateResponse)
 async def draft_and_create_worker(
     payload: DraftAndCreateRequest,
@@ -5485,6 +5540,20 @@ def create_worker_run(
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
+    # B-P1-1 (2026-05-29): a smoke-disabled worker must NOT run on demand. The
+    # smoke+gate disables a worker whose first test run failed (enabled=False);
+    # honour that here so a broken worker cannot be run from the UI/API to a
+    # green-but-empty no-op. Reject with 409 + the worker_disabled headline.
+    try:
+        recipe = repos.workers.get_recipe(worker_id=worker_id, user_id=auth.user_id)
+    except Exception:
+        recipe = None
+    if isinstance(recipe, dict) and recipe.get("enabled") is False:
+        raise HTTPException(
+            status_code=409,
+            detail=_OPERATOR_ERROR_CODE_HEADLINES["worker_disabled"],
+        )
+
     # P1-2: Validate required inputs at the request boundary before creating a run row.
     # Use the same WorkerConfig the runner will see — get_worker_config_for_run resolves
     # both DB-backed and filesystem-discovered workers into the same shape.
@@ -6105,7 +6174,11 @@ def get_run(
             run_id=r["run_id"],
             name=r["name"],
             type=row_to_dict(r).get("type"),
-            path=r["path"],
+            # PATH-1: never return the absolute host path; expose only the path
+            # relative to the artifacts root. Download resolves the real path
+            # server-side from the artifact id.
+            path=_public_artifact_path(r["path"]),
+            relative_path=_public_artifact_path(r["path"]),
             size_bytes=row_to_dict(r).get("size_bytes"),
             created_at=r["created_at"],
         )
@@ -6333,7 +6406,37 @@ def _redact_public_log_message(message: str) -> str:
     redacted = _ENV_SECRET_CONFIG_RE.sub("Required platform secret is not configured", redacted)
     redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", redacted)
     redacted = _LOG_METADATA_RE.sub("[redacted-metadata]", redacted)
+    # PATH-1 (2026-05-29): logs[].message still leaked host paths
+    # (/root/workeros/...) and sandbox paths (/home/user/worker/run.py),
+    # unlike error_raw which already strips them. Apply the SAME redaction so
+    # the log surface never discloses the deploy dir or sandbox topology.
+    redacted = _SANDBOX_PATH_RE.sub("[worker file]", redacted)
     return redacted
+
+
+def _public_artifact_path(raw_path: Optional[str]) -> str:
+    """Return an artifact path safe to expose in an API response (PATH-1).
+
+    The artifacts table stores the absolute host path
+    (e.g. /root/workeros/data/artifacts/run_x/out/sorted.csv). Returning it
+    discloses the deploy dir + storage layout. Strip the artifacts-root prefix
+    so callers see only the relative path (run_x/out/sorted.csv). The download
+    endpoint resolves the real on-disk path server-side from the artifact id,
+    so relativising here does not break downloads.
+    """
+    raw = str(raw_path or "").strip()
+    if not raw:
+        return ""
+    try:
+        from runner_utils import ARTIFACTS_DIR
+
+        resolved = Path(raw).resolve()
+        rel = resolved.relative_to(ARTIFACTS_DIR.resolve())
+        return rel.as_posix()
+    except Exception:
+        # Not under the artifacts root (or unresolvable) — never leak an
+        # absolute path; fall back to the basename only.
+        return Path(raw).name
 
 
 # ---------------------------------------------------------------------------
@@ -6459,6 +6562,39 @@ _WORKER_CODE_TRACEBACK_RE = re.compile(
     r"|UnicodeDecodeError|UnicodeEncodeError"
     r")\b"
 )
+# Bare Python exception MESSAGES that carry no exception-class name (so
+# _WORKER_CODE_TRACEBACK_RE misses them) yet are unmistakably worker-code-crash
+# jargon. e.g. a TypeError stringified as just its message
+# ("unsupported operand type(s) for /: 'str' and 'float'") with error_code=None.
+# These must read as a CODE error, never leak verbatim to the operator (P0-2).
+_BARE_PYTHON_EXC_MSG_RE = re.compile(
+    r"(?i:"
+    r"unsupported operand type\(s\)"
+    r"|object is not (?:subscriptable|callable|iterable)"
+    r"|object has no attribute"
+    r"|object of type .* has no len"
+    r"|(?:list|string|tuple|dict) index out of range"
+    r"|index out of range"
+    r"|division by zero"
+    r"|float division by zero"
+    r"|integer division or modulo by zero"
+    r"|cannot unpack non-iterable"
+    r"|(?:not enough|too many) values to unpack"
+    r"|takes (?:no|exactly|at least|at most|from) .* argument"
+    r"|missing \d+ required (?:positional|keyword-only) argument"
+    r"|got an unexpected keyword argument"
+    r"|positional argument(?:s)? but \d+ (?:was|were) given"
+    r"|could not convert string to float"
+    r"|invalid literal for int\(\) with base"
+    r"|string indices must be integers"
+    r"|'[^']*' is not defined"
+    r"|name '[^']*' is not defined"
+    r"|can only concatenate"
+    r"|unhashable type"
+    r"|'NoneType' object"
+    r")"
+)
+
 # Error codes whose raw text can legitimately carry a worker-code traceback
 # (the worker's run.py crashed). For these, a code-class traceback in the raw
 # string outranks the generic headline so the operator sees "code has an error".
@@ -6467,10 +6603,17 @@ _WORKER_CODE_ERROR_CODES = frozenset({"execution_error", "e2b_sandbox_error"})
 
 def _looks_like_worker_code_error(text: str) -> bool:
     """True when the raw error text contains a Python exception class raised by
-    the worker's own code (so the operator headline should be _CODE_HEADLINE)."""
+    the worker's own code (so the operator headline should be _CODE_HEADLINE).
+
+    Also matches BARE exception messages that carry no class name (a stringified
+    TypeError/ValueError message), which the class-name regex would otherwise
+    miss and let leak verbatim to the operator surface."""
     if not text:
         return False
-    return bool(_WORKER_CODE_TRACEBACK_RE.search(text))
+    return bool(
+        _WORKER_CODE_TRACEBACK_RE.search(text)
+        or _BARE_PYTHON_EXC_MSG_RE.search(text)
+    )
 
 
 def _has_internal_artifact(text: str) -> bool:
@@ -6567,10 +6710,16 @@ _RUNTIME_JARGON_RE = re.compile(
 def _looks_like_runtime_jargon(text: str) -> bool:
     """True for artifact-free strings that are still pure runtime/sandbox jargon
     (e.g. 'Event loop is closed', E2B deadline boilerplate). These must not pass
-    through verbatim to the operator surface."""
+    through verbatim to the operator surface.
+
+    Also true for bare Python exception MESSAGES with no class name
+    ("unsupported operand type(s) for /: 'str' and 'float'") so they never leak
+    verbatim when an error_code is missing or unrecognised (P0-2)."""
     if not text:
         return False
-    return bool(_RUNTIME_JARGON_RE.search(text))
+    return bool(
+        _RUNTIME_JARGON_RE.search(text) or _BARE_PYTHON_EXC_MSG_RE.search(text)
+    )
 
 
 def _run_error_raw(
@@ -8753,6 +8902,32 @@ def system_overview(
                 action_url=f"/workers/{worker_id}",
             )
         )
+
+    # B-P1-2 (2026-05-29): surface smoke-disabled workers (enabled=False, not
+    # archived) so a freshly-generated broken worker is visible even when it has
+    # NO failed runs (the smoke gate disables it before any real run). Skip any
+    # worker already surfaced above as a failure cluster to avoid duplicates.
+    _already_surfaced = {item.worker_id for item in attention_items if item.worker_id}
+    for worker in workers:
+        wid = worker.get("id")
+        if not wid or wid in _already_surfaced:
+            continue
+        manifest = worker.get("manifest") or {}
+        if manifest.get("archived") is True or worker.get("archived"):
+            continue
+        if worker.get("enabled") is False or manifest.get("enabled") is False:
+            attention_items.append(
+                OverviewAttentionItem(
+                    type="worker_disabled",
+                    kind="paused",
+                    worker_id=wid,
+                    worker_name=worker_names.get(wid, wid),
+                    message="Paused — its first test run failed. Edit or re-generate it, then turn it on.",
+                    error_code="worker_disabled",
+                    suggested_actions=["view_logs", "edit"],
+                    action_url=f"/workers/{wid}",
+                )
+            )
 
     for row in sorted(
         (
