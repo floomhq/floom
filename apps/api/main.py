@@ -3969,8 +3969,17 @@ Respond with ONLY valid JSON (no markdown fences). The `files` array is mandator
   "required_connections": ["<oauth-app-slugs>"],
   "required_secrets": ["<UPPER_SNAKE_CASE_API_KEY>"],
   "inputs": [{"name": "field_name", "type": "string", "label": "Human label", "required": false, "default": null}],
-  "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}]
+  "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}],
+  "sample_input_json": "<JSON object string with a realistic value for EVERY input>"
 }
+
+=== SAMPLE INPUT RULE (so the worker is one-click runnable) ===
+- ALWAYS return `sample_input_json`: a JSON object string with one realistic
+  value for EVERY input the worker declares, scalar AND file.
+- For a FILE input, the value MUST be the file's INLINE TEXT CONTENT as a string
+  (e.g. a small CSV "name\\nalice\\nbob\\n"), NEVER a path or placeholder. The
+  platform turns it into a real uploaded file so the operator can run the worker
+  immediately with no manual upload.
 
 Only include files that are needed. Omit run.py for agent-only (A), omit SKILL.md for pure-script (B).
 The `requirements` array is the authoritative source. `required_connections` = oauth slugs only. `required_secrets` = API_KEY names only."""
@@ -6798,6 +6807,11 @@ def humanize_smoke_reason(reason: Optional[str]) -> Optional[str]:
         if code.lower() in ("unknown", "none", ""):
             code = None
         text = _SMOKE_REASON_CODE_RE.sub("", text).strip()
+    # A bare quoted token (e.g. "'name'") is a stripped KeyError arg — meaningless
+    # to an operator. Treat it as a worker-code error rather than letting the bare
+    # key pass through verbatim.
+    if re.fullmatch(r"""['"][^'"]*['"]""", text):
+        return _CODE_HEADLINE
     headline = _operator_error_message(text, code)
     if headline is None:
         # No raw text resolved to a headline; never return the raw string —
