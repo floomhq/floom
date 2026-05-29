@@ -448,8 +448,13 @@ export function WorkerAsciiDiagram({
   return (
     <section className={cn("space-y-3", className)}>
       <h2 className="text-base font-semibold text-foreground">Flow</h2>
+      {/* MOBILE-375: the diagram grid (`inline-block`) is intrinsically wider
+          than a 375 viewport. `max-w-full` pins the framed card to its parent
+          width so the wide grid scrolls horizontally INSIDE the card
+          (overflow-x-auto) instead of dragging the page wider than the
+          viewport. */}
       <div
-        className="overflow-x-auto border border-[var(--line)] bg-[var(--bg-card)] px-5 py-4"
+        className="max-w-full overflow-x-auto border border-[var(--line)] bg-[var(--bg-card)] px-5 py-4"
         style={{ borderRadius: "var(--radius-card)" }}
       >
         {/* The diagram is a positioned stack: the text grid (box-drawing) plus

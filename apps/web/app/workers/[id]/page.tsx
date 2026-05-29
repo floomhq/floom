@@ -827,23 +827,34 @@ export default function WorkerDetailPage() {
         )}
       </div>
 
-      {/* Top tabs (shadcn) */}
-      <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
-        <TabsList>
-          {NAV_ITEMS.map((item) => (
-            <TabsTrigger key={item.id} value={item.id}>
-              {item.icon}
-              <span>{item.label}</span>
-              {item.id === "triggers" && triggersCount > 1 && (
-                <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
-              )}
-              {item.id === "runs" && runsCount > 0 && (
-                <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
-              )}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      {/* Top tabs (shadcn). MOBILE-375: the 6-tab bar (About/Run/Triggers/
+          History/Apps/Source) is `inline-flex w-fit whitespace-nowrap` — it
+          cannot shrink below its content width and at 375 it forced the whole
+          page wider than the viewport (Federico's screenshot: title cut off
+          on the left, tabs pushed off-screen, page-level horizontal scroll).
+          Wrap the tab bar in a full-width scroll container so the OVERFLOW
+          stays inside the strip (it scrolls horizontally within itself) and
+          never drives page width. `-mx-4 px-4` lets the scroll area run
+          edge-to-edge on mobile; on desktop the list is narrower than the
+          container so nothing scrolls and it looks identical. */}
+      <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
+        <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
+          <TabsList>
+            {NAV_ITEMS.map((item) => (
+              <TabsTrigger key={item.id} value={item.id}>
+                {item.icon}
+                <span>{item.label}</span>
+                {item.id === "triggers" && triggersCount > 1 && (
+                  <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
+                )}
+                {item.id === "runs" && runsCount > 0 && (
+                  <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
+                )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
 
       {/* Section content */}
       <div>
