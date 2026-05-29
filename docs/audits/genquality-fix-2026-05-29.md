@@ -238,3 +238,49 @@ Retry once on transient fetch error before alarming; never surface raw "Failed t
 Broken generations still smoke-FAIL → durably 409 (never green); passing generations run healthy. **0 silently-broken holds.** Honest residual: generator first-pass quality is the remaining ceiling — many fresh script gens fail `output_validation_failed: <field> scalar output leaked a path string` (engine quality watch-item; gate catches them, not a launch blocker).
 
 Tests: 38 client-fixture + hygiene + backfill + overview-scope pass together. Pre-existing 2 `test_db_factory.py` failures (missing `approvals` arg) untouched.
+
+---
+
+# Batch L — stderr code-echo redaction (P1 ≥95 unlock) + gen-quality engine fixes (2026-05-29 PM)
+
+Deployed SHA: `340d99d`. PRs: #292 (P1 + P2 + gen-quality levers), #293 (scalar-output SCHEMA/SKILL guidance), #294/#295/#296 (engine-side worker.yml normalization, iterated against live failures).
+
+## P1 — e2b stderr code-echo redaction (the ≥95 unlock) — VERIFIED LIVE
+
+Live worker-code failure (div-by-zero worker `batchl-dz-probe`, run `run_6e4531fbed97`). The residual that PR #288 left (each e2b stderr line is a SEPARATE log row, so the multiline-collapse never saw the block):
+- **GET /runs/{id} logs[]**, **GET /runs/{id}/logs**, **SSE finish error + stream** are ALL calm. The whole traceback (header + frames + source echo `quotient = number1 / number2` + caret `~~~~~~~~^~~~~~~~~` + exception line + `Command exited with code 1`) collapses to exactly ONE calm note `Worker code raised an error (see the Error card for details).`
+- **error** field + **SSE finish** `error` = calm Error-card headline `This worker's code has an error and couldn't run...` (SSE error was raw before).
+
+Grep of operator-default surfaces (logs[] + error; NOT the engineer-only `error_raw`):
+`~~~:0  ^~:0  quotient:0  Command exited:0  number1:0  ZeroDivision:0  Traceback:0  division by zero:0  /home/user:0  /root/workeros:0`. SSE stream grep: all 0.
+
+`error_raw` (a separate API field, **not rendered anywhere in `apps/web`** — grep returns nothing) keeps the verbatim trace for engineers = the brief's opt-in Raw condition. `output_schema`'s `quotient` is the declared output NAME, not a code-echo.
+
+## P2 — operator honesty — VERIFIED LIVE
+- `bundle_path`: GET /workers/{id} `config.runtime.bundle_path` = `batchl-dz-probe` (bare basename). Detail JSON 0× `/root/workeros/workers`.
+- never-run worker: `status:"ready"` (not `healthy`), `enabled:true`.
+- paused worker: `enabled` exposed; `median-calculator-4` → `enabled:false` + `needs_attention` + run **409**; UI disables Run with "Paused — turn on to run".
+
+## Gen-quality — 6-prompt live walk (deployed `340d99d`)
+
+| prompt | worker_id | smoke | real run | output |
+|---|---|---|---|---|
+| reverse string | reverse-string-2 | passed | **completed** | `{"reversed_string":"dlrow olleh"}` |
+| sort CSV by col 2 | csv-row-sorter | passed | **completed** | `out/sorted.csv` (sorted by value 10/20/30) |
+| title-case | title-case-sentence-5 | passed | **completed** | `{"title_cased_sentence":"This Is A Sample Sentence"}` |
+| sum a column | sum-column-numbers-4 | passed | **completed** | `{"total":15.0}` |
+| median | median-calculator-4 | **failed** | **409 (durably GATED)** | never green |
+| dedupe | remove-duplicate-lines-4 | passed | **completed** | `{"deduped_text":"line 2\nline 3\nline 1"}` |
+
+**USABLE FIRST-PASS: 5/6** (up from ~1/6). **GATED: 1/6** (median), **0 silently-broken**.
+
+(The csv-row-sorter run shown completed when its `text/csv` input is uploaded with the correct content-type; the first automated pass mislabeled the upload content-type — a test-driver artifact, not a worker fault. Its smoke passed and the manual proper-upload run completed with a correctly sorted CSV.)
+
+### What the fixes did
+1. **Declaration normalization (engine, #294-#296)** — recurring LLM worker.yml mistakes that DEAD-ENDED registration are now fixed losslessly at `_normalize_authored_worker_yml`: (a) type-in-kind-slot (`kind: textarea`) → `kind:scalar`+`type`; (b) contradictory `kind:scalar`+`path`/`media_type` → clean scalar; (c) scalar missing `type` → default `string`. Before this, `reverse-string` + `sum-column` dead-ended; now both register + run completed.
+2. **Scalar-vs-file OUTPUT value contract** taught in `RUN_PY_TEMPLATE.py` + `worker-author/SKILL.md` + `_SMOKE_REPAIR_SYSTEM_PROMPT`, and `output_validation_failed` routed into the bounded repair loop.
+
+### Honest residual (the remaining ceiling)
+`median` smoke-FAILED because its run.py hardcoded `open('inputs/numbers.txt')` instead of reading the relative path from `inputs.json` (real path `inputs/numbers`, no `.txt`). This is a run.py CODE mistake — a DIFFERENT class from the declaration mistakes fixed here — and the bounded max-2 repair did not self-heal it this run (LLM non-determinism). The durable gate caught it: `enabled=false` + 409, never green. Generator run.py code quality (hardcoded input paths) is the remaining watch-item; the wedge gate (durable disable + 409 + 0-silently-broken) is the backstop and it holds.
+
+Tests: +14 across `test_batchj_hygiene` (38 total) and `test_batchj_gate` (10 total): stderr-echo collapse + SSE error redaction + scalar-output validation/repair-routing + worker.yml field normalization. Pre-existing 2 `test_db_factory.py` failures (missing `approvals` arg) untouched.
