@@ -351,9 +351,13 @@ function CloudAccessPanel() {
   }, []);
 
   const snippets = {
-    cli: "npm i -g @floomhq/workeros\nfloom login",
+    cli:
+      "npm i -g @floomhq/workeros@latest\n" +
+      "floom login --cloud\n" +
+      "floom workspaces list\n" +
+      "floom workers list",
     mcp: "npx @floomhq/workeros install --target claude",
-    api: 'curl -sS https://workeros-api.floom.dev/api/workers \\\n  -H "Authorization: Bearer $WORKEROS_TOKEN"',
+    api: 'curl -sS https://workeros-api.floom.dev/api/workers \\\n  -H "Authorization: Bearer $WORKEROS_TOKEN" \\\n  -H "X-Workeros-Workspace: $WORKEROS_WORKSPACE_ID"',
   };
 
   async function copy(key: keyof typeof snippets) {
@@ -447,11 +451,19 @@ function CloudAccessPanel() {
                   {copied === key ? "Copied" : "Copy"}
                 </Button>
               </div>
+              {key === "cli" && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  <code className="text-foreground">floom login --cloud</code> opens the dashboard
+                  to approve the CLI session. Workspace context is passed via the{" "}
+                  <code className="text-foreground">X-Workeros-Workspace</code> header on every call.
+                </p>
+              )}
               {key === "api" && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  $WORKEROS_TOKEN comes from{" "}
-                  <code className="text-foreground">floom login</code> (CLI prints
-                  the personal access token). Treat it like a password.
+                  $WORKEROS_TOKEN is your short-lived Supabase JWT; get one by running{" "}
+                  <code className="text-foreground">floom whoami --json</code> after login.
+                  $WORKEROS_WORKSPACE_ID is the active workspace id from{" "}
+                  <code className="text-foreground">floom workspaces show</code>.
                 </p>
               )}
             </TabsContent>

@@ -1509,7 +1509,10 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
         item["scopes"] = _json_load(item.pop("scopes_json", None), [])
         return item
 
-    def create_device(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
+    def create_device(self, *, user_id: str | None, **fields: Any) -> dict[str, Any]:
+        # user_id can be None for cloud's pre-approval devices (see migration
+        # 0007). The cloud cli-approve handler writes the real Supabase
+        # user_id when the dashboard user claims the device.
         device_code = fields["device_code"]
         self._client.table("cli_auth_devices").insert(
             {
@@ -1526,7 +1529,10 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
                 "approved_at": fields.get("approved_at"),
             }
         ).execute()
-        item = self.get(user_id=user_id, device_code=device_code)
+        # Look up by device_code (unique PK) so we don't depend on user_id
+        # being non-null. The OSS code path that passes a real user_id
+        # still gets the same row back.
+        item = self.get_by_device_code(device_code)
         if item is None:
             raise RuntimeError(f"failed to create cli auth device {device_code}")
         return item

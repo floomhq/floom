@@ -394,10 +394,37 @@ def cli_exchange(payload: CliExchangeRequest):
     refresh_token = str(consumed.get("secret") or "")
     if not refresh_token:
         raise HTTPException(status_code=500, detail="Approved device missing refresh token")
+    # Include supabase_url + supabase_anon_key + api_base in the response so
+    # the CLI can refresh JWTs without a second round-trip. The anon key is a
+    # public client key (already shipped in the dashboard JS bundle); not
+    # sensitive.
     return {
         "refresh_token": refresh_token,
         "expires_in_seconds": settings.cli_code_ttl_seconds,
         "user_id": consumed.get("user_id"),
+        "supabase_url": settings.supabase_url,
+        "supabase_anon_key": settings.supabase_anon_key,
+        "api_base": settings.api_base,
+    }
+
+
+@router.get("/cli-bootstrap")
+def cli_bootstrap():
+    """Public bootstrap endpoint for the @floomhq/workeros CLI.
+
+    Returns the Supabase project URL + anon key the CLI needs to refresh
+    JWTs against, plus the canonical API base. Anon key is the same public
+    client key the dashboard already exposes in its JS bundle; not sensitive.
+
+    Older CLI versions that don't read /auth/cli-exchange's expanded
+    payload (or future tooling that wants to discover the cloud config
+    before login) fall back to this endpoint.
+    """
+    settings = get_cloud_settings()
+    return {
+        "supabase_url": settings.supabase_url,
+        "supabase_anon_key": settings.supabase_anon_key,
+        "api_base": settings.api_base,
     }
 
 
@@ -418,32 +445,68 @@ def _session_user(request: Request) -> tuple[str, str]:
     return user_id, refresh_token
 
 
+_OSS_PLACEHOLDER_USER_ID = "federico"
+
+
+def _device_can_be_claimed(device_user_id: str | None, session_user_id: str) -> bool:
+    """Allow approve when the device hasn't been claimed yet.
+
+    Cloud's POST /api/cli-auth/devices override (see routes/cli_auth_devices.py)
+    mints rows with user_id=NULL since the dashboard user isn't known at
+    mint time. When that user signs in and clicks Approve, this handler
+    claims the device for the real Supabase user_id.
+
+    Older device rows minted by the engine's OSS handler before the cloud
+    override existed carry the placeholder string "federico" — same
+    semantics, allow the claim.
+
+    A device that already belongs to a real Supabase user can ONLY be
+    approved by that same user (prevents another user from stealing a
+    half-completed login).
+    """
+    if not device_user_id:
+        return True
+    if device_user_id == _OSS_PLACEHOLDER_USER_ID:
+        return True
+    return device_user_id == session_user_id
+
+
 @router.post("/cli-approve")
 def cli_approve(payload: CliApproveRequest, request: Request):
     """Cloud equivalent of the engine's /cli-auth/approve.
 
     The engine endpoint requires FLOOM_SECRET (single-user shared secret)
     and is incompatible with cloud's per-user Supabase auth. This handler
-    looks up the pending device by user_code, verifies the signed-in
-    user owns it, marks it approved, and stores the user's Supabase
-    refresh_token as the device "secret" — that's what the CLI will
-    receive via the /auth/cli-exchange poll.
+    looks up the pending device by user_code, claims it for the signed-in
+    user, marks it approved, and stores the user's Supabase refresh_token
+    as the device "secret" — that's what the CLI will receive via the
+    /auth/cli-exchange poll.
     """
     user_id, refresh_token = _session_user(request)
     repos = get_repositories()
     now_ts = time.time()
     repos.cli_auth.prune_expired(now_ts=now_ts)
     record = repos.cli_auth.verify_device(payload.user_code)
-    if not record or str(record.get("user_id") or "") != user_id:
+    if not record or not _device_can_be_claimed(
+        str(record.get("user_id") or ""), user_id
+    ):
         raise HTTPException(status_code=404, detail="User code not found")
     if str(record.get("status") or "").lower() != "pending":
         raise HTTPException(status_code=409, detail="Device code is no longer pending")
-    repos.cli_auth.update(
-        device_code=record["device_code"],
-        status="approved",
-        secret=refresh_token,
-        approved_at=now_ts,
-    )
+    update_fields: dict[str, Any] = {
+        "status": "approved",
+        "secret": refresh_token,
+        "approved_at": now_ts,
+    }
+    # Persist the claim. The engine's repo `update()` doesn't accept user_id;
+    # rewrite the row via a service-role client when we need to claim it from
+    # the OSS placeholder.
+    if str(record.get("user_id") or "") != user_id:
+        from apps.api.config import new_supabase_service_client
+        new_supabase_service_client().table("cli_auth_devices").update(
+            {"user_id": user_id}
+        ).eq("device_code", record["device_code"]).execute()
+    repos.cli_auth.update(device_code=record["device_code"], **update_fields)
     return {"ok": True, "client_name": record.get("client_name") or "workeros-cli"}
 
 
@@ -454,7 +517,9 @@ def cli_deny(payload: CliDenyRequest, request: Request):
     now_ts = time.time()
     repos.cli_auth.prune_expired(now_ts=now_ts)
     record = repos.cli_auth.verify_device(payload.user_code)
-    if not record or str(record.get("user_id") or "") != user_id:
+    if not record or not _device_can_be_claimed(
+        str(record.get("user_id") or ""), user_id
+    ):
         raise HTTPException(status_code=404, detail="User code not found")
     if str(record.get("status") or "").lower() != "pending":
         raise HTTPException(status_code=409, detail="Device code is no longer pending")
