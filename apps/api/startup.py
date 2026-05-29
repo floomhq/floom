@@ -4,6 +4,7 @@ import os
 
 from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.supabase_provider import SupabaseAuthProvider
+from apps.api.auth.workspace_context import get_active_workspace_id
 from apps.api.cloud_webhooks import apply_engine_overrides
 from apps.api.config import get_cloud_settings
 from apps.api.db._secret_crypto import ensure_secret_crypto_ready
@@ -18,6 +19,7 @@ from apps.api.db.supabase_repos import (
 ensure_engine_api_path()
 
 from auth.factory import register_auth_provider  # noqa: E402
+import contexts as engine_contexts  # noqa: E402
 import db as engine_db  # noqa: E402
 from db import factory as engine_db_factory  # noqa: E402
 from db.factory import Repositories, register_repositories  # noqa: E402
@@ -89,6 +91,25 @@ def _cloud_repositories() -> Repositories:
     )
 
 
+def _register_contexts_scope_resolver() -> None:
+    """Tell the engine's contexts module to scope every FS path by the
+    active workspace_id. Without this, every authed cloud user sees
+    every workspace's contexts (P0 #34). Falls back to unscoped when
+    the contextvar is unset (scheduler / webhook background tasks),
+    which is fine because those code paths only touch contexts via
+    worker config and don't list the root.
+    """
+    if not hasattr(engine_contexts, "set_context_scope_resolver"):
+        # Engine submodule predates the scoping hook. Surface loudly so
+        # the cloud refuses to boot multi-tenant on a vulnerable engine.
+        raise RuntimeError(
+            "Engine submodule is missing contexts.set_context_scope_resolver "
+            "(P0 #34). Bump the engine pin to a commit that includes the "
+            "scoping hook before deploying cloud."
+        )
+    engine_contexts.set_context_scope_resolver(get_active_workspace_id)
+
+
 def register_cloud_components() -> None:
     _activate_cloud_deploy()
     get_cloud_settings()
@@ -97,6 +118,7 @@ def register_cloud_components() -> None:
     register_auth_provider("cloud", lambda: SupabaseAuthProvider())
     register_repositories("cloud", _cloud_repositories)
     apply_engine_overrides()
+    _register_contexts_scope_resolver()
     engine_db.init_db = lambda: None
 
     # Bypass the engine's lru_cache on get_repositories. Otherwise the

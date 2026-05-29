@@ -226,42 +226,27 @@ export default function ConnectionsBrowsePage() {
     return `${start}-${end} of ${catalog.total_items.toLocaleString()} integrations`;
   }, [catalog, loading, loadError]);
 
-  async function handleConnect(slug: string) {
+  function handleConnect(slug: string) {
+    // BUG #46: was async + window.open("", "_blank") + api.connections.initiate()
+    // inline. The fetch round-trip breaks the user-gesture chain so the popup
+    // (or its post-fetch navigation) gets blocked across browsers, and the
+    // network call ALSO creates a "Connecting" row in the DB — so the user
+    // ends up with a ghost row in /connections and no OAuth tab ever opens.
+    //
+    // Fix: every Connect click routes to /app/connections/connect/[slug]
+    // FIRST. That page renders a single Connect button inside the same SPA
+    // navigation tick, then calls api.connections.initiate() in direct
+    // response to THAT click — so the popup opens in proper user-gesture
+    // context and no DB row is created until the user actually clicks the
+    // confirmation button.
     setConnecting(slug);
-    const oauthTab = window.open("", "_blank");
-    if (oauthTab) oauthTab.opener = null;
-    try {
-      const result = await api.connections.initiate(slug);
-      if (result.redirect_url) {
-        if (oauthTab) {
-          oauthTab.location.href = result.redirect_url;
-        } else {
-          window.open(result.redirect_url, "_blank");
-        }
-        toast.success(`OAuth opened for ${slug}`);
-      } else {
-        oauthTab?.close();
-        toast.success(`Connection initiated for ${slug}`);
-      }
-    } catch (error) {
-      oauthTab?.close();
-      const msg = error instanceof Error ? error.message : `Failed to connect ${slug}`;
-      // Backend returns "api_key_only: ..." when the app uses API-key auth, not OAuth.
-      // Redirect to secrets so the user can add the key there instead.
-      if (msg.startsWith("api_key_only:")) {
-        toast.info(`${slug} uses an API key, not OAuth. Add the key in Secrets.`, {
-          action: {
-            label: "Go to Secrets",
-            onClick: () => router.push("/secrets"),
-          },
-          duration: 8000,
-        });
-      } else {
-        toast.error(msg);
-      }
-    } finally {
-      setConnecting(null);
-    }
+    // router.push auto-prepends basePath "/app" (set in next.config.ts).
+    // The return_to MUST be basePath-stripped; the interstitial uses
+    // <Link href> + router.push which both auto-prepend basePath, so
+    // "/connections" becomes "/app/connections" automatically.
+    router.push(
+      `/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`,
+    );
   }
 
   return (
