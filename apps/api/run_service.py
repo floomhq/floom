@@ -112,6 +112,57 @@ def _find_bundle_artifact(run_id: str, artifacts: list[Dict[str, Any]]) -> Optio
     return fallback if fallback.is_file() else None
 
 
+def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None]) -> str:
+    """Strip optional metadata that violates the WorkerContract schema so an
+    otherwise-valid drafted worker still registers.
+
+    Only touches DISPLAY metadata (lossless to function):
+      - ``use_cases``: must be 3-5 non-empty items, else dropped.
+      - ``tags``: must be <= 8 flat non-empty strings, else dropped.
+
+    Returns the (possibly rewritten) YAML; on any parse error returns the
+    input unchanged so the normal validation path reports the real error.
+    """
+    try:
+        import yaml as pyyaml
+        raw = pyyaml.safe_load(worker_yml)
+    except Exception:
+        return worker_yml
+    if not isinstance(raw, dict):
+        return worker_yml
+
+    changed = False
+
+    use_cases = raw.get("use_cases")
+    if use_cases is not None:
+        ok = (
+            isinstance(use_cases, list)
+            and 3 <= len(use_cases) <= 5
+            and all(isinstance(u, str) and u.strip() for u in use_cases)
+        )
+        if not ok:
+            raw.pop("use_cases", None)
+            changed = True
+            log_fn("Dropped invalid use_cases from drafted worker (schema requires 3-5 items)", level="warning")
+
+    tags = raw.get("tags")
+    if tags is not None:
+        ok = (
+            isinstance(tags, list)
+            and len(tags) <= 8
+            and all(isinstance(t, str) and t.strip() and "/" not in t for t in tags)
+        )
+        if not ok:
+            raw.pop("tags", None)
+            changed = True
+            log_fn("Dropped invalid tags from drafted worker (schema requires <=8 flat strings)", level="warning")
+
+    if not changed:
+        return worker_yml
+    import yaml as pyyaml
+    return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
+
+
 def _register_authored_worker(
     run_id: str,
     outputs: Dict[str, Any],
@@ -165,6 +216,14 @@ def _register_authored_worker(
     if not worker_yml:
         log_fn("worker-author bundle missing worker_yml — nothing to register", level="warning")
         return None
+
+    # Safety-net: the worker-author LLM validates the YAML with its own loose
+    # check, which is weaker than the canonical WorkerContract schema enforced
+    # at registration. The common drift is OPTIONAL metadata (use_cases must be
+    # 3-5 items, tags <= 8 flat strings). Strip violating optional metadata so a
+    # functionally-valid worker still registers instead of dead-ending. This is
+    # lossless to behaviour (these fields are display metadata only).
+    worker_yml = _normalize_authored_worker_yml(worker_yml, log_fn)
 
     skill_md = bundle.get("skill_md")
     run_code = bundle.get("run_code")
