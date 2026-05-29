@@ -289,6 +289,21 @@ def test_smoke_reason_bare_keyerror_token_humanized() -> None:
         assert out == main._CODE_HEADLINE, raw
 
 
+def test_smoke_reason_strips_leading_code_prefix() -> None:
+    # G5-B: the pipeline may build a reason as "<code>: <raw error>" with NO
+    # trailing (error_code=…). The leading prefix must be stripped and routed
+    # to the calm headline, never leaked verbatim.
+    reason = (
+        "output_validation_failed: worker reported success "
+        "but produced no real output"
+    )
+    out = main.humanize_smoke_reason(reason)
+    assert out == main._OUTPUT_HEADLINE
+    assert "output_validation_failed" not in out
+    assert "output_validation_failed:" not in out
+    assert "produced no real output" not in out
+
+
 # --------------------------------------------------------------------------
 # Batch L / G5 P1 — the residual e2b stderr CODE-ECHO leak. Each stderr line is
 # stored as a SEPARATE log row, so the source-line echo, the caret marker
