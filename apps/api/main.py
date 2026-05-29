@@ -254,6 +254,7 @@ PUBLIC_STOCK_WORKER_IDS = frozenset(
         "github-digest",
         "gmail_intake_brief",
         "linkedin-post-engagements",
+        "node-smoke-test",
         "openblog",
         "opendraft",
         "research_brief",
