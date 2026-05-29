@@ -151,3 +151,58 @@ being created, which is the lever, but the historical rate will only move as new
   intentionally out of FIX 5's `error_raw` scope (B P2-1 unaddressed).
 - Author-bundle scalar-output-without-`type` schema rejection drops the worker to a
   no-registration dead-end (2/5 above). Worth a follow-up; does not ship a broken worker.
+
+---
+
+## Batch J — P0-1 persistence + half-wired gate + path leaks (2026-05-29 PM)
+
+Follow-up closing the residuals from the G5 rescores (A=62, B=74) + probe (95).
+
+### Root cause of P0-1 (the wedge blocker)
+The smoke gate set `workers.enabled=0` in the DB, but `_persist_discovered_workers`
+recomputes `enabled` from the worker MANIFEST on every re-discover (cache
+invalidation, worker-file save, repair persist). The generated manifest carried no
+paused flag, and `WorkerContract` had no `paused` field (so `model_dump()` dropped
+it during discovery). Net: any re-discover silently flipped a smoke-disabled worker
+back to `enabled=1` — so a broken worker shipped enabled with a "passed" smoke and
+failed 100% of real runs. (Reproduced: a freshly disabled worker became `enabled=1`
+after a `/workers/reload`.)
+
+### Fixes
+1. `WorkerContract.paused: bool` (round-trips through discover).
+2. Smoke gate writes `paused: true` into worker.yml (inline `_mark_worker_paused_on_disk`,
+   no cross-module import in the async to_thread create path) + DB `enabled=0`.
+3. Repair loop persists the fixed run.py via the canonical `persist_worker_run_py`
+   (disk write + cache invalidate + re-discover + recipe re-persist); a persist
+   FAILURE fails the smoke (disable) rather than shipping unverified disk state.
+4. `_build_smoke_inputs`: list/array → `[3,1,2]`, object → `{"key":"value"}`
+   (number/string unchanged) so legit list workers are not false-disabled.
+5. P0-2: `_BARE_PYTHON_EXC_MSG_RE` → bare-exc messages map to `_CODE_HEADLINE`,
+   never verbatim; clean structured messages still pass through.
+6. B-P1-1: `create_worker_run` → 409 `worker_disabled` before any run row.
+7. B-P1-2: disabled worker → `needs_attention` in detail status + overview.
+8. P2/PATH-1: `_redact_public_log_message` runs `_SANDBOX_PATH_RE`; `_public_artifact_path`
+   relativises `artifacts[].path` (+ `Artifact.relative_path`). Download unchanged.
+
+### Live verification table (worktree API, isolated DB/workers/artifacts)
+
+| Prompt | worker_id | smoke | real run | status | output |
+|---|---|---|---|---|---|
+| median of a list | median-calculator-6 | passed | created | completed | `{"median":3}` |
+| std deviation of a list | compute-standard-deviation-2 | passed | created | completed | `{"standard_deviation":2.138...}` |
+| USD→EUR (file) | usd-to-euro-converter-4 | passed | run_df9f3b0154f5 | completed | `9.2/18.4/27.6` (0.92, correct) |
+| dedupe list (file) | remove-duplicate-strings-2 | passed | run_bff7d4fcc312 | completed | unique_list.txt (real) |
+| reverse a string | string-reverser-4 | failed | gated | **409** | disabled (path-leak code) |
+| sort numbers | sort-numbers | failed | gated | **409** | disabled (path-leak code) |
+| extract emails | extract-email-addresses-4 | failed | gated | **409** | disabled (empty file) |
+| std deviation (early) | compute-standard-deviation | failed* | gated | **409** | disabled (pre-input-fix) |
+
+*pre-smoke-input-fix run. **0 silently-broken.** All disabled workers stayed disabled
+across a full `/workers/reload`.
+
+- P1-1: `compute-standard-deviation` POST runs → 409 "This worker is paused. Turn it on to run it again."
+- P1-2: overview `paused_workers_count=7`, all 7 in needs_attention as `worker_disabled`; detail `status=needs_attention`.
+- P0-2: `divide-numbers` 10/0 → operator error = calm CODE headline; `error_raw` = traceback with `[worker file]` (no path).
+- P2: run JSON `artifacts[].path` relative (`run_xxx/out/...`), logs scrubbed, 0 host/sandbox path hits; artifact download returns real bytes.
+
+Tests: 19 new (batch J), all pass. 6 pre-existing failures (stale signatures, untouched).
