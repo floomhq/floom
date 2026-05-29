@@ -8,14 +8,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowLeft,
-  Check,
   Download,
   Edit3,
   File as FileIcon,
   FileCode,
   FileText,
   Image as ImageIcon,
-  Link as LinkIcon,
   Save,
   X,
 } from "lucide-react";
@@ -87,16 +85,6 @@ export default function FilePreviewPage() {
   const [loadingText, setLoadingText] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
-  const [fileLinkCopied, setFileLinkCopied] = useState(false);
-
-  function copyFileLink() {
-    const pathEncoded = selectedPath.split("/").map(encodeURIComponent).join("/");
-    const url = `${window.location.origin}/contexts/${encodeURIComponent(packName)}/files/${pathEncoded}`;
-    navigator.clipboard.writeText(url).then(() => {
-      setFileLinkCopied(true);
-      setTimeout(() => setFileLinkCopied(false), 1500);
-    });
-  }
 
   const selectedFile = detail?.files.find((f) => f.path === selectedPath) ?? null;
   const kind = selectedFile ? fileKind(selectedFile) : null;
@@ -185,23 +173,13 @@ export default function FilePreviewPage() {
             </>
           )}
           {selectedFile && (
-            <>
-              <button
-                type="button"
-                onClick={copyFileLink}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border-default)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                title="Copy link to this file"
-              >
-                {fileLinkCopied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5" />}
-              </button>
-              <a
-                href={fileUrl}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border-default)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                title="Download"
-              >
-                <Download className="size-3.5" />
-              </a>
-            </>
+            <a
+              href={fileUrl}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border-default)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              title="Download"
+            >
+              <Download className="size-3.5" />
+            </a>
           )}
           <Button
             size="sm"
@@ -241,7 +219,7 @@ export default function FilePreviewPage() {
                       : "hover:bg-muted/40"
                   }`}
                 >
-                  {displayTypeIcon(file.display_type)}
+                  {displayTypeIcon(file.display_type ?? "File")}
                   <span className="text-xs font-mono truncate flex-1">{file.path}</span>
                 </button>
               ))}
@@ -262,22 +240,12 @@ export default function FilePreviewPage() {
             <>
               {/* File header */}
               <div className="border-b border-[var(--border-default)] px-4 py-3 shrink-0">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {displayTypeIcon(selectedFile.display_type)}
-                    <span className="font-mono text-sm font-medium truncate">{selectedFile.path.split("/").pop()}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={copyFileLink}
-                    className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors shrink-0"
-                    title="Copy link to this file"
-                  >
-                    {fileLinkCopied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5" />}
-                  </button>
+                <div className="flex items-center gap-2">
+                  {displayTypeIcon(selectedFile.display_type ?? "File")}
+                  <span className="font-mono text-sm font-medium">{selectedFile.path.split("/").pop()}</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {selectedFile.display_type} · {formatBytes(selectedFile.size)}
+                  {selectedFile.display_type ?? "File"} · {formatBytes(selectedFile.size)}
                   {selectedFile.updated_at && ` · Updated ${formatDate(selectedFile.updated_at)}`}
                 </p>
               </div>
@@ -396,7 +364,7 @@ function FileContent({
 
   return (
     <div className="p-4 space-y-3 text-sm">
-      <p className="text-muted-foreground">{file.display_type} file · {formatBytes(file.size)}</p>
+      <p className="text-muted-foreground">{file.display_type ?? "File"} file · {formatBytes(file.size)}</p>
       <a href={fileUrl} className="inline-flex items-center gap-2 rounded-md border border-[var(--border-default)] px-3 py-1.5 text-sm hover:bg-muted">
         <Download className="size-4" />
         Download
