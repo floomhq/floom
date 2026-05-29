@@ -247,8 +247,8 @@ function useNavScroll() {
 
 /* ── Hero new-worker flow ──────────────────────────────────────────
    The hero IS the /workers/new experience: a visitor types a job in
-   plain English, then watches Workeros configure a worker — worker.yml,
-   tools, schedule, connections, approval — and run it once.
+   plain English, then watches Workeros configure a worker, worker.yml,
+   tools, schedule, connections, approval, and run it once.
    Phases drive the staged reveal. */
 type HeroPhase = "typing" | "thinking" | "config" | "run" | "done";
 
@@ -483,11 +483,46 @@ const EMPLOYEES: EmployeeCard[] = [
 ];
 
 const OUTCOME_TILES = [
-  { n: "12", label: "New leads researched", sub: "today" },
-  { n: "8", label: "Follow-ups drafted", sub: "today" },
-  { n: "4", label: "Invoices processed", sub: "today" },
-  { n: "17", label: "Reports written", sub: "this week" },
+  { n: "12", label: "New leads researched", sub: "today", spark: [3, 5, 4, 7, 6, 9, 12] },
+  { n: "8", label: "Follow-ups drafted", sub: "today", spark: [2, 3, 3, 5, 4, 6, 8] },
+  { n: "4", label: "Invoices processed", sub: "today", spark: [1, 2, 1, 3, 2, 3, 4] },
+  { n: "17", label: "Reports written", sub: "this week", spark: [6, 8, 7, 11, 10, 14, 17] },
 ];
+
+/* Tiny inline sparkline so each outcome tile reads as live momentum,
+   not an empty form box. Pure SVG, no deps. */
+function Sparkline({ data }: { data: number[] }) {
+  const w = 100;
+  const h = 24;
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const span = max - min || 1;
+  const stepX = w / (data.length - 1);
+  const pts = data.map((v, i) => {
+    const x = i * stepX;
+    const y = h - 2 - ((v - min) / span) * (h - 4);
+    return [x, y] as const;
+  });
+  const line = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
+  const area = `${line} L${w} ${h} L0 ${h} Z`;
+  const gid = `sg-${data.join("-")}`;
+  const [lx, ly] = pts[pts.length - 1];
+  return (
+    <span className="ln-outcome-spark" aria-hidden="true">
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={area} fill={`url(#${gid})`} />
+        <path d={line} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        <circle cx={lx} cy={ly} r="2.6" fill="currentColor" />
+      </svg>
+    </span>
+  );
+}
 
 const WORKSPACES = [
   { id: "rocketlist", short: "RL", name: "Rocketlist", role: "Owner · 6 workers", active: true },
@@ -596,7 +631,7 @@ export function LandingBody() {
           </div>
         </section>
 
-        {/* Your team — outcome tiles + employee-shaped worker cards */}
+        {/* Your team, outcome tiles + employee-shaped worker cards */}
         <section className="ln-team lp1" aria-label="Your team of AI workers">
           <div className="ln-sec-head">
             <div className="ln-ft-eye">Your team</div>
@@ -612,6 +647,7 @@ export function LandingBody() {
             {OUTCOME_TILES.map((t) => (
               <div key={t.label} className="ln-outcome">
                 <div className="ln-outcome-n">{t.n}</div>
+                <Sparkline data={t.spark} />
                 <div className="ln-outcome-l">{t.label}</div>
                 <div className="ln-outcome-s">{t.sub}</div>
               </div>
@@ -653,7 +689,7 @@ export function LandingBody() {
           </div>
         </section>
 
-        {/* Three pillars — what makes a Workeros worker different. */}
+        {/* Three pillars, what makes a Workeros worker different. */}
         <section className="ln-pillars lp1" aria-label="Why Workeros">
           <div className="ln-pillar">
             <span className="ln-pillar-ic" aria-hidden="true">
@@ -663,7 +699,7 @@ export function LandingBody() {
             <p>
               Drop your style guide, CRM playbook, or 2026 OKRs into a
               Context. It mounts into every run, so your worker carries the
-              same knowledge across days, triggers, and tools — not a blank
+              same knowledge across days, triggers, and tools, not a blank
               slate each time.
             </p>
             <span className="ln-pillar-tag">Contexts, mounted per run</span>
@@ -675,7 +711,7 @@ export function LandingBody() {
             <h3>Sharper every run</h3>
             <p>
               Every run is captured and every worker is versioned. Read the
-              real transcript, tweak the brief, re-run in one click — by hand
+              real transcript, tweak the brief, re-run in one click, by hand
               or from your agent over MCP. Each run teaches the next.
             </p>
             <span className="ln-pillar-tag">Versioned + replayable</span>
@@ -695,14 +731,14 @@ export function LandingBody() {
         </section>
 
         <section className="ln-feat lp1">
-          {/* Runs — artifact-native. A run produces the THING. */}
+          {/* Runs, artifact-native. A run produces the THING. */}
           <div className="ln-feat-row">
             <div className="ln-ft-txt">
               <div className="ln-ft-eye">Runs</div>
               <h2>Every run produces the thing, not a log line.</h2>
               <p>
-                Open any run and you get the artifact your worker made — the
-                drafted replies, the parsed invoices, the digest — plus the
+                Open any run and you get the artifact your worker made, the
+                drafted replies, the parsed invoices, the digest, plus the
                 inputs, every step, each tool call, the cost, and the approval
                 trail. Replay it in one click.
               </p>
@@ -743,7 +779,7 @@ export function LandingBody() {
             </div>
           </div>
 
-          {/* Workspaces — multi-tenant. */}
+          {/* Workspaces, multi-tenant. */}
           <div className="ln-feat-row rev">
             <div className="ln-ft-txt">
               <div className="ln-ft-eye">Workspaces</div>
@@ -786,7 +822,7 @@ export function LandingBody() {
             </div>
           </div>
 
-          {/* Contexts — knowledge mounted into every run. */}
+          {/* Contexts, knowledge mounted into every run. */}
           <div className="ln-feat-row">
             <div className="ln-ft-txt">
               <div className="ln-ft-eye">Contexts</div>
@@ -842,7 +878,7 @@ export function LandingBody() {
             </div>
           </div>
 
-          {/* Connections — live OAuth + MCP. */}
+          {/* Connections, live OAuth + MCP. */}
           <div className="ln-feat-row rev">
             <div className="ln-ft-txt">
               <div className="ln-ft-eye">Connections</div>

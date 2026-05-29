@@ -23,7 +23,7 @@ import {
 
 const SIGN_IN_HREF = "/login";
 
-/* Nav scroll docking — same behavior as the main landing. */
+/* Nav scroll docking, same behavior as the main landing. */
 function useNavScroll() {
   useEffect(() => {
     const navEl = document.getElementById("lnNav");
@@ -141,7 +141,7 @@ function HeroAgentInTool({ v }: { v: Vertical }) {
       </div>
 
       <div className="lv-mock-body">
-        {/* The tool surface header — tinted to read as the real app. */}
+        {/* The tool surface header, tinted to read as the real app. */}
         <div className="lv-app-head">
           <span className="lv-app-ic">
             <AppIcon />
@@ -165,7 +165,7 @@ function HeroAgentInTool({ v }: { v: Vertical }) {
           <p>{hero.task}</p>
         </div>
 
-        {/* The run — concrete steps it took inside the tool. */}
+        {/* The run, concrete steps it took inside the tool. */}
         <div className="lv-steps">
           {hero.steps.map((s, i) => (
             <div key={s} className={"lv-step" + (i < step ? " on" : "")}>
@@ -297,12 +297,15 @@ export function VerticalLanding({ slug }: { slug: string }) {
             </div>
           </div>
 
-          <div className="ln-hero-visual ln-rise ln-rise-2">
+          <div
+            className="ln-hero-visual ln-rise ln-rise-2"
+            style={{ ["--tool" as string]: v.hero.accent }}
+          >
             <HeroAgentInTool v={v} />
           </div>
         </section>
 
-        {/* Tools strip — what this vertical's worker connects to. */}
+        {/* Tools strip, what this vertical's worker connects to. */}
         <section className="ln-trust lp1">
           <div className="ln-trust-label">{v.toolsLabel}</div>
           <div className="ln-logos">
@@ -318,7 +321,7 @@ export function VerticalLanding({ slug }: { slug: string }) {
           </div>
         </section>
 
-        {/* Capabilities — 4 jobs it does on day one. */}
+        {/* Capabilities, 4 jobs it does on day one. */}
         <section className="ln-team lp1" aria-label="What it does">
           <div className="ln-sec-head">
             <div className="ln-ft-eye">Capabilities</div>
@@ -349,7 +352,7 @@ export function VerticalLanding({ slug }: { slug: string }) {
           </div>
         </section>
 
-        {/* MCP trust strip — drive it from any agent (shared idea). */}
+        {/* MCP trust strip, drive it from any agent (shared idea). */}
         <section className="ln-trust lp1">
           <div className="ln-trust-label">
             Drive Workeros from any MCP-capable agent
@@ -378,7 +381,7 @@ export function VerticalLanding({ slug }: { slug: string }) {
           </div>
         </section>
 
-        {/* Three shared pillars — what makes a Workeros worker different. */}
+        {/* Three shared pillars, what makes a Workeros worker different. */}
         <section className="ln-pillars lp1" aria-label="Why Workeros">
           <div className="ln-pillar">
             <span className="ln-pillar-ic" aria-hidden="true">

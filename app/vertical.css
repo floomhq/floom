@@ -281,25 +281,26 @@
 .lv-cap {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-2xl);
   background: var(--paper);
   padding: 24px 22px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
   transition: transform 0.2s var(--ease), box-shadow 0.2s;
 }
 .lv-cap:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
 }
 .lv-cap-ic {
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--r-lg);
   display: grid;
   place-items: center;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--solid-fg) 50%, transparent);
   color: var(--accent);
   margin-bottom: 16px;
 }

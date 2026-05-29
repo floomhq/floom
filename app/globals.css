@@ -45,6 +45,7 @@
   --color-card: var(--card);
   --shadow-sm: var(--shadow-sm);
   --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
   --shadow-pop: var(--shadow-pop);
   --shadow-btn: var(--shadow-btn);
   --radius-xs: var(--r-xs);
@@ -85,10 +86,30 @@
   --glass-edge: rgba(255, 255, 255, 0.96);
   --hairline: 0 0 0 1px var(--line);
   --edge: inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  --shadow-sm: 0 1px 2px rgba(20, 20, 20, 0.05), 0 0 0 1px rgba(20, 20, 20, 0.05), var(--edge);
-  --shadow-md: 0 6px 20px -8px rgba(20, 20, 20, 0.13), 0 0 0 1px rgba(20, 20, 20, 0.05), var(--edge);
-  --shadow-pop: 0 22px 50px -16px rgba(20, 20, 20, 0.2), 0 0 0 1px rgba(20, 20, 20, 0.06), var(--edge);
-  --shadow-btn: 0 1px 2px rgba(20, 20, 20, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  /* Layered, soft shadows (Linear/Vercel-grade). Two stacked offsets give
+     real elevation without a heavy single drop. */
+  --shadow-sm:
+    0 1px 1px rgba(23, 31, 43, 0.04),
+    0 2px 4px -1px rgba(23, 31, 43, 0.06),
+    0 0 0 1px rgba(20, 20, 20, 0.045),
+    var(--edge);
+  --shadow-md:
+    0 2px 4px -1px rgba(23, 31, 43, 0.06),
+    0 8px 16px -6px rgba(23, 31, 43, 0.12),
+    0 0 0 1px rgba(20, 20, 20, 0.05),
+    var(--edge);
+  --shadow-lg:
+    0 4px 8px -2px rgba(23, 31, 43, 0.08),
+    0 16px 32px -10px rgba(23, 31, 43, 0.16),
+    0 0 0 1px rgba(20, 20, 20, 0.05),
+    var(--edge);
+  /* Floating-app-window shadow for product mocks: long soft cast + crisp edge. */
+  --shadow-pop:
+    0 6px 12px -4px rgba(23, 31, 43, 0.1),
+    0 28px 56px -16px rgba(23, 31, 43, 0.24),
+    0 0 0 1px rgba(20, 20, 20, 0.06),
+    var(--edge);
+  --shadow-btn: 0 1px 2px rgba(20, 20, 20, 0.22), 0 2px 6px -2px rgba(20, 20, 20, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   --focus: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
   --sidebar-glass: color-mix(in srgb, var(--accent) 5%, color-mix(in srgb, var(--paper) 70%, transparent));
   --sidebar-glass-shadow: 0 1px 2px rgba(20, 35, 50, 0.04), 0 4px 16px rgba(58, 110, 165, 0.06);
@@ -175,10 +196,27 @@ html.dark {
   --glass-bg-strong: rgba(35, 35, 35, 0.78);
   --glass-edge: rgba(244, 244, 241, 0.14);
   --edge: inset 0 1px 0 rgba(255, 255, 255, 0.055);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(255, 255, 255, 0.04), var(--edge);
-  --shadow-md: 0 6px 18px -8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05), var(--edge);
-  --shadow-pop: 0 22px 48px -16px rgba(0, 0, 0, 0.66), 0 0 0 1px rgba(255, 255, 255, 0.06), var(--edge);
-  --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-sm:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 2px 6px -2px rgba(0, 0, 0, 0.46),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    var(--edge);
+  --shadow-md:
+    0 2px 6px -2px rgba(0, 0, 0, 0.5),
+    0 10px 22px -8px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    var(--edge);
+  --shadow-lg:
+    0 4px 10px -3px rgba(0, 0, 0, 0.55),
+    0 18px 36px -12px rgba(0, 0, 0, 0.66),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    var(--edge);
+  --shadow-pop:
+    0 8px 18px -6px rgba(0, 0, 0, 0.6),
+    0 30px 60px -18px rgba(0, 0, 0, 0.72),
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    var(--edge);
+  --shadow-btn: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 6px -2px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --sidebar-glass: color-mix(in srgb, var(--accent) 7%, color-mix(in srgb, var(--paper) 68%, transparent));
   --sidebar-glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 4px 16px rgba(127, 176, 224, 0.06);
   --card-glass: color-mix(in srgb, var(--paper) 40%, transparent);
@@ -285,11 +323,11 @@ html.dark {
 }
 
 .spacebg .c1 {
-  width: 760px;
-  height: 280px;
+  width: 820px;
+  height: 320px;
   left: -130px;
-  top: 40px;
-  opacity: 0.48;
+  top: 20px;
+  opacity: 0.6;
   background: radial-gradient(ellipse at 40% 50%, color-mix(in srgb, var(--accent) 46%, transparent) 0%, color-mix(in srgb, var(--accent) 24%, transparent) 44%, color-mix(in srgb, var(--accent) 9%, transparent) 70%, transparent 100%);
 }
 

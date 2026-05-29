@@ -83,13 +83,13 @@ export interface Vertical {
 export const VERTICALS: Record<string, Vertical> = {
   marketing: {
     slug: "marketing",
-    metaTitle: "Workeros for Marketing — Campaign reporting that writes itself",
+    metaTitle: "Workeros for Marketing: Campaign reporting that writes itself",
     metaDescription:
-      "Hire an AI worker for your marketing team. It pulls performance from Google Analytics, drafts social from new posts, scores inbound leads in HubSpot, and watches competitors — on a schedule, a webhook, or with your approval.",
+      "Hire an AI worker for your marketing team. It pulls performance from Google Analytics, drafts social from new posts, scores inbound leads in HubSpot, and watches competitors, on a schedule, a webhook, or with your approval.",
     eyebrow: "Workeros for Marketing",
     h1: "Campaign reporting that writes itself",
     h1Accent: "writes itself",
-    sub: "Describe the job once, connect Analytics, HubSpot, and Slack, and your worker pulls the numbers, drafts the posts, and scores the leads — on a schedule, a webhook, or with your approval.",
+    sub: "Describe the job once, connect Analytics, HubSpot, and Slack, and your worker pulls the numbers, drafts the posts, and scores the leads, on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your marketing worker",
     hero: {
       accent: "#FF7A59",
@@ -141,7 +141,7 @@ export const VERTICALS: Record<string, Vertical> = {
       {
         icon: ShieldIcon,
         title: "Competitor + news watch",
-        body: "On a daily schedule it scans named competitors and your category, then posts only what changed to a Slack channel — no noise.",
+        body: "On a daily schedule it scans named competitors and your category, then posts only what changed to a Slack channel, no noise.",
         tools: [SlackLogo, GmailLogo],
       },
     ],
@@ -152,13 +152,13 @@ export const VERTICALS: Record<string, Vertical> = {
 
   recruiting: {
     slug: "recruiting",
-    metaTitle: "Workeros for Recruiting — Screen every applicant before standup",
+    metaTitle: "Workeros for Recruiting: Screen every applicant before standup",
     metaDescription:
-      "Hire an AI worker for your recruiting team. It screens new applicants against the role brief, drafts personalized outreach, sends a daily pipeline digest, and schedules interviews via Calendar — with your approval.",
+      "Hire an AI worker for your recruiting team. It screens new applicants against the role brief, drafts personalized outreach, sends a daily pipeline digest, and schedules interviews via Calendar, with your approval.",
     eyebrow: "Workeros for Recruiting",
     h1: "Screen every applicant before standup",
     h1Accent: "before standup",
-    sub: "Describe the role, connect your ATS, Gmail, and Calendar, and your worker scores each new applicant against the brief, drafts the outreach, and books the interviews — on a schedule, a webhook, or with your approval.",
+    sub: "Describe the role, connect your ATS, Gmail, and Calendar, and your worker scores each new applicant against the brief, drafts the outreach, and books the interviews, on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your recruiting worker",
     hero: {
       accent: "#24A47F",
@@ -221,13 +221,13 @@ export const VERTICALS: Record<string, Vertical> = {
 
   support: {
     slug: "support",
-    metaTitle: "Workeros for Support — Every ticket triaged the moment it lands",
+    metaTitle: "Workeros for Support: Every ticket triaged the moment it lands",
     metaDescription:
-      "Hire an AI worker for your support team. It triages and tags incoming tickets, drafts first-response replies, escalates urgent issues to Slack, and writes a weekly support-trends report — with your approval.",
+      "Hire an AI worker for your support team. It triages and tags incoming tickets, drafts first-response replies, escalates urgent issues to Slack, and writes a weekly support-trends report, with your approval.",
     eyebrow: "Workeros for Support",
     h1: "Every ticket triaged the moment it lands",
     h1Accent: "the moment it lands",
-    sub: "Describe the job, connect your helpdesk, Slack, and Notion, and your worker tags and prioritizes each ticket, drafts the first reply, and escalates what's urgent — on a schedule, a webhook, or with your approval.",
+    sub: "Describe the job, connect your helpdesk, Slack, and Notion, and your worker tags and prioritizes each ticket, drafts the first reply, and escalates what's urgent, on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your support worker",
     hero: {
       accent: "#03363D",
@@ -260,7 +260,7 @@ export const VERTICALS: Record<string, Vertical> = {
       {
         icon: TicketIcon,
         title: "Triage + tag incoming tickets",
-        body: "Every new ticket is read with the customer's history, tagged by topic, and prioritized — so the right person sees the right ticket first.",
+        body: "Every new ticket is read with the customer's history, tagged by topic, and prioritized, so the right person sees the right ticket first.",
         tools: [ZendeskLogo, IntercomLogo],
       },
       {
@@ -289,13 +289,13 @@ export const VERTICALS: Record<string, Vertical> = {
 
   sales: {
     slug: "sales",
-    metaTitle: "Workeros for Sales — Every lead researched before you call",
+    metaTitle: "Workeros for Sales: Every lead researched before you call",
     metaDescription:
-      "Hire an AI worker for your sales team. It enriches and scores every new inbound lead in your CRM, drafts personalized first-touch outreach, sends a daily pipeline digest, and researches accounts before your calls — on a schedule, a webhook, or with your approval.",
+      "Hire an AI worker for your sales team. It enriches and scores every new inbound lead in your CRM, drafts personalized first-touch outreach, sends a daily pipeline digest, and researches accounts before your calls, on a schedule, a webhook, or with your approval.",
     eyebrow: "Workeros for Sales",
     h1: "Every lead researched before you call",
     h1Accent: "before you call",
-    sub: "Describe the job, connect your CRM, LinkedIn, and Gmail, and your worker enriches and scores each new lead, drafts the first touch, and briefs you on the account — on a schedule, a webhook, or with your approval.",
+    sub: "Describe the job, connect your CRM, LinkedIn, and Gmail, and your worker enriches and scores each new lead, drafts the first touch, and briefs you on the account, on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your sales worker",
     hero: {
       accent: "#6D5CE0",

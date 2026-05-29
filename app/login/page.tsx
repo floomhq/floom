@@ -2,7 +2,7 @@ import Link from "next/link";
 import { OAUTH_LOGIN_URL, OAUTH_LOGIN_URL_GITHUB } from "@/lib/api";
 
 export const metadata = {
-  title: "Sign in — Workeros",
+  title: "Sign in · Workeros",
 };
 
 export default async function LoginPage({
