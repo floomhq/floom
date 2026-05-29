@@ -32,6 +32,7 @@ import type { TriggerRow } from "@/components/worker-form";
 import type { WorkerMetadataValues } from "@/components/worker-form";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { formatRelative, formatDuration } from "@/lib/formatters";
+import { humanizeRunError } from "@/lib/run-format";
 import { RunStatusBadge } from "@/components/RunStatus";
 import { RunDetailSplitPane } from "@/components/RunDetailSplitPane";
 import { useRunStream } from "@/lib/useRunStream";
@@ -53,6 +54,36 @@ const VALID_SECTIONS: Section[] = ["about", "run", "code", "triggers", "connecti
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
+}
+
+// P2-3: the URL hash must match the visible tab label, not the internal
+// Section id. Labels: About / Run / Triggers / History / Apps / Source.
+// Internal ids stay stable (runs/connections/code) for back-compat; only the
+// hash slug the user sees/links changes.
+const SECTION_TO_HASH: Record<Section, string> = {
+  about: "about",
+  run: "run",
+  triggers: "triggers",
+  runs: "history",
+  connections: "apps",
+  code: "source",
+};
+const HASH_TO_SECTION: Record<string, Section> = {
+  about: "about",
+  run: "run",
+  triggers: "triggers",
+  history: "runs",
+  apps: "connections",
+  source: "code",
+  // legacy hashes still resolve so old deep-links keep working
+  runs: "runs",
+  connections: "connections",
+  code: "code",
+  overview: "about",
+};
+
+function hashToSection(h: string): Section | null {
+  return HASH_TO_SECTION[h] ?? (isValidSection(h) ? h : null);
 }
 
 interface NavItem {
@@ -118,11 +149,10 @@ export default function WorkerDetailPage() {
     (searchParams.get("section") as string) ||
     "";
   // S34: default to "about" so first-time visitors see what the worker does
-  // before the Run form. Once they pick a tab via URL hash, that wins. Legacy
-  // "#overview" URLs collapse to "about".
+  // before the Run form. Once they pick a tab via URL hash, that wins.
+  // P2-3: hash slugs (history/apps/source) map to internal section ids.
   const [activeSection, setActiveSection] = useState<Section>(
-    isValidSection(sectionParam) ? sectionParam :
-      (sectionParam === "overview" ? "about" : "about")
+    hashToSection(sectionParam) ?? "about"
   );
 
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
@@ -178,7 +208,7 @@ export default function WorkerDetailPage() {
     // browser back button now jumps to previous tab.
     const url = new URL(window.location.href);
     url.searchParams.delete("section");
-    url.hash = s;
+    url.hash = SECTION_TO_HASH[s];
     window.history.pushState(null, "", url.toString());
   }, []);
 
@@ -189,7 +219,8 @@ export default function WorkerDetailPage() {
   useEffect(() => {
     const sync = () => {
       const h = window.location.hash.replace(/^#/, "");
-      if (isValidSection(h) && h !== activeSection) setActiveSection(h);
+      const next = hashToSection(h);
+      if (next && next !== activeSection) setActiveSection(next);
     };
     window.addEventListener("hashchange", sync);
     window.addEventListener("popstate", sync);
@@ -206,7 +237,7 @@ export default function WorkerDetailPage() {
     if (typeof window === "undefined") return;
     if (!window.location.hash) {
       const url = new URL(window.location.href);
-      url.hash = activeSection;
+      url.hash = SECTION_TO_HASH[activeSection];
       window.history.replaceState(null, "", url.toString());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -214,11 +245,35 @@ export default function WorkerDetailPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // P1-1: deep-linking /workers/<id> sometimes hit a transient fetch failure
+    // (cold proxy / network blip) and flashed "Couldn't load worker — Retry"
+    // on a perfectly valid worker. Retry the worker fetch up to 2 times with a
+    // short backoff before surfacing the error state. A real 404 (worker not
+    // found) is NOT retried — it short-circuits to the not-found state.
+    async function fetchWorkerWithRetry(workerId: string): Promise<WorkerDetail> {
+      const maxAttempts = 3;
+      let lastErr: unknown;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          return await api.workers.get(workerId);
+        } catch (e: unknown) {
+          lastErr = e;
+          const msg = e instanceof Error ? e.message : String(e);
+          const isNotFound =
+            msg.includes("404") ||
+            /^worker( .+)? not found$/i.test(msg.trim()) ||
+            msg.toLowerCase() === "not found";
+          if (isNotFound || attempt === maxAttempts) throw e;
+          await new Promise((r) => setTimeout(r, 250 * attempt));
+        }
+      }
+      throw lastErr;
+    }
     async function load() {
       setNotFound(false);
       try {
         const [w, conns] = await Promise.all([
-          api.workers.get(id as string),
+          fetchWorkerWithRetry(id as string),
           api.connections.list().catch(() => [] as ConnectionItem[]),
         ]);
         if (cancelled) return;
@@ -924,10 +979,19 @@ function RunSection({
   // S29m (ChatGPT-audit P-3): drop Card wrapper; the Run tab is a form, not
   // a distinct surface needing a border. Section heading + form fields sit
   // directly on the page background.
+  // P2-2: free-form text fields ("Enrichment instruction", "Raw notes",
+  // "Job brief", "Role summary", etc.) render as a wrapping textarea, not a
+  // single-line input that truncates. Heuristic on the field name/label since
+  // the worker manifest marks them type:"text". Short text fields (location,
+  // search query) stay single-line.
+  const MULTILINE_HINT = /(instruction|brief|notes?|summary|prompt|message|context|description|details|jd|paste|body|content)/i;
+  const isMultilineText = (inp: WorkerInput) =>
+    (inp.type === "text" || inp.type === "string") &&
+    (MULTILINE_HINT.test(inp.name) || MULTILINE_HINT.test(inp.label || ""));
   // S29t (score walk): short inputs (select/string/number/boolean) pair
-  // side-by-side; long inputs (textarea/file/csv) span both columns.
+  // side-by-side; long inputs (textarea/file/csv/multiline) span both columns.
   const isLongInput = (inp: WorkerInput) =>
-    inp.type === "textarea" || inp.type === "file";
+    inp.type === "textarea" || inp.type === "file" || isMultilineText(inp);
   // S34: About content moved to its own tab (Federico — "different content,
   // different tabs"). Run tab is now form-only.
   return (
@@ -970,7 +1034,7 @@ function RunSection({
               {inp.description && (
                 <p className="text-xs text-muted-foreground">{inp.description}</p>
               )}
-              {inp.type === "textarea" ? (
+              {inp.type === "textarea" || isMultilineText(inp) ? (
                 <Textarea
                   placeholder={inp.placeholder}
                   value={(inputs[inp.name] as string) || ""}
@@ -1248,7 +1312,8 @@ function RunsSection({ worker }: { worker: WorkerDetail }) {
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <RunStatusBadge status={r.status} />
+            {/* P2-4: History shows a Completed pill for parity with failed runs. */}
+            <RunStatusBadge status={r.status} showSuccess />
             <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
           </div>
         </Link>
@@ -1267,23 +1332,7 @@ function RunsSection({ worker }: { worker: WorkerDetail }) {
 
 // S29a: humanize raw enum option keys for display in select dropdowns.
 // "branded_markdown" -> "Branded markdown"
-// Humanize raw API error strings into operator-friendly language.
-// Strips Python dict syntax from "Error code: N - {'error': {'message': '...'}}"
-function humanizeRunError(error: string): string {
-  const cleaned = (error || "").replace(/\s+/g, " ").trim();
-  const dictMatch = cleaned.match(/Error code:\s*\d+\s*-\s*[{'"]/i);
-  if (dictMatch) {
-    const msgMatch = cleaned.match(/"message"\s*:\s*"([^"]{1,200})"/i)
-      || cleaned.match(/'message'\s*:\s*'([^']{1,200})'/i);
-    if (msgMatch) {
-      const msg = msgMatch[1].trim();
-      return msg.length > 120 ? `${msg.slice(0, 117)}...` : msg;
-    }
-    const codeMatch = cleaned.match(/Error code:\s*(\d+)/i);
-    if (codeMatch) return `Request error (code ${codeMatch[1]})`;
-  }
-  return cleaned.length > 120 ? `${cleaned.slice(0, 117)}...` : cleaned;
-}
+// (humanizeRunError now lives in @/lib/run-format — P1-4 single source.)
 
 // "two_pager"        -> "Two pager"
 // "PLAIN_TEXT"       -> "Plain text"
