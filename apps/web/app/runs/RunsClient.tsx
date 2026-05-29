@@ -20,6 +20,22 @@ import {
 import { Download, Play } from "lucide-react";
 import type { RunSummary, WorkerSummary } from "@/lib/types";
 
+// Filter out system/test workers from the operator-facing filter dropdown.
+// Matches: audit-*, node-smoke-*, mcp-*-smoke, *-smoke-*, *quality-gate*
+const SYSTEM_WORKER_PATTERNS = [
+  /^audit-/i,
+  /^node-smoke/i,
+  /smoke/i,
+  /quality.gate/i,
+  /-smoke$/i,
+];
+
+function isSystemOrTestWorker(w: WorkerSummary): boolean {
+  const id = w.id.toLowerCase();
+  const name = (w.name || "").toLowerCase();
+  return SYSTEM_WORKER_PATTERNS.some((p) => p.test(id) || p.test(name));
+}
+
 const STATUS_OPTIONS = [
   { value: "", label: "All" },
   { value: "queued", label: "Queued" },
@@ -102,10 +118,13 @@ export default function RunsClient({
     }
   }
 
-  function loadMore() {
-    const next = offset + PAGE_SIZE;
+  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
+
+  function goToPage(page: number) {
+    const next = (page - 1) * PAGE_SIZE;
     setOffset(next);
-    fetchRuns(next);
+    fetchRuns(next, true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   const groupedRuns = groupRunsByDay(runs);
@@ -173,16 +192,18 @@ export default function RunsClient({
 
       <div className="flex gap-3 flex-wrap items-center">
         <Select value={workerFilter} onValueChange={(v) => updateFilter("worker_id", v ?? "")}>
-          <SelectTrigger className="w-[200px] text-sm h-8">
+          <SelectTrigger className="w-[220px] text-sm h-8">
             <SelectValue placeholder="All workers" />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="w-[320px]">
             <SelectItem value="">All workers</SelectItem>
-            {workers.map((w) => (
-              <SelectItem key={w.id} value={w.id}>
-                {w.name}
-              </SelectItem>
-            ))}
+            {workers
+              .filter((w) => !isSystemOrTestWorker(w))
+              .map((w) => (
+                <SelectItem key={w.id} value={w.id} title={w.name}>
+                  <span className="block truncate max-w-[280px]">{w.name}</span>
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
         <div className="flex items-center gap-3 flex-wrap">
@@ -299,16 +320,26 @@ export default function RunsClient({
               ))}
             </section>
           ))}
-          {hasMore && (
-            <div className="px-4 py-3 text-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)]">
+          {(hasMore || currentPage > 1) && (
+            <div className="flex items-center justify-between gap-3 px-1 py-2">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={loadMore}
-                disabled={loadingMore}
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage <= 1 || loading}
                 className="text-xs"
               >
-                {loadingMore ? "Loading..." : "Load more"}
+                ← Previous
+              </Button>
+              <span className="text-xs text-muted-foreground">Page {currentPage}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={!hasMore || loadingMore}
+                className="text-xs"
+              >
+                {loadingMore ? "Loading..." : "Next →"}
               </Button>
             </div>
           )}
@@ -375,6 +406,21 @@ function formatStartedTime(run: RunSummary): string {
 
 function summarizeError(error: string): string {
   const cleaned = error.replace(/\s+/g, " ").trim();
+  // Strip raw Python dict / JSON wrapper: Error code: 400 - {'error': {'message': "..."}}
+  const dictMatch = cleaned.match(/Error code:\s*\d+\s*-\s*[{'"]/i);
+  if (dictMatch) {
+    // Try to extract a human-readable message from inside the dict/JSON
+    const msgMatch = cleaned.match(/"message"\s*:\s*"([^"]{1,200})"/i)
+      || cleaned.match(/'message'\s*:\s*'([^']{1,200})'/i)
+      || cleaned.match(/"message"\s*:\s*'([^']{1,200})'/i);
+    if (msgMatch) {
+      const msg = msgMatch[1].trim();
+      return msg.length > 120 ? `${msg.slice(0, 117)}...` : msg;
+    }
+    // Fallback: strip the dict wrapper and show "Error (code N)"
+    const codeMatch = cleaned.match(/Error code:\s*(\d+)/i);
+    if (codeMatch) return `Request error (code ${codeMatch[1]})`;
+  }
   if (cleaned.length <= 120) return cleaned;
   return `${cleaned.slice(0, 117)}...`;
 }

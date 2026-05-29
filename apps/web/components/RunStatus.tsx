@@ -1,17 +1,19 @@
-import { CheckCircle2, Clock, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, XCircle, Pause } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 const SUCCESS_STATES = new Set(["completed", "success", "succeeded"]);
 const ERROR_STATES = new Set(["failed", "error", "cancelled"]);
 const RUNNING_STATES = new Set(["running", "pending"]);
 const QUEUED_STATES = new Set(["queued"]);
+const APPROVAL_STATES = new Set(["pending_approval"]);
 
-function classify(status: string): "success" | "error" | "running" | "queued" | "unknown" {
+function classify(status: string): "success" | "error" | "running" | "queued" | "approval" | "unknown" {
   const s = (status || "").toLowerCase();
   if (SUCCESS_STATES.has(s)) return "success";
   if (ERROR_STATES.has(s)) return "error";
   if (RUNNING_STATES.has(s)) return "running";
   if (QUEUED_STATES.has(s)) return "queued";
+  if (APPROVAL_STATES.has(s)) return "approval";
   return "unknown";
 }
 
@@ -30,6 +32,8 @@ export function RunStatusGlyph({
     return <Loader2 className={`${cls} text-pending animate-spin`} />;
   if (kind === "queued")
     return <Clock className={`${cls} text-muted-foreground`} />;
+  if (kind === "approval")
+    return <Pause className={`${cls} text-muted-foreground`} />;
   return <Clock className={`${cls} text-muted-foreground`} />;
 }
 
@@ -38,6 +42,7 @@ const BADGE_STYLE: Record<string, string> = {
   error: "bg-error/10 text-error border-error/30 font-semibold",
   running: "bg-pending/10 text-pending border-pending/30 font-medium",
   queued: "bg-muted text-muted-foreground border-border font-medium",
+  approval: "bg-muted text-muted-foreground border-border font-medium",
   unknown: "bg-muted text-muted-foreground border-border font-medium",
 };
 
@@ -47,9 +52,10 @@ const BADGE_STYLE: Record<string, string> = {
 export function RunStatusBadge({ status }: { status: string }) {
   const kind = classify(status);
   if (kind === "success") return null;
+  const label = kind === "approval" ? "Awaiting approval" : status.replace(/_/g, " ");
   return (
     <Badge variant="outline" className={BADGE_STYLE[kind]}>
-      {status.replace("_", " ")}
+      {label}
     </Badge>
   );
 }
