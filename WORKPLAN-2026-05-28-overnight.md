@@ -216,3 +216,22 @@ Scope note surfaced: R3 required a one-line backend change despite the "don't
 touch backend" constraint — R3 is unfixable from the frontend alone because the
 API returns all source fields empty for example workers. Change is scoped to the
 visibility gate; does not touch ConnectionsClient or other lanes.
+
+## Batch burn-down (2026-05-29)
+
+Multi-lane sweep of `docs/audits/all-issues-discovery-2026-05-29.md`. One lane =
+one branch = one worktree = one PR. Each lane verifies LIVE before claiming done.
+
+### Batch D — /contexts + file viewer (PR #242, lane/batchD-contexts-2026-05-29) — DONE ✅
+
+| Item | Sev | Status | Live artifact |
+|------|-----|--------|---------------|
+| P0-2 file viewer blank on direct nav / refresh / copy-link | P0 | VERIFIED | `docs/audits/shots-2026-05-29/batchD-verified/P0-2-FIXED-schema-direct-load.png` (3 fresh direct loads all render) |
+| P2-11 preview code-block contrast | P2 | VERIFIED | `…/batchD-verified/P2-11-code-contrast-desktop.png` |
+| Used-by → top metrics row (Federico Image #17) | — | VERIFIED | `…/batchD-verified/usedby-top-row-pack-detail.png` |
+| /workers/new drag-&-drop files (Federico) | — | VERIFIED | `…/batchD-verified/workers-new-dropzone-overlay.png` (+ real .md drop → Processing, test worker deleted) |
+| Regression check: file-switch in-place (no full skeleton) | — | VERIFIED (no regression) | CDP: 0 skeletons after tree click, content swaps in place |
+
+No backend touched (all frontend). No files outside /contexts + /workers/new.
+Merged → main `57a1754` (rolled up under `8b0a674`); prod aliased to
+`workers.floom.dev` (`workeros-hnnypgguw-…`).
