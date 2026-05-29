@@ -54,9 +54,14 @@ def _load_api(monkeypatch, tmp_path):
 
 def _insert_completed_run(main, run_id="run_s188"):
     manifest = {
+        # schema_version 0.3 + description are required for the WorkerContract
+        # (exec-based) shape; without them parse_worker_manifest tries a legacy
+        # WorkerConfig and the missing top-level runtime raised a 422.
+        "schema_version": "0.3",
         "name": "s188-worker",
         "version": "0.1.0",
         "title": "S188 Worker",
+        "description": "Worker used by the PR-188 log-replay tests.",
         "inputs": [],
         "outputs": [],
         "trigger": {"type": "manual"},

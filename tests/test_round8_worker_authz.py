@@ -471,7 +471,20 @@ def test_sample_input_hidden_for_foreign_custom_worker(monkeypatch, tmp_path):
     assert foreign.status_code == 404, foreign.text
 
 
-def test_stock_worker_detail_omits_sensitive_fields(monkeypatch, tmp_path):
+def test_stock_worker_detail_exposes_source_without_secret_values(monkeypatch, tmp_path):
+    """Public stock/example workers ship their source ON PURPOSE.
+
+    Design (R3, main.py `_worker_source_visible_to_api` + PUBLIC_STOCK_WORKER_IDS):
+    stock workers like research_brief are example code meant to be read and
+    forked, so the Source tab MUST show worker.yml / run.py / SKILL.md. The
+    earlier expectation that stock detail hides all source was superseded by
+    that fix on the same day.
+
+    The security invariant is narrower and still enforced here: no secret
+    VALUES, no host paths, and no internal-only handles ever leak. Stock
+    bundles are git-tracked public code with no embedded secrets; secret NAMES
+    (not values) are all that auth-gated detail exposes.
+    """
     main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief",))
     client = TestClient(main.app)
 
@@ -479,16 +492,32 @@ def test_stock_worker_detail_omits_sensitive_fields(monkeypatch, tmp_path):
 
     assert detail.status_code == 200, detail.text
     body = detail.json()
+
+    # Internal-only / never-exposed handles stay absent regardless of source.
     assert not body.get("new_webhook_secret")
     assert "bundle_url" not in body
     assert "source" not in body
     assert "env" not in body["config"]
     assert "webhook_secret" not in body["config"]
-    assert body["manifest_yaml"] is None
-    assert body["run_py"] is None
-    assert body["skill_md_content"] is None
-    assert body["run_py_content"] is None
-    assert body["files"] == []
+
+    # Host path must never leak (relativised to the bundle basename / None).
+    runtime = body["config"].get("runtime") or {}
+    bundle_path = runtime.get("bundle_path")
+    assert bundle_path in (None, "research_brief"), bundle_path
+
+    # Source IS exposed by design so the Source tab can teach + fork.
+    assert body["manifest_yaml"], "stock worker.yml must be visible for learning/forking"
+    assert body["run_py"], "stock run.py must be visible for learning/forking"
+    assert body["run_py_content"] == body["run_py"]
+    assert isinstance(body["files"], list) and body["files"], "stock bundle files must be listed"
+
+    # And the exposed source must carry no secret-shaped values.
+    blob = "\n".join(
+        str(part)
+        for part in (body["manifest_yaml"], body["run_py"], body.get("skill_md_content") or "")
+    )
+    assert "sk-" not in blob
+    assert "round8-secret" not in blob
 
 
 def test_internal_shipped_workers_are_hidden_from_public_api(monkeypatch, tmp_path):

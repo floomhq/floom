@@ -195,9 +195,28 @@ class SkillRuntimeDriver(SandboxDriver):
         timeout_seconds: int,
         config: Optional[WorkerConfig],
     ) -> WorkerResult:
-        worker_dir = _worker_dir_for_run(worker_id, config)
+        try:
+            worker_dir = _worker_dir_for_run(worker_id, config)
+        except ValueError as exc:
+            # bundle_path escaped the allowed root (path traversal). Surface a
+            # clean, specific error_code rather than the generic
+            # skill_runtime_error so callers can distinguish a rejected path
+            # from a real runtime failure. Security is unchanged: the path is
+            # still refused and never resolved.
+            return WorkerResult(
+                status="error",
+                error=str(exc),
+                error_code="skill_path_invalid",
+            )
         entrypoint = config.runtime.entrypoint if config and config.runtime else "SKILL.md"
-        skill_path = _safe_path(worker_dir, entrypoint or "SKILL.md")
+        try:
+            skill_path = _safe_path(worker_dir, entrypoint or "SKILL.md")
+        except ValueError as exc:
+            return WorkerResult(
+                status="error",
+                error=str(exc),
+                error_code="skill_path_invalid",
+            )
         if not skill_path.is_file():
             return WorkerResult(
                 status="error",
