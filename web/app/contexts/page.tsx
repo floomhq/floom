@@ -26,7 +26,16 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ContextDetail, ContextFileItem, ContextSummary } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function formatBytes(bytes: number): string {
@@ -65,6 +74,16 @@ function ContextsPage() {
   const [newContextName, setNewContextName] = useState("");
   const [showNewContext, setShowNewContext] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+
+  // FIX #55: replace native confirm() with type-to-confirm Dialogs (matching
+  // the delete-worker dialog in workers/[id] and sign-out in the sidebar).
+  // Native confirm() can't be driven by tests and is inconsistent with the
+  // rest of the app.
+  const [deleteContextTarget, setDeleteContextTarget] = useState<ContextSummary | null>(null);
+  const [deleteContextConfirm, setDeleteContextConfirm] = useState("");
+  const [deletingContext, setDeletingContext] = useState(false);
+  const [deleteFileTarget, setDeleteFileTarget] = useState<ContextFileItem | null>(null);
+  const [deletingFile, setDeletingFile] = useState(false);
 
   // Keep URL in sync with selected pack so the link is shareable/refreshable.
   useEffect(() => {
@@ -127,28 +146,39 @@ function ContextsPage() {
     }
   }
 
-  async function deleteContext(context: ContextSummary) {
-    if (!confirm(`Delete knowledge pack "${context.name}"? This cannot be undone.`)) return;
+  async function confirmDeleteContext() {
+    const context = deleteContextTarget;
+    if (!context || deleteContextConfirm.trim() !== "DELETE") return;
+    setDeletingContext(true);
     try {
       await api.contexts.delete(context.name, true);
       const remaining = contexts.filter((item) => item.name !== context.name);
       setContexts(remaining);
       await loadContexts(remaining[0]?.name || "");
       toast.success("Knowledge pack deleted");
+      setDeleteContextTarget(null);
+      setDeleteContextConfirm("");
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to delete knowledge pack");
+    } finally {
+      setDeletingContext(false);
     }
   }
 
-  async function deleteFile(file: ContextFileItem) {
-    if (!selectedName || !confirm(`Delete "${file.path}"?`)) return;
+  async function confirmDeleteFile() {
+    const file = deleteFileTarget;
+    if (!selectedName || !file) return;
+    setDeletingFile(true);
     try {
       const next = await api.contexts.deleteFile(selectedName, file.path);
       setDetail(next);
       await loadContexts(selectedName);
       toast.success("File deleted");
+      setDeleteFileTarget(null);
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to delete file");
+    } finally {
+      setDeletingFile(false);
     }
   }
 
@@ -290,7 +320,10 @@ function ContextsPage() {
                 ctx={ctx}
                 selected={ctx.name === selectedName}
                 onSelect={() => void selectContext(ctx.name)}
-                onDelete={() => void deleteContext(ctx)}
+                onDelete={() => {
+                  setDeleteContextConfirm("");
+                  setDeleteContextTarget(ctx);
+                }}
               />
             ))}
           </div>
@@ -334,7 +367,7 @@ function ContextsPage() {
                     .join("/")}`,
                 )
               }
-              onDeleteFile={deleteFile}
+              onDeleteFile={(file) => setDeleteFileTarget(file)}
               onAddFile={() => fileInputRef.current?.click()}
             />
           )}
@@ -350,6 +383,97 @@ function ContextsPage() {
           />
         </section>
       </div>
+
+      {/* FIX #55: type-to-confirm delete dialog for knowledge packs. */}
+      <Dialog
+        open={deleteContextTarget !== null}
+        onOpenChange={(open) => {
+          if (deletingContext) return;
+          if (!open) {
+            setDeleteContextTarget(null);
+            setDeleteContextConfirm("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Delete {deleteContextTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes the knowledge pack and all of its files. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="delete-context-confirm" className="text-xs text-muted-foreground">
+              Type <code className="text-foreground">DELETE</code> to confirm.
+            </Label>
+            <Input
+              id="delete-context-confirm"
+              value={deleteContextConfirm}
+              onChange={(e) => setDeleteContextConfirm(e.target.value)}
+              placeholder="DELETE"
+              autoComplete="off"
+              disabled={deletingContext}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setDeleteContextTarget(null);
+                setDeleteContextConfirm("");
+              }}
+              disabled={deletingContext}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void confirmDeleteContext()}
+              disabled={deletingContext || deleteContextConfirm.trim() !== "DELETE"}
+            >
+              {deletingContext ? "Deleting…" : "Delete pack"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* FIX #55: confirm dialog for file delete (no native confirm). */}
+      <Dialog
+        open={deleteFileTarget !== null}
+        onOpenChange={(open) => {
+          if (deletingFile) return;
+          if (!open) setDeleteFileTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Delete file?</DialogTitle>
+            <DialogDescription>
+              Delete <code className="text-foreground">{deleteFileTarget?.path}</code> from this knowledge pack? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteFileTarget(null)}
+              disabled={deletingFile}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void confirmDeleteFile()}
+              disabled={deletingFile}
+            >
+              {deletingFile ? "Deleting…" : "Delete file"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -446,7 +570,7 @@ function PackDetail({
   detail: ContextDetail;
   dragActive: boolean;
   onOpenFile: (file: ContextFileItem) => void;
-  onDeleteFile: (file: ContextFileItem) => Promise<void>;
+  onDeleteFile: (file: ContextFileItem) => void;
   onAddFile: () => void;
 }) {
   const [packLinkCopied, setPackLinkCopied] = useState(false);

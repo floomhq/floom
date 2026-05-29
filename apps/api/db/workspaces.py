@@ -16,6 +16,31 @@ from typing import Any, Mapping
 from apps.api.config import get_supabase_service_client
 
 
+def ensure_user_row(*, user_id: str, email: str | None) -> None:
+    """Idempotently upsert the ``public.users`` row for an authenticated user.
+
+    ``workspaces.owner_user_id`` has an FK to ``public.users(id)``. The normal
+    OAuth/magic-link path upserts this row in ``/auth/callback``
+    (``routes.auth._upsert_user_row``), but a partial write — or a JWT minted
+    out-of-band (admin API, tests) — can strand a real ``auth.users`` user with
+    no ``public.users`` row. In that state the lazy workspace bootstrap's INSERT
+    violates the FK and 500s a validly-authenticated user.
+
+    This mirrors the shape of ``routes.auth._upsert_user_row`` (id=sub,
+    email, updated_at) so both paths converge on the same row. Safe to call on
+    every resolution: ``on_conflict="id"`` makes it a no-op when the row exists.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    get_supabase_service_client().table("users").upsert(
+        {
+            "id": str(user_id),
+            "email": email,
+            "updated_at": now_iso,
+        },
+        on_conflict="id",
+    ).execute()
+
+
 def _new_workspace_id() -> str:
     """Generate a short workspace id of the form ``ws_<14 hex chars>``.
 
@@ -120,7 +145,11 @@ def resolve_active_workspace(*, user_id: str, email: str | None, requested_id: s
     if owned:
         return dict(owned[0])
 
-    # Bootstrap: brand-new user, no rows yet.
+    # Bootstrap: brand-new user, no rows yet. Guarantee the public.users row
+    # exists first so the workspaces FK can't 500 a validly-authenticated user
+    # whose users row was never written (partial /auth/callback, admin-minted
+    # JWT, etc.). Idempotent — no-op when the row already exists.
+    ensure_user_row(user_id=user_id, email=email)
     return create(owner_user_id=user_id, name=_email_prefix(email))
 
 

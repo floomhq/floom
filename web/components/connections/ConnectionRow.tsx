@@ -110,8 +110,24 @@ export function ConnectionRow({
       {/* S29w (score walk): was Reconnect + 3 icon-buttons (Test/Refresh/
           Disconnect) = 4 actions per row. Now Reconnect + a single
           overflow menu containing Test / Refresh / Disconnect. Row reads
-          as one primary action with secondary options behind a click. */}
+          as one primary action with secondary options behind a click.
+
+          FIX #5: a direct, always-visible "Refresh status" icon button is
+          surfaced inline (refreshing is the common, low-stakes action) so
+          users don't have to open the overflow menu for it. Test/Disconnect
+          stay in the menu. */}
       <div className="flex shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => onRefresh(connection)}
+          disabled={refreshing}
+          title={refreshing ? "Refreshing status" : "Refresh status"}
+          aria-label={`Refresh status for ${connection.displayName}`}
+        >
+          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+        </Button>
         <Button
           type="button"
           variant="outline"
