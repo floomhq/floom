@@ -143,6 +143,80 @@ def test_draft_and_create_happy_path(mock_openai_cls, client_with_tmp_workers):
 
 
 # ---------------------------------------------------------------------------
+# Engine #211: LLM emits exec.mode=pure-script + entry=run.py WITHOUT
+# exec.command -> command is defaulted during validation, so draft-and-create
+# returns 200 instead of 502.
+# ---------------------------------------------------------------------------
+
+def _pure_script_worker_yml_no_command(name: str = "test-211-worker") -> str:
+    return f"""\
+schema_version: "0.3"
+name: {name}
+title: "Test 211 Worker"
+description: "Unit test worker for engine #211 exec.command defaulting."
+version: "0.1.0"
+targets: [generic]
+
+exec:
+  runtime: python311
+  mode: pure-script
+  runner: e2b
+  entry: run.py
+  inputs: []
+  outputs: []
+
+trigger:
+  type: manual
+"""
+
+
+@patch("openai.OpenAI")
+def test_draft_and_create_pure_script_missing_command_returns_200(
+    mock_openai_cls, client_with_tmp_workers
+):
+    """exec.mode=pure-script + entry=run.py + NO command -> 200, not 502."""
+    client, workers_dir = client_with_tmp_workers
+
+    worker_yml = _pure_script_worker_yml_no_command()
+    payload = {
+        "worker_yml": worker_yml,
+        "suggested_name": "test-211-worker",
+        "suggested_title": "Test 211 Worker",
+        "requirements": [],
+        "required_connections": [],
+        "required_secrets": [],
+        "inputs": [],
+        "outputs": [],
+        "files": [
+            {"path": "worker.yml", "content": worker_yml},
+            {"path": "run.py", "content": "print('hello from 211')\n"},
+        ],
+    }
+
+    mock_client = MagicMock()
+    mock_openai_cls.return_value = mock_client
+    mock_client.chat.completions.create.return_value = _mock_openai_response(
+        json.dumps(payload)
+    )
+
+    secret = os.environ.get("FLOOM_SECRET", "")
+    headers = {"x-floom-secret": secret} if secret else {}
+
+    resp = client.post(
+        "/workers/draft-and-create",
+        json={"prompt": "Run a python script that prints hello"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["worker_id"] == "test-211-worker"
+
+    worker_dir = workers_dir / "test-211-worker"
+    assert worker_dir.exists(), "Worker directory was not created"
+    assert (worker_dir / "run.py").exists(), "run.py missing"
+
+
+# ---------------------------------------------------------------------------
 # 2. Invalid YAML path: LLM returns broken YAML 3 times -> 502, no worker
 # ---------------------------------------------------------------------------
 
