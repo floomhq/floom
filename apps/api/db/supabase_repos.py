@@ -366,7 +366,26 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         return _worker_record_from_rows(row, skill_map.get(row.get("skill_version_id")))
 
     def get_any(self, *, worker_id: str) -> dict[str, Any] | None:
-        rows = self._worker_rows(worker_id=worker_id)
+        # Contract (engine db.interface + OSS sqlite impl): get_any is a
+        # GLOBAL, UNSCOPED existence check keyed on the worker id alone
+        # (``id TEXT PRIMARY KEY`` on the workers table). It MUST NOT be
+        # workspace- or user-scoped — _free_worker_id (#54/#186) relies on
+        # it to detect cross-workspace id collisions during draft-and-create.
+        #
+        # Bug: routing through _worker_rows() applied _scope_by_workspace,
+        # so when the active-workspace contextvar was set, get_any could not
+        # see a row owned by the SAME user in a DIFFERENT workspace. Dedupe
+        # then judged the colliding id "free", the insert hit the global PK,
+        # and draft-and-create 409'd with "failed to upsert <id>". Query by
+        # id only, bypassing all scoping.
+        response = (
+            self._client.table("workers")
+            .select("*")
+            .eq("id", worker_id)
+            .limit(1)
+            .execute()
+        )
+        rows = _response_rows(response)
         if not rows:
             return None
         row = rows[0]
