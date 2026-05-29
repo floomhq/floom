@@ -146,12 +146,28 @@ export default function FilePreviewPage() {
           <Link href={`/contexts/${encodeURIComponent(packName)}`} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
             {packName}
           </Link>
-          {selectedPath && (
-            <>
-              <span className="text-muted-foreground">/</span>
-              <span className="font-mono text-xs truncate">{selectedPath}</span>
-            </>
-          )}
+          {selectedPath && (() => {
+            const parts = selectedPath.split("/");
+            return parts.map((part, i) => {
+              const isLast = i === parts.length - 1;
+              const folderPath = parts.slice(0, i + 1).join("/");
+              return (
+                <span key={folderPath} className="flex items-center gap-2 min-w-0">
+                  <span className="text-muted-foreground shrink-0">/</span>
+                  {isLast ? (
+                    <span className="font-mono text-xs truncate">{part}</span>
+                  ) : (
+                    <Link
+                      href={`/contexts/${encodeURIComponent(packName)}?path=${encodeURIComponent(folderPath)}`}
+                      className="font-mono text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                    >
+                      {part}
+                    </Link>
+                  )}
+                </span>
+              );
+            });
+          })()}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {selectedFile && isKnownTextFile(selectedFile) && !editing && (
