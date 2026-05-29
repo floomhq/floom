@@ -100,8 +100,36 @@ function NewWorkerContent() {
   // ---- Generate from prompt ------------------------------------------------
   // Uses the new /workers/new/from-prompt endpoint which returns a run_id.
   // We then subscribe to SSE on that run to get real-time progress.
-  // On completion we navigate to /workers/<suggested_id>/edit.
-  // Falls back to draftAndCreate on failure.
+  // On completion we navigate to /runs/<id> so the user can save the bundle.
+  //
+  // ROBUST FALLBACK (P0 2026-05-29): the user must NEVER see a dead/hung
+  // generation. If the streaming path fails for ANY reason — endpoint 404,
+  // the worker-author run reaches status=failed, or the SSE connection drops
+  // before completion — fall back to the synchronous draftAndCreate path
+  // (which runs the generation in-process and reliably returns a worker_id)
+  // so a worker still gets created.
+
+  // Guards against a double-fallback (e.g. onerror firing after a failed
+  // status already triggered the fallback).
+  const fallbackFiredRef = useRef(false);
+
+  async function fallbackDraftAndCreate(trimmed: string) {
+    if (fallbackFiredRef.current) return;
+    fallbackFiredRef.current = true;
+    if (sseRef.current) {
+      sseRef.current.close();
+      sseRef.current = null;
+    }
+    try {
+      const result = await api.workers.draftAndCreate({ prompt: trimmed });
+      router.push(`/workers/${result.worker_id}?edit=1`);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to generate worker");
+      setGenerating(false);
+      setStreamRunId(null);
+      setStreamLogs([]);
+    }
+  }
 
   async function handleGenerate(overridePrompt?: string) {
     const trimmed = overridePrompt ?? getLivePrompt();
@@ -110,8 +138,11 @@ function NewWorkerContent() {
       return;
     }
     if (overridePrompt) setPrompt(overridePrompt);
+    fallbackFiredRef.current = false;
     setGenerating(true);
     setStreamLogs([]);
+
+    let completed = false;
 
     try {
       // Try the new streaming endpoint first
@@ -133,13 +164,14 @@ function NewWorkerContent() {
             evtSource.close();
             sseRef.current = null;
             if (event.status === "completed") {
+              completed = true;
               // Navigate to the run page so user can see the bundle and save it
               router.push(`/runs/${runId}`);
             } else {
-              toast.error(event.error || "Worker generation failed");
-              setGenerating(false);
-              setStreamRunId(null);
-              setStreamLogs([]);
+              // The worker-author run failed — don't dead-end. Fall back to
+              // draftAndCreate so a worker still gets created.
+              console.warn("worker-author run failed, falling back to draftAndCreate:", event.error);
+              void fallbackDraftAndCreate(trimmed);
             }
           }
         } catch {
@@ -150,26 +182,18 @@ function NewWorkerContent() {
       evtSource.onerror = () => {
         evtSource.close();
         sseRef.current = null;
-        // SSE closed unexpectedly — navigate to the run anyway (may have completed)
-        if (streamRunId) {
-          router.push(`/runs/${runId}`);
-        } else {
-          setGenerating(false);
-          setStreamLogs([]);
+        // SSE dropped. If the run already completed we've navigated away.
+        // Otherwise fall back to draftAndCreate rather than navigating to a
+        // possibly-incomplete run page or hanging on the GeneratingPanel.
+        if (!completed) {
+          console.warn("worker-author SSE dropped before completion, falling back to draftAndCreate");
+          void fallbackDraftAndCreate(trimmed);
         }
       };
     } catch (streamErr) {
-      // Fall back to the synchronous draftAndCreate if the new endpoint is unavailable
+      // The /workers/new/from-prompt endpoint itself failed (e.g. 404/503).
       console.warn("worker-author endpoint unavailable, falling back to draftAndCreate:", streamErr);
-      try {
-        const result = await api.workers.draftAndCreate({ prompt: trimmed });
-        router.push(`/workers/${result.worker_id}?edit=1`);
-      } catch (e: unknown) {
-        toast.error(e instanceof Error ? e.message : "Failed to generate worker");
-        setGenerating(false);
-        setStreamRunId(null);
-        setStreamLogs([]);
-      }
+      void fallbackDraftAndCreate(trimmed);
     }
   }
 
