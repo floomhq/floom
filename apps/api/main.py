@@ -40,11 +40,25 @@ async def lifespan(_app: FastAPI):
             stop_cloud_scheduler()
 
 
+# Interactive API docs + the raw OpenAPI schema are disabled by default so
+# they are never exposed unauthenticated in prod (they leak the full route
+# surface, models, and auth shapes). Set WORKEROS_ENABLE_DOCS=1 to re-enable
+# them locally for development.
+_docs_enabled = (os.environ.get("WORKEROS_ENABLE_DOCS") or "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 app = FastAPI(
     title="workeros-cloud API",
     version="0.1.0",
     description="Supabase-backed wrapper around the workeros OSS API engine.",
     lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 app.include_router(auth_router)
 # Mount workspaces + cli-auth/devices under /api BEFORE the engine sub-app
@@ -114,6 +128,24 @@ async def cloud_webhook_trigger(
     )
     return engine_main.ActionResponse(status="queued", run_id=run_id)
 
+
+# The engine creates its OWN FastAPI app with docs enabled (Floom API). Mounted
+# under /api it would expose /api/docs, /api/redoc and /api/openapi.json
+# unauthenticated. We can't edit engine/ (pinned submodule), so disable the
+# engine sub-app's docs at the cloud layer: blank the docs URLs and drop the
+# already-registered Swagger/ReDoc/OpenAPI routes from its router before mount.
+# Gated by the same WORKEROS_ENABLE_DOCS flag as the cloud app.
+if not _docs_enabled:
+    _engine_app = engine_main.app
+    _engine_app.docs_url = None
+    _engine_app.redoc_url = None
+    _engine_app.openapi_url = None
+    _docs_paths = {"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+    _engine_app.router.routes = [
+        route
+        for route in _engine_app.router.routes
+        if getattr(route, "path", None) not in _docs_paths
+    ]
 
 app.mount("/api", engine_main.app)
 

@@ -46,8 +46,18 @@ class CliDenyRequest(BaseModel):
 
 
 def _safe_next(value: str | None) -> str:
+    """Allow only same-origin relative redirect targets.
+
+    Must start with a single "/" and must NOT be a protocol-relative URL
+    ("//evil.com") or a backslash-smuggled one ("/\\evil.com", which some
+    browsers normalize to "//evil.com"). Absolute URLs ("https://evil.com")
+    also fail the leading-"/" check. Anything suspicious falls back to "/".
+    """
     candidate = (value or "/").strip()
-    if not candidate.startswith("/") or candidate.startswith("//"):
+    if not candidate.startswith("/"):
+        return "/"
+    # Block protocol-relative ("//") and backslash variants ("/\", "\\").
+    if candidate.startswith(("//", "/\\", "\\")):
         return "/"
     return candidate
 
@@ -412,9 +422,20 @@ def cli_exchange(payload: CliExchangeRequest):
 def cli_bootstrap():
     """Public bootstrap endpoint for the @floomhq/workeros CLI.
 
-    Returns the Supabase project URL + anon key the CLI needs to refresh
-    JWTs against, plus the canonical API base. Anon key is the same public
-    client key the dashboard already exposes in its JS bundle; not sensitive.
+    SECURITY (audit 2026-05-29, CRIT-1 — ACCEPTED, intentionally public):
+    This endpoint is unauthenticated BY DESIGN and returns ONLY public
+    client config:
+      - supabase_url        — the project URL, public (in every frontend bundle)
+      - supabase_anon_key    — the Supabase ANON key, public by design; it is
+                               the client key shipped in every frontend JS
+                               bundle and is gated by Row Level Security (RLS
+                               is now enabled on every public table, migration
+                               0008). It grants NO privileged access.
+      - api_base             — the public API host.
+    It deliberately exposes NO secrets: the service_role key, JWT signing
+    keys, DB credentials, and webhook encryption key are NEVER returned here.
+    Do NOT add any field sourced from a service-role / secret setting to this
+    response.
 
     Older CLI versions that don't read /auth/cli-exchange's expanded
     payload (or future tooling that wants to discover the cloud config

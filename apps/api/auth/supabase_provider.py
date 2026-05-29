@@ -94,29 +94,32 @@ def _verify_jwt(token: str, supabase_url: str) -> dict:
     a per-request cost, rate limits, and can hang on stale HTTP/2 pools).
     Local verification is offline after the JWKS is cached.
     """
+    # The whole verification path must fail closed: any error in header
+    # parsing, JWKS fetch, key selection, algorithm mismatch (e.g. an HS256
+    # anon key presented against the project's ES256 JWKS), signature
+    # mismatch, or claim validation must surface as 401, never propagate as
+    # a 500. Only HTTPException (already a clean 401 we raised) is re-raised
+    # as-is.
     try:
         header = jwt.get_unverified_header(token)
-    except jwt.PyJWTError as exc:
-        raise HTTPException(status_code=401, detail="unauthorized") from exc
 
-    kid = header.get("kid")
-    alg = header.get("alg") or "ES256"
-    keys = _get_jwks(supabase_url)
-    key = keys.get(kid) if kid else None
-
-    # Refresh and retry once if the kid wasn't in our cache (key rotation).
-    if key is None:
-        keys = _get_jwks(supabase_url, force=True)
+        kid = header.get("kid")
+        alg = header.get("alg") or "ES256"
+        keys = _get_jwks(supabase_url)
         key = keys.get(kid) if kid else None
-    if key is None and keys and len(keys) == 1:
-        # Some projects sign with a single key; fall back when the
-        # token didn't carry a kid.
-        key = next(iter(keys.values()))
 
-    if key is None:
-        raise HTTPException(status_code=401, detail="unauthorized")
+        # Refresh and retry once if the kid wasn't in our cache (key rotation).
+        if key is None:
+            keys = _get_jwks(supabase_url, force=True)
+            key = keys.get(kid) if kid else None
+        if key is None and keys and len(keys) == 1:
+            # Some projects sign with a single key; fall back when the
+            # token didn't carry a kid.
+            key = next(iter(keys.values()))
 
-    try:
+        if key is None:
+            raise HTTPException(status_code=401, detail="unauthorized")
+
         claims = jwt.decode(
             token,
             key.key,  # type: ignore[arg-type]
@@ -124,7 +127,9 @@ def _verify_jwt(token: str, supabase_url: str) -> dict:
             audience="authenticated",
             options={"require": ["exp", "sub"]},
         )
-    except jwt.PyJWTError as exc:
+    except HTTPException:
+        raise
+    except Exception as exc:
         raise HTTPException(status_code=401, detail="unauthorized") from exc
     return claims
 
