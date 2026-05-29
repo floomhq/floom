@@ -338,6 +338,41 @@ class TestDrainLoopDbMethods:
         finally:
             sem.release()
 
+    def test_drain_loop_claims_run_before_thread_start(self, tmp_path, monkeypatch):
+        main = _load_api(monkeypatch, tmp_path, max_concurrent=2)
+        _insert_minimal_worker(main, "claim-worker")
+
+        run_service = sys.modules.get("run_service")
+        assert run_service is not None
+        repos = main.get_repositories()
+        run_id = run_service.create_run(
+            "claim-worker",
+            {},
+            user_id="federico",
+            repos=repos,
+        )
+        dispatched: list[str] = []
+
+        class DummyThread:
+            def __init__(self, *args, **kwargs):
+                self._args = kwargs.get("args", ())
+
+            def start(self):
+                dispatched.append(self._args[0])
+
+        with patch.object(run_service.threading, "Thread", DummyThread):
+            run_service._drain_one_batch()
+            run_service._drain_one_batch()
+
+        row = repos.runs.get(user_id="federico", run_id=run_id)
+        assert row is not None
+        assert row["status"] == "running"
+        assert dispatched == [run_id]
+
+        with run_service._active_runs_lock:
+            run_service._active_runs.clear()
+        run_service._get_semaphore().release()
+
 
 class TestStartupReEnqueue:
     """Queued runs on startup are re-enqueued, not failed."""

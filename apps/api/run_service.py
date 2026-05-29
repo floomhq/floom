@@ -304,6 +304,7 @@ def create_run(
     inputs: Dict[str, Any],
     trigger_source: str = "manual",
     *,
+    status: str | None = None,
     user_id: str | None = None,
     repos: Repositories | None = None,
 ) -> str:
@@ -325,7 +326,7 @@ def create_run(
         user_id=owner_id,
         run_id=run_id,
         worker_id=worker_id,
-        status=RunStatus.QUEUED.value,
+        status=status or RunStatus.QUEUED.value,
         trigger_source=trigger_source,
         runner=runner,
         input_json=effective_inputs,
@@ -796,17 +797,43 @@ def _drain_one_batch() -> None:
             logger.debug("Queue drain: no free execution slots, pausing")
             break
 
-        # Slot acquired — dispatch the run in a thread.
-        # The semaphore is released inside _run_thread_entry_with_semaphore.
-        thread = threading.Thread(
-            target=_run_thread_entry_with_semaphore,
-            args=(run_id, worker_id, inputs, user_id, None),
-            daemon=True,
-            name=f"workeros-run-{run_id}",
-        )
-        _register_active_run(_ActiveRun(run_id=run_id, worker_id=worker_id, user_id=user_id, thread=thread))
-        thread.start()
-        logger.info("Queue drain: dispatched run %s for worker %s", run_id, worker_id)
+        try:
+            # Claim the run before spawning a worker thread so subsequent drain
+            # passes cannot dispatch the same queued row twice.
+            repos_obj.runs.update(
+                user_id=user_id,
+                run_id=run_id,
+                status=RunStatus.RUNNING.value,
+                started_at=_now_iso(),
+            )
+
+            # Slot acquired — dispatch the run in a thread.
+            # The semaphore is released inside _run_thread_entry_with_semaphore.
+            thread = threading.Thread(
+                target=_run_thread_entry_with_semaphore,
+                args=(run_id, worker_id, inputs, user_id, None),
+                daemon=True,
+                name=f"workeros-run-{run_id}",
+            )
+            _register_active_run(_ActiveRun(run_id=run_id, worker_id=worker_id, user_id=user_id, thread=thread))
+            thread.start()
+            logger.info("Queue drain: dispatched run %s for worker %s", run_id, worker_id)
+        except Exception as exc:
+            logger.warning("Queue drain: failed to dispatch run %s: %s", run_id, exc)
+            try:
+                repos_obj.runs.update(
+                    user_id=user_id,
+                    run_id=run_id,
+                    status=RunStatus.QUEUED.value,
+                    started_at=None,
+                )
+            except Exception as rollback_exc:
+                logger.warning(
+                    "Queue drain: failed to restore queued status for %s: %s",
+                    run_id,
+                    rollback_exc,
+                )
+            _get_semaphore().release()
 
 
 def start_drain_loop() -> None:
@@ -1044,149 +1071,178 @@ def execute_run(
             repos=repos_obj,
         )
 
-    update_run_status(run_id, RunStatus.RUNNING.value, user_id=owner_id, repos=repos_obj)
-    log_fn("Run started")
-    log_fn("Validating inputs", level="debug")
+    try:
+        current_run = repos_obj.runs.get_any(run_id=run_id)
+        if (current_run or {}).get("status") != RunStatus.RUNNING.value:
+            update_run_status(run_id, RunStatus.RUNNING.value, user_id=owner_id, repos=repos_obj)
+        log_fn("Run started")
+        log_fn("Validating inputs", level="debug")
 
-    if not config:
-        err = "Worker config not found"
-        update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="invalid_worker", user_id=owner_id, repos=repos_obj)
-        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
-        log_fn(err, level="error")
-        return
-
-    if instance and not instance.get("enabled", True):
-        err = "Worker is disabled"
-        update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="worker_disabled", user_id=owner_id, repos=repos_obj)
-        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
-        log_fn(err, level="error")
-        return
-
-    # Validate required inputs
-    for inp in config.inputs:
-        if inp.required and (inp.name not in effective_inputs or effective_inputs[inp.name] in (None, "")):
-            err = f"Missing required input: {inp.name}"
-            update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_required_input", user_id=owner_id, repos=repos_obj)
+        if not config:
+            err = "Worker config not found"
+            update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="invalid_worker", user_id=owner_id, repos=repos_obj)
             publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
             log_fn(err, level="error")
             return
 
-    log_fn("Loading secrets", level="debug")
-    secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
-    missing = [s for s in config.secrets if s not in secrets]
-    if missing:
-        err = f"Missing secrets: {', '.join(missing)}"
-        update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
-        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
-        log_fn(err, level="error")
-        return
-
-    # Resolve Composio connections declared in worker.yml.
-    connection_ids: Dict[str, str] = {}
-    if config.connections:
-        log_fn("Resolving connections", level="debug")
-        from runner_utils import _resolve_connections
-        connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config)
-        if conn_err:
-            update_run_status(run_id, RunStatus.FAILED.value, error=conn_err, error_code="missing_connection", user_id=owner_id, repos=repos_obj)
-            publish_run_part(run_id, {"type": "finish", "status": "failed", "error": conn_err})
-            log_fn(conn_err, level="error")
+        if instance and not instance.get("enabled", True):
+            err = "Worker is disabled"
+            update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="worker_disabled", user_id=owner_id, repos=repos_obj)
+            publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
+            log_fn(err, level="error")
             return
 
-    bundle_snapshot_path = _snapshot_worker_bundle(run_id, worker_id, config)
-    if owner_id:
-        repos_obj.runs.set_bundle_snapshot_path(
-            user_id=owner_id,
+        # Validate required inputs
+        for inp in config.inputs:
+            if inp.required and (inp.name not in effective_inputs or effective_inputs[inp.name] in (None, "")):
+                err = f"Missing required input: {inp.name}"
+                update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_required_input", user_id=owner_id, repos=repos_obj)
+                publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
+                log_fn(err, level="error")
+                return
+
+        log_fn("Loading secrets", level="debug")
+        secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
+        missing = [s for s in config.secrets if s not in secrets]
+        if missing:
+            err = f"Missing secrets: {', '.join(missing)}"
+            update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
+            publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
+            log_fn(err, level="error")
+            return
+
+        # Resolve Composio connections declared in worker.yml.
+        connection_ids: Dict[str, str] = {}
+        if config.connections:
+            log_fn("Resolving connections", level="debug")
+            from runner_utils import _resolve_connections
+            connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config)
+            if conn_err:
+                update_run_status(run_id, RunStatus.FAILED.value, error=conn_err, error_code="missing_connection", user_id=owner_id, repos=repos_obj)
+                publish_run_part(run_id, {"type": "finish", "status": "failed", "error": conn_err})
+                log_fn(conn_err, level="error")
+                return
+
+        bundle_snapshot_path = _snapshot_worker_bundle(run_id, worker_id, config)
+        if owner_id:
+            repos_obj.runs.set_bundle_snapshot_path(
+                user_id=owner_id,
+                run_id=run_id,
+                bundle_snapshot_path=bundle_snapshot_path,
+            )
+
+        # Dispatch to the appropriate sandbox driver based on worker config
+        runner = "local"
+        if config and config.runtime:
+            runner = config.runtime.runner or "local"
+        mode = config.runtime.mode if config and config.runtime else "pure-script"
+        timeout_seconds = (
+            config.runtime.limits.timeout_seconds
+            if config and config.runtime and config.runtime.limits
+            else 300
+        )
+        log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
+        driver = get_sandbox_driver(runner, config=config)
+        result = driver.run(
+            worker_id=worker_id,
             run_id=run_id,
-            bundle_snapshot_path=bundle_snapshot_path,
+            inputs=effective_inputs,
+            secrets=secrets,
+            log_fn=log_fn,
+            trace_id=trace_id,
+            timeout_seconds=timeout_seconds,
+            config=config,
+            connection_ids=connection_ids,
         )
 
-    # Dispatch to the appropriate sandbox driver based on worker config
-    runner = "local"
-    if config and config.runtime:
-        runner = config.runtime.runner or "local"
-    mode = config.runtime.mode if config and config.runtime else "pure-script"
-    timeout_seconds = (
-        config.runtime.limits.timeout_seconds
-        if config and config.runtime and config.runtime.limits
-        else 300
-    )
-    log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
-    driver = get_sandbox_driver(runner, config=config)
-    result = driver.run(
-        worker_id=worker_id,
-        run_id=run_id,
-        inputs=effective_inputs,
-        secrets=secrets,
-        log_fn=log_fn,
-        trace_id=trace_id,
-        timeout_seconds=timeout_seconds,
-        config=config,
-        connection_ids=connection_ids,
-    )
-
-    if was_shutdown_cancelled(run_id):
-        update_run_status(
-            run_id,
-            RunStatus.FAILED.value,
-            error=INTERRUPTED_RUN_ERROR,
-            error_code=INTERRUPTED_RUN_ERROR_CODE,
-            user_id=owner_id,
-            repos=repos_obj,
-        )
-        publish_run_part(
-            run_id,
-            {"type": "finish", "status": "failed", "error": INTERRUPTED_RUN_ERROR},
-        )
-        log_fn(INTERRUPTED_RUN_ERROR, level="error")
-        return
-
-    outputs = result.outputs
-    artifacts = result.artifacts
-    _materialize_declared_file_outputs(run_id, config, outputs, artifacts)
-    _store_run_artifacts(run_id, artifacts, log_fn, user_id=owner_id, repos=repos_obj)
-
-    # Both "error" and "failed" terminal statuses map to a failed run
-    if result.status in ("error", "failed"):
-        result_error = result.error
-        result_error_code = result.error_code
         if was_shutdown_cancelled(run_id):
-            result_error = INTERRUPTED_RUN_ERROR
-            result_error_code = INTERRUPTED_RUN_ERROR_CODE
-        update_run_status(
-            run_id,
-            RunStatus.FAILED.value,
-            error=result_error,
-            error_code=result_error_code,
-            user_id=owner_id,
-            repos=repos_obj,
-        )
-        finish_status = "timeout" if (result.error_code or "").lower().find("timeout") >= 0 else "failed"
-        publish_run_part(
-            run_id,
-            {"type": "finish", "status": finish_status, "error": result_error or "Run failed"},
-        )
-        log_fn(f"Run failed: {result_error}", level="error")
-        return
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=INTERRUPTED_RUN_ERROR,
+                error_code=INTERRUPTED_RUN_ERROR_CODE,
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+            publish_run_part(
+                run_id,
+                {"type": "finish", "status": "failed", "error": INTERRUPTED_RUN_ERROR},
+            )
+            log_fn(INTERRUPTED_RUN_ERROR, level="error")
+            return
 
-    quality_error, quality_warnings = _validate_run_outputs(run_id, config, outputs, artifacts)
-    if quality_error:
-        update_run_status(run_id, RunStatus.FAILED.value, error=quality_error, error_code="quality_gate_failed", user_id=owner_id, repos=repos_obj)
-        publish_run_part(run_id, {"type": "finish", "status": "failed", "error": quality_error})
-        log_fn(quality_error, level="error")
-        return
+        outputs = result.outputs
+        artifacts = result.artifacts
+        _materialize_declared_file_outputs(run_id, config, outputs, artifacts)
+        _store_run_artifacts(run_id, artifacts, log_fn, user_id=owner_id, repos=repos_obj)
 
-    update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
-    if quality_warnings and owner_id:
-        repos_obj.runs.update(
-            user_id=owner_id,
-            run_id=run_id,
-            quality_warning="; ".join(quality_warnings),
-        )
-        log_fn(f"Quality warning: {'; '.join(quality_warnings)}", level="warning")
-    publish_run_part(run_id, {"type": "finish", "status": "completed"})
-    log_fn("Output generated")
-    log_fn("Run completed")
+        # Both "error" and "failed" terminal statuses map to a failed run
+        if result.status in ("error", "failed"):
+            result_error = result.error
+            result_error_code = result.error_code
+            if was_shutdown_cancelled(run_id):
+                result_error = INTERRUPTED_RUN_ERROR
+                result_error_code = INTERRUPTED_RUN_ERROR_CODE
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=result_error,
+                error_code=result_error_code,
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+            finish_status = "timeout" if (result.error_code or "").lower().find("timeout") >= 0 else "failed"
+            publish_run_part(
+                run_id,
+                {"type": "finish", "status": finish_status, "error": result_error or "Run failed"},
+            )
+            log_fn(f"Run failed: {result_error}", level="error")
+            return
+
+        quality_error, quality_warnings = _validate_run_outputs(run_id, config, outputs, artifacts)
+        if quality_error:
+            update_run_status(run_id, RunStatus.FAILED.value, error=quality_error, error_code="quality_gate_failed", user_id=owner_id, repos=repos_obj)
+            publish_run_part(run_id, {"type": "finish", "status": "failed", "error": quality_error})
+            log_fn(quality_error, level="error")
+            return
+
+        update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
+        if quality_warnings and owner_id:
+            repos_obj.runs.update(
+                user_id=owner_id,
+                run_id=run_id,
+                quality_warning="; ".join(quality_warnings),
+            )
+            log_fn(f"Quality warning: {'; '.join(quality_warnings)}", level="warning")
+        publish_run_part(run_id, {"type": "finish", "status": "completed"})
+        log_fn("Output generated")
+        log_fn("Run completed")
+    except Exception as exc:
+        logger.exception("Run %s crashed for worker %s", run_id, worker_id)
+        error_message = str(exc) or exc.__class__.__name__
+        try:
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=error_message,
+                error_code="run_execution_exception",
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+        except Exception:
+            logger.exception("Failed to mark run %s as failed after crash", run_id)
+        try:
+            publish_run_part(
+                run_id,
+                {"type": "finish", "status": "failed", "error": error_message},
+            )
+        except Exception:
+            logger.exception("Failed to publish crash event for run %s", run_id)
+        try:
+            log_fn(f"Run crashed: {error_message}", level="error")
+        except Exception:
+            logger.exception("Failed to persist crash log for run %s", run_id)
+        return
 
 
 def start_run(
