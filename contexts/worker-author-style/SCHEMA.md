@@ -27,6 +27,10 @@ use_cases:                   # bullet list shown on Overview
 example_input:               # dict; populates "Fill with sample input" button
   topic: "AI tools"
   audience: "executive"
+  # For a FILE input, give the file's INLINE TEXT CONTENT as a string (not a
+  # path). The UI turns it into a real uploaded file so the worker is
+  # one-click runnable from the sample. ALWAYS include every file input here.
+  #   names_csv: "name\nalice\nbob\ncharlie\n"
 
 example_output: |            # shown on Overview; markdown rendered
   ## Example output

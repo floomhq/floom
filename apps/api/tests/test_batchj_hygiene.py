@@ -154,3 +154,61 @@ def test_smoke_inputs_string_placeholder_unchanged(tmp_path):
     )
     out = run_service._build_smoke_inputs(config, {}, tmp_path)
     assert out["text"] == "sample"
+
+
+# --------------------------------------------------------------------------
+# Batch K / G5 P1-A — smoke_reason humanization (draft-and-create + SSE) and
+# the run "Recent logs" failure line must never leak raw exceptions/paths.
+# --------------------------------------------------------------------------
+
+def test_smoke_reason_strips_sandbox_path() -> None:
+    # The exact scorer-B leak: KeyError with a /home/user sandbox path.
+    reason = (
+        "Command exited with code 1 ... "
+        'File "/home/user/worker/run.py", line 42 ... '
+        "KeyError: 'input_file' (error_code=e2b_sandbox_error)"
+    )
+    out = main.humanize_smoke_reason(reason)
+    assert out is not None
+    assert "/home/user" not in out
+    assert "/root/workeros" not in out
+    assert "KeyError" not in out
+    assert "Traceback" not in out
+
+
+def test_smoke_reason_bare_exception_humanized() -> None:
+    # The exact scorer-A leak class on the create surface.
+    reason = "unsupported operand type(s) for /: 'str' and 'float' (error_code=execution_error)"
+    out = main.humanize_smoke_reason(reason)
+    assert out == main._CODE_HEADLINE
+    assert "unsupported operand" not in out
+
+
+def test_smoke_reason_typeerror_no_int_multiply() -> None:
+    reason = "can't multiply sequence by non-int of type 'float' (error_code=unknown)"
+    out = main.humanize_smoke_reason(reason)
+    assert out is not None
+    assert "multiply sequence" not in out
+    assert out == main._CODE_HEADLINE
+
+
+def test_smoke_reason_missing_input_passes_through_calm() -> None:
+    # A clean structured reason should remain readable, not be over-scrubbed.
+    reason = "Missing required inputs: csv_data (error_code=missing_required_input)"
+    out = main.humanize_smoke_reason(reason)
+    assert out is not None
+    assert "/home" not in out
+    assert "error_code=" not in out
+
+
+def test_smoke_reason_none_and_empty() -> None:
+    assert main.humanize_smoke_reason(None) is None
+    assert main.humanize_smoke_reason("") is None
+    assert main.humanize_smoke_reason("   ") is None
+
+
+def test_smoke_reason_never_carries_error_code_marker() -> None:
+    reason = "boom (error_code=execution_error)"
+    out = main.humanize_smoke_reason(reason)
+    assert out is not None
+    assert "error_code=" not in out
