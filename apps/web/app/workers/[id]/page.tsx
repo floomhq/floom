@@ -1217,7 +1217,7 @@ function RunsSection({ worker }: { worker: WorkerDetail }) {
             </p>
             {r.error && (
               <p className="mt-1 text-xs text-[var(--warning,#F9735B)] truncate" title={r.error}>
-                {r.error}
+                {humanizeRunError(r.error)}
               </p>
             )}
           </div>
@@ -1241,6 +1241,24 @@ function RunsSection({ worker }: { worker: WorkerDetail }) {
 
 // S29a: humanize raw enum option keys for display in select dropdowns.
 // "branded_markdown" -> "Branded markdown"
+// Humanize raw API error strings into operator-friendly language.
+// Strips Python dict syntax from "Error code: N - {'error': {'message': '...'}}"
+function humanizeRunError(error: string): string {
+  const cleaned = (error || "").replace(/\s+/g, " ").trim();
+  const dictMatch = cleaned.match(/Error code:\s*\d+\s*-\s*[{'"]/i);
+  if (dictMatch) {
+    const msgMatch = cleaned.match(/"message"\s*:\s*"([^"]{1,200})"/i)
+      || cleaned.match(/'message'\s*:\s*'([^']{1,200})'/i);
+    if (msgMatch) {
+      const msg = msgMatch[1].trim();
+      return msg.length > 120 ? `${msg.slice(0, 117)}...` : msg;
+    }
+    const codeMatch = cleaned.match(/Error code:\s*(\d+)/i);
+    if (codeMatch) return `Request error (code ${codeMatch[1]})`;
+  }
+  return cleaned.length > 120 ? `${cleaned.slice(0, 117)}...` : cleaned;
+}
+
 // "two_pager"        -> "Two pager"
 // "PLAIN_TEXT"       -> "Plain text"
 function humanizeOptionLabel(raw: string): string {

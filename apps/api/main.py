@@ -2755,6 +2755,20 @@ def list_workers(
         recent_stats = stats_by_id.get(w["id"])
         timeseries = timeseries_by_id.get(w["id"])
 
+        # Extract connection slugs and runtime from worker config dict.
+        # These are lightweight and needed for the worker card tool-logo strip.
+        _worker_config_dict = w.get("config") or {}
+        _raw_connections = _worker_config_dict.get("connections") or w.get("connections") or []
+        _conn_slugs = [
+            c if isinstance(c, str) else (c.get("mcp", {}).get("label") or "mcp")
+            for c in _raw_connections
+        ]
+        _raw_runtime = _worker_config_dict.get("runtime") or {}
+        _runtime_type = (
+            _raw_runtime.get("type") if isinstance(_raw_runtime, dict)
+            else (str(_raw_runtime) if _raw_runtime else None)
+        )
+
         result.append(
             WorkerSummary(
                 id=w["id"],
@@ -2779,6 +2793,9 @@ def list_workers(
                 triggers_spec=triggers_spec,
                 recent_stats=recent_stats,
                 timeseries=None if list_shape else timeseries,
+                # B7: always include connection slugs and runtime for worker card tool strip.
+                connections=_conn_slugs,
+                runtime=_runtime_type,
             )
         )
     return result
