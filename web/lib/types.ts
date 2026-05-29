@@ -261,13 +261,33 @@ export interface PlatformConfig {
   required_count: number;
 }
 
+// S39 overview redesign: a single hourly/daily bucket in the 7d sparkline.
+export interface OverviewSparklineBucket {
+  label: string;
+  started_at: string;
+  total: number;
+  failed: number;
+}
+
 export interface SystemOverviewStats {
   runs_24h: number;
   runs_24h_sparkline: number[];
-  success_rate_7d: number;
+  // S39: 28-bucket structured sparkline with failed-counts split.
+  runs_7d_sparkline: OverviewSparklineBucket[];
+  success_rate_7d: number | null;
   active_workers_count: number;
+  paused_workers_count: number;
   connections_healthy: number;
   connections_total: number;
+  work_shipped_7d: number;
+  work_shipped_previous_7d: number;
+  runs_today: number;
+  completed_today: number;
+  failed_today: number;
+  running_now: number;
+  queued_now: number;
+  scheduled_24h_count: number;
+  next_scheduled_at?: string | null;
 }
 
 export interface SystemOverviewRunItem {
@@ -280,28 +300,78 @@ export interface SystemOverviewRunItem {
   trigger_source: string;
 }
 
+// S39: cloud outcome tiles — per-worker shipped-work counts.
+export interface SystemOverviewOutcomeItem {
+  worker_id: string;
+  worker_name: string;
+  label: string;
+  count: number;
+}
+
 export interface SystemOverviewScheduledItem {
   worker_id: string;
   worker_name: string;
   next_fire_at: string;
   trigger_label: string;
+  trigger_source?: string;
+  paused?: boolean;
 }
 
 export interface SystemOverviewAttentionItem {
+  kind?: "failing" | "connection_expired" | "connection_expiring" | string;
   type: string;
   worker_id?: string;
+  worker_name?: string;
   connection_id?: string;
   provider_slug?: string;
   provider_display_name?: string;
+  provider_names?: string[];
   message: string;
+  cause?: string | null;
+  error_code?: string | null;
+  recent_failure_count?: number | null;
+  last_failed_at?: string | null;
+  suggested_actions?: string[];
   action_url: string;
 }
 
 export interface SystemOverview {
   stats: SystemOverviewStats;
+  outcomes?: SystemOverviewOutcomeItem[];
   recent_runs: SystemOverviewRunItem[];
   scheduled_today: SystemOverviewScheduledItem[];
   needs_attention: SystemOverviewAttentionItem[];
+}
+
+// S36 contexts (knowledge packs).
+export interface ContextSummary {
+  name: string;
+  file_count: number;
+  total_size_bytes: number;
+  updated_at?: string | null;
+  writeable: boolean;
+  worker_count: number;
+  description?: string | null;
+}
+
+export interface ContextWorkerRef {
+  worker_id: string;
+  worker_name: string;
+}
+
+export interface ContextFileItem {
+  path: string;
+  size: number;
+  mime_type: string;
+  updated_at: string;
+  is_binary: boolean;
+  description?: string | null;
+  display_type: string;
+}
+
+export interface ContextDetail extends ContextSummary {
+  files: ContextFileItem[];
+  used_by: ContextWorkerRef[];
 }
 
 export interface SystemMetrics {

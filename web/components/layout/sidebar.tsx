@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Box, Clock, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
+import { Activity, Box, Clock, FolderOpen, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -46,6 +46,7 @@ const nav = [
   { href: "/workers", label: "Workers", icon: Box },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/connections", label: "Connections", icon: Plug },
+  { href: "/contexts", label: "Contexts", icon: FolderOpen },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

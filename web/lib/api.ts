@@ -29,6 +29,27 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+// S36 contexts: raw fetch for file bodies (text/binary) that aren't JSON.
+async function fetchRaw(path: string, options?: RequestInit): Promise<Response> {
+  const res = await fetch(`${API_BASE}${path}`, options);
+  if (!res.ok) {
+    let err = "";
+    try {
+      const body = await res.json();
+      err = body.detail || JSON.stringify(body);
+    } catch {
+      err = res.statusText || `HTTP ${res.status}`;
+    }
+    throw new Error(err);
+  }
+  return res;
+}
+
+function contextFilePath(name: string, path: string): string {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  return `/contexts/${encodeURIComponent(name)}/files/${encodedPath}`;
+}
+
 export const api = {
   workers: {
     list: () => fetchJson<import("./types").WorkerSummary[]>("/workers"),
@@ -155,6 +176,39 @@ export const api = {
       fetchJson<import("./types").ConnectionTestResult>(`/connections/${id}/test`, {
         method: "POST",
       }),
+  },
+  // S36 contexts (knowledge packs). All paths go through the /app/api/proxy
+  // proxy (API_BASE), which injects the Supabase JWT and scopes by workspace.
+  contexts: {
+    list: () => fetchJson<import("./types").ContextSummary[]>("/contexts"),
+    get: (name: string) =>
+      fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}`),
+    create: (name: string, writeable = false) =>
+      fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}`, {
+        method: "POST",
+        body: JSON.stringify({ writeable }),
+      }),
+    delete: (name: string, force = false) =>
+      fetchJson<{ status: string; referenced_by?: string[] }>(
+        `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
+        { method: "DELETE" }
+      ),
+    putFile: (name: string, path: string, content: string) =>
+      fetchJson<import("./types").ContextFileItem>(contextFilePath(name, path), {
+        method: "PUT",
+        body: JSON.stringify({ content }),
+      }),
+    deleteFile: (name: string, path: string) =>
+      fetchJson<import("./types").ContextDetail>(contextFilePath(name, path), {
+        method: "DELETE",
+      }),
+    getFile: async (name: string, path: string) => {
+      const res = await fetchRaw(contextFilePath(name, path));
+      return res.text();
+    },
+    // Direct URL for binary previews/downloads (<img src>, <a href>, <embed>).
+    // API_BASE already carries the /app basePath so this works in raw HTML attrs.
+    fileUrl: (name: string, path: string) => `${API_BASE}${contextFilePath(name, path)}`,
   },
   workspaces: {
     list: () => fetchJson<{ workspaces: import("./types").Workspace[]; active_id: string | null }>("/workspaces"),
