@@ -108,7 +108,7 @@ def test_sqlite_connections_enable_wal_normal_sync_and_foreign_keys(monkeypatch,
     assert settings["busy_timeout"] >= 1000
 
 
-def test_run_creation_quota_is_per_user_worker_not_ip_global(monkeypatch, tmp_path):
+def test_run_creation_quota_is_global_per_user_not_ip_scoped(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path, run_create_rate_limit=1)
     monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
     client = TestClient(main.app)
@@ -135,7 +135,7 @@ def test_run_creation_quota_is_per_user_worker_not_ip_global(monkeypatch, tmp_pa
 
     assert first.status_code == 200, first.text
     assert second_same_worker.status_code == 429, second_same_worker.text
-    assert other_worker.status_code == 200, other_worker.text
+    assert other_worker.status_code == 429, other_worker.text
 
 
 def test_twenty_concurrent_run_creates_do_not_lock_sqlite(monkeypatch, tmp_path):

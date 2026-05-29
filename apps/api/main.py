@@ -22,6 +22,7 @@ import secrets as pysecrets
 import uuid as _uuid_mod
 import zipfile
 import ipaddress
+import math
 import requests
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
@@ -44,6 +45,7 @@ from contexts import (
     CONTEXTS_DIR,
     context_dir,
     context_file_metadata,
+    context_owner_id,
     context_mount_names,
     context_total_size,
     context_updated_at,
@@ -54,6 +56,7 @@ from contexts import (
     is_binary_file,
     iter_context_files,
     load_context_metadata,
+    normalize_context_mount,
     normalize_context_file_path,
     safe_context_file_path,
     set_context_metadata,
@@ -218,11 +221,16 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "dach_compliance",
         "github-digest",
         "gmail_intake_brief",
+        "kugelaudio-bug-intake",
+        "kugelaudio-meeting-pipeline",
+        "linkedin-post-engagements",
+        "node-smoke-test",
         "openblog",
         "opendraft",
         "research_brief",
         "reverse_match_crm",
         "weekly_update",
+        "worker-author",
     }
 )
 
@@ -435,9 +443,9 @@ def _rate_caller_keys(request: Request, path: str) -> List[str]:
 
 def _run_create_quota_config() -> tuple[int, float]:
     try:
-        limit = int(os.environ.get("WORKEROS_RUN_CREATE_RATE_LIMIT", "30"))
+        limit = int(os.environ.get("WORKEROS_RUN_CREATE_RATE_LIMIT", "10"))
     except ValueError:
-        limit = 30
+        limit = 10
     try:
         window = float(os.environ.get("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60"))
     except ValueError:
@@ -445,18 +453,32 @@ def _run_create_quota_config() -> tuple[int, float]:
     return max(0, limit), max(1.0, window)
 
 
-def _run_create_quota_key(auth: AuthContext, worker_id: str) -> str:
-    return f"user:{auth.user_id}:worker:{worker_id}"
+def _run_create_per_worker_limit() -> int:
+    raw = os.environ.get("WORKEROS_RUN_CREATE_PER_WORKER_RATE_LIMIT")
+    if raw is None:
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
 
 
-def _enforce_run_create_quota(auth: AuthContext, worker_id: str) -> None:
-    limit, window = _run_create_quota_config()
+def _run_replay_per_run_limit() -> int:
+    raw = os.environ.get("WORKEROS_RUN_REPLAY_PER_RUN_RATE_LIMIT")
+    if raw is None:
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def _claim_run_create_quota_slot(key: str, *, limit: int, window: float) -> Optional[int]:
     if limit <= 0:
-        return
+        return None
 
     now = time.time()
     cutoff = now - window
-    key = _run_create_quota_key(auth, worker_id)
     with get_db() as conn:
         conn.execute(
             """
@@ -477,13 +499,52 @@ def _enforce_run_create_quota(auth: AuthContext, worker_id: str) -> None:
         count = int(row["count"] or 0) if row else 0
         if count >= limit:
             oldest_ts = float(row["oldest_ts"] or now) if row else now
-            retry_after = max(1, int(window - (now - oldest_ts)))
-            raise HTTPException(
-                status_code=429,
-                detail=f"Run creation rate limit exceeded: {limit}/{int(window)}s",
-                headers={"Retry-After": str(retry_after)},
-            )
+            retry_after = max(1, int(math.ceil((oldest_ts + window) - now)))
+            return retry_after
         conn.execute("INSERT INTO run_create_rate_limits (key, ts) VALUES (?, ?)", (key, now))
+    return None
+
+
+def _raise_run_create_quota(limit: int, window: float, retry_after: int) -> None:
+    raise HTTPException(
+        status_code=429,
+        detail=f"Run creation rate limit exceeded: {limit}/{int(window)}s",
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+def _enforce_run_create_quota(auth: AuthContext, worker_id: str) -> None:
+    limit, window = _run_create_quota_config()
+    retry_after = _claim_run_create_quota_slot(
+        f"user:{auth.user_id}:runs",
+        limit=limit,
+        window=window,
+    )
+    if retry_after is not None:
+        _raise_run_create_quota(limit, window, retry_after)
+
+    per_worker_limit = _run_create_per_worker_limit()
+    retry_after = _claim_run_create_quota_slot(
+        f"user:{auth.user_id}:worker:{worker_id}",
+        limit=per_worker_limit,
+        window=window,
+    )
+    if retry_after is not None:
+        _raise_run_create_quota(per_worker_limit, window, retry_after)
+
+
+def _enforce_run_replay_quota(auth: AuthContext, worker_id: str, source_run_id: str) -> None:
+    replay_limit = _run_replay_per_run_limit()
+    if replay_limit <= 0:
+        return
+    _limit, window = _run_create_quota_config()
+    retry_after = _claim_run_create_quota_slot(
+        f"user:{auth.user_id}:worker:{worker_id}:replay:{source_run_id}",
+        limit=replay_limit,
+        window=window,
+    )
+    if retry_after is not None:
+        _raise_run_create_quota(replay_limit, window, retry_after)
 
 
 @app.middleware("http")
@@ -589,10 +650,11 @@ def _sse_publish(run_id: str, event: Dict[str, Any]) -> None:
     asyncio.Queue is not thread-safe, so we route the put through each
     queue's bound loop via call_soon_threadsafe.
     """
+    public_event = _public_sse_event(event)
     with _sse_lock:
         entries = list(_sse_queues.get(run_id, []))
     for q, loop in entries:
-        def _put(q=q, event=event):
+        def _put(q=q, event=public_event):
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
@@ -653,17 +715,18 @@ def _schedule_run_part_cleanup(run_id: str) -> None:
 
 def _run_part_publish(run_id: str, part: Dict[str, Any]) -> None:
     """Publish one AI SDK part to the replay buffer and active consumers."""
+    public_part = _public_run_part(part)
     with _run_part_lock:
         state = _run_part_state(run_id)
         event_id = state["next_id"]
         state["next_id"] = event_id + 1
-        state["parts"].append((event_id, part))
-        if _run_part_is_finish(part):
+        state["parts"].append((event_id, public_part))
+        if _run_part_is_finish(public_part):
             state["finished_at"] = time.time()
         entries = list(state["queues"])
 
     for q, loop in entries:
-        def _put(q=q, event_id=event_id, part=part):
+        def _put(q=q, event_id=event_id, part=public_part):
             try:
                 q.put_nowait((event_id, part))
             except asyncio.QueueFull:
@@ -674,7 +737,7 @@ def _run_part_publish(run_id: str, part: Dict[str, Any]) -> None:
         except RuntimeError:
             pass
 
-    if _run_part_is_finish(part):
+    if _run_part_is_finish(public_part):
         _schedule_run_part_cleanup(run_id)
 
 
@@ -727,7 +790,7 @@ def _finish_part_from_run_row(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     if status == RunStatus.FAILED.value:
         part: Dict[str, Any] = {"type": "finish", "status": "failed"}
         if row["error"]:
-            part["error"] = row["error"]
+            part["error"] = _redact_public_log_message(str(row["error"]))
         return part
     return None
 
@@ -1134,9 +1197,7 @@ def get_worker_timeseries(
     repos: Repositories = Depends(get_repos),
 ) -> List[TimeseriesDay]:
     """Return per-day run counts for the last N days (default 14). Zero-filled."""
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     batch = _get_timeseries_batch(
@@ -1297,7 +1358,8 @@ def _composio_webhook_url() -> str:
 
 
 def _bootstrap_user_id() -> str:
-    return "federico"
+    configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
+    return configured or "federico"
 
 
 def _composio_trigger_signature(config: Optional[WorkerConfig]) -> Optional[Dict[str, Any]]:
@@ -1500,7 +1562,7 @@ def _persist_discovered_workers(
                 cron_expr=excluded.cron_expr,
                 cron_timezone=excluded.cron_timezone,
                 enabled=excluded.enabled,
-                owner_id=excluded.owner_id,
+                owner_id=workers.owner_id,
                 composio_trigger_id=excluded.composio_trigger_id,
                 composio_event=excluded.composio_event,
                 triggers_json=excluded.triggers_json
@@ -1604,6 +1666,38 @@ def _list_db_workers(
         return []
 
 
+def _user_scoped_local_mode() -> bool:
+    return os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1"
+
+
+def _shared_filesystem_fallback_allowed() -> bool:
+    return not _is_cloud_deploy() and not _user_scoped_local_mode()
+
+
+def _stock_workers_from_filesystem(*, use_cache: bool = True) -> List[Dict[str, Any]]:
+    return [
+        worker
+        for worker in discover_workers(use_cache=use_cache)
+        if worker["id"] in PROTECTED_STOCK_WORKER_IDS
+    ]
+
+
+def _list_visible_workers(
+    *,
+    user_id: str,
+    repos: Repositories,
+    use_cache: bool = True,
+) -> List[Dict[str, Any]]:
+    db_workers = _list_db_workers(user_id=user_id, repos=repos)
+    if _shared_filesystem_fallback_allowed():
+        return db_workers if db_workers else discover_workers(use_cache=use_cache)
+
+    visible = {worker["id"]: worker for worker in db_workers}
+    for worker in _stock_workers_from_filesystem(use_cache=use_cache):
+        visible.setdefault(worker["id"], worker)
+    return list(visible.values())
+
+
 def _get_db_worker(
     worker_id: str,
     *,
@@ -1614,6 +1708,20 @@ def _get_db_worker(
         return repos.workers.get(user_id=user_id, worker_id=worker_id)
     except sqlite3.OperationalError:
         return None
+
+
+def _get_visible_worker(
+    worker_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Optional[Dict[str, Any]]:
+    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos)
+    if worker is not None:
+        return worker
+    if _shared_filesystem_fallback_allowed() or worker_id in PROTECTED_STOCK_WORKER_IDS:
+        return get_worker(worker_id)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1843,7 +1951,7 @@ def _resolve_file_input_references(
 
             # Fix 5: File ownership audit — log cross-user bindings (non-blocking per T1c).
             file_owner = row["uploaded_by"] or "anonymous"
-            if file_owner != bound_by:
+            if not _user_owns_uploaded_file(conn, row["id"], bound_by):
                 logger.info(
                     "file_binding_audit: run=%s worker=%s input=%s sha=%s "
                     "uploaded_by=%r bound_by=%r",
@@ -1998,6 +2106,13 @@ def _validate_upload_filename(raw_filename: str) -> None:
             status_code=400,
             detail="filename must not contain path separators, leading dots, or '..' segments",
         )
+    suffixes = [suffix.lower() for suffix in Path(raw_filename).suffixes]
+    for inner_suffix in suffixes[:-1]:
+        if inner_suffix in _UPLOAD_BLOCKED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Upload filename contains blocked inner extension {inner_suffix!r}",
+            )
     suffix = Path(raw_filename).suffix.lower()
     if suffix in _UPLOAD_BLOCKED_EXTENSIONS or suffix not in _UPLOAD_ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -2069,12 +2184,27 @@ def _verify_upload_download_token(file_id: str, token: str) -> str:
     return uploaded_by
 
 
+def _user_owns_uploaded_file(conn: sqlite3.Connection, file_id: str, user_id: str) -> bool:
+    owner_row = conn.execute(
+        "SELECT 1 FROM file_owners WHERE file_id = ? AND user_id = ? LIMIT 1",
+        (file_id, user_id),
+    ).fetchone()
+    if owner_row is not None:
+        return True
+    legacy_row = conn.execute(
+        "SELECT 1 FROM files WHERE id = ? AND COALESCE(uploaded_by, 'anonymous') = ? LIMIT 1",
+        (file_id, user_id),
+    ).fetchone()
+    return legacy_row is not None
+
+
 @app.post("/uploads")
 async def upload_file(
     request: Request,
     file: UploadFile = File(...),
     max_size_mb: Optional[float] = Form(None),
     accepts: Optional[str] = Form(None),
+    auth: AuthContext = Depends(get_auth_context),
 ) -> Dict[str, Any]:
     if max_size_mb is not None and max_size_mb <= 0:
         raise HTTPException(status_code=400, detail="max_size_mb must be greater than 0")
@@ -2161,7 +2291,7 @@ async def upload_file(
         # Blob already exists — dedup; remove the temp file.
         tmp_upload.unlink(missing_ok=True)
 
-    uploaded_by = request.headers.get("x-floom-user") or "anonymous"
+    uploaded_by = auth.user_id or "anonymous"
     uploaded_at = now_iso()
     filename = file.filename or sha256
     with get_db() as conn:
@@ -2179,6 +2309,14 @@ async def upload_file(
                 ref_count=files.ref_count
             """,
             (sha256, filename, media_type, size, uploaded_by, uploaded_at),
+        )
+        conn.execute(
+            """
+            INSERT INTO file_owners (file_id, user_id, first_uploaded_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(file_id, user_id) DO NOTHING
+            """,
+            (sha256, uploaded_by, uploaded_at),
         )
 
     download_token = _make_upload_download_token(sha256, uploaded_by)
@@ -2198,12 +2336,13 @@ def download_upload(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> FileResponse:
-    _ = auth
     if not is_sha256(file_id):
         raise HTTPException(status_code=404, detail="Uploaded file not found")
 
     download_token = request.query_params.get("download_token", "")
-    _verify_upload_download_token(file_id, download_token)
+    token_user_id = _verify_upload_download_token(file_id, download_token)
+    if auth.user_id != token_user_id:
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
     with get_db() as conn:
         row = conn.execute(
             """
@@ -2213,6 +2352,8 @@ def download_upload(
             """,
             (file_id,),
         ).fetchone()
+        if row is not None and not _user_owns_uploaded_file(conn, file_id, auth.user_id):
+            raise HTTPException(status_code=404, detail="Uploaded file not found")
 
     path = blob_path(file_id)
     if row is None or not path.exists():
@@ -2238,13 +2379,6 @@ class ContextSummary(BaseModel):
     total_size_bytes: int
     updated_at: Optional[str] = None
     writeable: bool = False
-    worker_count: int = 0
-    description: Optional[str] = None
-
-
-class ContextWorkerRef(BaseModel):
-    worker_id: str
-    worker_name: str
 
 
 class ContextFileItem(BaseModel):
@@ -2253,13 +2387,10 @@ class ContextFileItem(BaseModel):
     mime_type: str
     updated_at: str
     is_binary: bool
-    description: Optional[str] = None
-    display_type: str = "Binary"
 
 
 class ContextDetail(ContextSummary):
     files: List[ContextFileItem] = Field(default_factory=list)
-    used_by: List[ContextWorkerRef] = Field(default_factory=list)
 
 
 class ContextCreateRequest(BaseModel):
@@ -2301,133 +2432,52 @@ def _safe_context_file_or_400(name: str, path: str) -> Path:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _extract_md_description(text: str, max_chars: int = 80) -> Optional[str]:
-    """Extract a 1-line description from markdown: first H1 or first non-empty paragraph."""
-    for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("# "):
-            desc = line[2:].strip()
-            return desc[:max_chars] if desc else None
-        if line and not line.startswith("#"):
-            return line[:max_chars]
-    return None
+def _unowned_contexts_visible_to_caller() -> bool:
+    return os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") != "1" and not _is_cloud_deploy()
 
 
-def _extract_yml_description(text: str) -> Optional[str]:
-    """Extract description or title field from YAML front matter."""
-    try:
-        import yaml as _yaml
-        data = _yaml.safe_load(text)
-        if isinstance(data, dict):
-            for key in ("description", "title", "name"):
-                val = data.get(key)
-                if isinstance(val, str) and val.strip():
-                    return val.strip()[:80]
-    except Exception:
-        pass
-    return None
+def _context_visible_to_user(
+    name: str,
+    *,
+    user_id: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    safe_name = validate_context_name(name)
+    meta = metadata if metadata is not None else load_context_metadata()
+    owner_id = context_owner_id(safe_name, meta)
+    if owner_id:
+        return owner_id == user_id
+    return _unowned_contexts_visible_to_caller()
 
 
-def _file_display_type(path: str, mime_type: str) -> str:
-    """Return a human-friendly file type label."""
-    p = path.lower()
-    if p.endswith(".md") or p.endswith(".mdx"):
-        return "Markdown"
-    if p.endswith(".yml") or p.endswith(".yaml"):
-        return "YAML"
-    if p.endswith(".py"):
-        return "Python"
-    if p.endswith(".js") or p.endswith(".jsx"):
-        return "JavaScript"
-    if p.endswith(".ts") or p.endswith(".tsx"):
-        return "TypeScript"
-    if p.endswith(".json"):
-        return "JSON"
-    if p.endswith(".sh"):
-        return "Shell"
-    if p.endswith(".sql"):
-        return "SQL"
-    if p.endswith(".txt"):
-        return "Text"
-    if p.endswith(".csv"):
-        return "CSV"
-    if p.endswith(".html") or p.endswith(".htm"):
-        return "HTML"
-    if p.endswith(".pdf"):
-        return "PDF"
-    mime = mime_type.lower()
-    if mime.startswith("image/"):
-        return "Image"
-    if "text/" in mime:
-        return "Text"
-    return "Binary"
-
-
-def _file_description(root: Path, path: Path) -> Optional[str]:
-    """Auto-extract a 1-line description from a file."""
-    rel = path.relative_to(root).as_posix().lower()
-    try:
-        if rel.endswith(".md") or rel.endswith(".mdx"):
-            text = path.read_text(encoding="utf-8", errors="replace")
-            return _extract_md_description(text)
-        if rel.endswith(".yml") or rel.endswith(".yaml"):
-            text = path.read_text(encoding="utf-8", errors="replace")
-            return _extract_yml_description(text)
-    except Exception:
-        pass
-    return None
-
-
-def _context_readme_description(root: Path) -> Optional[str]:
-    """Extract description from README.md in context root."""
-    for name in ("README.md", "readme.md", "README.MD"):
-        readme = root / name
-        if readme.is_file():
-            try:
-                text = readme.read_text(encoding="utf-8", errors="replace")
-                return _extract_md_description(text, max_chars=120)
-            except Exception:
-                pass
-    return None
-
-
-def _workers_using_context(name: str) -> List[ContextWorkerRef]:
-    """Return list of workers that reference this context via contexts: field."""
-    refs: List[ContextWorkerRef] = []
-    for worker in discover_workers(use_cache=False):
-        try:
-            contexts = (worker.get("config") or {}).get("contexts") or []
-            if name in context_mount_names(contexts):
-                refs.append(ContextWorkerRef(
-                    worker_id=str(worker["id"]),
-                    worker_name=str(worker.get("name") or worker["id"]),
-                ))
-        except Exception:
-            continue
-    return refs
+def _require_context_for_user(
+    name: str,
+    *,
+    user_id: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    safe_name = _context_name_or_400(name)
+    meta = metadata if metadata is not None else load_context_metadata()
+    if not context_dir(safe_name).is_dir() or not _context_visible_to_user(
+        safe_name,
+        user_id=user_id,
+        metadata=meta,
+    ):
+        raise HTTPException(status_code=404, detail="Context not found")
+    return safe_name, meta
 
 
 def _context_summary(name: str, metadata: dict[str, dict[str, Any]]) -> ContextSummary:
     root = context_dir(name)
     files = list(iter_context_files(root))
     total_size = sum(path.stat().st_size for path in files)
-    workers = _workers_using_context(name)
     return ContextSummary(
         name=name,
         file_count=len(files),
         total_size_bytes=total_size,
         updated_at=context_updated_at(root),
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
-        worker_count=len(workers),
-        description=_context_readme_description(root),
     )
-
-
-def _context_file_item(root: Path, path: Path) -> ContextFileItem:
-    base = context_file_metadata(root, path)
-    desc = _file_description(root, path)
-    display_type = _file_display_type(base["path"], base["mime_type"])
-    return ContextFileItem(**base, description=desc, display_type=display_type)
 
 
 def _context_detail(name: str, metadata: dict[str, dict[str, Any]] | None = None) -> ContextDetail:
@@ -2436,12 +2486,11 @@ def _context_detail(name: str, metadata: dict[str, dict[str, Any]] | None = None
         raise HTTPException(status_code=404, detail="Context not found")
     meta = metadata if metadata is not None else load_context_metadata()
     files = [
-        _context_file_item(root, path)
+        ContextFileItem(**context_file_metadata(root, path))
         for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
     ]
-    used_by = _workers_using_context(name)
     summary = _context_summary(name, meta)
-    return ContextDetail(**summary.model_dump(), files=files, used_by=used_by)
+    return ContextDetail(**summary.model_dump(), files=files)
 
 
 def _raise_context_quota_if_needed(name: str) -> None:
@@ -2453,7 +2502,7 @@ def _raise_context_quota_if_needed(name: str) -> None:
         )
 
 
-def _write_context_file(name: str, file_path: str, data: bytes) -> ContextFileItem:
+def _write_context_file(name: str, file_path: str, data: bytes, *, user_id: str) -> ContextFileItem:
     root = context_dir(name)
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="Context not found")
@@ -2469,13 +2518,13 @@ def _write_context_file(name: str, file_path: str, data: bytes) -> ContextFileIt
         else:
             destination.write_bytes(previous)
         raise
-    set_context_metadata(name)
-    return _context_file_item(root, destination)
+    set_context_metadata(name, owner_id=user_id)
+    return ContextFileItem(**context_file_metadata(root, destination))
 
 
-def _workers_referencing_context(name: str) -> List[str]:
+def _workers_referencing_context(name: str, *, user_id: str, repos: Repositories) -> List[str]:
     referenced_by: List[str] = []
-    for worker in discover_workers(use_cache=False):
+    for worker in repos.workers.list(user_id=user_id):
         try:
             contexts = (worker.get("config") or {}).get("contexts") or []
             if name in context_mount_names(contexts):
@@ -2489,7 +2538,6 @@ def _workers_referencing_context(name: str) -> List[str]:
 def list_contexts(
     auth: AuthContext = Depends(get_auth_context),
 ) -> List[ContextSummary]:
-    _ = auth
     ensure_contexts_dir()
     metadata = load_context_metadata()
     root = current_contexts_root()
@@ -2497,6 +2545,7 @@ def list_contexts(
         _context_summary(folder.name, metadata)
         for folder in sorted(root.iterdir(), key=lambda p: p.name)
         if folder.is_dir() and not folder.is_symlink() and not folder.name.startswith(".")
+        and _context_visible_to_user(folder.name, user_id=auth.user_id, metadata=metadata)
     ]
     return items
 
@@ -2507,13 +2556,19 @@ def create_context(
     payload: Optional[ContextCreateRequest] = Body(default=None),
     auth: AuthContext = Depends(get_auth_context),
 ) -> ContextDetail:
-    _ = auth
     safe_name = _context_name_or_400(name)
     root = context_dir(safe_name)
+    metadata = load_context_metadata()
     if root.exists():
+        if not _context_visible_to_user(safe_name, user_id=auth.user_id, metadata=metadata):
+            raise HTTPException(status_code=404, detail="Context not found")
         raise HTTPException(status_code=409, detail="Context already exists")
     root.mkdir(parents=True)
-    set_context_metadata(safe_name, writeable=bool(payload.writeable) if payload else False)
+    set_context_metadata(
+        safe_name,
+        writeable=bool(payload.writeable) if payload else False,
+        owner_id=auth.user_id,
+    )
     return _context_detail(safe_name)
 
 
@@ -2522,8 +2577,8 @@ def get_context(
     name: str,
     auth: AuthContext = Depends(get_auth_context),
 ) -> ContextDetail:
-    _ = auth
-    return _context_detail(_context_name_or_400(name))
+    safe_name, metadata = _require_context_for_user(name, user_id=auth.user_id)
+    return _context_detail(safe_name, metadata)
 
 
 @app.delete("/contexts/{name}", response_model=ContextDeleteResponse)
@@ -2531,13 +2586,11 @@ def delete_context(
     name: str,
     force: bool = Query(False),
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextDeleteResponse:
-    _ = auth
-    safe_name = _context_name_or_400(name)
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     root = context_dir(safe_name)
-    if not root.is_dir():
-        raise HTTPException(status_code=404, detail="Context not found")
-    referenced_by = _workers_referencing_context(safe_name)
+    referenced_by = _workers_referencing_context(safe_name, user_id=auth.user_id, repos=repos)
     if referenced_by and not force:
         raise HTTPException(
             status_code=409,
@@ -2554,8 +2607,7 @@ def get_context_file(
     file_path: str,
     auth: AuthContext = Depends(get_auth_context),
 ):
-    _ = auth
-    safe_name = _context_name_or_400(name)
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
     target = _safe_context_file_or_400(safe_name, rel)
     if not target.is_file():
@@ -2575,8 +2627,7 @@ async def put_context_file(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> ContextFileItem:
-    _ = auth
-    safe_name = _context_name_or_400(name)
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
     content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     if content_type == "application/json":
@@ -2587,7 +2638,7 @@ async def put_context_file(
         data = payload.content.encode("utf-8")
     else:
         data = await request.body()
-    return _write_context_file(safe_name, rel, data)
+    return _write_context_file(safe_name, rel, data, user_id=auth.user_id)
 
 
 @app.delete("/contexts/{name}/files/{file_path:path}", response_model=ContextDetail)
@@ -2596,8 +2647,7 @@ def delete_context_file(
     file_path: str,
     auth: AuthContext = Depends(get_auth_context),
 ) -> ContextDetail:
-    _ = auth
-    safe_name = _context_name_or_400(name)
+    safe_name, metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
     target = _safe_context_file_or_400(safe_name, rel)
     if not target.is_file():
@@ -2610,8 +2660,8 @@ def delete_context_file(
             parent.rmdir()
         except OSError:
             break
-    set_context_metadata(safe_name)
-    return _context_detail(safe_name)
+    set_context_metadata(safe_name, owner_id=auth.user_id)
+    return _context_detail(safe_name, metadata)
 
 
 @app.post("/contexts/{name}/upload", response_model=ContextUploadResponse)
@@ -2621,8 +2671,7 @@ async def upload_context_files(
     path_prefix: str = Form(""),
     auth: AuthContext = Depends(get_auth_context),
 ) -> ContextUploadResponse:
-    _ = auth
-    safe_name = _context_name_or_400(name)
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     raw_prefix = path_prefix.strip().strip("/")
     prefix = _context_file_path_or_400(raw_prefix) if raw_prefix else ""
     written: List[ContextFileItem] = []
@@ -2630,7 +2679,7 @@ async def upload_context_files(
         filename = _context_file_path_or_400(upload.filename or "upload.bin")
         rel = f"{prefix}/{filename}" if prefix else filename
         data = await upload.read()
-        written.append(_write_context_file(safe_name, rel, data))
+        written.append(_write_context_file(safe_name, rel, data, user_id=auth.user_id))
     return ContextUploadResponse(
         files=written,
         total_size_bytes=context_total_size(context_dir(safe_name)),
@@ -2654,12 +2703,7 @@ def list_workers(
     ?include_archived=true — include archived workers (archived:true in worker.yml).
                              Default: excluded from All/Starred/Recent; shown only in Archived view.
     """
-    db_workers = _list_db_workers(user_id=auth.user_id, repos=repos)
-    # In cloud (multi-tenant) mode never fall back to the shared filesystem,
-    # which would expose another tenant's bundles. Local single-tenant mode
-    # keeps the old behavior so a fresh install with no DB rows yet still
-    # enumerates the on-disk workers for first-time UX.
-    workers = db_workers if (db_workers or _is_cloud_deploy()) else discover_workers(use_cache=True)
+    workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True)
     # Filter out system_worker: true workers unless explicitly requested.
     if not include_system:
         workers = [
@@ -2705,13 +2749,6 @@ def list_workers(
         recent_stats = stats_by_id.get(w["id"])
         timeseries = timeseries_by_id.get(w["id"])
 
-        # Extract Composio app slug connections for the card tool-logo strip.
-        conn_slugs: list[str] = []
-        if config and config.connections:
-            for c in config.connections:
-                if isinstance(c, str):
-                    conn_slugs.append(c)
-
         result.append(
             WorkerSummary(
                 id=w["id"],
@@ -2736,8 +2773,6 @@ def list_workers(
                 triggers_spec=triggers_spec,
                 recent_stats=recent_stats,
                 timeseries=None if list_shape else timeseries,
-                connections=conn_slugs,
-                runtime=config.runtime.type if config else None,
             )
         )
     return result
@@ -2749,9 +2784,7 @@ def _build_worker_detail(
     user_id: str,
     repos: Repositories,
 ) -> WorkerDetail:
-    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -2937,9 +2970,7 @@ def update_worker(
     stored in plaintext.
     """
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4064,7 +4095,7 @@ async def draft_and_create_worker(
         if not worker_yml_file:
             raise HTTPException(status_code=400, detail="files must include worker.yml")
 
-        worker_id, _config = _parse_worker_payload(worker_yml_file.content)
+        worker_id, _config = _parse_worker_payload(worker_yml_file.content, user_id=auth.user_id)
 
         target_dir = WORKERS_DIR / worker_id
         if target_dir.exists():
@@ -4165,35 +4196,6 @@ async def draft_and_create_worker(
             raw_manifest = pyyaml.safe_load(worker_yml_str)
             if not isinstance(raw_manifest, dict):
                 raise ValueError("worker_yml must be a YAML mapping")
-            # Auto-repair: the LLM frequently emits exec.mode=pure-script
-            # without exec.command, which the strict validator rejects. The
-            # platform's pure-script convention is `python run.py`, so when
-            # both mode=pure-script and command is missing AND entry/runner
-            # match the convention, inject the canonical command rather than
-            # burning another LLM retry. Same patch for "hybrid". This was
-            # the dominant failure path that caused /api/workers/draft-and-create
-            # to 502 (Bug #38).
-            exec_block = raw_manifest.get("exec")
-            if isinstance(exec_block, dict):
-                exec_mode = (exec_block.get("mode") or "").strip().lower()
-                exec_command = (exec_block.get("command") or "").strip()
-                exec_entry = (exec_block.get("entry") or "").strip()
-                if exec_mode in ("pure-script", "hybrid") and not exec_command:
-                    inferred_entry = exec_entry or "run.py"
-                    if inferred_entry.endswith(".py"):
-                        exec_block["command"] = f"python {inferred_entry}"
-                        if not exec_block.get("entry"):
-                            exec_block["entry"] = inferred_entry
-                        # Re-serialize so downstream code sees the repaired yml
-                        worker_yml_str = pyyaml.safe_dump(
-                            raw_manifest, sort_keys=False, default_flow_style=False
-                        )
-                        logger.info(
-                            "draft-and-create auto-repair: injected "
-                            "exec.command=%r for mode=%r",
-                            exec_block["command"],
-                            exec_mode,
-                        )
             parse_worker_manifest(raw_manifest)
             last_yaml_error = None
             break
@@ -4237,7 +4239,7 @@ async def draft_and_create_worker(
             draft_files_from_llm.append(DraftFile(path="SKILL.md", content=skill_md_str))
 
     # Parse worker_id from validated YAML
-    worker_id, _config2 = _parse_worker_payload(worker_yml_str)
+    worker_id, _config2 = _parse_worker_payload(worker_yml_str, user_id=auth.user_id)
 
     # #186: the LLM author often returns the same suggested id regardless of
     # prompt. Rather than 409 on collision, allocate a free id and rewrite the
@@ -4291,7 +4293,7 @@ async def draft_and_create_worker(
     return DraftAndCreateResponse(worker_id=worker_id)
 
 
-def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
+def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tuple[str, WorkerConfig]:
     import yaml as pyyaml
 
     try:
@@ -4342,6 +4344,22 @@ def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
 
     if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
         raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")
+    if user_id:
+        metadata = load_context_metadata()
+        for raw_context in config.contexts or []:
+            try:
+                context = normalize_context_mount(raw_context)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if context["source"] != "local":
+                continue
+            context_name = context["name"]
+            if not context_dir(context_name).is_dir() or not _context_visible_to_user(
+                context_name,
+                user_id=user_id,
+                metadata=metadata,
+            ):
+                raise HTTPException(status_code=400, detail=f"Context not found: {context_name}")
     _raise_if_protected_worker_mutation(worker_id)
     return worker_id, config
 
@@ -4355,7 +4373,7 @@ def create_worker(
     """Create a new worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
-    worker_id, config = _parse_worker_payload(payload.worker_yml)
+    worker_id, config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
@@ -4465,7 +4483,7 @@ async def create_worker_from_bundle(
     worker_yml_path_in_zip = f"{prefix}worker.yml"
     worker_yml = zf.read(worker_yml_path_in_zip).decode("utf-8")
 
-    worker_id, config = _parse_worker_payload(worker_yml)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
@@ -4545,12 +4563,14 @@ def update_worker(
     from worker_registry import WORKERS_DIR
 
     _raise_if_protected_worker_mutation(worker_id)
-    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml)
+    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
     if parsed_worker_id != worker_id:
         raise HTTPException(
             status_code=400,
             detail=f"worker_yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
         )
+    if _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
 
     target_dir = WORKERS_DIR / worker_id
     if not target_dir.exists():
@@ -4647,9 +4667,7 @@ def update_worker_files(
     from worker_registry import WORKERS_DIR
 
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4674,7 +4692,7 @@ def update_worker_files(
 
     # Validate worker.yml is parseable
     yml_item = next(f for f in payload.files if f.path == "worker.yml")
-    parsed_worker_id, _config = _parse_worker_payload(yml_item.content)
+    parsed_worker_id, _config = _parse_worker_payload(yml_item.content, user_id=auth.user_id)
     if parsed_worker_id != worker_id:
         raise HTTPException(
             status_code=400,
@@ -4817,9 +4835,7 @@ def create_worker_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4850,7 +4866,7 @@ def create_worker_run(
         user_id=auth.user_id,
         repos=repos,
     )
-    bound_by = request.headers.get("x-floom-user") or "anonymous"
+    bound_by = auth.user_id or "anonymous"
     try:
         resolved_inputs = _resolve_file_input_references(
             worker_id, run_id, payload.inputs, bound_by=bound_by
@@ -4888,9 +4904,7 @@ def replay_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4903,6 +4917,7 @@ def replay_run(
     source_inputs = json.loads(row["input_json"] or "{}")
     replay_inputs = json.loads(json.dumps(source_inputs))
     _enforce_run_create_quota(auth, worker_id)
+    _enforce_run_replay_quota(auth, worker_id, run_id)
     new_run_id = create_run(
         worker_id,
         replay_inputs,
@@ -5252,7 +5267,7 @@ def get_run(
         logs=logs,
         artifacts=artifacts,
         transcript=transcript,
-        error=run.get("error"),
+        error=_redact_public_log_message(str(run.get("error") or "")) or None,
         error_code=run.get("error_code"),
         started_at=run.get("started_at"),
         completed_at=run.get("completed_at"),
@@ -5368,13 +5383,13 @@ async def stream_run_events(
         if already_terminal:
             final_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
             if final_row:
-                evt = {
+                evt = _public_sse_event({
                     "type": "status",
                     "run_id": run_id,
                     "status": final_row["status"],
                     "error": final_row["error"],
                     "completed_at": final_row["completed_at"],
-                }
+                })
                 yield f"data: {json.dumps(evt)}\n\n"
             yield "data: {\"type\": \"close\"}\n\n"
             return
@@ -5427,6 +5442,23 @@ def _redact_public_log_message(message: str) -> str:
     redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", message or "")
     redacted = _LOG_METADATA_RE.sub("[redacted-metadata]", redacted)
     return redacted
+
+
+def _public_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    public_event = dict(event)
+    if "message" in public_event:
+        public_event["message"] = _redact_public_log_message(str(public_event.get("message") or ""))
+    if public_event.get("error") is not None:
+        public_event["error"] = _redact_public_log_message(str(public_event["error"]))
+    public_event.pop("trace_id", None)
+    return public_event
+
+
+def _public_run_part(part: Dict[str, Any]) -> Dict[str, Any]:
+    public_part = dict(part)
+    if public_part.get("type") == "finish" and public_part.get("error") is not None:
+        public_part["error"] = _redact_public_log_message(str(public_part["error"]))
+    return public_part
 
 
 @app.get("/runs/{run_id}/logs")
@@ -5712,11 +5744,7 @@ def list_secrets(
         for row in repos.secrets.list(user_id=auth.user_id)
     }
 
-    db_workers = _list_db_workers(user_id=auth.user_id, repos=repos)
-    # Same cloud-tenant scoping as /workers above: never enumerate the
-    # shared filesystem in cloud mode (would surface another tenant's
-    # worker.yml secret declarations to this user).
-    workers = db_workers if (db_workers or _is_cloud_deploy()) else discover_workers(use_cache=True)
+    workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True)
 
     # (a) All secrets declared by any worker.yml
     worker_secret_names: set[str] = set()
@@ -6011,14 +6039,8 @@ def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
 def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
     item = dict(data)
     item["kind"] = item.get("kind") or "composio"
-    # E2 fix: display_name carries the real unredacted email/login so the UI
-    # can show "user@example.com" instead of "Connected account".
-    # Prefer the explicit display_name column; fall back to account_label
-    # (which may be raw email from the sweeper). account_label is kept as-is
-    # for backward compat with any callers that already parse it.
-    raw_display = item.get("display_name") or item.get("account_label") or ""
-    item["display_name"] = raw_display.strip() or None
     item["account_label"] = _redact_connection_account_label(item.get("account_label"))
+    item["display_name"] = _redact_connection_account_label(item.get("display_name"))
     item["mcp_allowed_tools"] = _parse_json_string_list(item.pop("mcp_allowed_tools_json", None))
     return ConnectionItem(**item)
 
@@ -6130,34 +6152,18 @@ def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict
         if not isinstance(account, dict):
             return {}
 
-        params = account.get("params") or {}
-        metadata = account.get("metadata") or {}
         email = (
             account.get("email")
             or account.get("account_email")
-            or params.get("userEmail")
-            or params.get("email")
             or (account.get("connection_data") or {}).get("email")
             or (account.get("data") or {}).get("email")
-            or metadata.get("email")
+            or (account.get("metadata") or {}).get("email")
             or (account.get("user") or {}).get("email")
         )
-        # Composio v3: granted scopes may be in params.scopes, metadata.scopes,
-        # or the top-level scopes array.
-        raw_scopes = (
-            account.get("scopes")
-            or params.get("scopes")
-            or metadata.get("scopes")
-            or []
-        )
+        raw_scopes = account.get("scopes") or []
         if not isinstance(raw_scopes, list):
             raw_scopes = []
         scopes = [s for s in raw_scopes if isinstance(s, str)]
-        # Composio v3: entity_id is often the user's email for OAuth integrations.
-        entity_id = account.get("entity_id") or ""
-        if not email and "@" in entity_id:
-            email = entity_id
-
         # Fallback: Composio doesn't return email for managed-OAuth connections
         # and masks the raw access_token, so we cannot call provider userinfo
         # directly. Use Composio's /tools/execute proxy to invoke a per-provider
@@ -6434,9 +6440,7 @@ def get_connection_account_info(
     if not info:
         raise HTTPException(status_code=502, detail="Unable to fetch account info from upstream")
 
-    # Cache scopes + account_label in DB for list endpoint.
-    # E2 fix: also write display_name (unredacted email) so the list
-    # endpoint can surface the real identity without stripping it.
+    # Cache scopes + account_label in DB for list endpoint
     if info.get("scopes") is not None or info.get("email"):
         now = now_iso()
         account_label = info.get("email") or ""
@@ -6445,7 +6449,6 @@ def get_connection_account_info(
             composio_id=connection_id,
             scopes_json=info.get("scopes") or [],
             account_label=account_label,
-            display_name=account_label or None,
             updated_at=now,
         )
 
@@ -6663,11 +6666,11 @@ def _write_connection_check(
     )
 
 
-async def _run_connection_sweep() -> None:
+async def _run_connection_sweep(*, user_id: str | None = None) -> None:
     """Background task: test every connection and update last_checked_at columns."""
     logger.info("Connection health sweep starting")
     repos = get_repositories()
-    rows = repos.connections.list_all()
+    rows = repos.connections.list(user_id=user_id) if user_id else repos.connections.list_all()
 
     for row in rows:
         if (row.get("kind") or "composio") != "composio":
@@ -6698,14 +6701,10 @@ async def _run_connection_sweep() -> None:
                 info = _fetch_composio_account_info(composio_conn_id, user_id=row["user_id"])
                 email_or_user = info.get("email") or info.get("user_id") or ""
                 if email_or_user:
-                    # E2 fix: write to both account_label (legacy) and
-                    # display_name (new, unredacted) so the list endpoint
-                    # surfaces the real email without stripping it.
                     repos.connections.update(
                         user_id=row["user_id"],
                         composio_id=conn_id,
                         account_label=email_or_user,
-                        display_name=email_or_user,
                         updated_at=tested_at,
                     )
             except Exception as exc:
@@ -6717,7 +6716,7 @@ async def _run_connection_sweep() -> None:
 
 
 _connection_sweep_gate_lock = threading.Lock()
-_connection_sweep_last_started_at = 0.0
+_connection_sweep_last_started_at_by_user: Dict[str, float] = {}
 
 
 def _connection_sweep_cooldown_seconds() -> float:
@@ -6732,21 +6731,21 @@ async def sweep_connections_endpoint(
     auth: AuthContext = Depends(get_auth_context),
 ):
     """Trigger a health-check sweep for all connections. Called by external cron."""
-    _ = auth
-    global _connection_sweep_last_started_at
     now = time.monotonic()
     cooldown = _connection_sweep_cooldown_seconds()
+    user_key = auth.user_id or "anonymous"
     with _connection_sweep_gate_lock:
-        elapsed = now - _connection_sweep_last_started_at
-        if cooldown > 0 and _connection_sweep_last_started_at and elapsed < cooldown:
+        last_started_at = _connection_sweep_last_started_at_by_user.get(user_key, 0.0)
+        elapsed = now - last_started_at
+        if cooldown > 0 and last_started_at and elapsed < cooldown:
             retry_after = max(1, int(cooldown - elapsed))
             raise HTTPException(
                 status_code=429,
                 detail="Connection sweep already started recently",
                 headers={"Retry-After": str(retry_after)},
             )
-        _connection_sweep_last_started_at = now
-    asyncio.create_task(_run_connection_sweep())
+        _connection_sweep_last_started_at_by_user[user_key] = now
+    asyncio.create_task(_run_connection_sweep(user_id=auth.user_id))
     return {"status": "sweep_started"}
 
 
@@ -6853,6 +6852,36 @@ def _verify_composio_signature(body: bytes, request: Request, signing_key: str) 
     )
 
 
+def _webhook_receipt_ttl_seconds() -> int:
+    try:
+        return max(3600, int(os.environ.get("WORKEROS_WEBHOOK_RECEIPT_TTL_SECONDS", "604800")))
+    except ValueError:
+        return 604800
+
+
+def _claim_webhook_delivery(source: str, delivery_id: str) -> bool:
+    if not delivery_id:
+        return True
+    now_ts = time.time()
+    cutoff = now_ts - _webhook_receipt_ttl_seconds()
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM webhook_delivery_receipts WHERE source = ? AND received_at <= ?",
+            (source, cutoff),
+        )
+        try:
+            conn.execute(
+                """
+                INSERT INTO webhook_delivery_receipts (source, delivery_id, received_at)
+                VALUES (?, ?, ?)
+                """,
+                (source, delivery_id, now_ts),
+            )
+        except sqlite3.IntegrityError:
+            return False
+    return True
+
+
 def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]:
     candidates = [
         request.headers.get("X-Composio-Trigger-Id"),
@@ -6951,6 +6980,14 @@ async def composio_events(request: Request) -> ActionResponse:
     worker_id = _find_worker_for_composio_event(payload, request)
     if not worker_id:
         raise HTTPException(status_code=404, detail="No worker registered for Composio trigger")
+
+    delivery_id = (
+        request.headers.get("webhook-id")
+        or (payload.get("id") if isinstance(payload, dict) else "")
+        or ""
+    )
+    if not _claim_webhook_delivery(f"composio:{worker_id}", str(delivery_id)):
+        return ActionResponse(status="duplicate_ignored")
 
     inputs = {"event": payload}
     run_id = create_run(worker_id, inputs, trigger_source="composio")
@@ -7688,9 +7725,7 @@ async def webhook_trigger(
     if not _check_webhook_rate_limit(rl_key):
         raise HTTPException(status_code=429, detail="Too many webhook requests")
 
-    worker = repos.workers.get_any(worker_id=worker_id)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = repos.workers.get_any(worker_id=worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -7764,9 +7799,7 @@ def rotate_webhook_secret(
     from webhook_service import generate_webhook_secret
 
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
