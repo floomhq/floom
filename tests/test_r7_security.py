@@ -270,33 +270,34 @@ def test_secret_name_invalid_chars_rejected(monkeypatch, tmp_path):
 
 
 def test_ratelimit_uses_cf_connecting_ip(monkeypatch, tmp_path):
+    """The IP rate limiter must bucket on CF-Connecting-IP, not the CF edge IP.
+
+    Run-create is rate-limited by a per-user DB quota (not by IP), so this
+    exercises an IP-keyed path instead: /cli-auth/devices is unauthenticated
+    and capped at 5/60s per client IP. A different CF-Connecting-IP gets a
+    fresh bucket, proving the limiter keys on the real client IP that
+    Cloudflare forwards rather than the shared edge IP.
+    """
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
-    worker_id = "rate-worker"
-    monkeypatch.setattr(main, "_get_db_worker", lambda _worker_id, **_kwargs: {"id": worker_id})
-    monkeypatch.setattr(main, "get_worker_config_for_run", lambda _worker_id: None)
-    monkeypatch.setattr(
-        main,
-        "create_run",
-        lambda _worker_id, _inputs, _trigger_source, **_kwargs: f"run_{uuid.uuid4().hex}",
-    )
-    monkeypatch.setattr(main, "start_run", lambda _run_id, _worker_id, _inputs, **_kwargs: None)
 
     responses = [
         client.post(
-            f"/workers/{worker_id}/runs",
-            headers={**_headers(), "CF-Connecting-IP": "1.2.3.4"},
-            json={"inputs": {}},
+            "/cli-auth/devices",
+            headers={"CF-Connecting-IP": "1.2.3.4"},
+            json={"client_name": "ratelimit-test"},
         )
-        for _ in range(11)
+        for _ in range(6)
     ]
     changed_ip = client.post(
-        f"/workers/{worker_id}/runs",
-        headers={**_headers(), "CF-Connecting-IP": "5.6.7.8"},
-        json={"inputs": {}},
+        "/cli-auth/devices",
+        headers={"CF-Connecting-IP": "5.6.7.8"},
+        json={"client_name": "ratelimit-test"},
     )
 
+    # 6th request from the same client IP exceeds the 5/60s cap.
     assert responses[-1].status_code == 429
+    # A different forwarded client IP gets a fresh bucket (proves CF-IP keying).
     assert changed_ip.status_code == 200
 
 
