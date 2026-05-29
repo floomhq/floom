@@ -308,7 +308,11 @@ def test_draft_and_create_response_model():
     resp = DraftAndCreateResponse(worker_id="my-worker")
     assert resp.worker_id == "my-worker"
     data = resp.model_dump()
-    assert data == {"worker_id": "my-worker"}
+    # FIX 4 (2026-05-29): the response now also carries the smoke verdict
+    # (smoke_status / smoke_reason), defaulting to None for backward compat.
+    assert data["worker_id"] == "my-worker"
+    assert data["smoke_status"] is None
+    assert data["smoke_reason"] is None
 
 
 # ---------------------------------------------------------------------------

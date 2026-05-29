@@ -65,7 +65,6 @@ logger = logging.getLogger("floom.run_service")
 
 API_ENV_PATH = Path("/root/.config/workeros/api.env")
 LOCAL_ENV_PATH = Path(__file__).resolve().parent / ".env"
-MIN_OUTPUT_BYTES = int(os.environ.get("WORKEROS_MIN_OUTPUT_BYTES", "100"))
 _PLACEHOLDER_MARKERS = (
     "i don't have access",
     "i cannot fetch",
@@ -553,7 +552,41 @@ def _smoke_and_repair_generated_worker(
                 log_fn(f"Smoke run raised: {exc}", level="warning")
                 result = None
 
+            substance_error: str | None = None
             if result is not None and result.status not in ("error", "failed"):
+                # The worker reported success — but "success" with an empty or
+                # missing declared output is a silent no-op (green-but-empty),
+                # the worst failure mode for the operator. Validate substance
+                # with the SAME gate a real run uses; an empty/missing required
+                # output is a CODE-class bug worth a repair attempt, not a pass.
+                result_outputs = dict(result.outputs or {})
+                result_artifacts = list(result.artifacts or [])
+                try:
+                    _materialize_declared_file_outputs(
+                        smoke_run_id, config, result_outputs, result_artifacts
+                    )
+                except Exception:
+                    pass
+                substance_error, _smoke_warnings = _validate_run_outputs(
+                    smoke_run_id, config, result_outputs, result_artifacts
+                )
+                if substance_error is None:
+                    # A required output that parses as JSON but is an EMPTY
+                    # container (``[]`` / ``{}`` / ``""`` / null) is the
+                    # green-but-empty no-op: valid JSON, zero substance. The
+                    # normal-run validator accepts it (an empty list can be a
+                    # legitimate "no results" answer), but at SMOKE time the
+                    # sample input is non-trivial, so an empty result means the
+                    # generated logic did nothing — route it into the repair loop.
+                    substance_error = _smoke_empty_output_error(
+                        smoke_run_id, config, result_outputs, result_artifacts
+                    )
+
+            if (
+                result is not None
+                and result.status not in ("error", "failed")
+                and substance_error is None
+            ):
                 msg = (
                     "Smoke passed — generated worker ran successfully"
                     + (f" after {repairs} repair(s)" if repairs else "")
@@ -562,7 +595,15 @@ def _smoke_and_repair_generated_worker(
                 return {"status": "passed", "reason": "", "repairs": repairs}
 
             # Failure: decide whether it's a code bug worth repairing.
-            if result is not None:
+            if substance_error is not None:
+                # Ran green but produced no real output — treat as a code bug so
+                # the generator gets a bounded chance to fix the logic.
+                last_failure = (
+                    f"{substance_error} "
+                    "(worker reported success but produced no real output)"
+                )
+                code_failure = True
+            elif result is not None:
                 last_failure = (
                     f"{result.error or 'run failed'} "
                     f"(error_code={result.error_code or 'unknown'})"
@@ -623,6 +664,60 @@ def _smoke_and_repair_generated_worker(
             log_fn(f"Smoke repair {repairs}/{_MAX_SMOKE_REPAIRS} applied; re-running", level="info")
     finally:
         shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+def smoke_and_gate_generated_worker(
+    worker_id: str,
+    bundle: Dict[str, Any],
+    *,
+    user_id: str | None,
+    repos: Repositories | None,
+    log_fn: Callable[..., None],
+) -> Dict[str, Any]:
+    """Run the smoke+repair safety net AND gate the worker on its result.
+
+    The single safety net for BOTH creation paths (the UI worker-author run and
+    the raw /workers/draft-and-create endpoint). After the bounded smoke+repair:
+
+      - smoke ``passed`` / ``skipped``  -> leave the worker enabled (as today).
+      - smoke ``failed`` (repairs exhausted) -> DISABLE the worker so the
+        dashboard does not count it as healthy and a run on it is gated
+        (``worker_disabled``). The worker STAYS editable — never deleted — so
+        the operator can review/fix it. The create flow surfaces the smoke
+        verdict from the returned dict.
+
+    Returns the same dict ``_smoke_and_repair_generated_worker`` produces
+    (``{"status","reason","repairs"}``). Never raises.
+    """
+    repos_obj = _repos(repos)
+    smoke = _smoke_and_repair_generated_worker(
+        worker_id,
+        bundle,
+        user_id=user_id,
+        repos=repos_obj,
+        log_fn=log_fn,
+    )
+    if smoke.get("status") == "failed":
+        try:
+            repos_obj.workers.update(
+                user_id=user_id,
+                worker_id=worker_id,
+                enabled=False,
+            )
+            try:
+                from worker_registry import invalidate_worker_cache as _invalidate
+
+                _invalidate()
+            except Exception:
+                pass
+            log_fn(
+                "Generated worker disabled — its first test run failed: "
+                f"{smoke.get('reason') or 'unknown'}. Review and edit it before turning it on.",
+                level="warning",
+            )
+        except Exception:
+            logger.exception("Failed to disable smoke-failed worker %s", worker_id)
+    return smoke
 
 
 # ---------------------------------------------------------------------------
@@ -1124,22 +1219,23 @@ def _validate_run_outputs(
                     return f"output_validation_failed: {name} JSON file is invalid: {exc}", warnings
                 continue
             if not media_type:
-                # Unknown type: if it parses as JSON, accept as structured data;
-                # otherwise fall back to the prose byte floor below.
+                # Unknown type: if it parses as JSON, accept as structured data.
                 try:
                     json.loads(path.read_text())
                     continue
                 except Exception:
                     pass
-            if size < MIN_OUTPUT_BYTES:
-                return (
-                    f"output_validation_failed: {name} file is too small "
-                    f"({size} bytes, minimum {MIN_OUTPUT_BYTES})"
-                ), warnings
-            if media_type.startswith("text/"):
-                warning = _placeholder_warning(path.read_text(errors="ignore")[:1000], name)
-                if warning:
-                    warnings.append(warning)
+            # Non-JSON file (text/csv/etc): a valid, non-empty result of ANY size
+            # is legitimate. There is no byte floor — a 36-byte sorted CSV or a
+            # short uppercased name list is a correct output. Only truly empty /
+            # whitespace-only content fails; near-empty apology/placeholder prose
+            # is surfaced as a WARNING, never a hard failure.
+            text = path.read_text(errors="ignore")
+            if not text.strip():
+                return f"output_validation_failed: {name} file is empty", warnings
+            warning = _placeholder_warning(text[:1000], name)
+            if warning:
+                warnings.append(warning)
             continue
 
         if output.required and (value is None or value == ""):
@@ -1151,6 +1247,43 @@ def _validate_run_outputs(
             warnings.append(warning)
 
     return None, warnings
+
+
+def _smoke_empty_output_error(
+    run_id: str,
+    config: WorkerConfig,
+    outputs: Dict[str, Any],
+    artifacts: list[Dict[str, Any]],
+) -> str | None:
+    """Smoke-only: a REQUIRED output that parses as an empty JSON container
+    (``[]`` / ``{}`` / ``""`` / null) is a green-but-empty no-op at smoke time.
+
+    Returns an error string for the FIRST such output, else None. Only required
+    file/scalar outputs are checked; the normal run validator stays unchanged.
+    """
+    for output in config.outputs:
+        if not output.required:
+            continue
+        kind = output.kind or ("file" if output.type == "file" else "scalar")
+        parsed: Any = None
+        if kind == "file":
+            path = _candidate_output_path(run_id, output, outputs, artifacts)
+            if path is None or not path.is_file():
+                continue
+            text = path.read_text(errors="ignore")
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                # Non-JSON text already passed the non-empty check upstream.
+                continue
+        else:
+            parsed = outputs.get(output.name)
+        if parsed is None or parsed == [] or parsed == {} or parsed == "":
+            return (
+                f"output_validation_failed: {output.name} produced an empty result "
+                "(the worker ran but did nothing)"
+            )
+    return None
 
 
 def _load_runtime_env_files() -> None:
@@ -1830,7 +1963,7 @@ def execute_run(
                     # slot — no extra concurrency. Never fails the author run.
                     try:
                         smoke_bundle = _read_authored_bundle(run_id, artifacts)
-                        smoke = _smoke_and_repair_generated_worker(
+                        smoke = smoke_and_gate_generated_worker(
                             created_worker_id,
                             smoke_bundle or {},
                             user_id=owner_id,
@@ -1856,12 +1989,20 @@ def execute_run(
         # Broadcast the new worker id on the live stream so the create flow can
         # navigate straight to the editor without a follow-up fetch.
         if worker_id == _WORKER_AUTHOR_WORKER_ID and isinstance(outputs, dict) and outputs.get("created_worker_id"):
-            _publish_sse(run_id, {
+            _smoke_event = outputs.get("smoke") if isinstance(outputs.get("smoke"), dict) else None
+            _sse_event = {
                 "type": "status",
                 "run_id": run_id,
                 "status": RunStatus.COMPLETED.value,
                 "created_worker_id": outputs["created_worker_id"],
-            })
+            }
+            if _smoke_event:
+                # Surface the smoke verdict so the create flow can tell the
+                # operator "generated, but its first test run failed: <reason>"
+                # instead of presenting a gated worker as ready.
+                _sse_event["smoke_status"] = _smoke_event.get("status")
+                _sse_event["smoke_reason"] = _smoke_event.get("reason")
+            _publish_sse(run_id, _sse_event)
         if quality_warnings and owner_id:
             repos_obj.runs.update(
                 user_id=owner_id,

@@ -33,7 +33,10 @@ def _artifact(tmp_path, run_id, relative_path, content, media_type="text/plain")
     }
 
 
-def test_file_output_too_small_fails(tmp_path, monkeypatch):
+def test_small_nonempty_file_output_passes(tmp_path, monkeypatch):
+    # FIX 1 (2026-05-29): a valid, non-empty result of ANY size is legitimate.
+    # There is no byte floor — a 5-byte correct output must PASS, not fail
+    # "too small". Only truly empty / whitespace-only content fails.
     run_id = "run_small"
     monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
     config = _config([
@@ -50,8 +53,52 @@ def test_file_output_too_small_fails(tmp_path, monkeypatch):
 
     error, warnings = run_service._validate_run_outputs(run_id, config, {"update": "short"}, [artifact])
 
+    assert error is None
     assert warnings == []
-    assert "file is too small" in error
+
+
+def test_small_csv_output_passes(tmp_path, monkeypatch):
+    # The exact wedge regression: a correct 36-byte CSV (uppercased names) must
+    # be ACCEPTED, never false-failed by a byte floor.
+    run_id = "run_csv_small"
+    monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    config = _config([
+        WorkerOutput(
+            name="output_csv",
+            label="Output CSV",
+            type="file",
+            kind="file",
+            media_type="text/csv",
+            path="out/output.csv",
+        )
+    ])
+    artifact = _artifact(tmp_path, run_id, "out/output.csv", "name\nALICE\nBOB\n", "text/csv")
+
+    error, warnings = run_service._validate_run_outputs(run_id, config, {"output_csv": "out/output.csv"}, [artifact])
+
+    assert error is None
+    assert warnings == []
+
+
+def test_empty_file_output_fails(tmp_path, monkeypatch):
+    # Only truly empty / whitespace-only content fails now.
+    run_id = "run_empty"
+    monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    config = _config([
+        WorkerOutput(
+            name="update",
+            label="Update",
+            type="file",
+            kind="file",
+            media_type="text/markdown",
+            path="out/update.md",
+        )
+    ])
+    artifact = _artifact(tmp_path, run_id, "out/update.md", "   \n  \t\n", "text/markdown")
+
+    error, warnings = run_service._validate_run_outputs(run_id, config, {"update": "   \n  \t\n"}, [artifact])
+
+    assert "file is empty" in error
 
 
 def test_file_output_content_is_materialized_before_validation(tmp_path, monkeypatch):
@@ -118,8 +165,10 @@ def test_optional_file_output_is_validated_when_emitted(tmp_path, monkeypatch):
 
     error, warnings = run_service._validate_run_outputs(run_id, config, {"preview_html": "out/preview.html"}, [artifact])
 
+    # FIX 1: an emitted optional output is still validated, but a small non-empty
+    # value is a legitimate result — no byte floor.
+    assert error is None
     assert warnings == []
-    assert "file is too small" in error
 
 
 def test_json_file_output_must_parse(tmp_path, monkeypatch):
