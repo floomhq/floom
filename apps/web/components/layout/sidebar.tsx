@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Box, Clock, Folder, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
+import { Activity, Box, CheckCircle, Clock, Folder, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
+import { api } from "@/lib/api";
 
 function FloomMark({ size = 28 }: { size?: number }) {
   return (
@@ -37,11 +38,32 @@ const nav = [
   { href: "/workers", label: "Workers", icon: Box },
   { href: "/contexts", label: "Contexts", icon: Folder },
   { href: "/runs", label: "Runs", icon: Clock },
+  { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
   { href: "/connections", label: "Connections", icon: Plug },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCount() {
+      try {
+        const res = await api.approvals.count();
+        if (!cancelled) setPendingCount(res.pending);
+      } catch {
+        // silently ignore
+      }
+    }
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   return (
     <nav className="flex-1 px-3 space-y-0.5">
       {nav.map((item) => {
@@ -49,6 +71,7 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
           item.href === "/overview"
             ? pathname === "/" || pathname === "/overview"
             : pathname === item.href || pathname.startsWith(item.href + "/");
+        const showBadge = item.badge && pendingCount > 0;
         return (
           <Link
             key={item.href}
@@ -63,6 +86,11 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
           >
             <item.icon className="w-4 h-4" />
             {item.label}
+            {showBadge && (
+              <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
+                {pendingCount}
+              </span>
+            )}
           </Link>
         );
       })}
