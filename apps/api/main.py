@@ -691,6 +691,59 @@ _TERMINAL_STATUSES = frozenset({
 })
 
 
+# ---------------------------------------------------------------------------
+# Per-user concurrent SSE stream cap (Round 16 DoS finding)
+# ---------------------------------------------------------------------------
+# Unlimited concurrent SSE streams (/runs/<id>/stream + /runs/<id>/events) are
+# a DoS vector: each open stream holds a connection + queue + worker slot. Cap
+# the number of simultaneous streams per user with a simple in-process counter
+# keyed by user_id. The slot is always released on disconnect via the
+# contextmanager's finally block, so a dropped client frees its slot.
+_sse_user_stream_counts: Dict[str, int] = {}
+_sse_stream_count_lock = threading.Lock()
+
+
+def _max_concurrent_streams() -> int:
+    try:
+        return max(1, int(os.environ.get("WORKEROS_MAX_CONCURRENT_STREAMS", "10")))
+    except (TypeError, ValueError):
+        return 10
+
+
+def _sse_stream_acquire(user_id: str) -> str:
+    """Reserve a per-user SSE stream slot or raise 429 if the cap is exceeded.
+
+    Returns the registry key to pass to _sse_stream_release. Acquisition happens
+    synchronously in the endpoint body so the 429 is returned before any
+    StreamingResponse is constructed.
+    """
+    cap = _max_concurrent_streams()
+    key = user_id or "anonymous"
+    with _sse_stream_count_lock:
+        current = _sse_user_stream_counts.get(key, 0)
+        if current >= cap:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many concurrent streams. Close existing streams and retry.",
+            )
+        _sse_user_stream_counts[key] = current + 1
+    return key
+
+
+def _sse_stream_release(key: str) -> None:
+    """Free a previously reserved per-user SSE stream slot.
+
+    Called from the generator's finally block so a dropped/disconnected client
+    always frees its slot.
+    """
+    with _sse_stream_count_lock:
+        remaining = _sse_user_stream_counts.get(key, 0) - 1
+        if remaining <= 0:
+            _sse_user_stream_counts.pop(key, None)
+        else:
+            _sse_user_stream_counts[key] = remaining
+
+
 def _sse_publish(run_id: str, event: Dict[str, Any]) -> None:
     """Publish an SSE event to all active consumers for a run.
 
@@ -5765,51 +5818,58 @@ async def stream_run_parts(
 
     last_seen = _parse_last_event_id(request.headers.get("last-event-id"))
 
+    # Per-user concurrent-stream cap (Round 16 DoS finding). Acquire
+    # synchronously so the 429 is returned before the StreamingResponse.
+    stream_slot = _sse_stream_acquire(auth.user_id)
+
     async def event_generator():
-        snapshot = _run_part_snapshot(run_id)
-        if snapshot is None:
-            final_part = _finish_part_from_run_row(row)
-            if final_part is not None:
-                # #188: the in-memory part buffer is gone (terminal run past its
-                # TTL, or a fresh server process). Replay persisted log rows so
-                # the client reconstructs the transcript instead of receiving a
-                # bare finish event.
-                event_id = 0
-                for log_part in _log_replay_parts(repos, auth.user_id, run_id):
-                    if event_id > last_seen:
-                        yield _format_run_part_sse(event_id, log_part)
-                    event_id += 1
-                if event_id > last_seen:
-                    yield _format_run_part_sse(event_id, final_part)
-                return
-            snapshot = {"parts": [], "finished": False}
-
-        for event_id, part in snapshot["parts"]:
-            if event_id > last_seen:
-                yield _format_run_part_sse(event_id, part)
-
-        if snapshot["finished"]:
-            return
-
-        q: asyncio.Queue = asyncio.Queue(maxsize=512)
-        loop = asyncio.get_running_loop()
-        _run_part_register(run_id, q, loop)
         try:
-            while True:
-                if await request.is_disconnected():
-                    break
+            snapshot = _run_part_snapshot(run_id)
+            if snapshot is None:
+                final_part = _finish_part_from_run_row(row)
+                if final_part is not None:
+                    # #188: the in-memory part buffer is gone (terminal run past its
+                    # TTL, or a fresh server process). Replay persisted log rows so
+                    # the client reconstructs the transcript instead of receiving a
+                    # bare finish event.
+                    event_id = 0
+                    for log_part in _log_replay_parts(repos, auth.user_id, run_id):
+                        if event_id > last_seen:
+                            yield _format_run_part_sse(event_id, log_part)
+                        event_id += 1
+                    if event_id > last_seen:
+                        yield _format_run_part_sse(event_id, final_part)
+                    return
+                snapshot = {"parts": [], "finished": False}
 
-                try:
-                    event_id, part = await asyncio.wait_for(q.get(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-                    continue
+            for event_id, part in snapshot["parts"]:
+                if event_id > last_seen:
+                    yield _format_run_part_sse(event_id, part)
 
-                yield _format_run_part_sse(event_id, part)
-                if _run_part_is_finish(part):
-                    break
+            if snapshot["finished"]:
+                return
+
+            q: asyncio.Queue = asyncio.Queue(maxsize=512)
+            loop = asyncio.get_running_loop()
+            _run_part_register(run_id, q, loop)
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+
+                    try:
+                        event_id, part = await asyncio.wait_for(q.get(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    yield _format_run_part_sse(event_id, part)
+                    if _run_part_is_finish(part):
+                        break
+            finally:
+                _run_part_cleanup(run_id, q)
         finally:
-            _run_part_cleanup(run_id, q)
+            _sse_stream_release(stream_slot)
 
     return StreamingResponse(
         event_generator(),
@@ -5849,51 +5909,58 @@ async def stream_run_events(
     initial_status = run_row["status"]
     already_terminal = initial_status in _TERMINAL_STATUSES
 
+    # Per-user concurrent-stream cap (Round 16 DoS finding). Acquire
+    # synchronously so the 429 is returned before the StreamingResponse.
+    stream_slot = _sse_stream_acquire(auth.user_id)
+
     async def event_generator():
-        q: asyncio.Queue = asyncio.Queue(maxsize=512)
-
-        # If run already terminal, emit current state and close immediately
-        if already_terminal:
-            final_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
-            if final_row:
-                evt = _public_sse_event({
-                    "type": "status",
-                    "run_id": run_id,
-                    "status": final_row["status"],
-                    "error": final_row["error"],
-                    "completed_at": final_row["completed_at"],
-                })
-                yield f"data: {json.dumps(evt)}\n\n"
-            yield "data: {\"type\": \"close\"}\n\n"
-            return
-
-        # Register the consumer queue with its bound event loop
-        loop = asyncio.get_running_loop()
-        with _sse_lock:
-            _sse_queues.setdefault(run_id, []).append((q, loop))
-
         try:
-            while True:
-                # Check for client disconnect
-                if await request.is_disconnected():
-                    break
+            q: asyncio.Queue = asyncio.Queue(maxsize=512)
 
-                try:
-                    event = await asyncio.wait_for(q.get(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    # Send keepalive comment
-                    yield ": keepalive\n\n"
-                    continue
+            # If run already terminal, emit current state and close immediately
+            if already_terminal:
+                final_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+                if final_row:
+                    evt = _public_sse_event({
+                        "type": "status",
+                        "run_id": run_id,
+                        "status": final_row["status"],
+                        "error": final_row["error"],
+                        "completed_at": final_row["completed_at"],
+                    })
+                    yield f"data: {json.dumps(evt)}\n\n"
+                yield "data: {\"type\": \"close\"}\n\n"
+                return
 
-                yield f"data: {json.dumps(event)}\n\n"
+            # Register the consumer queue with its bound event loop
+            loop = asyncio.get_running_loop()
+            with _sse_lock:
+                _sse_queues.setdefault(run_id, []).append((q, loop))
 
-                # Close stream if run reached terminal state
-                evt_type = event.get("type")
-                evt_status = event.get("status", "")
-                if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
-                    break
+            try:
+                while True:
+                    # Check for client disconnect
+                    if await request.is_disconnected():
+                        break
+
+                    try:
+                        event = await asyncio.wait_for(q.get(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        # Send keepalive comment
+                        yield ": keepalive\n\n"
+                        continue
+
+                    yield f"data: {json.dumps(event)}\n\n"
+
+                    # Close stream if run reached terminal state
+                    evt_type = event.get("type")
+                    evt_status = event.get("status", "")
+                    if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
+                        break
+            finally:
+                _sse_cleanup(run_id, q)
         finally:
-            _sse_cleanup(run_id, q)
+            _sse_stream_release(stream_slot)
 
     return StreamingResponse(
         event_generator(),
