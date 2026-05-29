@@ -189,3 +189,30 @@ and confirmed via live screenshot.
 - API deployed SHA: 861d38b (via ops/deploy-api.sh) + connection sweep.
 - Live screenshot: `/.screenshots/connections-after-fidelity-20260529.png`
 - PR: https://github.com/floomhq/workeros/pull/233 (merged)
+
+## Phase 4 — UI regression sweep + polish (lane/ui-regression-sweep, 2026-05-29) — DONE
+
+Federico surfaced 5 regressions + Phase 4 polish was due. Fixed all, then ran a
+full visual walk (broker @1280 + raw-CDP @375) with a screenshot per fix as the
+gate. See ISSUES.md "2026-05-29 UI regression sweep" for the per-item matrix.
+
+Regressions (all VERIFIED with live screenshots in `/tmp/wk-shots/`):
+- R1 card hover size jump → fixed (CDP-measured 0px change before/after hover).
+- R2 internal nav opened new tabs → fixed (removed target=_blank, app-wide grep clean).
+- R3 Source tab empty → fixed. Root cause was BACKEND, not frontend: the source
+  visibility gate hid source for every git-tracked (= every example) worker. Opened
+  the gate for PUBLIC_STOCK_WORKER_IDS + added frontend deriveSourceFiles. Verified
+  e2e: /workers/opendraft#code renders worker.yml + run.py (11KB) + 88 files.
+- R4 run-detail infinite scroll → fixed (bounded split pane, internal scroll;
+  full-page height 713px desktop / 1205px mobile with 200 logs).
+- R5 folder-filter layout jump → fixed (breadcrumb + chips share one row).
+
+Polish: B3 radius (token box + Cmd-K), B9 mobile @375 pass, error humanisation,
+employee-framing hero copy. pending_approval distinct rendering already correct
+(no change). B8: no archive ACTION affordance exists, surfaced rather than
+inventing one.
+
+Scope note surfaced: R3 required a one-line backend change despite the "don't
+touch backend" constraint — R3 is unfixable from the frontend alone because the
+API returns all source fields empty for example workers. Change is scoped to the
+visibility gate; does not touch ConnectionsClient or other lanes.
