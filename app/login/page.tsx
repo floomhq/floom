@@ -31,7 +31,7 @@ export default async function LoginPage({
           <div className="rounded-2xl border border-[var(--line)] bg-[var(--paper)] shadow-[0_1px_0_rgba(15,15,15,0.04),0_24px_60px_-24px_rgba(15,15,15,0.18)] p-8">
             <div className="text-center space-y-1.5 mb-7">
               <h1 className="text-[22px] font-semibold tracking-tight leading-tight">Sign in to Workeros</h1>
-              <p className="text-[13px] text-[var(--ink-soft)] leading-relaxed">The cockpit for background work</p>
+              <p className="text-[13px] text-[var(--ink-soft)] leading-relaxed">AI workers that actually run</p>
             </div>
 
             <div className="space-y-2.5">

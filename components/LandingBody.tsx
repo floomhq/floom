@@ -496,8 +496,8 @@ export function LandingBody() {
             </div>
 
             <h1 className="ln-h1">
-              The <em>cockpit</em><br />
-              for background work
+              Hire <em>AI workers</em><br />
+              that actually run
             </h1>
 
             <p className="ln-sub">
@@ -1173,9 +1173,9 @@ export function LandingBody() {
         </section>
 
         <section className="ln-cta-section lp1">
-          <h2>Spin up a worker in two minutes.</h2>
+          <h2>Hire your first AI worker in two minutes.</h2>
           <p className="ln-cta-sub">
-            The cockpit for every background task you direct. Triggered by cron, webhook, or your agent.
+            Give it a job, pick a trigger, connect its tools. It runs on cron, webhook, or on demand.
           </p>
           <div className="ln-ctas" style={{ marginTop: 34 }}>
             <a href={SIGN_IN_HREF} className="ln-btn-primary">Start a workspace</a>

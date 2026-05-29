@@ -3,9 +3,9 @@ import "./globals.css";
 import { Ambient } from "@/components/Ambient";
 
 export const metadata: Metadata = {
-  title: "Workeros — The cockpit for background work",
+  title: "Workeros — Hire AI workers that actually run",
   description:
-    "Workers, triggers, and connections in one place. Driven by Claude, Codex, Cursor, or any agent that speaks MCP. One operating layer.",
+    "Hire AI workers for your company. Give them a job, a trigger, and their tools — they run on cron, webhook, or on demand. Drive everything from Claude, Codex, Cursor, or any agent that speaks MCP.",
 };
 
 export default function RootLayout({
