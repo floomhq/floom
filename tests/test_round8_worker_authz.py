@@ -496,6 +496,27 @@ def test_internal_shipped_workers_are_hidden_from_public_api(monkeypatch, tmp_pa
     assert "slack-listener" not in worker_ids
 
 
+def test_owner_audit_prefixed_custom_worker_remains_visible(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("audit-visible-probe", title="Audit Visible Probe"),
+    )
+    listed = client.get("/workers", headers=_headers("user-a"))
+    detail = client.get("/workers/audit-visible-probe", headers=_headers("user-a"))
+    foreign_detail = client.get("/workers/audit-visible-probe", headers=_headers("user-b"))
+
+    assert created.status_code == 200, created.text
+    assert listed.status_code == 200, listed.text
+    assert detail.status_code == 200, detail.text
+    assert foreign_detail.status_code == 404, foreign_detail.text
+    worker_ids = {item["id"] for item in listed.json()}
+    assert "audit-visible-probe" in worker_ids
+
+
 def test_hidden_internal_worker_runs_stay_inaccessible(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief", "slack-listener"))
     client = TestClient(main.app)
