@@ -278,12 +278,24 @@ class TestWebhookEndpointTokenAuth:
     """Integration tests for the webhook token query parameter auth."""
 
     def _make_client(self):
-        """Try to import and build the test client; skip if not possible."""
+        """Try to import and build the test client; skip if not possible.
+
+        Point FLOOM_DB at a fresh temp file (NOT :memory:, which is per-connection
+        in sqlite and therefore has no schema for the next get_db() connection,
+        and NOT setdefault, which would inherit a foreign/deleted DB from an
+        earlier test in the full suite -> "no such table: workers"). Initialise
+        the schema so the webhook endpoint's worker lookup works.
+        """
         try:
-            import importlib
-            # Set required env vars for app import
-            os.environ.setdefault("FLOOM_DB", ":memory:")
-            os.environ.setdefault("FLOOM_SECRET", "test-secret-for-webhook-tests")
+            import tempfile
+            import db as _db
+            db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+            db_file.close()
+            os.environ.pop("WORKEROS_DB", None)
+            os.environ["FLOOM_DB"] = db_file.name
+            os.environ["FLOOM_SECRET"] = "test-secret-for-webhook-tests"
+            _db.DB_PATH = db_file.name
+            _db.init_db()
             from main import app
             return TestClient(app, raise_server_exceptions=False)
         except Exception as exc:

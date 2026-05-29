@@ -22,7 +22,14 @@ class WorkerContractMigrationTest(unittest.TestCase):
             db_path = Path(tmp) / "legacy.db"
             self._create_legacy_db(db_path)
 
+            # get_db() resolves the path live from WORKEROS_DB/FLOOM_DB on every
+            # call (db.DB_PATH alone is overwritten each call), so point the env
+            # at the legacy DB for the duration of this test.
+            import os
             original_db_path = db.DB_PATH
+            original_env = {k: os.environ.get(k) for k in ("WORKEROS_DB", "FLOOM_DB")}
+            os.environ.pop("WORKEROS_DB", None)
+            os.environ["FLOOM_DB"] = str(db_path)
             db.DB_PATH = str(db_path)
             try:
                 db.init_db()
@@ -30,17 +37,35 @@ class WorkerContractMigrationTest(unittest.TestCase):
                     version = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
                     worker = conn.execute("SELECT * FROM workers WHERE id = 'legacy_worker'").fetchone()
                     run_count = conn.execute("SELECT COUNT(*) FROM runs WHERE worker_id = 'legacy_worker'").fetchone()[0]
+                    # The approvals table is dropped + recreated by the scope-cut
+                    # migration (migration 15, added in #107), so it exists after
+                    # init but legacy approval rows intentionally do NOT survive.
+                    approvals_table_exists = conn.execute(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='approvals'"
+                    ).fetchone()[0]
                     approval_count = conn.execute("SELECT COUNT(*) FROM approvals WHERE worker_id = 'legacy_worker'").fetchone()[0]
                     artifact_count = conn.execute("SELECT COUNT(*) FROM artifacts WHERE run_id = 'run_1'").fetchone()[0]
                     skill_version_count = conn.execute("SELECT COUNT(*) FROM skill_versions").fetchone()[0]
                     foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
             finally:
                 db.DB_PATH = original_db_path
+                for key, value in original_env.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
 
-            self.assertEqual(version, 11)
+            # Latest schema version is the migration count, not a hardcoded
+            # number that goes stale each time a migration is appended (was 11).
+            from db import _legacy_sqlite as _legacy
+            self.assertEqual(version, len(_legacy.MIGRATIONS))
             self.assertIsNotNone(worker)
             self.assertEqual(run_count, 1)
-            self.assertEqual(approval_count, 1)
+            # Worker / run / artifact / skill_version rows survive the full
+            # migration chain. The approvals table is present (recreated by the
+            # later migration) but legacy approval rows are dropped by design.
+            self.assertEqual(approvals_table_exists, 1)
+            self.assertEqual(approval_count, 0)
             self.assertEqual(artifact_count, 1)
             self.assertEqual(skill_version_count, 1)
             self.assertEqual(foreign_key_errors, [])
@@ -107,6 +132,65 @@ class WorkerContractMigrationTest(unittest.TestCase):
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
             );
+            -- A faithful version-10 DB also has the tables from migration 1 that
+            -- this fixture had omitted (logs, secrets, schedules) plus the tables
+            -- created by migrations 5/7/9 (worker_state, composio_connections,
+            -- worker_webhook_secrets). The fixture stamps version 10, so those
+            -- migrations are skipped on init_db(); later migrations (e.g. 18,
+            -- which ALTERs composio_connections AND secrets) require them to
+            -- exist. Without these, init_db() failed with "no such table: ...".
+            CREATE TABLE logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                level TEXT DEFAULT 'info' NOT NULL,
+                message TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                trace_id TEXT,
+                FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+            );
+            CREATE TABLE secrets (
+                name TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                last_used_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT
+            );
+            CREATE TABLE schedules (
+                id TEXT PRIMARY KEY,
+                worker_id TEXT NOT NULL,
+                cron TEXT NOT NULL,
+                enabled INTEGER DEFAULT 1 NOT NULL,
+                next_run_at TEXT,
+                last_run_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+            );
+            CREATE TABLE worker_state (
+                worker_id TEXT PRIMARY KEY,
+                paused INTEGER DEFAULT 0 NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE composio_connections (
+                id TEXT PRIMARY KEY,
+                app_name TEXT NOT NULL,
+                composio_connection_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'initiated',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX idx_composio_connections_app_name
+                ON composio_connections(app_name);
+            CREATE INDEX idx_composio_connections_status
+                ON composio_connections(status);
+            CREATE TABLE worker_webhook_secrets (
+                worker_id TEXT PRIMARY KEY,
+                secret_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                rotated_at TEXT,
+                FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+            );
+            CREATE INDEX idx_workers_next_run_at ON workers(next_run_at);
             """
         )
         config = {
