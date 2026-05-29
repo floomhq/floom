@@ -173,12 +173,12 @@ function ApprovalCard({
         <div className="mt-4">
           {editing ? (
             <textarea
-              className="w-full min-h-[120px] rounded-[var(--radius-input)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] resize-y"
+              className="w-full min-h-[120px] rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] resize-y"
               value={editedText}
               onChange={(e) => setEditedText(e.target.value)}
             />
           ) : (
-            <div className="rounded-[var(--radius-input)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink)] whitespace-pre-wrap">
+            <div className="rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink)] whitespace-pre-wrap">
               {approval.preview}
             </div>
           )}
@@ -193,7 +193,7 @@ function ApprovalCard({
             placeholder="Reason (optional)"
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
-            className="w-full rounded-[var(--radius-input)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-1.5 text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:outline-none focus:ring-1 focus:ring-destructive"
+            className="w-full rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-1.5 text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:outline-none focus:ring-1 focus:ring-destructive"
           />
         </div>
       )}
