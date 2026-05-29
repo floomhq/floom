@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { RunStatusBadge, RunStatusGlyph } from "@/components/RunStatus";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { formatRelative, formatTimeOfDay } from "@/lib/formatters";
+import { humanizeRunError } from "@/lib/run-format";
 import {
   Select,
   SelectContent,
@@ -406,24 +407,11 @@ function formatStartedTime(run: RunSummary): string {
 
 function summarizeError(error: string): string {
   const cleaned = error.replace(/\s+/g, " ").trim();
-  // Strip raw Python dict / JSON wrapper: Error code: 400 - {'error': {'message': "..."}}
+  // Raw dict / JSON with no "Error code:" prefix that the shared helper
+  // doesn't recognise — pull the message out so the user never sees a raw
+  // Python dict (audit P1).
   const dictMatch = cleaned.match(/Error code:\s*\d+\s*-\s*[{'"]/i);
-  if (dictMatch) {
-    // Try to extract a human-readable message from inside the dict/JSON
-    const msgMatch = cleaned.match(/"message"\s*:\s*"([^"]{1,200})"/i)
-      || cleaned.match(/'message'\s*:\s*'([^']{1,200})'/i)
-      || cleaned.match(/"message"\s*:\s*'([^']{1,200})'/i);
-    if (msgMatch) {
-      const msg = msgMatch[1].trim();
-      return msg.length > 120 ? `${msg.slice(0, 117)}...` : msg;
-    }
-    // Fallback: strip the dict wrapper and show "Error (code N)"
-    const codeMatch = cleaned.match(/Error code:\s*(\d+)/i);
-    if (codeMatch) return `Request error (code ${codeMatch[1]})`;
-  }
-  // Raw dict / JSON with no "Error code:" prefix — pull the message out so
-  // the user never sees a raw Python dict (audit P1).
-  if (/^[{[]/.test(cleaned) || /['"]message['"]\s*:/.test(cleaned)) {
+  if (!dictMatch && (/^[{[]/.test(cleaned) || /['"]message['"]\s*:/.test(cleaned))) {
     const msgMatch = cleaned.match(/['"]message['"]\s*:\s*['"]([^'"]{1,200})['"]/i);
     if (msgMatch) {
       const msg = msgMatch[1].trim();
@@ -431,8 +419,9 @@ function summarizeError(error: string): string {
     }
     if (/^[{[]/.test(cleaned)) return "Run failed (see run detail for the full error).";
   }
-  if (cleaned.length <= 120) return cleaned;
-  return `${cleaned.slice(0, 117)}...`;
+  // P1-4: machine error codes ("missing_connection: github",
+  // "output_validation_failed: ...") + OpenAI dict wrappers -> human text.
+  return humanizeRunError(cleaned);
 }
 
 function titleCase(value: string): string {
