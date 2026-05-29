@@ -1,8 +1,35 @@
-# Workeros MCP
+# Workeros CLI + MCP
 
 Workeros lets agents create, update, run, watch, and delete production worker automations through a local stdio MCP server backed by the Workeros API. The package installs into Claude Code, Cursor, VS Code, Windsurf, Continue, or any harness that accepts an MCP stdio server entry.
 
-## Install
+Workeros ships as a single npm package that exposes:
+
+- **`floom` / `workeros` CLI** – `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue.
+- **`workeros-mcp` stdio server** – the production MCP surface (workers / runs / secrets / connections / triggers) used by agents.
+
+The CLI targets both deployments:
+
+| Mode | API base | Auth | Workspaces |
+|------|----------|------|------------|
+| **OSS** (default) | `https://workers-api.floom.dev` | per-CLI `x-floom-secret` minted by `floom login` | n/a |
+| **Cloud** | `https://workeros-api.floom.dev` (workeros.floom.dev dashboard) | Supabase refresh token → JWT bearer, `X-Workeros-Workspace` header | multi-workspace |
+
+## Cloud quickstart (workeros.floom.dev)
+
+```bash
+npm i -g @floomhq/workeros@latest
+floom login --cloud           # opens workeros.floom.dev/app/cli-auth
+floom workspaces list
+floom workspaces use <name>   # persists to ~/.config/workeros/credentials.json
+floom workers list
+floom run <worker-id> --input key=value
+```
+
+`floom login` auto-detects cloud when the verification URL the API returns is `workeros.floom.dev` or contains `/app/`, so `--cloud` is only needed if you also set `WORKEROS_API_BASE` to a non-default host. `WORKEROS_CLOUD=1` is equivalent to `--cloud`.
+
+Credentials live at `~/.config/workeros/credentials.json` (mode 0600). `floom logout` clears them.
+
+## OSS quickstart (workers.floom.dev)
 
 ```bash
 npx @floomhq/workeros install
