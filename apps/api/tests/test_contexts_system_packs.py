@@ -141,3 +141,64 @@ def test_operator_create_and_upload_roundtrip(client_and_main):
     assert up.status_code == 200, up.text
     detail = client.get("/contexts/my-company").json()
     assert any(f["path"] == "icp.md" for f in detail["files"])
+
+
+_CTX_WORKER_YML = """schema_version: "0.3"
+name: "ctx-consumer"
+title: "Context Consumer"
+description: "mounts my-company"
+version: "0.1.0"
+targets: [generic]
+exec:
+  entry: "run.py"
+  runtime: "python311"
+  runner: "e2b"
+  command: "python run.py"
+  inputs: []
+  outputs: []
+trigger:
+  type: manual
+connections: []
+contexts:
+  - name: "my-company"
+    writeable: false
+"""
+
+_CTX_WORKER_RUN_PY = (
+    "def run(inputs, context):\n"
+    "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
+)
+
+
+def test_list_worker_count_matches_detail(client_and_main):
+    """FIX 2: /contexts LIST worker_count must equal /contexts/{name} used_by.
+
+    Previously the LIST path hardcoded worker_count=0 while the DETAIL path
+    computed it from referencing workers, so the UI showed "0 workers" for
+    packs that were actually in use.
+    """
+    client, _main = client_and_main
+    # Operator pack with zero referencing workers => count 0 in both views.
+    assert client.post("/contexts/my-company").status_code == 200
+    list_before = {c["name"]: c for c in client.get("/contexts").json()}
+    assert list_before["my-company"]["worker_count"] == 0
+    detail_before = client.get("/contexts/my-company").json()
+    assert len(detail_before["used_by"]) == 0
+    assert detail_before["worker_count"] == 0
+
+    # Create a worker that mounts the pack.
+    created = client.post(
+        "/workers",
+        json={"worker_yml": _CTX_WORKER_YML, "run_py": _CTX_WORKER_RUN_PY},
+    )
+    assert created.status_code == 200, created.text
+
+    # LIST count now == DETAIL used_by length == 1.
+    list_after = {c["name"]: c for c in client.get("/contexts").json()}
+    detail_after = client.get("/contexts/my-company").json()
+    assert detail_after["worker_count"] == len(detail_after["used_by"])
+    assert detail_after["worker_count"] == 1
+    assert list_after["my-company"]["worker_count"] == 1
+    assert (
+        list_after["my-company"]["worker_count"] == detail_after["worker_count"]
+    )
