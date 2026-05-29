@@ -342,6 +342,16 @@ export interface WorkspaceAgentInfo {
   tools: WorkspaceAgentTool[];
 }
 
+export interface WorkspaceImportResult {
+  workers_imported: string[];
+  contexts_imported: string[];
+  skipped: { type: string; id: string; reason: string }[];
+  id_remaps: Record<string, string>;
+  required_secrets: string[];
+  required_connections: string[];
+  workspace_md_present: boolean;
+}
+
 export interface SystemOverviewStats {
   runs_24h: number;
   runs_24h_sparkline: number[];
