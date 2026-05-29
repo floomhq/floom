@@ -15,7 +15,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
-import { BrandLogo, normalizeBrandSlug } from "@/components/connections/BrandLogo";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -382,7 +381,6 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
                     key={w.id}
                     worker={w}
                     isFavorite={favorites.has(w.id)}
-                    onTagClick={setTagFilter}
                     onFavoriteToggle={toggleFavorite}
                   />
                 ))}
@@ -532,70 +530,16 @@ function EmptyWorkersState() {
 }
 
 // ---------------------------------------------------------------------------
-// WorkerToolStrip — 20px rounded-square brand logos + AI icon + +N overflow
-// ---------------------------------------------------------------------------
-
-// Runtimes that invoke an LLM and should show the AI icon.
-const LLM_RUNTIMES = new Set(["skill", "agent"]);
-
-// Langdock-style tool-logo row: a horizontal strip of real, colored brand
-// logos in rounded chips, with a "+N" overflow chip. Slug normalization +
-// fallback live in BrandLogo (single source of truth).
-function WorkerToolStrip({ worker }: { worker: WorkerSummary }) {
-  const isLlmWorker = LLM_RUNTIMES.has(worker.runtime ?? "");
-  const connSlugs = (worker.connections ?? []).map(normalizeBrandSlug);
-
-  // Build ordered tool list: connections first, then AI icon at the end.
-  type Tool = { type: "connection"; slug: string } | { type: "ai" };
-  const tools: Tool[] = [
-    ...connSlugs.map((slug) => ({ type: "connection" as const, slug })),
-    ...(isLlmWorker ? [{ type: "ai" as const }] : []),
-  ];
-
-  if (tools.length === 0) return null;
-
-  const MAX_VISIBLE = 4;
-  const visible = tools.slice(0, MAX_VISIBLE);
-  const overflow = tools.length - MAX_VISIBLE;
-
-  const chip =
-    "inline-flex size-5 items-center justify-center rounded-md border border-border bg-card";
-
-  return (
-    <div className="flex items-center gap-1">
-      {visible.map((tool, i) =>
-        tool.type === "connection" ? (
-          <span key={`conn-${tool.slug}-${i}`} className={chip} title={tool.slug}>
-            <BrandLogo icon={tool.slug} className="size-3" />
-          </span>
-        ) : (
-          <span key="ai-icon" className={chip} title="AI / LLM">
-            <BrandLogo icon="anthropic" className="size-3 text-[#C96442]" />
-          </span>
-        )
-      )}
-      {overflow > 0 && (
-        <span className="inline-flex h-5 items-center rounded-md border border-border bg-card px-1 text-[10px] font-medium text-muted-foreground">
-          +{overflow}
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // WorkerCard
 // ---------------------------------------------------------------------------
 
 function WorkerCard({
   worker,
   isFavorite,
-  onTagClick,
   onFavoriteToggle,
 }: {
   worker: WorkerSummary;
   isFavorite: boolean;
-  onTagClick?: (tag: string) => void;
   onFavoriteToggle: (id: string) => void;
 }) {
   const hoverDescription = firstLine(worker.long_description);
@@ -649,33 +593,18 @@ function WorkerCard({
 
         {!worker.archived && <CardStatusPill status={worker.status} />}
 
-        <p className="text-sm text-muted-foreground line-clamp-1">
+        <p className="text-sm text-muted-foreground line-clamp-2">
           {worker.archived && worker.archive_reason
             ? worker.archive_reason
             : worker.description || "No description."}
         </p>
 
-        {/* Tool-logo strip — Langdock-style row of real brand logos */}
-        <WorkerToolStrip worker={worker} />
-
-        {(worker.tags || []).length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {(worker.tags || []).map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onTagClick?.(tag);
-                }}
-                className="inline-flex items-center rounded-full border border-border bg-card px-2 py-0.5 text-xs font-normal text-muted-foreground hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] transition-colors"
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* FIX 1 (Federico 2026-05-29, ChatGPT-simplicity): the per-card
+            tool-logo strip and tag-chip row were duplicated metadata + visual
+            noise — tags already have a dedicated filter row above the grid, and
+            the brand-logo wall added chrome an operator doesn't need to scan.
+            Dropped both so the card is name + status + what-it-does + last
+            result, calm and scannable. */}
 
         {/* Stable footer: single line, never changes height on hover (R1 —
             the prior group-hover content swap grew the card on hover and
@@ -737,17 +666,8 @@ function WorkerCardSkeleton() {
           <Skeleton className="size-5 rounded-full shrink-0" />
         </div>
         <Skeleton className="h-3 w-full" />
-        {/* Tool strip skeleton */}
-        <div className="flex gap-1">
-          <Skeleton className="size-5 rounded-md" />
-          <Skeleton className="size-5 rounded-md" />
-          <Skeleton className="size-5 rounded-md" />
-        </div>
-        <div className="flex gap-1.5">
-          <Skeleton className="h-5 w-14 rounded-full" />
-          <Skeleton className="h-5 w-16 rounded-full" />
-        </div>
-        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-3 w-2/3" />
+        <Skeleton className="h-3 w-20 mt-2" />
       </CardContent>
     </Card>
   );
