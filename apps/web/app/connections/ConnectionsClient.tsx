@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
-import { IconSprite } from "@/components/IconSprite";
 import { ConnectionRow } from "@/components/connections/ConnectionRow";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { ConnectionSkeleton } from "@/components/connections/ConnectionSkeleton";
@@ -223,7 +222,6 @@ export default function ConnectionsClient({
 
   return (
     <>
-      <IconSprite />
       <div className="space-y-6">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
