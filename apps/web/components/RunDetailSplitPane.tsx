@@ -681,11 +681,16 @@ function buildTimeline(run: RunDetail, parts: RunPart[]): TimelineItem[] {
     } else if (part.type === "reasoning") {
       rows.push({ label: "Reasoning", detail: clip(part.text), duration: "stream", status: run.status });
     } else if (part.type === "finish") {
+      // G5 P3: a "pending_approval" finish is a parked state, not a failure —
+      // it must not render a red "Failed" row in the timeline (caught on the
+      // live run-detail timeline after the first P3 pass).
+      const isCompleted = part.status === "completed";
+      const isPending = part.status === "pending_approval";
       rows.push({
-        label: part.status === "completed" ? "Completed" : "Failed",
-        detail: part.error,
+        label: isCompleted ? "Completed" : isPending ? "Awaiting approval" : "Failed",
+        detail: isPending ? "Waiting for your decision" : part.error,
         duration: run.duration_ms != null ? formatDuration(run.duration_ms) : "done",
-        status: part.status === "completed" ? "completed" : "failed",
+        status: isCompleted ? "completed" : isPending ? "pending_approval" : "failed",
       });
     }
   }
