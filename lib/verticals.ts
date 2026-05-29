@@ -15,6 +15,7 @@ import {
   LinkedInLogo,
   MailIcon,
   NotionLogo,
+  SalesforceLogo,
   SheetsLogo,
   ShieldIcon,
   SlackLogo,
@@ -82,13 +83,13 @@ export interface Vertical {
 export const VERTICALS: Record<string, Vertical> = {
   marketing: {
     slug: "marketing",
-    metaTitle: "Workeros for Marketing — Your marketing team's AI worker",
+    metaTitle: "Workeros for Marketing — Campaign reporting that writes itself",
     metaDescription:
       "Hire an AI worker for your marketing team. It pulls performance from Google Analytics, drafts social from new posts, scores inbound leads in HubSpot, and watches competitors — on a schedule, a webhook, or with your approval.",
     eyebrow: "Workeros for Marketing",
-    h1: "Your marketing team's AI worker",
-    h1Accent: "marketing",
-    sub: "It reads your analytics, drafts the posts, scores the leads, and watches the competition — connected to the tools your team already uses.",
+    h1: "Campaign reporting that writes itself",
+    h1Accent: "writes itself",
+    sub: "Describe the job once, connect Analytics, HubSpot, and Slack, and your worker pulls the numbers, drafts the posts, and scores the leads — on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your marketing worker",
     hero: {
       accent: "#FF7A59",
@@ -151,13 +152,13 @@ export const VERTICALS: Record<string, Vertical> = {
 
   recruiting: {
     slug: "recruiting",
-    metaTitle: "Workeros for Recruiting — Your recruiting team's AI worker",
+    metaTitle: "Workeros for Recruiting — Screen every applicant before standup",
     metaDescription:
       "Hire an AI worker for your recruiting team. It screens new applicants against the role brief, drafts personalized outreach, sends a daily pipeline digest, and schedules interviews via Calendar — with your approval.",
     eyebrow: "Workeros for Recruiting",
-    h1: "Your recruiting team's AI worker",
-    h1Accent: "recruiting",
-    sub: "It screens applicants against the brief, drafts the outreach, digests the pipeline, and books the interviews — working inside your ATS and inbox.",
+    h1: "Screen every applicant before standup",
+    h1Accent: "before standup",
+    sub: "Describe the role, connect your ATS, Gmail, and Calendar, and your worker scores each new applicant against the brief, drafts the outreach, and books the interviews — on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your recruiting worker",
     hero: {
       accent: "#24A47F",
@@ -220,13 +221,13 @@ export const VERTICALS: Record<string, Vertical> = {
 
   support: {
     slug: "support",
-    metaTitle: "Workeros for Support — Your support team's AI worker",
+    metaTitle: "Workeros for Support — Every ticket triaged the moment it lands",
     metaDescription:
       "Hire an AI worker for your support team. It triages and tags incoming tickets, drafts first-response replies, escalates urgent issues to Slack, and writes a weekly support-trends report — with your approval.",
     eyebrow: "Workeros for Support",
-    h1: "Your support team's AI worker",
-    h1Accent: "support",
-    sub: "It triages the queue, drafts the first reply, escalates what's urgent, and reports the trends — working inside your helpdesk and Slack.",
+    h1: "Every ticket triaged the moment it lands",
+    h1Accent: "the moment it lands",
+    sub: "Describe the job, connect your helpdesk, Slack, and Notion, and your worker tags and prioritizes each ticket, drafts the first reply, and escalates what's urgent — on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your support worker",
     hero: {
       accent: "#03363D",
@@ -284,6 +285,75 @@ export const VERTICALS: Record<string, Vertical> = {
     closingHead: "Hire your support worker in two minutes.",
     closingSub:
       "Describe the job, connect your helpdesk, Slack, and Notion, set the approval policy. It runs on a schedule, a webhook, or on demand.",
+  },
+
+  sales: {
+    slug: "sales",
+    metaTitle: "Workeros for Sales — Every lead researched before you call",
+    metaDescription:
+      "Hire an AI worker for your sales team. It enriches and scores every new inbound lead in your CRM, drafts personalized first-touch outreach, sends a daily pipeline digest, and researches accounts before your calls — on a schedule, a webhook, or with your approval.",
+    eyebrow: "Workeros for Sales",
+    h1: "Every lead researched before you call",
+    h1Accent: "before you call",
+    sub: "Describe the job, connect your CRM, LinkedIn, and Gmail, and your worker enriches and scores each new lead, drafts the first touch, and briefs you on the account — on a schedule, a webhook, or with your approval.",
+    primaryCtaLabel: "Hire your sales worker",
+    hero: {
+      accent: "#6D5CE0",
+      url: "workeros.floom.dev/runs · lead-enrich",
+      app: "New Inbound Lead",
+      appIcon: UsersIcon,
+      taskKicker: "Runs on every new lead",
+      task: "Enrich + score the new inbound lead against your ICP",
+      steps: [
+        "Read the lead + company from your CRM",
+        "Enriched headcount, funding + role from LinkedIn · scored 4 / 5 fit",
+        "Wrote the fit note back to the CRM · flagged for fast follow-up",
+      ],
+      artifactName: "enriched lead + fit note",
+      artifactMeta: "artifact · 2.8 KB · written to your CRM",
+      artifactCta: "Open",
+    },
+    toolsLabel: "Connects to your sales stack",
+    tools: [
+      { label: "Salesforce", logo: SalesforceLogo },
+      { label: "HubSpot", logo: HubSpotLogo },
+      { label: "LinkedIn", logo: LinkedInLogo },
+      { label: "Gmail", logo: GmailLogo },
+      { label: "Google Calendar", logo: GCalLogo },
+      { label: "Sheets", logo: SheetsLogo },
+    ],
+    capabilitiesHead: "Four jobs it does on day one.",
+    capabilitiesSub:
+      "Each one connects the tools you already pay for, runs on a trigger you set, and shows you the artifact it produced.",
+    capabilities: [
+      {
+        icon: SparkIcon,
+        title: "Enrich + score every new lead",
+        body: "Every new inbound lead is enriched against public data, scored against your ICP context, and written back to your CRM with a fit note so reps work the right ones first.",
+        tools: [SalesforceLogo, LinkedInLogo],
+      },
+      {
+        icon: MailIcon,
+        title: "Draft personalized first-touch outreach",
+        body: "For high-fit leads it drafts a first email that references their company and role, grounded in your messaging context, then holds it for your approval before sending.",
+        tools: [GmailLogo, HubSpotLogo],
+      },
+      {
+        icon: TrendIcon,
+        title: "Daily pipeline digest",
+        body: "Each morning it summarizes deal movement, stalled opportunities, and what needs a next step, and posts the digest to your team channel.",
+        tools: [SlackLogo, SalesforceLogo],
+      },
+      {
+        icon: FileTextIcon,
+        title: "Research an account before a call",
+        body: "Ahead of a meeting it pulls recent news, headcount changes, and buying signals, then posts a short brief to your inbox or channel so you walk in prepared.",
+        tools: [LinkedInLogo, GCalLogo],
+      },
+    ],
+    closingHead: "Hire your sales worker in two minutes.",
+    closingSub:
+      "Describe the job, connect your CRM, LinkedIn, and Gmail, set the approval policy. It runs on a schedule, a webhook, or on demand.",
   },
 };
 

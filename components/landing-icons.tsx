@@ -224,6 +224,13 @@ export const NotionLogo = () => (
   </svg>
 );
 
+/* Salesforce — SimpleIcons (salesforce) */
+export const SalesforceLogo = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+    <path fill="#00A1E0" d="M10.006 5.415a4.195 4.195 0 0 1 3.045-1.306c1.56 0 2.92.87 3.65 2.165a5.072 5.072 0 0 1 2.075-.441 5.143 5.143 0 0 1 5.144 5.16 5.143 5.143 0 0 1-5.144 5.157c-.31 0-.616-.027-.91-.082a3.74 3.74 0 0 1-3.27 1.93 3.7 3.7 0 0 1-1.624-.372 4.273 4.273 0 0 1-3.971 2.65c-1.781 0-3.31-1.088-3.955-2.636a3.97 3.97 0 0 1-.823.086A4.014 4.014 0 0 1 .2 13.18a4.025 4.025 0 0 1 1.992-3.477A4.617 4.617 0 0 1 1.81 7.79a4.633 4.633 0 0 1 4.635-4.631c1.52 0 2.864.73 3.71 1.858z" />
+  </svg>
+);
+
 /* Greenhouse — generic ATS mark (SimpleIcons greenhouse) */
 export const ATSLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">

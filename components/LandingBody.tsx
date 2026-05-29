@@ -1005,6 +1005,7 @@ export function LandingBody() {
           <div className="ln-footer-col">
             <h3>For your team</h3>
             <Link href="/marketing">Marketing</Link>
+            <Link href="/sales">Sales</Link>
             <Link href="/recruiting">Recruiting</Link>
             <Link href="/support">Support</Link>
           </div>
