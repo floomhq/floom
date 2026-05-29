@@ -4,6 +4,31 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 ---
 
+## P0 — wedge flow (G5-confirm #269, 78/100): "describe a job → get a worker" did NOT create a worker
+
+### #W1 Prompt-to-worker dead-ended on a drafted bundle (2026-05-29)
+
+**Where:** `/workers/new` → `newFromPrompt({mode:"draft"})` → worker-author meta-worker → `out/bundle.json`; `apps/web/app/workers/new/page.tsx`, `apps/api/run_service.py`, `apps/api/main.py`, `workers/worker-author/run.py`.
+
+**Symptom:** Typing a plain-English job + Generate ran the worker-author meta-worker, which drafted `out/bundle.json` inside its E2B sandbox but never registered a worker (`run.py` always set `created_worker_id=None`). The catalog count never incremented; the UI landed on `/runs/<id>` (a run with a bundle, Back/Replay/Download only) — no editable, runnable worker. The only path that created a real worker was the error fallback.
+
+**Fix (PRs #271, #272, #273 — chosen approach A, backend post-completion registration; preserves the live drafting stream):**
+1. Backend hook on worker-author run completion (`run_service._register_authored_worker`) reads the drafted bundle and registers it via the SAME path `/workers/draft-and-create` uses (shared `main._register_worker_from_files`); stores `created_worker_id` on the run output + broadcasts via SSE. Idempotent; dedupes colliding ids; skips broken bundles.
+2. Frontend navigates to `/workers/<id>?edit=1` on completion; on mid-flight SSE drop it polls the run to terminal (bounded) instead of stranding the operator on `/runs/<id>`.
+3. Backend safety-net `_normalize_authored_worker_yml` strips optional metadata (use_cases/tags) that violates the canonical `WorkerContract` schema, so a functionally-valid drafted worker always registers (live-found: LLM emitted <3 use_cases → 400).
+4. Backfilled `run.py` stub now satisfies the E2B pure-script contract (writes `result.json`) so a created worker is RUNNABLE (live-found: old stub used legacy `run(inputs,context)` with no `__main__` → `missing_result`).
+
+**Live verification (workers.floom.dev, fresh browser, deployed `b3e97bd`):**
+- Catalog incremented 13 → 14 → 15 → 16 across 3 prompts ("GitHub PR summary", "email deduplicator", "daily motivational quote") — no duplicate workers.
+- Editor opened at `/workers/<id>?edit=1` for every prompt (worker.yml + run.py/SKILL.md present).
+- Worker RAN: `run_eaa068a9f95b` (daily-motivational-quote) completed in 6.7s, 1 output item + 1 file.
+- Screenshots: `docs/audits/shots-wedge-P0-2026-05-29/` (01-prompt-typed, 02-drafting-stream, 03-editor-opened, 04-editor-second-prompt, 05-worker-ran-completed).
+- New worker ids: `github-pr-summary-2`, `email-deduplicator`, `daily-motivational-quote`.
+
+**Status:** VERIFIED (2026-05-29)
+
+---
+
 ## P0 — blocks the "useful B2C worker" claim
 
 ### #1 Generated worker is empty after create (no SKILL.md, no run.py)
