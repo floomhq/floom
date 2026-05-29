@@ -3,34 +3,55 @@
 // S47: Approvals page — pending approval cards with Approve / Edit-then-approve / Reject.
 // feat/approvals-user-flow: worker name links to /workers/<id>, run id links to /runs/<id>,
 //   deep-link via ?id=<approval_id> scrolls + briefly highlights the target card.
-// ChatGPT-simplicity bar: no nested cards, single blue accent, sentence case.
+// B5 (Phase 5.2): organisation at scale — group by worker (collapsible), sort
+//   (newest / oldest / worker), paginate (matches /runs pattern), per-card age,
+//   oldest visually distinct, light per-group bulk approve/reject.
+// ChatGPT-simplicity bar: no nested cards, single blue accent, sentence case, no emoji.
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle, Clock, XCircle } from "lucide-react";
+import { CheckCircle, ChevronDown, Clock, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ApprovalRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function formatRelative(iso: string) {
-  const ms = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
+const PAGE_SIZE = 20;
+// A pending approval older than this reads as "most-waiting" → subtle emphasis.
+const STALE_MS = 6 * 60 * 60 * 1000; // 6h
+
+type SortMode = "newest" | "oldest" | "worker";
+
+function ageMs(iso: string): number {
+  return Date.now() - new Date(iso).getTime();
+}
+
+// "pending 12m" / "pending 3h" / "pending 2d" — sets up the future soft-deadline.
+function formatPending(iso: string): string {
+  const mins = Math.floor(ageMs(iso) / 60000);
+  if (mins < 1) return "pending just now";
+  if (mins < 60) return `pending ${mins}m`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+  if (hrs < 24) return `pending ${hrs}h`;
+  return `pending ${Math.floor(hrs / 24)}d`;
 }
 
 function ApprovalCard({
   approval,
   highlighted,
+  stale,
+  selectable,
+  selected,
+  onToggleSelect,
   onDecision,
 }: {
   approval: ApprovalRow;
   highlighted: boolean;
+  stale: boolean;
+  selectable: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   onDecision: () => void;
 }) {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
@@ -95,29 +116,46 @@ function ApprovalCard({
       )}
     >
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Worker name links to /workers/<worker_id> */}
-            <Link
-              href={`/workers/${approval.worker_id}`}
-              className="text-sm font-medium text-[var(--ink)] hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-            >
-              {approval.worker_name ?? approval.worker_id}
-            </Link>
-            <span className="text-xs text-[var(--ink-mute)]">
-              {formatRelative(approval.created_at)}
-            </span>
-          </div>
-          {approval.label && (
-            <p className="mt-0.5 text-xs text-[var(--ink-soft)]">{approval.label}</p>
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          {selectable && (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onToggleSelect}
+              disabled={!!busy}
+              aria-label="Select approval"
+              className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-[var(--primary)]"
+            />
           )}
-          {/* Run link — "Run run_xxx" → /runs/<run_id> */}
-          <Link
-            href={`/runs/${approval.run_id}`}
-            className="mt-0.5 text-[11px] text-[var(--ink-faint)] hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-          >
-            Run {approval.run_id}
-          </Link>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Worker name links to /workers/<worker_id> */}
+              <Link
+                href={`/workers/${approval.worker_id}`}
+                className="text-sm font-medium text-[var(--ink)] hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
+                {approval.worker_name ?? approval.worker_id}
+              </Link>
+              <span
+                className={cn(
+                  "text-xs",
+                  stale ? "font-medium text-amber-700 dark:text-amber-400" : "text-[var(--ink-mute)]"
+                )}
+              >
+                {formatPending(approval.created_at)}
+              </span>
+            </div>
+            {approval.label && (
+              <p className="mt-0.5 text-xs text-[var(--ink-soft)]">{approval.label}</p>
+            )}
+            {/* Run link — "Run run_xxx" → /runs/<run_id> */}
+            <Link
+              href={`/runs/${approval.run_id}`}
+              className="mt-0.5 block text-[11px] text-[var(--ink-faint)] hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              Run {approval.run_id}
+            </Link>
+          </div>
         </div>
         <span className="shrink-0 inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-amber-50 dark:bg-amber-950/30 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
           <Clock className="h-3 w-3" />
@@ -213,6 +251,12 @@ function ApprovalCard({
   );
 }
 
+type WorkerGroup = {
+  workerId: string;
+  workerName: string;
+  rows: ApprovalRow[];
+};
+
 function ApprovalsContent() {
   const searchParams = useSearchParams();
   // Deep-link: ?id=<approval_id> scrolls + highlights that card.
@@ -220,11 +264,22 @@ function ApprovalsContent() {
 
   const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sort, setSort] = useState<SortMode>("newest");
+  const [page, setPage] = useState(0);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const rows = await api.approvals.list("pending");
       setApprovals(rows);
+      // Drop any selections that no longer exist.
+      setSelected((prev) => {
+        const ids = new Set(rows.map((r) => r.id));
+        const next = new Set([...prev].filter((id) => ids.has(id)));
+        return next;
+      });
     } catch {
       // silently fail
     } finally {
@@ -235,6 +290,128 @@ function ApprovalsContent() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const sortedAll = useMemo(() => {
+    const rows = [...approvals];
+    if (sort === "oldest") {
+      rows.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+    } else {
+      // newest + worker both default to newest-first within their grouping
+      rows.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+    }
+    return rows;
+  }, [approvals, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedAll.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageRows = useMemo(
+    () => sortedAll.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE),
+    [sortedAll, safePage]
+  );
+
+  // Oldest pending across the whole set — visually emphasised even when stale.
+  const oldestId = useMemo(() => {
+    if (approvals.length === 0) return null;
+    return [...approvals].sort(
+      (a, b) => +new Date(a.created_at) - +new Date(b.created_at)
+    )[0].id;
+  }, [approvals]);
+
+  // Deep-link: if ?id= targets a row on a later page, jump to that page once.
+  const jumpedRef = useRef(false);
+  useEffect(() => {
+    if (jumpedRef.current || !targetId || sortedAll.length === 0) return;
+    const idx = sortedAll.findIndex(
+      (r) => r.id === targetId || r.run_id === targetId
+    );
+    if (idx >= 0) {
+      jumpedRef.current = true;
+      setPage(Math.floor(idx / PAGE_SIZE));
+    }
+  }, [targetId, sortedAll]);
+
+  // Group the current page's rows by worker. Rows keep the active sort order
+  // (pageRows is pre-sorted). Group order: by-worker → alphabetical; otherwise
+  // groups follow the order their first (sort-leading) row appears.
+  const groups = useMemo<WorkerGroup[]>(() => {
+    const map = new Map<string, WorkerGroup>();
+    for (const row of pageRows) {
+      const key = row.worker_id;
+      const existing = map.get(key);
+      if (existing) existing.rows.push(row);
+      else
+        map.set(key, {
+          workerId: key,
+          workerName: row.worker_name ?? row.worker_id,
+          rows: [row],
+        });
+    }
+    const result = Array.from(map.values());
+    if (sort === "worker") {
+      result.sort((a, b) => a.workerName.localeCompare(b.workerName));
+    }
+    return result;
+  }, [pageRows, sort]);
+
+  const toggleCollapse = useCallback((workerId: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(workerId)) next.delete(workerId);
+      else next.add(workerId);
+      return next;
+    });
+  }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectGroup = useCallback((group: WorkerGroup) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allSelected = group.rows.every((r) => next.has(r.id));
+      if (allSelected) group.rows.forEach((r) => next.delete(r.id));
+      else group.rows.forEach((r) => next.add(r.id));
+      return next;
+    });
+  }, []);
+
+  // Bulk action: call the existing per-run approve/reject endpoints in sequence.
+  const runBulk = useCallback(
+    async (group: WorkerGroup, action: "approve" | "reject") => {
+      const ids = group.rows.filter((r) => selected.has(r.id));
+      if (ids.length === 0) return;
+      setBulkBusy(true);
+      let ok = 0;
+      let failed = 0;
+      for (const row of ids) {
+        try {
+          if (action === "approve") await api.runs.approve(row.run_id);
+          else await api.runs.reject(row.run_id);
+          ok += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      setBulkBusy(false);
+      if (ok > 0) {
+        toast.success(
+          `${action === "approve" ? "Approved" : "Rejected"} ${ok}${
+            failed ? `, ${failed} failed` : ""
+          }`
+        );
+      } else if (failed > 0) {
+        toast.error(`${failed} ${action === "approve" ? "approvals" : "rejections"} failed`);
+      }
+      await load();
+    },
+    [selected, load]
+  );
 
   return (
     <div className="max-w-2xl">
@@ -275,16 +452,154 @@ function ApprovalsContent() {
           </Link>
         </div>
       ) : (
-        <div className="space-y-3">
-          {approvals.map((a) => (
-            <ApprovalCard
-              key={a.id}
-              approval={a}
-              highlighted={targetId === a.id || targetId === a.run_id}
-              onDecision={load}
-            />
-          ))}
-        </div>
+        <>
+          {/* Sort + count bar */}
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <span className="text-xs text-[var(--ink-mute)]">
+              {approvals.length} pending
+            </span>
+            <div className="flex items-center gap-3">
+              {(["newest", "oldest", "worker"] as SortMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    setSort(mode);
+                    setPage(0);
+                  }}
+                  className={cn(
+                    "text-xs transition-colors",
+                    sort === mode
+                      ? "font-medium text-[var(--ink)]"
+                      : "text-[var(--ink-mute)] hover:text-[var(--ink-soft)]"
+                  )}
+                >
+                  {mode === "newest"
+                    ? "Newest"
+                    : mode === "oldest"
+                    ? "Most waiting"
+                    : "By worker"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            {groups.map((group) => {
+              const isCollapsed = collapsed.has(group.workerId);
+              const groupSelected = group.rows.filter((r) => selected.has(r.id));
+              const allSelected =
+                group.rows.length > 0 && group.rows.every((r) => selected.has(r.id));
+              return (
+                <section key={group.workerId} className="space-y-3">
+                  {/* Group header — worker name + count, collapsible */}
+                  <div className="flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleCollapse(group.workerId)}
+                      className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-[var(--ink)] transition-colors hover:text-blue-600 dark:hover:text-blue-400"
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "h-4 w-4 shrink-0 text-[var(--ink-mute)] transition-transform",
+                          isCollapsed && "-rotate-90"
+                        )}
+                      />
+                      <span className="truncate">{group.workerName}</span>
+                      <span className="shrink-0 text-[var(--ink-mute)]">
+                        ({group.rows.length})
+                      </span>
+                    </button>
+                    {/* Light bulk affordance — only shows when ≥2 in group */}
+                    {group.rows.length >= 2 && (
+                      <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-[var(--ink-mute)]">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={() => toggleSelectGroup(group)}
+                          disabled={bulkBusy}
+                          className="h-3.5 w-3.5 cursor-pointer accent-[var(--primary)]"
+                        />
+                        Select all
+                      </label>
+                    )}
+                  </div>
+
+                  {/* Per-group bulk action bar — only when something is selected */}
+                  {groupSelected.length > 0 && (
+                    <div className="flex items-center gap-2 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-2">
+                      <span className="text-xs text-[var(--ink-soft)]">
+                        {groupSelected.length} selected
+                      </span>
+                      <div className="ml-auto flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => runBulk(group, "approve")}
+                          disabled={bulkBusy}
+                          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-2.5 text-xs font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-40 transition-opacity"
+                        >
+                          <CheckCircle className="h-3 w-3" />
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => runBulk(group, "reject")}
+                          disabled={bulkBusy}
+                          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-2.5 text-xs font-medium text-destructive hover:bg-destructive/5 disabled:opacity-40 transition-colors"
+                        >
+                          <XCircle className="h-3 w-3" />
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {!isCollapsed && (
+                    <div className="space-y-3">
+                      {group.rows.map((a) => (
+                        <ApprovalCard
+                          key={a.id}
+                          approval={a}
+                          highlighted={targetId === a.id || targetId === a.run_id}
+                          stale={a.id === oldestId || ageMs(a.created_at) >= STALE_MS}
+                          selectable={group.rows.length >= 2}
+                          selected={selected.has(a.id)}
+                          onToggleSelect={() => toggleSelect(a.id)}
+                          onDecision={load}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+
+          {/* Pagination — matches /runs prev/next pattern */}
+          {totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={safePage <= 0}
+                className="inline-flex h-8 items-center rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-3 text-xs text-[var(--ink)] hover:bg-[var(--bg-2)] disabled:opacity-40 transition-colors"
+              >
+                ← Previous
+              </button>
+              <span className="text-xs text-[var(--ink-mute)]">
+                Page {safePage + 1} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={safePage >= totalPages - 1}
+                className="inline-flex h-8 items-center rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-3 text-xs text-[var(--ink)] hover:bg-[var(--bg-2)] disabled:opacity-40 transition-colors"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
