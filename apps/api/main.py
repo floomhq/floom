@@ -4589,6 +4589,103 @@ def _rewrite_worker_yml_id(worker_yml: str, new_id: str) -> str:
     return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
 
 
+def _register_worker_from_files(
+    files: List[DraftFile],
+    *,
+    user_id: str | None,
+    repos: "Repositories | None" = None,
+    dedupe_id: bool = False,
+) -> str:
+    """Write a worker bundle (``files``) to disk and register it in the DB.
+
+    This is the single, shared registration path used by BOTH the
+    ``/workers/draft-and-create`` files branch AND the worker-author
+    post-completion hook (``run_service._register_authored_worker``) so the
+    prompt-to-worker flow yields a real, editable, runnable worker rather than
+    dead-ending on a drafted bundle.json.
+
+    ``files`` must include ``worker.yml``. ``run.py`` and ``requirements.txt``
+    are backfilled with safe defaults when absent (matching the upload flow).
+
+    When ``dedupe_id`` is True (the author hook), a colliding worker id is
+    rewritten to a free id instead of raising 409 — the worker-author LLM
+    frequently reuses a suggested id, and a generation must never fail just
+    because the slug is taken (#186 pattern).
+
+    Returns the registered ``worker_id``. Raises ``HTTPException`` on invalid
+    YAML / write failure / DB conflict so the existing endpoint behaviour is
+    unchanged.
+    """
+    from worker_registry import WORKERS_DIR
+
+    draft_files: List[DraftFile] = []
+    for f in files:
+        path = (f.path or "").strip()
+        parts = path.replace("\\", "/").split("/")
+        if any(p in ("", "..") for p in parts):
+            raise HTTPException(status_code=400, detail=f"Invalid path: {path!r}")
+        draft_files.append(f)
+
+    worker_yml_file = next((f for f in draft_files if f.path == "worker.yml"), None)
+    if not worker_yml_file:
+        raise HTTPException(status_code=400, detail="files must include worker.yml")
+
+    worker_id, _config = _parse_worker_payload(worker_yml_file.content, user_id=user_id)
+
+    # The author hook can collide on a reused suggested id; allocate a free id
+    # and rewrite the manifest identity so dir + worker.yml + DB row all agree.
+    if dedupe_id:
+        free_id = _free_worker_id(worker_id, repos=repos)
+        if free_id != worker_id:
+            new_yml = _rewrite_worker_yml_id(worker_yml_file.content, free_id)
+            worker_id = free_id
+            worker_yml_file.content = new_yml
+
+    target_dir = WORKERS_DIR / worker_id
+    if target_dir.exists():
+        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+
+    target_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        for f in draft_files:
+            parts = f.path.replace("\\", "/").split("/")
+            dest = target_dir
+            for part in parts[:-1]:
+                dest = dest / part
+                dest.mkdir(exist_ok=True)
+            (dest / parts[-1]).write_text(f.content)
+
+        if not (target_dir / "run.py").exists():
+            (target_dir / "run.py").write_text(
+                "from typing import Dict, Any\n\n"
+                "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
+                "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
+            )
+        if not (target_dir / "requirements.txt").exists():
+            (target_dir / "requirements.txt").write_text("")
+    except HTTPException:
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise
+    except Exception as exc:
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=f"Failed to write files: {exc}") from exc
+
+    invalidate_worker_cache()
+    workers = discover_workers()
+    with get_db() as conn:
+        try:
+            _persist_discovered_workers(conn, workers, user_id=user_id)
+        except (sqlite3.IntegrityError, RuntimeError) as exc:
+            import shutil
+            shutil.rmtree(target_dir, ignore_errors=True)
+            invalidate_worker_cache()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return worker_id
+
+
 @app.post("/workers/draft-and-create", response_model=DraftAndCreateResponse)
 async def draft_and_create_worker(
     payload: DraftAndCreateRequest,
@@ -4611,62 +4708,11 @@ async def draft_and_create_worker(
     # ----------------------------------------------------------------
     if payload.files:
         _enforce_draft_rate_limit(request)
-        draft_files = []
-        for f in payload.files:
-            path = (f.path or "").strip()
-            parts = path.replace("\\", "/").split("/")
-            if any(p in ("", "..") for p in parts):
-                raise HTTPException(status_code=400, detail=f"Invalid path: {path!r}")
-            draft_files.append(f)
-
-        worker_yml_file = next((f for f in draft_files if f.path == "worker.yml"), None)
-        if not worker_yml_file:
-            raise HTTPException(status_code=400, detail="files must include worker.yml")
-
-        worker_id, _config = _parse_worker_payload(worker_yml_file.content, user_id=auth.user_id)
-
-        target_dir = WORKERS_DIR / worker_id
-        if target_dir.exists():
-            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
-
-        target_dir.mkdir(parents=True, exist_ok=False)
-        try:
-            for f in draft_files:
-                parts = f.path.replace("\\", "/").split("/")
-                dest = target_dir
-                for part in parts[:-1]:
-                    dest = dest / part
-                    dest.mkdir(exist_ok=True)
-                (dest / parts[-1]).write_text(f.content)
-
-            if not (target_dir / "run.py").exists():
-                (target_dir / "run.py").write_text(
-                    "from typing import Dict, Any\n\n"
-                    "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
-                    "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
-                )
-            if not (target_dir / "requirements.txt").exists():
-                (target_dir / "requirements.txt").write_text("")
-        except HTTPException:
-            import shutil
-            shutil.rmtree(target_dir, ignore_errors=True)
-            raise
-        except Exception as exc:
-            import shutil
-            shutil.rmtree(target_dir, ignore_errors=True)
-            raise HTTPException(status_code=400, detail=f"Failed to write files: {exc}") from exc
-
-        invalidate_worker_cache()
-        workers = discover_workers()
-        with get_db() as conn:
-            try:
-                _persist_discovered_workers(conn, workers, user_id=auth.user_id)
-            except (sqlite3.IntegrityError, RuntimeError) as exc:
-                import shutil
-                shutil.rmtree(target_dir, ignore_errors=True)
-                invalidate_worker_cache()
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
-
+        worker_id = _register_worker_from_files(
+            payload.files,
+            user_id=auth.user_id,
+            repos=repos,
+        )
         return DraftAndCreateResponse(worker_id=worker_id)
 
     # ----------------------------------------------------------------

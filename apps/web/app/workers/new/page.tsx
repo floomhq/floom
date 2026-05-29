@@ -70,6 +70,9 @@ interface RunEvent {
   log?: string;
   level?: string;
   error?: string;
+  // Broadcast by the backend when a worker-author run completes and the drafted
+  // bundle has been registered as a real worker (wedge fix 2026-05-29).
+  created_worker_id?: string;
 }
 
 function NewWorkerContent() {
@@ -109,19 +112,21 @@ function NewWorkerContent() {
   // ---- Generate from prompt ------------------------------------------------
   // Uses the /workers/new/from-prompt endpoint which creates a worker-author
   // run and returns its run_id. We subscribe to SSE on that run for real-time
-  // progress, and on terminal state navigate to /runs/<id> so the user can see
-  // the drafted bundle and save it.
+  // drafting progress.
   //
-  // G5 P1 (2026-05-29): the hero flow MUST NEVER silently reset to the empty
-  // form on a successful (or completing) generation. The earlier code read the
-  // run id from a stale `streamRunId` state closure and, on an SSE drop, fired
-  // a *second* synchronous draftAndCreate — creating a DUPLICATE worker and, if
-  // that second call raced/failed, resetting to an empty form. Fix:
-  //   1. Keep the run id in a ref so onmessage/onerror never read a stale null.
-  //   2. Once we HAVE a run id (the worker-author run is in flight / done), an
-  //      SSE drop navigates to that run (`/runs/<id>`) + toasts — it does NOT
-  //      fire a duplicate-creating fallback. The run page streams the rest.
-  //   3. Only a hard failure to even start the run falls back to draftAndCreate.
+  // WEDGE FIX (2026-05-29): the prompt-to-worker flow MUST end on a REAL,
+  // editable worker — not a dead-end /runs/<id> bundle view. On a successful
+  // worker-author run the BACKEND now registers the drafted bundle as a worker
+  // (run completion hook) and reports the new worker id via SSE
+  // (`created_worker_id`) + on the run output. We navigate to
+  // `/workers/<id>?edit=1` so the operator reviews/saves/runs it. We only land
+  // on `/runs/<id>` when the run FAILED (so the operator can see why) or when
+  // — defensively — no worker id ever materialises.
+  //
+  // G5 P1 (2026-05-29, still holds): never silently reset to the empty form,
+  // and never fire a duplicate-creating second call. The run id is kept in a
+  // ref so onmessage/onerror never read a stale null; a mid-flight SSE drop
+  // resolves the worker via a run-detail fetch rather than re-drafting.
 
   function navigateToRun(runId: string, opts?: { failed?: boolean }) {
     if (navigatedRef.current) return;
@@ -136,6 +141,41 @@ function NewWorkerContent() {
       toast.success("Worker drafted");
     }
     router.push(`/runs/${runId}`);
+  }
+
+  function navigateToWorker(workerId: string) {
+    if (navigatedRef.current) return;
+    navigatedRef.current = true;
+    if (sseRef.current) {
+      sseRef.current.close();
+      sseRef.current = null;
+    }
+    toast.success("Worker created");
+    router.push(`/workers/${workerId}?edit=1`);
+  }
+
+  // A worker-author run COMPLETED. Resolve the real worker id and open the
+  // editor. If the SSE event already carried `created_worker_id`, use it; else
+  // read it from the run output (covers the already-terminal reconnect case
+  // where the minimal SSE event omits custom fields). Only fall back to the
+  // run view when no worker id can be resolved.
+  async function navigateToCreatedWorker(runId: string, eventWorkerId?: string) {
+    if (navigatedRef.current) return;
+    if (eventWorkerId) {
+      navigateToWorker(eventWorkerId);
+      return;
+    }
+    try {
+      const run = await api.runs.get(runId);
+      const createdId = (run.output as Record<string, unknown> | undefined)?.["created_worker_id"];
+      if (typeof createdId === "string" && createdId) {
+        navigateToWorker(createdId);
+        return;
+      }
+    } catch {
+      // fall through to the run view
+    }
+    navigateToRun(runId);
   }
 
   async function fallbackDraftAndCreate(trimmed: string) {
@@ -191,10 +231,14 @@ function NewWorkerContent() {
           if (event.log) {
             setStreamLogs((prev: string[]) => [...prev.slice(-19), event.log as string]);
           }
-          if (event.type === "status" && (event.status === "completed" || event.status === "failed")) {
-            // Either way the run is real and openable — go to it. A failed
-            // worker-author run still has a viewable run page (logs + error).
-            navigateToRun(runIdRef.current ?? runId, { failed: event.status === "failed" });
+          if (event.type === "status" && event.status === "completed") {
+            // Success: the backend registered the drafted bundle as a real
+            // worker. Open its editor (not the dead-end run view).
+            void navigateToCreatedWorker(runIdRef.current ?? runId, event.created_worker_id);
+          } else if (event.type === "status" && event.status === "failed") {
+            // A failed worker-author run still has a viewable run page so the
+            // operator can see what went wrong.
+            navigateToRun(runIdRef.current ?? runId, { failed: true });
           }
         } catch {
           // Non-JSON keepalive lines — ignore
@@ -204,13 +248,14 @@ function NewWorkerContent() {
       evtSource.onerror = () => {
         evtSource.close();
         sseRef.current = null;
-        // SSE dropped. We already have a real run id, so navigate to that run
-        // (it streams the rest of progress + the final bundle). NEVER fire a
-        // second draftAndCreate here — that created the duplicate worker + the
-        // silent form reset the G5 audit hit.
+        // SSE dropped. We already have a real run id, so resolve the worker it
+        // produced (via run-detail fetch) and open the editor; if the run is
+        // not yet done / produced no worker, this falls back to the run view.
+        // NEVER fire a second draftAndCreate here — that created the duplicate
+        // worker + the silent form reset the G5 audit hit.
         const id = runIdRef.current;
         if (id) {
-          navigateToRun(id);
+          void navigateToCreatedWorker(id);
         } else if (!fallbackFiredRef.current) {
           // The run never started (no id yet) — fall back so a worker still
           // gets created rather than dead-ending on an empty stream.
