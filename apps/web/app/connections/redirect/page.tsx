@@ -94,7 +94,7 @@ function RedirectInner() {
                 <p className="mt-2 text-sm text-muted-foreground">{error}</p>
                 <div className="mt-6 flex flex-col gap-2">
                   <Link
-                    href={`/secrets?prefill=${encodeURIComponent(`${slug.toUpperCase()}_API_KEY`)}`}
+                    href={`/connections/secrets?prefill=${encodeURIComponent(`${slug.toUpperCase()}_API_KEY`)}`}
                     className={buttonVariants({ className: "w-full" })}
                   >
                     Add secret

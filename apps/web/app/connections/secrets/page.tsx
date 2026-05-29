@@ -125,9 +125,9 @@ function SecretsContent() {
 
   return (
     <div className="space-y-6">
-      {/* S24: /secrets folded into the /connections surface via shared tabs.
-          Same H1 ("Connections") + subtitle pattern as /connections and
-          /connections/browse so the three tabs feel like one page. */}
+      {/* Secrets lives under /connections/secrets (P2-9) and shares the
+          Connections tabs. Same H1 ("Connections") + subtitle pattern as
+          /connections and /connections/browse so the tabs feel like one page. */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
