@@ -487,6 +487,113 @@ const runIdSchema = z.object({
   id: z.string().min(1).describe("Workeros run id."),
 });
 
+async function consumeChatStream(
+  message: string,
+  conversationId: string | undefined,
+  timeoutMs: number,
+): Promise<JsonObject> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const textParts: string[] = [];
+  const toolCalls: JsonObject[] = [];
+  let finishEvent: JsonObject | null = null;
+  let buffer = "";
+
+  try {
+    const body: JsonObject = { message };
+    if (conversationId) {
+      body.conversation_id = conversationId;
+    }
+    const response = await fetch(buildUrl("/chat"), {
+      method: "POST",
+      headers: {
+        "accept": "text/event-stream",
+        "content-type": "application/json",
+        "x-floom-secret": apiSecret(),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const parsed = await parseResponse(response);
+      const safeParsed = redactSecrets(parsed);
+      const detail =
+        typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
+          ? redactSecretText(String((safeParsed as { detail: unknown }).detail))
+          : JSON.stringify(safeParsed);
+      throw new WorkerosApiError(
+        `POST /chat failed with HTTP ${response.status}: ${detail}`,
+        response.status,
+        parsed,
+      );
+    }
+    if (!response.body) {
+      throw new WorkerosApiError("POST /chat response has no body");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split(/\r?\n\r?\n/);
+      buffer = chunks.pop() || "";
+      for (const chunk of chunks) {
+        if (!chunk || chunk.startsWith(":")) {
+          continue;
+        }
+        const dataLine = chunk.split(/\r?\n/).find((l) => l.startsWith("data:"));
+        if (!dataLine) {
+          continue;
+        }
+        const raw = dataLine.slice(5).trimStart();
+        let part: JsonObject;
+        try {
+          part = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        const partType = part.type as string | undefined;
+        if (partType === "text") {
+          textParts.push(String(part.text || ""));
+        } else if (partType === "tool-call") {
+          toolCalls.push(part);
+        } else if (partType === "finish") {
+          finishEvent = part;
+          await reader.cancel();
+          return buildChatResult(textParts, toolCalls, finishEvent);
+        }
+      }
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new WorkerosApiError(`workspace.chat timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  return buildChatResult(textParts, toolCalls, finishEvent);
+}
+
+function buildChatResult(
+  textParts: string[],
+  toolCalls: JsonObject[],
+  finishEvent: JsonObject | null,
+): JsonObject {
+  return {
+    reply: textParts.join(""),
+    tool_calls: toolCalls,
+    conversation_id: finishEvent?.conversation_id ?? null,
+    message_id: finishEvent?.message_id ?? null,
+  };
+}
+
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "workeros-mcp",
@@ -778,6 +885,28 @@ export function createServer(): McpServer {
     },
     async ({ worker_id, app }) =>
       callTool(async () => jsonResult(await listTriggers(worker_id, app))),
+  );
+
+  server.registerTool(
+    "workspace.chat",
+    {
+      title: "Chat with Workspace Agent",
+      description:
+        "Send a message to the Workeros workspace agent and receive a streamed reply. " +
+        "The agent can list workers, inspect runs, create workers, manage secrets, and more. " +
+        "Supply conversation_id to continue an existing conversation (enables anaphor resolution).",
+      inputSchema: {
+        message: z.string().min(1).describe("The message to send to the workspace agent."),
+        conversation_id: z.string().optional().describe("Optional conversation ID to continue a previous session."),
+        timeout_ms: z.number().optional().default(120000).describe("Maximum wait time in milliseconds."),
+      },
+      annotations: { readOnlyHint: false, openWorldHint: true },
+    },
+    async ({ message, conversation_id, timeout_ms = 120000 }) =>
+      callTool(async () => {
+        const parts = await consumeChatStream(message, conversation_id, timeout_ms);
+        return jsonResult(parts);
+      }),
   );
 
   return server;

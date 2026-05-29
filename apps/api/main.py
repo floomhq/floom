@@ -7736,6 +7736,145 @@ def deny_cli_device(
     return {"ok": True, "client_name": record.get("client_name") or "unknown"}
 
 
+# ---------------------------------------------------------------------------
+# S37 — Workspace agent /chat endpoint + conversation history
+# ---------------------------------------------------------------------------
+
+
+class ChatRequest(BaseModel):
+    message: str
+    conversation_id: Optional[str] = None
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: Optional[str] = None
+    created_at: str
+    updated_at: str
+    message_count: int
+
+
+class ConversationDetail(BaseModel):
+    id: str
+    title: Optional[str] = None
+    created_at: str
+    updated_at: str
+    messages: List[Dict[str, Any]]
+
+
+@app.get("/workspace")
+async def get_workspace(auth: AuthContext = Depends(get_auth_context)) -> PlainTextResponse:
+    """Return the current workspace.md content."""
+    from chat_service import get_workspace_md
+    return PlainTextResponse(get_workspace_md(), media_type="text/markdown")
+
+
+@app.put("/workspace", status_code=204)
+async def put_workspace(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Response:
+    """Update workspace.md (replaces entire content)."""
+    from chat_service import set_workspace_md
+    body = await request.body()
+    content = body.decode("utf-8", errors="replace")
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="workspace.md content cannot be empty")
+    set_workspace_md(content)
+    return Response(status_code=204)
+
+
+@app.post("/chat")
+async def post_chat(
+    payload: ChatRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> StreamingResponse:
+    """Stream a workspace agent response as Server-Sent Events.
+
+    Each SSE event is a JSON-encoded AI SDK part:
+      {"type": "text", "text": "..."}
+      {"type": "tool-call", "toolName": "...", "args": {...}, "callId": "..."}
+      {"type": "tool-result", "callId": "...", "result": {...}}
+      {"type": "finish", "conversation_id": "...", "message_id": "..."}
+    """
+    import asyncio
+    from chat_service import stream_chat
+
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    part_queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
+    loop = asyncio.get_running_loop()
+
+    async def _run_in_thread():
+        """Execute the agent in a thread (agent driver is sync-bridged)."""
+        try:
+            await stream_chat(
+                message=message,
+                user_id=auth.user_id,
+                conversation_id=payload.conversation_id,
+                part_queue=part_queue,
+            )
+        except Exception as exc:
+            logger.exception("chat background task failed")
+            try:
+                await part_queue.put({"type": "error", "error": str(exc)})
+                await part_queue.put({"type": "finish", "conversation_id": None, "message_id": None})
+            except Exception:
+                pass
+
+    task = loop.create_task(_run_in_thread())
+
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                task.cancel()
+                break
+            try:
+                part = await asyncio.wait_for(part_queue.get(), timeout=5.0)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            yield f"data: {json.dumps(part, default=str)}\n\n"
+            if part.get("type") == "finish":
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/conversations", response_model=List[ConversationSummary])
+async def list_conversations(
+    auth: AuthContext = Depends(get_auth_context),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> List[Dict[str, Any]]:
+    """List conversations for the authenticated user."""
+    from chat_service import list_conversations as _list
+    return _list(auth.user_id, limit=limit)
+
+
+@app.get("/conversations/{conversation_id}")
+async def get_conversation_detail(
+    conversation_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Get a conversation with its messages."""
+    from chat_service import get_conversation, list_conversation_messages
+    conv = get_conversation(conversation_id, auth.user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    messages = list_conversation_messages(conversation_id, auth.user_id)
+    return {**conv, "messages": messages}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
