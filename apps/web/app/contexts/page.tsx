@@ -82,9 +82,39 @@ function ContextsPage() {
   }, []);
 
   useEffect(() => {
-    loadContexts()
-      .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Failed to load knowledge packs"))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    // G5 FIX 5 (P2-A): the initial load occasionally hit a transient
+    // "Failed to fetch" (network hiccup / cold proxy) and surfaced the raw
+    // browser error as a toast, even though /contexts returns 200 [] correctly.
+    // Retry once on a transient fetch error before alarming the operator, and
+    // never show the raw "Failed to fetch" string.
+    const isTransientFetchError = (error: unknown) =>
+      error instanceof TypeError ||
+      (error instanceof Error && /failed to fetch|load failed|network/i.test(error.message));
+
+    (async () => {
+      try {
+        await loadContexts();
+      } catch (error: unknown) {
+        if (isTransientFetchError(error)) {
+          try {
+            await new Promise((r) => setTimeout(r, 600));
+            if (cancelled) return;
+            await loadContexts();
+          } catch {
+            if (!cancelled) toast.error("Couldn't reach the server. Check your connection and retry.");
+          }
+        } else if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : "Failed to load knowledge packs");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [loadContexts]);
 
   const filteredContexts = useMemo(() => {
