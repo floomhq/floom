@@ -58,7 +58,7 @@ def main():
     emails = _fetch_emails_via_proxy(gmail_conn_id, query, max_results)
 
     if not emails:
-        summary = f"No emails found for query `{query}`."
+        summary = f"## Gmail Brief — `{query}`\n\nNo emails matched the query. Your inbox is clear or no messages match the filter.\n\n---\n*Run completed at {__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}*"
     elif openai_api_key:
         summary = _summarize_with_openai(emails, openai_api_key, query)
     else:
