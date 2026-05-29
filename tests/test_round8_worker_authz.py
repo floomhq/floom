@@ -475,7 +475,130 @@ def test_stock_worker_detail_omits_sensitive_fields(monkeypatch, tmp_path):
     assert "source" not in body
     assert "env" not in body["config"]
     assert "webhook_secret" not in body["config"]
-    assert all(item["path"] != ".env" for item in body["files"])
+    assert body["manifest_yaml"] is None
+    assert body["run_py"] is None
+    assert body["skill_md_content"] is None
+    assert body["run_py_content"] is None
+    assert body["files"] == []
+
+
+def test_internal_shipped_workers_are_hidden_from_public_api(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief", "slack-listener"))
+    client = TestClient(main.app)
+
+    listed = client.get("/workers", headers=_headers("user-a"))
+    hidden_detail = client.get("/workers/slack-listener", headers=_headers("user-a"))
+
+    assert listed.status_code == 200, listed.text
+    assert hidden_detail.status_code == 404, hidden_detail.text
+    worker_ids = {item["id"] for item in listed.json()}
+    assert "research_brief" in worker_ids
+    assert "slack-listener" not in worker_ids
+
+
+def test_hidden_internal_worker_runs_stay_inaccessible(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief", "slack-listener"))
+    client = TestClient(main.app)
+    repos = main.get_repositories()
+    main._reload_workers_for_user("user-a")
+
+    visible_run_id = main.create_run(
+        "research_brief",
+        {},
+        trigger_source="audit",
+        user_id="user-a",
+        repos=repos,
+    )
+    hidden_run_id = main.create_run(
+        "slack-listener",
+        {},
+        trigger_source="audit",
+        user_id="user-a",
+        repos=repos,
+    )
+    main.update_run_status(
+        hidden_run_id,
+        main.RunStatus.FAILED.value,
+        error="Missing secrets: OPENAI_API_KEY",
+        user_id="user-a",
+        repos=repos,
+    )
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id=hidden_run_id,
+        level="info",
+        message="Missing secrets: OPENAI_API_KEY",
+        timestamp=main.now_iso(),
+    )
+
+    listed = client.get("/runs", headers=_headers("user-a"))
+
+    assert listed.status_code == 200, listed.text
+    run_ids = {item["id"] for item in listed.json()}
+    assert visible_run_id in run_ids
+    assert hidden_run_id not in run_ids
+
+    checks = {
+        "detail": client.get(f"/runs/{hidden_run_id}", headers=_headers("user-a")),
+        "stream": client.get(f"/runs/{hidden_run_id}/stream", headers=_headers("user-a")),
+        "events": client.get(f"/runs/{hidden_run_id}/events", headers=_headers("user-a")),
+        "logs": client.get(f"/runs/{hidden_run_id}/logs", headers=_headers("user-a")),
+    }
+    for name, response in checks.items():
+        assert response.status_code == 404, f"{name}: {response.status_code} {response.text}"
+
+
+def test_public_run_redacts_secret_names_across_read_surfaces(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief",))
+    client = TestClient(main.app)
+    repos = main.get_repositories()
+    main._reload_workers_for_user("user-a")
+
+    run_id = main.create_run(
+        "research_brief",
+        {},
+        trigger_source="audit",
+        user_id="user-a",
+        repos=repos,
+    )
+    leaked_error = "Missing secrets: OPENAI_API_KEY, ANTHROPIC_API_KEY"
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id=run_id,
+        level="info",
+        message=leaked_error,
+        timestamp=main.now_iso(),
+    )
+    main.update_run_status(
+        run_id,
+        main.RunStatus.FAILED.value,
+        error=leaked_error,
+        user_id="user-a",
+        repos=repos,
+    )
+
+    list_response = client.get("/runs", headers=_headers("user-a"))
+    detail_response = client.get(f"/runs/{run_id}", headers=_headers("user-a"))
+    logs_response = client.get(f"/runs/{run_id}/logs", headers=_headers("user-a"))
+    stream_response = client.get(f"/runs/{run_id}/stream", headers=_headers("user-a"))
+    events_response = client.get(f"/runs/{run_id}/events", headers=_headers("user-a"))
+
+    assert list_response.status_code == 200, list_response.text
+    assert detail_response.status_code == 200, detail_response.text
+    assert logs_response.status_code == 200, logs_response.text
+    assert stream_response.status_code == 200, stream_response.text
+    assert events_response.status_code == 200, events_response.text
+
+    summaries = {item["id"]: item for item in list_response.json()}
+    assert summaries[run_id]["error"] == "Missing required secrets"
+    assert detail_response.json()["error"] == "Missing required secrets"
+    assert detail_response.json()["logs"][0]["message"] == "Missing required secrets"
+    assert logs_response.json()[0]["message"] == "Missing required secrets"
+    assert "Missing required secrets" in stream_response.text
+    assert "Missing required secrets" in events_response.text
+    assert "OPENAI_API_KEY" not in stream_response.text
+    assert "OPENAI_API_KEY" not in events_response.text
+    assert "OPENAI_API_KEY" not in detail_response.text
 
 
 def test_worker_write_routes_reject_owner_mass_assignment(monkeypatch, tmp_path):
