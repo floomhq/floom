@@ -1621,3 +1621,29 @@ Source: `docs/audits/final-gate-G5-rescore4-2026-05-29.md`. All three closed and
 **Scope:** ONLY these two fixes. No wedge-gate / security / env-var / FLOOM_SECRET changes.
 
 **Status:** VERIFIED LIVE (deployed `8211c29`, 2026-05-29 PM). PR #300.
+
+---
+
+## R17 referee — two genuinely-real security residuals (2026-05-29)
+
+Branch `fix/composio-execute-auth-and-csp-2026-05-29`. Detail: `docs/audits/round17-fix-followup-2026-05-29.md`.
+
+### #SEC1 composio-execute proxy connection fallback not owner-scoped (MEDIUM multi-tenant / LOW single-tenant) — FIXED + TESTED
+
+**Where:** `apps/api/main.py` `composio_execute_proxy` (~L7238), `apps/api/db/sqlite.py` `SqliteRunRepository.get_any`.
+
+**Symptom:** Connection fallback picked "first active connection for the app" with no owner scoping, and read the owner from `run_row['user_id']` (a column the `runs` table does not have — owner lives on `workers.owner_id`). Multi-tenant Cloud: owner A's running worker could drive owner B's connected account.
+
+**Fix:** Derive owner from the run's worker; scope the connection lookup to that owner via `repos.connections.list(user_id=owner_id)`; reject when worker/owner unresolved. Documented `runs.get_any()` as unscoped/capability-only and confirmed it is off all authed read paths.
+
+**Proof:** `tests/test_composio_execute_owner_scope.py` 3/3 (owner-scoping picks owner's conn over a sibling owner's; garbage run_id → 404; non-running run → 403). Single-tenant unchanged.
+
+**Status:** FIXED. (live proof appended after deploy)
+
+### #SEC2 CSP `script-src 'unsafe-inline'` (LOW) — DOCUMENTED + LEFT
+
+**Where:** `apps/web/next.config.ts`.
+
+**Decision:** Nonce CSP in Next 16 app-router needs middleware + forced dynamic rendering, risking hydration regressions — not worth breaking a working app for a LOW finding. Left `'unsafe-inline'` with rationale + `TODO(cloud-ga)` to nonce before the multi-tenant Cloud serves untrusted-tenant content. Live site verified loading.
+
+**Status:** DOCUMENTED-AND-LEFT (residual acknowledged).
