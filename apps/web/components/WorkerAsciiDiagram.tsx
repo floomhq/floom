@@ -1,4 +1,21 @@
 import * as React from "react";
+import {
+  AlignLeft,
+  Clock,
+  FileText,
+  Globe,
+  Hash,
+  List,
+  Mail,
+  Play,
+  Sparkles,
+  Table,
+  ToggleLeft,
+  Type,
+  User,
+  Webhook,
+  type LucideIcon,
+} from "lucide-react";
 import { BrandLogo, normalizeBrandSlug } from "@/components/connections/BrandLogo";
 import { cn } from "@/lib/utils";
 
@@ -8,39 +25,36 @@ import { cn } from "@/lib/utils";
 //
 // Federico (2026-05-29): "draw ascii for each worker, powered by these logos,
 // on the description view — polished ascii where the lines are NOT dashed and
-// fit our design system… basically a layer around ascii."
+// fit our design system… basically a layer around ascii." Then (FIX 1):
+// "no truncated text" + "show the type icons IN the visual".
 //
 // This is NOT raw terminal output. It is an architecture diagram drawn in
-// SOLID box-drawing characters (─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ ▸), rendered in the app
+// SOLID box-drawing characters (─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼), rendered in the app
 // mono font, wrapped in the design system (--radius-card frame, --bg-card
 // surface, --line hairline), and themed with design-system colors:
 //   • input / output node text  → --ink
 //   • connector rules / buses    → --ink-faint
 //   • the worker node + trigger  → --accent
-//   • connection nodes          → carry their real brand mark (BrandLogo) so
-//                                  the diagram is "powered by the logos".
+//   • a type glyph (lucide) is overlaid on the LEADING cell of every input /
+//     output / worker node (text→Type, file→FileText, person→User, web→Globe…)
+//     so the diagram visually CARRIES the type icons, like the reference.
+//   • connection brand logos      → the real BrandLogo "POWERED BY" strip below.
 //
-// The diagram is built DETERMINISTICALLY from the worker config (NO LLM). It is
-// laid out on a fixed 2-D character grid (string matrix) so monospace alignment
-// holds across widths and never misaligns. Long names truncate cleanly. The
-// inputs converge into the worker via a single vertical bus (┬ ┤ ┴ junctions),
-// and the worker fans out to the outputs the same way — so every line actually
-// connects. 0-input / 0-output / 0-connection workers still render a clean,
-// non-broken diagram (trigger → worker → result).
+// NO TRUNCATION: every column sizes itself to its LONGEST label (capped at
+// MAX_INNER cells), so labels read in full ("CV file (PDF, DOCX, TXT)",
+// "Candidate Writeup", "Extracted Profile"). If the whole diagram is wider
+// than the card it scrolls horizontally inside the framed card (overflow-x).
 //
-// Shape (left → right):
+// ICON ALIGNMENT: the text grid is pure box-drawing (alignment never breaks).
+// The lucide type glyphs are a SEPARATE absolute overlay positioned in `ch`
+// units — `1ch` is exactly the monospace advance width, so each glyph lands on
+// its node's leading inner cell with pixel-perfect grid alignment. The text
+// grid reserves that leading cell (a blank slot) so the glyph never collides
+// with the label. Box-drawing characters and connectors are untouched.
 //
-//   INPUTS                WORKER                 OUTPUTS
-//   ┌──────────┐  ┬   ┌──────────────┐   ┬─▸ ┌──────────┐
-//   │ ▸ repo   │──┤   │  github-…    │   │   │ ▸ digest │
-//   └──────────┘  ┼─▸ │  ──────────  │ ─▸┤   └──────────┘
-//   ┌──────────┐  │   │  scheduled   │   ┴─▸ ┌──────────┐
-//   │ ▸ since  │──┴   └──────────────┘       │ ▸ report │
-//   └──────────┘                             └──────────┘
-//
-// The connection brand logos are rendered as a real BrandLogo "engine" strip
-// beneath the diagram — the ASCII gives structure, the logos give identity
-// (the hybrid Federico asked for).
+// Built DETERMINISTICALLY from the worker config (NO LLM), on a fixed 2-D
+// character grid so monospace alignment holds. 0-input / 0-output / 0-connection
+// workers still render a clean diagram (trigger → worker → result).
 // ---------------------------------------------------------------------------
 
 const B = {
@@ -50,7 +64,6 @@ const B = {
   br: "┘",
   h: "─",
   v: "│",
-  arrow: "▸",
   teeL: "┤",
   teeR: "├",
   cross: "┼",
@@ -70,13 +83,53 @@ export interface WorkerAsciiDiagramProps {
 }
 
 // --- layout constants (all widths in monospace cells) ----------------------
-const NODE_INNER = 16; // inner content width of input/output boxes
-const NODE_W = NODE_INNER + 2; // full box width incl. borders
-const WORKER_INNER = 18; // inner width of the central worker box
 const NODE_ROWS = 3; // top / content / bottom
 const GAP_ROWS = 1; // blank row between stacked nodes
 const STUB = 2; // node→bus stub length
 const ZONE_W = 6; // total connector-zone width per side
+const ICON_SLOT = 2; // leading cells reserved inside a box for the type glyph
+const MIN_INNER = 12; // floor so short labels still look like boxes
+const MAX_INNER = 40; // cap so a pathological label still scrolls, not explodes
+
+// --- type → lucide glyph (shared vocabulary with WorkerIconPills) -----------
+function nodeIcon(n: DiagramNode): LucideIcon {
+  const t = (n.type || "").toLowerCase();
+  const hint = `${n.name || ""} ${n.label || ""}`.toLowerCase();
+  if (/\b(person|name|contact|author|owner|candidate|user)\b/.test(hint)) return User;
+  if (/\b(email|e-mail)\b/.test(hint)) return Mail;
+  if (/\b(url|link|website|domain|web)\b/.test(hint)) return Globe;
+  if (/\b(csv|table|spreadsheet|rows?|columns?)\b/.test(hint)) return Table;
+  if (/\b(file|pdf|docx?|attachment|document)\b/.test(hint)) return FileText;
+  if (/\b(list|profile|items?|array)\b/.test(hint)) return List;
+  switch (t) {
+    case "textarea":
+      return AlignLeft;
+    case "number":
+      return Hash;
+    case "boolean":
+      return ToggleLeft;
+    case "select":
+      return List;
+    case "url":
+      return Globe;
+    case "email":
+      return Mail;
+    case "file":
+      return FileText;
+    case "text":
+    case "string":
+    default:
+      return Type;
+  }
+}
+
+function triggerGlyph(triggerType?: string): LucideIcon {
+  const t = (triggerType || "").toLowerCase();
+  if (t === "schedule" || t === "cron" || t === "scheduled") return Clock;
+  if (t === "webhook") return Webhook;
+  if (t === "composio" || t === "event") return Play;
+  return Sparkles;
+}
 
 // --- helpers ---------------------------------------------------------------
 
@@ -99,25 +152,33 @@ function triggerWord(triggerType?: string): string {
   return "manual";
 }
 
+// Inner content width for a side column: the longest label + the icon slot,
+// clamped to [MIN_INNER, MAX_INNER]. Sizing to content is what kills the
+// truncation Federico flagged.
+function columnInner(labels: string[]): number {
+  const longest = labels.reduce((m, l) => Math.max(m, l.length), 0);
+  return Math.min(MAX_INNER, Math.max(MIN_INNER, longest + ICON_SLOT + 1));
+}
+
+// A box node. The first ICON_SLOT cells are left blank (the lucide glyph is
+// overlaid there); the label follows, clipped only at the (content-sized) cap.
 function boxNode(label: string, innerWidth: number): [string, string, string] {
-  const text = clip(label, innerWidth - 2); // room for "▸ "
-  const padded = `${B.arrow} ${text}`.padEnd(innerWidth, " ");
+  const textRoom = innerWidth - ICON_SLOT - 1; // 1 trailing space breathing room
+  const text = clip(label, textRoom);
+  const content = `${" ".repeat(ICON_SLOT)}${text}`.padEnd(innerWidth, " ");
   const horiz = B.h.repeat(innerWidth);
-  return [
-    `${B.tl}${horiz}${B.tr}`,
-    `${B.v}${padded}${B.v}`,
-    `${B.bl}${horiz}${B.br}`,
-  ];
+  return [`${B.tl}${horiz}${B.tr}`, `${B.v}${content}${B.v}`, `${B.bl}${horiz}${B.br}`];
 }
 
 // A side column of stacked boxes, vertically centered within `total` rows.
-function buildSideColumn(labels: string[], width: number, total: number): string[] {
+function buildSideColumn(labels: string[], inner: number, total: number): string[] {
+  const width = inner + 2;
   const rows: string[] = [];
   const blockH = labels.length * NODE_ROWS + (labels.length - 1) * GAP_ROWS;
   const topPad = Math.max(0, Math.floor((total - blockH) / 2));
   for (let i = 0; i < topPad; i++) rows.push(" ".repeat(width));
   labels.forEach((label, idx) => {
-    const [a, b, c] = boxNode(label, width - 2);
+    const [a, b, c] = boxNode(label, inner);
     rows.push(a, b, c);
     if (idx < labels.length - 1) rows.push(" ".repeat(width));
   });
@@ -138,13 +199,14 @@ function nodeCenterRows(labels: string[], total: number): number[] {
   return arr;
 }
 
-// The central worker box: name / rule / trigger, vertically centered.
+// The central worker box: name / rule / trigger, vertically centered. Reserves
+// the same leading icon slot on the name row for the worker glyph.
 function buildWorkerColumn(
   name: string,
   trigger: string,
+  inner: number,
   total: number,
 ): { rows: string[]; centerRow: number } {
-  const inner = WORKER_INNER;
   const horiz = B.h.repeat(inner);
   const center = (s: string) => {
     const t = clip(s, inner);
@@ -152,9 +214,13 @@ function buildWorkerColumn(
     const l = Math.floor(pad / 2);
     return `${" ".repeat(l)}${t}${" ".repeat(pad - l)}`;
   };
+  // Name row leaves the leading slot for the worker glyph, label left-aligned
+  // after it so the glyph never overlaps text.
+  const nameText = clip(name, inner - ICON_SLOT - 1);
+  const nameRow = `${" ".repeat(ICON_SLOT)}${nameText}`.padEnd(inner, " ");
   const lines = [
     `${B.tl}${horiz}${B.tr}`,
-    `${B.v}${center(name)}${B.v}`,
+    `${B.v}${nameRow}${B.v}`,
     `${B.v}${center(B.h.repeat(Math.min(10, inner)))}${B.v}`,
     `${B.v}${center(trigger)}${B.v}`,
     `${B.bl}${horiz}${B.br}`,
@@ -164,7 +230,7 @@ function buildWorkerColumn(
   for (let i = 0; i < topPad; i++) rows.push(" ".repeat(inner + 2));
   rows.push(...lines);
   while (rows.length < total) rows.push(" ".repeat(inner + 2));
-  // The connector should enter on the visual middle of the box (the rule row).
+  // The connector enters on the visual middle of the box (the rule row).
   const centerRow = topPad + 2;
   return { rows, centerRow };
 }
@@ -176,7 +242,7 @@ function leftZone(centers: number[], busRow: number, total: number): string[] {
   const busCol = STUB;
   // Single node aligned to the worker → clean straight rule, no bus.
   if (centers.length === 1 && centers[0] === busRow) {
-    for (let x = 0; x < ZONE_W; x++) g[busRow][x] = x === ZONE_W - 1 ? B.arrow : B.h;
+    for (let x = 0; x < ZONE_W; x++) g[busRow][x] = B.h;
     return g.map((r) => r.join(""));
   }
   const mn = Math.min(...centers, busRow);
@@ -188,25 +254,25 @@ function leftZone(centers: number[], busRow: number, total: number): string[] {
   }
   for (let x = busCol; x < ZONE_W; x++) {
     if (x === busCol) g[busRow][busCol] = centers.includes(busRow) ? B.cross : B.teeR;
-    else g[busRow][x] = x === ZONE_W - 1 ? B.arrow : B.h;
+    else g[busRow][x] = B.h;
   }
   return g.map((r) => r.join(""));
 }
 
 // Right connector zone: lead from worker to the bus, then stubs out to each
-// output center, with an arrow immediately before each output node.
+// output center.
 function rightZone(centers: number[], busRow: number, total: number): string[] {
   const g: string[][] = Array.from({ length: total }, () => Array(ZONE_W).fill(" "));
   const busCol = ZONE_W - 1 - STUB;
   if (centers.length === 1 && centers[0] === busRow) {
-    for (let x = 0; x < ZONE_W; x++) g[busRow][x] = x === ZONE_W - 1 ? B.arrow : B.h;
+    for (let x = 0; x < ZONE_W; x++) g[busRow][x] = B.h;
     return g.map((r) => r.join(""));
   }
   const mn = Math.min(...centers, busRow);
   const mx = Math.max(...centers, busRow);
   for (let r = mn; r <= mx; r++) g[r][busCol] = B.v;
   for (const c of centers) {
-    for (let x = busCol + 1; x < ZONE_W; x++) g[c][x] = x === ZONE_W - 1 ? B.arrow : B.h;
+    for (let x = busCol + 1; x < ZONE_W; x++) g[c][x] = B.h;
     g[c][busCol] = c === mn ? B.down : c === mx ? B.up : B.teeL;
   }
   for (let x = 0; x <= busCol; x++) {
@@ -236,6 +302,15 @@ interface Cell {
   tone: Tone;
 }
 
+// An overlaid type glyph, positioned on the character grid in `ch`/`em` units.
+interface IconMark {
+  key: string;
+  col: number; // absolute column (cells) of the glyph's leading edge
+  row: number; // absolute row (lines) — 0 = first grid row
+  Icon: LucideIcon;
+  tone: Tone;
+}
+
 export function WorkerAsciiDiagram({
   workerName,
   inputs = [],
@@ -257,27 +332,38 @@ export function WorkerAsciiDiagram({
     return out;
   }, [connections]);
 
-  const { headerRow, gridRows } = React.useMemo(() => {
+  const { headerRow, gridRows, iconMarks } = React.useMemo(() => {
     const trigger = triggerWord(triggerType);
 
     // 0-input → a single trigger node so the flow is never a dangling box.
-    const leftLabels =
+    const leftNodes: DiagramNode[] =
       inputs.length === 0
-        ? [`${trigger} trigger`]
-        : inputs.map(nodeLabel).filter(Boolean);
+        ? [{ label: `${trigger} trigger`, type: triggerType }]
+        : inputs.filter((n) => nodeLabel(n));
     // 0-output → a single "result" node.
-    const rightLabels =
-      outputs.length === 0 ? ["result"] : outputs.map(nodeLabel).filter(Boolean);
+    const rightNodes: DiagramNode[] =
+      outputs.length === 0 ? [{ label: "result" }] : outputs.filter((n) => nodeLabel(n));
+
+    const leftLabels = leftNodes.map(nodeLabel);
+    const rightLabels = rightNodes.map(nodeLabel);
+
+    const leftInner = columnInner(leftLabels);
+    const rightInner = columnInner(rightLabels);
+    const workerInner = Math.min(MAX_INNER, Math.max(18, workerName.length + ICON_SLOT + 1));
+
+    const leftW = leftInner + 2;
+    const workerW = workerInner + 2;
 
     const leftH = leftLabels.length * NODE_ROWS + (leftLabels.length - 1) * GAP_ROWS;
     const rightH = rightLabels.length * NODE_ROWS + (rightLabels.length - 1) * GAP_ROWS;
     const total = Math.max(leftH, rightH, 5);
 
-    const leftCol = buildSideColumn(leftLabels, NODE_W, total);
-    const rightCol = buildSideColumn(rightLabels, NODE_W, total);
+    const leftCol = buildSideColumn(leftLabels, leftInner, total);
+    const rightCol = buildSideColumn(rightLabels, rightInner, total);
     const { rows: workerCol, centerRow } = buildWorkerColumn(
-      clip(workerName, WORKER_INNER),
+      workerName,
       trigger,
+      workerInner,
       total,
     );
 
@@ -297,6 +383,42 @@ export function WorkerAsciiDiagram({
       ]);
     }
 
+    // Absolute column offsets of each segment's leading edge (cells).
+    const leftColStart = 0;
+    const workerColStart = leftW + ZONE_W;
+    const rightColStart = workerColStart + workerW + ZONE_W;
+    // Header rows occupy line 0 (label) + line 1 (spacer) before the grid; the
+    // overlay layer is anchored to the grid only, so grid row r → overlay row r.
+    const ICON_COL_OFFSET = 1; // inside the box: 1 border cell, then the glyph
+
+    const marks: IconMark[] = [];
+    leftCenters.forEach((row, i) => {
+      marks.push({
+        key: `li-${i}`,
+        col: leftColStart + ICON_COL_OFFSET,
+        row,
+        Icon: nodeIcon(leftNodes[i]),
+        tone: "ink",
+      });
+    });
+    rightCenters.forEach((row, i) => {
+      marks.push({
+        key: `ro-${i}`,
+        col: rightColStart + ICON_COL_OFFSET,
+        row,
+        Icon: nodeIcon(rightNodes[i]),
+        tone: "ink",
+      });
+    });
+    // Worker glyph on the name row (centerRow - 1).
+    marks.push({
+      key: "worker",
+      col: workerColStart + ICON_COL_OFFSET,
+      row: centerRow - 1,
+      Icon: triggerGlyph(triggerType),
+      tone: "accent",
+    });
+
     const headerCell = (text: string, width: number): string => {
       const t = clip(text, width);
       const pad = width - t.length;
@@ -305,17 +427,23 @@ export function WorkerAsciiDiagram({
     };
     const header: Cell[] = [
       {
-        text: headerCell(inputs.length === 0 ? "TRIGGER" : "INPUTS", NODE_W),
+        text: headerCell(inputs.length === 0 ? "TRIGGER" : "INPUTS", leftW),
         tone: "soft",
       },
       { text: " ".repeat(ZONE_W), tone: "faint" },
-      { text: headerCell("WORKER", WORKER_INNER + 2), tone: "soft" },
+      { text: headerCell("WORKER", workerW), tone: "soft" },
       { text: " ".repeat(ZONE_W), tone: "faint" },
-      { text: headerCell("OUTPUTS", NODE_W), tone: "soft" },
+      { text: headerCell("OUTPUTS", rightInner + 2), tone: "soft" },
     ];
 
-    return { headerRow: header, gridRows: rows };
+    return { headerRow: header, gridRows: rows, iconMarks: marks };
   }, [workerName, inputs, outputs, triggerType]);
+
+  // Grid metrics — keep these in lockstep with the <pre> font below so the
+  // `ch`/`em` overlay lands exactly on the character cells.
+  const FONT_PX = 12;
+  const LINE_H = 1.4; // em
+  const HEADER_OFFSET_EM = LINE_H + 0.5; // header line + its 0.5em margin-bottom
 
   return (
     <section className={cn("space-y-3", className)}>
@@ -324,45 +452,74 @@ export function WorkerAsciiDiagram({
         className="overflow-x-auto border border-[var(--line)] bg-[var(--bg-card)] px-5 py-4"
         style={{ borderRadius: "var(--radius-card)" }}
       >
-        <pre
-          aria-hidden="true"
-          className="m-0 select-none"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "12px",
-            lineHeight: "1.4",
-            letterSpacing: "0",
-            tabSize: 1,
-          }}
-        >
-          <div style={{ marginBottom: "0.5em" }}>
-            {headerRow.map((cell, i) => (
-              <span
-                key={`h-${i}`}
-                style={{
-                  color: cell.tone === "soft" ? "var(--ink-soft)" : "var(--ink-faint)",
-                  whiteSpace: "pre",
-                  fontWeight: 600,
-                  letterSpacing: "0.1em",
-                }}
-              >
-                {cell.text}
-              </span>
-            ))}
-          </div>
-          {gridRows.map((row, r) => (
-            <div key={`r-${r}`}>
-              {row.map((cell, c) => (
+        {/* The diagram is a positioned stack: the text grid (box-drawing) plus
+            an absolute glyph overlay measured in `ch` (monospace cell width)
+            and `em` (line height). The two layers share the exact same font
+            metrics, so glyphs land on their reserved leading cells. */}
+        <div className="relative inline-block" style={{ fontSize: `${FONT_PX}px` }}>
+          <pre
+            aria-hidden="true"
+            className="m-0 select-none"
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "1em",
+              lineHeight: `${LINE_H}`,
+              letterSpacing: "0",
+              tabSize: 1,
+            }}
+          >
+            <div style={{ marginBottom: "0.5em" }}>
+              {headerRow.map((cell, i) => (
                 <span
-                  key={`c-${r}-${c}`}
-                  style={{ color: toneColor(cell.tone), whiteSpace: "pre" }}
+                  key={`h-${i}`}
+                  style={{
+                    color: cell.tone === "soft" ? "var(--ink-soft)" : "var(--ink-faint)",
+                    whiteSpace: "pre",
+                    fontWeight: 600,
+                    letterSpacing: "0.1em",
+                  }}
                 >
                   {cell.text}
                 </span>
               ))}
             </div>
-          ))}
-        </pre>
+            {gridRows.map((row, r) => (
+              <div key={`r-${r}`}>
+                {row.map((cell, c) => (
+                  <span
+                    key={`c-${r}-${c}`}
+                    style={{ color: toneColor(cell.tone), whiteSpace: "pre" }}
+                  >
+                    {cell.text}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </pre>
+
+          {/* Type-glyph overlay. Positioned in `ch` (exact cell advance) and
+              `em` (line box). Centered within the cell's box vertically. */}
+          <div
+            className="pointer-events-none absolute left-0 top-0"
+            style={{ fontFamily: "var(--font-mono)", lineHeight: `${LINE_H}` }}
+            aria-hidden="true"
+          >
+            {iconMarks.map((m) => (
+              <m.Icon
+                key={m.key}
+                className="absolute"
+                style={{
+                  left: `${m.col}ch`,
+                  top: `calc(${HEADER_OFFSET_EM}em + ${m.row * LINE_H}em + ${LINE_H / 2}em)`,
+                  width: "1.05em",
+                  height: "1.05em",
+                  transform: "translateY(-50%)",
+                  color: toneColor(m.tone),
+                }}
+              />
+            ))}
+          </div>
+        </div>
 
         {/* Logo "engine" strip — the worker's connection brand marks layered
             beneath the ASCII as the hybrid identity layer Federico asked for.
