@@ -3,15 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// Shared tabs row at the top of /connections, /connections/browse, and
-// /secrets. S24: added "Secrets" so the sidebar drops its standalone item.
-// Connections + secrets are the same mental model (credentials a worker
-// can read) so they share a surface.
+// Shared tabs row at the top of /connections, /connections/browse,
+// /connections/mcp, and /secrets. S41: added "MCP" tab for MCP server management.
 export function ConnectionsTabs() {
   const pathname = usePathname();
   const tabs = [
     { href: "/connections", label: "Connected", match: (p: string) => p === "/connections" },
     { href: "/connections/browse", label: "Browse", match: (p: string) => p.startsWith("/connections/browse") },
+    { href: "/connections/mcp", label: "MCP", match: (p: string) => p.startsWith("/connections/mcp") },
     { href: "/secrets", label: "Secrets", match: (p: string) => p.startsWith("/secrets") },
   ];
 
