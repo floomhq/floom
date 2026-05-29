@@ -315,3 +315,157 @@ def test_register_authored_worker_skips_broken_bundle(monkeypatch, tmp_path):
     )
     assert worker_id is None
     assert not any(workers_dir.iterdir())
+
+
+# ---------------------------------------------------------------------------
+# Fix 3 (2026-05-29): post-generation smoke + bounded repair safety net.
+# A generated SCRIPT-mode worker must be PROVEN to run before it is presented
+# as ready. These cover the pure helpers; the E2B driver call itself is not
+# exercised here (no network), matching this file's no-HTTP/no-auth style.
+# ---------------------------------------------------------------------------
+
+def _script_worker_config(name="word-counter", with_file=False):
+    """Build a projected WorkerConfig for a script-mode worker."""
+    from models import WorkerConfig
+
+    inputs = [
+        {"name": "text", "label": "Text", "type": "textarea", "required": True, "kind": "scalar"},
+    ]
+    if with_file:
+        inputs.append(
+            {"name": "csv_file", "label": "CSV", "type": "file", "required": True, "kind": "file",
+             "path": "inputs/csv_file"}
+        )
+    raw = {
+        "schema_version": "0.3",
+        "name": name,
+        "title": "Word Counter",
+        "description": "Counts the words in a block of text.",
+        "version": "0.1.0",
+        "exec": {
+            "entry": "run.py",
+            "command": "python run.py",
+            "runtime": "python311",
+            "runner": "e2b",
+            "inputs": inputs,
+            "outputs": [
+                {"name": "result", "label": "Result", "type": "file", "kind": "file",
+                 "path": "out/result.json", "media_type": "application/json"}
+            ],
+        },
+        "trigger": {"type": "manual"},
+    }
+    from models import parse_worker_manifest, worker_contract_to_worker_config, WorkerConfig
+
+    parsed = parse_worker_manifest(raw)
+    if isinstance(parsed, WorkerConfig):
+        return parsed
+    return worker_contract_to_worker_config(parsed, name)
+
+
+def test_build_smoke_inputs_scalar_uses_sample_literal(tmp_path):
+    import run_service
+
+    config = _script_worker_config()
+    bundle = {"sample_input_json": json.dumps({"text": "hello world"})}
+    inputs = run_service._build_smoke_inputs(config, bundle, tmp_path)
+    # Scalar value is the literal — NOT a path, NOT opened.
+    assert inputs["text"] == "hello world"
+
+
+def test_build_smoke_inputs_scalar_falls_back_when_no_sample(tmp_path):
+    import run_service
+
+    config = _script_worker_config()
+    inputs = run_service._build_smoke_inputs(config, {}, tmp_path)
+    # Required scalar gets a deterministic placeholder so the smoke isn't blocked.
+    assert inputs["text"] == "sample"
+
+
+def test_build_smoke_inputs_file_is_materialized_as_abs_path(tmp_path):
+    import os as _os
+    import run_service
+
+    config = _script_worker_config(with_file=True)
+    bundle = {"sample_input_json": json.dumps({"text": "hi", "csv_file": "a,b\n1,2\n"})}
+    inputs = run_service._build_smoke_inputs(config, bundle, tmp_path)
+    # File input is an ABSOLUTE path to a real file (what the E2B driver needs).
+    assert _os.path.isabs(inputs["csv_file"])
+    assert _os.path.isfile(inputs["csv_file"])
+    assert open(inputs["csv_file"]).read() == "a,b\n1,2\n"
+
+
+def test_strip_code_fences():
+    import run_service
+
+    assert run_service._strip_code_fences("```python\nx = 1\n```") == "x = 1"
+    assert run_service._strip_code_fences("x = 1") == "x = 1"
+
+
+def test_repair_run_py_skips_without_key(monkeypatch):
+    import run_service
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    out = run_service._repair_run_py(
+        run_code="print('x')",
+        failure="NameError: name 'os' is not defined",
+        secrets={},
+        log_fn=lambda *a, **k: None,
+    )
+    assert out is None
+
+
+def test_repair_run_py_rejects_invalid_python(monkeypatch):
+    """The repair pass must never write syntactically invalid Python over the
+    broken file — a worse file is not a fix."""
+    import run_service
+
+    class _FakeResp:
+        class _Choice:
+            class _Msg:
+                content = "def main(:\n  pass"  # invalid syntax
+            message = _Msg()
+        choices = [_Choice()]
+
+    class _FakeClient:
+        def __init__(self, **kw):
+            self.chat = self
+            self.completions = self
+
+        def create(self, **kw):
+            return _FakeResp()
+
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", _FakeClient)
+    out = run_service._repair_run_py(
+        run_code="print('x')",
+        failure="boom",
+        secrets={"OPENAI_API_KEY": "sk-test"},
+        log_fn=lambda *a, **k: None,
+    )
+    assert out is None
+
+
+def test_smoke_skips_non_script_worker(monkeypatch, tmp_path):
+    """Agent-mode workers are not smoke-tested by this path."""
+    import worker_registry
+    import run_service
+
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    monkeypatch.setattr(worker_registry, "WORKERS_DIR", workers_dir)
+
+    # Register an agent-mode worker (SKILL.md entry).
+    import main
+    monkeypatch.setattr(worker_registry, "WORKERS_DIR", workers_dir)
+    files = [
+        main.DraftFile(path="worker.yml", content=_valid_worker_yml("agent-worker")),
+        main.DraftFile(path="SKILL.md", content="# Agent\n"),
+    ]
+    wid = main._register_worker_from_files(files, user_id="federico", repos=None)
+
+    out = run_service._smoke_and_repair_generated_worker(
+        wid, {}, user_id="federico", repos=None, log_fn=lambda *a, **k: None
+    )
+    assert out["status"] == "skipped"
+    assert "script" in out["reason"].lower()
