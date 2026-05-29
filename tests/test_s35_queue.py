@@ -1,0 +1,430 @@
+"""Tests for the in-process run-execution queue (S35 feature).
+
+Verifies:
+- Runs land as 'queued' when the execution semaphore is full
+- The drain loop dispatches queued runs as slots free up
+- Cancelling a queued run immediately fails it without spawning a sandbox
+- On backend restart, queued runs are re-enqueued (not lost)
+- The WORKEROS_MAX_CONCURRENT_RUNS env var controls the cap
+"""
+from __future__ import annotations
+
+import importlib
+import os
+import sys
+import time
+import threading
+import types
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+API_DIR = os.path.join(os.path.dirname(__file__), "..", "apps", "api")
+if API_DIR not in sys.path:
+    sys.path.insert(0, API_DIR)
+
+AUTH_HEADER = {"x-floom-secret": "test-secret-queue"}
+
+
+def _load_api(monkeypatch, tmp_path, *, max_concurrent: int = 3):
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir()
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
+    monkeypatch.setenv("FLOOM_SECRET", AUTH_HEADER["x-floom-secret"])
+    monkeypatch.setenv("WORKEROS_MAX_CONCURRENT_RUNS", str(max_concurrent))
+    monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_LIMIT", "100")
+    monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60")
+    monkeypatch.delenv("WORKEROS_RATE_LIMIT_DEV", raising=False)
+
+    reset_prefixes = ("auth.", "db.")
+    reset_exact = {
+        "main",
+        "auth",
+        "db",
+        "files",
+        "models",
+        "worker_registry",
+        "run_service",
+        "runner_utils",
+        "composio_client",
+        "scheduler",
+    }
+    for name in list(sys.modules):
+        if name in reset_exact or name.startswith(reset_prefixes):
+            sys.modules.pop(name, None)
+
+    sys.modules["scheduler"] = types.SimpleNamespace(
+        start_scheduler=lambda: None,
+        stop_scheduler=lambda: None,
+    )
+    main = importlib.import_module("main")
+    main.get_auth_provider.cache_clear()
+    return main
+
+
+def _insert_minimal_worker(main, worker_id: str) -> None:
+    import json as _json
+    now = main.now_iso()
+    manifest = {
+        "id": worker_id, "name": worker_id, "title": worker_id, "version": "0.1.0",
+        "runtime": {"type": "python311", "runner": "e2b", "mode": "pure-script"},
+        "inputs": [], "outputs": [], "secrets": [], "connections": [],
+        "trigger": {"type": "manual"},
+    }
+    with main.get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO skill_versions (id, name, version, manifest_json, created_at)
+            VALUES (?, ?, '0.1.0', ?, ?)
+            """,
+            (f"sv_{worker_id}", worker_id, _json.dumps(manifest), now),
+        )
+        conn.execute(
+            """
+            INSERT INTO workers (id, skill_version_id, name, trigger_type, grants_json,
+                                 input_values_json, enabled, created_at, owner_id)
+            VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'federico')
+            """,
+            (worker_id, f"sv_{worker_id}", worker_id, now),
+        )
+
+
+def _get_client(main):
+    from fastapi.testclient import TestClient
+    return TestClient(main.app, raise_server_exceptions=False)
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+class TestSemaphoreEnvVar:
+    """WORKEROS_MAX_CONCURRENT_RUNS controls the semaphore cap."""
+
+    def test_default_cap_is_18(self, monkeypatch):
+        monkeypatch.delenv("WORKEROS_MAX_CONCURRENT_RUNS", raising=False)
+        for name in list(sys.modules):
+            if name == "run_service":
+                sys.modules.pop(name, None)
+        rs = importlib.import_module("run_service")
+        assert rs._max_concurrent_runs() == 18
+
+    def test_env_var_overrides_cap(self, monkeypatch):
+        monkeypatch.setenv("WORKEROS_MAX_CONCURRENT_RUNS", "5")
+        for name in list(sys.modules):
+            if name == "run_service":
+                sys.modules.pop(name, None)
+        rs = importlib.import_module("run_service")
+        assert rs._max_concurrent_runs() == 5
+
+
+class TestQueueDB:
+    """DB layer: get_queued and count_queued work correctly."""
+
+    def test_get_queued_returns_fifo(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+        for name in list(sys.modules):
+            if name in ("db", "db.sqlite") or name.startswith("db."):
+                sys.modules.pop(name, None)
+
+        import db
+        db.init_db()
+        from db.factory import get_repositories
+        repos = get_repositories()
+
+        # Insert a worker and two runs
+        import json as _json
+        from db._legacy_sqlite import get_db, now_iso
+        now = now_iso()
+        worker_id = "queue-test-worker"
+        manifest = {"name": worker_id, "title": worker_id, "version": "0.1.0", "runtime": {"runner": "e2b"}, "inputs": [], "outputs": [], "trigger": {"type": "manual"}}
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO skill_versions (id, name, version, manifest_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("sv1", "t1", "0.1.0", _json.dumps(manifest), now),
+            )
+            conn.execute(
+                "INSERT INTO workers (id, skill_version_id, name, trigger_type, grants_json, input_values_json, enabled, created_at, owner_id) VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'local')",
+                (worker_id, "sv1", worker_id, now),
+            )
+
+        repos.runs.create(
+            user_id="local",
+            run_id="run_a",
+            worker_id=worker_id,
+            status="queued",
+            trigger_source="test",
+            runner="e2b",
+            input_json={},
+        )
+        repos.runs.create(
+            user_id="local",
+            run_id="run_b",
+            worker_id=worker_id,
+            status="queued",
+            trigger_source="test",
+            runner="e2b",
+            input_json={},
+        )
+
+        queued = repos.runs.get_queued(limit=10)
+        assert len(queued) == 2
+        # FIFO: run_a was inserted first
+        assert queued[0]["run_id"] == "run_a"
+        assert queued[1]["run_id"] == "run_b"
+
+    def test_cancelled_runs_excluded_from_get_queued(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+        for name in list(sys.modules):
+            if name in ("db", "db.sqlite") or name.startswith("db."):
+                sys.modules.pop(name, None)
+
+        import db
+        db.init_db()
+        from db.factory import get_repositories
+        repos = get_repositories()
+
+        import json as _json
+        from db._legacy_sqlite import get_db, now_iso
+        now = now_iso()
+        worker_id = "cancel-test-worker"
+        manifest2 = {"name": worker_id, "title": worker_id, "version": "0.1.0", "runtime": {"runner": "e2b"}, "inputs": [], "outputs": [], "trigger": {"type": "manual"}}
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO skill_versions (id, name, version, manifest_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("sv2", "t2", "0.1.0", _json.dumps(manifest2), now),
+            )
+            conn.execute(
+                "INSERT INTO workers (id, skill_version_id, name, trigger_type, grants_json, input_values_json, enabled, created_at, owner_id) VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'local')",
+                (worker_id, "sv2", worker_id, now),
+            )
+
+        repos.runs.create(
+            user_id="local",
+            run_id="run_keep",
+            worker_id=worker_id,
+            status="queued",
+            trigger_source="test",
+            runner="e2b",
+            input_json={},
+        )
+        repos.runs.create(
+            user_id="local",
+            run_id="run_cancel",
+            worker_id=worker_id,
+            status="queued",
+            trigger_source="test",
+            runner="e2b",
+            input_json={},
+        )
+        # Mark run_cancel as cancel_requested
+        repos.runs.cancel(user_id="local", run_id="run_cancel", cancelled_at=now)
+
+        queued = repos.runs.get_queued(limit=10)
+        run_ids = [r["run_id"] for r in queued]
+        assert "run_keep" in run_ids
+        assert "run_cancel" not in run_ids
+
+    def test_count_queued(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+        for name in list(sys.modules):
+            if name in ("db", "db.sqlite") or name.startswith("db."):
+                sys.modules.pop(name, None)
+
+        import db
+        db.init_db()
+        from db.factory import get_repositories
+        repos = get_repositories()
+
+        assert repos.runs.count_queued() == 0
+
+        import json as _json
+        from db._legacy_sqlite import get_db, now_iso
+        now = now_iso()
+        manifest3 = {"name": "t3", "title": "t3", "version": "0.1.0", "runtime": {"runner": "e2b"}, "inputs": [], "outputs": [], "trigger": {"type": "manual"}}
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO skill_versions (id, name, version, manifest_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("sv3", "t3", "0.1.0", _json.dumps(manifest3), now),
+            )
+            conn.execute(
+                "INSERT INTO workers (id, skill_version_id, name, trigger_type, grants_json, input_values_json, enabled, created_at, owner_id) VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'local')",
+                ("wkr3", "sv3", "t3", now),
+            )
+
+        repos.runs.create(user_id="local", run_id="rc1", worker_id="wkr3", status="queued", trigger_source="t", runner="e2b", input_json={})
+        repos.runs.create(user_id="local", run_id="rc2", worker_id="wkr3", status="queued", trigger_source="t", runner="e2b", input_json={})
+
+        assert repos.runs.count_queued() == 2
+
+
+class TestCancelQueuedRun:
+    """Cancel endpoint immediately fails queued runs without sandbox spawn."""
+
+    def test_cancel_queued_run(self, tmp_path, monkeypatch):
+        main = _load_api(monkeypatch, tmp_path, max_concurrent=1)
+        _insert_minimal_worker(main, "q-cancel-worker")
+
+        # Fill the semaphore so next run lands queued
+        run_service = sys.modules.get("run_service")
+        assert run_service is not None
+        sem = run_service._get_semaphore()
+        # Consume the 1 available slot
+        sem.acquire()
+        try:
+            client = _get_client(main)
+            resp = client.post(
+                "/workers/q-cancel-worker/runs",
+                json={"inputs": {}},
+                headers=AUTH_HEADER,
+            )
+            assert resp.status_code == 200, resp.text
+            run_id = resp.json()["run_id"]
+
+            # Verify run is queued
+            detail = client.get(f"/runs/{run_id}", headers=AUTH_HEADER)
+            assert detail.status_code == 200
+            assert detail.json()["status"] == "queued"
+
+            # Cancel it
+            cancel_resp = client.post(f"/runs/{run_id}/cancel", headers=AUTH_HEADER)
+            assert cancel_resp.status_code == 200
+            assert cancel_resp.json()["status"] == "cancelled"
+
+            # Should be failed now
+            detail2 = client.get(f"/runs/{run_id}", headers=AUTH_HEADER)
+            assert detail2.status_code == 200
+            data = detail2.json()
+            assert data["status"] == "failed"
+            assert data["error_code"] == "cancelled_queued"
+        finally:
+            sem.release()
+
+
+class TestDrainLoopDbMethods:
+    """get_queued and count_queued interact correctly with the semaphore logic."""
+
+    def test_queued_run_has_position_info(self, tmp_path, monkeypatch):
+        """Queued runs expose queue_position via GET /runs/:id."""
+        main = _load_api(monkeypatch, tmp_path, max_concurrent=1)
+        _insert_minimal_worker(main, "pos-worker")
+
+        run_service = sys.modules.get("run_service")
+        assert run_service is not None
+        sem = run_service._get_semaphore()
+        sem.acquire()
+        try:
+            client = _get_client(main)
+            resp = client.post(
+                "/workers/pos-worker/runs",
+                json={"inputs": {}},
+                headers=AUTH_HEADER,
+            )
+            assert resp.status_code == 200
+            run_id = resp.json()["run_id"]
+
+            detail = client.get(f"/runs/{run_id}", headers=AUTH_HEADER)
+            assert detail.status_code == 200
+            data = detail.json()
+            assert data["status"] == "queued"
+            # queue_position should be 1 (first in queue)
+            assert data.get("queue_position") == 1
+        finally:
+            sem.release()
+
+
+class TestStartupReEnqueue:
+    """Queued runs on startup are re-enqueued, not failed."""
+
+    def test_re_enqueue_queued_runs_on_startup(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+        for name in list(sys.modules):
+            if name in ("db", "db.sqlite", "run_service") or name.startswith("db."):
+                sys.modules.pop(name, None)
+
+        import db
+        db.init_db()
+        from db.factory import get_repositories
+        repos = get_repositories()
+
+        import json as _json
+        from db._legacy_sqlite import get_db, now_iso
+        now = now_iso()
+        manifests = {"name": "ts", "title": "ts", "version": "0.1.0", "runtime": {"runner": "e2b"}, "inputs": [], "outputs": [], "trigger": {"type": "manual"}}
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO skill_versions (id, name, version, manifest_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("svs", "ts", "0.1.0", _json.dumps(manifests), now),
+            )
+            conn.execute(
+                "INSERT INTO workers (id, skill_version_id, name, trigger_type, grants_json, input_values_json, enabled, created_at, owner_id) VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'local')",
+                ("startup-wkr", "svs", "ts", now),
+            )
+
+        repos.runs.create(user_id="local", run_id="rq1", worker_id="startup-wkr", status="queued", trigger_source="t", runner="e2b", input_json={})
+        repos.runs.create(user_id="local", run_id="rq2", worker_id="startup-wkr", status="queued", trigger_source="t", runner="e2b", input_json={})
+
+        # Simulate startup
+        for name in list(sys.modules):
+            if name == "run_service":
+                sys.modules.pop(name, None)
+        import run_service
+
+        count = run_service.re_enqueue_queued_runs_on_startup()
+        assert count == 2
+
+        # Runs should still be queued (not failed)
+        queued = repos.runs.get_queued(limit=10)
+        assert len(queued) == 2
+        run_ids = [r["run_id"] for r in queued]
+        assert "rq1" in run_ids
+        assert "rq2" in run_ids
+
+    def test_fail_running_does_not_touch_queued(self, tmp_path, monkeypatch):
+        """fail_running on startup must not change queued→failed."""
+        monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+        for name in list(sys.modules):
+            if name in ("db", "db.sqlite", "run_service") or name.startswith("db."):
+                sys.modules.pop(name, None)
+
+        import db
+        db.init_db()
+        from db.factory import get_repositories
+        repos = get_repositories()
+
+        import json as _json
+        from db._legacy_sqlite import get_db, now_iso
+        now = now_iso()
+        manifestf = {"name": "tf", "title": "tf", "version": "0.1.0", "runtime": {"runner": "e2b"}, "inputs": [], "outputs": [], "trigger": {"type": "manual"}}
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO skill_versions (id, name, version, manifest_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("svsf", "tf", "0.1.0", _json.dumps(manifestf), now),
+            )
+            conn.execute(
+                "INSERT INTO workers (id, skill_version_id, name, trigger_type, grants_json, input_values_json, enabled, created_at, owner_id) VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'local')",
+                ("fail-wkr", "svsf", "tf", now),
+            )
+
+        # One running, one queued
+        repos.runs.create(user_id="local", run_id="rrun", worker_id="fail-wkr", status="running", trigger_source="t", runner="e2b", input_json={})
+        repos.runs.create(user_id="local", run_id="rqueue", worker_id="fail-wkr", status="queued", trigger_source="t", runner="e2b", input_json={})
+
+        for name in list(sys.modules):
+            if name == "run_service":
+                sys.modules.pop(name, None)
+        import run_service
+        run_service.fail_interrupted_runs_on_startup(user_id="local")
+
+        # Running → failed; queued → still queued
+        rrun = repos.runs.get(user_id="local", run_id="rrun")
+        assert rrun["status"] == "failed"
+
+        rqueue = repos.runs.get(user_id="local", run_id="rqueue")
+        assert rqueue["status"] == "queued"

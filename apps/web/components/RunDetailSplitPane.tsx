@@ -209,6 +209,12 @@ function TimelineRow({ item }: { item: TimelineItem }) {
 }
 
 function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
+  if (run.status === "queued") {
+    const positionMsg = run.queue_position != null && run.queue_position > 0
+      ? `Waiting for a free execution slot (${run.queue_position - 1} ahead)`
+      : "Waiting for a free execution slot";
+    return <Task title="Queued" status="pending" detail={positionMsg} />;
+  }
   if (parts.length === 0) {
     return <Task title="Waiting for transcript" status={run.status === "failed" ? "failed" : "pending"} detail="No stream parts recorded yet." />;
   }
