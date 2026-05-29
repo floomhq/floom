@@ -167,11 +167,13 @@ function useOverview(initialData: SystemOverview | null) {
   }, []);
 
   useEffect(() => {
-    // If we already have server-fetched data, skip the initial client fetch.
-    if (initialData !== null) return;
     let cancelled = false;
     async function loadOnce() {
-      setLoading(true);
+      // Only show the skeleton when we have nothing to paint. With
+      // server-fetched initialData we revalidate silently in the background so
+      // the overview never strands a stale status (e.g. a run that finished
+      // after SSR still showing "Running" while /runs shows "Completed").
+      if (initialData === null) setLoading(true);
       try {
         const result = await api.system.overview();
         if (!cancelled) setData(result);
@@ -186,6 +188,17 @@ function useOverview(initialData: SystemOverview | null) {
       cancelled = true;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fetch when the tab regains focus so cross-view status stays consistent
+  // (navigating /runs -> /overview, or returning to the tab, surfaces the
+  // latest run statuses rather than the value cached at SSR time).
+  useEffect(() => {
+    function onFocus() {
+      void load();
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [load]);
 
   return { data, loading, reload: load };
 }
@@ -296,13 +309,25 @@ function ComingUp({
                 {formatTimeOfDay(item.next_fire_at)}
               </span>
               <span className="min-w-0">
-                <span
-                  className={cn(
-                    "block truncate text-sm text-[var(--text-primary)]",
-                    item.paused && "line-through decoration-[var(--text-muted)]",
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={cn(
+                      "block truncate text-sm",
+                      // Paused workers are de-emphasized (muted), not struck
+                      // through — strikethrough reads as cancelled/done for an
+                      // item that is otherwise listed as upcoming.
+                      item.paused
+                        ? "text-[var(--text-muted)]"
+                        : "text-[var(--text-primary)]",
+                    )}
+                  >
+                    {item.worker_name || humanizeSlug(item.worker_id, "Worker")}
+                  </span>
+                  {item.paused && (
+                    <span className="shrink-0 rounded-[var(--radius-pill)] border border-[var(--line)] px-1.5 py-px text-[10px] font-medium leading-none text-[var(--text-muted)]">
+                      Paused
+                    </span>
                   )}
-                >
-                  {item.worker_name || humanizeSlug(item.worker_id, "Worker")}
                 </span>
                 <span className="block text-xs text-[var(--text-muted)]">
                   {formatRelativeFuture(item.next_fire_at)} · {formatTriggerSource(item.trigger_source || item.trigger_label)}

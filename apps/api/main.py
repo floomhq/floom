@@ -8020,6 +8020,17 @@ def _overview_failure_cause(row: Dict[str, Any]) -> str:
         first_line = error_message.splitlines()[0].strip()
         if len(first_line) > 140:
             first_line = first_line[:137].rstrip() + "..."
+        # Avoid duplicated label prefixes, e.g. error_code "missing_secret"
+        # humanizes to "Missing secret" while the message already starts with
+        # "Missing secrets: …" — concatenating yields the doubled label
+        # "Missing secret: Missing secrets: …". When the message already leads
+        # with the (loosely-matched) humanized code, return the message alone.
+        normalized_code = re.sub(r"[^a-z]", "", error_code.lower())
+        normalized_msg_prefix = re.sub(
+            r"[^a-z]", "", first_line.lower().split(":", 1)[0]
+        )
+        if normalized_code and normalized_msg_prefix.startswith(normalized_code):
+            return first_line
         return f"{error_code}: {first_line}"
     return error_code
 
