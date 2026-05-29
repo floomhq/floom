@@ -373,6 +373,27 @@ def _infer_mode_from_entry(entry: str) -> Literal["agent", "pure-script"]:
     )
 
 
+def _default_command_from_entry(entry: str) -> Optional[str]:
+    """Derive a canonical exec.command from a script entry by extension.
+
+    Engine #211: the LLM frequently emits `exec.mode: pure-script` (or
+    `hybrid`) + `entry: run.py` WITHOUT a `command`. PR #184 added auto-repair
+    that injects `python <entry>`, but in the draft-and-create / draft-from-prompt
+    loops the WorkerContract validation ran (and 502'd) BEFORE the repair. By
+    defaulting the command inside WorkerContractExec validation we cover every
+    call site at once (draft-and-create, draft-from-prompt, upload, from-bundle,
+    disk-load).
+    """
+    lower = entry.lower()
+    if lower.endswith(".py"):
+        return f"python {entry}"
+    if lower.endswith(".sh"):
+        return f"bash {entry}"
+    if lower.endswith(".js"):
+        return f"node {entry}"
+    return None
+
+
 class WorkerContractExec(BaseModel):
     command: Optional[str] = None
     runtime: Literal["python311", "node22", "bash", "skill", "none"] = "skill"
@@ -446,6 +467,13 @@ class WorkerContractExec(BaseModel):
             else:
                 # pure-script / hybrid -> run.py
                 self.entry = "run.py"
+        # Engine #211: default exec.command from exec.entry for script modes
+        # when the author (often the LLM) omitted it. `.py` -> `python <entry>`,
+        # `.sh` -> `bash <entry>`, `.js` -> `node <entry>`. Only fall back to the
+        # hard error when we genuinely cannot derive a command (no entry).
+        if self.mode in ("pure-script", "hybrid") and not self.command:
+            if self.entry:
+                self.command = _default_command_from_entry(self.entry)
         # Validation: keep existing constraints.
         if self.mode in ("pure-script", "hybrid") and not self.command:
             raise ValueError(f"exec.command is required when exec.mode is {self.mode!r}")
@@ -562,6 +590,11 @@ class WorkerContract(BaseModel):
             raise ValueError("exec.runtime 'none' cannot declare exec.command")
         if self.exec.runtime == "none" and (self.entrypoint or self.entrypoints):
             raise ValueError("exec.runtime 'none' cannot declare entrypoints")
+        # Engine #211: default exec.command from exec.entry for script modes
+        # (covers the legacy path where mode was resolved to pure-script above
+        # from an entry but command was omitted).
+        if self.exec.mode in ("pure-script", "hybrid") and not self.exec.command and self.exec.entry:
+            self.exec.command = _default_command_from_entry(self.exec.entry)
         if self.exec.mode in ("pure-script", "hybrid") and not self.exec.command:
             raise ValueError(f"exec.command is required when exec.mode is {self.exec.mode!r}")
         # Canonicalize triggers: if `triggers` list present, use it; else derive from `trigger`.
