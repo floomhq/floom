@@ -1,0 +1,3 @@
+{
+  "note": "Schedule-triggered worker (0 9 * * *). No manual inputs required. Reads GITHUB_PAT from secrets."
+}
