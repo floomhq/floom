@@ -403,7 +403,6 @@ export function OverviewDashboard({
   const nextScheduled = nextScheduledAt
     ? `Next at ${formatTimeOfDay(nextScheduledAt)}`
     : "No scheduled runs";
-  const heroCount = completedThisWeek || data?.stats.runs_24h || 0;
   const runsToday = data?.stats.runs_today ?? data?.stats.runs_24h ?? 0;
   const completedToday = data?.stats.completed_today;
   const failedToday = data?.stats.failed_today;
@@ -458,7 +457,7 @@ export function OverviewDashboard({
       <section>
         <h1 className="text-xl font-semibold tracking-normal text-[var(--text-primary)]">Work done</h1>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
-          {heroCount} outcomes this week.
+          {completedThisWeek} {completedThisWeek === 1 ? "run" : "runs"} completed in the last 7 days.
         </p>
       </section>
 

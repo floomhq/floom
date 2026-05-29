@@ -637,12 +637,22 @@ def _smoke_and_repair_generated_worker(
     user_id: str | None,
     repos: Repositories | None,
     log_fn: Callable[..., None],
+    allow_code_repair: bool = True,
 ) -> Dict[str, Any]:
     """Prove a generated SCRIPT-mode worker runs; repair (bounded) if it doesn't.
 
     Returns a small dict suitable for the author run output ``smoke`` field:
       {"status": "passed"|"failed"|"skipped", "reason": <str>, "repairs": <int>}
     Never raises — a smoke failure must not crash the author run.
+
+    ``allow_code_repair`` (least-surprise gate, 2026-05-29): when True (the
+    LLM-generated worker-author / draft-from-prompt path) a code-class failure
+    triggers the bounded auto-repair of run.py — that self-heal is the product
+    wedge. When False (USER-SUPPLIED files via the upload flow) the worker is
+    STILL smoked and gated, but the user's run.py is NEVER rewritten: a code
+    failure is surfaced as a smoke failure (the caller disables + surfaces the
+    calm reason) so the operator edits their own code. Silently mutating
+    user-provided code would change its semantics without consent.
     """
     repos_obj = _repos(repos)
     loaded = _load_worker_recipe(worker_id, repos_obj)
@@ -800,11 +810,22 @@ def _smoke_and_repair_generated_worker(
             else:
                 code_failure = True  # driver raised; treat as code-class
 
-            if not code_failure or repairs >= _MAX_SMOKE_REPAIRS:
-                log_fn(
-                    f"Smoke failed — generated worker did not run on first try: {last_failure}",
-                    level="warning",
-                )
+            if not allow_code_repair or not code_failure or repairs >= _MAX_SMOKE_REPAIRS:
+                # User-supplied code (allow_code_repair=False) is gated on its
+                # first-run result but NEVER rewritten — the operator owns and
+                # edits their own run.py. LLM-generated code exhausts its bounded
+                # repair budget here too.
+                if not allow_code_repair and code_failure:
+                    log_fn(
+                        "Smoke failed — uploaded worker did not run on first try: "
+                        f"{last_failure}. Edit it, then re-run. (Your code was not modified.)",
+                        level="warning",
+                    )
+                else:
+                    log_fn(
+                        f"Smoke failed — generated worker did not run on first try: {last_failure}",
+                        level="warning",
+                    )
                 return {
                     "status": "failed",
                     "reason": last_failure or "first run failed",
@@ -913,6 +934,7 @@ def smoke_and_gate_generated_worker(
     user_id: str | None,
     repos: Repositories | None,
     log_fn: Callable[..., None],
+    allow_code_repair: bool = True,
 ) -> Dict[str, Any]:
     """Run the smoke+repair safety net AND gate the worker on its result.
 
@@ -936,6 +958,7 @@ def smoke_and_gate_generated_worker(
         user_id=user_id,
         repos=repos_obj,
         log_fn=log_fn,
+        allow_code_repair=allow_code_repair,
     )
     if smoke.get("status") == "failed":
         try:

@@ -294,3 +294,154 @@ def test_small_valid_output_smoke_passes(monkeypatch, tmp_path):
         "gen-test", {}, user_id="u1", repos=_FakeRepos(), log_fn=lambda *a, **k: None
     )
     assert smoke["status"] == "passed"
+
+
+# ---------------------------------------------------------------------------
+# P2-C (2026-05-29): user-supplied run.py must NEVER be auto-rewritten.
+# allow_code_repair gates the bounded auto-repair: True only for LLM-generated
+# bundles (the wedge); False for user-supplied uploads.
+# ---------------------------------------------------------------------------
+
+def _failing_code_driver():
+    class _ExecErrorDriver:
+        def run(self, **kwargs):
+            # A code-class failure: triggers the repair branch when repair is
+            # allowed, otherwise must be gated as-is.
+            return WorkerResult(
+                status="error",
+                error="ZeroDivisionError: division by zero",
+                error_code="execution_error",
+                outputs={},
+                artifacts=[],
+            )
+
+    return _ExecErrorDriver()
+
+
+def _scalar_config():
+    return _script_config([
+        WorkerOutput(name="score", label="Score", type="scalar", kind="scalar", required=True)
+    ])
+
+
+def _track_repair_env(monkeypatch, tmp_path, config, *, user_run_py):
+    """Like _make_smoke_env but records every _repair_run_py call and writes a
+    user-authored run.py so we can assert byte-identity."""
+    workers_dir = tmp_path / "workers"
+    (workers_dir / "gen-test").mkdir(parents=True)
+    run_path = workers_dir / "gen-test" / "run.py"
+    run_path.write_text(user_run_py)
+    monkeypatch.setattr(run_service, "WORKERS_DIR", workers_dir)
+    monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    (tmp_path / "artifacts").mkdir()
+    monkeypatch.setattr(
+        run_service, "_load_worker_recipe", lambda wid, repos=None: ("u1", config, {"enabled": True})
+    )
+    monkeypatch.setattr(run_service, "get_secrets_for_worker", lambda *a, **k: {})
+    monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _failing_code_driver())
+    import contextlib
+
+    monkeypatch.setattr(run_service, "use_context_scope", lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(run_service, "context_scope_for_user", lambda *a, **k: None)
+
+    repair_calls: list = []
+
+    def _spy_repair(**kwargs):
+        repair_calls.append(kwargs)
+        # Return a rewrite so that, IF the repair branch runs, the run.py would
+        # change — making any user-code mutation observable.
+        return user_run_py.replace("1 / 0", "1 / 1")
+
+    monkeypatch.setattr(run_service, "_repair_run_py", _spy_repair)
+    return run_path, repair_calls
+
+
+def test_user_supplied_code_is_not_repaired(monkeypatch, tmp_path):
+    # P2-C: allow_code_repair=False (user upload). A runtime failure must NOT
+    # trigger a rewrite of the user's run.py: _repair_run_py is never called and
+    # the file on disk stays byte-identical.
+    user_run_py = "import json\n\ndef main():\n    x = 1 / 0  # intentional\n    return x\n"
+    run_path, repair_calls = _track_repair_env(
+        monkeypatch, tmp_path, _scalar_config(), user_run_py=user_run_py
+    )
+    before = run_path.read_bytes()
+    smoke = run_service._smoke_and_repair_generated_worker(
+        "gen-test",
+        {},
+        user_id="u1",
+        repos=_FakeRepos(),
+        log_fn=lambda *a, **k: None,
+        allow_code_repair=False,
+    )
+    assert smoke["status"] == "failed"
+    assert smoke["repairs"] == 0
+    assert repair_calls == [], "user-supplied run.py must never be auto-repaired"
+    assert run_path.read_bytes() == before, "user run.py was mutated — least-surprise violated"
+
+
+def test_generated_code_still_repairs(monkeypatch, tmp_path):
+    # P2-C no-regression: allow_code_repair=True (LLM-generated, the default
+    # wedge). A code-class failure MUST still trigger the bounded auto-repair.
+    gen_run_py = "import json\n\ndef main():\n    x = 1 / 0\n    return x\n"
+
+    # The repair loop lazily does `import main as _main; _main.persist_worker_run_py`.
+    # Inject a hermetic stub `main` module so the test never touches the real
+    # init_db()/DB path while still proving the repair branch executed.
+    import sys as _sys
+
+    fake_main = types.ModuleType("main")
+    fake_main.persist_worker_run_py = lambda *a, **k: None
+    monkeypatch.setitem(_sys.modules, "main", fake_main)
+
+    run_path, repair_calls = _track_repair_env(
+        monkeypatch, tmp_path, _scalar_config(), user_run_py=gen_run_py
+    )
+    smoke = run_service._smoke_and_repair_generated_worker(
+        "gen-test",
+        {},
+        user_id="u1",
+        repos=_FakeRepos(),
+        log_fn=lambda *a, **k: None,
+        allow_code_repair=True,
+    )
+    # The wedge: at least one repair attempt was made on generated code.
+    assert len(repair_calls) >= 1, "generated worker must still self-repair (wedge regression)"
+
+
+def test_resolve_worker_status_list_detail_agree():
+    # P2-A: the SHARED resolver returns identical status for identical inputs,
+    # so the LIST and DETAIL endpoints can never disagree for the same worker.
+    import main as _main
+    from models import WorkerStatus, RunStatus
+
+    # never-run, enabled, no secrets -> READY (not an unearned healthy)
+    w_ready = {"status": "healthy", "archived": False, "enabled": True}
+    assert _main._resolve_worker_status(
+        w_ready, config=None, available_secret_names=[], last_run_status=None, has_run=False
+    ) == WorkerStatus.READY
+
+    # disabled worker -> needs_attention (broken, never healthy)
+    w_disabled = {"status": "healthy", "archived": False, "enabled": False}
+    assert _main._resolve_worker_status(
+        w_disabled, config=None, available_secret_names=[], last_run_status=None, has_run=True
+    ) == WorkerStatus.NEEDS_ATTENTION
+
+    # last run failed -> needs_attention
+    w_failed = {"status": "healthy", "archived": False, "enabled": True}
+    assert _main._resolve_worker_status(
+        w_failed,
+        config=None,
+        available_secret_names=[],
+        last_run_status=RunStatus.FAILED,
+        has_run=True,
+    ) == WorkerStatus.NEEDS_ATTENTION
+
+    # ran, succeeded, enabled -> healthy (earned)
+    w_healthy = {"status": "healthy", "archived": False, "enabled": True}
+    assert _main._resolve_worker_status(
+        w_healthy,
+        config=None,
+        available_secret_names=[],
+        last_run_status=RunStatus.COMPLETED,
+        has_run=True,
+    ) == WorkerStatus.HEALTHY
