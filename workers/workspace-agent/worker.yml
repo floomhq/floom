@@ -1,0 +1,39 @@
+schema_version: "0.3"
+system_worker: true
+is_example: false
+name: "workspace-agent"
+title: "Workspace Agent"
+description: "Interactive ops assistant for your Workeros workspace. Chat with it to manage workers, runs, secrets, and connections."
+long_description: |
+  The workspace agent is your AI ops teammate. Ask it to list workers, inspect
+  failed runs, create new workers, trigger existing ones, manage secrets, or
+  add connections. It can answer follow-up questions using conversation history.
+
+  It can only call workspace-management tools (workers.*, runs.*, secrets.*,
+  contexts.*, connections.*) plus web_search. It never calls external APIs
+  directly on behalf of other workers.
+folder: "System"
+tags:
+  - "system"
+  - "chat"
+  - "workspace"
+version: "0.1.0"
+entrypoint: "SKILL.md"
+mode: "agent"
+limits:
+  max_tool_iterations: 30
+  max_output_tokens: 4096
+  max_total_tokens: 200000
+  timeout_seconds: 300
+exec:
+  mode: "agent"
+outputs:
+  - name: "reply"
+    type: "markdown"
+    required: true
+    label: "Agent reply"
+trigger:
+  type: "manual"
+connections: []
+contexts: []
+secrets: []

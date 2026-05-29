@@ -821,6 +821,33 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE composio_connections ADD COLUMN display_name TEXT;
     """,
+    # -- migration 34: conversation persistence for /chat endpoint (S37) -----
+    """
+    CREATE TABLE IF NOT EXISTS conversations (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        title TEXT,
+        summary TEXT,
+        total_tokens INTEGER DEFAULT 0 NOT NULL,
+        total_cost_usd REAL DEFAULT 0.0 NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS conversation_messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'tool')),
+        content TEXT NOT NULL,
+        tool_call_id TEXT,
+        created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
+    CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_conversation_messages_conv_idx
+        ON conversation_messages(conversation_id, created_at);
+    """,
 ]
 
 

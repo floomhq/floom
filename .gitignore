@@ -6,6 +6,9 @@ venv/
 .venv/
 .env
 
+# Workspace configuration (user-editable, not committed)
+workspace.md
+
 # Data
 data/floom.db
 data/artifacts/*
