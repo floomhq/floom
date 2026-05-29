@@ -211,12 +211,17 @@ async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDi
 
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
+# A workspace template bundles every operator worker + knowledge pack, so it is
+# larger than a single worker bundle. Cap it generously but bounded.
+WORKSPACE_IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024
 DEFAULT_CHAT_MESSAGE_MAX_CHARS = 20_000
 DEFAULT_RATE_LIMIT = (60, 60.0)
 BODYLESS_METHODS = {"GET", "HEAD", "OPTIONS"}
 RATE_LIMIT_RULES = [
     (re.compile(r"^/cli-auth/devices$"), (5, 60.0)),
     (re.compile(r"^/workers/from-bundle$"), (10, 60.0)),
+    (re.compile(r"^/workspace/import$"), (10, 60.0)),
+    (re.compile(r"^/workspace/export$"), (20, 60.0)),
     (re.compile(r"^/workers$"), (20, 60.0)),
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
     (re.compile(r"^/connections$"), (20, 60.0)),
@@ -464,6 +469,8 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
     path = request.url.path
     if path == "/workers/from-bundle":
         return FROM_BUNDLE_BODY_LIMIT_BYTES
+    if path == "/workspace/import":
+        return WORKSPACE_IMPORT_BODY_LIMIT_BYTES
     if path.startswith("/uploads"):
         return None
     if path.startswith("/contexts"):
@@ -5416,6 +5423,443 @@ async def create_worker_from_bundle(
         worker_id,
         user_id=auth.user_id,
         repos=repos,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Workspace duplicate (Notion-template style): export the operator's whole
+# workspace (workers + knowledge packs + workspace-agent config) as a single
+# downloadable .zip template, and import such a template into another
+# workspace. A workspace = operator WORKERS + operator KNOWLEDGE PACKS +
+# workspace.md. Reuses the per-worker bundle layout, the contexts create/upload
+# path, and _register_worker_from_files for import.
+#
+# SECURITY: the export NEVER contains secret VALUES or connection tokens. It
+# only carries the worker bundle files (worker.yml/run.py/SKILL.md/...) which
+# declare required secrets/connections by NAME, plus operator knowledge-pack
+# files (operator content), plus workspace.md. The importer reconnects secrets
+# and connections itself. See _collect_workspace_secret_names() for the manifest
+# names surface, and the test suite for the no-secret-value guarantee.
+# ---------------------------------------------------------------------------
+
+WORKSPACE_TEMPLATE_SCHEMA_VERSION = 1
+
+
+def _is_exportable_operator_worker(w: Dict[str, Any]) -> bool:
+    """True for a worker that belongs in a workspace template.
+
+    Excludes example/stock workers and system workers. ``_list_operator_workers``
+    already drops system_worker:true + archived + hidden; this adds the
+    example/stock filter so a template carries only the operator's OWN authored
+    workers (mirrors _is_example_worker in the overview).
+    """
+    wid = w.get("id")
+    if not wid:
+        return False
+    if w.get("is_example") is True:
+        return False
+    manifest = w.get("manifest")
+    if isinstance(manifest, dict) and manifest.get("is_example") is True:
+        return False
+    if wid in PUBLIC_STOCK_WORKER_IDS or wid in PROTECTED_STOCK_WORKER_IDS:
+        return False
+    if (manifest or {}).get("system_worker", False):
+        return False
+    return True
+
+
+def _worker_required_secret_names(w: Dict[str, Any]) -> List[str]:
+    """Required secret NAMES declared by a worker manifest (never values).
+
+    The normalized ``WorkerConfig`` surfaces secrets at the top level
+    (``config["secrets"]``); raw manifests may also nest them under
+    ``capabilities.secrets`` / ``exec.secrets``. Read all three so the name list
+    is complete regardless of which shape we got.
+    """
+    names: List[str] = []
+    config = w.get("config") or {}
+    for s in config.get("secrets") or []:
+        if isinstance(s, str) and s.strip():
+            names.append(s.strip())
+    cap = config.get("capabilities") or {}
+    for s in cap.get("secrets") or []:
+        if isinstance(s, str) and s.strip():
+            names.append(s.strip())
+    exec_block = config.get("exec") or {}
+    for s in exec_block.get("secrets") or []:
+        if isinstance(s, str) and s.strip():
+            names.append(s.strip())
+    # de-dup, preserve order
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            ordered.append(n)
+    return ordered
+
+
+def _worker_connection_slugs(w: Dict[str, Any]) -> List[str]:
+    """Required connection slugs declared by a worker manifest (never tokens)."""
+    config = w.get("config") or {}
+    raw = config.get("connections") or []
+    slugs: List[str] = []
+    for c in raw:
+        if isinstance(c, str) and c.strip():
+            slugs.append(c.strip())
+        elif isinstance(c, dict):
+            label = (c.get("mcp", {}) or {}).get("label") or c.get("app") or c.get("slug")
+            if isinstance(label, str) and label.strip():
+                slugs.append(label.strip())
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for s in slugs:
+        if s not in seen:
+            seen.add(s)
+            ordered.append(s)
+    return ordered
+
+
+# Filenames / patterns that may hold secret VALUES and must NEVER be exported in
+# a workspace template. A worker bundle is worker.yml + run.py / SKILL.md +
+# requirements.txt + lib/*; a .env (or similar) is operator credential state,
+# not bundle content. Defense-in-depth: a real worker dir should not contain
+# these, but if one does we drop it rather than leak a secret value.
+_WORKSPACE_EXPORT_SECRET_BASENAMES = frozenset({
+    ".env",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "credentials",
+    "credentials.json",
+    "secrets.json",
+    "secrets.yaml",
+    "secrets.yml",
+    ".secrets",
+})
+
+
+def _is_secret_bearing_export_path(rel: str) -> bool:
+    """True if a worker-dir file may carry secret values (excluded from export)."""
+    base = rel.rsplit("/", 1)[-1].lower()
+    if base in _WORKSPACE_EXPORT_SECRET_BASENAMES:
+        return True
+    # .env, .env.local, .env.production, foo.env, etc.
+    if base == ".env" or base.startswith(".env.") or base.endswith(".env"):
+        return True
+    # Private keys / certs.
+    if base.endswith((".pem", ".key", ".p12", ".pfx")):
+        return True
+    return False
+
+
+def _iter_worker_dir_files(worker_id: str):
+    """Yield (relpath, bytes) for every exportable file in a worker's dir.
+
+    Skips symlinks (security), __pycache__ / *.pyc cruft, and any
+    secret-bearing file (``.env`` and friends — see
+    ``_is_secret_bearing_export_path``) so a template never carries a secret
+    VALUE.
+    """
+    from worker_registry import WORKERS_DIR
+
+    base = (WORKERS_DIR / worker_id).resolve()
+    if not base.is_dir():
+        return
+    for path in sorted(base.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        rel = path.relative_to(base).as_posix()
+        parts = rel.split("/")
+        if "__pycache__" in parts or rel.endswith(".pyc"):
+            continue
+        if _is_secret_bearing_export_path(rel):
+            continue
+        yield rel, path.read_bytes()
+
+
+@app.get("/workspace/export")
+def export_workspace(
+    exported_at: Optional[str] = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Export this workspace as a single downloadable .zip template.
+
+    Bundles every NON-EXAMPLE, non-system operator worker (worker.yml + run.py /
+    SKILL.md + requirements.txt + lib/*), every OPERATOR knowledge pack
+    (contexts; system packs like worker-author-style and other users' packs are
+    excluded), the workspace-agent config (workspace.md if present), and a
+    ``workspace.json`` manifest.
+
+    NO secret values or connection tokens are ever written — only the NAMES of
+    required secrets/connections so the importer knows what to reconnect.
+    """
+    # ---- workers --------------------------------------------------------
+    all_operator = _list_operator_workers(user_id=auth.user_id, repos=repos)
+    workers = [w for w in all_operator if _is_exportable_operator_worker(w)]
+
+    worker_manifest_entries: List[Dict[str, Any]] = []
+    # Build the zip in memory.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for w in workers:
+            wid = w["id"]
+            file_count = 0
+            for rel, data in _iter_worker_dir_files(wid):
+                zf.writestr(f"workers/{wid}/{rel}", data)
+                file_count += 1
+            if file_count == 0:
+                # No on-disk files (shouldn't happen for a real worker); skip so
+                # we never emit an empty, un-importable worker entry.
+                continue
+            worker_manifest_entries.append({
+                "id": wid,
+                "name": w.get("name") or wid,
+                "trigger_type": w.get("trigger_type"),
+                "required_secrets": _worker_required_secret_names(w),
+                "required_connections": _worker_connection_slugs(w),
+                "file_count": file_count,
+            })
+
+        # ---- operator knowledge packs (contexts) ----------------------
+        context_manifest_entries: List[Dict[str, Any]] = []
+        ensure_contexts_dir()
+        meta = load_context_metadata()
+        root = current_contexts_root()
+        if root.is_dir():
+            for folder in sorted(root.iterdir(), key=lambda p: p.name):
+                if not folder.is_dir() or folder.is_symlink() or folder.name.startswith("."):
+                    continue
+                # EXCLUDE system/engine packs and other users' packs.
+                if _is_system_context_pack(folder.name, meta):
+                    continue
+                if not _context_visible_to_user(folder.name, user_id=auth.user_id, metadata=meta):
+                    continue
+                pack_files = 0
+                for fpath in iter_context_files(folder):
+                    rel = fpath.relative_to(folder).as_posix()
+                    parts = rel.split("/")
+                    if "__pycache__" in parts or rel.endswith(".pyc"):
+                        continue
+                    # Defense-in-depth: never export a secret-bearing file even
+                    # if an operator dropped one into a knowledge pack.
+                    if _is_secret_bearing_export_path(rel):
+                        continue
+                    zf.writestr(f"contexts/{folder.name}/{rel}", fpath.read_bytes())
+                    pack_files += 1
+                writeable = bool((meta.get(folder.name) or {}).get("writeable", False))
+                context_manifest_entries.append({
+                    "name": folder.name,
+                    "file_count": pack_files,
+                    "writeable": writeable,
+                })
+
+        # ---- workspace-agent config (workspace.md) --------------------
+        from chat_service import WORKSPACE_MD_PATH as _WS_MD_PATH
+        has_workspace_md = bool(_WS_MD_PATH.is_file())
+        if has_workspace_md:
+            zf.writestr("workspace.md", _WS_MD_PATH.read_bytes())
+
+        # ---- manifest -------------------------------------------------
+        # Aggregate the full set of secret/connection NAMES to reconnect.
+        all_secret_names: set[str] = set()
+        all_conn_slugs: set[str] = set()
+        for entry in worker_manifest_entries:
+            all_secret_names.update(entry["required_secrets"])
+            all_conn_slugs.update(entry["required_connections"])
+
+        manifest = {
+            "schema_version": WORKSPACE_TEMPLATE_SCHEMA_VERSION,
+            "exported_at": (exported_at or datetime.now(timezone.utc).isoformat()),
+            "workers": worker_manifest_entries,
+            "contexts": context_manifest_entries,
+            "has_workspace_md": has_workspace_md,
+            "required_secrets": sorted(all_secret_names),
+            "required_connections": sorted(all_conn_slugs),
+            "counts": {
+                "workers": len(worker_manifest_entries),
+                "contexts": len(context_manifest_entries),
+            },
+        }
+        zf.writestr("workspace.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    payload = buf.getvalue()
+    filename = "workeros-workspace-template.zip"
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+class WorkspaceImportResponse(BaseModel):
+    workers_imported: List[str] = []
+    contexts_imported: List[str] = []
+    skipped: List[Dict[str, str]] = []
+    id_remaps: Dict[str, str] = {}
+    required_secrets: List[str] = []
+    required_connections: List[str] = []
+    workspace_md_present: bool = False
+
+
+def _safe_zip_rel(name: str) -> Optional[str]:
+    """Sanitize a zip member name; reject traversal/absolute paths.
+
+    Returns the cleaned posix-relative path, or None if the member should be
+    skipped (directory entry) or rejected.
+    """
+    cleaned = (name or "").replace("\\", "/")
+    if not cleaned or cleaned.endswith("/"):
+        return None
+    if cleaned.startswith("/"):
+        raise HTTPException(status_code=400, detail=f"Unsafe path in zip: {name!r}")
+    parts = cleaned.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise HTTPException(status_code=400, detail=f"Unsafe path in zip: {name!r}")
+    return cleaned
+
+
+@app.post("/workspace/import", response_model=WorkspaceImportResponse)
+async def import_workspace(
+    bundle: UploadFile = File(...),
+    request: Request = None,  # type: ignore[assignment]
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceImportResponse:
+    """Import a workspace template .zip produced by GET /workspace/export.
+
+    Unpacks the template, registers each worker via the shared
+    ``_register_worker_from_files`` path (id-deduped — never clobbers an
+    existing worker), and creates each knowledge pack + files. Returns a summary
+    plus the list of secrets/connections the operator still needs to reconnect.
+    """
+    if request is not None:
+        _enforce_draft_rate_limit(request)
+
+    raw_bytes = await bundle.read()
+    if len(raw_bytes) > WORKSPACE_IMPORT_BODY_LIMIT_BYTES:
+        raise HTTPException(status_code=413, detail="Workspace template too large")
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw_bytes))
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail=f"Not a valid zip file: {exc}")
+
+    # Reject symlink members (security).
+    for info in zf.infolist():
+        file_type = (info.external_attr >> 16) & 0o170000
+        if file_type == 0o120000:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Template contains unsupported symlink: {info.filename!r}",
+            )
+
+    names = zf.namelist()
+
+    # ---- group members by worker id / context name ---------------------
+    worker_files: Dict[str, List[DraftFile]] = collections.OrderedDict()
+    context_files: Dict[str, List[tuple[str, bytes]]] = collections.OrderedDict()
+    for name in names:
+        rel = _safe_zip_rel(name)
+        if rel is None:
+            continue
+        parts = rel.split("/")
+        if parts[0] == "workers" and len(parts) >= 3:
+            wid = parts[1]
+            inner = "/".join(parts[2:])
+            # Decode worker bundle files as text (they are YAML/py/md/txt).
+            try:
+                content = zf.read(name).decode("utf-8")
+            except UnicodeDecodeError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Worker file {rel!r} is not valid UTF-8 text",
+                )
+            worker_files.setdefault(wid, []).append(DraftFile(path=inner, content=content))
+        elif parts[0] == "contexts" and len(parts) >= 3:
+            cname = parts[1]
+            inner = "/".join(parts[2:])
+            context_files.setdefault(cname, []).append((inner, zf.read(name)))
+        # workspace.md / workspace.json and anything else are intentionally
+        # ignored for import (workspace.md is operator-agent config that the
+        # importer reviews, not auto-overwritten).
+
+    workers_imported: List[str] = []
+    contexts_imported: List[str] = []
+    skipped: List[Dict[str, str]] = []
+    id_remaps: Dict[str, str] = {}
+
+    # ---- register workers (id-dedup, never clobber) --------------------
+    for wid, files in worker_files.items():
+        if not any(f.path == "worker.yml" for f in files):
+            skipped.append({"type": "worker", "id": wid, "reason": "missing worker.yml"})
+            continue
+        try:
+            new_id = _register_worker_from_files(
+                files,
+                user_id=auth.user_id,
+                repos=repos,
+                dedupe_id=True,
+            )
+        except HTTPException as exc:
+            skipped.append({"type": "worker", "id": wid, "reason": str(exc.detail)})
+            continue
+        workers_imported.append(new_id)
+        if new_id != wid:
+            id_remaps[wid] = new_id
+
+    # ---- create knowledge packs (skip existing, never clobber) ---------
+    meta = load_context_metadata()
+    for cname, files in context_files.items():
+        try:
+            safe_name = validate_context_name(cname)
+        except ValueError:
+            skipped.append({"type": "context", "id": cname, "reason": "invalid pack name"})
+            continue
+        try:
+            dir_path = context_dir(safe_name)
+        except ValueError:
+            skipped.append({"type": "context", "id": cname, "reason": "invalid pack name"})
+            continue
+        if dir_path.exists():
+            skipped.append({"type": "context", "id": safe_name, "reason": "already exists"})
+            continue
+        dir_path.mkdir(parents=True)
+        set_context_metadata(safe_name, writeable=False, owner_id=auth.user_id)
+        for inner, data in files:
+            try:
+                _write_context_file(safe_name, inner, data, user_id=auth.user_id)
+            except (HTTPException, ValueError) as exc:
+                skipped.append({
+                    "type": "context_file",
+                    "id": f"{safe_name}/{inner}",
+                    "reason": str(getattr(exc, "detail", exc)),
+                })
+        contexts_imported.append(safe_name)
+
+    # ---- surface what to reconnect, from the manifest if present -------
+    required_secrets: List[str] = []
+    required_connections: List[str] = []
+    if "workspace.json" in names:
+        try:
+            mani = json.loads(zf.read("workspace.json").decode("utf-8"))
+            if isinstance(mani, dict):
+                required_secrets = [s for s in (mani.get("required_secrets") or []) if isinstance(s, str)]
+                required_connections = [s for s in (mani.get("required_connections") or []) if isinstance(s, str)]
+        except Exception:
+            pass
+
+    return WorkspaceImportResponse(
+        workers_imported=workers_imported,
+        contexts_imported=contexts_imported,
+        skipped=skipped,
+        id_remaps=id_remaps,
+        required_secrets=required_secrets,
+        required_connections=required_connections,
+        workspace_md_present=("workspace.md" in names),
     )
 
 
