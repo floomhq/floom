@@ -181,6 +181,20 @@ Things I missed in the original ledger. Re-grep of /root/.claude/projects/-root/
 | O6 | "Smoke past, I don't think, is enough" — deeper worker testing (USR 287) | ✅ | S38 PR #204 — prod smoke runs recorded with run_ids, status, duration, output heads. |
 | O7 | "MCPs should be live, right, so we can already connect some MCPs as well" (USR 281, 298) | ⏸ | Partial: MCP add UI exists (PR #161). Full S41 (tab + import + stdio) blocked on Codex stdio verdict. |
 
+## Q. S47 HITL (NovaSearch P0)
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| Q1 | S47 HITL approvals via two-run respawn model | ✅ | PR #207 |
+| Q1a | Migration 37 — restore approvals table with respawn columns | ✅ | PR #207 |
+| Q1b | RunStatus.PENDING_APPROVAL + WorkerApprovals model | ✅ | PR #207 |
+| Q1c | execute_run() HITL path — detect decision_required, create approval row | ✅ | PR #207 |
+| Q1d | GET /approvals + POST /approve + POST /reject endpoints | ✅ | PR #207 |
+| Q1e | /approvals page + inline decision card on /runs/[id] | ✅ | PR #207 |
+| Q1f | Sidebar Approvals nav + AlertsBell pending count | ✅ | PR #207 |
+| Q1g | outbound-approval-demo worker (two-phase proof) | ✅ | PR #207 |
+| Q1h | AUTHORING.md two-run model documentation | ✅ | PR #207 |
+
 ## P. Long-standing Federico standing instructions (verified observed)
 
 | # | Standing rule | Status |

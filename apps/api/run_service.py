@@ -1199,6 +1199,44 @@ def execute_run(
             log_fn(f"Run failed: {result_error}", level="error")
             return
 
+        # S47 HITL: if the worker emitted decision_required AND the worker declares
+        # approvals.required, land this run as PENDING_APPROVAL and create an
+        # approvals row.  Do NOT mark COMPLETED — execution halts here.
+        decision_required = result.decision_required
+        worker_needs_approval = bool(config and getattr(config, "approvals", None) and config.approvals.required)
+        if decision_required and worker_needs_approval and result.status not in ("error", "failed"):
+            approval_id = f"apr_{uuid.uuid4().hex[:12]}"
+            label = decision_required.get("label") or (config.approvals.label if config and config.approvals else "Approve action")
+            preview = decision_required.get("preview") or ""
+            decision_input_json = json.dumps(effective_inputs)
+            now_ts = _now_iso()
+            try:
+                repos_obj.approvals.create(
+                    owner_id=owner_id,
+                    id=approval_id,
+                    run_id=run_id,
+                    worker_id=worker_id,
+                    status="pending",
+                    label=label,
+                    preview=preview,
+                    created_at=now_ts,
+                    decision_input_json=decision_input_json,
+                )
+            except Exception as exc:
+                logger.error("Failed to create approval row for run %s: %s", run_id, exc)
+            # Store the proposed outputs on the run so the approval page can show them
+            update_run_status(run_id, RunStatus.PENDING_APPROVAL.value, output=outputs, user_id=owner_id, repos=repos_obj)
+            _publish_sse(run_id, {
+                "type": "status",
+                "run_id": run_id,
+                "status": RunStatus.PENDING_APPROVAL.value,
+                "approval_id": approval_id,
+                "label": label,
+            })
+            publish_run_part(run_id, {"type": "finish", "status": "pending_approval"})
+            log_fn(f"Run awaiting approval: {label}")
+            return
+
         quality_error, quality_warnings = _validate_run_outputs(run_id, config, outputs, artifacts)
         if quality_error:
             update_run_status(run_id, RunStatus.FAILED.value, error=quality_error, error_code="quality_gate_failed", user_id=owner_id, repos=repos_obj)

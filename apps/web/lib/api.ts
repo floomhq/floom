@@ -133,6 +133,16 @@ export const api = {
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
       }),
+    approve: (id: string, editedOutput?: Record<string, unknown>) =>
+      fetchJson<import("./types").ActionResponse>(`/runs/${id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ edited_output: editedOutput ?? null }),
+      }),
+    reject: (id: string, reason?: string) =>
+      fetchJson<import("./types").ActionResponse>(`/runs/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason ?? null }),
+      }),
     replay: (workerId: string, runId: string) =>
       fetchJson<{ run_id: string }>(
         `/workers/${encodeURIComponent(workerId)}/runs/${encodeURIComponent(runId)}/replay`,
@@ -143,6 +153,13 @@ export const api = {
       `${API_BASE}/runs/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/download`,
     bundleUrl: (id: string, filename: string) =>
       `${API_BASE}/runs/${encodeURIComponent(id)}/bundle/${encodeURIComponent(filename)}`,
+  },
+  approvals: {
+    list: (status?: string) => {
+      const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+      return fetchJson<import("./types").ApprovalRow[]>(`/approvals${qs}`);
+    },
+    count: () => fetchJson<{ pending: number }>("/approvals/count"),
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),

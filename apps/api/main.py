@@ -986,7 +986,9 @@ def _normalize_run_status(status_value: str) -> str:
     value = (status_value or "").lower()
     if value in {"completed", "approved", "success"}:
         return "success"
-    if value in {"running", "queued", "pending_approval"}:
+    if value == "pending_approval":
+        return "pending_approval"
+    if value in {"running", "queued"}:
         return "running"
     return "error"
 
@@ -1002,6 +1004,7 @@ def _resolve_run_status_filters(raw_status: Optional[str]) -> List[str]:
         "completed": ["completed"],
         "failed": ["failed"],
         "queued": ["queued"],
+        "pending_approval": ["pending_approval"],
     }
     statuses: List[str] = []
     for token in raw_status.split(","):
@@ -1138,7 +1141,6 @@ def _make_run_summary(row: Any) -> RunSummary:
         "rejected": RunStatus.FAILED.value,
         "error": RunStatus.FAILED.value,
         "cancelled": RunStatus.FAILED.value,
-        "pending_approval": RunStatus.RUNNING.value,
     }
     normalized_status = status_aliases.get(status_value, status_value or RunStatus.FAILED.value)
     return RunSummary(
@@ -4998,7 +5000,7 @@ def clear_runs(
     return {"status": "cleared", "deleted_runs": deleted_count}
 
 
-_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed"})
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "pending_approval"})
 
 
 @app.post("/runs/{run_id}/cancel", response_model=ActionResponse)
@@ -5050,6 +5052,184 @@ def cancel_run(
 
     logger.info("Cancel requested for run %s", run_id)
     return ActionResponse(status="cancel_requested", run_id=run_id)
+
+
+# ---------------------------------------------------------------------------
+# S47 HITL — approval endpoints
+# ---------------------------------------------------------------------------
+
+class ApproveRequest(BaseModel):
+    edited_output: Optional[Dict[str, Any]] = None
+
+
+class RejectRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+@app.get("/approvals")
+def list_approvals(
+    status: Optional[str] = Query(None, description="Filter by status (default: pending)"),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """List approval requests for the authenticated user."""
+    status_filter = (status or "pending").lower()
+    if status_filter == "pending":
+        rows = repos.approvals.list_pending(owner_id=auth.user_id)
+    else:
+        # For non-pending statuses, query directly
+        with get_db() as conn:
+            rows = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT a.*, w.name AS worker_name
+                    FROM approvals a
+                    LEFT JOIN workers w ON w.id = a.worker_id
+                    WHERE a.owner_id = ? AND a.status = ?
+                    ORDER BY a.created_at DESC
+                    """,
+                    (auth.user_id, status_filter),
+                ).fetchall()
+            ]
+    return rows
+
+
+@app.get("/approvals/count")
+def count_pending_approvals(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Return count of pending approvals for the authenticated user."""
+    count = repos.approvals.count_pending(owner_id=auth.user_id)
+    return {"pending": count}
+
+
+@app.post("/runs/{run_id}/approve", response_model=ActionResponse)
+def approve_run(
+    run_id: str,
+    body: ApproveRequest = Body(default_factory=ApproveRequest),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Approve a PENDING_APPROVAL run and spawn a follow-up execution run.
+
+    The follow-up run receives all original inputs merged with:
+      - decision: "approved"
+      - approved_output: the (optionally edited) proposed output
+    """
+    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    if run_row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if row_to_dict(run_row).get("status") != RunStatus.PENDING_APPROVAL.value:
+        raise HTTPException(status_code=409, detail="Run is not awaiting approval")
+
+    approval_row = repos.approvals.get_by_run_id(run_id=run_id)
+    if approval_row is None:
+        raise HTTPException(status_code=404, detail="Approval record not found")
+    if approval_row.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    # Load original inputs
+    original_inputs: Dict[str, Any] = {}
+    raw_decision_input = approval_row.get("decision_input_json")
+    if raw_decision_input:
+        try:
+            original_inputs = json.loads(raw_decision_input)
+        except Exception:
+            original_inputs = {}
+
+    # Load proposed output
+    run_data = row_to_dict(run_row)
+    proposed_output: Dict[str, Any] = {}
+    raw_output = run_data.get("output_json")
+    if raw_output:
+        try:
+            proposed_output = json.loads(raw_output)
+        except Exception:
+            proposed_output = {}
+
+    # Build follow-up inputs
+    edited_output = body.edited_output if body.edited_output is not None else proposed_output
+    follow_up_inputs = {
+        **original_inputs,
+        "decision": "approved",
+        "approved_output": edited_output,
+    }
+
+    # Create the follow-up run
+    worker_id = run_data["worker_id"]
+    try:
+        follow_up_run_id = create_run(
+            worker_id,
+            follow_up_inputs,
+            trigger_source="approval",
+            user_id=auth.user_id,
+            repos=repos,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to spawn follow-up run: {exc}") from exc
+
+    decided_at = now_iso()
+    edited_output_json = json.dumps(edited_output) if body.edited_output is not None else None
+    repos.approvals.approve(
+        owner_id=auth.user_id,
+        run_id=run_id,
+        decided_at=decided_at,
+        edited_output_json=edited_output_json,
+        follow_up_run_id=follow_up_run_id,
+    )
+
+    # Kick off the follow-up run
+    start_run(follow_up_run_id, worker_id, follow_up_inputs, user_id=auth.user_id, repos=repos)
+
+    # Broadcast the decision
+    _sse_publish(run_id, {
+        "type": "approval_decided",
+        "run_id": run_id,
+        "decision": "approved",
+        "follow_up_run_id": follow_up_run_id,
+    })
+
+    return ActionResponse(status="approved", run_id=follow_up_run_id)
+
+
+@app.post("/runs/{run_id}/reject", response_model=ActionResponse)
+def reject_run(
+    run_id: str,
+    body: RejectRequest = Body(default_factory=RejectRequest),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Reject a PENDING_APPROVAL run. No follow-up run is spawned."""
+    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    if run_row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if row_to_dict(run_row).get("status") != RunStatus.PENDING_APPROVAL.value:
+        raise HTTPException(status_code=409, detail="Run is not awaiting approval")
+
+    approval_row = repos.approvals.get_by_run_id(run_id=run_id)
+    if approval_row is None:
+        raise HTTPException(status_code=404, detail="Approval record not found")
+    if approval_row.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    decided_at = now_iso()
+    repos.approvals.reject(
+        owner_id=auth.user_id,
+        run_id=run_id,
+        decided_at=decided_at,
+        reason=body.reason,
+    )
+
+    _sse_publish(run_id, {
+        "type": "approval_decided",
+        "run_id": run_id,
+        "decision": "rejected",
+        "reason": body.reason,
+    })
+
+    return ActionResponse(status="rejected", run_id=run_id)
 
 
 @app.get("/runs/{run_id}/download")
