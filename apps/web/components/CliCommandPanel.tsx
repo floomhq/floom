@@ -20,13 +20,12 @@ function readStoredSecret(): string {
 }
 
 function maskSecret(secret: string): string {
-  // S29a: Federico saw "924a. fe59" rendered on prod — the three ASCII dots
-  // were getting collapsed/spaced weirdly in monospace at small sizes. Switch
-  // to a Unicode horizontal ellipsis (U+2026) which is one glyph and renders
-  // consistently across fonts.
+  // Federico 2026-05-29: show a full-length-style masked key like any other app
+  // (first 4 + a run of bullets + last 4), not a truncated "924a…fe59". The
+  // bullet run is fixed-width so it does not leak the secret's exact length.
   if (!secret) return "<YOUR_FLOOM_SECRET>";
-  if (secret.length <= 8) return "*".repeat(secret.length);
-  return `${secret.slice(0, 4)}…${secret.slice(-4)}`;
+  if (secret.length <= 8) return "•".repeat(secret.length);
+  return `${secret.slice(0, 4)}${"•".repeat(24)}${secret.slice(-4)}`;
 }
 
 export function CliCommandPanel() {
