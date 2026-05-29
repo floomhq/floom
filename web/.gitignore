@@ -63,3 +63,6 @@ next-env.d.ts
 /components.json
 /eslint.config.mjs
 
+
+# Use npm (package-lock.json); avoid pnpm-lock so Vercel picks npm deterministically
+pnpm-lock.yaml
