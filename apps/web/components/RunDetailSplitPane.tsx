@@ -262,6 +262,15 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
     return <RunResultOverview run={run} />;
   }
 
+  // G5 P2 (rescore2 2026-05-29): a failed run with a readable transcript but no
+  // explicit "finish" part (e.g. the agent died mid-step) rendered only a red
+  // "Step 1" with NO error sentence on the default Result tab — the operator
+  // had to dig into Logs/Raw to learn anything. Surface the (already humanized)
+  // error headline at the end of the transcript whenever the run failed and no
+  // finish part carried it.
+  const hasFinishPart = parts.some((p) => p.type === "finish");
+  const showTrailingError = run.status === "failed" && !hasFinishPart;
+
   return (
     <div className="space-y-3">
       {parts.map((part, index) => {
@@ -304,14 +313,28 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
           );
         }
         if (part.type === "finish") {
-          return part.status === "completed" ? (
-            <Task key={`finish-${index}`} title="Finished" status="completed" />
-          ) : (
-            <StackTrace key={`finish-${index}`} error={part.error || run.error || "Run failed"} />
-          );
+          if (part.status === "completed") {
+            return <Task key={`finish-${index}`} title="Finished" status="completed" />;
+          }
+          // A HITL run parked for approval is not a failure (G5 P3) — show a
+          // neutral "Awaiting approval" task, never a red StackTrace.
+          if (part.status === "pending_approval") {
+            return (
+              <Task
+                key={`finish-${index}`}
+                title="Awaiting approval"
+                status="pending"
+                detail="This run is waiting for your decision before it continues."
+              />
+            );
+          }
+          return <StackTrace key={`finish-${index}`} error={part.error || run.error || "Run failed"} />;
         }
         return null;
       })}
+      {showTrailingError && (
+        <StackTrace error={run.error || "This run failed. Check the logs for details."} />
+      )}
     </div>
   );
 }
@@ -684,7 +707,14 @@ function logsToTimeline(logs: LogEntry[], status: string): TimelineItem[] {
 function latestStatus(run: RunDetail, parts: RunPart[]): string {
   const finish = [...parts].reverse().find((part) => part.type === "finish");
   if (finish?.type === "finish") {
-    return finish.status === "completed" ? "completed" : "failed";
+    // G5 P3 (rescore2 2026-05-29): a HITL run that parks for approval emits a
+    // finish part with status "pending_approval". Treating any non-"completed"
+    // finish as "failed" rendered a brand-new awaiting-approval run as a red
+    // "Failed". Preserve the real terminal/parked status; only true failures
+    // are failures.
+    if (finish.status === "completed") return "completed";
+    if (finish.status === "pending_approval") return "pending_approval";
+    return "failed";
   }
   return run.status;
 }
