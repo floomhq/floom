@@ -1,6 +1,18 @@
 import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Ambient } from "@/components/Ambient";
+
+// Geist Sans + Geist Mono (openchat-v2 / dashboard parity). Loaded via
+// next/font for proper inlining and no FOUT. Matches web/app/layout.tsx.
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
 
 export const metadata: Metadata = {
   title: "Workeros: Hire AI workers for your company",
@@ -14,7 +26,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
+    <html
+      lang="en"
+      className={`h-full antialiased ${geistSans.variable} ${geistMono.variable}`}
+      suppressHydrationWarning
+    >
       <body className="min-h-full bg-transparent text-foreground">
         <Ambient />
         {children}

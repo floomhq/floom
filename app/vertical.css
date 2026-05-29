@@ -9,12 +9,11 @@
 .lv-mock {
   position: relative;
   z-index: 1;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r-2xl);
   overflow: hidden;
   background: var(--paper);
-  box-shadow: var(--shadow-pop),
-    0 0 0 1px color-mix(in srgb, var(--tool, var(--accent)) 22%, transparent);
+  box-shadow: var(--shadow-pop);
   text-align: left;
   animation: shotIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -48,11 +47,7 @@
 
 .lv-mock-body {
   padding: 22px 24px 24px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--tool, var(--accent)) 6%, var(--paper)) 0%,
-    var(--paper) 58%
-  );
+  background: var(--paper);
 }
 @media (max-width: 640px) {
   .lv-mock-body {

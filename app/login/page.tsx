@@ -28,7 +28,7 @@ export default async function LoginPage({
 
       <section className="flex-1 grid place-items-center px-6 pb-24">
         <div className="w-full max-w-[400px]">
-          <div className="rounded-2xl border border-[var(--line)] bg-[var(--paper)] shadow-[0_1px_0_rgba(15,15,15,0.04),0_24px_60px_-24px_rgba(15,15,15,0.18)] p-8">
+          <div className="border border-[var(--line)] bg-[var(--paper)] shadow-[var(--shadow-pop)] p-8">
             <div className="text-center space-y-1.5 mb-7">
               <h1 className="text-[22px] font-semibold tracking-tight leading-tight">Sign in to Workeros</h1>
               <p className="text-[13px] text-[var(--ink-soft)] leading-relaxed">AI workers that actually run</p>
@@ -74,7 +74,7 @@ export default async function LoginPage({
           justify-content: center;
           gap: 10px;
           height: 44px;
-          border-radius: 10px;
+          border-radius: 0;
           font-size: 14px;
           font-weight: 500;
           letter-spacing: -0.005em;
@@ -107,7 +107,7 @@ function WorkerosMark() {
   return (
     <span
       aria-hidden="true"
-      className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-[var(--solid)] text-[var(--solid-fg)] text-[10px] font-bold leading-none"
+      className="inline-flex items-center justify-center w-5 h-5 bg-[var(--solid)] text-[var(--solid-fg)] text-[10px] font-bold leading-none"
     >
       W
     </span>

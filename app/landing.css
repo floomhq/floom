@@ -4,46 +4,29 @@
    Uses skills-neo globals.css tokens. No Tailwind, no raw hex.
    ================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;680&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* Matte adoption: no Inter/JetBrains @import (Geist via next/font), no
+   landing-only #3a6ea5 accent override. The landing now inherits the
+   dashboard tokens from globals.css verbatim: Floom-blue --accent,
+   pure-black --line, radius 0, flat opaque surfaces, matte shadows. */
 
-/* ── Extra tokens not in globals.css (surface / positive) ──────── */
+/* ── Extra tokens not in globals.css ─────────────────────────────
+   Surfaces are now FLAT OPAQUE (matte), not translucent glass. They map
+   onto the dashboard's paper/paper-2 so cards read as solid panels with
+   pure-black hairline borders, not frosted glass. */
 :root {
-  --surface-2: color-mix(in srgb, var(--paper) 54%, transparent);
-  --surface-3: color-mix(in srgb, var(--paper) 38%, transparent);
+  --surface-2: var(--paper);
+  --surface-3: var(--paper-2);
   --positive:  var(--accent);
-  --ink-on-accent: #0c1a30;
+  --ink-on-accent: var(--solid-fg);
 }
 html.dark {
-  --surface-2: color-mix(in srgb, var(--paper) 56%, transparent);
-  --surface-3: color-mix(in srgb, var(--paper) 40%, transparent);
+  --surface-2: var(--paper);
+  --surface-3: var(--paper-2);
   --positive:  var(--accent);
-  --ink-on-accent: #0c1a30;
+  --ink-on-accent: var(--solid-fg);
 }
 
-/* Federico 2026-05-20: landing-only accent override.
-   Wireframe (cockpit.floom.dev/landing-v2.html) uses BLUE #3a6ea5.
-   App-wide --accent is green (#2f7a59 brand) but the wireframe
-   landing is the design contract here. Scope the blue to pages
-   that contain the landing nav so the rest of the app keeps green.
-   --positive stays green so 'synced' indicators read as green dots. */
-body:has(#lnNav),
-body:has(.ln-nav) {
-  --accent:        #3a6ea5;
-  --accent-soft:   color-mix(in srgb, #3a6ea5 11%, transparent);
-  --accent-line:   color-mix(in srgb, #3a6ea5 26%, transparent);
-  /* codex audit 2026-05-21: wireframe sync dots are BLUE not green. */
-  --positive:      #3a6ea5;
-}
-html.dark body:has(#lnNav),
-html.dark body:has(.ln-nav) {
-  --accent:        #7fb0e0;
-  --accent-soft:   color-mix(in srgb, #7fb0e0 16%, transparent);
-  --accent-line:   color-mix(in srgb, #7fb0e0 28%, transparent);
-  --positive:      #7fb0e0;
-}
-
-/* Body bg transparent so html bg (now globally cloud-gradient in
-   globals.css) shows through. */
+/* Body bg transparent so html bg shows through. */
 body:has(#lnNav),
 body:has(.ln-nav) { background: transparent !important; }
 
@@ -72,14 +55,10 @@ body:has(.ln-nav) { background: transparent !important; }
   justify-content: space-between;
   height: 54px;
   padding: 0 10px 0 18px;
-  border-radius: var(--r-pill);
-  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  background: color-mix(in srgb, var(--paper) 62%, transparent);
-  -webkit-backdrop-filter: saturate(1.6) blur(22px);
-  backdrop-filter: saturate(1.6) blur(22px);
-  box-shadow:
-    0 1px 1px rgba(23, 31, 43, 0.03),
-    0 8px 28px -14px rgba(23, 31, 43, 0.22);
+  border-radius: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
   transform: translateY(0);
   will-change: transform;
   transition:
@@ -102,8 +81,8 @@ body:has(.ln-nav) { background: transparent !important; }
   border-right: 0;
   border-top: 0;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--paper) 80%, transparent);
-  box-shadow: 0 1px 0 var(--line), 0 8px 24px -20px rgba(23, 31, 43, 0.5);
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
 }
 .ln-nav.ln-hide {
   transform: translateY(-130%);
@@ -174,8 +153,6 @@ body:has(.ln-nav) { background: transparent !important; }
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   background: var(--surface-3);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
   cursor: pointer;
   color: var(--ink-soft);
   font-size: 12px;
@@ -232,8 +209,6 @@ html.dark .ln-cta:hover { background: var(--solid-2) !important; }
   border: 1px solid var(--line-strong);
   border-radius: var(--r-pill);
   background: var(--surface-3);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
   box-shadow: var(--shadow-sm);
   margin-bottom: 18px;
   font-size: 12px;
@@ -356,8 +331,6 @@ html.dark .ln-btn-primary:hover { background: var(--solid-2) !important; }
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   background: var(--surface-3);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
   box-shadow: var(--shadow-sm);
   font-family: var(--font-mono, "JetBrains Mono", monospace);
   font-size: 13.5px;
@@ -422,10 +395,10 @@ html.dark .ln-btn-primary:hover { background: var(--solid-2) !important; }
   margin: 22px 0 0;
 }
 
-/* Mock viewport toggle (Desktop/Mobile pills) — wireframe parity.
+/* Mock viewport toggle (Desktop/Mobile pills) - wireframe parity.
    Decorative, sits bottom-right of mock chrome. */
 .ln-prev-opts {
-  /* Fixed bottom-right of viewport on landing — matches the wireframe's
+  /* Fixed bottom-right of viewport on landing - matches the wireframe's
      #flmPrev floating affordance. White outer pill, black active segment,
      gray inactive (per codex audit 2026-05-21). */
   position: fixed;
@@ -466,52 +439,15 @@ html.dark .ln-btn-primary:hover { background: var(--solid-2) !important; }
   height: 13px;
   flex-shrink: 0;
 }
-.ln-shot-wrap::before {
-  content: "";
-  position: absolute;
-  left: 50%; top: -12%;
-  width: 90%; height: 65%;
-  transform: translateX(-50%);
-  background: radial-gradient(ellipse at center,
-    color-mix(in srgb, var(--accent) 20%, transparent) 0%,
-    color-mix(in srgb, var(--accent) 6%, transparent) 50%,
-    transparent 72%
-  );
-  filter: blur(72px);
-  z-index: 0;
-  pointer-events: none;
-}
-.ln-shot-wrap::after {
-  content: "";
-  position: absolute;
-  left: 50%; bottom: 0;
-  width: 70%; height: 40%;
-  transform: translateX(-50%);
-  background: radial-gradient(ellipse at center,
-    color-mix(in srgb, var(--accent) 10%, transparent),
-    transparent 70%
-  );
-  filter: blur(56px);
-  z-index: 0;
-  pointer-events: none;
-}
-
 .ln-shot {
   position: relative;
   z-index: 1;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r-xl);
   overflow: hidden;
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--accent) 14%, var(--paper)) 0%,
-      color-mix(in srgb, var(--accent) 9%, var(--paper)) 45%,
-      color-mix(in srgb, var(--accent) 5%, var(--paper)) 100%);
-  box-shadow: var(--shadow-pop), 0 0 0 1px var(--accent-line);
+  background: var(--paper);
+  box-shadow: var(--shadow-pop);
   animation: shotIn .9s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-html.dark .ln-shot {
-  box-shadow: var(--shadow-pop), 0 0 0 1px var(--accent-line);
 }
 @keyframes shotIn {
   from { opacity: 0; transform: translateY(28px) scale(.995); }
@@ -826,11 +762,9 @@ html.dark .ln-sb-ws i { color: var(--ink-on-accent); }
 @media (max-width: 900px) { .ln-grid { grid-template-columns: repeat(2, 1fr); grid-auto-rows: auto; flex: none; } }
 @media (max-width: 640px) { .ln-grid { grid-template-columns: repeat(2, 1fr); } }
 
-/* Skill cards — D1 glass parity */
+/* Skill cards - D1 glass parity */
 .ln-card {
   background: var(--surface-2);
-  -webkit-backdrop-filter: saturate(1.5) blur(20px);
-  backdrop-filter: saturate(1.5) blur(20px);
   border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--line));
   border-radius: var(--r-xl);
   box-shadow: var(--shadow-sm);
@@ -845,13 +779,11 @@ html.dark .ln-sb-ws i { color: var(--ink-on-accent); }
   box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-sm);
   transform: translateY(-1px);
 }
-/* D2 parity: icon containers — accent glass */
+/* D2 parity: icon containers - accent glass */
 .ln-card-icon {
   width: 28px; height: 28px;
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--solid-fg) 40%, transparent);
   display: grid;
@@ -962,8 +894,6 @@ html.dark .ln-detail {
   width: 32px; height: 32px;
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--solid-fg) 40%, transparent);
   display: grid;
@@ -1103,8 +1033,6 @@ html.dark .ln-detail {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface-3);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
 }
 .ln-ns b {
   font-size: 19px;
@@ -1134,8 +1062,6 @@ html.dark .ln-detail {
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--paper) 60%, var(--bg-2));
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
   overflow: hidden;
 }
 .ln-sysi-hd {
@@ -1151,8 +1077,6 @@ html.dark .ln-detail {
   border-radius: var(--r-md);
   display: grid; place-items: center;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--solid-fg) 40%, transparent);
   color: var(--accent);
@@ -1252,8 +1176,6 @@ html.dark .ln-detail {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface-3);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
 }
 .ln-context-row.on {
   background: color-mix(in srgb, var(--accent) 9%, var(--surface-3));
@@ -1309,8 +1231,6 @@ html.dark .ln-detail {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface-3);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
 }
 .ln-ar + .ln-ar { margin-top: 6px; }
 .ln-ar-dot {
@@ -1402,7 +1322,7 @@ html.dark .ln-detail {
   padding: 72px 0 0;
 }
 
-/* Three pillars — the why-it's-different band. */
+/* Three pillars - the why-it's-different band. */
 .ln-pillars {
   padding: 88px 0 0;
   display: grid;
@@ -1507,19 +1427,21 @@ html.dark .ln-detail {
   .ln-feat-row.rev .ln-ft-txt { order: 0; }
 }
 
+/* Matte eyebrow: neutral label, flat opaque surface, pure-black hairline,
+   square. Blue restrained to the single live-state dot. */
 .ln-ft-eye {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   height: 24px;
   padding: 0 11px 0 9px;
-  border-radius: var(--r-pill);
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
   font-size: 11px;
   font-weight: 650;
   letter-spacing: .07em;
-  color: var(--accent);
+  color: var(--ink-soft);
   text-transform: uppercase;
 }
 .ln-ft-eye::before {
@@ -1527,7 +1449,7 @@ html.dark .ln-detail {
   width: 5px; height: 5px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
   flex-shrink: 0;
 }
 .ln-ft-txt h2 {
@@ -1567,20 +1489,8 @@ html.dark .ln-detail {
   box-shadow: var(--shadow-pop);
   overflow: hidden;
 }
-/* Soft accent glow behind each product mock so it reads as the proof it is. */
-.ln-ft-vis::after {
-  content: "";
-  position: absolute;
-  inset: -14% -8% -22% -8%;
-  z-index: -1;
-  border-radius: 40px;
-  background: radial-gradient(60% 60% at 50% 38%,
-    color-mix(in srgb, var(--accent) 18%, transparent) 0%,
-    color-mix(in srgb, var(--accent) 6%, transparent) 46%,
-    transparent 72%);
-  filter: blur(40px);
-  pointer-events: none;
-}
+/* Matte: no accent glow behind mocks. Flat opaque surface, pure-black
+   hairline border, matte shadow - the proof reads from the content. */
 .ln-ftv-bar {
   display: flex;
   align-items: center;
@@ -1628,8 +1538,6 @@ html.dark .ln-detail {
   border-radius: var(--r-md);
   display: grid; place-items: center;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--solid-fg) 40%, transparent);
   color: var(--accent);
@@ -1867,8 +1775,6 @@ html.dark .ln-sync-pull { color: var(--ink-on-accent); }
   width: 34px; height: 34px;
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--solid-fg) 40%, transparent);
   display: grid;
@@ -1961,19 +1867,6 @@ html.dark .ln-sync-pull { color: var(--ink-on-accent); }
   border-top: 1px solid var(--line);
   margin-top: 108px;
   position: relative;
-}
-.ln-cta-section::before {
-  content: "";
-  position: absolute;
-  left: 50%; top: 0;
-  width: 70%; height: 60%;
-  transform: translateX(-50%);
-  background: radial-gradient(ellipse at center,
-    color-mix(in srgb, var(--accent) 13%, transparent),
-    transparent 70%);
-  filter: blur(64px);
-  pointer-events: none;
-  z-index: 0;
 }
 .ln-cta-section > * { position: relative; z-index: 1; }
 .ln-cta-section h2 {
@@ -2151,7 +2044,7 @@ html.dark .ln-sync-pull { color: var(--ink-on-accent); }
 }
 
 /* =================================================================
-   REDESIGN 2026-05-29 — new-worker hero flow + employee cards +
+   REDESIGN 2026-05-29 - new-worker hero flow + employee cards +
    artifact-native runs. Locked positioning: hire AI workers.
    ================================================================= */
 
@@ -2182,29 +2075,15 @@ html.dark .ln-sync-pull { color: var(--ink-on-accent); }
   margin: 48px auto 0;
   max-width: 920px;
 }
-.ln-hero-visual::before {
-  content: "";
-  position: absolute;
-  left: 50%; top: -10%;
-  width: 88%; height: 64%;
-  transform: translateX(-50%);
-  background: radial-gradient(ellipse at center,
-    color-mix(in srgb, var(--tool, var(--accent)) 26%, transparent) 0%,
-    color-mix(in srgb, var(--tool, var(--accent)) 8%, transparent) 52%,
-    transparent 74%);
-  filter: blur(80px);
-  z-index: 0;
-  pointer-events: none;
-}
 
 .ln-nw {
   position: relative;
   z-index: 1;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r-2xl);
   overflow: hidden;
   background: var(--paper);
-  box-shadow: var(--shadow-pop), 0 0 0 1px var(--accent-line);
+  box-shadow: var(--shadow-pop);
   text-align: left;
   animation: shotIn .9s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -2260,10 +2139,7 @@ html.dark .ln-sync-pull { color: var(--ink-on-accent); }
     "run run";
   gap: 16px;
   padding: 22px;
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--accent) 5%, var(--paper)) 0%,
-      var(--paper) 60%);
+  background: var(--paper);
   min-height: 380px;
 }
 @media (max-width: 760px) {
@@ -2573,6 +2449,8 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
   padding: 92px 0 96px;
   margin-top: 96px;
 }
+/* Matte: neutral full-bleed band for section rhythm. No blue wash; a flat
+   warm-neutral surface separated by a pure-black hairline. */
 .ln-team::before {
   content: "";
   position: absolute;
@@ -2582,12 +2460,8 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
   height: 100%;
   transform: translateX(-50%);
   z-index: -1;
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--accent) 5%, transparent) 0%,
-      color-mix(in srgb, var(--accent) 2.5%, transparent) 50%,
-      transparent 100%);
-  border-top: 1px solid color-mix(in srgb, var(--accent) 10%, var(--line));
+  background: var(--bg-2);
+  border-top: 1px solid var(--line);
   pointer-events: none;
 }
 .ln-outcomes {
@@ -2600,18 +2474,15 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
 .ln-outcome {
   position: relative;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--line));
+  border: 1px solid var(--line);
   border-radius: var(--r-xl);
-  background:
-    linear-gradient(165deg,
-      color-mix(in srgb, var(--accent) 7%, var(--paper)) 0%,
-      var(--paper) 58%);
+  background: var(--paper);
   padding: 18px 18px 16px;
   box-shadow: var(--shadow-md);
   transition: transform .2s var(--ease), box-shadow .2s;
 }
 .ln-outcome:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-/* live pulse dot top-right — "work is happening" */
+/* live pulse dot top-right - "work is happening" */
 .ln-outcome::after {
   content: "";
   position: absolute;
@@ -2632,7 +2503,7 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
   font-weight: 700;
   letter-spacing: -.045em;
   line-height: 1;
-  color: var(--accent);
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
 .ln-outcome-spark {

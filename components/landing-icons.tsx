@@ -179,7 +179,7 @@ export const HubSpotLogo = () => (
   </svg>
 );
 
-/* Google Analytics — SimpleIcons (googleanalytics) */
+/* Google Analytics - SimpleIcons (googleanalytics) */
 export const AnalyticsLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
     <path fill="#F9AB00" d="M22.84 2.998v17.999a2.983 2.983 0 0 1-2.967 2.998 2.98 2.98 0 0 1-.368-.02 3.06 3.06 0 0 1-2.61-3.1V3.13A3.06 3.06 0 0 1 19.502.02a2.983 2.983 0 0 1 3.338 2.978z" />
@@ -187,7 +187,7 @@ export const AnalyticsLogo = () => (
   </svg>
 );
 
-/* Google Calendar — SimpleIcons (googlecalendar) */
+/* Google Calendar - SimpleIcons (googlecalendar) */
 export const GCalLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
     <path fill="#fff" d="M5 5h14v14H5z" />
@@ -203,35 +203,35 @@ export const GCalLogo = () => (
   </svg>
 );
 
-/* Zendesk — SimpleIcons (zendesk) */
+/* Zendesk - SimpleIcons (zendesk) */
 export const ZendeskLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
     <path fill="#03363D" d="M11.07 7.196v12.27H.93zM11.07 2.804a5.07 5.07 0 0 1-10.14 0zM12.93 19.466a5.07 5.07 0 0 1 10.14 0zM12.93 16.804V4.534L23.07 4.534z" />
   </svg>
 );
 
-/* Intercom — SimpleIcons (intercom) */
+/* Intercom - SimpleIcons (intercom) */
 export const IntercomLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
     <path fill="#1F8DED" d="M21 1.5H3A1.5 1.5 0 0 0 1.5 3v18A1.5 1.5 0 0 0 3 22.5h18a1.5 1.5 0 0 0 1.5-1.5V3A1.5 1.5 0 0 0 21 1.5zM15.7 5.7a.75.75 0 0 1 1.5 0v9a.75.75 0 0 1-1.5 0zm-3.95-.3a.75.75 0 0 1 1.5 0v10a.75.75 0 0 1-1.5 0zm-3.95.3a.75.75 0 0 1 1.5 0v9a.75.75 0 0 1-1.5 0zM4.05 6.6a.75.75 0 0 1 1.5 0v7a.75.75 0 0 1-1.5 0zm15.6 11.13c-.28.24-3.45 2.87-7.65 2.87s-7.37-2.63-7.65-2.87a.75.75 0 0 1 .98-1.14c.05.04 2.93 2.51 6.67 2.51s6.63-2.48 6.67-2.51a.75.75 0 1 1 .98 1.14z" />
   </svg>
 );
 
-/* Notion — SimpleIcons (notion) */
+/* Notion - SimpleIcons (notion) */
 export const NotionLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
     <path fill="#000" d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952l1.448.327s0 .84-1.168.84l-3.22.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933z" />
   </svg>
 );
 
-/* Salesforce — SimpleIcons (salesforce) */
+/* Salesforce - SimpleIcons (salesforce) */
 export const SalesforceLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
     <path fill="#00A1E0" d="M10.006 5.415a4.195 4.195 0 0 1 3.045-1.306c1.56 0 2.92.87 3.65 2.165a5.072 5.072 0 0 1 2.075-.441 5.143 5.143 0 0 1 5.144 5.16 5.143 5.143 0 0 1-5.144 5.157c-.31 0-.616-.027-.91-.082a3.74 3.74 0 0 1-3.27 1.93 3.7 3.7 0 0 1-1.624-.372 4.273 4.273 0 0 1-3.971 2.65c-1.781 0-3.31-1.088-3.955-2.636a3.97 3.97 0 0 1-.823.086A4.014 4.014 0 0 1 .2 13.18a4.025 4.025 0 0 1 1.992-3.477A4.617 4.617 0 0 1 1.81 7.79a4.633 4.633 0 0 1 4.635-4.631c1.52 0 2.864.73 3.71 1.858z" />
   </svg>
 );
 
-/* Greenhouse — generic ATS mark (SimpleIcons greenhouse) */
+/* Greenhouse - generic ATS mark (SimpleIcons greenhouse) */
 export const ATSLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
     <path fill="#24A47F" d="M12 0a4.5 4.5 0 0 0-1.5 8.74v2.02a8.25 8.25 0 1 0 3 0V8.74A4.5 4.5 0 0 0 12 0zm0 13.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9z" />
