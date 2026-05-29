@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "node scripts/sync-engine-web.mjs && NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy next dev",
+    "build": "node scripts/sync-engine-web.mjs && NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "node scripts/sync-engine-web.mjs && eslint",
+    "sync": "node scripts/sync-engine-web.mjs",
+    "check-drift": "node scripts/check-engine-sync.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -34,6 +36,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@tailwindcss/typography": "^0.5.19",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20",
     "@types/react": "^19",
