@@ -7,14 +7,23 @@ import { log } from "../lib/output.js";
 type JsonObject = Record<string, unknown>;
 
 const PACKAGE_NAME = "@floomhq/workeros";
+const DEFAULT_API_BASE = "https://workers-api.floom.dev";
 
-const CLIENTS = [
-  { target: "claude", name: "Claude Code", path: ".claude/settings.json", kind: "object" },
-  { target: "cursor", name: "Cursor", path: ".cursor/mcp.json", kind: "object" },
-  { target: "continue", name: "Continue", path: ".continue/.continuerc.json", kind: "array" },
+// Targets that write a file (kind = "object" or "array" for config shape).
+const FILE_CLIENTS = [
+  { target: "claude",   name: "Claude Code", path: ".claude/settings.json",                      kind: "object" },
+  { target: "cursor",   name: "Cursor",      path: ".cursor/mcp.json",                            kind: "object" },
+  { target: "windsurf", name: "Windsurf",    path: ".codeium/windsurf/mcp_config.json",            kind: "object" },
+  // VS Code: project-local first; fall back to user settings via --target vscode.
+  // The VS Code MCP extension stores servers under the same mcpServers key as
+  // Claude/Cursor when using the .vscode/mcp.json workspace file.
+  { target: "vscode",   name: "VS Code",     path: ".vscode/mcp.json",                            kind: "object" },
+  { target: "continue", name: "Continue",    path: ".continue/.continuerc.json",                  kind: "array"  },
 ] as const;
 
-type ClientTarget = (typeof CLIENTS)[number]["target"];
+type FileTarget = (typeof FILE_CLIENTS)[number]["target"];
+// "generic" is valid as a CLI --target but never writes a file.
+export type ClientTarget = FileTarget | "generic";
 
 function resolveHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "";
@@ -92,34 +101,34 @@ function removeContinueConfig(config: JsonObject): JsonObject {
   return next;
 }
 
-function manualSnippets(): string {
-  const placeholder = "<WORKEROS_API_SECRET>";
-  const objectSnippet = JSON.stringify({
+/** Build the JSON snippet for a generic / manual install. */
+function genericSnippet(secret: string, apiBase: string): string {
+  return JSON.stringify({
     mcpServers: {
-      workeros: {
-        command: "npx",
-        args: ["-y", PACKAGE_NAME],
-        env: {
-          WORKEROS_API_SECRET: placeholder,
-          WORKEROS_API_BASE: "https://workers-api.floom.dev",
-        },
-      },
+      workeros: serverConfig(secret, apiBase),
     },
   }, null, 2);
+}
+
+function manualSnippets(): string {
+  const placeholder = "<WORKEROS_API_SECRET>";
+  const objectSnippet = genericSnippet(placeholder, DEFAULT_API_BASE);
   return [
     "No supported MCP client config was found.",
-    "Create one of these files and add:",
-    "- ~/.claude/settings.json",
-    "- ~/.cursor/mcp.json",
-    "- ~/.continue/.continuerc.json",
+    "Create one of these files and add the snippet below:",
+    "- ~/.claude/settings.json         (--target claude)",
+    "- ~/.cursor/mcp.json              (--target cursor)",
+    "- ~/.codeium/windsurf/mcp_config.json  (--target windsurf)",
+    "- .vscode/mcp.json                (--target vscode, workspace-local)",
+    "- ~/.continue/.continuerc.json    (--target continue)",
+    "Or run with --target generic to print this snippet and paste it manually.",
     "",
     objectSnippet,
   ].join("\n");
 }
 
-function selectClients(target?: ClientTarget): Array<(typeof CLIENTS)[number]> {
-  if (target) return CLIENTS.filter((client) => client.target === target);
-  return [...CLIENTS];
+function selectFileClients(target: FileTarget): Array<(typeof FILE_CLIENTS)[number]> {
+  return FILE_CLIENTS.filter((c) => c.target === target);
 }
 
 export async function mcpInstallCommand(options: { target?: ClientTarget }): Promise<number> {
@@ -129,26 +138,62 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
   const credentials = await readCredentials();
   const fallbackSecret = process.env.WORKEROS_API_SECRET?.trim();
   const resolvedSecret = credentials?.api_secret || fallbackSecret;
-  const resolvedBase = credentials?.api_base || process.env.WORKEROS_API_BASE || "https://workers-api.floom.dev";
+  const resolvedBase = credentials?.api_base || process.env.WORKEROS_API_BASE || DEFAULT_API_BASE;
+
   if (!resolvedSecret) {
     log.err("Not logged in. Cannot install MCP config without credentials.");
     log.info("Run: floom login");
     return 1;
   }
 
-  const candidates = selectClients(options.target);
-  for (const client of candidates) {
-    const path = join(home, client.path);
-    if (!options.target && !existsSync(path)) {
-      continue;
+  // "generic" — print snippet for manual paste, no file written.
+  if (options.target === "generic") {
+    process.stdout.write(genericSnippet(resolvedSecret, resolvedBase) + "\n");
+    return 0;
+  }
+
+  if (options.target) {
+    // Explicit target: write unconditionally (create file if absent).
+    const clients = selectFileClients(options.target as FileTarget);
+    if (clients.length === 0) {
+      log.err(`Unknown target: ${options.target}`);
+      log.info("Supported targets: claude | cursor | vscode | windsurf | continue | generic");
+      return 1;
     }
-    const config = readJson(path);
+    const client = clients[0];
+    // VS Code workspace config lives relative to CWD, not HOME.
+    const configPath = client.target === "vscode"
+      ? join(process.cwd(), client.path)
+      : join(home, client.path);
+    const config = readJson(configPath);
     const patched = client.kind === "array"
       ? patchContinueConfig(config, resolvedSecret, resolvedBase)
       : patchObjectConfig(config, resolvedSecret, resolvedBase);
-    await writeJson(path, patched);
+    await writeJson(configPath, patched);
+    const displayPath = client.target === "vscode"
+      ? client.path
+      : `~/${client.path}`;
     log.ok(`Installed Workeros MCP config for ${client.name}`);
-    log.kv("Config path", `~/${client.path}`);
+    log.kv("Config path", displayPath);
+    return 0;
+  }
+
+  // No --target: auto-detect the first existing config file.
+  for (const client of FILE_CLIENTS) {
+    const configPath = client.target === "vscode"
+      ? join(process.cwd(), client.path)
+      : join(home, client.path);
+    if (!existsSync(configPath)) continue;
+    const config = readJson(configPath);
+    const patched = client.kind === "array"
+      ? patchContinueConfig(config, resolvedSecret, resolvedBase)
+      : patchObjectConfig(config, resolvedSecret, resolvedBase);
+    await writeJson(configPath, patched);
+    const displayPath = client.target === "vscode"
+      ? client.path
+      : `~/${client.path}`;
+    log.ok(`Installed Workeros MCP config for ${client.name} (auto-detected)`);
+    log.kv("Config path", displayPath);
     return 0;
   }
 
@@ -159,17 +204,32 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
 export async function mcpUninstallCommand(options: { target?: ClientTarget }): Promise<number> {
   const home = resolveHomeDir();
   if (!home) throw new Error("HOME is required");
-  const candidates = selectClients(options.target);
-  for (const client of candidates) {
-    const path = join(home, client.path);
-    if (!existsSync(path)) continue;
-    const config = readJson(path);
-    const patched = client.kind === "array" ? removeContinueConfig(config) : removeObjectConfig(config);
-    await writeJson(path, patched);
-    log.ok(`Removed Workeros MCP config from ${client.name}`);
-    log.kv("Config path", `~/${client.path}`);
+
+  if (options.target === "generic") {
+    log.warn("generic target writes no file — nothing to uninstall.");
     return 0;
   }
+
+  const candidates = options.target
+    ? selectFileClients(options.target as FileTarget)
+    : [...FILE_CLIENTS];
+
+  for (const client of candidates) {
+    const configPath = client.target === "vscode"
+      ? join(process.cwd(), client.path)
+      : join(home, client.path);
+    if (!existsSync(configPath)) continue;
+    const config = readJson(configPath);
+    const patched = client.kind === "array" ? removeContinueConfig(config) : removeObjectConfig(config);
+    await writeJson(configPath, patched);
+    const displayPath = client.target === "vscode"
+      ? client.path
+      : `~/${client.path}`;
+    log.ok(`Removed Workeros MCP config from ${client.name}`);
+    log.kv("Config path", displayPath);
+    return 0;
+  }
+
   log.warn("No Workeros MCP config entries were found.");
   log.info("Install first: floom mcp install");
   return 0;

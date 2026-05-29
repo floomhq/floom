@@ -382,6 +382,7 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
       "workers.list",
       "workers.run",
       "workers.update",
+      "workspace.chat",
     ]);
 
     const listed = await client.callTool({ name: "workers.list", arguments: {} });
