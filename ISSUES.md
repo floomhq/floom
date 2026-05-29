@@ -1158,3 +1158,30 @@ PR #243 (merged to main). Worktree `/tmp/wk-batchB-overview` off `66d1fa5`, reba
 **Root cause:** `.theme-mode-button-compact` (mobile top bar) kept the base `.theme-mode-button` border, pill radius and drop shadow, so it rendered as an outlined circle next to the borderless 44×44 search/menu icons.
 **Fix:** restyled the compact variant to a borderless 44×44 icon button with transparent bg and a 20px glyph, matching its siblings.
 **Status:** VERIFIED LIVE — CDP 375px emulation on pool-e: top bar shows search + theme + hamburger at identical icon size, no outlined circle. Screenshot: `docs/audits/shots-batchB-2026-05-29/M01-overview-mobile.png`.
+
+## Batch D — /contexts file viewer + /workers/new drag-drop (from `docs/audits/all-issues-discovery-2026-05-29.md`) (VERIFIED 2026-05-29)
+
+PR #242 (merged to main `57a1754`, rolled up under `8b0a674`). Worktree `/tmp/wk-batchD-contexts` off `66d1fa5`, rebased onto `origin/main` pre-merge, `gh auth=federicodeponte`, `baseRefName=main`. No backend touched (all frontend) → no `ops/deploy-api.sh`. Frontend aliased `workers.floom.dev` → `workeros-hnnypgguw` (custom alias is NOT auto-assigned by push). Screenshots in `docs/audits/shots-2026-05-29/batchD-verified/`. Scope respected: did NOT touch `/workers/<id>`, `/runs`, `/connections`, `/overview` (other batches); only `/contexts` + `/workers/new`.
+
+### P0-2 — context file viewer rendered NO content on direct nav / refresh / shared "Copy link"
+**Root cause:** in `apps/web/app/contexts/[name]/files/[...path]/page.tsx`, the file-text `useEffect` depended on the `selectedFile` OBJECT, which `detail?.files.find(...)` rebuilds with a NEW reference every render. On a URL-seeded load `detail` is null on first paint → `selectedFile` null → effect early-returned; once `detail` resolved, the unstable reference re-ran the body with `setText("")` racing the resolved fetch → blank pane (a race; sometimes content won, hence intermittent).
+**Fix:** key the effect on a STABLE primitive (`loadableTextPath` = the resolved path when it is a previewable text file) + an abort guard, so it fires exactly once per file and loads the URL-seeded file on first load.
+**Status:** VERIFIED LIVE — 3 fresh direct loads in a clean broker context (`/contexts/worker-author-style/files/SCHEMA.md`, `ANTI-PATTERNS.md?v=2`, `?v=3`) all render full content immediately. Screenshot: `docs/audits/shots-2026-05-29/batchD-verified/P0-2-FIXED-schema-direct-load.png`.
+
+### P2-11 — context-file Preview code blocks faint grey (low contrast)
+**Root cause:** prose's default `--tw-prose-pre-code` / inline-code colour rendered as faint grey on the light `bg-muted` block in `MarkdownRenderer`.
+**Fix:** force fenced-code (`prose-pre:text-foreground prose-pre:[&_code]:text-foreground`) and inline-code (`prose-code:text-foreground`) to full-contrast foreground in both themes.
+**Status:** VERIFIED LIVE — `# BAD`, `client = OpenAI(...)`, `exec: secrets:` render as dark high-contrast text on light bg-muted; inline `run.py` / `SKILL.md` / `exec.secrets` readable. Screenshot: `docs/audits/shots-2026-05-29/batchD-verified/P2-11-code-contrast-desktop.png`.
+
+### USED BY → top metrics row (Federico Image #17)
+**Ask:** on the pack-detail page, "Used by: <worker>" should sit in the top metrics row (Files / Workers / Size), not as a separate section below.
+**Fix:** in `apps/web/app/contexts/[name]/page.tsx`, render the used-by worker names as an inline chip in the top metrics row; removed the standalone section (kept only the empty-state hint).
+**Status:** VERIFIED LIVE — top row reads `Files 9 · Workers 1 · Size 20.9 KB · Used by Worker Author` (clickable); no separate section below. Screenshot: `docs/audits/shots-2026-05-29/batchD-verified/usedby-top-row-pack-detail.png`.
+
+### /workers/new drag-and-drop files (Federico)
+**Ask:** the `/workers/new` prompt box should accept dropped files (bundle zip / worker folder / .md / .py).
+**Fix:** made the hero card a dropzone (`onDragOver`/`onDragLeave`/`onDrop` + `dragActive` overlay) routing through the existing `handleFiles` path. Additive — the textarea + Upload button are unchanged.
+**Status:** VERIFIED LIVE — synthetic `dragover` (zip in dataTransfer) shows the dashed accent border + "Drop a .md / .py / .zip or a worker folder to import" overlay; a real `drop` of a `.md` fires `handleFiles` → page enters Processing (test worker created via the real path, then deleted to keep prod clean, HTTP 204). Screenshot: `docs/audits/shots-2026-05-29/batchD-verified/workers-new-dropzone-overlay.png`.
+
+### Regression check — file-switch-via-tree must stay in-place (no full-page skeleton)
+**Status:** VERIFIED (no regression) — CDP click on the SCHEMA.md tree button: 0 skeletons immediately after click, content swapped in place and settled.
