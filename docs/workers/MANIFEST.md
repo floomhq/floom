@@ -97,7 +97,7 @@
 - **Connections required:** none
 - **Secrets required:** APIFY_API_KEY
 - **Runtime:** python311 (run.py)
-- **Status:** ACTIVE
+- **Status:** ARCHIVED — APIFY_API_KEY free credits exhausted until 2026-06-25. Worker code correct (KeyError guard added lane/reliability-2026-05-29). Restore when credits renew.
 
 ### node-smoke-test
 - **Bundle:** workers/node-smoke-test/
