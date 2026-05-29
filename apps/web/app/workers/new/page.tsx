@@ -647,6 +647,16 @@ const DRAFT_STAGES = [
   { id: "validate", label: "Validating schema",             targetSec: 38 },
 ] as const;
 
+// FIX 4 (Federico 2026-05-29): worker-author + smoke legitimately runs
+// 60-120s+. The old 60s "may have stalled" notice fired DURING normal
+// generation, telling the user a worker that completes fine server-side had
+// stalled (a scorer flagged the false stall). The background poll
+// (pollRunUntilTerminalThenRoute) keeps reconciling against the real run for
+// up to 5min and navigates to the created worker on completion — so the UI
+// must not alarm before that has had a fair chance. Raise the notice to 150s
+// and reword it to "still working", never "stalled".
+const SLOW_GENERATION_NOTICE_SEC = 150;
+
 function GeneratingPanel({
   prompt,
   streamLogs,
@@ -745,17 +755,18 @@ function GeneratingPanel({
         </div>
       </div>
 
-      {elapsed >= 60 && onCancel && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:bg-amber-950/30 dark:border-amber-900">
-          <p className="text-xs text-amber-800 dark:text-amber-300">
-            This is taking longer than usual. The request may have stalled.
+      {elapsed >= SLOW_GENERATION_NOTICE_SEC && onCancel && (
+        <div className="rounded-lg border border-line bg-[var(--bg-2)] px-4 py-3">
+          <p className="text-xs text-muted-foreground">
+            Still working — complex workers can take a couple of minutes. We&apos;ll
+            open the editor automatically as soon as it&apos;s ready.
           </p>
           <button
             type="button"
             onClick={onCancel}
-            className="mt-2 text-xs underline text-amber-900 hover:text-amber-700 dark:text-amber-200 dark:hover:text-amber-100"
+            className="mt-2 text-xs underline text-muted-foreground hover:text-foreground transition-colors"
           >
-            Go back and try a shorter prompt
+            Cancel and start over
           </button>
         </div>
       )}
