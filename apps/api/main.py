@@ -7849,7 +7849,7 @@ def system_overview(
                 recent_failure_count=int(failure_count),
                 last_failed_at=last_failed_at,
                 suggested_actions=["view_logs", "retry", "disable"],
-                action_url=f"/runs?worker={worker_id}&status=failed",
+                action_url=f"/workers/{worker_id}",
             )
         )
 
@@ -7959,6 +7959,44 @@ def system_info():
         "started_at": _PROCESS_STARTED_AT,
         "python_version": sys.version.split()[0],
         "runner": "e2b",
+    }
+
+
+@app.get("/system/alerts")
+def system_alerts(auth: AuthContext = Depends(get_auth_context)):
+    """Return open (unresolved) alert incidents.
+
+    Returns a list of {worker_id, incident_key, reason, details, fired_at} for
+    incidents that have not yet been resolved.  Used for diagnostics and the
+    test harness.
+    """
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, worker_id, incident_key, reason, details, fired_at, resolved_at
+                FROM alert_incidents
+                ORDER BY fired_at DESC
+                LIMIT 200
+                """
+            ).fetchall()
+    except Exception:
+        # Table may not exist yet if migrations haven't run (e.g., test env)
+        return {"incidents": []}
+    return {
+        "incidents": [
+            {
+                "id": row["id"],
+                "worker_id": row["worker_id"],
+                "incident_key": row["incident_key"],
+                "reason": row["reason"],
+                "details": row["details"],
+                "fired_at": row["fired_at"],
+                "resolved_at": row["resolved_at"],
+                "open": row["resolved_at"] is None,
+            }
+            for row in rows
+        ]
     }
 
 
