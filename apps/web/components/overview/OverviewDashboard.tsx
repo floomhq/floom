@@ -143,6 +143,9 @@ function statusMeta(status: string) {
   if (normalized === "queued") {
     return { label: "Queued", color: "var(--pending)" };
   }
+  if (normalized === "pending_approval") {
+    return { label: "Awaiting approval", color: "var(--text-muted)" };
+  }
   return { label: "Running", color: "var(--pending)" };
 }
 
@@ -206,7 +209,7 @@ function WorkerActivity({
       </div>
       {loading ? (
         <div className="space-y-2">
-          {Array.from({ length: 7 }).map((_, index) => (
+          {Array.from({ length: 5 }).map((_, index) => (
             <Skeleton key={index} className="h-11 w-full rounded-lg" />
           ))}
         </div>
@@ -214,7 +217,7 @@ function WorkerActivity({
         <p className="py-8 text-center text-sm text-[var(--text-muted)]">No runs yet.</p>
       ) : (
         <div className="divide-y divide-[var(--border-soft)]">
-          {runs.slice(0, 8).map((run) => {
+          {runs.slice(0, 5).map((run) => {
             const meta = statusMeta(run.status);
             return (
               <Link
@@ -395,11 +398,11 @@ export function OverviewDashboard({
     () => [
       {
         value: completedThisWeek,
-        label: "Work shipped",
+        label: "Runs completed",
         context:
           workTrend !== null
             ? `${workTrend >= 0 ? "+" : ""}${workTrend}% vs last week`
-            : "This week",
+            : "Completed runs, last 7 days",
         trend: workTrend,
         sparkline: runs7dSparkline,
       },
