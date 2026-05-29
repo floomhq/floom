@@ -170,7 +170,14 @@ function ContextsPage() {
   const [newContextName, setNewContextName] = useState("");
   const [showNewContext, setShowNewContext] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-  const [mobilePane, setMobilePane] = useState<"packs" | "files" | "file">("packs");
+  // On mobile only one pane shows at a time. Initialise from the URL so a
+  // deep-link (?pack=&file=) lands on the right pane instead of stranding the
+  // user on the pack list with the file pane absent from the DOM.
+  const [mobilePane, setMobilePane] = useState<"packs" | "files" | "file">(() => {
+    if (searchParams.get("file")) return "file";
+    if (searchParams.get("pack")) return "files";
+    return "packs";
+  });
 
   // ---- Shallow URL sync (no Next navigation / remount) --------------------
   useEffect(() => {
