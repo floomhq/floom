@@ -211,15 +211,70 @@ def _backfill_example_input(worker_yml: str, sample_input_json: Any, log_fn: Cal
         sample = dict(sample_input_json)
 
     if not sample:
-        return worker_yml
+        # Final fallback: synthesize a type-appropriate value for every declared
+        # input straight from the worker's own schema, so EVERY worker is
+        # one-click runnable even when the LLM returns no sample at all.
+        sample = _synthesize_example_input_from_schema(raw)
+        if not sample:
+            return worker_yml
+        log_fn("Synthesized example_input from the worker's input schema (no LLM sample)", level="info")
+    else:
+        log_fn("Backfilled example_input from sample_input_json so the worker is one-click runnable", level="info")
 
     raw["example_input"] = sample
-    log_fn("Backfilled example_input from sample_input_json so the worker is one-click runnable", level="info")
     try:
         import yaml as pyyaml
         return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
     except Exception:
         return worker_yml
+
+
+def _synthesize_example_input_from_schema(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a minimal, type-appropriate example_input from a worker manifest's
+    declared inputs. Used as the last-resort sample so file-input workers (and
+    any worker) are one-click runnable when no LLM sample is available.
+
+    File inputs get small inline TEXT content (a CSV for text/csv, else a couple
+    of plain-text lines); scalars get the same type-appropriate placeholders the
+    smoke runner uses. Returns {} when there are no usable inputs."""
+    inputs = None
+    exec_block = manifest.get("exec")
+    if isinstance(exec_block, dict) and isinstance(exec_block.get("inputs"), list):
+        inputs = exec_block["inputs"]
+    elif isinstance(manifest.get("inputs"), list):
+        inputs = manifest["inputs"]
+    if not inputs:
+        return {}
+
+    sample: Dict[str, Any] = {}
+    for inp in inputs:
+        if not isinstance(inp, dict):
+            continue
+        name = inp.get("name")
+        if not name:
+            continue
+        itype = str(inp.get("type") or "").strip().lower()
+        kind = str(inp.get("kind") or "").strip().lower()
+        media = str(inp.get("media_type") or "").strip().lower()
+        is_file = itype == "file" or kind == "file"
+        if is_file:
+            if "csv" in media:
+                sample[name] = "name,value\nalice,1\nbob,2\n"
+            elif "json" in media:
+                sample[name] = '{"example": "value"}'
+            else:
+                sample[name] = "alice\nbob\ncharlie\n"
+        elif itype in ("list", "array"):
+            sample[name] = [3, 1, 2]
+        elif itype in ("object", "dict", "json"):
+            sample[name] = {"key": "value"}
+        elif itype == "number":
+            sample[name] = "1"
+        elif itype == "boolean":
+            sample[name] = True
+        else:
+            sample[name] = "sample"
+    return sample
 
 
 def _register_authored_worker(

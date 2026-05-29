@@ -60,3 +60,26 @@ def test_backfill_invalid_sample_json_is_noop() -> None:
     yml = "name: t\n"
     out = run_service._backfill_example_input(yml, "{not json", _log)
     assert "example_input" not in yaml.safe_load(out)
+
+
+def test_synthesize_file_input_csv_from_schema() -> None:
+    yml = (
+        "name: t\nexec:\n  entry: run.py\n  inputs:\n"
+        "  - name: csv_data\n    kind: file\n    media_type: text/csv\n    required: true\n"
+    )
+    out = run_service._backfill_example_input(yml, None, _log)
+    ei = yaml.safe_load(out)["example_input"]
+    assert "," in ei["csv_data"]  # a real CSV the UI can upload
+
+
+def test_synthesize_scalars_from_schema() -> None:
+    yml = "name: t\ninputs:\n- name: text\n  type: string\n- name: count\n  type: number\n"
+    out = run_service._backfill_example_input(yml, None, _log)
+    ei = yaml.safe_load(out)["example_input"]
+    assert ei["text"] == "sample"
+    assert ei["count"] == "1"
+
+
+def test_synthesize_skips_when_no_inputs() -> None:
+    out = run_service._backfill_example_input("name: t\n", None, _log)
+    assert "example_input" not in yaml.safe_load(out)
