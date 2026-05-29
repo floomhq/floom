@@ -41,7 +41,9 @@ const ICON_PREFIX_SLUGS = new Set(["anthropic", "cursor", "windsurf", "continue"
 
 // Slugs that have a registered #brand-* SVG sprite symbol. Anything outside
 // this set falls back to a clean lettered glyph instead of an empty box.
-const KNOWN_BRAND_SLUGS = new Set([
+// Exported so workerIcon() can lead a card with a real logo only when one
+// exists (otherwise it prefers a meaningful category glyph).
+export const KNOWN_BRAND_SLUGS = new Set([
   "composio",
   "github",
   "gmail",
