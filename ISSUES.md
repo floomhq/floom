@@ -1185,3 +1185,52 @@ PR #242 (merged to main `57a1754`, rolled up under `8b0a674`). Worktree `/tmp/wk
 
 ### Regression check — file-switch-via-tree must stay in-place (no full-page skeleton)
 **Status:** VERIFIED (no regression) — CDP click on the SCHEMA.md tree button: 0 skeletons immediately after click, content swapped in place and settled.
+
+## Batch C — connections + secrets + settings + approvals defects (from `docs/audits/all-issues-discovery-2026-05-29.md`) (VERIFIED 2026-05-29)
+
+PR #245 (squash `9965187`, merged to main). Worktree `/tmp/wk-batchC-connections` off `66d1fa5`, rebased onto `origin/main` pre-merge (no conflicts), `gh auth=federicodeponte`, `baseRefName=main`. Backend deployed via `ops/deploy-api.sh` (HEAD `b516b71` → SHA `8e5920f`, health ok, all endpoint asserts 200, migration v38, schema OK). Frontend: Vercel prod deploy aliased to `workers.floom.dev` (verified `created 47s ago`). Live verification via self-hosted server Browser Broker pool-e + `curl` against `workers-api.floom.dev` (public API reachable, not CF-blocked). Screenshots in `docs/audits/shots-batchC-2026-05-29/`. Scope respected: did NOT touch `/workers`, `/runs`, `/overview`, `/contexts` (other batches).
+
+### P1-8 (DANGER) — infrastructure env vars listed as deletable user Secrets
+**Root cause:** `apps/api/main.py` `PLATFORM_SECRETS` (the denylist that filters `GET /secrets` and guards upsert/delete/test) was built from `PLATFORM_SECRET_SPECS` only. The infra/path vars in `INFRA_PATH_SPECS` (`FLOOM_DB`, `FLOOM_WORKERS_DIR`, `FLOOM_ARTIFACTS_DIR`, `FLOOM_CONTEXTS_DIR`, `FLOOM_RUN_TIMEOUT`) were therefore NOT excluded, so they appeared in the operator Secrets list with Test/Update/**Delete** — deleting `FLOOM_DB` could break the running system.
+**Fix:** `PLATFORM_SECRETS` now unions `PLATFORM_SECRET_SPECS + INFRA_PATH_SPECS`. The infra vars are excluded from the list and refused (HTTP 400) for upsert/delete/test. They remain visible (read-only) in Settings → System → Platform configuration. New regression test `tests/test_p1_8_infra_vars_not_user_secrets.py` (4 tests, all pass).
+**Status:** VERIFIED LIVE — deployed backend `GET /secrets` returns 6 names, all real API keys (`APIFY_API_KEY`, `GEMINI_API_KEY`, `GITHUB_PAT`, `GOOGLE_API_KEY`, `GRANOLA_API_KEY`, `TEST_SECRET`); zero infra vars present. `DELETE /secrets/FLOOM_DB` → HTTP 400 (refused). Public `workers-api.floom.dev/secrets` → 200.
+
+### P1-7 — Connections Status column had no positive state for active connections
+**Root cause:** `StatusPill` in `apps/web/components/connections/ConnectionRow.tsx` returned `null` for `status==="active"` (an earlier "no decoration" call), so active rows showed a blank Status cell while only Expired/Failed got a pill — read as missing data.
+**Fix:** added an "Active" pill (uses `--positive`) so every row shows its actual state.
+**Status:** VERIFIED LIVE — `/connections` (broker pool-e): GitHub, Gmail, LinkedIn all show green "Active" pills. Screenshot: `docs/audits/shots-batchC-2026-05-29/16-connections-connected.png`.
+
+### P2-6 — expired rows showed "— ↻" dangling refresh glyph (looked like a stuck loader)
+**Root cause:** the Scopes column rendered a dash + inline refresh button whenever `scopes.length===0`, including expired/failed rows — where a scope re-check can never succeed.
+**Fix:** for expired/failed connections show a clean dash only; the inline refresh affordance is reserved for healthy-but-unloaded rows. The path back for a dead connection is Reconnect.
+**Status:** VERIFIED LIVE — expired Google Calendar/Drive/Notion rows show "— —" with no refresh glyph. Same screenshot.
+
+### P2-7 — opaque "account …849fe7" hash for expired Google/Notion connections
+**Root cause:** `getConnectionAccountLabel` (`connection-data.ts`) fell back to an ID-suffix hash when no human-readable account metadata existed — which is the case for expired connections (Composio returns no account info until reconnect).
+**Fix:** for expired/failed connections with no account label, show "Expired — reconnect to see account" instead of a hash. The per-row ID-suffix disambiguator in `ConnectionsClient.tsx` now skips this placeholder so two expired rows don't reintroduce hash noise.
+**Status:** VERIFIED LIVE — both Google Calendars, Google Drive and Notion show "Expired — reconnect to see account". Same screenshot.
+
+### P2-8 — Browse cards showed a redundant dev-facing slug + truncated title
+**Root cause:** `apps/web/app/connections/browse/page.tsx` rendered the Composio toolkit slug under the human name ("Gmail / gmail") and `truncate`d the title ("Google Calen…").
+**Fix:** dropped the slug line; the name now uses `line-clamp-2` so it shows in full.
+**Status:** VERIFIED LIVE — `/connections/browse` (broker) cards show name + description only, no slug; "Google Calendar" renders in full.
+
+### P2-9 — inconsistent Connections tab routing (`/secrets` outside the `/connections/*` namespace)
+**Root cause:** Connected/Browse/MCP lived under `/connections/*` but Secrets was at `/secrets`.
+**Fix:** moved the secrets page to `/connections/secrets` (`git mv`); the old `/secrets` is now a redirect that preserves `?prefill=`. Updated the tab, command palette, and browse/redirect prefill links.
+**Status:** VERIFIED LIVE — Secrets tab href = `/connections/secrets` (HTTP 200); `/secrets` 301-redirects to `/connections/secrets` (final URL confirmed). Same connections screenshot shows the tab row.
+
+### P1-9 — Approvals "Go to platform" link near-invisible + ambiguous
+**Root cause:** two `Go to platform` links in `apps/web/app/approvals/page.tsx` used `--ink-mute` (low contrast); "platform" is confusing in the single-tenant OS (implies the separate Cloud product).
+**Fix:** both now read "Back to dashboard" (→ `/overview`) with readable `--ink-soft` + hover underline.
+**Status:** VERIFIED LIVE — `/approvals` shows two "Back to dashboard" links, both `href=/overview`, clearly legible. Screenshot: `docs/audits/shots-batchC-2026-05-29/20-approvals.png`.
+
+### P2-12 — Approvals empty-state card half-width while page is full-width
+**Root cause:** the page wrapper was `max-w-2xl` while Runs/Connections fill the layout container.
+**Fix:** outer wrapper is now full-width (`space-y-6`) with the larger 2xl H1; header + empty-state span full width; the populated approval card list keeps a `max-w-2xl` reading column.
+**Status:** VERIFIED LIVE — the "No pending approvals" card spans the full content width, matching Runs/Connections. Same approvals screenshot.
+
+### P2-10 — Settings CLI showed `floom login` but the npm package installs the `workeros` binary
+**Root cause:** `apps/web/components/CliCommandPanel.tsx` printed `npm i -g @floomhq/workeros` then `floom login`. Per `apps/mcp/package.json` the package's `bin` entries are `workeros` and `workeros-mcp` — there is no `floom` binary, so the displayed command does not exist after install. (The CLI brands its help text as `floom`, but that is not an installed executable.)
+**Fix:** the CLI snippet now reads `workeros login` (the real installed binary, matching the package name).
+**Status:** VERIFIED LIVE — `/settings` → API access → CLI tab shows `npm i -g @floomhq/workeros` then `workeros login`.
