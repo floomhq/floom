@@ -614,36 +614,30 @@ function WorkerCard({
             )}
           </div>
 
-          {/* 2. Title + description form ONE bounded body block (flex-1,
-              min-h-0) that absorbs the space between the top pill row and the
-              pinned footer. FIX 3 (Federico 2026-05-29): the description used
-              to bleed into the footer when the title ran 2 lines and/or a
-              status pill appeared. Reserving the title at a fixed 2-line
-              height and clamping the description inside a min-h-0 flex body
-              means the footer is laid out (never overlapped) and every card
-              holds the same height. */}
-          <div className="flex-1 min-h-0 flex flex-col gap-1.5">
-            <h3
-              className={`font-medium text-[15px] leading-snug line-clamp-2 min-h-[2.7em] ${
-                worker.archived ? "text-muted-foreground" : ""
-              }`}
-            >
-              {worker.name}
-            </h3>
+          {/* 2. Title — natural height, capped at 2 lines. No rigid min-height:
+              reserving 2 lines for every title starved the description to 0px
+              on cards that also show a status pill (caught live 2026-05-29). */}
+          <h3
+            className={`font-medium text-[15px] leading-snug line-clamp-2 ${
+              worker.archived ? "text-muted-foreground" : ""
+            }`}
+          >
+            {worker.name}
+          </h3>
 
-            {!worker.archived && worker.status !== "healthy" && worker.status !== "ready" && worker.status && (
-              <CardStatusPill status={worker.status} />
-            )}
+          {!worker.archived && worker.status !== "healthy" && worker.status !== "ready" && worker.status && (
+            <CardStatusPill status={worker.status} />
+          )}
 
-            {/* Description — clamped to 2 lines. `line-clamp-2` already sets
-                display:-webkit-box + overflow:hidden; do NOT add a separate
-                `overflow-hidden` utility — it conflicts with the webkit-box
-                display and collapses the paragraph to 0 height (caught live
-                2026-05-29). The min-h-0 flex parent bounds it instead. */}
-            <p className="text-sm text-muted-foreground line-clamp-2">
-              {description}
-            </p>
-          </div>
+          {/* 3. Description — clamped to 2 lines, given a 1-line min-height
+              floor so flexbox can never crush it to 0 (the bug on pill cards),
+              and flex-1 so it absorbs the slack between the title/pill and the
+              pinned footer. FIX 3 (Federico 2026-05-29): this is what keeps the
+              description off the footer — it can never grow past its 2-line
+              clamp, and the footer is pinned below with mt-auto. */}
+          <p className="text-sm text-muted-foreground line-clamp-2 flex-1 min-h-[1.25rem]">
+            {description}
+          </p>
 
           {/* 3. Quiet footer — one line: relative last-run + a small success
               bar (filled % of last-7d success). Pinned below the body block. */}
