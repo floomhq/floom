@@ -206,3 +206,35 @@ across a full `/workers/reload`.
 - P2: run JSON `artifacts[].path` relative (`run_xxx/out/...`), logs scrubbed, 0 host/sandbox path hits; artifact download returns real bytes.
 
 Tests: 19 new (batch J), all pass. 6 pre-existing failures (stale signatures, untouched).
+
+---
+
+## Batch K — launch-polish (G5 final A=88 / B=91, both 0 P0) — deployed `2cc8dd2`, 2026-05-29 PM
+
+Backend under test: local `http://127.0.0.1:8011` = the `workeros-api` systemd service (MainPID confirmed) = the production backend `workers-api.floom.dev` proxies to. PRs #287, #288, #289, #290 squash-merged to main; deployed via `ops/deploy-api.sh` (no `--skip-drain`), `/health=ok`, migration v38.
+
+### FIX 1 — smoke_reason + log-panel jargon/path leaks (P1, both scorers)
+- `humanize_smoke_reason()` (main.py): strips `(error_code=…)`, routes through `_operator_error_message`; bare quoted-token KeyError args → CODE headline. Wired into draft-and-create response (main.py) + worker-author SSE (run_service.py).
+- run-failed log line (run_service.py:1959) routed through `_operator_error_message`.
+- `_redact_public_log_message` (the single log-read chokepoint) now collapses traceback headers/frames/exception-class/bare-exc lines into one calm note — kills the e2b raw-stderr leak in the "Recent logs" panel.
+- Widened `_BARE_PYTHON_EXC_MSG_RE` (`can't multiply sequence by non-int`, sibling TypeErrors).
+- **Live proof:** fresh BOOM-input run `run_012996068127` → `error`=calm headline; logs panel = all traceback lines → "Worker code raised an error (see the Error card)"; `error_raw` path-scrubbed + collapsed; draft-and-create `divide-numbers-2` `smoke_reason`=calm headline. Operator-visible surface (error + all logs) grep-CLEAN for `/home/user` `/root/workeros` `Traceback` `unsupported operand` `TypeError`.
+
+### FIX 2 — catalog cleanup (P1, both scorers) — live DATA op (no deploy)
+DELETED (30, HTTP 204): ai-research-summary-2, csv-name-length-adder-2, csv-name-length-adder-3, csv-sorter-2, csv-sorter-3, csv-uppercase-names-2, divide-numbers-2, extract-email-addresses-2, extract-phone-numbers-2, github-pr-summary-2, markdown-to-plain-text-2, markdown-to-plain-text-3, median-calculator-2, median-calculator-3, median-calculator-4, random-science-facts-2, random-science-facts-3, remove-duplicate-lines, statistics-calculator-2, statistics-calculator-3, string-reverser, sum-column-numbers-2, sum-column-numbers-3, sum-column-numbers-4, text-word-character-counter-2, text-word-character-counter-3, text-word-character-counter-4, text-word-character-counter-5, usd-to-euro-converter-2, usd-to-euro-converter-3. (Reason: numbered `-N` duplicates + one-off wedge tests created during today's audits — disposable test artifacts.)
+PAUSED (9, reversible: `paused: true` in manifest + `/workers/reload` → durable `enabled=0`): csv-name-length-adder, csv-sorter, csv-uppercase-transform, divide-numbers, markdown-to-plain-text, median-calculator, random-science-facts, statistics-calculator, text-uppercase-converter. (Reason: base-name non-example workers at 0% success / needs_attention — not clearly real; paused not deleted per brief.) All 9 verified 409 + `worker_disabled` in overview, durable across 2 reloads.
+KEPT: 11 examples + 27 non-example (healthy/real). Catalog **68 → 38**. No 0%-success non-example worker is presented as green-ready.
+
+### FIX 3 — honest success metric (P1, scorer A)
+`success_rate_7d` numerator+denominator scoped to ACTIVE real workers (operator-visible, not paused, not example/stock); `success_rate_scope="active_workers"` label added. **Live: 0.857 (85.7%)** vs the 54.6% legacy aggregate both scorers flagged. Run COUNTS/sparklines left unscoped (activity volume).
+
+### FIX 4 — file-input workers ship runnable samples (P1, scorer A)
+Generator prompt + SCHEMA.md require example_input for every input (inline text for files); `_DRAFT_SYSTEM_PROMPT` requests `sample_input_json`; registration backfills example_input from sample_input_json on BOTH create paths; final fallback `_synthesize_example_input_from_schema` builds a type-appropriate sample from the declared schema (CSV/text for files) so EVERY worker is one-click runnable regardless of LLM compliance; UI `applyExampleInput` synthesizes a real upload from inline content (accept_csv fills raw CSV inline). **Live proof:** fresh file-input worker `line-counter` → `example_input={"text_file":"line 1\nline 2\nline 3\n"}`, smoke passed, healthy.
+
+### FIX 5 — /contexts transient toast (P2-A, scorer B)
+Retry once on transient fetch error before alarming; never surface raw "Failed to fetch". (P2-B/P2-C deferred per brief.)
+
+### Regression (VERIFICATION 5)
+Broken generations still smoke-FAIL → durably 409 (never green); passing generations run healthy. **0 silently-broken holds.** Honest residual: generator first-pass quality is the remaining ceiling — many fresh script gens fail `output_validation_failed: <field> scalar output leaked a path string` (engine quality watch-item; gate catches them, not a launch blocker).
+
+Tests: 38 client-fixture + hygiene + backfill + overview-scope pass together. Pre-existing 2 `test_db_factory.py` failures (missing `approvals` arg) untouched.
