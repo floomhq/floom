@@ -1,0 +1,28 @@
+schema_version: "0.3"
+name: "gmail-daily-summary"
+title: "Gmail Daily Summary"
+description: "Summarise the day's unread Gmail into a tight digest every morning at 8am Berlin time."
+version: "0.1.0"
+targets: ["generic"]
+exec:
+  entry: "SKILL.md"
+runtime: "skill"
+running: "e2b"
+inputs:
+- name: focus_topic
+  kind: scalar
+  type: string
+  required: false
+  label: "Focus Topic"
+  default: "unread email: senders, what they need, and what to action first"
+outputs:
+- name: summary
+  kind: file
+  media_type: text/markdown
+  path: out/summary.md
+  required: true
+  label: "Daily Email Summary"
+trigger:
+  type: schedule
+  cron: "0 8 * * *"
+  timezone: "Europe/Berlin"
