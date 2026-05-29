@@ -71,7 +71,11 @@ export function CliCommandPanel() {
 
   const snippets = useMemo(
     () => ({
-      cli: "npm i -g @floomhq/workeros\nfloom login",
+      // P2-10 (audit 2026-05-29): the npm package @floomhq/workeros installs a
+      // binary named `workeros` (see apps/mcp/package.json `bin`), NOT `floom`.
+      // Showing `floom login` here had the user run a command that does not
+      // exist after install. Use the real installed binary name.
+      cli: "npm i -g @floomhq/workeros\nworkeros login",
       mcp: buildMcpSnippet(mcpTarget),
       api: `curl -sS ${API_BASE}/workers \\\n  -H "x-floom-secret: ${apiSecret}"`,
     }),
