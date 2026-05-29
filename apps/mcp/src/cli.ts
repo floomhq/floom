@@ -9,6 +9,11 @@ import { runWhoamiCommand } from "./commands/whoami.js";
 import { runWorkerCommand } from "./commands/run.js";
 import { workersListCommand, workersShowCommand, workersInfoCommand } from "./commands/workers.js";
 import {
+  workspacesListCommand,
+  workspacesShowCommand,
+  workspacesUseCommand,
+} from "./commands/workspaces.js";
+import {
   runsDownloadCommand,
   runsListCommand,
   runsLogsCommand,
@@ -50,7 +55,8 @@ export function buildCliProgram(): Command {
 
   program.command("login")
     .description("Login via browser device authorization")
-    .action(async () => runAction(runLoginCommand()));
+    .option("--cloud", "Authenticate against Workeros Cloud (workeros.floom.dev)")
+    .action(async (options: { cloud?: boolean }) => runAction(runLoginCommand(options)));
 
   program.command("logout")
     .description("Remove saved CLI credentials")
@@ -88,6 +94,31 @@ export function buildCliProgram(): Command {
     .argument("<id>", "Worker id")
     .option("--json", "Print raw JSON")
     .action(async (id: string, options: { json?: boolean }) => runAction(workersInfoCommand(id, options)));
+  workers.command("run")
+    .description("Trigger a worker run (alias for `floom run`)")
+    .argument("<id>", "Worker id")
+    .option("--input <key=value>", "Input key/value (repeatable)", (value: string, acc: string[]) => [...acc, value], [])
+    .option("-f, --inputs-file <path>", "Path to JSON inputs object")
+    .option("--output-dir <path>", "Save artifacts to this directory")
+    .option("--json", "Print final run JSON")
+    .action(async (
+      id: string,
+      options: { input?: string[]; inputsFile?: string; outputDir?: string; json?: boolean },
+    ) => runAction(runWorkerCommand(id, options)));
+
+  const workspaces = program.command("workspaces").description("Manage Workeros Cloud workspaces");
+  workspaces.command("list")
+    .description("List workspaces you can access")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(workspacesListCommand(options)));
+  workspaces.command("show")
+    .description("Show the currently active workspace")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(workspacesShowCommand(options)));
+  workspaces.command("use")
+    .description("Set the active workspace (matches by name or id)")
+    .argument("<name-or-id>", "Workspace name or id")
+    .action(async (target: string) => runAction(workspacesUseCommand(target)));
 
   const runs = program.command("runs").description("Inspect worker runs");
   runs.command("list")
