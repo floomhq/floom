@@ -1070,17 +1070,30 @@ def _validate_run_outputs(
             if not path.is_file():
                 return f"output_validation_failed: {name} file not found at {path.name}", warnings
             size = path.stat().st_size
+            if size == 0:
+                return f"output_validation_failed: {name} file is empty", warnings
+            media_type = (output.media_type or "").lower()
+            if media_type == "application/json":
+                # A valid, parseable JSON document is a legitimate result at any
+                # non-zero size — gate on parseability, never the byte floor.
+                try:
+                    json.loads(path.read_text())
+                except Exception as exc:
+                    return f"output_validation_failed: {name} JSON file is invalid: {exc}", warnings
+                continue
+            if not media_type:
+                # Unknown type: if it parses as JSON, accept as structured data;
+                # otherwise fall back to the prose byte floor below.
+                try:
+                    json.loads(path.read_text())
+                    continue
+                except Exception:
+                    pass
             if size < MIN_OUTPUT_BYTES:
                 return (
                     f"output_validation_failed: {name} file is too small "
                     f"({size} bytes, minimum {MIN_OUTPUT_BYTES})"
                 ), warnings
-            media_type = (output.media_type or "").lower()
-            if media_type == "application/json":
-                try:
-                    json.loads(path.read_text())
-                except Exception as exc:
-                    return f"output_validation_failed: {name} JSON file is invalid: {exc}", warnings
             if media_type.startswith("text/"):
                 warning = _placeholder_warning(path.read_text(errors="ignore")[:1000], name)
                 if warning:

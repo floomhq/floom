@@ -113,6 +113,16 @@ exec:
 - **File inputs**: `kind: "file"`, `path: "inputs/<name>"` (use the input's own
   `name`). run.py reads the relative path from inputs.json and `open()`s it.
 
+### Output `media_type` rule
+
+- **Structured / JSON results** (a dict/list the worker writes via `json.dumps`,
+  e.g. `{"min":1,"max":9,"mean":5}`): declare `media_type: "application/json"` and
+  `path: "out/<name>.json"`. The validator gates JSON outputs on **parseability,
+  not byte size**, so a small valid JSON document passes. Declaring such an output
+  as `text/*` would wrongly fail it against the prose byte floor.
+- **Prose / markdown / CSV results**: use the matching text media_type
+  (`text/markdown`, `text/plain`, `text/csv`) and `path: "out/<name>.<ext>"`.
+
 ## Trigger types
 
 ```yaml
