@@ -1152,37 +1152,42 @@ function ConnectionsSection({
 // ---------------------------------------------------------------------------
 
 function RunsSection({ worker }: { worker: WorkerDetail }) {
-  // S29m (ChatGPT-audit P-3): drop Card wrapper. The History tab IS a list,
-  // it doesn't need an extra "Recent runs" titled border.
+  // Federico USR 288 ("history is a bit weird formatting-wise"): wrap rows in
+  // the same warm card chrome the /runs page uses, drop max-w-2xl so it fits
+  // the page width, surface failure cause inline (matches /runs row format).
+  const runs = worker.recent_runs ?? [];
+  if (runs.length === 0) {
+    return (
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 text-sm text-muted-foreground">
+        No runs yet.
+      </div>
+    );
+  }
   return (
-    <div className="max-w-2xl space-y-2">
-      {worker.recent_runs?.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No runs yet.</p>
-      ) : (
-        // S29q: was rendering run.id as BOTH title and font-mono secondary
-        // line (duplicate), every row showed a "completed" Badge (decoration
-        // — should route through RunStatusBadge which hides for default-success).
-        // Now: relative-time title, dot-separated meta (duration · trigger),
-        // RunStatusBadge for non-success states only. Matches /runs list rhythm.
-        worker.recent_runs?.map((r) => (
-          <Link
-            key={r.id}
-            href={`/runs/${r.id}`}
-            className="flex items-center justify-between p-2 hover:bg-muted cursor-pointer transition-colors"
-          >
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate">{formatRelative(r.created_at) || "Unknown time"}</p>
-              <p className="text-xs text-muted-foreground">
-                {formatDuration(r.duration_ms)} · {(r.trigger_source || "manual")}
+    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden divide-y divide-[var(--border-default)]">
+      {runs.map((r) => (
+        <Link
+          key={r.id}
+          href={`/runs/${r.id}`}
+          className="flex items-center justify-between gap-4 p-3 hover:bg-[var(--active-nav-bg)] transition-colors"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium truncate">{formatRelative(r.created_at) || "Unknown time"}</p>
+            <p className="text-xs text-muted-foreground">
+              {formatDuration(r.duration_ms)} · {(r.trigger_source || "manual")}
+            </p>
+            {r.error && (
+              <p className="mt-1 text-xs text-[var(--warning,#F9735B)] truncate" title={r.error}>
+                {r.error}
               </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <RunStatusBadge status={r.status} />
-              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-            </div>
-          </Link>
-        ))
-      )}
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <RunStatusBadge status={r.status} />
+            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+          </div>
+        </Link>
+      ))}
     </div>
   );
 }
