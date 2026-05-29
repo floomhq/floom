@@ -69,6 +69,15 @@ async function handler(
     const cookieHeader = req.headers.get("cookie");
     if (cookieHeader) forwardHeaders.cookie = cookieHeader;
   }
+  // Forward the active-workspace selection on EVERY request (not just auth
+  // paths) as the x-workeros-workspace header the backend already honors.
+  // Without this, workspace-scoped data paths (/workers, /runs, /connections,
+  // /contexts, /system/overview, ...) never saw the cookie and silently fell
+  // back to the user's default workspace — i.e. the workspace switcher did
+  // nothing in the deployed dashboard. Backend validates ownership, so this
+  // cannot be used to scope into another user's workspace.
+  const activeWorkspace = req.cookies.get("workeros_active_workspace")?.value;
+  if (activeWorkspace) forwardHeaders["x-workeros-workspace"] = activeWorkspace;
   const contentType = req.headers.get("content-type");
   if (contentType) forwardHeaders["content-type"] = contentType;
   const lastEventId = req.headers.get("last-event-id");
