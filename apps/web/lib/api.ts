@@ -207,9 +207,10 @@ export const api = {
       );
       return res.text();
     },
-    upload: async (name: string, files: FileList | File[]) => {
+    upload: async (name: string, files: FileList | File[], pathPrefix?: string) => {
       const form = new FormData();
       Array.from(files).forEach((file) => form.append("files", file, file.name));
+      if (pathPrefix) form.append("path_prefix", pathPrefix);
       const res = await fetch(`${API_BASE}/contexts/${encodeURIComponent(name)}/upload`, {
         method: "POST",
         body: form,
