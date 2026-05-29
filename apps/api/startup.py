@@ -23,6 +23,7 @@ import contexts as engine_contexts  # noqa: E402
 import db as engine_db  # noqa: E402
 from db import factory as engine_db_factory  # noqa: E402
 from db.factory import Repositories, register_repositories  # noqa: E402
+from db.sqlite import SqliteApprovalRepository  # noqa: E402
 
 
 def _activate_cloud_deploy() -> None:
@@ -113,6 +114,16 @@ def _cloud_repositories() -> Repositories:
         connections=SupabaseConnectionRepository(),
         secrets=SupabaseSecretRepository(),
         cli_auth=SupabaseCliAuthRepository(),
+        # HITL approvals are not yet Supabase-backed in cloud. Until a
+        # SupabaseApprovalRepository exists, reuse the engine's SQLite
+        # approval repo so the Repositories tuple is complete and the
+        # scheduler / get_repositories() construct without TypeError.
+        # The scheduler tick does not touch approvals; this only unblocks
+        # construction. (Engine added approvals to the required
+        # Repositories fields; the cloud factory had never supplied it,
+        # crashing every scheduler tick with "missing positional
+        # argument: 'approvals'".)
+        approvals=SqliteApprovalRepository(),
     )
 
 
