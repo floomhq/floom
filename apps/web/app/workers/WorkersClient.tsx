@@ -60,6 +60,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   const folderFilter = searchParams.get("folder");
   const tagFilter = searchParams.get("tag");
   const [search, setSearch] = useState("");
+  const [showAllTags, setShowAllTags] = useState(false);
 
   const setTagFilter = useCallback((tag: string | null) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -339,7 +340,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
           {allTags.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-xs text-muted-foreground mr-1">Tags:</span>
-              {allTags.slice(0, 12).map(({ tag, count }) => {
+              {(showAllTags ? allTags : allTags.slice(0, 12)).map(({ tag, count }) => {
                 const active = tagFilter === tag;
                 return (
                   <button
@@ -360,7 +361,13 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
                 );
               })}
               {allTags.length > 12 && (
-                <span className="text-xs text-muted-foreground">+{allTags.length - 12} more</span>
+                <button
+                  type="button"
+                  onClick={() => setShowAllTags((v) => !v)}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {showAllTags ? "Show less" : `+${allTags.length - 12} more`}
+                </button>
               )}
             </div>
           )}

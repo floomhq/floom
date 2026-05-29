@@ -626,13 +626,35 @@ html.dark .grain {
   flex-shrink: 0;
 }
 
+/* Mobile top-bar variant: match the sibling icon buttons (search, menu) —
+   borderless 44x44 icon hit-area, square-ish button radius, no pill outline or
+   drop shadow that made it read as an oversized outlined circle. */
 .theme-mode-button-compact {
+  width: 44px;
+  height: 44px;
   min-width: 44px;
   min-height: 44px;
   justify-content: center;
   padding: 0;
+  border: none;
+  border-radius: var(--radius-button);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-soft);
+}
+
+.theme-mode-button-compact:hover {
+  background: var(--bg-2);
+  border-color: transparent;
+  color: var(--ink);
 }
 
 .theme-mode-button-compact span {
   display: none;
+}
+
+/* Match the 20px (w-5 h-5) icon size of the sibling top-bar buttons. */
+.theme-mode-button-compact svg {
+  width: 20px;
+  height: 20px;
 }
