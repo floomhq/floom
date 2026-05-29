@@ -1,10 +1,13 @@
 "use client";
 
 // S47: Approvals page — pending approval cards with Approve / Edit-then-approve / Reject.
+// feat/approvals-user-flow: worker name links to /workers/<id>, run id links to /runs/<id>,
+//   deep-link via ?id=<approval_id> scrolls + briefly highlights the target card.
 // ChatGPT-simplicity bar: no nested cards, single blue accent, sentence case.
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { CheckCircle, Clock, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -23,9 +26,11 @@ function formatRelative(iso: string) {
 
 function ApprovalCard({
   approval,
+  highlighted,
   onDecision,
 }: {
   approval: ApprovalRow;
+  highlighted: boolean;
   onDecision: () => void;
 }) {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
@@ -33,6 +38,15 @@ function ApprovalCard({
   const [editedText, setEditedText] = useState(approval.preview ?? "");
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Scroll into view and briefly highlight when this card is the deep-link target.
+  useEffect(() => {
+    if (!highlighted) return;
+    const el = cardRef.current;
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlighted]);
 
   const handleApprove = useCallback(async () => {
     setBusy("approve");
@@ -71,13 +85,25 @@ function ApprovalCard({
   }, [approval.run_id, rejectReason, onDecision]);
 
   return (
-    <div className="rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] p-5">
+    <div
+      ref={cardRef}
+      className={cn(
+        "rounded-[var(--radius-card)] border bg-[var(--paper)] p-5 transition-[box-shadow] duration-500",
+        highlighted
+          ? "border-blue-500/60 ring-2 ring-blue-500/20"
+          : "border-[var(--border-soft)]"
+      )}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-[var(--ink)]">
+            {/* Worker name links to /workers/<worker_id> */}
+            <Link
+              href={`/workers/${approval.worker_id}`}
+              className="text-sm font-medium text-[var(--ink)] hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
               {approval.worker_name ?? approval.worker_id}
-            </span>
+            </Link>
             <span className="text-xs text-[var(--ink-mute)]">
               {formatRelative(approval.created_at)}
             </span>
@@ -85,9 +111,10 @@ function ApprovalCard({
           {approval.label && (
             <p className="mt-0.5 text-xs text-[var(--ink-soft)]">{approval.label}</p>
           )}
+          {/* Run link — "Run run_xxx" → /runs/<run_id> */}
           <Link
             href={`/runs/${approval.run_id}`}
-            className="mt-0.5 text-[11px] text-[var(--ink-faint)] hover:text-[var(--ink-soft)] transition-colors"
+            className="mt-0.5 text-[11px] text-[var(--ink-faint)] hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
           >
             Run {approval.run_id}
           </Link>
@@ -186,7 +213,11 @@ function ApprovalCard({
   );
 }
 
-export default function ApprovalsPage() {
+function ApprovalsContent() {
+  const searchParams = useSearchParams();
+  // Deep-link: ?id=<approval_id> scrolls + highlights that card.
+  const targetId = searchParams.get("id") ?? null;
+
   const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -207,11 +238,20 @@ export default function ApprovalsPage() {
 
   return (
     <div className="max-w-2xl">
-      <div className="mb-6">
-        <h1 className="text-lg font-semibold text-[var(--ink)]">Approvals</h1>
-        <p className="mt-1 text-sm text-[var(--ink-soft)]">
-          Workers waiting for your decision before executing.
-        </p>
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold text-[var(--ink)]">Approvals</h1>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">
+            Workers waiting for your decision before executing.
+          </p>
+        </div>
+        {/* Link back to the full platform for chat-only operators */}
+        <Link
+          href="/overview"
+          className="shrink-0 text-xs text-[var(--ink-mute)] hover:text-[var(--ink-soft)] transition-colors"
+        >
+          Go to platform
+        </Link>
       </div>
 
       {loading ? (
@@ -227,14 +267,45 @@ export default function ApprovalsPage() {
         <div className="rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] px-6 py-10 text-center">
           <CheckCircle className="mx-auto h-8 w-8 text-[var(--ink-faint)]" />
           <p className="mt-3 text-sm text-[var(--ink-soft)]">No pending approvals</p>
+          <Link
+            href="/overview"
+            className="mt-4 inline-block text-xs text-[var(--ink-mute)] hover:text-[var(--ink-soft)] transition-colors"
+          >
+            Go to platform
+          </Link>
         </div>
       ) : (
         <div className="space-y-3">
           {approvals.map((a) => (
-            <ApprovalCard key={a.id} approval={a} onDecision={load} />
+            <ApprovalCard
+              key={a.id}
+              approval={a}
+              highlighted={targetId === a.id || targetId === a.run_id}
+              onDecision={load}
+            />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+export default function ApprovalsPage() {
+  return (
+    <Suspense fallback={
+      <div className="max-w-2xl">
+        <div className="mb-6">
+          <div className="h-6 w-28 animate-pulse rounded bg-[var(--bg-2)]" />
+          <div className="mt-1 h-4 w-64 animate-pulse rounded bg-[var(--bg-2)]" />
+        </div>
+        <div className="space-y-3">
+          {[0, 1].map((i) => (
+            <div key={i} className="h-28 animate-pulse rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--bg-2)]" />
+          ))}
+        </div>
+      </div>
+    }>
+      <ApprovalsContent />
+    </Suspense>
   );
 }
