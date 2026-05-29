@@ -191,9 +191,13 @@ export function WorkerIconPills({
     entries.push({ kind: "brand", key: `conn-${key}`, title: slug, slug });
   }
 
-  // The start node alone (no inputs, no connections) is not worth a strip — it
-  // would just be a lone accent square pretending to be a composition.
-  if (entries.length <= 1) return null;
+  // A worker card must NEVER read as visually empty (Federico 2026-05-29). The
+  // start node (trigger) is the always-present anchor, so the strip renders
+  // even when there are no inputs and no connections — the lone accented start
+  // node still carries "how this worker fires". `WorkerSummary` from the list
+  // endpoint has no inputs, so on /workers the strip is start-node + connection
+  // logos; on the detail header it also gets input glyphs.
+  if (entries.length === 0) return null;
 
   const visible = entries.length > max ? entries.slice(0, max) : entries;
   const overflow = entries.length - visible.length;
