@@ -189,6 +189,8 @@ export interface WorkerSummary {
   example_output?: string;
   how_it_works?: string;
   is_example?: boolean;
+  archived?: boolean;
+  archive_reason?: string;
   tags: string[];
   folder?: string;
   status: WorkerStatus;
@@ -221,6 +223,8 @@ export interface WorkerDetail {
   example_output?: string;
   how_it_works?: string;
   is_example?: boolean;
+  archived?: boolean;
+  archive_reason?: string;
   tags: string[];
   folder?: string;
   status: WorkerStatus;

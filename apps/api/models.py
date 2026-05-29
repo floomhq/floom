@@ -482,6 +482,9 @@ class WorkerContract(BaseModel):
     example_output: Optional[str] = None
     how_it_works: Optional[str] = None
     is_example: Optional[bool] = None
+    system_worker: Optional[bool] = None
+    archived: bool = False
+    archive_reason: Optional[str] = None
     folder: Optional[str] = None
     version: str
     entrypoint: Optional[str] = "SKILL.md"
@@ -981,6 +984,8 @@ class WorkerSummary(BaseModel):
     example_output: Optional[str] = None
     how_it_works: Optional[str] = None
     is_example: Optional[bool] = None
+    archived: bool = False
+    archive_reason: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
@@ -1013,6 +1018,8 @@ class WorkerDetail(BaseModel):
     example_output: Optional[str] = None
     how_it_works: Optional[str] = None
     is_example: Optional[bool] = None
+    archived: bool = False
+    archive_reason: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
