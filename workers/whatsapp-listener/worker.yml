@@ -15,6 +15,7 @@ long_description: |
 use_cases:
   - Chat with the workspace agent from your phone via WhatsApp.
   - Route WhatsApp messages to the workspace agent for ops queries.
+  - Keep mobile follow-up questions in the same workspace conversation flow.
 example_input:
   lookback_minutes: 10
 folder: "Examples"
