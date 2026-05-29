@@ -7254,7 +7254,15 @@ def composio_execute_proxy(
     """
     import requests as _req_lib
 
-    # 1. Validate run_id — must exist in DB and be RUNNING
+    # 1. Validate run_id — must exist in DB and be RUNNING.
+    #    NOTE: get_any() is the UNSCOPED run lookup. That is correct *here* and
+    #    only here on an HTTP path: this endpoint is the sandbox→API callback,
+    #    middleware-exempt, and authorized by possession of a live run_id (the
+    #    capability), not by an operator auth context. The run_id is only a valid
+    #    capability while the run is RUNNING — a missing/garbage/terminal run is
+    #    rejected below, so get_any() never doubles as an authed read path here.
+    #    Do NOT use get_any() on any operator-facing read endpoint; those scope
+    #    by user_id via repos.runs.get(user_id=...).
     run_row = repos.runs.get_any(run_id=run_id)
     if run_row is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -7269,24 +7277,29 @@ def composio_execute_proxy(
     if not composio_key:
         raise HTTPException(status_code=503, detail="COMPOSIO_API_KEY not configured on server")
 
-    # 3. Resolve connected_account_id if not supplied by caller
+    # 3. Resolve connected_account_id if not supplied by caller.
+    #    SECURITY (multi-tenant): the connection MUST be scoped to the run's
+    #    OWNER, never "first active connection for the app". The runs table has
+    #    no owner column — the owner lives on workers.owner_id — so derive it via
+    #    the run's worker. In single-tenant OS there is one owner so this is a
+    #    no-op; in multi-tenant Cloud it prevents worker A's run from driving
+    #    worker B's owner's Composio connection.
     connected_account_id = body.connected_account_id
     if not connected_account_id:
         worker_id = run_row.get("worker_id", "")
-        owner_id = run_row.get("user_id", "")
-        from db import get_db as _get_db
-        with _get_db() as conn:
-            # Find the active connection for the tool's implied app.
-            # The caller should pass connected_account_id when they know it;
-            # this fallback finds the first active connection for the worker's owner.
-            tool_prefix = tool_slug.split("_")[0].lower()  # e.g. "GMAIL_..." -> "gmail"
-            row = conn.execute(
-                "SELECT composio_connection_id FROM composio_connections "
-                "WHERE app_name = ? AND status = 'active' LIMIT 1",
-                (tool_prefix,),
-            ).fetchone()
-            if row:
-                connected_account_id = row["composio_connection_id"]
+        worker_row = repos.workers.get_any(worker_id=worker_id) if worker_id else None
+        if worker_row is None:
+            raise HTTPException(status_code=404, detail="Run worker not found")
+        owner_id = worker_row.get("owner_id") or ""
+        if not owner_id:
+            raise HTTPException(status_code=403, detail="Run owner could not be resolved")
+        # Find the run-owner's active connection for the tool's implied app.
+        # repos.connections.list(user_id=...) is owner-scoped at the SQL layer.
+        tool_prefix = tool_slug.split("_")[0].lower()  # e.g. "GMAIL_..." -> "gmail"
+        for conn_row in repos.connections.list(user_id=owner_id):
+            if conn_row.get("app_name") == tool_prefix and conn_row.get("status") == "active":
+                connected_account_id = conn_row.get("composio_connection_id")
+                break
 
     # 4. Build and forward the Composio request
     proxy_body: Dict[str, Any] = {}

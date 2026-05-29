@@ -878,6 +878,11 @@ class SqliteRunRepository:
         return _row_dict(row) if row else None
 
     def get_any(self, *, run_id: str) -> dict[str, Any] | None:
+        # UNSCOPED run lookup (no owner filter). Reserved for internal/capability
+        # paths only: the sandbox→API composio-execute callback (run_id is the
+        # capability) and background run-execution in run_service.py. NEVER use on
+        # an operator-facing authed read path — those use get(user_id=...), which
+        # enforces WHERE w.owner_id = ? via the workers JOIN.
         with get_db() as conn:
             row = conn.execute(
                 "SELECT * FROM runs WHERE id = ? LIMIT 1",
