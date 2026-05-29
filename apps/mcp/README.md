@@ -1,6 +1,6 @@
 # Workeros MCP
 
-Workeros lets agents create, update, run, watch, and delete production worker automations through a local stdio MCP server backed by the Workeros API. The package installs into Claude Code, Cursor, or Continue and exposes worker lifecycle and run observability tools without requiring custom agent-side code.
+Workeros lets agents create, update, run, watch, and delete production worker automations through a local stdio MCP server backed by the Workeros API. The package installs into Claude Code, Cursor, VS Code, Windsurf, Continue, or any harness that accepts an MCP stdio server entry.
 
 ## Install
 
@@ -8,11 +8,35 @@ Workeros lets agents create, update, run, watch, and delete production worker au
 npx @floomhq/workeros install
 ```
 
-The installer uses `WORKEROS_API_SECRET` from the environment when present, otherwise it prompts for it. It patches the first existing config file it finds in this order: `~/.claude/settings.json`, `~/.cursor/mcp.json`, `~/.continue/.continuerc.json`. Re-running the installer updates the existing `workeros` entry instead of duplicating it.
+Auto-detects the first existing config file. To target a specific harness:
 
-## Manual Config
+```bash
+floom mcp install --target claude     # ~/.claude/settings.json
+floom mcp install --target cursor     # ~/.cursor/mcp.json
+floom mcp install --target vscode     # .vscode/mcp.json  (workspace-local)
+floom mcp install --target windsurf   # ~/.codeium/windsurf/mcp_config.json
+floom mcp install --target continue   # ~/.continue/.continuerc.json
+floom mcp install --target generic    # prints JSON snippet for manual paste
+```
 
-Claude Code (`~/.claude/settings.json`):
+Re-running the installer updates the existing `workeros` entry instead of duplicating it.
+
+## Supported targets
+
+| Target | Config file written | Config shape |
+|---|---|---|
+| `claude` | `~/.claude/settings.json` | `{ mcpServers: { workeros: {...} } }` |
+| `cursor` | `~/.cursor/mcp.json` | `{ mcpServers: { workeros: {...} } }` |
+| `vscode` | `.vscode/mcp.json` (workspace) | `{ mcpServers: { workeros: {...} } }` |
+| `windsurf` | `~/.codeium/windsurf/mcp_config.json` | `{ mcpServers: { workeros: {...} } }` |
+| `continue` | `~/.continue/.continuerc.json` | `{ mcpServers: [ { name:"workeros", ... } ] }` |
+| `generic` | (no file) | prints JSON snippet to stdout |
+
+All targets use stdio transport (`command: npx`, `args: ["-y", "@floomhq/workeros"]`). There is no HTTP/SSE variant — the MCP server starts in-process via stdio.
+
+## Manual config
+
+Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape):
 
 ```json
 {
@@ -21,30 +45,15 @@ Claude Code (`~/.claude/settings.json`):
       "command": "npx",
       "args": ["-y", "@floomhq/workeros"],
       "env": {
-        "WORKEROS_API_SECRET": "<WORKEROS_API_SECRET>"
+        "WORKEROS_API_SECRET": "<WORKEROS_API_SECRET>",
+        "WORKEROS_API_BASE": "https://workers-api.floom.dev"
       }
     }
   }
 }
 ```
 
-Cursor (`~/.cursor/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "workeros": {
-      "command": "npx",
-      "args": ["-y", "@floomhq/workeros"],
-      "env": {
-        "WORKEROS_API_SECRET": "<WORKEROS_API_SECRET>"
-      }
-    }
-  }
-}
-```
-
-Continue (`~/.continue/.continuerc.json`):
+Continue (`~/.continue/.continuerc.json`, array shape):
 
 ```json
 {
@@ -54,7 +63,8 @@ Continue (`~/.continue/.continuerc.json`):
       "command": "npx",
       "args": ["-y", "@floomhq/workeros"],
       "env": {
-        "WORKEROS_API_SECRET": "<WORKEROS_API_SECRET>"
+        "WORKEROS_API_SECRET": "<WORKEROS_API_SECRET>",
+        "WORKEROS_API_BASE": "https://workers-api.floom.dev"
       }
     }
   ]
