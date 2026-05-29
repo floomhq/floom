@@ -117,15 +117,31 @@ exec:
 - **File inputs**: `kind: "file"`, `path: "inputs/<name>"` (use the input's own
   `name`). run.py reads the relative path from inputs.json and `open()`s it.
 
-### Output `media_type` rule
+### Output `kind` rule (scalar vs file) — DECLARE the kind correctly
 
-- **Structured / JSON results** (a dict/list the worker writes via `json.dumps`,
-  e.g. `{"min":1,"max":9,"mean":5}`): declare `media_type: "application/json"` and
-  `path: "out/<name>.json"`. The validator gates JSON outputs on **parseability,
-  not byte size**, so a small valid JSON document passes. Declaring such an output
-  as `text/*` would wrongly fail it against the prose byte floor.
-- **Prose / markdown / CSV results**: use the matching text media_type
-  (`text/markdown`, `text/plain`, `text/csv`) and `path: "out/<name>.<ext>"`.
+Pick the output kind that matches the result, and declare its required fields.
+A scalar output MUST declare `type`; a file output MUST declare `media_type`.
+
+- **Scalar output** (a single short string or number — reverse/title-case/sum/
+  median results): `kind: "scalar"` and **declare `type`**
+  (`string | textarea | number | boolean | select | url`); **omit `media_type`
+  and `path`**. A scalar output WITHOUT `type` fails registration with
+  "scalar field '<name>' must declare type". run.py returns the literal value:
+  `outputs={"<name>": <value>}` (no out/ file).
+  ```yaml
+  outputs:
+    - name: reversed_string
+      kind: "scalar"
+      type: "string"
+  ```
+- **File output** — declare `kind: "file"` + `media_type` + `path` (below):
+  - **Structured / JSON results** (a dict/list the worker writes via `json.dumps`,
+    e.g. `{"min":1,"max":9,"mean":5}`): `media_type: "application/json"` and
+    `path: "out/<name>.json"`. The validator gates JSON outputs on **parseability,
+    not byte size**, so a small valid JSON document passes. Declaring such an output
+    as `text/*` would wrongly fail it against the prose byte floor.
+  - **Prose / markdown / CSV results**: use the matching text media_type
+    (`text/markdown`, `text/plain`, `text/csv`) and `path: "out/<name>.<ext>"`.
 
 ## Trigger types
 
