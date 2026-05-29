@@ -1,4 +1,4 @@
-export type WorkerStatus = "healthy" | "needs_attention" | "missing_secret" | "error";
+export type WorkerStatus = "healthy" | "ready" | "needs_attention" | "missing_secret" | "error";
 
 export interface TriggerSpec {
   type: string;
@@ -227,6 +227,8 @@ export interface WorkerDetail {
   how_it_works?: string;
   is_example?: boolean;
   archived?: boolean;
+  /** P2: false when the worker is paused/disabled — UI disables the Run button. */
+  enabled?: boolean;
   archive_reason?: string;
   tags: string[];
   folder?: string;

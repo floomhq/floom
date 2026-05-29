@@ -125,10 +125,19 @@ copy-pasteable template is `contexts/worker-author-style/RUN_PY_TEMPLATE.py`
 - **Import EVERY module you reference** — `os`, `json`, `csv`, `io`, `re`, `statistics`,
   etc. A missing `import` (e.g. `NameError: name 'os' is not defined`) is a top
   generated-worker crash.
-- Write output files under `out/` (create it: `os.makedirs("out", exist_ok=True)`).
+- **Output contract — scalar vs file** (the INVERSE of the input contract; a top
+  generated-worker failure is writing a PATH into a SCALAR output):
+  - A **scalar output** (worker.yml output `kind: "scalar"`, no `path:`):
+    `outputs["<name>"]` is the **literal value** (string/number), NEVER a path.
+    NO `out/` file, NO artifact. e.g. `outputs={"reversed": "olleh"}`. Writing
+    `"out/reversed.txt"` there fails with "scalar output leaked a path string".
+  - A **file output** (worker.yml output `kind: "file"` with a `path:`): write the
+    file under `out/`, put its **relative path** in `outputs["<name>"]`, plus one
+    matching `artifacts[]` entry. e.g. `outputs={"report": "out/report.csv"}`.
+- For file outputs, write under `out/` (create it: `os.makedirs("out", exist_ok=True)`).
 - Write `result.json` to the WORKING DIRECTORY (just `"result.json"`, NOT
   `"out/result.json"`), with the FULL schema, on BOTH the success and error path:
-  `{"status": "success"|"error", "outputs": {"<output_name>": "out/<file>"},
+  `{"status": "success"|"error", "outputs": {"<output_name>": <value-or-out/path>},
   "artifacts": [{"name","relative_path","type"}], "error": "<msg if error>"}`.
   Writing result.json under out/ makes the run fail with "didn't produce a result".
 - No unbounded loops; bound any retry/iteration and set a timeout on network calls.

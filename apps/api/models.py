@@ -19,6 +19,12 @@ def _model_data(value: Any) -> Any:
 
 class WorkerStatus(str, Enum):
     HEALTHY = "healthy"
+    # P2 (2026-05-29): a worker that has never run has not EARNED "healthy"
+    # (which implies a verified-working worker). Report a neutral READY/Untested
+    # state instead. The UI treats READY exactly like HEALTHY (quiet, no pill),
+    # so this only makes the API claim honest — it never says "healthy" for an
+    # unverified worker.
+    READY = "ready"
     NEEDS_ATTENTION = "needs_attention"
     MISSING_SECRET = "missing_secret"
     ERROR = "error"
@@ -1116,6 +1122,10 @@ class WorkerDetail(BaseModel):
     how_it_works: Optional[str] = None
     is_example: Optional[bool] = None
     archived: bool = False
+    # P2 (2026-05-29): expose whether the worker is enabled (NOT paused) so the
+    # UI can disable the Run affordance on a paused worker instead of letting the
+    # operator click into a dead-end 409. Defaults true (a normal active worker).
+    enabled: bool = True
     archive_reason: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
