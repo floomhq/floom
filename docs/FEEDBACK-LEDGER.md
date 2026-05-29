@@ -1,14 +1,30 @@
 # Federico's feedback ledger — Workeros session 2026-05-28/29
 
-Single source of truth for every concrete UI / product / runtime callout Federico made this session, with current status. Updated whenever something changes.
+Single source of truth for every concrete UI / product / runtime callout Federico made this session, with true status as of **2026-05-29 reconcile**.
+
+> **Authoritative tracker for current open work: `WORKPLAN-20260529-road-to-100.md`**
+> This ledger records the historical feedback items and whether they shipped. For what is actively in flight or genuinely open today, read the WORKPLAN.
+
+## Summary (2026-05-29 reconcile)
+
+**72 items total — 65 shipped, 7 genuinely open (see WORKPLAN)**
+
+Genuinely open items (all tracked in WORKPLAN-20260529-road-to-100.md):
+1. **E5** — Import Federico's 17 existing stdio MCPs from cursor/.claude configs (verdict done, import not shipped)
+2. **E7** — Stdio transport support in E2B sandbox (verdict published, implementation open)
+3. **M5** — Cloud agent vendoring + Supabase JWT + RLS + Stripe (separate Cloud lane, not OS)
+4. **O2** — GITHUB_PAT secret missing on prod (github-digest worker needs it; needs Federico to set)
+5. **O7** — Full S41 stdio integration (MCP tab ✅; stdio import flow genuinely open)
+6. **WORKPLAN 1.5.1** — Approve/reject endpoint must transition original run status off pending_approval
+7. **WORKPLAN 1.5.2-1.5.5** — Correctness/data-hygiene items (zombie overview links, audit runs, worker count mismatch, robots.txt/favicon)
+
+---
 
 ## Legend
 
 - ✅ **Shipped** — merged to main, live on workers.floom.dev
-- 🚧 **In flight** — sub-agent or Codex working right now
-- 📝 **Brief written, dispatching** — sub-agent fired this turn
-- ⏸ **Waiting on you** — needs a decision before I can dispatch
-- ❌ **Not started** — gap, needs a brief
+- ❌ **Genuinely open** — not shipped as of 2026-05-29; tracked in WORKPLAN
+- ~~🚧~~ / ~~⏸~~ — stale status cleared in this reconcile
 
 ---
 
@@ -22,7 +38,7 @@ Single source of truth for every concrete UI / product / runtime callout Federic
 | A4 | Hourly backups + disk-guard + artifact rotation + restore drill | ✅ | PRs #166-#168 |
 | A5 | `/metrics` Prometheus + `/health` deep checks | ✅ | PR #169 |
 | A6 | Silent-failure audit doc | ✅ | PR #170 |
-| A7 | Async architecture / Vercel 60s explained in plain language | 🚧 | Codex verdict running |
+| A7 | Async architecture / Vercel 60s explained in plain language | ✅ | `docs/architecture/prod-architecture-verdict-2026-05-29.md` — verdict written, on main |
 
 ## B. /overview page
 
@@ -32,10 +48,10 @@ Single source of truth for every concrete UI / product / runtime callout Federic
 | B2 | "Worker keeps failing" must name the worker + cause | ✅ | PR #176 (S39) |
 | B3 | Page left the design system (warm tokens applied /overview only) | ✅ | PR #180 (S43) — rolled app-wide |
 | B4 | Red AI-slop cards (colored left border + warm-tint bg) | ✅ | PR #180 strip removed |
-| B5 | Single-screen fit, no scroll needed | 🚧 | S45 sub-agent |
-| B6 | Metric tiles get sparklines | 🚧 | S45 sub-agent |
-| B7 | "Needs attention" → notifications-style button top-right | 🚧 | S45 sub-agent |
-| B8 | "Last 7 days" redundant with sparklines | 🚧 | S45 sub-agent (drops the subtitle) |
+| B5 | Single-screen fit, no scroll needed | ✅ | PR #187 (S45) — overview compression |
+| B6 | Metric tiles get sparklines | ✅ | PR #187 (S45) — AlertsBell + sparkline tiles |
+| B7 | "Needs attention" → notifications-style button top-right | ✅ | PR #187 (S45) — AlertsBell top-right |
+| B8 | "Last 7 days" redundant with sparklines | ✅ | PR #187 (S45) — subtitle dropped |
 
 ## C. /workers list
 
@@ -62,10 +78,10 @@ Single source of truth for every concrete UI / product / runtime callout Federic
 | E1 | "Reconnect" button shown on every row even when active | ✅ | PR #194 |
 | E2 | Account names show "Connected account" or UUID slice, not real email | ✅ | PR #194 |
 | E3 | "default scopes" hardcoded, never real granted scopes | ✅ | PR #194 |
-| E4 | MCP servers as own tab (not mixed with OAuth) | ⏸ | S41, gated on stdio verdict |
-| E5 | Integrate his 17 existing stdio MCPs from cursor/.claude configs | ⏸ | S41, gated on stdio verdict |
-| E6 | One-command MCP add (`floom mcp add github`) + paste-JSON + catalog | ⏸ | S41, gated on stdio verdict |
-| E7 | Stdio transport support in sandbox | ⏸ | Codex stdio verdict running, then S41 |
+| E4 | MCP servers as own tab (not mixed with OAuth) | ✅ | PR #206 (S41) — MCP tab on /connections |
+| E5 | Integrate his 17 existing stdio MCPs from cursor/.claude configs | ❌ | Stdio verdict done (`docs/architecture/mcp-stdio-verdict-2026-05-29.md`); import flow not yet shipped |
+| E6 | One-command MCP add (`floom mcp add github`) + paste-JSON + catalog | ✅ | PR #206 (S41) — MCP tab with shareable links + paste-JSON |
+| E7 | Stdio transport support in sandbox | ❌ | Verdict: Path A (hybrid). Implementation not shipped. Open in WORKPLAN. |
 
 ## F. /runs + run detail
 
@@ -83,10 +99,10 @@ Single source of truth for every concrete UI / product / runtime callout Federic
 | G2 | MCP exports for contexts (read/write/list) | ✅ | PR #175 |
 | G3 | Seed worker-author-style context content | ✅ | Direct write 2026-05-28 |
 | G4 | ANTI-PATTERNS.md content with no emoji slop | ✅ | Direct write — Don't:/Do: prose |
-| G5 | "Right now its shit" — page reads as file explorer, not knowledge packs | 🚧 | S46 sub-agent |
-| G6 | Markdown renderer styling (code blocks, headings, spacing) | 🚧 | S46 sub-agent |
-| G7 | 25/75 layout, preview as separate route | 🚧 | S46 sub-agent |
-| G8 | Product language ("Knowledge packs" not "Folders") | 🚧 | S46 sub-agent |
+| G5 | "Right now its shit" — page reads as file explorer, not knowledge packs | ✅ | PR #192 (S46) — knowledge packs redesign |
+| G6 | Markdown renderer styling (code blocks, headings, spacing) | ✅ | PR #192 (S46) — markdown renderer shipped |
+| G7 | 25/75 layout, preview as separate route | ✅ | PR #192 (S46) — file preview route |
+| G8 | Product language ("Knowledge packs" not "Folders") | ✅ | PR #192 (S46) — language updated |
 
 ## H. /workers/new + worker-author
 
@@ -100,11 +116,11 @@ Single source of truth for every concrete UI / product / runtime callout Federic
 
 | # | Callout | Status | Where |
 |---|---|---|---|
-| I1 | `POST /chat` SSE endpoint, agent that can create workers / run them | ⏸ | S37 brief written, NOT dispatched — needs go-ahead |
-| I2 | workspace.md at workspace root as system prompt | ⏸ | Same |
-| I3 | Conversations table for persistence | ⏸ | Same |
-| I4 | MCP export `workspace.chat()` for Claude Code / Cursor | ⏸ | Same |
-| I5 | Slack / WhatsApp adapter examples | ⏸ | Same |
+| I1 | `POST /chat` SSE endpoint, agent that can create workers / run them | ✅ | PR #205 (S37) — workspace agent shipped |
+| I2 | workspace.md at workspace root as system prompt | ✅ | PR #205 (S37) |
+| I3 | Conversations table for persistence | ✅ | PR #205 (S37) |
+| I4 | MCP export `workspace.chat()` for Claude Code / Cursor | ✅ | PR #205 (S37) |
+| I5 | Slack / WhatsApp adapter examples | ✅ | PR #205 (S37) |
 
 ## J. CLI
 
@@ -122,9 +138,9 @@ Single source of truth for every concrete UI / product / runtime callout Federic
 |---|---|---|---|
 | K1 | "Leaving design system should NEVER happen" — globals apply app-wide | ✅ | PR #180 (S43) + memory saved |
 | K2 | Rounded corners everywhere (not just /overview) | ✅ | PR #180 — 18px on all cards |
-| K3 | Single-blue dark mode (currently TWO blues) | 🚧 | S45 sub-agent |
-| K4 | Radius inconsistency (some boxes square, others rounded) | 🚧 | S45 sub-agent — `--radius-card / button / pill` |
-| K5 | Logo + text ratio in sidebar | 🚧 | PR #183 open (icon 22 / text-base) |
+| K3 | Single-blue dark mode (currently TWO blues) | ✅ | PR #187 (S45) — single-blue dark mode shipped |
+| K4 | Radius inconsistency (some boxes square, others rounded) | ✅ | PR #187 (S45) — `--radius-card / button / pill` audit |
+| K5 | Logo + text ratio in sidebar | ✅ | PR #183 — icon 22 / text-base merged |
 | K6 | "No colored left borders on cards = AI slop" enforced | ✅ | PR #180 + memory saved |
 
 ## L. Performance
@@ -140,9 +156,9 @@ Single source of truth for every concrete UI / product / runtime callout Federic
 |---|---|---|---|
 | M1 | OS vs Cloud separation (workers.floom.dev = OS dogfood, Cloud is separate) | ✅ | Memory saved + Cloud brief written |
 | M2 | Worker matrix completion (every worker smoked with real inputs, inactive flag) | ✅ | S38 PR #204 — archived primitive + sample inputs + Archived UI tab + MANIFEST + SMOKE-RESULTS |
-| M3 | Workspace agent system instruction location | ⏸ | S37 |
+| M3 | Workspace agent system instruction location | ✅ | PR #205 (S37) — workspace.md location documented |
 | M4 | Memory + contexts same primitive (writeable contexts) | ✅ | Explained, no implementation needed beyond S36 |
-| M5 | Cloud agent vendoring + Supabase JWT + RLS + Stripe | ⏸ | Cloud brief written for separate agent lane |
+| M5 | Cloud agent vendoring + Supabase JWT + RLS + Stripe | ❌ | Cloud brief written; separate Cloud lane not yet started |
 
 ## N. Process / docs
 
@@ -154,32 +170,19 @@ Single source of truth for every concrete UI / product / runtime callout Federic
 | N4 | "Use more Claude than Codex (temp override)" | ✅ | Memory saved 2026-05-29; Codex reserved for verdicts since |
 | N5 | Document everything Federico calls out | ✅ | THIS FILE (created 2026-05-29) |
 
-## Open decisions waiting on Federico
-
-1. **MCP stdio (Path A / B / C / hybrid)** — Codex verdict running. Wait for it, then pick.
-2. **S37 workspace agent dispatch** — brief ready, awaiting go-ahead.
-3. **Contexts ASCII style (proposal 1/2/3/4)** — pending your pick; default in flight is Proposal 1 (current Don't:/Do: prose) inside S46 redesign.
-
-## Open briefs ready to dispatch
-
-- ~~S38 worker matrix completion~~ ✅ PR #204
-- Cloud vendoring (for the Cloud agent lane, not OS)
-
 ---
 
 ## O. Gaps found by re-reading the full session log 2026-05-29
 
-Things I missed in the original ledger. Re-grep of /root/.claude/projects/-root/ab820815-*.jsonl turned these up.
-
 | # | Callout | Status | Action |
 |---|---|---|---|
 | O1 | "Granola Hubspot sync: you can remove. I don't have the API key" (USR 288) | ✅ | DELETE /workers/granola-hubspot-sync HTTP 204 — gone from prod |
-| O2 | "GITHUB_PAT: you should have it somewhere here" (USR 288) | ⏸ | Verified: secret `GITHUB_PAT` NOT present on prod. Need you to set it (or paste it and I'll set via API). github-digest worker needs it. |
+| O2 | "GITHUB_PAT: you should have it somewhere here" (USR 288) | ❌ | Secret `GITHUB_PAT` NOT present on prod. github-digest worker needs it. Federico must set it. |
 | O3 | Kugelaudio Meeting Pipeline + Bug Intake workers — sample customer code provided (USR 295) | ✅ | Both workers archived in S38 PR #204 with archive_reason. Restore when customer provides secrets. |
-| O4 | "how managed agents compare to what we do? from claude. and same question for trigger dev" (USR 300) | 🚧 | Codex verdict dispatched — writes `docs/architecture/competitive-comparison-2026-05-29.md` |
+| O4 | "how managed agents compare to what we do? from claude. and same question for trigger dev" (USR 300) | ✅ | `docs/architecture/competitive-comparison-2026-05-29.md` — verdict written, on main |
 | O5 | FRONTEND-AGENT-BRIEFING-R13 (5 missing security headers on frontend) (USR 291) | ✅ | Verified live on prod: CSP + X-Frame-Options + X-Content-Type-Options + Referrer-Policy + Permissions-Policy all present. Shipped before this session. |
 | O6 | "Smoke past, I don't think, is enough" — deeper worker testing (USR 287) | ✅ | S38 PR #204 — prod smoke runs recorded with run_ids, status, duration, output heads. |
-| O7 | "MCPs should be live, right, so we can already connect some MCPs as well" (USR 281, 298) | ⏸ | Partial: MCP add UI exists (PR #161). Full S41 (tab + import + stdio) blocked on Codex stdio verdict. |
+| O7 | "MCPs should be live, right, so we can already connect some MCPs as well" (USR 281, 298) | ❌ | MCP tab + HTTP MCP shipped (PR #206). Stdio import flow genuinely open — see E5/E7. |
 
 ## Q. S47 HITL (NovaSearch P0)
 
@@ -195,6 +198,21 @@ Things I missed in the original ledger. Re-grep of /root/.claude/projects/-root/
 | Q1g | outbound-approval-demo worker (two-phase proof) | ✅ | PR #207 |
 | Q1h | AUTHORING.md two-run model documentation | ✅ | PR #207 |
 
+## R. Deploy pipeline + queue + token-mask + MCP install targets + alerting (2026-05-29)
+
+Items added since the ledger was first written, confirmed shipped to main:
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| R1 | Deploy pipeline: deploy-api.sh + verify-schema.py + DEPLOY.md | ✅ | PR #214 |
+| R2 | Approvals user-flow linking (card links, deep-link ?id=, agent tool + SKILL.md) | ✅ | PR #210 |
+| R3 | Full-length bullet-masked token in settings (not truncated) | ✅ | PR #213 |
+| R4 | In-process run-execution queue with E2B concurrency cap | ✅ | PR #203 |
+| R5 | MCP install targets: vscode/windsurf/generic + UI picker | ✅ | PR #219 |
+| R6 | Per-worker success-rate alerting + overview "View worker" links (Phase 3) | ✅ | PR #218 |
+| R7 | /contexts crash (TypeError duplicate kwargs) | ✅ | PR #221 |
+| R8 | Worker reliability batch (file outputs, Composio proxy, KeyError guard) | ✅ | PRs #220-#225 |
+
 ## P. Long-standing Federico standing instructions (verified observed)
 
 | # | Standing rule | Status |
@@ -203,6 +221,6 @@ Things I missed in the original ledger. Re-grep of /root/.claude/projects/-root/
 | P2 | "Test everything yourself, every click" (USR 23+) | ✅ Browser walks at each milestone |
 | P3 | "Code/implementation decisions to Codex, not Federico" (multiple) | ✅ Followed |
 | P4 | "Use more Claude than Codex (temp override 2026-05-29)" (USR 313) | ✅ Memory saved + observed |
-| P5 | "Discuss with Codex before defaulting" (multiple) | Partial — need to check more often (the A/B MCP question) |
+| P5 | "Discuss with Codex before defaulting" (multiple) | ✅ MCP verdict via Codex before S41 |
 | P6 | "Parallelise when possible" (USR 306) | ✅ 4 sub-agents + 2 Codex verdicts running concurrently |
-| P7 | "Roadmap should be super clear" (USR 390) | ✅ This ledger is the roadmap snapshot |
+| P7 | "Roadmap should be super clear" (USR 390) | ✅ WORKPLAN-20260529-road-to-100.md is the live roadmap |
