@@ -212,12 +212,29 @@ def save_context_metadata(metadata: dict[str, dict[str, Any]]) -> None:
     os.replace(tmp_path, metadata_path)
 
 
-def set_context_metadata(name: str, *, writeable: bool | None = None) -> None:
+def context_owner_id(name: str, metadata: dict[str, dict[str, Any]] | None = None) -> str | None:
+    safe_name = validate_context_name(name)
+    meta = metadata if metadata is not None else load_context_metadata()
+    entry = meta.get(safe_name) or {}
+    owner_id = str(entry.get("owner_id") or "").strip()
+    return owner_id or None
+
+
+def set_context_metadata(
+    name: str,
+    *,
+    writeable: bool | None = None,
+    owner_id: str | None = None,
+) -> None:
     safe_name = validate_context_name(name)
     metadata = load_context_metadata()
     existing = metadata.get(safe_name, {})
     if writeable is not None:
         existing["writeable"] = bool(writeable)
+    if owner_id is not None:
+        owner_value = str(owner_id).strip()
+        if owner_value:
+            existing["owner_id"] = owner_value
     existing["updated_at"] = now_iso()
     metadata[safe_name] = existing
     save_context_metadata(metadata)

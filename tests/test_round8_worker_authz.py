@@ -1,0 +1,587 @@
+from __future__ import annotations
+
+import importlib
+import os
+import shutil
+import subprocess
+import sys
+import types
+import uuid
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+
+API_DIR = Path(__file__).resolve().parents[1] / "apps" / "api"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_WORKERS_DIR = REPO_ROOT / "workers"
+if str(API_DIR) not in sys.path:
+    sys.path.insert(0, str(API_DIR))
+
+AUTH = {"x-floom-secret": "round8-secret"}
+
+
+def _load_api(monkeypatch, tmp_path, *, stock_workers: tuple[str, ...] = ()):
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir()
+    for worker_id in stock_workers:
+        shutil.copytree(REPO_WORKERS_DIR / worker_id, workers_dir / worker_id)
+
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
+    monkeypatch.setenv("FLOOM_BLOBS_DIR", str(tmp_path / "blobs"))
+    monkeypatch.setenv("FLOOM_SECRET", AUTH["x-floom-secret"])
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+    monkeypatch.setenv("WORKEROS_USER_ID", "user-a")
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+    monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
+    monkeypatch.delenv("WORKEROS_DEV", raising=False)
+
+    reset_prefixes = ("auth.", "db.")
+    reset_exact = {
+        "main",
+        "auth",
+        "db",
+        "files",
+        "models",
+        "worker_registry",
+        "run_service",
+        "composio_client",
+        "scheduler",
+    }
+    for name in list(sys.modules):
+        if name in reset_exact or name.startswith(reset_prefixes):
+            sys.modules.pop(name, None)
+
+    sys.modules["scheduler"] = types.SimpleNamespace(
+        start_scheduler=lambda: None,
+        stop_scheduler=lambda: None,
+    )
+    main = importlib.import_module("main")
+    run_service = importlib.import_module("run_service")
+    main._rate_buckets.clear()
+    main.start_run = lambda *args, **kwargs: None
+    run_service.start_run = main.start_run
+    return main
+
+
+def _headers(user_id: str) -> dict[str, str]:
+    return {**AUTH, "x-floom-user": user_id}
+
+
+def _worker_yml(name: str, *, title: str = "Audit Worker", trigger_type: str = "manual") -> str:
+    if trigger_type == "webhook":
+        trigger_block = """
+trigger:
+  type: webhook
+  webhook:
+    secret: true
+""".strip()
+    else:
+        trigger_block = """
+trigger:
+  type: manual
+""".strip()
+    return f"""schema_version: "0.3"
+name: "{name}"
+title: "{title}"
+description: "authz test worker"
+version: "0.1.0"
+targets: [generic]
+exec:
+  entry: "run.py"
+  runtime: "python311"
+  runner: "e2b"
+  command: "python run.py"
+  inputs: []
+  outputs: []
+{trigger_block}
+"""
+
+
+def _worker_payload(
+    name: str,
+    *,
+    title: str = "Audit Worker",
+    trigger_type: str = "manual",
+    secrets: tuple[str, ...] = (),
+) -> dict[str, str]:
+    worker_yml = _worker_yml(name, title=title, trigger_type=trigger_type)
+    if secrets:
+        secret_lines = "\n".join(f"  - {secret}" for secret in secrets)
+        worker_yml = worker_yml.replace("  outputs: []", f"  secrets:\n{secret_lines}\n  outputs: []")
+    return {
+        "worker_yml": worker_yml,
+        "run_py": (
+            "def run(inputs, context):\n"
+            "    return {'status': 'success', 'outputs': {'ok': True}, 'artifacts': []}\n"
+        ),
+    }
+
+
+def _insert_connection(main, *, user_id: str, app_name: str = "gmail") -> str:
+    local_id = f"local_{user_id}_{app_name}"
+    now = main.now_iso()
+    with main.get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO composio_connections
+                (id, app_name, composio_connection_id, status, created_at, updated_at, user_id)
+            VALUES (?, ?, ?, 'active', ?, ?, ?)
+            """,
+            (
+                local_id,
+                app_name,
+                f"ca_{user_id}_{app_name}",
+                now,
+                now,
+                user_id,
+            ),
+        )
+    return local_id
+
+
+def _tracked_worker_ids() -> set[str]:
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-tree", "-r", "--name-only", "HEAD", "workers"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    tracked_ids = set()
+    for raw_path in result.stdout.splitlines():
+        path = Path(raw_path.strip())
+        if len(path.parts) == 3 and path.parts[0] == "workers" and path.parts[2] == "worker.yml":
+            tracked_ids.add(path.parts[1])
+    return tracked_ids
+
+
+def _seed_run_surfaces(main, tmp_path, *, run_id: str) -> str:
+    artifact_id = f"artifact_{uuid.uuid4().hex}"
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir(exist_ok=True)
+    artifact_path = artifacts_dir / f"{artifact_id}.txt"
+    artifact_path.write_text("artifact body")
+
+    bundle_dir = tmp_path / "run-bundles" / run_id
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_dir / "worker.yml").write_text("name: seeded\n")
+
+    with main.get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO logs (run_id, level, message, timestamp, trace_id)
+            VALUES (?, 'info', 'scoped log', ?, 'trace_scope')
+            """,
+            (run_id, main.now_iso()),
+        )
+        conn.execute(
+            """
+            INSERT INTO artifacts (id, run_id, name, type, path, size_bytes, created_at)
+            VALUES (?, ?, 'result.txt', 'file', ?, ?, ?)
+            """,
+            (
+                artifact_id,
+                run_id,
+                str(artifact_path),
+                artifact_path.stat().st_size,
+                main.now_iso(),
+            ),
+        )
+        conn.execute(
+            "UPDATE runs SET bundle_snapshot_path = ? WHERE id = ?",
+            (f"run-bundles/{run_id}", run_id),
+        )
+    return artifact_id
+
+
+def test_list_workers_hides_foreign_custom_workers_but_keeps_stock(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief",))
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("shared-probe", title="Shared Probe"),
+    )
+    assert created.status_code == 200, created.text
+
+    owner_list = client.get("/workers", headers=_headers("user-a"))
+    foreign_list = client.get("/workers", headers=_headers("user-b"))
+
+    assert owner_list.status_code == 200, owner_list.text
+    assert foreign_list.status_code == 200, foreign_list.text
+
+    owner_ids = {item["id"] for item in owner_list.json()}
+    foreign_ids = {item["id"] for item in foreign_list.json()}
+
+    assert {"research_brief", "shared-probe"} <= owner_ids
+    assert "research_brief" in foreign_ids
+    assert "shared-probe" not in foreign_ids
+
+
+def test_foreign_custom_worker_routes_return_404(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("shared-probe", title="Shared Probe"),
+    )
+    assert created.status_code == 200, created.text
+
+    payload = _worker_payload("shared-probe", title="Overwritten Probe")
+    files_payload = {
+        "files": [
+            {"path": "worker.yml", "content": payload["worker_yml"]},
+            {"path": "run.py", "content": payload["run_py"]},
+        ]
+    }
+
+    checks = {
+        "detail": client.get("/workers/shared-probe", headers=_headers("user-b")),
+        "timeseries": client.get("/workers/shared-probe/runs/timeseries", headers=_headers("user-b")),
+        "patch": client.patch(
+            "/workers/shared-probe",
+            headers=_headers("user-b"),
+            json={"trigger_type": "manual"},
+        ),
+        "put": client.put(
+            "/workers/shared-probe",
+            headers=_headers("user-b"),
+            json=payload,
+        ),
+        "put_files": client.put(
+            "/workers/shared-probe/files",
+            headers=_headers("user-b"),
+            json=files_payload,
+        ),
+        "create_run": client.post(
+            "/workers/shared-probe/runs",
+            headers=_headers("user-b"),
+            json={"inputs": {}, "trigger_source": "audit"},
+        ),
+    }
+
+    for name, response in checks.items():
+        assert response.status_code == 404, f"{name}: {response.status_code} {response.text}"
+
+    owner_detail = client.get("/workers/shared-probe", headers=_headers("user-a"))
+    assert owner_detail.status_code == 200, owner_detail.text
+    assert owner_detail.json()["name"] == "Shared Probe"
+
+
+def test_run_list_and_foreign_run_routes_return_404(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created_a = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("runs-owner-probe", title="Runs Owner Probe"),
+    )
+    created_b = client.post(
+        "/workers",
+        headers=_headers("user-b"),
+        json=_worker_payload("runs-foreign-probe", title="Runs Foreign Probe"),
+    )
+    assert created_a.status_code == 200, created_a.text
+    assert created_b.status_code == 200, created_b.text
+
+    run_a = client.post(
+        "/workers/runs-owner-probe/runs",
+        headers=_headers("user-a"),
+        json={"inputs": {}, "trigger_source": "audit"},
+    )
+    run_b = client.post(
+        "/workers/runs-foreign-probe/runs",
+        headers=_headers("user-b"),
+        json={"inputs": {}, "trigger_source": "audit"},
+    )
+    assert run_a.status_code == 200, run_a.text
+    assert run_b.status_code == 200, run_b.text
+
+    run_a_id = run_a.json()["run_id"]
+    run_b_id = run_b.json()["run_id"]
+    artifact_id = _seed_run_surfaces(main, tmp_path, run_id=run_a_id)
+
+    owner_list = client.get("/runs", headers=_headers("user-a"))
+    foreign_list = client.get("/runs", headers=_headers("user-b"))
+    assert owner_list.status_code == 200, owner_list.text
+    assert foreign_list.status_code == 200, foreign_list.text
+
+    owner_ids = {item["id"] for item in owner_list.json()}
+    foreign_ids = {item["id"] for item in foreign_list.json()}
+    assert run_a_id in owner_ids
+    assert run_b_id not in owner_ids
+    assert run_b_id in foreign_ids
+    assert run_a_id not in foreign_ids
+
+    checks = {
+        "detail": client.get(f"/runs/{run_a_id}", headers=_headers("user-b")),
+        "download": client.get(f"/runs/{run_a_id}/download", headers=_headers("user-b")),
+        "bundle": client.get(f"/runs/{run_a_id}/bundle/worker.yml", headers=_headers("user-b")),
+        "artifact": client.get(
+            f"/runs/{run_a_id}/artifacts/{artifact_id}/download",
+            headers=_headers("user-b"),
+        ),
+        "stream": client.get(f"/runs/{run_a_id}/stream", headers=_headers("user-b")),
+        "events": client.get(f"/runs/{run_a_id}/events", headers=_headers("user-b")),
+        "logs": client.get(f"/runs/{run_a_id}/logs", headers=_headers("user-b")),
+        "cancel": client.post(f"/runs/{run_a_id}/cancel", headers=_headers("user-b")),
+    }
+
+    for name, response in checks.items():
+        assert response.status_code == 404, f"{name}: {response.status_code} {response.text}"
+
+
+def test_runs_clear_only_deletes_owner_history(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created_a = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("clear-owner-probe", title="Clear Owner Probe"),
+    )
+    created_b = client.post(
+        "/workers",
+        headers=_headers("user-b"),
+        json=_worker_payload("clear-foreign-probe", title="Clear Foreign Probe"),
+    )
+    assert created_a.status_code == 200, created_a.text
+    assert created_b.status_code == 200, created_b.text
+
+    run_a = client.post(
+        "/workers/clear-owner-probe/runs",
+        headers=_headers("user-a"),
+        json={"inputs": {}, "trigger_source": "audit"},
+    )
+    run_b = client.post(
+        "/workers/clear-foreign-probe/runs",
+        headers=_headers("user-b"),
+        json={"inputs": {}, "trigger_source": "audit"},
+    )
+    assert run_a.status_code == 200, run_a.text
+    assert run_b.status_code == 200, run_b.text
+
+    clear_resp = client.post(
+        "/runs/clear?confirm=yes-wipe-all-runs",
+        headers=_headers("user-a"),
+    )
+    assert clear_resp.status_code == 200, clear_resp.text
+    assert clear_resp.json()["deleted_runs"] == 1
+
+    owner_after = client.get("/runs", headers=_headers("user-a"))
+    foreign_after = client.get("/runs", headers=_headers("user-b"))
+    assert owner_after.status_code == 200, owner_after.text
+    assert foreign_after.status_code == 200, foreign_after.text
+    assert owner_after.json() == []
+    assert {item["id"] for item in foreign_after.json()} == {run_b.json()["run_id"]}
+
+
+def test_foreign_webhook_secret_rotate_returns_404(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("shared-webhook", title="Shared Webhook", trigger_type="webhook"),
+    )
+    assert created.status_code == 200, created.text
+
+    response = client.post(
+        "/workers/shared-webhook/webhook-secret/rotate",
+        headers=_headers("user-b"),
+    )
+
+    assert response.status_code == 404, response.text
+
+
+def test_reload_preserves_existing_owner_on_conflict(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("shared-probe", title="Shared Probe"),
+    )
+    assert created.status_code == 200, created.text
+
+    with main.get_db() as conn:
+        before = conn.execute(
+            "SELECT owner_id FROM workers WHERE id = ?",
+            ("shared-probe",),
+        ).fetchone()
+    assert before is not None
+    assert before["owner_id"] == "user-a"
+
+    reload_resp = client.post("/workers/reload", headers=_headers("user-b"))
+    assert reload_resp.status_code == 200, reload_resp.text
+
+    with main.get_db() as conn:
+        after = conn.execute(
+            "SELECT owner_id FROM workers WHERE id = ?",
+            ("shared-probe",),
+        ).fetchone()
+    assert after is not None
+    assert after["owner_id"] == "user-a"
+
+
+def test_list_secrets_hides_foreign_worker_requirements_but_keeps_stock(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("opendraft",))
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload(
+            "shared-secret-worker",
+            title="Shared Secret Worker",
+            secrets=("TEAM_ONLY_SECRET",),
+        ),
+    )
+    assert created.status_code == 200, created.text
+
+    owner_list = client.get("/secrets", headers=_headers("user-a"))
+    foreign_list = client.get("/secrets", headers=_headers("user-b"))
+
+    assert owner_list.status_code == 200, owner_list.text
+    assert foreign_list.status_code == 200, foreign_list.text
+
+    owner_names = {item["name"] for item in owner_list.json()}
+    foreign_names = {item["name"] for item in foreign_list.json()}
+
+    assert "GOOGLE_API_KEY" in owner_names
+    assert "GOOGLE_API_KEY" in foreign_names
+    assert "TEAM_ONLY_SECRET" in owner_names
+    assert "TEAM_ONLY_SECRET" not in foreign_names
+
+
+def test_upload_download_token_is_user_bound(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    upload = client.post(
+        "/uploads",
+        headers=_headers("user-a"),
+        files={"file": ("audit.txt", b"upload body", "text/plain")},
+    )
+    assert upload.status_code == 200, upload.text
+    url = upload.json()["url"]
+
+    owner_download = client.get(url, headers=_headers("user-a"))
+    foreign_download = client.get(url, headers=_headers("user-b"))
+
+    assert owner_download.status_code == 200, owner_download.text
+    assert owner_download.content == b"upload body"
+    assert foreign_download.status_code == 404, foreign_download.text
+
+
+def test_system_metrics_and_overview_are_user_scoped(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    worker_a = "metrics-a"
+    worker_b = "metrics-b"
+    created_a = client.post("/workers", headers=_headers("user-a"), json=_worker_payload(worker_a, title="Metrics A"))
+    created_b = client.post("/workers", headers=_headers("user-b"), json=_worker_payload(worker_b, title="Metrics B"))
+    assert created_a.status_code == 200, created_a.text
+    assert created_b.status_code == 200, created_b.text
+
+    secret_a = client.post("/secrets/AUDIT_SECRET_A", headers=_headers("user-a"), json={"value": "value-a"})
+    secret_b = client.post("/secrets/AUDIT_SECRET_B", headers=_headers("user-b"), json={"value": "value-b"})
+    assert secret_a.status_code == 200, secret_a.text
+    assert secret_b.status_code == 200, secret_b.text
+
+    _insert_connection(main, user_id="user-a", app_name="gmail")
+    _insert_connection(main, user_id="user-b", app_name="slack")
+
+    run_a = client.post(
+        f"/workers/{worker_a}/runs",
+        headers=_headers("user-a"),
+        json={"inputs": {}, "trigger_source": "audit"},
+    )
+    run_b = client.post(
+        f"/workers/{worker_b}/runs",
+        headers=_headers("user-b"),
+        json={"inputs": {}, "trigger_source": "audit"},
+    )
+    assert run_a.status_code == 200, run_a.text
+    assert run_b.status_code == 200, run_b.text
+
+    metrics_a = client.get("/system/metrics", headers=_headers("user-a"))
+    metrics_b = client.get("/system/metrics", headers=_headers("user-b"))
+    overview_a = client.get("/system/overview", headers=_headers("user-a"))
+    overview_b = client.get("/system/overview", headers=_headers("user-b"))
+
+    assert metrics_a.status_code == 200, metrics_a.text
+    assert metrics_b.status_code == 200, metrics_b.text
+    assert overview_a.status_code == 200, overview_a.text
+    assert overview_b.status_code == 200, overview_b.text
+
+    metrics_a_body = metrics_a.json()
+    metrics_b_body = metrics_b.json()
+    overview_a_body = overview_a.json()
+    overview_b_body = overview_b.json()
+    recent_a = {item["worker_id"] for item in overview_a_body["recent_runs"]}
+    recent_b = {item["worker_id"] for item in overview_b_body["recent_runs"]}
+
+    assert metrics_a_body["runs_total"] == 1
+    assert metrics_b_body["runs_total"] == 1
+    assert metrics_a_body["connections_count"] == 1
+    assert metrics_b_body["connections_count"] == 1
+    assert metrics_a_body["secrets_count"] == 1
+    assert metrics_b_body["secrets_count"] == 1
+    assert overview_a_body["stats"]["connections_total"] == 1
+    assert overview_b_body["stats"]["connections_total"] == 1
+    assert recent_a == {worker_a}
+    assert recent_b == {worker_b}
+
+
+def test_shipped_worker_directories_match_protected_set(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    shipped_worker_ids = _tracked_worker_ids()
+
+    assert shipped_worker_ids == set(main.PROTECTED_STOCK_WORKER_IDS)
+
+
+def test_protected_stock_worker_mutations_are_blocked(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("linkedin-post-engagements",))
+    client = TestClient(main.app)
+
+    payload = _worker_payload("linkedin-post-engagements", title="Probe Replacement")
+    files_payload = {
+        "files": [
+            {"path": "worker.yml", "content": payload["worker_yml"]},
+            {"path": "run.py", "content": payload["run_py"]},
+        ]
+    }
+
+    checks = {
+        "delete": client.delete("/workers/linkedin-post-engagements", headers=_headers("user-a")),
+        "patch": client.patch(
+            "/workers/linkedin-post-engagements",
+            headers=_headers("user-a"),
+            json={"trigger_type": "manual"},
+        ),
+        "put": client.put(
+            "/workers/linkedin-post-engagements",
+            headers=_headers("user-a"),
+            json=payload,
+        ),
+        "put_files": client.put(
+            "/workers/linkedin-post-engagements/files",
+            headers=_headers("user-a"),
+            json=files_payload,
+        ),
+    }
+
+    for name, response in checks.items():
+        assert response.status_code == 403, f"{name}: {response.status_code} {response.text}"

@@ -10,6 +10,7 @@ import json
 import os
 import base64
 import sys
+import threading
 import time
 import types
 import uuid
@@ -33,17 +34,20 @@ def _load_api(
     tmp_path,
     *,
     draft_rate_hour: int = 20,
-    run_create_rate_minute: int = 10,
+    run_create_rate_minute: int | None = 10,
 ):
     workers_dir = tmp_path / "workers"
     workers_dir.mkdir()
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir()
+    contexts_dir = tmp_path / "contexts"
+    contexts_dir.mkdir()
     db_path = tmp_path / "floom.db"
 
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
+    monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
     monkeypatch.setenv("FLOOM_SECRET", _AUTH_HEADER["x-floom-secret"])
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
@@ -51,13 +55,17 @@ def _load_api(
     monkeypatch.setenv("COMPOSIO_WEBHOOK_SIGNING_KEY", "whsec-test")
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
     monkeypatch.setenv("WORKEROS_DRAFT_RATE_HOUR", str(draft_rate_hour))
-    monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_LIMIT", str(run_create_rate_minute))
+    if run_create_rate_minute is None:
+        monkeypatch.delenv("WORKEROS_RUN_CREATE_RATE_LIMIT", raising=False)
+    else:
+        monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_LIMIT", str(run_create_rate_minute))
     monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60")
 
     reset_prefixes = ("auth.", "db.")
     reset_exact = {
         "main",
         "auth",
+        "contexts",
         "db",
         "files",
         "models",
@@ -77,6 +85,9 @@ def _load_api(
         stop_scheduler=lambda: None,
     )
     main = importlib.import_module("main")
+    run_service = importlib.import_module("run_service")
+    run_service.register_sse_publisher(main._sse_publish)
+    run_service.register_part_publisher(main._run_part_publish)
     main.get_auth_provider.cache_clear()
     return main
 
@@ -161,6 +172,14 @@ def _symlink_bundle(name: str) -> bytes:
     return buf.getvalue()
 
 
+def _nested_traversal_bundle(name: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("worker.yml", _worker_yml(name))
+        zf.writestr("nested/../../../../etc/passwd", "x")
+    return buf.getvalue()
+
+
 def _signed_headers(body: bytes, signing_key: str) -> Dict[str, str]:
     msg_id = "msg_s13"
     ts = str(int(time.time()))
@@ -175,7 +194,13 @@ def _signed_headers(body: bytes, signing_key: str) -> Dict[str, str]:
     }
 
 
-def _insert_minimal_worker(main: Any, worker_id: str, *, secrets: list[str] | None = None) -> None:
+def _insert_minimal_worker(
+    main: Any,
+    worker_id: str,
+    *,
+    secrets: list[str] | None = None,
+    owner_id: str = "federico",
+) -> None:
     now = main.now_iso()
     skill_version_id = f"skill_{worker_id}"
     manifest = {
@@ -200,13 +225,13 @@ def _insert_minimal_worker(main: Any, worker_id: str, *, secrets: list[str] | No
         conn.execute(
             """
             INSERT INTO workers (id, skill_version_id, name, trigger_type, created_at, owner_id)
-            VALUES (?, ?, ?, 'manual', ?, 'federico')
+            VALUES (?, ?, ?, 'manual', ?, ?)
             """,
-            (worker_id, skill_version_id, worker_id, now),
+            (worker_id, skill_version_id, worker_id, now, owner_id),
         )
 
 
-def _insert_file_input_worker(main: Any, worker_id: str) -> None:
+def _insert_file_input_worker(main: Any, worker_id: str, *, owner_id: str = "federico") -> None:
     now = main.now_iso()
     skill_version_id = f"skill_{worker_id}"
     manifest = {
@@ -238,9 +263,9 @@ def _insert_file_input_worker(main: Any, worker_id: str) -> None:
         conn.execute(
             """
             INSERT INTO workers (id, skill_version_id, name, trigger_type, created_at, owner_id)
-            VALUES (?, ?, ?, 'manual', ?, 'federico')
+            VALUES (?, ?, ?, 'manual', ?, ?)
             """,
-            (worker_id, skill_version_id, worker_id, now),
+            (worker_id, skill_version_id, worker_id, now, owner_id),
         )
 
 
@@ -349,7 +374,50 @@ def test_upload_rejects_null_byte_filename(monkeypatch, tmp_path):
     assert resp.json() == {"detail": "filename must not contain control characters"}
 
 
+def test_upload_rejects_blocked_inner_extension(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/uploads",
+        headers=_AUTH_HEADER,
+        files={"file": ("shell.php.jpg", b"<?php echo 1; ?>", "image/jpeg")},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json() == {"detail": "Upload filename contains blocked inner extension '.php'"}
+
+
+def test_upload_requires_auth(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/uploads",
+        files={"file": ("audit.txt", b"upload body", "text/plain")},
+    )
+
+    assert resp.status_code == 401, resp.text
+
+
+def test_upload_rejects_path_traversal_filename(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/uploads",
+        headers=_AUTH_HEADER,
+        files={"file": ("../../etc/passwd.txt", b"upload body", "text/plain")},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert resp.json() == {
+        "detail": "filename must not contain path separators, leading dots, or '..' segments"
+    }
+
+
 def test_upload_returns_owner_scoped_download_url(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
     headers = {**_AUTH_HEADER, "x-floom-user": "upload-owner"}
@@ -365,28 +433,65 @@ def test_upload_returns_owner_scoped_download_url(monkeypatch, tmp_path):
     assert body["url"].startswith(f"/uploads/{body['sha256']}?download_token=")
     assert body["id"] == body["sha256"]
 
-    download = client.get(body["url"], headers=_AUTH_HEADER)
+    download = client.get(body["url"], headers=headers)
     assert download.status_code == 200, download.text
     assert download.content == b"upload body"
 
+    foreign = client.get(body["url"], headers={**_AUTH_HEADER, "x-floom-user": "foreign-user"})
+    assert foreign.status_code == 404, foreign.text
+
     spoofed = client.get(
         f"/uploads/{body['sha256']}",
-        headers={**_AUTH_HEADER, "x-floom-user": "upload-owner"},
+        headers=headers,
     )
     assert spoofed.status_code == 404, spoofed.text
 
-    tampered = client.get(body["url"].replace("download_token=", "download_token=x"), headers=_AUTH_HEADER)
+    tampered = client.get(body["url"].replace("download_token=", "download_token=x"), headers=headers)
     assert tampered.status_code == 404, tampered.text
 
+    dedup_headers = {**_AUTH_HEADER, "x-floom-user": "second-owner"}
     dedup = client.post(
         "/uploads",
-        headers={**_AUTH_HEADER, "x-floom-user": "second-owner"},
+        headers=dedup_headers,
         files={"file": ("audit.txt", b"upload body", "text/plain")},
     )
     assert dedup.status_code == 200, dedup.text
-    dedup_download = client.get(dedup.json()["url"], headers=_AUTH_HEADER)
+    dedup_download = client.get(dedup.json()["url"], headers=dedup_headers)
     assert dedup_download.status_code == 200, dedup_download.text
     assert dedup_download.content == b"upload body"
+
+
+def test_file_input_accepts_dedup_upload_for_second_owner(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
+    worker_id = "s13-file-dedup-worker"
+    _insert_file_input_worker(main, worker_id, owner_id="upload-owner-b")
+
+    owner_a = {**_AUTH_HEADER, "x-floom-user": "upload-owner-a"}
+    owner_b = {**_AUTH_HEADER, "x-floom-user": "upload-owner-b"}
+    first = client.post(
+        "/uploads",
+        headers=owner_a,
+        files={"file": ("scores.csv", b"name,score\nAda,98\n", "text/csv")},
+    )
+    assert first.status_code == 200, first.text
+
+    second = client.post(
+        "/uploads",
+        headers=owner_b,
+        files={"file": ("scores.csv", b"name,score\nAda,98\n", "text/csv")},
+    )
+    assert second.status_code == 200, second.text
+
+    resp = client.post(
+        f"/workers/{worker_id}/runs",
+        headers=owner_b,
+        json={"inputs": {"upload": second.json()["sha256"]}, "trigger_source": "manual"},
+    )
+
+    assert resp.status_code == 200, resp.text
 
 
 def test_get_with_body_is_rejected(monkeypatch, tmp_path):
@@ -399,29 +504,74 @@ def test_get_with_body_is_rejected(monkeypatch, tmp_path):
     assert resp.json() == {"detail": "Request body not allowed"}
 
 
-def test_run_creation_quota_is_per_worker_not_ip_global(monkeypatch, tmp_path):
-    main = _load_api(monkeypatch, tmp_path, run_create_rate_minute=1)
+def test_new_worker_from_prompt_requires_auth(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post("/workers/new/from-prompt", json={"prompt": "draft a worker"})
+
+    assert resp.status_code == 401, resp.text
+
+
+def test_new_worker_from_prompt_oversized_body_rejected(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/workers/new/from-prompt",
+        headers=_AUTH_HEADER,
+        json={"prompt": "x" * (300 * 1024)},
+    )
+
+    assert resp.status_code == 413, resp.text
+    assert resp.json() == {"detail": "Request body too large"}
+
+
+def test_run_creation_quota_is_shared_across_workers_and_ips(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, run_create_rate_minute=3)
     client = TestClient(main.app)
     monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
-    worker_ids = [f"s13-run-quota-{idx}" for idx in range(2)]
+    worker_ids = [f"s13-run-quota-{idx}" for idx in range(3)]
     for worker_id in worker_ids:
         _insert_minimal_worker(main, worker_id)
 
     statuses = []
     bodies = []
-    for idx, worker_id in enumerate([worker_ids[0], worker_ids[1], worker_ids[0]]):
+    for idx in range(4):
         headers = {**_AUTH_HEADER, "x-forwarded-for": f"203.0.113.{idx + 1}"}
         resp = client.post(
-            f"/workers/{worker_id}/runs",
+            f"/workers/{worker_ids[idx % len(worker_ids)]}/runs",
             headers=headers,
             json={"inputs": {}, "trigger_source": "manual"},
         )
         statuses.append(resp.status_code)
         bodies.append(resp.text)
 
-    assert statuses == [200, 200, 429], bodies
+    assert statuses == [200, 200, 200, 429], bodies
     assert "Retry-After" in resp.headers
-    assert resp.json() == {"detail": "Run creation rate limit exceeded: 1/60s"}
+    assert resp.json() == {"detail": "Run creation rate limit exceeded: 3/60s"}
+
+
+def test_run_creation_quota_defaults_to_safe_global_limit(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, run_create_rate_minute=None)
+    client = TestClient(main.app)
+    monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
+    worker_ids = [f"s13-default-run-quota-{idx}" for idx in range(3)]
+    for worker_id in worker_ids:
+        _insert_minimal_worker(main, worker_id)
+
+    statuses = []
+    for idx in range(11):
+        resp = client.post(
+            f"/workers/{worker_ids[idx % len(worker_ids)]}/runs",
+            headers={**_AUTH_HEADER, "x-forwarded-for": f"203.0.113.{idx + 1}"},
+            json={"inputs": {}, "trigger_source": "manual"},
+        )
+        statuses.append(resp.status_code)
+
+    assert statuses == [200] * 10 + [429], statuses
+    assert resp.json() == {"detail": "Run creation rate limit exceeded: 10/60s"}
+    assert "Retry-After" in resp.headers
 
 
 def test_replay_route_shares_run_creation_quota(monkeypatch, tmp_path):
@@ -446,6 +596,68 @@ def test_replay_route_shares_run_creation_quota(monkeypatch, tmp_path):
     assert "Retry-After" in replay.headers
 
 
+def test_run_creation_quota_applies_per_worker(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_RUN_CREATE_PER_WORKER_RATE_LIMIT", "2")
+    main = _load_api(monkeypatch, tmp_path, run_create_rate_minute=10)
+    client = TestClient(main.app)
+    monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
+    worker_a = "s13-worker-a"
+    worker_b = "s13-worker-b"
+    _insert_minimal_worker(main, worker_a)
+    _insert_minimal_worker(main, worker_b)
+
+    first = client.post(
+        f"/workers/{worker_a}/runs",
+        headers=_AUTH_HEADER,
+        json={"inputs": {}, "trigger_source": "manual"},
+    )
+    second = client.post(
+        f"/workers/{worker_a}/runs",
+        headers=_AUTH_HEADER,
+        json={"inputs": {}, "trigger_source": "manual"},
+    )
+    third = client.post(
+        f"/workers/{worker_a}/runs",
+        headers=_AUTH_HEADER,
+        json={"inputs": {}, "trigger_source": "manual"},
+    )
+    other_worker = client.post(
+        f"/workers/{worker_b}/runs",
+        headers=_AUTH_HEADER,
+        json={"inputs": {}, "trigger_source": "manual"},
+    )
+
+    assert [first.status_code, second.status_code, third.status_code, other_worker.status_code] == [200, 200, 429, 200]
+    assert third.json() == {"detail": "Run creation rate limit exceeded: 2/60s"}
+    assert "Retry-After" in third.headers
+
+
+def test_replay_quota_applies_per_run_id(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_RUN_CREATE_PER_WORKER_RATE_LIMIT", "10")
+    monkeypatch.setenv("WORKEROS_RUN_REPLAY_PER_RUN_RATE_LIMIT", "2")
+    main = _load_api(monkeypatch, tmp_path, run_create_rate_minute=10)
+    client = TestClient(main.app)
+    monkeypatch.setattr(main, "start_run", lambda *args, **kwargs: None)
+    worker_id = "s13-replay-per-run"
+    _insert_minimal_worker(main, worker_id)
+
+    created = client.post(
+        f"/workers/{worker_id}/runs",
+        headers=_AUTH_HEADER,
+        json={"inputs": {}, "trigger_source": "manual"},
+    )
+    assert created.status_code == 200, created.text
+    run_id = created.json()["run_id"]
+
+    first = client.post(f"/workers/{worker_id}/runs/{run_id}/replay", headers=_AUTH_HEADER)
+    second = client.post(f"/workers/{worker_id}/runs/{run_id}/replay", headers=_AUTH_HEADER)
+    third = client.post(f"/workers/{worker_id}/runs/{run_id}/replay", headers=_AUTH_HEADER)
+
+    assert [first.status_code, second.status_code, third.status_code] == [200, 200, 429]
+    assert third.json() == {"detail": "Run creation rate limit exceeded: 2/60s"}
+    assert "Retry-After" in third.headers
+
+
 def test_sweep_connections_has_cooldown(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
@@ -460,12 +672,137 @@ def test_sweep_connections_has_cooldown(monkeypatch, tmp_path):
     assert "Retry-After" in second.headers
 
 
+def test_system_metrics_and_overview_require_auth(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    metrics = client.get("/system/metrics")
+    overview = client.get("/system/overview")
+
+    assert metrics.status_code == 401, metrics.text
+    assert overview.status_code == 401, overview.text
+
+
+def test_sweep_connections_is_scoped_per_user(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    seen_user_ids = []
+
+    async def fake_sweep(*, user_id=None):
+        seen_user_ids.append(user_id)
+
+    monkeypatch.setattr(main, "_run_connection_sweep", fake_sweep)
+
+    user_a = {**_AUTH_HEADER, "x-floom-user": "user-a"}
+    user_b = {**_AUTH_HEADER, "x-floom-user": "user-b"}
+    first = client.post("/system/sweep-connections", headers=user_a)
+    second = client.post("/system/sweep-connections", headers=user_b)
+    third = client.post("/system/sweep-connections", headers=user_a)
+    time.sleep(0.05)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert third.status_code == 429, third.text
+    assert seen_user_ids == ["user-a", "user-b"]
+
+
+def test_context_routes_are_scoped_per_user(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    user_a = {**_AUTH_HEADER, "x-floom-user": "user-a"}
+    user_b = {**_AUTH_HEADER, "x-floom-user": "user-b"}
+    context_name = "private-context"
+    worker_yml = f"""
+schema_version: "0.3"
+name: "context-probe"
+title: "Context Probe"
+description: "Worker with a local context."
+version: "0.1.0"
+targets: ["generic"]
+contexts:
+  - "{context_name}"
+exec:
+  entry: "run.py"
+  runtime: "python311"
+  runner: "e2b"
+  command: "python run.py"
+  inputs: []
+  outputs: []
+trigger:
+  type: "manual"
+""".strip()
+
+    created = client.post(f"/contexts/{context_name}", headers=user_a, json={"writeable": True})
+    assert created.status_code == 200, created.text
+
+    put_file = client.put(
+        f"/contexts/{context_name}/files/notes.txt",
+        headers=user_a,
+        content=b"owner-only notes",
+    )
+    owner_list = client.get("/contexts", headers=user_a)
+    foreign_list = client.get("/contexts", headers=user_b)
+    foreign_get = client.get(f"/contexts/{context_name}", headers=user_b)
+    foreign_file = client.get(f"/contexts/{context_name}/files/notes.txt", headers=user_b)
+    foreign_put = client.put(
+        f"/contexts/{context_name}/files/pwned.txt",
+        headers=user_b,
+        content=b"nope",
+    )
+    foreign_upload = client.post(
+        f"/contexts/{context_name}/upload",
+        headers=user_b,
+        files={"files": ("upload.txt", b"nope", "text/plain")},
+    )
+    foreign_delete = client.delete(f"/contexts/{context_name}", headers=user_b)
+    foreign_worker = client.post(
+        "/workers",
+        headers=user_b,
+        json={"worker_yml": worker_yml, "run_py": "def run(inputs, context):\n    return {'ok': True}\n"},
+    )
+
+    assert put_file.status_code == 200, put_file.text
+    assert [item["name"] for item in owner_list.json()] == [context_name]
+    assert foreign_list.json() == []
+    assert foreign_get.status_code == 404, foreign_get.text
+    assert foreign_file.status_code == 404, foreign_file.text
+    assert foreign_put.status_code == 404, foreign_put.text
+    assert foreign_upload.status_code == 404, foreign_upload.text
+    assert foreign_delete.status_code == 404, foreign_delete.text
+    assert foreign_worker.status_code == 400, foreign_worker.text
+    assert foreign_worker.json() == {"detail": f"Context not found: {context_name}"}
+
+
 def _setup_rate_limited_draft_client(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path, draft_rate_hour=2)
     client = TestClient(main.app)
     payload = _valid_draft_payload(name="s13-rate-limited")
     monkeypatch.setattr(main, "_call_draft_llm", lambda *args, **kwargs: payload)
     return main, client
+
+
+def test_draft_from_prompt_requires_auth(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post("/workers/draft-from-prompt", json={"prompt": "draft a worker"})
+
+    assert resp.status_code == 401, resp.text
+
+
+def test_from_bundle_requires_auth(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/workers/from-bundle",
+        files={"bundle": ("bad.zip", b"not a zip", "application/zip")},
+    )
+
+    assert resp.status_code == 401, resp.text
 
 
 def _consume_two_draft_slots(client: TestClient):
@@ -513,6 +850,48 @@ def test_draft_limit_sets_retry_after_header(monkeypatch, tmp_path):
     assert "Retry-After" in third.headers
     retry_after = int(third.headers["Retry-After"])
     assert 1 <= retry_after <= 3600
+
+
+def test_draft_from_prompt_treats_metadata_urls_as_plain_text(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    captured: dict[str, str] = {}
+    network_attempts: list[tuple[Any, ...]] = []
+    original_openai = sys.modules.get("openai")
+    draft_payload = _valid_draft_payload(name="s13-plain-text-prompt")
+
+    def fake_call_draft_llm(_client, user_message, _extra=None):
+        captured["user_message"] = user_message
+        return draft_payload
+
+    monkeypatch.setattr(main, "_call_draft_llm", fake_call_draft_llm)
+    sys.modules["openai"] = types.SimpleNamespace(OpenAI=lambda api_key=None: object())
+
+    import socket
+
+    original_create_connection = socket.create_connection
+
+    def fail_network(*args, **kwargs):
+        network_attempts.append(args)
+        raise AssertionError("unexpected network access during draft-from-prompt")
+
+    socket.create_connection = fail_network
+    try:
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            headers=_AUTH_HEADER,
+            json={"prompt": "fetch http://169.254.169.254/latest/meta-data/iam/security-credentials/"},
+        )
+    finally:
+        socket.create_connection = original_create_connection
+        if original_openai is None:
+            sys.modules.pop("openai", None)
+        else:
+            sys.modules["openai"] = original_openai
+
+    assert resp.status_code == 200, resp.text
+    assert "169.254.169.254" in captured["user_message"]
+    assert network_attempts == []
 
 
 def test_system_metrics_includes_drafts_last_hour(monkeypatch, tmp_path):
@@ -610,6 +989,77 @@ def test_run_detail_omits_sensitive_inputs_logs_trace_and_transcript(monkeypatch
         headers=_AUTH_HEADER,
     )
     assert transcript_download.status_code == 404, transcript_download.text
+
+
+def test_run_events_redact_trace_ids_and_internal_metadata(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    worker_id = f"s13-events-worker-{uuid.uuid4().hex[:8]}"
+    run_id = f"run_{uuid.uuid4().hex}"
+    _insert_minimal_worker(main, worker_id)
+    now = main.now_iso()
+    with main.get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO runs
+                (id, worker_id, status, trigger_source, runner, input_json, created_at)
+            VALUES (?, ?, 'running', 'manual', 'skill', ?, ?)
+            """,
+            (run_id, worker_id, "{}", now),
+        )
+
+    run_service = importlib.import_module("run_service")
+
+    def emit_events():
+        run_service.add_log(
+            run_id,
+            "trace_a2278662e7ae4e05 mode=agent runner=e2b private log",
+            trace_id="trace_a2278662e7ae4e05",
+            user_id="federico",
+        )
+        run_service.update_run_status(
+            run_id,
+            main.RunStatus.COMPLETED.value,
+            error="thread_a2278662e7ae4e05 runner=e2b",
+            user_id="federico",
+        )
+
+    events = []
+
+    def consume_events():
+        with client.stream("GET", f"/runs/{run_id}/events", headers=_AUTH_HEADER) as response:
+            assert response.status_code == 200, response.text
+            for line in response.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                event = json.loads(line[5:].strip())
+                events.append(event)
+                if event.get("status") in (main.RunStatus.COMPLETED.value, main.RunStatus.FAILED.value):
+                    break
+
+    consumer = threading.Thread(target=consume_events, daemon=True)
+    consumer.start()
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        with main._sse_lock:
+            if main._sse_queues.get(run_id):
+                break
+        time.sleep(0.05)
+    with main._sse_lock:
+        assert main._sse_queues.get(run_id), "SSE consumer did not register"
+    emitter = threading.Thread(target=emit_events, daemon=True)
+    emitter.start()
+    emitter.join(timeout=1)
+    consumer.join(timeout=2)
+    assert not consumer.is_alive(), "SSE consumer did not finish"
+
+    body = json.dumps(events)
+    assert "trace_a2278662e7ae4e05" not in body
+    assert "\"trace_id\"" not in body
+    assert "mode=agent" not in body
+    assert "runner=e2b" not in body
+    assert "[redacted-id]" in body
+    assert "[redacted-metadata]" in body
 
 
 def test_cancel_completed_run_does_not_reveal_existence(monkeypatch, tmp_path):
@@ -762,6 +1212,22 @@ def test_from_bundle_rejects_symlinks(monkeypatch, tmp_path):
 
     assert resp.status_code == 400, resp.text
     assert "symlink" in resp.text.lower()
+    assert not (tmp_path / "workers" / name).exists()
+
+
+def test_from_bundle_rejects_nested_traversal(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    name = "s13-nested-traversal-worker"
+
+    resp = client.post(
+        "/workers/from-bundle",
+        headers=_AUTH_HEADER,
+        files={"bundle": ("nested.zip", io.BytesIO(_nested_traversal_bundle(name)), "application/zip")},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "invalid path" in resp.text.lower()
     assert not (tmp_path / "workers" / name).exists()
 
 
