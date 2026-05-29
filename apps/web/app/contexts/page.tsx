@@ -205,9 +205,9 @@ function ContextsPage() {
           <Skeleton className="h-7 w-48" />
           <Skeleton className="h-4 w-72" />
         </div>
-        <div className="flex gap-4" style={{ minHeight: 520 }}>
-          <Skeleton className="w-[25%] min-w-[240px] max-w-[320px] rounded-[var(--radius-button)]" />
-          <Skeleton className="flex-1 rounded-[var(--radius-button)]" />
+        <div className="flex flex-col lg:flex-row gap-4" style={{ minHeight: 520 }}>
+          <Skeleton className="w-full lg:w-[25%] lg:min-w-[240px] lg:max-w-[320px] rounded-[var(--radius-button)]" style={{ minHeight: 180 }} />
+          <Skeleton className="flex-1 rounded-[var(--radius-button)]" style={{ minHeight: 320 }} />
         </div>
       </div>
     );
@@ -250,10 +250,10 @@ function ContextsPage() {
         </div>
       )}
 
-      {/* 25/75 split */}
-      <div className="flex gap-4 flex-1 min-h-0">
-        {/* Left: pack list (25%) */}
-        <section className="flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden min-w-[240px] max-w-[320px] w-[25%]">
+      {/* 25/75 split — stacks on mobile, side-by-side at lg+ */}
+      <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
+        {/* Left: pack list — full-width on mobile, 25% at lg+ */}
+        <section className="flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden w-full lg:w-[25%] lg:min-w-[240px] lg:max-w-[320px] lg:sticky lg:top-0 shrink-0">
           <div className="border-b border-[var(--border-default)] p-3 shrink-0">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Knowledge packs</p>
             <div className="relative">
