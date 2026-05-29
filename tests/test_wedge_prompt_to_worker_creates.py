@@ -89,6 +89,28 @@ def test_register_worker_from_files_creates_real_worker(monkeypatch, tmp_path):
     assert (tmp_path / worker_id / "requirements.txt").exists()
 
 
+def test_backfilled_run_py_satisfies_e2b_contract(monkeypatch, tmp_path):
+    """LIVE-FOUND BUG (2026-05-29): the backfilled run.py used the legacy
+    run(inputs, context) signature with NO __main__ block, so `python run.py`
+    (the E2B pure-script contract) wrote no result.json and every run of a
+    backfilled worker failed with error_code=missing_result. The stub MUST be
+    valid Python AND write result.json when executed as a script."""
+    import ast
+    import subprocess
+    import sys
+    import main
+
+    stub = main._DEFAULT_RUN_PY_STUB
+    # 1. Valid Python.
+    ast.parse(stub)
+    # 2. Executing it as a script writes result.json with success.
+    (tmp_path / "run.py").write_text(stub)
+    subprocess.run([sys.executable, "run.py"], cwd=tmp_path, check=True, timeout=30)
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["status"] == "success"
+    assert "outputs" in result
+
+
 def test_register_worker_from_files_dedupes_when_requested(monkeypatch, tmp_path):
     """With dedupe_id=True a colliding id is rewritten rather than 409'd, so a
     worker-author generation never fails because the suggested slug is taken."""
