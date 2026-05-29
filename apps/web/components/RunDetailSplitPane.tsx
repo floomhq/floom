@@ -474,7 +474,9 @@ function ArtifactsList({ run }: { run: RunDetail }) {
 }
 
 function RecentLogsPreview({ run }: { run: RunDetail }) {
-  const recent = run.logs.slice(-8);
+  // P1-3: the Result-tab log preview is operator-facing too — filter the same
+  // infra/[redacted] noise the Logs tab hides.
+  const recent = operatorLogs(run.logs).slice(-8);
   if (recent.length === 0) return null;
   return (
     <section className="space-y-3">
