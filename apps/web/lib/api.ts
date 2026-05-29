@@ -45,8 +45,14 @@ export const api = {
   workers: {
     // S44 Win 3: use list shape (~15 KB vs 47 KB full) for the web UI.
     // CLI consumers that call GET /workers directly get full payload (no ?shape=list).
-    list: () => fetchJson<import("./types").WorkerSummary[]>("/workers?shape=list"),
+    list: (opts?: { include_archived?: boolean }) => {
+      const qs = new URLSearchParams({ shape: "list" });
+      if (opts?.include_archived) qs.set("include_archived", "true");
+      return fetchJson<import("./types").WorkerSummary[]>(`/workers?${qs.toString()}`);
+    },
     get: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}`),
+    sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
+    restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
     run: (id: string, inputs: Record<string, unknown>) =>
