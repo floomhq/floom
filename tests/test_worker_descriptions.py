@@ -14,8 +14,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 
-# Point worker_registry at the repo workers dir before any import
-os.environ.setdefault("FLOOM_WORKERS_DIR", str(REPO_ROOT / "workers"))
+# Point worker_registry at the REAL repo workers dir before any import. This is
+# an explicit override (not setdefault) because conftest pins a throwaway temp
+# WORKERS_DIR for the suite; these stock-worker tests must see the real bundles.
+# The module flag tells the conftest isolation fixture NOT to reset us back to
+# the suite temp dir before each test in this module.
+_USE_REAL_WORKERS_DIR = True
+os.environ["FLOOM_WORKERS_DIR"] = str(REPO_ROOT / "workers")
 
 from models import (
     WorkerContract,
@@ -25,6 +30,9 @@ from models import (
 )
 
 WORKERS_DIR = REPO_ROOT / "workers"
+# Non-stock test fixtures (input_types_test, etc.) were moved out of workers/
+# into tests/fixtures/ (commit db255be) so they no longer ship as stock workers.
+FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +235,7 @@ class TestStockWorkerManifests:
 
     def test_input_types_test_file_input_null(self):
         """input_types_test example_input must not contain a filename string for file_input."""
-        raw = yaml.safe_load((WORKERS_DIR / "input_types_test" / "worker.yml").read_text())
+        raw = yaml.safe_load((FIXTURES_DIR / "input_types_test" / "worker.yml").read_text())
         m = parse_worker_manifest(raw)
         assert isinstance(m, WorkerContract)
         assert m.example_input is not None

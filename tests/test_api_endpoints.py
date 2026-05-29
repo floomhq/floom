@@ -786,8 +786,8 @@ class TestApprovalStatusPublisher(unittest.TestCase):
                 (run_id, worker_id),
             )
             conn.execute(
-                """INSERT INTO approvals (id, run_id, worker_id, status, label, preview, created_at)
-                   VALUES (?, ?, ?, 'pending', 'Approve output', 'preview', datetime('now'))""",
+                """INSERT INTO approvals (id, run_id, worker_id, owner_id, status, label, preview, created_at)
+                   VALUES (?, ?, ?, 'federico', 'pending', 'Approve output', 'preview', datetime('now'))""",
                 (approval_id, run_id, worker_id),
             )
         return run_id
@@ -841,7 +841,15 @@ class TestApprovalRunLifecycle(unittest.TestCase):
 
         class FakeDriver:
             def run(self, **_kwargs):
-                return WorkerResult(status="success", outputs={"message": "ready"})
+                # S47 HITL: a worker requests human approval by emitting
+                # decision_required in its result. Combined with the manifest's
+                # approvals.required, this lands the run as PENDING_APPROVAL
+                # instead of COMPLETED.
+                return WorkerResult(
+                    status="success",
+                    outputs={"message": "ready"},
+                    decision_required={"label": "Approve test output", "preview": "ready"},
+                )
 
         def capture(published_run_id: str, event: dict) -> None:
             if published_run_id == run_id:
