@@ -111,6 +111,45 @@ def test_upload_accepts_text_plain_file(monkeypatch, tmp_path):
     assert body["media_type"] == "text/plain"
 
 
+def test_upload_accepts_widened_code_and_markup_types(monkeypatch, tmp_path):
+    """html/py/ts/json/toml are now allowed (served as attachment + nosniff).
+
+    Browsers commonly send code files as application/octet-stream, so the
+    extension is the authoritative gate; benign declared types defer to it.
+    """
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    cases = [
+        ("page.html", b"<h1>hi</h1>", "text/html"),
+        ("script.py", b"print('hi')", "application/octet-stream"),
+        ("types.ts", b"export const x = 1", "application/octet-stream"),
+        ("config.toml", b"[a]\nb = 1", "application/octet-stream"),
+    ]
+    for filename, content, content_type in cases:
+        resp = client.post(
+            "/uploads",
+            headers=_AUTH_HEADER,
+            files={"file": (filename, content, content_type)},
+        )
+        assert resp.status_code == 200, f"{filename}: {resp.text}"
+
+
+def test_upload_blocks_js_and_sh_extensions(monkeypatch, tmp_path):
+    """Executable/script extensions stay blocked even with a benign media type."""
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    for filename in ("evil.js", "evil.sh", "evil.ps1"):
+        resp = client.post(
+            "/uploads",
+            headers=_AUTH_HEADER,
+            files={"file": (filename, b"x" * 10, "text/plain")},
+        )
+        assert resp.status_code == 400, f"{filename}: {resp.text}"
+        assert "extension" in resp.json()["detail"]
+
+
 def test_upload_rejects_disallowed_media_type(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
