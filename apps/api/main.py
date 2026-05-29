@@ -6404,6 +6404,56 @@ _ENV_SECRET_CONFIG_RE = re.compile(
 )
 
 
+_CALM_CODE_ERROR_LOG = "Worker code raised an error (see the Error card for details)."
+# A single traceback FRAME line: '  File "...", line N, in name' or the bare
+# source line printed under it. After path-scrubbing these become noise like
+# 'File "[worker file]", line 9, in main'.
+_TRACEBACK_FRAME_LINE_RE = re.compile(r'File\s+"[^"]*",\s*line\s+\d+', re.IGNORECASE)
+# A final 'ExcClass: message' line (TypeError: ...), or a bare Traceback header.
+_TRACEBACK_HEADER_RE = re.compile(r"Traceback \(most recent call last\)", re.IGNORECASE)
+
+
+def _redact_runtime_jargon_in_log(message: str) -> str:
+    """Collapse Python traceback frames + bare-exception jargon in an operator
+    log line into a single calm note (G5 P1-A). The raw text stays available to
+    engineers on the run's debug 'Raw' tab (error_raw); the operator-facing log
+    surface must read like the calm Error card, never a Python traceback.
+
+    Line-aware so a normal log line ('Worker completed: 9 words') is untouched."""
+    if not message:
+        return message
+    lines = message.splitlines()
+    if len(lines) <= 1:
+        text = message.strip()
+        # Single-line: only rewrite when it is unmistakably runtime jargon
+        # (traceback header, a frame line, an exception class/message). A clean
+        # operator log line never matches these.
+        if (
+            _TRACEBACK_HEADER_RE.search(text)
+            or _TRACEBACK_FRAME_LINE_RE.search(text)
+            or _WORKER_CODE_TRACEBACK_RE.search(text)
+            or _BARE_PYTHON_EXC_MSG_RE.search(text)
+        ):
+            return _CALM_CODE_ERROR_LOG
+        return message
+    out: List[str] = []
+    collapsed = False
+    for line in lines:
+        if (
+            _TRACEBACK_HEADER_RE.search(line)
+            or _TRACEBACK_FRAME_LINE_RE.search(line)
+            or _WORKER_CODE_TRACEBACK_RE.search(line)
+            or _BARE_PYTHON_EXC_MSG_RE.search(line)
+        ):
+            # Emit ONE calm note for the whole traceback block, drop the rest.
+            if not collapsed:
+                out.append(_CALM_CODE_ERROR_LOG)
+                collapsed = True
+            continue
+        out.append(line)
+    return "\n".join(out).strip() or _CALM_CODE_ERROR_LOG
+
+
 def _redact_public_log_message(message: str) -> str:
     redacted = _MISSING_SECRETS_RE.sub("Missing required secrets", message or "")
     redacted = _ENV_SECRET_CONFIG_RE.sub("Required platform secret is not configured", redacted)
@@ -6414,6 +6464,12 @@ def _redact_public_log_message(message: str) -> str:
     # unlike error_raw which already strips them. Apply the SAME redaction so
     # the log surface never discloses the deploy dir or sandbox topology.
     redacted = _SANDBOX_PATH_RE.sub("[worker file]", redacted)
+    # G5 P1-A (2026-05-29): the e2b driver streams the worker's raw stderr
+    # (Traceback + 'TypeError: unsupported operand ...') into the run logs. The
+    # "Recent logs" panel rendered that verbatim, undercutting the calm Error
+    # card. Collapse runtime jargon/tracebacks into one calm note here — the
+    # single chokepoint for every operator-facing log read.
+    redacted = _redact_runtime_jargon_in_log(redacted)
     return redacted
 
 
