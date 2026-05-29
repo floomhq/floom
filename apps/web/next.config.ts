@@ -9,6 +9,19 @@ import type { NextConfig } from "next";
 //   - blob: on worker-src + img-src for streaming + uploaded preview blobs
 // Verify with: `curl -I https://workers.floom.dev/` and a browser console
 // CSP-violation check after deploy.
+//
+// R17 FIX 2 (LOW) — `script-src 'unsafe-inline'` is a known defense-in-depth
+// weakness. It is DELIBERATELY LEFT for now, not an oversight:
+// Next.js 16 app-router emits inline bootstrap/flight scripts that only get a
+// CSP nonce when the header is produced per-request from `middleware.ts`. This
+// app ships no middleware and relies on static/ISR rendering; adding a nonce
+// middleware forces every route to dynamic rendering and risks hydration
+// regressions — too much risk for a LOW finding on a single-tenant OS.
+// TODO(cloud-ga): before the multi-tenant Cloud serves untrusted-tenant
+// content, replace 'unsafe-inline' on script-src with a per-request nonce
+// (middleware.ts + nonce threaded to next/script + headers), or 'strict-dynamic'
+// with hashes, and verify hydration + streaming still work. style-src keeps
+// 'unsafe-inline' (style injection is far lower risk; Next/Tailwind need it).
 const CSP_DIRECTIVES = [
   "default-src 'self'",
   "base-uri 'self'",
