@@ -1,11 +1,12 @@
 {
   "name": "@floomhq/workeros",
-  "version": "4.0.0",
-  "description": "MCP server for managing Workeros workers and runs.",
+  "version": "4.1.0",
+  "description": "CLI + MCP server for Workeros OSS and Workeros Cloud.",
   "type": "module",
   "bin": {
     "workeros-mcp": "./dist/server.js",
-    "workeros": "./dist/cli.js"
+    "workeros": "./dist/cli.js",
+    "floom": "./dist/cli.js"
   },
   "files": [
     "bin/",
