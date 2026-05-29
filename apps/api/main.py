@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional, TypedDict
+from typing import Annotated, Any, Dict, Iterable, List, Optional, TypedDict
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -1327,6 +1327,74 @@ def _make_run_summary(row: Any) -> RunSummary:
     )
 
 
+def _resolve_worker_status(
+    worker: Dict[str, Any],
+    *,
+    config: Optional["WorkerConfig"],
+    available_secret_names: Iterable[str],
+    last_run_status: Optional[RunStatus],
+    has_run: bool,
+) -> WorkerStatus:
+    """Single source of truth for an operator-facing worker status.
+
+    Used by BOTH the LIST path (``list_workers``) and the DETAIL path
+    (``_build_worker_detail``) so the two surfaces can never disagree for the
+    same worker. The full honesty downgrade ladder, in order:
+
+    1. MISSING_SECRET — a required secret is not configured.
+    2. NEEDS_ATTENTION — the most recent run FAILED.
+    3. NEEDS_ATTENTION — the worker is durably disabled (``enabled is False``,
+       e.g. smoke-gated on creation). A disabled worker is broken, not healthy.
+    4. READY — the worker has never run, so "healthy" (which implies a
+       verified-working worker) has not been EARNED. READY renders identically
+       to HEALTHY in the quiet UI; this only keeps the API claim honest.
+
+    Archived workers are intentionally inactive and keep their stored status
+    (they surface via the archived badge, not needs_attention).
+    Already-broken raw states (e.g. "error") are preserved as-is — we only
+    ever downgrade FROM healthy, never fabricate health.
+    """
+    raw = worker.get("status") or WorkerStatus.HEALTHY.value
+    try:
+        status = WorkerStatus(raw)
+    except ValueError:
+        status = WorkerStatus.ERROR
+    is_archived = bool(worker.get("archived", False))
+    # `enabled` defaults to True: stock/filesystem workers have no recipe row
+    # and are not durably disable-able, so absence means "enabled".
+    enabled = bool(worker.get("enabled", True))
+    secret_set = set(available_secret_names)
+
+    if config and config.secrets:
+        missing = [s for s in config.secrets if s not in secret_set]
+        if missing:
+            status = WorkerStatus.MISSING_SECRET
+
+    if (
+        not is_archived
+        and status == WorkerStatus.HEALTHY
+        and last_run_status == RunStatus.FAILED
+    ):
+        status = WorkerStatus.NEEDS_ATTENTION
+
+    if (
+        not is_archived
+        and status == WorkerStatus.HEALTHY
+        and not enabled
+    ):
+        status = WorkerStatus.NEEDS_ATTENTION
+
+    if (
+        status == WorkerStatus.HEALTHY
+        and not has_run
+        and not is_archived
+        and enabled
+    ):
+        status = WorkerStatus.READY
+
+    return status
+
+
 def _get_stats_batch(
     worker_ids: List[str],
     *,
@@ -1799,34 +1867,6 @@ def _persist_discovered_workers(
                 user_id,
             )
             raise
-
-
-def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
-    d = row_to_dict(row)
-    config = get_worker_config_for_run(d["id"])
-    manifest = json.loads(d.get("manifest_json") or "{}")
-    manifest_dict = manifest if isinstance(manifest, dict) else {}
-    return {
-        "id": d["id"],
-        "name": d["name"],
-        "description": manifest_dict.get("description"),
-        "long_description": manifest_dict.get("long_description"),
-        "use_cases": manifest_dict.get("use_cases"),
-        "example_input": manifest_dict.get("example_input"),
-        "example_output": manifest_dict.get("example_output"),
-        "how_it_works": manifest_dict.get("how_it_works"),
-        "is_example": manifest_dict.get("is_example"),
-        "archived": bool(manifest_dict.get("archived", False)),
-        "archive_reason": manifest_dict.get("archive_reason"),
-        "tags": manifest_dict.get("tags") or [],
-        "folder": manifest_dict.get("folder"),
-        "status": "healthy",
-        "trigger_type": d.get("trigger_type") or (config.trigger.type if config else "manual"),
-        "runner": config.runtime.runner if config and config.runtime else "local",
-        "config": config.model_dump(mode="json") if config else {},
-        "manifest": manifest_dict,
-        "triggers_json": d.get("triggers_json"),
-    }
 
 
 def _list_db_workers(
@@ -3201,22 +3241,18 @@ def list_workers(
         last_run_row = _get_last_run_for_worker(w["id"], user_id=auth.user_id, repos=repos)
         last_run = _make_run_summary(last_run_row) if last_run_row else None
 
-        # Check secrets
+        # Resolve status via the SHARED resolver so LIST and DETAIL agree
+        # exactly for the same worker (full honesty ladder: missing-secret /
+        # failed-run / disabled / never-run, see _resolve_worker_status).
         config = get_worker_config_for_run(w["id"])
-        status = WorkerStatus(w["status"])
-        if config and config.secrets:
-            missing = [s for s in config.secrets if s not in available_secret_names]
-            if missing:
-                status = WorkerStatus.MISSING_SECRET
-        # Archived workers never show needs_attention — they're intentionally inactive.
         is_archived = w.get("archived", False)
-        if (
-            not is_archived
-            and status == WorkerStatus.HEALTHY
-            and last_run
-            and last_run.status == RunStatus.FAILED
-        ):
-            status = WorkerStatus.NEEDS_ATTENTION
+        status = _resolve_worker_status(
+            w,
+            config=config,
+            available_secret_names=available_secret_names,
+            last_run_status=last_run.status if last_run else None,
+            has_run=last_run is not None,
+        )
 
         triggers = _build_triggers_list(w)
         triggers_spec = _build_triggers_spec(w)
@@ -3300,46 +3336,22 @@ def _build_worker_detail(
             runtime={"type": "python", "entrypoint": "run.py"},
         )
 
-    status = WorkerStatus(worker["status"])
-    if config and config.secrets:
-        available_secret_names = repos.secrets.list_names(user_id=user_id)
-        missing = [s for s in config.secrets if s not in available_secret_names]
-        if missing:
-            status = WorkerStatus.MISSING_SECRET
-    if (
-        status == WorkerStatus.HEALTHY
-        and recent_runs
-        and recent_runs[0].status == RunStatus.FAILED
-    ):
-        status = WorkerStatus.NEEDS_ATTENTION
-    # B-P1-2 (2026-05-29): a smoke-disabled worker (enabled=False) is broken and
-    # must NOT report `healthy`. The detail row's hardcoded "healthy" hid it; key
-    # off the DB `enabled` flag so the operator sees it needs attention. (Archived
-    # workers are intentionally inactive and keep their own surfacing.)
-    try:
-        _recipe = repos.workers.get_recipe(worker_id=worker_id, user_id=user_id)
-    except Exception:
-        _recipe = None
-    if (
-        isinstance(_recipe, dict)
-        and _recipe.get("enabled") is False
-        and not worker.get("archived")
-        and status == WorkerStatus.HEALTHY
-    ):
-        status = WorkerStatus.NEEDS_ATTENTION
-
-    # P2 (2026-05-29): a worker that has never run hasn't earned "healthy".
-    # Report neutral READY (rendered identically to healthy in the quiet UI) so
-    # the API never claims health for an unverified worker. Only downgrade from
-    # HEALTHY — a missing-secret / needs-attention worker keeps its real state.
-    worker_enabled = not (isinstance(_recipe, dict) and _recipe.get("enabled") is False)
-    if (
-        status == WorkerStatus.HEALTHY
-        and not recent_runs
-        and not worker.get("archived")
-        and worker_enabled
-    ):
-        status = WorkerStatus.READY
+    # Resolve status via the SHARED resolver so DETAIL and LIST agree exactly
+    # for the same worker (full honesty ladder: missing-secret / failed-run /
+    # disabled / never-run, see _resolve_worker_status). The worker dict already
+    # carries `enabled` (same w.enabled column get_recipe reads), so no separate
+    # recipe fetch is needed.
+    available_secret_names = repos.secrets.list_names(user_id=user_id)
+    status = _resolve_worker_status(
+        worker,
+        config=config,
+        available_secret_names=available_secret_names,
+        last_run_status=recent_runs[0].status if recent_runs else None,
+        has_run=bool(recent_runs),
+    )
+    # `enabled` mirrors the same w.enabled column the resolver reads; stock /
+    # filesystem workers carry no enabled flag and are treated as enabled.
+    worker_enabled = bool(worker.get("enabled", True))
 
     manifest_yaml: Optional[str] = None
     run_py: Optional[str] = None
@@ -3472,11 +3484,16 @@ def get_worker_sample_input(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Any:
-    """Return the sample input JSON for a worker if present.
+    """Return the sample input JSON for a worker.
 
-    Sample inputs live at docs/workers/inputs/<worker_id>.json relative to the
-    repo root (one level above the workers/ directory).
-    Returns 404 if no sample input exists for the worker.
+    Resolution order (consistent for ALL workers, not just stock ones):
+      1. A static docs/workers/inputs/<worker_id>.json file, if present (stock
+         workers ship curated samples there).
+      2. The worker's own ``example_input`` from its manifest (every generated /
+         user worker has this — it's what the UI prefills with).
+    Returns 404 only when the worker has no sample input from EITHER source, so
+    an API consumer gets the same answer the UI shows instead of a spurious 404
+    on generated workers (the manifest example_input was always available).
     """
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -3485,13 +3502,21 @@ def get_worker_sample_input(
     safe_id = worker_id.replace("..", "").replace("/", "").replace("\\", "")
     # Walk from WORKERS_DIR up one level to the repo root, then into docs/workers/inputs/
     sample_path = WORKERS_DIR.parent / "docs" / "workers" / "inputs" / f"{safe_id}.json"
-    if not sample_path.is_file():
-        raise HTTPException(status_code=404, detail=f"No sample input found for worker {worker_id!r}")
-    try:
-        data = json.loads(sample_path.read_text())
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to parse sample input: {exc}") from exc
-    return data
+    if sample_path.is_file():
+        try:
+            return json.loads(sample_path.read_text())
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to parse sample input: {exc}") from exc
+
+    # Fall back to the worker's manifest example_input (consistent with the UI,
+    # which prefers example_input and only used this endpoint as a fallback).
+    example_input = (worker.get("manifest") or {}).get("example_input")
+    if example_input is None:
+        example_input = worker.get("example_input")
+    if example_input is not None:
+        return example_input
+
+    raise HTTPException(status_code=404, detail=f"No sample input found for worker {worker_id!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -4826,15 +4851,22 @@ async def draft_and_create_worker(
     from models import parse_worker_manifest
 
     async def _smoke_gate_and_respond(
-        created_worker_id: str, sample_input: Any
+        created_worker_id: str,
+        sample_input: Any,
+        *,
+        allow_code_repair: bool,
     ) -> DraftAndCreateResponse:
         # Wedge safety net (FIX 4, 2026-05-29): unify the raw create path with the
-        # UI worker-author path. Prove the generated SCRIPT-mode worker actually
-        # RUNS (bounded smoke + repair), validate it produces real output, and
-        # gate it: a smoke-failed worker is DISABLED (not deleted — stays
-        # editable) so it is never presented as a clean, ready worker. Runs on a
-        # worker thread so the E2B run does not block the event loop. Never fails
-        # the create.
+        # UI worker-author path. Prove the SCRIPT-mode worker actually RUNS,
+        # validate it produces real output, and gate it: a smoke-failed worker is
+        # DISABLED (not deleted — stays editable) so it is never presented as a
+        # clean, ready worker. Runs on a worker thread so the E2B run does not
+        # block the event loop. Never fails the create.
+        #
+        # allow_code_repair (least-surprise, 2026-05-29): TRUE only for the
+        # LLM-generated draft (Path B), where bounded auto-repair of run.py is the
+        # wedge. FALSE for USER-SUPPLIED uploads (Path A) — those are smoked and
+        # gated but the user's run.py is NEVER rewritten.
         smoke_result: Optional[Dict[str, Any]] = None
         try:
             smoke_bundle: Dict[str, Any] = {}
@@ -4851,6 +4883,7 @@ async def draft_and_create_worker(
                 user_id=auth.user_id,
                 repos=repos,
                 log_fn=_draft_smoke_log,
+                allow_code_repair=allow_code_repair,
             )
         except Exception:
             logger.exception("draft-and-create smoke+gate failed for %s", created_worker_id)
@@ -4885,7 +4918,11 @@ async def draft_and_create_worker(
             sample_input = getattr(cfg, "example_input", None)
         except Exception:
             sample_input = None
-        return await _smoke_gate_and_respond(worker_id, sample_input)
+        # Path A is USER-SUPPLIED code: smoke + gate it, but never rewrite the
+        # user's run.py (least-surprise).
+        return await _smoke_gate_and_respond(
+            worker_id, sample_input, allow_code_repair=False
+        )
 
     # ----------------------------------------------------------------
     # Path B: LLM draft from prompt
@@ -5058,7 +5095,10 @@ async def draft_and_create_worker(
         sample_input = getattr(_persisted_cfg, "example_input", None)
     except Exception:
         sample_input = getattr(_config2, "example_input", None)
-    return await _smoke_gate_and_respond(worker_id, sample_input)
+    # Path B is LLM-GENERATED code: bounded auto-repair of run.py is the wedge.
+    return await _smoke_gate_and_respond(
+        worker_id, sample_input, allow_code_repair=True
+    )
 
 
 def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tuple[str, WorkerConfig]:
