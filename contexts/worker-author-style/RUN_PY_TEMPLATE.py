@@ -9,8 +9,10 @@
 #      - For a SCALAR input (type: string | textarea | number | boolean |
 #        select | url) the value in inputs.json is the LITERAL value inline.
 #        Use it directly. NEVER open() a scalar.
-#      - For a FILE input (kind: "file") the value is a RELATIVE PATH like
-#        "inputs/<input_name>". open() THAT path to read the uploaded bytes.
+#      - For a FILE input (kind: "file") the value is ALREADY the full RELATIVE
+#        PATH like "inputs/<input_name>". open() that value DIRECTLY. Do NOT
+#        prepend "inputs/" again and do NOT os.path.join("inputs", value) — the
+#        value is the path, not a bare filename (that double-prepend is a top crash).
 #   2. Secrets are available in os.environ (the harness sets them) and ALSO in a
 #      `secrets.json` file. Read os.environ first, fall back to secrets.json.
 #      Connections (Composio) are in `connections.json` when present.
@@ -84,8 +86,9 @@ def main():
     # 2a) SCALAR input -> use the literal value directly (do NOT open it).
     #     some_text = (inputs.get("text") or "").strip()
     #
-    # 2b) FILE input  -> the value is a relative path under inputs/; open it.
-    #     csv_path = inputs.get("csv_file")
+    # 2b) FILE input -> the value IS the relative path (e.g. "inputs/csv_file").
+    #     open() it directly; never os.path.join("inputs", value).
+    #     csv_path = inputs["csv_file"]            # already "inputs/csv_file"
     #     with open(csv_path, "r", encoding="utf-8", errors="replace") as fh:
     #         raw = fh.read()
     #

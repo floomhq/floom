@@ -110,7 +110,9 @@ copy-pasteable template is `contexts/worker-author-style/RUN_PY_TEMPLATE.py`
 
 - Read inputs from `inputs.json`: `inputs = json.load(open("inputs.json"))`.
 - **Scalar inputs** are the LITERAL value inline — use them directly, never `open()` them.
-- **File inputs** are a RELATIVE PATH like `inputs/<name>` — `open()` that path to read the file.
+- **File inputs**: the value IS already the relative path (e.g. `inputs/<name>`).
+  `open(inputs["x"])` it directly. NEVER `os.path.join("inputs", inputs["x"])` —
+  double-prepending `inputs/` is a top crash.
 - **Secrets**: read from `os.environ` with a `secrets.json` fallback. Do NOT
   `import dotenv` / `from dotenv import ...` — it is NOT preinstalled and will
   crash with `ModuleNotFoundError`. Use the stdlib-only `_load_secrets()` helper
