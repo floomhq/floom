@@ -1825,6 +1825,47 @@ def _get_visible_run(
     return row
 
 
+def _list_visible_runs(
+    *,
+    user_id: str,
+    repos: Repositories,
+    worker_id: str | None = None,
+    statuses: list[str] | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[Any], int]:
+    batch_size = max(limit, 100)
+    raw_offset = 0
+    raw_total_count: int | None = None
+    visible_total = 0
+    visible_rows: list[Any] = []
+
+    while raw_total_count is None or raw_offset < raw_total_count:
+        rows, raw_total_count = repos.runs.list(
+            user_id=user_id,
+            worker_id=worker_id,
+            statuses=statuses,
+            since=since,
+            until=until,
+            limit=batch_size,
+            offset=raw_offset,
+        )
+        if not rows:
+            break
+        raw_offset += len(rows)
+        for row in rows:
+            if not _run_visible_to_api(row, user_id=user_id, repos=repos):
+                continue
+            visible_total += 1
+            if visible_total <= offset:
+                continue
+            if len(visible_rows) < limit:
+                visible_rows.append(row)
+    return visible_rows, visible_total
+
+
 # ---------------------------------------------------------------------------
 # Workers
 # ---------------------------------------------------------------------------
@@ -5128,8 +5169,9 @@ def list_runs(
         response.headers["X-Total-Count"] = "0"
         return []
 
-    rows, _total_count = repos.runs.list(
+    visible_rows, visible_total = _list_visible_runs(
         user_id=auth.user_id,
+        repos=repos,
         worker_id=worker_id,
         statuses=statuses,
         since=since_dt.isoformat() if since_dt else None,
@@ -5137,12 +5179,7 @@ def list_runs(
         limit=limit,
         offset=offset,
     )
-    visible_rows = [
-        row
-        for row in rows
-        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
-    ]
-    response.headers["X-Total-Count"] = str(len(visible_rows))
+    response.headers["X-Total-Count"] = str(visible_total)
     return [_make_run_summary(r) for r in visible_rows]
 
 

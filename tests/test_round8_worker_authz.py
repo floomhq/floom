@@ -548,6 +548,39 @@ def test_hidden_internal_worker_runs_stay_inaccessible(monkeypatch, tmp_path):
         assert response.status_code == 404, f"{name}: {response.status_code} {response.text}"
 
 
+def test_runs_list_pages_visible_rows_when_newer_hidden_runs_exist(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief", "slack-listener"))
+    client = TestClient(main.app)
+    repos = main.get_repositories()
+    main._reload_workers_for_user("user-a")
+
+    visible_run_id = main.create_run(
+        "research_brief",
+        {},
+        trigger_source="audit",
+        user_id="user-a",
+        repos=repos,
+    )
+    hidden_run_ids = [
+        main.create_run(
+            "slack-listener",
+            {},
+            trigger_source="audit",
+            user_id="user-a",
+            repos=repos,
+        )
+        for _ in range(55)
+    ]
+
+    listed = client.get("/runs?limit=10", headers=_headers("user-a"))
+
+    assert listed.status_code == 200, listed.text
+    run_ids = {item["id"] for item in listed.json()}
+    assert visible_run_id in run_ids
+    assert not run_ids.intersection(hidden_run_ids)
+    assert listed.headers["X-Total-Count"] == "1"
+
+
 def test_public_run_redacts_secret_names_across_read_surfaces(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief",))
     client = TestClient(main.app)
