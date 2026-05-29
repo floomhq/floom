@@ -330,7 +330,9 @@ When `approvals.required: true`, runs use a **two-phase respawn model**:
 #### Run 2 inputs
 
 ```python
-inputs = json.loads(os.environ.get("WORKEROS_INPUTS", "{}"))
+# Workeros passes inputs as an inputs.json FILE in the working dir — NOT an env var.
+with open("inputs.json") as f:
+    inputs = json.load(f)
 decision = inputs.get("decision")        # "approved"
 approved_output = inputs.get("approved_output")  # the (possibly edited) proposed output
 ```
