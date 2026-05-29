@@ -284,3 +284,62 @@ Grep of operator-default surfaces (logs[] + error; NOT the engineer-only `error_
 `median` smoke-FAILED because its run.py hardcoded `open('inputs/numbers.txt')` instead of reading the relative path from `inputs.json` (real path `inputs/numbers`, no `.txt`). This is a run.py CODE mistake — a DIFFERENT class from the declaration mistakes fixed here — and the bounded max-2 repair did not self-heal it this run (LLM non-determinism). The durable gate caught it: `enabled=false` + 409, never green. Generator run.py code quality (hardcoded input paths) is the remaining watch-item; the wedge gate (durable disable + 409 + 0-silently-broken) is the backstop and it holds.
 
 Tests: +14 across `test_batchj_hygiene` (38 total) and `test_batchj_gate` (10 total): stderr-echo collapse + SSE error redaction + scalar-output validation/repair-routing + worker.yml field normalization. Pre-existing 2 `test_db_factory.py` failures (missing `approvals` arg) untouched.
+
+---
+
+## Batch M — the two trust/honesty P2s capping G5 scorer B at 93 (PR #298, deployed `9f30c198`)
+
+Scorer B scored 93 with 0 P0/P1, capped by exactly two trust/honesty P2s. Scorer A had already passed at 95.
+
+### P2-A — /workers LIST reported broken workers as "healthy" (the main cap)
+The DETAIL path (`_build_worker_detail`) applied the full status-downgrade ladder; the LIST path (`list_workers`) applied only a partial version, and the dead helper `_db_worker_from_row` carried a hardcoded `status:healthy`. A gated / never-run / disabled worker could read **healthy** in the list API — a hand-held partner scanning /workers would not see which workers are broken.
+
+Fix (DRY): extracted ONE shared `_resolve_worker_status(worker, *, config, available_secret_names, last_run_status, has_run) -> WorkerStatus` containing the full ladder (missing_secret → failed-run→needs_attention → disabled→needs_attention → never-run→ready → earned-healthy; archived keeps its stored state). Called from BOTH `list_workers` AND `_build_worker_detail`, so the two surfaces are byte-for-byte identical for the same worker. Removed the dead `_db_worker_from_row` (hardcoded healthy). `enabled` is read off the worker dict (same `w.enabled` column `get_recipe` returned), letting the detail path drop its redundant per-request recipe fetch.
+
+Live proof (deployed `9f30c198`, backend 8011):
+```
+id                            list_status      detail_status    MATCH
+ai-news-summary               ready            ready            ok
+opendraft                     needs_attention  needs_attention  ok
+github-pull-request-summary   missing_secret   missing_secret   ok
+word-count                    healthy          healthy          ok
+divide-numbers                needs_attention  needs_attention  ok
+csv_enricher                  healthy          healthy          ok
+```
+LIST of 47 workers spans ready / needs_attention / missing_secret / healthy (no longer all-"healthy"). No hardcoded "healthy" remains.
+
+### P2-C — draft-and-create silently rewrote USER-supplied run.py
+The smoke+repair loop (the wedge for LLM-generated workers) also ran on user-UPLOADED files — it silently rewrote the scorer's `x/0` into `x/1` and returned success, changing user-code semantics without consent.
+
+Fix: threaded `allow_code_repair` through `smoke_and_gate_generated_worker` → `_smoke_and_repair_generated_worker`. Gated at the early-return before the repair branch:
+- User-supplied (draft-and-create Path A): `allow_code_repair=False`. Worker is still SMOKED and GATED (disabled + calm reason on failure), but run.py is NEVER rewritten and `_repair_run_py`/`persist_worker_run_py` are never reached.
+- LLM-generated (worker-author run path + draft-from-prompt Path B): `allow_code_repair=True` (default). Bounded auto-repair preserved — the wedge.
+
+Live proof (deployed `9f30c198`):
+```
+uploaded p2c-user-divzero-test run.py (contains 'x / 0')
+  uploaded sha256: 1b06ee5f...4af208
+  -> smoke_status: failed (calm reason), enabled: false
+  -> STORED run.py sha256: 1b06ee5f...4af208  (BYTE-IDENTICAL, still '/ 0')
+  -> POST /workers/<id>/runs -> HTTP 409 "This worker is paused. Turn it on to run it again."
+  -> LIST status == DETAIL status == needs_attention
+no-regression (LLM path):
+  prompt "top-5 word frequency" -> text-word-frequency, smoke=passed (ran green)
+  prompt "C->F/K converter"     -> celsius-temperature-converter, smoke=failed
+                                   -> enabled=false, 409, list==detail needs_attention
+                                   (auto-repair ran, gate held, 0 silently-broken)
+```
+
+### P2-B — orphan sample-input endpoint
+`GET /workers/{id}/sample-input` 404'd for non-stock workers (only read the static `docs/workers/inputs/<id>.json`). Now resolution order: static file → manifest `example_input` → 404 only when neither exists. Consistent for API consumers and the UI (which preferred `example_input` and used this endpoint as a fallback).
+
+Live proof: sample-input → HTTP 200 for csv_enricher / opendraft / research_brief, matching each worker's detail `example_input`.
+
+### P2-D — ambiguous overview hero copy
+The hero read "{heroCount} outcomes this week" beside a "Runs completed" metric tile for the same 7-day completed-run value, and `heroCount` could fall back to a 24h count — two labels for one (sometimes mismatched) number. Now one honest line: "N runs completed in the last 7 days", matching the tile; removed the now-unused `heroCount`.
+
+### Tests
++4 in `tests/test_wedge_smoke_gating.py`: shared resolver returns list==detail for ready/disabled/failed/healthy; user-supplied run.py is NOT repaired (byte-identical, `_repair_run_py` never called); generated worker STILL self-repairs (wedge no-regression). `test_wedge_smoke_gating` 10/10 and `test_batchj_gate` 10/10 pass isolated (fresh DB). The cross-file isolation failures in `test_pr_h_worker_cards` / `test_round8_worker_authz` / `test_workers_draft_from_prompt` reproduce identically on the base SHA `e0aaa41` — pre-existing, not introduced here.
+
+### Read on scorer B's two caps
+Both caps are closed with deployed, live evidence: P2-A (list==detail status, no fabricated healthy) and P2-C (user run.py byte-identical + gated, wedge auto-repair intact). The plus P2-B/P2-D polish removes the remaining ambiguities scorer B noted. This should lift B to ≥95 (both-agree bar), with the only residual being the unchanged generator first-pass run.py quality watch-item — backstopped by the durable disable + 409 + 0-silently-broken gate.
