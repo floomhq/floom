@@ -4,6 +4,24 @@ Status legend: OPEN / FIXING / FIXED (merged, unverified) / VERIFIED (confirmed 
 
 ---
 
+## 2026-05-29 /connections data fidelity (lane/connections-data-fidelity, PR #233)
+
+#194 was marked done but the LIVE page still showed every original problem because
+the **data** was placeholder/redacted, not the UI. Root-caused against live
+`workers-api.floom.dev` + the real Composio v3 `/connected_accounts/{id}` shape,
+fixed, deployed (API SHA 861d38b + sweep), and VERIFIED via live screenshot
+`/.screenshots/connections-after-fidelity-20260529.png`.
+
+| # | Issue | Root cause | Status |
+|---|---|---|---|
+| E1 (account name) | Every row showed `"Connected account"` placeholder | `_redact_connection_account_label` (added in #231 security batch) masked the OWNER's own email/login. Single-tenant → owner must see own identity. `_public_connection_item` now shows the real label via `_normalize_owner_account_label`; redaction helper retained for a future cross-user path. | **VERIFIED** — GitHub `federicodeponte`, Gmail `depontefede@gmail.com`, LinkedIn `f.deponte@outlook.com` live |
+| E2 (identity captured) | `account-info` returned `email:null` | Endpoint hardcoded `"email": None`. Now returns the owner's real connected email (still no `auth_config_id`/`user_id` leak). GitHub login no longer suffixed `@github`. | **VERIFIED** live |
+| E3 (fake scopes) | `"default scopes"` placeholder; `scopes=[]` everywhere | Composio v3 returns granted scopes as a delimited `scope` STRING under `data`/`params`/`state.val` (comma for github, space for google), NOT a `scopes` list. `_fetch_composio_account_info` now parses it; sweep caches `scopes_json`. UI shows real count (tooltip lists them) + honest `—` when unloaded — no fake string. | **VERIFIED** — GitHub 7, Gmail 12, LinkedIn 4 scopes live |
+| E4 (Reconnect on active) | GitHub (active) wrongly showed Reconnect; Gmail (active) did not | GitHub reports `last_check_status:"active"` (not `"valid"`), so the old `lastCheckStatus !== "valid"` condition fired. Now Reconnect renders only when broken (expired/failed) and never when `status==="active"`. | **VERIFIED** — only the 4 Expired rows show Reconnect; the 3 active rows show only the `…` menu |
+| E5 (table off) | Columns/cells misaligned | Actions cell right-aligned (`justify-end`) to match the "Actions" header. | **VERIFIED** live |
+
+---
+
 ## 2026-05-29 backend correctness + security batch (PR #231, merged 8aabe35)
 
 | # | Issue | Fix / evidence | Sev | Status |
