@@ -724,6 +724,34 @@ def _finish_part_from_run_row(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _log_replay_parts(repos: "Repositories", user_id: str, run_id: str) -> List[Dict[str, Any]]:
+    """Build replay parts from persisted log rows for a run.
+
+    When a client opens the stream for a run whose in-memory part buffer is
+    gone (terminal run after the buffer TTL'd out, or a fresh server process),
+    the live tail is empty. Without this, the stream emitted only the finish
+    part and the historical logs were lost (#188). Replaying the persisted log
+    rows lets the UI reconstruct the transcript.
+    """
+    parts: List[Dict[str, Any]] = []
+    try:
+        rows = repos.runs.list_logs(user_id=user_id, run_id=run_id)
+    except Exception:
+        logger.exception("Failed to load logs for SSE replay (run %s)", run_id)
+        return parts
+    for r in rows:
+        row = row_to_dict(r)
+        parts.append(
+            {
+                "type": "log",
+                "level": row.get("level"),
+                "message": _redact_public_log_message(row.get("message") or ""),
+                "timestamp": row.get("timestamp"),
+            }
+        )
+    return parts
+
+
 # ---------------------------------------------------------------------------
 # Health checks
 # ---------------------------------------------------------------------------
@@ -5142,7 +5170,17 @@ async def stream_run_parts(
         if snapshot is None:
             final_part = _finish_part_from_run_row(row)
             if final_part is not None:
-                yield _format_run_part_sse(0, final_part)
+                # #188: the in-memory part buffer is gone (terminal run past its
+                # TTL, or a fresh server process). Replay persisted log rows so
+                # the client reconstructs the transcript instead of receiving a
+                # bare finish event.
+                event_id = 0
+                for log_part in _log_replay_parts(repos, auth.user_id, run_id):
+                    if event_id > last_seen:
+                        yield _format_run_part_sse(event_id, log_part)
+                    event_id += 1
+                if event_id > last_seen:
+                    yield _format_run_part_sse(event_id, final_part)
                 return
             snapshot = {"parts": [], "finished": False}
 
