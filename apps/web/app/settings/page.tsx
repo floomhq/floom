@@ -2,12 +2,17 @@
 
 export const dynamic = "force-dynamic";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
-import type { PlatformConfig, SystemInfo, WorkspaceAgentInfo } from "@/lib/types";
+import type {
+  PlatformConfig,
+  SystemInfo,
+  WorkspaceAgentInfo,
+  WorkspaceImportResult,
+} from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,6 +68,12 @@ function SettingsContent() {
   const [clearing, setClearing] = useState(false);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
+
+  // Duplicate workspace: export this workspace as a .zip template / import one.
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<WorkspaceImportResult | null>(null);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -143,6 +154,44 @@ function SettingsContent() {
       toast.error(e instanceof Error ? e.message : "Failed to clear runs");
     } finally {
       setClearing(false);
+    }
+  }
+
+  async function handleExportWorkspace() {
+    setExporting(true);
+    try {
+      const { blob, filename } = await api.workspace.exportTemplate();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Workspace template downloaded");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to export workspace");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleImportWorkspace(file: File) {
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const result = await api.workspace.importTemplate(file);
+      setImportResult(result);
+      const n = result.workers_imported.length + result.contexts_imported.length;
+      toast.success(
+        n > 0 ? `Imported ${n} item${n === 1 ? "" : "s"}` : "Nothing new to import"
+      );
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to import workspace");
+    } finally {
+      setImporting(false);
+      if (importFileRef.current) importFileRef.current.value = "";
     }
   }
 
@@ -319,6 +368,118 @@ function SettingsContent() {
               </section>
             </>
           ) : null}
+
+          {/* Duplicate workspace (Notion-template style). Export bundles your
+              workers + knowledge packs + workspace agent config into one .zip;
+              import unpacks one into this workspace. Secrets/connections are
+              NEVER bundled — you reconnect those after import. */}
+          <section className="space-y-4 border-t border-[var(--border-default)] pt-8">
+            <div className="space-y-1">
+              <h2 className="text-sm font-medium text-muted-foreground">Duplicate workspace</h2>
+              <p className="text-sm text-muted-foreground">
+                Move or share your whole setup as a template.
+              </p>
+            </div>
+
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Export this workspace as a template</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Bundles your workers and knowledge packs into one .zip. Secrets and
+                  connections are not included — you&apos;ll reconnect those.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={handleExportWorkspace}
+                disabled={exporting}
+              >
+                {exporting ? "Exporting..." : "Export template"}
+              </Button>
+            </div>
+
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Import a workspace template</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Adds the template&apos;s workers and knowledge packs to this workspace.
+                  Existing items are kept — nothing is overwritten.
+                </p>
+              </div>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".zip,application/zip"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleImportWorkspace(file);
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => importFileRef.current?.click()}
+                disabled={importing}
+              >
+                {importing ? "Importing..." : "Import template"}
+              </Button>
+            </div>
+
+            {importResult ? (
+              <Alert>
+                <CheckCircle2 className="size-4" />
+                <AlertTitle>
+                  Imported {importResult.workers_imported.length}{" "}
+                  {importResult.workers_imported.length === 1 ? "worker" : "workers"} and{" "}
+                  {importResult.contexts_imported.length}{" "}
+                  {importResult.contexts_imported.length === 1 ? "knowledge pack" : "knowledge packs"}
+                </AlertTitle>
+                <AlertDescription>
+                  <div className="mt-2 space-y-2 text-xs">
+                    {importResult.workers_imported.length > 0 && (
+                      <p>
+                        Workers:{" "}
+                        <span className="text-foreground">
+                          {importResult.workers_imported.join(", ")}
+                        </span>
+                      </p>
+                    )}
+                    {importResult.contexts_imported.length > 0 && (
+                      <p>
+                        Knowledge packs:{" "}
+                        <span className="text-foreground">
+                          {importResult.contexts_imported.join(", ")}
+                        </span>
+                      </p>
+                    )}
+                    {importResult.skipped.length > 0 && (
+                      <p className="text-muted-foreground">
+                        Skipped {importResult.skipped.length} item
+                        {importResult.skipped.length === 1 ? "" : "s"} that already existed.
+                      </p>
+                    )}
+                    {(importResult.required_secrets.length > 0 ||
+                      importResult.required_connections.length > 0) && (
+                      <p className="text-muted-foreground">
+                        Reconnect these so the imported workers can run:{" "}
+                        <span className="text-foreground">
+                          {[
+                            ...importResult.required_secrets,
+                            ...importResult.required_connections,
+                          ].join(", ")}
+                        </span>
+                        .
+                      </p>
+                    )}
+                  </div>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </section>
         </TabsContent>
 
         <TabsContent value="notifications" className="space-y-4">

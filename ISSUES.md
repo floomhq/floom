@@ -1647,3 +1647,32 @@ Branch `fix/composio-execute-auth-and-csp-2026-05-29`. Detail: `docs/audits/roun
 **Decision:** Nonce CSP in Next 16 app-router needs middleware + forced dynamic rendering, risking hydration regressions — not worth breaking a working app for a LOW finding. Left `'unsafe-inline'` with rationale + `TODO(cloud-ga)` to nonce before the multi-tenant Cloud serves untrusted-tenant content. Live site verified loading.
 
 **Status:** DOCUMENTED-AND-LEFT (residual acknowledged).
+
+### #FEAT-WSDUP Workspace duplicate (Notion-template style) — SHIPPED + TESTED (2026-05-29)
+
+**What:** Duplicate/remix a WHOLE WORKSPACE as a downloadable `.zip` template.
+`GET /workspace/export` bundles every non-example/non-system operator worker +
+operator knowledge pack + `workspace.md` + a `workspace.json` manifest;
+`POST /workspace/import` unpacks one into the caller's workspace.
+
+**Security:** export carries NO secret VALUES — only required-secret/connection
+NAMES (in the manifest). Defense-in-depth drops any secret-bearing file
+(`.env`, `*.pem`, `credentials*`, …) from worker dirs AND knowledge packs.
+Verified: grep of the whole zip for the secret value / `FLOOM_SECRET` → 0 hits.
+
+**Import safety:** zip member paths sanitized (traversal + symlink → 400);
+workers registered via `_register_worker_from_files(dedupe_id=True)` (id-deduped,
+never clobbers); existing packs skipped (never clobbered). Reuses from-bundle
+rate limit + a 50 MiB body cap.
+
+**Where:** `apps/api/main.py` (`/workspace/export`, `/workspace/import`,
+`_iter_worker_dir_files`, `_is_secret_bearing_export_path`,
+`_is_exportable_operator_worker`). UI: `apps/web/app/settings/page.tsx`
+(Workspace agent tab → "Duplicate workspace"). `apps/web/lib/api.ts` +
+`lib/types.ts`.
+
+**Proof:** `tests/test_workspace_duplicate.py` 5/5; isolated export→import
+round-trip verified (worker + pack appear, re-import dedups, traversal rejected).
+Doc: `docs/audits/workspace-duplicate-2026-05-29.md`.
+
+**Status:** SHIPPED. (live edge proof appended after deploy)

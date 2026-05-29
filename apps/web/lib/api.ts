@@ -265,6 +265,37 @@ export const api = {
         method: "POST",
       }),
   },
+  workspace: {
+    // Download the whole workspace as a .zip template. Returns the Blob so the
+    // caller can trigger a browser download. The proxy streams the binary body
+    // and preserves content-disposition.
+    exportTemplate: async (): Promise<{ blob: Blob; filename: string }> => {
+      const res = await fetchRaw("/workspace/export");
+      const blob = await res.blob();
+      const cd = res.headers.get("content-disposition") || "";
+      const match = /filename="?([^"]+)"?/.exec(cd);
+      const filename = match?.[1] || "workeros-workspace-template.zip";
+      return { blob, filename };
+    },
+    importTemplate: async (
+      zipBlob: Blob
+    ): Promise<import("./types").WorkspaceImportResult> => {
+      const form = new FormData();
+      form.append("bundle", zipBlob, "workspace-template.zip");
+      const res = await fetch(`${API_BASE}/workspace/import`, { method: "POST", body: form });
+      if (!res.ok) {
+        let err = "";
+        try {
+          const body = await res.json();
+          err = body.detail || JSON.stringify(body);
+        } catch {
+          err = res.statusText || `HTTP ${res.status}`;
+        }
+        throw new Error(err);
+      }
+      return res.json() as Promise<import("./types").WorkspaceImportResult>;
+    },
+  },
   integrations: {
     triggers: () =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),
