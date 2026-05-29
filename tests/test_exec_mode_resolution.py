@@ -88,8 +88,20 @@ def test_invalid_runtime_none_combinations_fail():
             manifest({"mode": "agent", "runtime": "none"}, entrypoint="SKILL.md")
         )
 
-    with pytest.raises(ValidationError):
-        parse_worker_manifest(manifest({"mode": "pure-script", "runtime": "python311"}))
+
+def test_pure_script_without_command_defaults_command_engine_211():
+    """Engine #211: pure-script with no command no longer raises.
+
+    The legacy mode-only path derives entry=run.py, and the validator now
+    defaults exec.command to `python run.py` instead of 502'ing the
+    draft-and-create flow.
+    """
+    contract = parse_worker_manifest(
+        manifest({"mode": "pure-script", "runtime": "python311"})
+    )
+    assert contract.exec.mode == "pure-script"
+    assert contract.exec.entry == "run.py"
+    assert contract.exec.command == "python run.py"
 
 
 def test_stock_worker_migration_dispatch_matrix():

@@ -127,6 +127,68 @@ def test_entry_skill_md_routes_to_agent_driver():
 
 
 # ---------------------------------------------------------------------------
+# Engine #211: exec.command defaults from exec.entry for script modes when the
+# author (often the LLM) omits it, instead of raising a validation error that
+# 502s the draft-and-create / draft-from-prompt flow.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "entry,expected_command",
+    [
+        ("run.py", "python run.py"),
+        ("worker.PY", "python worker.PY"),
+        ("run.sh", "bash run.sh"),
+        ("main.js", "node main.js"),
+    ],
+)
+def test_pure_script_missing_command_defaults_from_entry(entry, expected_command):
+    """exec.mode=pure-script + entry + NO command -> command defaulted (no 502)."""
+    from models import parse_worker_manifest
+
+    contract = parse_worker_manifest(
+        _manifest({"entry": entry, "mode": "pure-script", "runtime": "python311"})
+    )
+    assert contract.exec.mode == "pure-script"
+    assert contract.exec.command == expected_command
+
+
+def test_pure_script_missing_command_defaults_without_explicit_mode():
+    """entry=run.py alone (mode inferred pure-script) + NO command -> defaulted."""
+    from models import parse_worker_manifest
+
+    contract = parse_worker_manifest(
+        _manifest({"entry": "run.py", "runtime": "python311"})
+    )
+    assert contract.exec.mode == "pure-script"
+    assert contract.exec.command == "python run.py"
+
+
+def test_hybrid_missing_command_defaults_from_entry():
+    """Legacy mode=hybrid + entry=run.py + NO command -> normalized + defaulted."""
+    from models import parse_worker_manifest
+
+    contract = parse_worker_manifest(
+        _manifest({"entry": "run.py", "mode": "hybrid", "runtime": "python311"})
+    )
+    # hybrid + .py entry normalizes to pure-script.
+    assert contract.exec.mode == "pure-script"
+    assert contract.exec.command == "python run.py"
+
+
+def test_explicit_command_is_preserved_not_overwritten():
+    """A provided command must survive untouched."""
+    from models import parse_worker_manifest
+
+    contract = parse_worker_manifest(
+        _manifest(
+            {"entry": "run.py", "mode": "pure-script", "runtime": "python311",
+             "command": "python run.py --flag"}
+        )
+    )
+    assert contract.exec.command == "python run.py --flag"
+
+
+# ---------------------------------------------------------------------------
 # Family 3: invalid entry suffix raises a validation error
 # ---------------------------------------------------------------------------
 
