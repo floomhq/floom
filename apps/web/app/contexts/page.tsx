@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
+  Check,
   File as FileIcon,
   FileCode,
   FileText,
   Image as ImageIcon,
+  Link as LinkIcon,
   Plus,
   Search,
   Trash2,
@@ -34,11 +36,20 @@ function displayTypeIcon(displayType: string) {
   return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
 }
 
-export default function ContextsPage() {
+export default function ContextsPageShell() {
+  return (
+    <Suspense>
+      <ContextsPage />
+    </Suspense>
+  );
+}
+
+function ContextsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [contexts, setContexts] = useState<ContextSummary[]>([]);
-  const [selectedName, setSelectedName] = useState<string>("");
+  const [selectedName, setSelectedName] = useState<string>(() => searchParams.get("pack") ?? "");
   const [detail, setDetail] = useState<ContextDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -46,18 +57,29 @@ export default function ContextsPage() {
   const [showNewContext, setShowNewContext] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
+  // Keep URL in sync with selected pack so the link is shareable/refreshable.
+  useEffect(() => {
+    if (selectedName) {
+      const next = `?pack=${encodeURIComponent(selectedName)}`;
+      if (typeof window !== "undefined" && window.location.search !== next) {
+        router.replace(`/contexts${next}`, { scroll: false });
+      }
+    }
+  }, [selectedName, router]);
+
   const loadContexts = useCallback(async (nextSelected?: string) => {
     const items = await api.contexts.list();
     setContexts(items);
-    const selected = nextSelected !== undefined ? nextSelected : (selectedName || items[0]?.name || "");
-    setSelectedName(selected);
-    if (selected) {
-      const loaded = await api.contexts.get(selected);
-      setDetail(loaded);
-    } else {
-      setDetail(null);
-    }
-  }, [selectedName]);
+    setSelectedName((current) => {
+      const selected = nextSelected !== undefined ? nextSelected : (current || items[0]?.name || "");
+      if (selected) {
+        api.contexts.get(selected).then(setDetail).catch(() => setDetail(null));
+      } else {
+        setDetail(null);
+      }
+      return selected;
+    });
+  }, []);
 
   useEffect(() => {
     loadContexts()
@@ -213,38 +235,13 @@ export default function ContextsPage() {
               </div>
             )}
             {filteredContexts.map((ctx) => (
-              <div
+              <PackRow
                 key={ctx.name}
-                role="button"
-                tabIndex={0}
-                onClick={() => void selectContext(ctx.name)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") void selectContext(ctx.name); }}
-                className={`group relative flex w-full items-start gap-2.5 px-3 py-3 text-left transition-colors cursor-pointer ${
-                  ctx.name === selectedName
-                    ? "bg-[var(--active-nav-bg)] border-l-2 border-l-[var(--border-default)]"
-                    : "hover:bg-muted/40"
-                }`}
-              >
-                <span className="mt-0.5 text-muted-foreground">{ctx.name === selectedName ? "●" : "○"}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{ctx.name}</span>
-                  {ctx.description && (
-                    <span className="block truncate text-xs text-muted-foreground mt-0.5">{ctx.description}</span>
-                  )}
-                  <span className="block text-xs text-muted-foreground mt-0.5">
-                    {ctx.file_count} {ctx.file_count === 1 ? "file" : "files"} · {ctx.worker_count} {ctx.worker_count === 1 ? "worker" : "workers"}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); void deleteContext(ctx); }}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); void deleteContext(ctx); } }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity mt-0.5"
-                  title={`Delete ${ctx.name}`}
-                >
-                  <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
-                </button>
-              </div>
+                ctx={ctx}
+                selected={ctx.name === selectedName}
+                onSelect={() => void selectContext(ctx.name)}
+                onDelete={() => void deleteContext(ctx)}
+              />
             ))}
           </div>
         </section>
@@ -291,6 +288,73 @@ export default function ContextsPage() {
   );
 }
 
+function PackRow({
+  ctx,
+  selected,
+  onSelect,
+  onDelete,
+}: {
+  ctx: ContextSummary;
+  selected: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  function copyLink(e: React.MouseEvent) {
+    e.stopPropagation();
+    const url = `${window.location.origin}/contexts?pack=${encodeURIComponent(ctx.name)}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
+      className={`group relative flex w-full items-start gap-2.5 px-3 py-3 text-left transition-colors cursor-pointer ${
+        selected
+          ? "bg-[var(--active-nav-bg)] border-l-2 border-l-[var(--border-default)]"
+          : "hover:bg-muted/40"
+      }`}
+    >
+      <span className="mt-0.5 text-muted-foreground">{selected ? "●" : "○"}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">{ctx.name}</span>
+        {ctx.description && (
+          <span className="block truncate text-xs text-muted-foreground mt-0.5">{ctx.description}</span>
+        )}
+        <span className="block text-xs text-muted-foreground mt-0.5">
+          {ctx.file_count} {ctx.file_count === 1 ? "file" : "files"} · {ctx.worker_count} {ctx.worker_count === 1 ? "worker" : "workers"}
+        </span>
+      </span>
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
+        <button
+          type="button"
+          onClick={copyLink}
+          className="p-1 rounded hover:bg-muted"
+          title="Copy link to this pack"
+        >
+          {copied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5 text-muted-foreground" />}
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); onDelete(); } }}
+          className="p-1 rounded hover:bg-muted"
+          title={`Delete ${ctx.name}`}
+        >
+          <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PackDetail({
   detail,
   dragActive,
@@ -304,11 +368,31 @@ function PackDetail({
   onDeleteFile: (file: ContextFileItem) => Promise<void>;
   onAddFile: () => void;
 }) {
+  const [packLinkCopied, setPackLinkCopied] = useState(false);
+
+  function copyPackLink() {
+    const url = `${window.location.origin}/contexts?pack=${encodeURIComponent(detail.name)}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setPackLinkCopied(true);
+      setTimeout(() => setPackLinkCopied(false), 1500);
+    });
+  }
+
   return (
     <div className={`flex flex-col flex-1 overflow-hidden transition-colors ${dragActive ? "bg-muted/30" : ""}`}>
       {/* Pack header */}
       <div className="border-b border-[var(--border-default)] px-5 py-4 shrink-0">
-        <h2 className="text-base font-semibold">{detail.name}</h2>
+        <div className="flex items-start justify-between gap-2">
+          <h2 className="text-base font-semibold">{detail.name}</h2>
+          <button
+            type="button"
+            onClick={copyPackLink}
+            className="p-1 rounded hover:bg-muted text-muted-foreground transition-colors shrink-0"
+            title="Copy link to this pack"
+          >
+            {packLinkCopied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5" />}
+          </button>
+        </div>
         {detail.description ? (
           <p className="text-sm text-muted-foreground mt-0.5">{detail.description}</p>
         ) : (
@@ -381,6 +465,7 @@ function PackDetail({
                 <FileCard
                   key={file.path}
                   file={file}
+                  packName={detail.name}
                   onOpen={() => onOpenFile(file)}
                   onDelete={() => onDeleteFile(file)}
                 />
@@ -401,13 +486,27 @@ function PackDetail({
 
 function FileCard({
   file,
+  packName,
   onOpen,
   onDelete,
 }: {
   file: ContextFileItem;
+  packName: string;
   onOpen: () => void;
   onDelete: () => void;
 }) {
+  const [fileLinkCopied, setFileLinkCopied] = useState(false);
+
+  function copyFileLink(e: React.MouseEvent) {
+    e.stopPropagation();
+    const pathEncoded = file.path.split("/").map(encodeURIComponent).join("/");
+    const url = `${window.location.origin}/contexts/${encodeURIComponent(packName)}/files/${pathEncoded}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setFileLinkCopied(true);
+      setTimeout(() => setFileLinkCopied(false), 1500);
+    });
+  }
+
   return (
     <div className="group flex items-center gap-3 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-2.5 hover:bg-muted/40 transition-colors">
       {displayTypeIcon(file.display_type)}
@@ -424,6 +523,14 @@ function FileCard({
         <Button size="sm" variant="outline" onClick={onOpen} className="h-7 text-xs">
           Open
         </Button>
+        <button
+          type="button"
+          onClick={copyFileLink}
+          className="p-1 rounded hover:bg-muted"
+          title="Copy link to this file"
+        >
+          {fileLinkCopied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5 text-muted-foreground" />}
+        </button>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
