@@ -1,6 +1,49 @@
-# ISSUES (Federico's 2026-05-26 morning walkthrough)
+# ISSUES — Workeros
 
-Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from a real browser walkthrough of workers.floom.dev after PRs #29-#33 landed.
+Status legend: OPEN / FIXING / FIXED (merged, unverified) / VERIFIED (confirmed live). Most-recent batch first.
+
+---
+
+## 2026-05-29 evening review (Federico) — CURRENT, 13 items
+
+| # | Issue | Detail / evidence | Sev | Status |
+|---|---|---|---|---|
+| B1 | Documentation — too much to track | This section. Keep current. | meta | FIXING |
+| B2 | **/contexts Vercel "page couldn't load"** | Error was on the **context page** specifically. Edge 200 but client/RSC throws. Root-cause it. | P0 | OPEN |
+| B3 | Hard edges remain | Settings boxes (token, setup-commands) + **Cmd+K search bar** still square. S45 radius missed them. [Img #3] | P1 | OPEN |
+| B4 | MCP install — other harnesses | Setup hardcodes `--target claude`. Add cursor/vscode/windsurf/generic. | P1 | OPEN |
+| B5 | Approvals — organise at scale | "what if I need multiple?" grouping/sort/pagination. | P1 | OPEN |
+| B6 | Workers cards — hover sparklines MISSING | S26 not visible on prod. Regression-or-stale. SYSTEMATIC check. | P1 | OPEN |
+| B7 | Workers cards — tool logos MISSING | S41/#68 logo strip not visible. Same systematic check as B6. | P1 | OPEN |
+| B8 | Archive = icon only | Drop the "Archive" text, keep just the icon. | P2 | OPEN |
+| B9 | Mobile optimisation — everywhere | Full 375px pass across all surfaces. | P1 | OPEN |
+| B10 | /runs worker-filter dropdown broken | Clipped text, raw IDs leaking (`audit-local-rate-*`), junk/system workers showing, unstyled. [Img #5] | P1 | OPEN |
+| B11 | Pagination, not "Load more" | /runs + lists should paginate. | P1 | OPEN |
+| B12 | Overview must fit one screen | "Worker activity" pane too tall; "See all" exists, so compress. | P1 | OPEN |
+| B13 | "103 Work shipped this week" unclear + hours-of-work? | Define the metric; consider surfacing hours-saved. | P1 | OPEN |
+
+**B10 is two bugs:** (a) dropdown styling/overflow; (b) junk/system workers (`audit-local-rate-*`, smoke/quality-gate workers) not flagged `system_worker`/archived, leaking into the operator filter.
+**B6/B7 systematic note:** sparklines + logos "missing again" → before fixing piecemeal, confirm whether it's a real regression or stale-build/CSS-scope; fix the root, then sweep all card states.
+
+### Decisions pending Federico
+- **C5 deadlines:** rec = no hard deadline; visible "pending Nh" age + optional soft `expires_in_hours` → `expired` (never auto-decide).
+- **C6 PR #197** (CLI cloud-aware): Cloud-lane PR open on OS repo — merge into OS or leave for Cloud lane?
+
+### Carried over (not done)
+- **C1** No backend deploy script (`ops/deploy-api.sh`) — root cause of today's stale-backend + migration desync. Highest leverage.
+- **C2** Worker reliability: ~6/15 clean. gmail_intake (needs Gmail conn), linkedin (Apify KeyError), csv/cv/reverse_match (no file-upload smoke).
+- **C3** No alerting (metrics exist, nothing wired).
+- **C4** Migration version desync root-cause (manual deploy left counter ahead → 3 tables uncreated, hand-fixed today).
+- **C7** approvals user-flow links — PR in flight (`feat/approvals-user-flow`).
+
+### Scores (2026-05-29)
+Claude self (critical): dogfood **72**, design-partner **58**. nvidia/nemotron: **62**. deepseek: timed out. Claude prod-walk: running.
+
+---
+
+## (historical) Federico's 2026-05-26 morning walkthrough
+
+Issues raised by Federico from a real browser walkthrough of workers.floom.dev after PRs #29-#33 landed.
 
 ---
 
