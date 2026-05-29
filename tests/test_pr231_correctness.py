@@ -135,3 +135,81 @@ def test_audit_runs_hidden_by_default_but_visible_with_include_system(monkeypatc
     system_ids = {item["id"] for item in client.get("/runs?include_system=true", headers=_headers()).json()}
     assert manual_id in system_ids
     assert audit_id in system_ids  # reachable, data preserved
+
+
+# ---------------------------------------------------------------------------
+# P0 2026-05-29 — single-run-by-explicit-id access bypasses the system/audit
+# worker-visibility filter. Regression: the /workers/new generation flow holds
+# a worker-author (system_worker, hidden-from-list) run_id and must be able to
+# fetch GET /runs/{id} + /logs to drive the GeneratingPanel. PR #231/#235 made
+# those 404 by reusing the LIST visibility filter on single-run fetch.
+# ---------------------------------------------------------------------------
+def _insert_run_for_worker(main, *, worker_id: str) -> str:
+    """Insert a completed run row for an already-created worker (FK satisfied)."""
+    from db import get_db
+
+    run_id = f"run_{uuid.uuid4().hex[:12]}"
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO runs (id, worker_id, status, trigger_source, runner,
+               input_json, output_json, created_at)
+               VALUES (?, ?, 'completed', 'manual', 'e2b', '{}', '{}', datetime('now'))""",
+            (run_id, worker_id),
+        )
+    return run_id
+
+
+def test_worker_author_run_fetchable_by_explicit_id_but_hidden_from_list(monkeypatch, tmp_path):
+    """worker-author (the generation meta-worker) is hidden from the LIST view
+    but its runs MUST be fetchable by explicit id so the /workers/new
+    GeneratingPanel can poll GET /runs/{id} + /logs after
+    POST /workers/new/from-prompt returns the run_id."""
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("worker-author",))
+    client = TestClient(main.app)
+    main._reload_workers_for_user("user-a")
+
+    # Sanity: the allowlist constant matches the real worker id constant.
+    assert main._WORKER_AUTHOR_ID in main._OPERATOR_REACHABLE_HIDDEN_WORKER_IDS
+
+    run_id = _insert_run_for_worker(main, worker_id=main._WORKER_AUTHOR_ID)
+
+    # Hidden from the default LIST view (system worker).
+    default_ids = {item["id"] for item in client.get("/runs", headers=_headers()).json()}
+    assert run_id not in default_ids
+
+    # But fetchable by EXPLICIT id — this is what the generation UI relies on.
+    detail = client.get(f"/runs/{run_id}", headers=_headers())
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["id"] == run_id
+
+    logs = client.get(f"/runs/{run_id}/logs", headers=_headers())
+    assert logs.status_code == 200, logs.text
+
+
+def test_non_allowlisted_hidden_worker_run_stays_inaccessible_by_id(monkeypatch, tmp_path):
+    """The explicit-id allowlist is worker-author ONLY: a different hidden
+    internal worker (e.g. an infra listener) must still 404 by id — preserves
+    the security boundary from test_round8_worker_authz."""
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    worker_id = "infra-listener-probe"
+    created = client.post(
+        "/workers",
+        headers=_headers(),
+        json=_worker_payload(worker_id, title="Infra Listener Probe"),
+    )
+    assert created.status_code == 200, created.text
+    run_id = _insert_run_for_worker(main, worker_id=worker_id)
+
+    # Force this worker hidden (NOT worker-author, NOT on the allowlist).
+    real_hidden = main._worker_hidden_from_api
+    monkeypatch.setattr(
+        main,
+        "_worker_hidden_from_api",
+        lambda wid: True if wid == worker_id else real_hidden(wid),
+    )
+
+    for path in (f"/runs/{run_id}", f"/runs/{run_id}/logs"):
+        resp = client.get(path, headers=_headers())
+        assert resp.status_code == 404, f"{path}: {resp.status_code} {resp.text}"
