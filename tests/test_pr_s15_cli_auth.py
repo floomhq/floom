@@ -1,43 +1,67 @@
 """Regression tests for PR S15 CLI device-code auth endpoints."""
 
+from __future__ import annotations
+
+import importlib
 import os
 import sys
-import tempfile
 import time
+import types
 
-import pytest
 from fastapi.testclient import TestClient
 
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "apps", "api"))
-
-_tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-_tmp_db.close()
-os.environ["FLOOM_DB"] = _tmp_db.name
-os.environ["FLOOM_SECRET"] = "test-secret-s15"
-
-import db  # noqa: E402
-
-db.DB_PATH = _tmp_db.name
-
-import main as app_module  # noqa: E402
-
-client = TestClient(app_module.app, raise_server_exceptions=True)
+API_DIR = os.path.join(os.path.dirname(__file__), "..", "apps", "api")
+if API_DIR not in sys.path:
+    sys.path.insert(0, API_DIR)
 
 
-@pytest.fixture(autouse=True)
-def reset_cli_auth_devices():
-    with app_module.get_db() as conn:
-        conn.execute("DELETE FROM cli_auth_devices")
-    app_module._rate_buckets.clear()
-    yield
-    with app_module.get_db() as conn:
-        conn.execute("DELETE FROM cli_auth_devices")
-    app_module._rate_buckets.clear()
+AUTH_HEADER = {"x-floom-secret": "test-secret-s15"}
 
 
-def test_devices_create_and_pending_poll_shape():
+def _load_api(monkeypatch, tmp_path):
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir()
+
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
+    monkeypatch.setenv("FLOOM_SECRET", AUTH_HEADER["x-floom-secret"])
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+
+    reset_prefixes = ("auth.", "db.")
+    reset_exact = {
+        "main",
+        "auth",
+        "db",
+        "files",
+        "models",
+        "worker_registry",
+        "run_service",
+        "runner_utils",
+        "scheduler",
+    }
+    for name in list(sys.modules):
+        if name in reset_exact or name.startswith(reset_prefixes):
+            sys.modules.pop(name, None)
+
+    sys.modules["scheduler"] = types.SimpleNamespace(
+        start_scheduler=lambda: None,
+        stop_scheduler=lambda: None,
+    )
+    main = importlib.import_module("main")
+    main.get_auth_provider.cache_clear()
+    client = TestClient(main.app, raise_server_exceptions=True)
+    return main, client
+
+
+def test_devices_create_and_pending_poll_shape(monkeypatch, tmp_path):
+    _main, client = _load_api(monkeypatch, tmp_path)
+
     response = client.post("/cli-auth/devices", json={"client_name": "floom-cli"})
+
     assert response.status_code == 200
     payload = response.json()
     assert payload["device_code"]
@@ -51,7 +75,24 @@ def test_devices_create_and_pending_poll_shape():
     assert pending.json() == {"status": "pending"}
 
 
-def test_approve_requires_secret_and_flips_device_to_approved():
+def test_devices_use_configured_bootstrap_user(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORKEROS_USER_ID", "backend-audit-user")
+    main, client = _load_api(monkeypatch, tmp_path)
+
+    created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
+
+    with main.get_db() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM cli_auth_devices WHERE device_code = ?",
+            (created["device_code"],),
+        ).fetchone()
+
+    assert row is not None
+    assert row["user_id"] == "backend-audit-user"
+
+
+def test_approve_requires_secret_and_flips_device_to_approved(monkeypatch, tmp_path):
+    _main, client = _load_api(monkeypatch, tmp_path)
     created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
     user_code = created["user_code"]
 
@@ -61,14 +102,15 @@ def test_approve_requires_secret_and_flips_device_to_approved():
     approved = client.post(
         "/cli-auth/approve",
         json={"user_code": user_code},
-        headers={"x-floom-secret": "test-secret-s15"},
+        headers=AUTH_HEADER,
     )
     assert approved.status_code == 200
     assert approved.json()["ok"] is True
     assert approved.json()["client_name"] == "floom-cli"
 
 
-def test_poll_returns_approved_once_then_404_after_consumption():
+def test_poll_returns_approved_once_then_404_after_consumption(monkeypatch, tmp_path):
+    _main, client = _load_api(monkeypatch, tmp_path)
     created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
     device_code = created["device_code"]
     user_code = created["user_code"]
@@ -76,7 +118,7 @@ def test_poll_returns_approved_once_then_404_after_consumption():
     approve = client.post(
         "/cli-auth/approve",
         json={"user_code": user_code},
-        headers={"x-floom-secret": "test-secret-s15"},
+        headers=AUTH_HEADER,
     )
     assert approve.status_code == 200
 
@@ -84,7 +126,7 @@ def test_poll_returns_approved_once_then_404_after_consumption():
     assert first_poll.status_code == 200
     assert first_poll.json() == {
         "status": "approved",
-        "api_secret": "test-secret-s15",
+        "api_secret": AUTH_HEADER["x-floom-secret"],
         "api_base": "https://workers-api.floom.dev",
     }
 
@@ -92,10 +134,11 @@ def test_poll_returns_approved_once_then_404_after_consumption():
     assert consumed.status_code == 404
 
 
-def test_poll_returns_404_for_expired_device():
+def test_poll_returns_404_for_expired_device(monkeypatch, tmp_path):
+    main, client = _load_api(monkeypatch, tmp_path)
     created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
     device_code = created["device_code"]
-    app_module.get_repositories().cli_auth.update(
+    main.get_repositories().cli_auth.update(
         device_code=device_code,
         expires_at=time.time() - 1,
     )
@@ -105,7 +148,8 @@ def test_poll_returns_404_for_expired_device():
     assert expired.json() == {"detail": "Device code not found"}
 
 
-def test_poll_returns_404_for_denied_device():
+def test_poll_returns_404_for_denied_device(monkeypatch, tmp_path):
+    _main, client = _load_api(monkeypatch, tmp_path)
     created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
     device_code = created["device_code"]
     user_code = created["user_code"]
@@ -113,7 +157,7 @@ def test_poll_returns_404_for_denied_device():
     denied = client.post(
         "/cli-auth/deny",
         json={"user_code": user_code},
-        headers={"x-floom-secret": "test-secret-s15"},
+        headers=AUTH_HEADER,
     )
     assert denied.status_code == 200
 
@@ -122,6 +166,9 @@ def test_poll_returns_404_for_denied_device():
     assert poll.json() == {"detail": "Device code not found"}
 
 
-def test_poll_returns_404_for_unknown_device_code():
+def test_poll_returns_404_for_unknown_device_code(monkeypatch, tmp_path):
+    _main, client = _load_api(monkeypatch, tmp_path)
+
     unknown = client.get("/cli-auth/poll/not-a-real-device-code")
+
     assert unknown.status_code == 404

@@ -36,6 +36,8 @@ TEST_WORKERS_DIR = Path("/tmp/workeros-t1d-file-inputs-workers")
 DB_PATH = Path("/tmp/workeros-t1d-file-inputs.db")
 BLOBS_DIR = Path("/tmp/workeros-t1d-file-inputs-blobs")
 ARTIFACTS_DIR = Path("/tmp/workeros-t1d-file-inputs-artifacts")
+TEST_SECRET = "test-secret-file-inputs"
+AUTH_HEADERS = {"x-floom-secret": TEST_SECRET}
 
 
 def reset_environment() -> None:
@@ -47,6 +49,8 @@ def reset_environment() -> None:
     os.environ["FLOOM_BLOBS_DIR"] = str(BLOBS_DIR)
     os.environ["FLOOM_WORKERS_DIR"] = str(TEST_WORKERS_DIR)
     os.environ["FLOOM_ARTIFACTS_DIR"] = str(ARTIFACTS_DIR)
+    os.environ["FLOOM_SECRET"] = TEST_SECRET
+    os.environ["WORKEROS_RUN_CREATE_RATE_LIMIT"] = "0"
     sys.path.insert(0, str(API_DIR))
 
 
@@ -155,10 +159,47 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import db  # noqa: E402
 import main as api_main  # noqa: E402
+import models  # noqa: E402
+import run_service  # noqa: E402
 from main import app, upload_file as api_upload_file  # noqa: E402
 
 
+class _FakeDriver:
+    def run(self, **kwargs):
+        inputs = kwargs["inputs"]
+        upload_path = Path(inputs["upload"])
+        body = upload_path.read_text()
+        optional_body = None
+        if inputs.get("optional_doc"):
+            optional_path = Path(inputs["optional_doc"])
+            if optional_path.exists():
+                optional_body = optional_path.read_text()
+        return models.WorkerResult(
+            status="success",
+            outputs={
+                "summary": (
+                    "# File Access Test\n\n"
+                    f"Mounted upload path: {inputs['upload']}\n\n"
+                    f"File body:\n{body}\n\n"
+                    "Validated staged file input path and content integrity.\n"
+                    "Validated staged file input path and content integrity.\n"
+                ),
+                "raw_inputs": {
+                    "upload": inputs["upload"],
+                    "optional_doc": inputs.get("optional_doc"),
+                    "body": body,
+                    "optional_body": optional_body,
+                    "cwd": str(Path.cwd()),
+                },
+            },
+            artifacts=[],
+        )
+
+
+run_service.get_sandbox_driver = lambda *_args, **_kwargs: _FakeDriver()
+
 client = TestClient(app)
+client.headers.update(AUTH_HEADERS)
 failures: list[str] = []
 
 
@@ -237,7 +278,8 @@ class AsyncBytesUpload:
 async def async_upload_bytes(content: bytes, index: int) -> Any:
     request = SimpleNamespace(headers={})
     file = AsyncBytesUpload(f"async-{index}.csv", content, "text/csv")
-    return await api_upload_file(request, file=file, max_size_mb=1, accepts=None)
+    auth = api_main.AuthContext(user_id="federico", email=None, scopes=("admin",))
+    return await api_upload_file(request, auth=auth, file=file, max_size_mb=1, accepts=None)
 
 
 async def run_async_uploads(content: bytes, count: int) -> list[Any]:
@@ -341,8 +383,8 @@ def main() -> int:
             f"non-SHA value {raw_value!r} did not execute worker",
             row is not None
             and row["status"] == "failed"
-            and row["output_json"] is None
-            and "non-SHA value" in (row["error"] or ""),
+            and row["output_json"] in (None, "{}")
+            and "SHA-256 reference" in (row["error"] or ""),
             dict(row) if row else "no run row",
         )
 
@@ -408,14 +450,15 @@ def main() -> int:
     ref_fail_sha = hashlib.sha256(ref_fail_content).hexdigest()
     ref_fail_upload = post_upload(ref_fail_content, filename="ref-fail.csv")
     check("ref-count failure fixture upload succeeds", ref_fail_upload.status_code == 200, ref_fail_upload.text[:200])
-    original_increment = api_main._increment_file_ref_counts
+    original_resolve = api_main._resolve_file_input_references
 
-    def fail_ref_count(file_ids: list[str]) -> None:
-        raise RuntimeError(f"synthetic ref-count failure for {','.join(file_ids)}")
+    def fail_bind(*args, **kwargs):
+        raise RuntimeError("synthetic bind failure")
 
-    api_main._increment_file_ref_counts = fail_ref_count
+    api_main._resolve_file_input_references = fail_bind
     try:
         no_raise_client = TestClient(app, raise_server_exceptions=False)
+        no_raise_client.headers.update(AUTH_HEADERS)
         ref_fail_bind = no_raise_client.post(
             "/workers/file_access_test/runs",
             json={
@@ -424,7 +467,7 @@ def main() -> int:
             },
         )
     finally:
-        api_main._increment_file_ref_counts = original_increment
+        api_main._resolve_file_input_references = original_resolve
 
     check("non-HTTP bind failure returns 500", ref_fail_bind.status_code == 500, ref_fail_bind.text[:300])
     ref_fail_row = db_row(
@@ -440,7 +483,7 @@ def main() -> int:
         "non-HTTP bind failure run row is marked failed",
         ref_fail_row is not None
         and ref_fail_row["status"] == "failed"
-        and "synthetic ref-count failure" in (ref_fail_row["error"] or ""),
+        and "synthetic bind failure" in (ref_fail_row["error"] or ""),
         dict(ref_fail_row) if ref_fail_row else "no run row",
     )
 
@@ -517,7 +560,7 @@ def main() -> int:
     run = wait_for_run(run_id)
     check("file reference run completes", run.get("status") == "completed", json.dumps(run, default=str)[:500])
 
-    mounted_abs = run.get("input", {}).get("upload")
+    mounted_abs = run.get("output", {}).get("raw_inputs", {}).get("upload")
     # Resolved value must now be an absolute path (not relative) for isolation.
     check("run input is an absolute path", mounted_abs is not None and Path(mounted_abs).is_absolute(), str(mounted_abs))
     mounted_path = Path(mounted_abs)
@@ -600,7 +643,7 @@ def main() -> int:
     check("run1 (with optional) starts", run1_resp.status_code == 200, run1_resp.text[:100])
     run1 = wait_for_run(run1_resp.json()["run_id"])
     check("run1 completes", run1.get("status") == "completed", str(run1.get("error")))
-    run1_opt = run1.get("input", {}).get("optional_doc")
+    run1_opt = run1.get("output", {}).get("raw_inputs", {}).get("optional_doc")
     check("run1 has optional_doc", run1_opt is not None and run1_opt != "", str(run1_opt))
 
     # Run 2: without optional file

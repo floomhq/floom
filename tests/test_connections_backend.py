@@ -394,6 +394,14 @@ class TestMCPConnections:
                 account_label TEXT,
                 user_id TEXT NOT NULL DEFAULT 'federico'
             );
+            CREATE TABLE runs (
+                id TEXT PRIMARY KEY
+            );
+            CREATE TABLE files (
+                id TEXT PRIMARY KEY,
+                uploaded_by TEXT,
+                uploaded_at TEXT NOT NULL
+            );
             """
         )
         conn.close()
@@ -403,8 +411,20 @@ class TestMCPConnections:
 
         conn = sqlite3.connect(db_path)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(composio_connections)").fetchall()}
-        assert {"kind", "mcp_label", "mcp_url", "mcp_auth_secret", "mcp_allowed_tools_json"} <= columns
-        assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 29
+        assert {
+            "kind",
+            "mcp_label",
+            "mcp_url",
+            "mcp_auth_secret",
+            "mcp_allowed_tools_json",
+            "display_name",
+        } <= columns
+        assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 35
+        file_owner_tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert "file_owners" in file_owner_tables
 
 
 # ---------------------------------------------------------------------------

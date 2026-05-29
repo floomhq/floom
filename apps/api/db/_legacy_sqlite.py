@@ -506,6 +506,32 @@ def _ensure_runs_artifacts_archived_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE runs ADD COLUMN artifacts_archived INTEGER DEFAULT 0 NOT NULL")
 
 
+def _migrate_file_owners(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS file_owners (
+            file_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            first_uploaded_at TEXT NOT NULL,
+            PRIMARY KEY (file_id, user_id),
+            FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_owners_user_id
+            ON file_owners(user_id);
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO file_owners (file_id, user_id, first_uploaded_at)
+        SELECT
+            id,
+            COALESCE(NULLIF(uploaded_by, ''), 'anonymous'),
+            uploaded_at
+        FROM files
+        """
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
@@ -848,6 +874,19 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_conversation_messages_conv_idx
         ON conversation_messages(conversation_id, created_at);
     """,
+    # -- migration 35: webhook delivery receipts for replay/idempotency -------
+    """
+    CREATE TABLE IF NOT EXISTS webhook_delivery_receipts (
+        source TEXT NOT NULL,
+        delivery_id TEXT NOT NULL,
+        received_at REAL NOT NULL,
+        PRIMARY KEY (source, delivery_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_webhook_delivery_receipts_received_at
+        ON webhook_delivery_receipts(received_at);
+    """,
+    # -- migration 36: many-to-many upload ownership for dedup-safe auth ------
+    _migrate_file_owners,
 ]
 
 

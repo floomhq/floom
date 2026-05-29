@@ -696,6 +696,7 @@ def get_secrets_for_worker(
 
 INTERRUPTED_RUN_ERROR = "Run was interrupted by an API restart before completion."
 INTERRUPTED_RUN_ERROR_CODE = "interrupted_by_restart"
+WORKER_DELETED_RUN_ERROR = "Worker deleted before run completed."
 
 
 @dataclass
@@ -730,7 +731,6 @@ def active_run_count() -> int:
 def was_shutdown_cancelled(run_id: str) -> bool:
     with _active_runs_lock:
         return run_id in _shutdown_cancelled_runs
-
 
 # ---------------------------------------------------------------------------
 # Queue drain loop
@@ -847,6 +847,59 @@ def queued_run_position(run_id: str) -> int:
         pass
     return 0
 
+def _cancel_active_runs(
+    active: list[_ActiveRun],
+    *,
+    repos: Repositories,
+    timeout_seconds: float,
+    reason: str,
+    mark_shutdown_cancelled: bool,
+) -> list[str]:
+    if mark_shutdown_cancelled:
+        with _active_runs_lock:
+            _shutdown_cancelled_runs.update(run.run_id for run in active)
+
+    try:
+        from runner_sandbox.e2b_driver import cancel_sandbox
+    except Exception:
+        cancel_sandbox = None
+
+    cancelled_at = _now_iso()
+    for run in active:
+        if run.user_id:
+            try:
+                repos.runs.cancel(
+                    user_id=run.user_id,
+                    run_id=run.run_id,
+                    cancelled_at=cancelled_at,
+                )
+                repos.runs.add_log(
+                    user_id=run.user_id,
+                    run_id=run.run_id,
+                    level="error",
+                    message=reason,
+                    timestamp=cancelled_at,
+                    trace_id=None,
+                )
+            except Exception as exc:
+                logger.warning("Failed to mark run %s cancelled: %s", run.run_id, exc)
+        if cancel_sandbox is not None:
+            try:
+                cancel_sandbox(run.run_id, reason=reason)
+            except Exception:
+                logger.debug("E2B cancel failed for run %s", run.run_id, exc_info=True)
+
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    for run in active:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        run.thread.join(timeout=remaining)
+
+    with _active_runs_lock:
+        active_ids = {run.run_id for run in active}
+        return [run_id for run_id in _active_runs if run_id in active_ids]
+
 
 def request_active_run_shutdown(
     *,
@@ -857,53 +910,57 @@ def request_active_run_shutdown(
     repos_obj = _repos(repos)
     with _active_runs_lock:
         active = list(_active_runs.values())
-        _shutdown_cancelled_runs.update(run.run_id for run in active)
     if not active:
         return 0
 
     logger.warning("Shutdown requested; cancelling %d active run(s)", len(active))
-    try:
-        from runner_sandbox.e2b_driver import cancel_sandbox
-    except Exception:
-        cancel_sandbox = None
-
-    cancelled_at = _now_iso()
-    for run in active:
-        if run.user_id:
-            try:
-                repos_obj.runs.cancel(
-                    user_id=run.user_id,
-                    run_id=run.run_id,
-                    cancelled_at=cancelled_at,
-                )
-                repos_obj.runs.add_log(
-                    user_id=run.user_id,
-                    run_id=run.run_id,
-                    level="error",
-                    message=INTERRUPTED_RUN_ERROR,
-                    timestamp=cancelled_at,
-                    trace_id=None,
-                )
-            except Exception as exc:
-                logger.warning("Failed to mark run %s cancelled on shutdown: %s", run.run_id, exc)
-        if cancel_sandbox is not None:
-            try:
-                cancel_sandbox(run.run_id, reason=INTERRUPTED_RUN_ERROR)
-            except Exception:
-                logger.debug("E2B shutdown cancel failed for run %s", run.run_id, exc_info=True)
-
-    deadline = time.monotonic() + max(0.0, timeout_seconds)
-    for run in active:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        run.thread.join(timeout=remaining)
-
-    with _active_runs_lock:
-        remaining_ids = [run_id for run_id in _active_runs if run_id in {run.run_id for run in active}]
+    remaining_ids = _cancel_active_runs(
+        active,
+        repos=repos_obj,
+        timeout_seconds=timeout_seconds,
+        reason=INTERRUPTED_RUN_ERROR,
+        mark_shutdown_cancelled=True,
+    )
     if remaining_ids:
         logger.warning("Shutdown timed out waiting for active runs: %s", ", ".join(sorted(remaining_ids)))
     return len(active)
+
+
+def request_worker_run_shutdown(
+    *,
+    worker_id: str,
+    user_id: str,
+    repos: Repositories | None = None,
+    timeout_seconds: float = 30.0,
+) -> list[str]:
+    repos_obj = _repos(repos)
+    with _active_runs_lock:
+        active = [
+            run for run in _active_runs.values()
+            if run.worker_id == worker_id and run.user_id == user_id
+        ]
+    if not active:
+        return []
+
+    logger.warning(
+        "Worker deletion requested; cancelling %d active run(s) for %s",
+        len(active),
+        worker_id,
+    )
+    remaining_ids = _cancel_active_runs(
+        active,
+        repos=repos_obj,
+        timeout_seconds=timeout_seconds,
+        reason=WORKER_DELETED_RUN_ERROR,
+        mark_shutdown_cancelled=False,
+    )
+    if remaining_ids:
+        logger.warning(
+            "Worker %s deletion timed out waiting for active runs: %s",
+            worker_id,
+            ", ".join(sorted(remaining_ids)),
+        )
+    return remaining_ids
 
 
 def fail_interrupted_runs_on_startup(
