@@ -189,6 +189,25 @@ def test_run_error_raw_kept_only_when_rewritten(api):
     assert api._run_error_raw("") is None
 
 
+def test_run_error_raw_strips_filesystem_paths(api):
+    # FIX 5 (2026-05-29): error_raw must never carry a real filesystem path —
+    # not the sandbox path nor the server path. The headline behavior is
+    # unchanged; only the debug 'Raw' tab string is path-stripped.
+    sandbox_raw = api._run_error_raw(SYNTAX_TRACE, "execution_error")
+    assert sandbox_raw is not None
+    assert "/home/user" not in sandbox_raw
+    assert "/home/user/worker/run.py" not in sandbox_raw
+
+    server_raw = api._run_error_raw(
+        "Command exited with code 1 and error: Traceback (most recent call last):\n"
+        '  File "/root/workeros/apps/api/run_service.py", line 10\n'
+        "RuntimeError: boom",
+        "run_execution_exception",
+    )
+    assert server_raw is not None
+    assert "/root/workeros" not in server_raw
+
+
 # ---------------------------------------------------------------------------
 # Fix 4 (2026-05-29): a worker's OWN code crash must read as a CODE error the
 # operator can fix/re-generate — NOT a platform "internal error", and NEVER
