@@ -268,7 +268,7 @@ def test_foreign_custom_worker_routes_return_404(monkeypatch, tmp_path):
         "create_run": client.post(
             "/workers/shared-probe/runs",
             headers=_headers("user-b"),
-            json={"inputs": {}, "trigger_source": "audit"},
+            json={"inputs": {}, "trigger_source": "manual"},
         ),
     }
 
@@ -300,12 +300,12 @@ def test_run_list_and_foreign_run_routes_return_404(monkeypatch, tmp_path):
     run_a = client.post(
         "/workers/runs-owner-probe/runs",
         headers=_headers("user-a"),
-        json={"inputs": {}, "trigger_source": "audit"},
+        json={"inputs": {}, "trigger_source": "manual"},
     )
     run_b = client.post(
         "/workers/runs-foreign-probe/runs",
         headers=_headers("user-b"),
-        json={"inputs": {}, "trigger_source": "audit"},
+        json={"inputs": {}, "trigger_source": "manual"},
     )
     assert run_a.status_code == 200, run_a.text
     assert run_b.status_code == 200, run_b.text
@@ -364,12 +364,12 @@ def test_runs_clear_only_deletes_owner_history(monkeypatch, tmp_path):
     run_a = client.post(
         "/workers/clear-owner-probe/runs",
         headers=_headers("user-a"),
-        json={"inputs": {}, "trigger_source": "audit"},
+        json={"inputs": {}, "trigger_source": "manual"},
     )
     run_b = client.post(
         "/workers/clear-foreign-probe/runs",
         headers=_headers("user-b"),
-        json={"inputs": {}, "trigger_source": "audit"},
+        json={"inputs": {}, "trigger_source": "manual"},
     )
     assert run_a.status_code == 200, run_a.text
     assert run_b.status_code == 200, run_b.text
@@ -526,14 +526,14 @@ def test_hidden_internal_worker_runs_stay_inaccessible(monkeypatch, tmp_path):
     visible_run_id = main.create_run(
         "research_brief",
         {},
-        trigger_source="audit",
+        trigger_source="manual",
         user_id="user-a",
         repos=repos,
     )
     hidden_run_id = main.create_run(
         "slack-listener",
         {},
-        trigger_source="audit",
+        trigger_source="manual",
         user_id="user-a",
         repos=repos,
     )
@@ -578,7 +578,7 @@ def test_runs_list_pages_visible_rows_when_newer_hidden_runs_exist(monkeypatch, 
     visible_run_id = main.create_run(
         "research_brief",
         {},
-        trigger_source="audit",
+        trigger_source="manual",
         user_id="user-a",
         repos=repos,
     )
@@ -586,7 +586,7 @@ def test_runs_list_pages_visible_rows_when_newer_hidden_runs_exist(monkeypatch, 
         main.create_run(
             "slack-listener",
             {},
-            trigger_source="audit",
+            trigger_source="manual",
             user_id="user-a",
             repos=repos,
         )
@@ -611,7 +611,7 @@ def test_public_run_redacts_secret_names_across_read_surfaces(monkeypatch, tmp_p
     run_id = main.create_run(
         "research_brief",
         {},
-        trigger_source="audit",
+        trigger_source="manual",
         user_id="user-a",
         repos=repos,
     )
@@ -664,7 +664,7 @@ def test_public_run_redacts_env_style_secret_errors_across_read_surfaces(monkeyp
     run_id = main.create_run(
         "research_brief",
         {},
-        trigger_source="audit",
+        trigger_source="manual",
         user_id="user-a",
         repos=repos,
     )
@@ -777,7 +777,7 @@ def test_run_replay_cross_worker_same_user_returns_404(monkeypatch, tmp_path):
     source_run = client.post(
         "/workers/replay-a/runs",
         headers=_headers("user-a"),
-        json={"inputs": {}, "trigger_source": "audit"},
+        json={"inputs": {}, "trigger_source": "manual"},
     )
     assert source_run.status_code == 200, source_run.text
     run_id = source_run.json()["run_id"]
@@ -939,12 +939,12 @@ def test_system_metrics_and_overview_are_user_scoped(monkeypatch, tmp_path):
     run_a = client.post(
         f"/workers/{worker_a}/runs",
         headers=_headers("user-a"),
-        json={"inputs": {}, "trigger_source": "audit"},
+        json={"inputs": {}, "trigger_source": "manual"},
     )
     run_b = client.post(
         f"/workers/{worker_b}/runs",
         headers=_headers("user-b"),
-        json={"inputs": {}, "trigger_source": "audit"},
+        json={"inputs": {}, "trigger_source": "manual"},
     )
     assert run_a.status_code == 200, run_a.text
     assert run_b.status_code == 200, run_b.text
