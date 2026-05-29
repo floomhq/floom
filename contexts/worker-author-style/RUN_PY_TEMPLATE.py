@@ -25,12 +25,28 @@
 # result.json schema (written to ./result.json on success AND error):
 #   {
 #     "status": "success" | "error",
-#     "outputs": {"<declared_output_name>": "out/<file>"},   # path under out/
+#     "outputs": {"<declared_output_name>": <value>},
 #     "artifacts": [
 #       {"name": "out/<file>", "relative_path": "out/<file>", "type": "<media_type>"}
 #     ],
 #     "error": "<message when status == 'error', else null>"
 #   }
+#
+# OUTPUT CONTRACT — scalar vs file (the EXACT INVERSE of the input contract; a
+# top generated-worker failure is writing a PATH into a SCALAR output):
+#   - SCALAR output (worker.yml output has kind: "scalar", NO `path:`):
+#       outputs[<name>] MUST be the LITERAL VALUE — a string or number — NEVER a
+#       path. A scalar output needs NO out/ file and NO artifact entry.
+#         GOOD:  _write_result("success", outputs={"reversed": "olleh"})
+#         BAD:   _write_result("success", outputs={"reversed": "out/reversed.txt"})
+#       Writing a path into a scalar output fails validation with
+#       "scalar output leaked a path string".
+#   - FILE output (worker.yml output has kind: "file" and a `path:`):
+#       write the file under out/ and put its RELATIVE PATH in outputs[<name>]
+#       PLUS one matching artifacts[] entry.
+#         GOOD:  outputs={"report": "out/report.csv"},
+#                artifacts=[{"name":"out/report.csv","relative_path":"out/report.csv","type":"text/csv"}]
+#   Match each output's declared kind: scalar -> literal value, file -> out/ path.
 #
 # HARD RULES (these are the exact mistakes that crash generated workers):
 #   - Use ONLY the Python standard library unless you also list the package in
@@ -39,7 +55,8 @@
 #   - import EVERY module you reference (os, json, csv, io, re, statistics, ...).
 #     A missing `import os` is a top generated-worker crash.
 #   - Write result.json to "result.json" (the working dir), NEVER "out/result.json".
-#   - one declared output -> one out/ file -> one outputs entry + one artifact.
+#   - SCALAR output -> outputs[name] is the literal VALUE (no out/ file, no artifact).
+#     FILE output -> one out/ file -> one outputs entry (the path) + one artifact.
 #   - never open() a scalar input value; never hardcode a secret.
 #   - always write result.json, even when you bail out early on bad input.
 #
@@ -101,17 +118,25 @@ def main():
     #     _write_result("error", error="Missing required input: text")
     #     return
 
-    # 3) Do the work, then write output file(s) under out/.
-    os.makedirs("out", exist_ok=True)
-    out_path = "out/result.txt"
-    Path(out_path).write_text("replace with the real output", encoding="utf-8")
+    # 3) Do the work.
+    result_value = "replace with the real output"
 
-    # 4) Write result.json (working dir) mapping each output name to its out/ path.
-    _write_result(
-        "success",
-        outputs={"result": out_path},
-        artifacts=[{"name": out_path, "relative_path": out_path, "type": "text/plain"}],
-    )
+    # 4a) SCALAR output (kind: "scalar") -> put the LITERAL VALUE inline. NO out/
+    #     file, NO artifact. This is the common case (reverse/sort/sum/title-case
+    #     a string or number). Match the declared output name from worker.yml.
+    _write_result("success", outputs={"result": result_value})
+
+    # 4b) FILE output (kind: "file") -> write the file under out/ and put its
+    #     RELATIVE PATH in outputs PLUS a matching artifact. Use THIS branch ONLY
+    #     when the output is declared kind: "file":
+    #     os.makedirs("out", exist_ok=True)
+    #     out_path = "out/result.csv"
+    #     Path(out_path).write_text(result_value, encoding="utf-8")
+    #     _write_result(
+    #         "success",
+    #         outputs={"result": out_path},
+    #         artifacts=[{"name": out_path, "relative_path": out_path, "type": "text/csv"}],
+    #     )
 
 
 if __name__ == "__main__":

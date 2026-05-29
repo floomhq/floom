@@ -373,3 +373,68 @@ def test_sse_error_field_keeps_clean_input_friendly() -> None:
     out = main._public_run_part(part)["error"]
     assert "input" in out.lower()
     assert out != main._CODE_HEADLINE
+
+
+# --------------------------------------------------------------------------
+# Batch L / gen-quality — the scalar-vs-file OUTPUT contract. A generated worker
+# that writes a PATH into a SCALAR output is a code bug; it must (a) fail
+# validation with the explicit reason, (b) route into the bounded smoke-repair
+# loop (output_validation_failed in _SMOKE_CODE_FAILURE_CODES), and (c) the
+# repair prompt + template must teach scalar=literal-value / file=out/path.
+# --------------------------------------------------------------------------
+
+def test_scalar_output_path_string_fails_validation() -> None:
+    import run_service as rs
+    from models import WorkerConfig
+
+    config = WorkerConfig(
+        id="t", name="t", trigger={"type": "manual"},
+        runtime={"type": "python", "entrypoint": "run.py"},
+        inputs=[],
+        outputs=[{"name": "reversed", "type": "string", "kind": "scalar", "required": True, "label": "R"}],
+    )
+    err, _ = rs._validate_run_outputs("rid", config, {"reversed": "out/reversed.txt"}, [])
+    assert err is not None and "scalar output leaked a path string" in err
+
+
+def test_scalar_output_literal_value_passes_validation() -> None:
+    import run_service as rs
+    from models import WorkerConfig
+
+    config = WorkerConfig(
+        id="t", name="t", trigger={"type": "manual"},
+        runtime={"type": "python", "entrypoint": "run.py"},
+        inputs=[],
+        outputs=[{"name": "reversed", "type": "string", "kind": "scalar", "required": True, "label": "R"}],
+    )
+    err, _ = rs._validate_run_outputs("rid", config, {"reversed": "olleh"}, [])
+    assert err is None
+
+
+def test_output_validation_failed_routes_to_repair() -> None:
+    import run_service as rs
+
+    # The smoke loop treats output_validation_failed as a code-class failure so
+    # the generator gets a bounded chance to fix the scalar-vs-file contract,
+    # instead of gating on the first try.
+    assert "output_validation_failed" in rs._SMOKE_CODE_FAILURE_CODES
+
+
+def test_smoke_repair_prompt_teaches_scalar_vs_file_output_contract() -> None:
+    import run_service as rs
+
+    prompt = rs._SMOKE_REPAIR_SYSTEM_PROMPT
+    assert "scalar output leaked a path string" in prompt
+    assert "SCALAR output" in prompt and "FILE output" in prompt
+    # Teaches the literal-value rule for scalar outputs.
+    assert "LITERAL VALUE" in prompt
+
+
+def test_template_teaches_scalar_vs_file_output_contract() -> None:
+    from pathlib import Path
+
+    api_dir = Path(main.__file__).resolve().parent
+    template = (api_dir.parents[1] / "contexts" / "worker-author-style" / "RUN_PY_TEMPLATE.py").read_text()
+    assert "OUTPUT CONTRACT" in template
+    assert "scalar output leaked a path string" in template
+    assert 'outputs={"reversed": "olleh"}' in template
