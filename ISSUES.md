@@ -4,6 +4,21 @@ Status legend: OPEN / FIXING / FIXED (merged, unverified) / VERIFIED (confirmed 
 
 ---
 
+## 2026-05-29 backend correctness + security batch (PR #231, merged 8aabe35)
+
+| # | Issue | Fix / evidence | Sev | Status |
+|---|---|---|---|---|
+| R16-SSE | Unlimited concurrent SSE streams per user (DoS) | `/runs/<id>/stream` + `/runs/<id>/events` had no cap (5 opened in 1.23s). Added per-user in-process counter `WORKEROS_MAX_CONCURRENT_STREAMS` (default 10): 429 on exceed, slot freed on disconnect via generator `finally`. Acquire/release logic unit-verified (4th over cap=3 → 429; reused after release; per-user isolated). commit fdd68fa | P1 sec | FIXED |
+| 1.5.1 | Zombie approvals (run stuck pending_approval) | approve/reject now set the original run to terminal `completed` after writing the approvals row; badge already read `approvals.status='pending'` via `/approvals/count`. commit 357bc42 | P0 | FIXED |
+| 1.5.2 / B (archived) | Archived worker detail 404 ("Worker not found") | `_archived_tracked_worker` fallback → GET `/workers/<id>` renders archived workers (badge+reason+Restore). Confirmed `/workers/kugelaudio-bug-intake` 404'd pre-fix. commit 21895da | P1 | FIXED |
+| 1.5.3 / B10b | audit/system trigger runs pollute `/runs` | Default `/runs` allowlists operator sources (manual/schedule/approval/composio/webhook/workspace-agent); `?include_system=true` shows all. Live `/runs` had audit/test/s35_concurrency_*/APPRVORG-* pre-fix. commit 1e5b24c | P1 | FIXED |
+| 1.5.4 | Overview worker count (24/26) ≠ /workers (11/13) | Shared `_list_operator_workers()` filter used by overview + `/workers`. commit 7214abd | P1 | FIXED |
+| CRIT-1 | OpenAI `web_search` "Invalid value" | Root cause = pre-#129 Chat Completions path; #129 Agents-SDK migration fixed it via Responses API. research_brief copy still said web search unavailable → enabled in worker.yml+SKILL.md. Live smoke: weekly_update run_837154286792 + research_brief run_cbe5e4bfa1c4 both completed, no error. commit f5420df | P0 | FIXED |
+
+Tests: `tests/test_round8_worker_authz.py` 25/25 (placeholder trigger_source audit→manual to match new default-hide); full relevant suite = origin/main baseline exactly (39 pre-existing harness failures, 0 new). Re-deploy via `ops/deploy-api.sh` pending an active long opendraft run draining; live re-verification to follow → VERIFIED.
+
+---
+
 ## 2026-05-29 security + privacy checklist (lane/security-checklist) — 11 items + 3 NEW
 
 Full report: `docs/audits/security-checklist-2026-05-29.md`.
