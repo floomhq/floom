@@ -254,6 +254,23 @@ def route_risk_tags(method: str, path: str) -> list[str]:
 ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/health"): ("health-public", "local-health", "local-deploy-health"),
     ("GET", "/healthz"): ("health-public",),
+    ("POST", "/chat"): (
+        "chat-auth-required",
+        "chat-empty-message-rejected",
+        "chat-message-length-limit",
+        "local-chat-conversations-scoped",
+        "local-chat-message-length-limit",
+    ),
+    ("GET", "/workspace"): ("workspace-auth-required", "local-workspace-roundtrip"),
+    ("PUT", "/workspace"): ("workspace-auth-required", "local-workspace-roundtrip"),
+    ("GET", "/conversations"): (
+        "conversations-auth-required",
+        "local-chat-conversations-scoped",
+    ),
+    ("GET", "/conversations/{conversation_id}"): (
+        "conversations-auth-required",
+        "local-chat-conversations-scoped",
+    ),
     ("GET", "/integrations/catalog"): ("integrations-routes-require-auth",),
     ("GET", "/integrations/triggers"): ("integrations-routes-require-auth",),
     ("GET", "/metrics"): ("prometheus-metrics-auth-and-shape",),
@@ -261,9 +278,9 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
     ("POST", "/contexts/{name}"): ("local-contexts-scoped",),
     ("GET", "/contexts/{name}"): ("local-contexts-scoped",),
     ("DELETE", "/contexts/{name}"): ("local-contexts-scoped",),
-    ("GET", "/contexts/{name}/files/{file_path}"): ("local-contexts-scoped",),
-    ("PUT", "/contexts/{name}/files/{file_path}"): ("local-contexts-scoped",),
-    ("DELETE", "/contexts/{name}/files/{file_path}"): ("local-contexts-scoped",),
+    ("GET", "/contexts/{name}/files/{file_path}"): ("local-contexts-scoped", "local-context-file-symlink-traversal"),
+    ("PUT", "/contexts/{name}/files/{file_path}"): ("local-contexts-scoped", "local-context-file-symlink-traversal"),
+    ("DELETE", "/contexts/{name}/files/{file_path}"): ("local-contexts-scoped", "local-context-file-symlink-traversal"),
     ("POST", "/contexts/{name}/upload"): ("local-contexts-scoped",),
     ("GET", "/runs"): ("local-runs-list-scoped",),
     ("POST", "/runs/clear"): ("runs-clear-requires-confirm", "local-runs-clear-scoped"),
@@ -301,20 +318,38 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
         "local-foreign-run-routes-404",
         "run-logs-no-sensitive-leak",
     ),
+    ("POST", "/runs/{run_id}/approve"): (
+        "run-approval-routes-require-auth",
+        "local-approval-routes-scoped",
+    ),
+    ("POST", "/runs/{run_id}/reject"): (
+        "run-approval-routes-require-auth",
+        "local-approval-routes-scoped",
+    ),
     ("POST", "/workers/{worker_id}/runs"): (
         "run-create-global-rate-limit",
         "run-create-body-limit-enforced",
         "local-foreign-custom-worker-routes-404",
         "local-run-file-input-foreign-sha-blocked",
         "local-run-create-per-worker-rate-limit",
+        "local-stock-worker-run-create-rate-limited",
     ),
     ("POST", "/workers/{worker_id}/runs/{run_id}/replay"): (
         "run-replay-shares-global-rate-limit",
         "local-foreign-custom-worker-routes-404",
         "local-run-replay-per-run-rate-limit",
+        "local-run-replay-cross-worker-same-user-404",
     ),
-    ("PATCH", "/workers/{worker_id}"): ("local-stock-worker-mutations-blocked", "local-foreign-custom-worker-routes-404"),
-    ("PUT", "/workers/{worker_id}"): ("local-stock-worker-mutations-blocked", "local-foreign-custom-worker-routes-404"),
+    ("PATCH", "/workers/{worker_id}"): (
+        "local-stock-worker-mutations-blocked",
+        "local-foreign-custom-worker-routes-404",
+        "local-worker-owner-mass-assignment-rejected",
+    ),
+    ("PUT", "/workers/{worker_id}"): (
+        "local-stock-worker-mutations-blocked",
+        "local-foreign-custom-worker-routes-404",
+        "local-worker-owner-mass-assignment-rejected",
+    ),
     ("PUT", "/workers/{worker_id}/files"): ("local-stock-worker-mutations-blocked", "local-foreign-custom-worker-routes-404"),
     ("GET", "/workers"): (
         "workers-require-auth",
@@ -326,6 +361,7 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
         "pydantic-version-redacted",
         "workers-oversized-body",
         "concurrent-create-conflict",
+        "local-worker-owner-mass-assignment-rejected",
     ),
     ("POST", "/workers/draft-and-create"): (
         "worker-write-routes-require-auth",
@@ -335,16 +371,30 @@ ROUTE_COVERAGE_HINTS: dict[tuple[str, str], tuple[str, ...]] = {
     ("POST", "/workers/reload"): (
         "worker-write-routes-require-auth",
         "local-reload-preserves-owner",
+        "local-reload-keeps-stock-workers-protected",
+    ),
+    ("POST", "/workers/{worker_id}/restore"): (
+        "worker-restore-auth-required",
+        "local-worker-restore-scoped",
     ),
     ("DELETE", "/workers/{worker_id}"): (
         "stock-worker-delete-blocked",
         "local-stock-worker-mutations-blocked",
         "local-foreign-worker-delete-404",
     ),
-    ("GET", "/workers/{worker_id}"): ("local-foreign-custom-worker-routes-404",),
+    ("GET", "/workers/{worker_id}"): (
+        "local-foreign-custom-worker-routes-404",
+        "stock-worker-detail-no-secrets",
+        "local-stock-worker-detail-no-secrets",
+    ),
+    ("GET", "/workers/{worker_id}/sample-input"): (
+        "sample-input-auth-and-shape",
+        "local-sample-input-scoped",
+    ),
     ("GET", "/workers/{worker_id}/runs/timeseries"): (
         "local-foreign-custom-worker-routes-404",
         "local-foreign-timeseries-no-data-leak",
+        "local-stock-timeseries-zero-safe",
     ),
     ("POST", "/workers/draft-from-prompt"): (
         "workers-oversized-body",
@@ -719,6 +769,8 @@ def _reset_local_api_modules() -> None:
     reset_exact = {
         "main",
         "auth",
+        "chat_service",
+        "contexts",
         "db",
         "files",
         "models",
@@ -789,6 +841,7 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
             )
             main_module = importlib.import_module("main")
             run_service_module = importlib.import_module("run_service")
+            chat_service_module = importlib.import_module("chat_service")
             run_service_module.register_sse_publisher(main_module._sse_publish)
             run_service_module.register_part_publisher(main_module._run_part_publish)
             from fastapi.testclient import TestClient
@@ -796,6 +849,9 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
             client = TestClient(main_module.app)
             main_module.start_run = lambda *args, **kwargs: None
             main_module._rate_buckets.clear()
+            chat_service_module.WORKSPACE_MD_PATH = tmp_dir / "workspace.md"
+            chat_service_module.WORKSPACE_MD_TEMPLATE = tmp_dir / "workspace.md.template"
+            chat_service_module.WORKSPACE_MD_TEMPLATE.write_text("# Workspace\n\nTemplate workspace.\n")
 
             user_a = _local_headers(local_secret, "user-a")
             user_b = _local_headers(local_secret, "user-b")
@@ -828,6 +884,45 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                     )
                 return run_id
 
+            def _insert_pending_approval_run(worker_id: str, *, user_id: str = "user-a") -> str:
+                run_id = f"run_{uuid.uuid4().hex[:12]}"
+                approval_id = f"approval_{uuid.uuid4().hex[:12]}"
+                now = main_module.now_iso()
+                decision_input = {"prospect_name": "Acme Corp"}
+                with main_module.get_db() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO runs
+                            (id, worker_id, status, trigger_source, runner, input_json, output_json,
+                             approval_status, created_at)
+                        VALUES (?, ?, 'pending_approval', 'manual', 'skill', ?, ?, 'pending', ?)
+                        """,
+                        (
+                            run_id,
+                            worker_id,
+                            json.dumps(decision_input),
+                            json.dumps({"text": "draft outbound"}),
+                            now,
+                        ),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO approvals
+                            (id, run_id, worker_id, status, label, preview, created_at,
+                             decision_input_json, owner_id)
+                        VALUES (?, ?, ?, 'pending', 'Approve output', 'preview', ?, ?, ?)
+                        """,
+                        (
+                            approval_id,
+                            run_id,
+                            worker_id,
+                            now,
+                            json.dumps(decision_input),
+                            user_id,
+                        ),
+                    )
+                return run_id
+
             def _stream_sse_body(path: str, headers: dict[str, str]) -> tuple[int, str]:
                 lines: list[str] = []
                 with client.stream("GET", path, headers=headers) as response:
@@ -853,6 +948,32 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                                 break
                     return response.status_code, "\n".join(lines)
 
+            def _stream_chat_body(
+                headers: dict[str, str],
+                *,
+                message: str,
+                conversation_id: str | None = None,
+            ) -> tuple[int, str, dict[str, Any] | None]:
+                payload = {"message": message}
+                if conversation_id:
+                    payload["conversation_id"] = conversation_id
+                lines: list[str] = []
+                finish_event: dict[str, Any] | None = None
+                with client.stream("POST", "/chat", headers=headers, json=payload) as response:
+                    for line in response.iter_lines():
+                        lines.append(line)
+                        if not line.startswith("data:"):
+                            continue
+                        payload_text = line[5:].strip()
+                        try:
+                            part = json.loads(payload_text)
+                        except Exception:
+                            continue
+                        if isinstance(part, dict) and part.get("type") == "finish":
+                            finish_event = part
+                            break
+                return response.status_code, "\n".join(lines), finish_event
+
             local_health = client.get("/health")
             record(
                 results,
@@ -860,6 +981,338 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                 local_health.status_code == 200,
                 f"status={local_health.status_code}",
                 {"status": local_health.status_code, "body": local_health.text},
+            )
+
+            workspace_empty = client.put("/workspace", headers=user_a, content=b"   ")
+            workspace_put = client.put(
+                "/workspace",
+                headers={**user_a, "content-type": "text/markdown; charset=utf-8"},
+                content=b"# Audit Workspace\n\nOwner-managed content.\n",
+            )
+            workspace_owner = client.get("/workspace", headers=user_a)
+            workspace_foreign = client.get("/workspace", headers=user_b)
+            record(
+                results,
+                "local-workspace-roundtrip",
+                workspace_empty.status_code == 400
+                and workspace_put.status_code == 204
+                and workspace_owner.status_code == 200
+                and "# Audit Workspace" in workspace_owner.text
+                and workspace_foreign.status_code == 200
+                and workspace_owner.text == workspace_foreign.text,
+                (
+                    f"empty={workspace_empty.status_code} put={workspace_put.status_code} "
+                    f"owner={workspace_owner.status_code} foreign={workspace_foreign.status_code}"
+                ),
+                {
+                    "empty": {"status": workspace_empty.status_code, "body": workspace_empty.text},
+                    "put": {"status": workspace_put.status_code, "body": workspace_put.text},
+                    "owner": {"status": workspace_owner.status_code, "body": workspace_owner.text},
+                    "foreign": {"status": workspace_foreign.status_code, "body": workspace_foreign.text},
+                },
+            )
+
+            async def _chat_stream_stub(
+                *,
+                message: str,
+                user_id: str,
+                conversation_id: str | None,
+                part_queue: Any,
+            ) -> None:
+                resolved_conversation_id = conversation_id
+                if resolved_conversation_id:
+                    existing = chat_service_module.get_conversation(resolved_conversation_id, user_id)
+                    if not existing:
+                        resolved_conversation_id = None
+                if not resolved_conversation_id:
+                    resolved_conversation_id = chat_service_module.create_conversation(
+                        user_id,
+                        title=message[:60],
+                    )
+                chat_service_module.insert_message(resolved_conversation_id, "user", message)
+                message_id = chat_service_module.insert_message(
+                    resolved_conversation_id,
+                    "assistant",
+                    f"stub reply: {message}",
+                )
+                await part_queue.put({"type": "text", "text": f"stub reply: {message}"})
+                await part_queue.put(
+                    {
+                        "type": "finish",
+                        "conversation_id": resolved_conversation_id,
+                        "message_id": message_id,
+                    }
+                )
+
+            chat_service_module.stream_chat = _chat_stream_stub
+            chat_empty_local = client.post("/chat", headers=user_a, json={"message": "   "})
+            chat_status, _chat_body, chat_finish = _stream_chat_body(user_a, message="audit chat scoped")
+            chat_conversation_id = str((chat_finish or {}).get("conversation_id") or "")
+            owner_conversations = client.get("/conversations", headers=user_a)
+            foreign_conversations = client.get("/conversations", headers=user_b)
+            owner_conversation_detail = (
+                client.get(f"/conversations/{chat_conversation_id}", headers=user_a)
+                if chat_conversation_id
+                else None
+            )
+            foreign_conversation_detail = (
+                client.get(f"/conversations/{chat_conversation_id}", headers=user_b)
+                if chat_conversation_id
+                else None
+            )
+            owner_conversation_ids = {
+                item.get("id")
+                for item in (owner_conversations.json() if owner_conversations.status_code == 200 else [])
+                if isinstance(item, dict)
+            }
+            foreign_conversation_ids = {
+                item.get("id")
+                for item in (foreign_conversations.json() if foreign_conversations.status_code == 200 else [])
+                if isinstance(item, dict)
+            }
+            owner_messages = []
+            if owner_conversation_detail is not None and owner_conversation_detail.status_code == 200:
+                owner_messages = owner_conversation_detail.json().get("messages") or []
+            record(
+                results,
+                "local-chat-conversations-scoped",
+                chat_empty_local.status_code == 400
+                and chat_status == 200
+                and bool(chat_conversation_id)
+                and owner_conversations.status_code == 200
+                and foreign_conversations.status_code == 200
+                and chat_conversation_id in owner_conversation_ids
+                and chat_conversation_id not in foreign_conversation_ids
+                and owner_conversation_detail is not None
+                and owner_conversation_detail.status_code == 200
+                and foreign_conversation_detail is not None
+                and foreign_conversation_detail.status_code == 404
+                and len(owner_messages) >= 2,
+                (
+                    f"empty={chat_empty_local.status_code} chat={chat_status} conv_id={chat_conversation_id!r} "
+                    f"owner={owner_conversation_detail.status_code if owner_conversation_detail else None} "
+                    f"foreign={foreign_conversation_detail.status_code if foreign_conversation_detail else None}"
+                ),
+                {
+                    "empty": {"status": chat_empty_local.status_code, "body": chat_empty_local.text},
+                    "chat_finish": chat_finish,
+                    "owner_list": {
+                        "status": owner_conversations.status_code,
+                        "ids": sorted(str(item) for item in owner_conversation_ids if item),
+                    },
+                    "foreign_list": {
+                        "status": foreign_conversations.status_code,
+                        "ids": sorted(str(item) for item in foreign_conversation_ids if item),
+                    },
+                    "owner_detail": (
+                        {
+                            "status": owner_conversation_detail.status_code,
+                            "messages": owner_messages,
+                        }
+                        if owner_conversation_detail is not None
+                        else {}
+                    ),
+                    "foreign_detail": (
+                        {
+                            "status": foreign_conversation_detail.status_code,
+                            "body": foreign_conversation_detail.text,
+                        }
+                        if foreign_conversation_detail is not None
+                        else {}
+                    ),
+                },
+            )
+
+            chat_oversized_local = client.post("/chat", headers=user_a, json={"message": "x" * 20001})
+            record(
+                results,
+                "local-chat-message-length-limit",
+                chat_oversized_local.status_code == 413
+                and "character limit" in chat_oversized_local.text.lower(),
+                f"status={chat_oversized_local.status_code}",
+                {"status": chat_oversized_local.status_code, "body": chat_oversized_local.text},
+            )
+
+            approval_created = client.post(
+                "/workers",
+                headers=user_a,
+                json=_local_worker_payload("approval-probe", title="Approval Probe"),
+            )
+            approve_run_id = ""
+            reject_run_id = ""
+            foreign_approve = owner_approve = approve_replay = None
+            foreign_reject = owner_reject = reject_replay = None
+            if approval_created.status_code == 200:
+                approve_run_id = _insert_pending_approval_run("approval-probe", user_id="user-a")
+                reject_run_id = _insert_pending_approval_run("approval-probe", user_id="user-a")
+                foreign_approve = client.post(f"/runs/{approve_run_id}/approve", headers=user_b)
+                owner_approve = client.post(f"/runs/{approve_run_id}/approve", headers=user_a)
+                approve_replay = client.post(f"/runs/{approve_run_id}/approve", headers=user_a)
+                foreign_reject = client.post(
+                    f"/runs/{reject_run_id}/reject",
+                    headers=user_b,
+                    json={"reason": "foreign"},
+                )
+                owner_reject = client.post(
+                    f"/runs/{reject_run_id}/reject",
+                    headers=user_a,
+                    json={"reason": "owner"},
+                )
+                reject_replay = client.post(
+                    f"/runs/{reject_run_id}/reject",
+                    headers=user_a,
+                    json={"reason": "repeat"},
+                )
+            record(
+                results,
+                "local-approval-routes-scoped",
+                approval_created.status_code == 200
+                and bool(approve_run_id)
+                and bool(reject_run_id)
+                and foreign_approve is not None
+                and foreign_approve.status_code == 404
+                and owner_approve is not None
+                and owner_approve.status_code == 200
+                and approve_replay is not None
+                and approve_replay.status_code == 409
+                and foreign_reject is not None
+                and foreign_reject.status_code == 404
+                and owner_reject is not None
+                and owner_reject.status_code == 200
+                and reject_replay is not None
+                and reject_replay.status_code == 409,
+                (
+                    f"create={approval_created.status_code} foreign_approve={foreign_approve.status_code if foreign_approve else None} "
+                    f"owner_approve={owner_approve.status_code if owner_approve else None} "
+                    f"approve_replay={approve_replay.status_code if approve_replay else None} "
+                    f"foreign_reject={foreign_reject.status_code if foreign_reject else None} "
+                    f"owner_reject={owner_reject.status_code if owner_reject else None} "
+                    f"reject_replay={reject_replay.status_code if reject_replay else None}"
+                ),
+                {
+                    "create": {"status": approval_created.status_code, "body": approval_created.text},
+                    "approve_run_id": approve_run_id,
+                    "reject_run_id": reject_run_id,
+                    "foreign_approve": (
+                        {"status": foreign_approve.status_code, "body": foreign_approve.text}
+                        if foreign_approve is not None
+                        else {}
+                    ),
+                    "owner_approve": (
+                        {"status": owner_approve.status_code, "body": owner_approve.text}
+                        if owner_approve is not None
+                        else {}
+                    ),
+                    "approve_replay": (
+                        {"status": approve_replay.status_code, "body": approve_replay.text}
+                        if approve_replay is not None
+                        else {}
+                    ),
+                    "foreign_reject": (
+                        {"status": foreign_reject.status_code, "body": foreign_reject.text}
+                        if foreign_reject is not None
+                        else {}
+                    ),
+                    "owner_reject": (
+                        {"status": owner_reject.status_code, "body": owner_reject.text}
+                        if owner_reject is not None
+                        else {}
+                    ),
+                    "reject_replay": (
+                        {"status": reject_replay.status_code, "body": reject_replay.text}
+                        if reject_replay is not None
+                        else {}
+                    ),
+                },
+            )
+
+            restore_created = client.post(
+                "/workers",
+                headers=user_a,
+                json=_local_worker_payload("restore-probe", title="Restore Probe"),
+            )
+            restore_foreign = restore_owner = restore_stock = None
+            restore_path = workers_dir / "restore-probe" / "worker.yml"
+            if restore_created.status_code == 200:
+                restore_path.write_text(restore_path.read_text() + "\narchived: true\narchive_reason: local-audit\n")
+                restore_foreign = client.post("/workers/restore-probe/restore", headers=user_b)
+                restore_owner = client.post("/workers/restore-probe/restore", headers=user_a)
+                restore_stock = client.post("/workers/research_brief/restore", headers=user_a)
+            record(
+                results,
+                "local-worker-restore-scoped",
+                restore_created.status_code == 200
+                and restore_foreign is not None
+                and restore_foreign.status_code == 404
+                and restore_owner is not None
+                and restore_owner.status_code == 200
+                and restore_stock is not None
+                and restore_stock.status_code == 403
+                and "archived: true" not in restore_path.read_text(),
+                (
+                    f"create={restore_created.status_code} foreign={restore_foreign.status_code if restore_foreign else None} "
+                    f"owner={restore_owner.status_code if restore_owner else None} "
+                    f"stock={restore_stock.status_code if restore_stock else None}"
+                ),
+                {
+                    "create": {"status": restore_created.status_code, "body": restore_created.text},
+                    "foreign": (
+                        {"status": restore_foreign.status_code, "body": restore_foreign.text}
+                        if restore_foreign is not None
+                        else {}
+                    ),
+                    "owner": (
+                        {"status": restore_owner.status_code, "body": restore_owner.text}
+                        if restore_owner is not None
+                        else {}
+                    ),
+                    "stock": (
+                        {"status": restore_stock.status_code, "body": restore_stock.text}
+                        if restore_stock is not None
+                        else {}
+                    ),
+                    "worker_yml": restore_path.read_text() if restore_path.exists() else "",
+                },
+            )
+
+            sample_created = client.post(
+                "/workers",
+                headers=user_a,
+                json=_local_worker_payload("sample-probe", title="Sample Probe"),
+            )
+            owner_sample = foreign_sample = None
+            if sample_created.status_code == 200:
+                sample_inputs_dir = tmp_dir / "docs" / "workers" / "inputs"
+                sample_inputs_dir.mkdir(parents=True, exist_ok=True)
+                (sample_inputs_dir / "sample-probe.json").write_text(json.dumps({"topic": "launch"}))
+                owner_sample = client.get("/workers/sample-probe/sample-input", headers=user_a)
+                foreign_sample = client.get("/workers/sample-probe/sample-input", headers=user_b)
+            record(
+                results,
+                "local-sample-input-scoped",
+                sample_created.status_code == 200
+                and owner_sample is not None
+                and owner_sample.status_code == 200
+                and owner_sample.json() == {"topic": "launch"}
+                and foreign_sample is not None
+                and foreign_sample.status_code == 404,
+                (
+                    f"create={sample_created.status_code} owner={owner_sample.status_code if owner_sample else None} "
+                    f"foreign={foreign_sample.status_code if foreign_sample else None}"
+                ),
+                {
+                    "create": {"status": sample_created.status_code, "body": sample_created.text},
+                    "owner": (
+                        {"status": owner_sample.status_code, "body": owner_sample.text}
+                        if owner_sample is not None
+                        else {}
+                    ),
+                    "foreign": (
+                        {"status": foreign_sample.status_code, "body": foreign_sample.text}
+                        if foreign_sample is not None
+                        else {}
+                    ),
+                },
             )
 
             draft_capture: dict[str, Any] = {}
@@ -990,6 +1443,72 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                 },
             )
 
+            stock_detail_local = client.get("/workers/research_brief", headers=user_a)
+            stock_detail_local_ok = False
+            stock_detail_local_body: dict[str, Any] = {}
+            if stock_detail_local.status_code == 200:
+                try:
+                    parsed_stock_detail_local = stock_detail_local.json()
+                except Exception:
+                    parsed_stock_detail_local = None
+                if isinstance(parsed_stock_detail_local, dict):
+                    config_keys = set((parsed_stock_detail_local.get("config") or {}).keys())
+                    file_paths = [
+                        str(item.get("path"))
+                        for item in (parsed_stock_detail_local.get("files") or [])
+                        if isinstance(item, dict)
+                    ]
+                    stock_detail_local_body = {
+                        "config_keys": sorted(config_keys),
+                        "file_paths": file_paths[:20],
+                        "new_webhook_secret": parsed_stock_detail_local.get("new_webhook_secret"),
+                    }
+                    stock_detail_local_ok = (
+                        parsed_stock_detail_local.get("new_webhook_secret") in (None, "")
+                        and not (config_keys & {"env", "webhook_secret", "source", "bundle_url"})
+                        and ".env" not in file_paths
+                    )
+            record(
+                results,
+                "local-stock-worker-detail-no-secrets",
+                stock_detail_local_ok,
+                f"status={stock_detail_local.status_code}",
+                stock_detail_local_body or {"status": stock_detail_local.status_code, "body": stock_detail_local.text},
+            )
+
+            stock_timeseries_owner = client.get("/workers/research_brief/runs/timeseries", headers=user_a)
+            stock_timeseries_foreign = client.get("/workers/research_brief/runs/timeseries", headers=user_b)
+            owner_totals: list[int] = []
+            foreign_totals: list[int] = []
+            if stock_timeseries_owner.status_code == 200:
+                owner_totals = [
+                    int(item.get("total") or 0)
+                    for item in stock_timeseries_owner.json()
+                    if isinstance(item, dict)
+                ]
+            if stock_timeseries_foreign.status_code == 200:
+                foreign_totals = [
+                    int(item.get("total") or 0)
+                    for item in stock_timeseries_foreign.json()
+                    if isinstance(item, dict)
+                ]
+            record(
+                results,
+                "local-stock-timeseries-zero-safe",
+                stock_timeseries_owner.status_code == 200
+                and stock_timeseries_foreign.status_code == 200
+                and owner_totals == foreign_totals
+                and all(total == 0 for total in owner_totals),
+                (
+                    f"owner={stock_timeseries_owner.status_code} foreign={stock_timeseries_foreign.status_code} "
+                    f"owner_totals={owner_totals[:5]} foreign_totals={foreign_totals[:5]}"
+                ),
+                {
+                    "owner": {"status": stock_timeseries_owner.status_code, "body": stock_timeseries_owner.text},
+                    "foreign": {"status": stock_timeseries_foreign.status_code, "body": stock_timeseries_foreign.text},
+                },
+            )
+
             stock_payload = _local_worker_payload("linkedin-post-engagements", title="Probe Replacement")
             stock_files_payload = {
                 "files": [
@@ -1050,6 +1569,65 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                     "create": {"status": created.status_code, "body": created.text},
                     "owner_list": {"status": list_a.status_code, "ids": sorted(owner_ids)},
                     "foreign_list": {"status": list_b.status_code, "ids": sorted(foreign_ids)},
+                },
+            )
+
+            owner_mass_create = client.post(
+                "/workers",
+                headers=user_a,
+                json={**_local_worker_payload("mass-owner-create", title="Mass Owner Create"), "owner_id": "user-b"},
+            )
+            owner_mass_created = client.post(
+                "/workers",
+                headers=user_a,
+                json=_local_worker_payload("mass-owner-update", title="Mass Owner Update"),
+            )
+            owner_mass_patch = client.patch(
+                "/workers/mass-owner-update",
+                headers=user_a,
+                json={"trigger_type": "manual", "owner_id": "user-b"},
+            )
+            owner_mass_put = client.put(
+                "/workers/mass-owner-update",
+                headers=user_a,
+                json={**_local_worker_payload("mass-owner-update", title="Mass Owner Update"), "owner_id": "user-b"},
+            )
+            owner_mass_foreign = client.get("/workers/mass-owner-update", headers=user_b)
+            owner_mass_row = None
+            owner_mass_missing = None
+            if owner_mass_created.status_code == 200:
+                with main_module.get_db() as conn:
+                    owner_mass_row = conn.execute(
+                        "SELECT owner_id FROM workers WHERE id = ?",
+                        ("mass-owner-update",),
+                    ).fetchone()
+                    owner_mass_missing = conn.execute(
+                        "SELECT owner_id FROM workers WHERE id = ?",
+                        ("mass-owner-create",),
+                    ).fetchone()
+            record(
+                results,
+                "local-worker-owner-mass-assignment-rejected",
+                owner_mass_create.status_code == 422
+                and owner_mass_created.status_code == 200
+                and owner_mass_patch.status_code == 422
+                and owner_mass_put.status_code == 422
+                and owner_mass_foreign.status_code == 404
+                and owner_mass_row is not None
+                and owner_mass_row["owner_id"] == "user-a"
+                and owner_mass_missing is None,
+                (
+                    f"create_extra={owner_mass_create.status_code} create_clean={owner_mass_created.status_code} "
+                    f"patch_extra={owner_mass_patch.status_code} put_extra={owner_mass_put.status_code} "
+                    f"foreign={owner_mass_foreign.status_code}"
+                ),
+                {
+                    "create_extra": {"status": owner_mass_create.status_code, "body": owner_mass_create.text},
+                    "create_clean": {"status": owner_mass_created.status_code, "body": owner_mass_created.text},
+                    "patch_extra": {"status": owner_mass_patch.status_code, "body": owner_mass_patch.text},
+                    "put_extra": {"status": owner_mass_put.status_code, "body": owner_mass_put.text},
+                    "foreign_detail": {"status": owner_mass_foreign.status_code, "body": owner_mass_foreign.text},
+                    "owner_id": owner_mass_row["owner_id"] if owner_mass_row is not None else None,
                 },
             )
 
@@ -1315,6 +1893,29 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                 },
             )
 
+            stock_detail_after_reload = client.get("/workers/research_brief", headers=user_a)
+            stock_patch_after_reload = client.patch(
+                "/workers/research_brief",
+                headers=user_a,
+                json={"trigger_type": "manual"},
+            )
+            record(
+                results,
+                "local-reload-keeps-stock-workers-protected",
+                reload_resp.status_code == 200
+                and stock_detail_after_reload.status_code == 200
+                and stock_patch_after_reload.status_code == 403,
+                (
+                    f"reload={reload_resp.status_code} detail={stock_detail_after_reload.status_code} "
+                    f"patch={stock_patch_after_reload.status_code}"
+                ),
+                {
+                    "reload": {"status": reload_resp.status_code, "body": reload_resp.text},
+                    "detail": {"status": stock_detail_after_reload.status_code, "body": stock_detail_after_reload.text},
+                    "patch": {"status": stock_patch_after_reload.status_code, "body": stock_patch_after_reload.text},
+                },
+            )
+
             conn_a = _local_insert_connection(main_module, user_id="user-a", app_name="gmail")
             _local_insert_connection(main_module, user_id="user-b", app_name="slack")
             list_conn_a = client.get("/connections", headers=user_a)
@@ -1526,6 +2127,69 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                     "foreign_delete": {"status": context_foreign_delete.status_code, "body": context_foreign_delete.text},
                     "foreign_worker": {"status": context_foreign_worker.status_code, "body": context_foreign_worker.text},
                     "owner_delete": {"status": context_owner_delete.status_code, "body": context_owner_delete.text},
+                },
+            )
+
+            symlink_context = "symlink-context"
+            symlink_context_create = client.post(
+                f"/contexts/{symlink_context}",
+                headers=user_a,
+                json={"writeable": True},
+            )
+            outside_target = tmp_dir / "outside-context-target.txt"
+            outside_target.write_text("outside")
+            symlink_path = contexts_dir / symlink_context / "escape.txt"
+            symlink_get = symlink_put = symlink_delete = None
+            if symlink_context_create.status_code == 200:
+                symlink_path = main_module.context_dir(symlink_context) / "escape.txt"
+                os.symlink(outside_target, symlink_path)
+                symlink_get = client.get(
+                    f"/contexts/{symlink_context}/files/escape.txt",
+                    headers=user_a,
+                )
+                symlink_put = client.put(
+                    f"/contexts/{symlink_context}/files/escape.txt",
+                    headers=user_a,
+                    content=b"hijack",
+                )
+                symlink_delete = client.delete(
+                    f"/contexts/{symlink_context}/files/escape.txt",
+                    headers=user_a,
+                )
+            record(
+                results,
+                "local-context-file-symlink-traversal",
+                symlink_context_create.status_code == 200
+                and symlink_get is not None
+                and symlink_put is not None
+                and symlink_delete is not None
+                and symlink_get.status_code == 400
+                and symlink_put.status_code == 400
+                and symlink_delete.status_code == 400
+                and outside_target.read_text() == "outside",
+                (
+                    f"create={symlink_context_create.status_code} get={symlink_get.status_code if symlink_get is not None else None} "
+                    f"put={symlink_put.status_code if symlink_put is not None else None} "
+                    f"delete={symlink_delete.status_code if symlink_delete is not None else None}"
+                ),
+                {
+                    "create": {"status": symlink_context_create.status_code, "body": symlink_context_create.text},
+                    "get": (
+                        {"status": symlink_get.status_code, "body": symlink_get.text}
+                        if symlink_get is not None
+                        else {}
+                    ),
+                    "put": (
+                        {"status": symlink_put.status_code, "body": symlink_put.text}
+                        if symlink_put is not None
+                        else {}
+                    ),
+                    "delete": (
+                        {"status": symlink_delete.status_code, "body": symlink_delete.text}
+                        if symlink_delete is not None
+                        else {}
+                    ),
+                    "outside": outside_target.read_text(),
                 },
             )
 
@@ -1873,6 +2537,25 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
 
                 with main_module.get_db() as conn:
                     conn.execute("DELETE FROM run_create_rate_limits")
+                stock_inputs = json.loads((repo / "docs" / "workers" / "inputs" / "research_brief.json").read_text())
+                stock_run_statuses = [
+                    client.post(
+                        "/workers/research_brief/runs",
+                        headers=user_a,
+                        json={"inputs": stock_inputs, "trigger_source": "audit"},
+                    ).status_code
+                    for _ in range(3)
+                ]
+                record(
+                    results,
+                    "local-stock-worker-run-create-rate-limited",
+                    stock_run_statuses == [200, 200, 429],
+                    f"statuses={stock_run_statuses}",
+                    {"statuses": stock_run_statuses},
+                )
+
+                with main_module.get_db() as conn:
+                    conn.execute("DELETE FROM run_create_rate_limits")
                 os.environ["WORKEROS_RUN_CREATE_PER_WORKER_RATE_LIMIT"] = "10"
                 replay_worker = "quota-replay-worker"
                 replay_create = client.post(
@@ -1911,6 +2594,79 @@ def run_local_probe_matrix(repo: Path) -> list[dict[str, Any]]:
                         "create": {"status": replay_create.status_code, "body": replay_create.text},
                         "seed": {"status": replay_seed.status_code, "body": replay_seed.text},
                         "replay_statuses": replay_statuses,
+                    },
+                )
+
+                with main_module.get_db() as conn:
+                    conn.execute("DELETE FROM run_create_rate_limits")
+                replay_cross_a = client.post(
+                    "/workers",
+                    headers=user_a,
+                    json=_local_worker_payload("cross-replay-a", title="Cross Replay A"),
+                )
+                replay_cross_b = client.post(
+                    "/workers",
+                    headers=user_a,
+                    json=_local_worker_payload("cross-replay-b", title="Cross Replay B"),
+                )
+                replay_cross_seed = client.post(
+                    "/workers/cross-replay-a/runs",
+                    headers=user_a,
+                    json={"inputs": {}, "trigger_source": "audit"},
+                )
+                replay_cross_run_id = ""
+                if replay_cross_seed.status_code == 200:
+                    try:
+                        replay_cross_run_id = str(replay_cross_seed.json().get("run_id") or "")
+                    except Exception:
+                        replay_cross_run_id = ""
+                replay_cross_wrong = (
+                    client.post(
+                        f"/workers/cross-replay-b/runs/{replay_cross_run_id}/replay",
+                        headers=user_a,
+                    )
+                    if replay_cross_run_id
+                    else None
+                )
+                replay_cross_right = (
+                    client.post(
+                        f"/workers/cross-replay-a/runs/{replay_cross_run_id}/replay",
+                        headers=user_a,
+                    )
+                    if replay_cross_run_id
+                    else None
+                )
+                record(
+                    results,
+                    "local-run-replay-cross-worker-same-user-404",
+                    replay_cross_a.status_code == 200
+                    and replay_cross_b.status_code == 200
+                    and replay_cross_seed.status_code == 200
+                    and bool(replay_cross_run_id)
+                    and replay_cross_wrong is not None
+                    and replay_cross_wrong.status_code == 404
+                    and replay_cross_right is not None
+                    and replay_cross_right.status_code == 200,
+                    (
+                        f"create={[replay_cross_a.status_code, replay_cross_b.status_code]} "
+                        f"seed={replay_cross_seed.status_code} "
+                        f"wrong={replay_cross_wrong.status_code if replay_cross_wrong is not None else None} "
+                        f"right={replay_cross_right.status_code if replay_cross_right is not None else None}"
+                    ),
+                    {
+                        "create_a": {"status": replay_cross_a.status_code, "body": replay_cross_a.text},
+                        "create_b": {"status": replay_cross_b.status_code, "body": replay_cross_b.text},
+                        "seed": {"status": replay_cross_seed.status_code, "body": replay_cross_seed.text},
+                        "wrong": (
+                            {"status": replay_cross_wrong.status_code, "body": replay_cross_wrong.text}
+                            if replay_cross_wrong is not None
+                            else {}
+                        ),
+                        "right": (
+                            {"status": replay_cross_right.status_code, "body": replay_cross_right.text}
+                            if replay_cross_right is not None
+                            else {}
+                        ),
                     },
                 )
             finally:
@@ -2051,6 +2807,107 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
         health["status"] in (200, 403) and healthz["status"] in (200, 403),
         f"health={health['status']} healthz={healthz['status']}",
         {"health": health, "healthz": healthz},
+    )
+
+    chat_noauth = request(api, "POST", "/chat", json={"message": "audit chat"})
+    record(
+        results,
+        "chat-auth-required",
+        chat_noauth["status"] in (401, 403),
+        f"status={chat_noauth['status']}",
+        chat_noauth,
+    )
+
+    chat_empty = request(api, "POST", "/chat", secret=secret, json={"message": "   "})
+    record(
+        results,
+        "chat-empty-message-rejected",
+        chat_empty["status"] == 400 and "message is required" in chat_empty["body"].lower(),
+        f"status={chat_empty['status']}",
+        chat_empty,
+    )
+
+    chat_oversized = request(api, "POST", "/chat", secret=secret, json={"message": "x" * 20001})
+    record(
+        results,
+        "chat-message-length-limit",
+        chat_oversized["status"] == 413 and "character limit" in chat_oversized["body"].lower(),
+        f"status={chat_oversized['status']}",
+        chat_oversized,
+    )
+
+    workspace_noauth = {
+        "get": request(api, "GET", "/workspace"),
+        "put": request(api, "PUT", "/workspace", data=b"audit workspace"),
+    }
+    record(
+        results,
+        "workspace-auth-required",
+        all(item["status"] in (401, 403) for item in workspace_noauth.values()),
+        f"get={workspace_noauth['get']['status']} put={workspace_noauth['put']['status']}",
+        workspace_noauth,
+    )
+
+    conversations_noauth = {
+        "list": request(api, "GET", "/conversations"),
+        "detail": request(api, "GET", "/conversations/conv_audit_probe"),
+    }
+    record(
+        results,
+        "conversations-auth-required",
+        all(item["status"] in (401, 403) for item in conversations_noauth.values()),
+        f"list={conversations_noauth['list']['status']} detail={conversations_noauth['detail']['status']}",
+        conversations_noauth,
+    )
+
+    approval_noauth = {
+        "approve": request(api, "POST", "/runs/run_audit_approve/approve"),
+        "reject": request(
+            api,
+            "POST",
+            "/runs/run_audit_approve/reject",
+            json={"reason": "audit"},
+        ),
+    }
+    record(
+        results,
+        "run-approval-routes-require-auth",
+        all(item["status"] in (401, 403) for item in approval_noauth.values()),
+        f"approve={approval_noauth['approve']['status']} reject={approval_noauth['reject']['status']}",
+        approval_noauth,
+    )
+
+    restore_noauth = request(api, "POST", "/workers/research_brief/restore")
+    record(
+        results,
+        "worker-restore-auth-required",
+        restore_noauth["status"] in (401, 403),
+        f"status={restore_noauth['status']}",
+        restore_noauth,
+    )
+
+    sample_input_noauth = request(api, "GET", "/workers/research_brief/sample-input")
+    sample_input_auth = request(api, "GET", "/workers/research_brief/sample-input", secret=secret)
+    sample_input_value: Any = None
+    sample_input_ok = sample_input_noauth["status"] in (401, 403)
+    if sample_input_auth["status"] == 200:
+        try:
+            sample_input_value = json.loads(sample_input_auth["body"])
+        except Exception:
+            sample_input_ok = False
+        else:
+            sample_input_ok = sample_input_ok and isinstance(sample_input_value, dict) and bool(sample_input_value)
+    else:
+        sample_input_ok = False
+    record(
+        results,
+        "sample-input-auth-and-shape",
+        sample_input_ok,
+        f"noauth={sample_input_noauth['status']} auth={sample_input_auth['status']}",
+        {
+            "noauth": sample_input_noauth,
+            "auth": sample_input_auth if sample_input_value is None else {**sample_input_auth, "body": json.dumps(sample_input_value, indent=2)},
+        },
     )
 
     no_auth = request(api, "GET", "/workers")
@@ -2286,11 +3143,16 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
     for _ in range(5):
         r = request(api, "POST", "/system/sweep-connections", secret=secret)
         sweep_statuses.append(r["status"])
-    sweep_ok = (
-        sweep_statuses
-        and sweep_statuses[0] in (200, 429)
-        and all(status == 429 for status in sweep_statuses[1:])
-    )
+    sweep_ok = False
+    if sweep_statuses:
+        first_success = next((idx for idx, status in enumerate(sweep_statuses) if status == 200), None)
+        if first_success is None:
+            sweep_ok = all(status == 429 for status in sweep_statuses)
+        else:
+            sweep_ok = (
+                all(status == 429 for status in sweep_statuses[:first_success])
+                and all(status == 429 for status in sweep_statuses[first_success + 1 :])
+            )
     record(
         results,
         "sweep-connections-cooldown",
@@ -2312,6 +3174,41 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
         workers["status"] == 200 and "csv_enricher" in worker_ids,
         f"status={workers['status']} count={len(worker_ids)} csv_enricher={'csv_enricher' in worker_ids}",
         {**workers, "body": json.dumps({"ids": worker_ids}, indent=2)},
+    )
+
+    stock_detail = request(api, "GET", "/workers/research_brief", secret=secret)
+    stock_detail_ok = False
+    stock_detail_summary: dict[str, Any] = {}
+    if stock_detail["status"] == 200:
+        try:
+            parsed_stock_detail = json.loads(stock_detail["body"])
+        except Exception:
+            parsed_stock_detail = None
+        if isinstance(parsed_stock_detail, dict):
+            config_keys = set((parsed_stock_detail.get("config") or {}).keys())
+            file_paths = [
+                str(item.get("path"))
+                for item in (parsed_stock_detail.get("files") or [])
+                if isinstance(item, dict)
+            ]
+            forbidden_keys = {"env", "webhook_secret", "source", "bundle_url"}
+            stock_detail_summary = {
+                "config_keys": sorted(config_keys),
+                "file_paths": file_paths[:20],
+                "new_webhook_secret": parsed_stock_detail.get("new_webhook_secret"),
+            }
+            stock_detail_ok = (
+                parsed_stock_detail.get("new_webhook_secret") in (None, "")
+                and not (config_keys & forbidden_keys)
+                and ".env" not in file_paths
+                and all(token not in stock_detail["body"] for token in ("sk-", "whsec_", "BEGIN PRIVATE KEY"))
+            )
+    record(
+        results,
+        "stock-worker-detail-no-secrets",
+        stock_detail_ok,
+        f"status={stock_detail['status']}",
+        stock_detail if not stock_detail_summary else {**stock_detail, "body": json.dumps(stock_detail_summary, indent=2)},
     )
 
     metrics = request(api, "GET", "/system/metrics", secret=secret)
