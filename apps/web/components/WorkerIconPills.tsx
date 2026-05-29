@@ -175,7 +175,7 @@ export function WorkerIconPills({
   const overflow = entries.length - visible.length;
 
   return (
-    <div className={cn("flex items-center", SIZE[size].gap, className)}>
+    <div className={cn("flex flex-wrap items-center", SIZE[size].gap, className)}>
       {visible.map((e) => (
         <Pill key={e.key} size={size} title={e.title}>
           {e.kind === "brand" ? (

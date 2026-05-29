@@ -160,14 +160,15 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
   // pane wrapped in a Card with a duplicated path header. Now: wider rail
   // (256px), no Card wrapper, path shown once as a quiet header above content.
   return (
-    <div className="flex gap-6 items-start max-w-5xl">
+    <div className="flex flex-col gap-4 lg:flex-row lg:gap-6 lg:items-start max-w-5xl">
       {/* FIX 2 (Federico 2026-05-29): the file rail must stay visible while a
           long file (e.g. a big run.py) scrolls. Sticky to the viewport with a
           top offset that clears the sticky mobile header (h-14 ≈ 56px); on
           desktop there is no top header over <main>, so it simply pins 72px
           from the top while the document scrolls. self-start lets the sticky
-          element detach from the flex stretch. */}
-      <div className="w-64 shrink-0 self-start sticky top-[4.5rem] border border-line rounded-[var(--radius-card)] overflow-hidden">
+          element detach from the flex stretch.
+          Mobile (< lg): full-width rail, no sticky (stacks above the code pane). */}
+      <div className="w-full lg:w-64 shrink-0 lg:self-start lg:sticky lg:top-[4.5rem] border border-line rounded-[var(--radius-card)] overflow-hidden">
         <div className="px-3 py-2 border-b border-line">
           <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
             <FolderOpen className="w-3.5 h-3.5" />
@@ -337,7 +338,10 @@ function FilesEditorEdit({
         </CardHeader>
         <CardContent className="p-0">
           {selectedFile ? (
-            <div className="rounded-b-[var(--radius-card)] overflow-hidden" style={{ minHeight: 640 }}>
+            <div
+              className="rounded-b-[var(--radius-card)] overflow-hidden bg-[var(--bg-2)] dark:bg-[#1e1e2e]"
+              style={{ minHeight: 640 }}
+            >
               <Editor
                 key={selectedFile.path}
                 value={selectedFile.content}
@@ -350,7 +354,8 @@ function FilesEditorEdit({
                   fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
                   fontSize: 12,
                   minHeight: 640,
-                  background: "#fff",
+                  background: "transparent",
+                  color: "var(--ink)",
                   outline: "none",
                   lineHeight: "1.6",
                 }}
