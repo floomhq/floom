@@ -695,7 +695,8 @@ function WorkerCard({
 }
 
 function CardStatusPill({ status }: { status: string }) {
-  if (status === "healthy" || !status) return null;
+  // P2: "ready" (never-run) is treated exactly like "healthy" — no pill.
+  if (status === "healthy" || status === "ready" || !status) return null;
   const conf: Record<string, { label: string; classes: string }> = {
     needs_attention: {
       label: "Needs attention",
