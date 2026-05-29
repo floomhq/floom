@@ -164,6 +164,7 @@ export interface RunDetail {
   completed_at?: string;
   duration_ms?: number;
   created_at?: string;
+  queue_position?: number;
 }
 
 export interface RecentStats {

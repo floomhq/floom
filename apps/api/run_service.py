@@ -13,6 +13,42 @@ from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 from datetime import datetime, timezone
 
+# ---------------------------------------------------------------------------
+# Concurrency gate — E2B has a hard cap of 20 concurrent sandboxes.
+# We cap at WORKEROS_MAX_CONCURRENT_RUNS (default 18) to leave headroom for
+# the workspace-agent /chat lane and manual smokes.
+# ---------------------------------------------------------------------------
+
+def _max_concurrent_runs() -> int:
+    try:
+        return max(1, int(os.environ.get("WORKEROS_MAX_CONCURRENT_RUNS", "18")))
+    except ValueError:
+        return 18
+
+# Semaphore is initialised lazily on first use so that tests can override the
+# env-var before importing this module.
+_execution_semaphore: Optional[threading.Semaphore] = None
+_semaphore_lock = threading.Lock()
+
+
+def _get_semaphore() -> threading.Semaphore:
+    global _execution_semaphore
+    if _execution_semaphore is None:
+        with _semaphore_lock:
+            if _execution_semaphore is None:
+                _execution_semaphore = threading.Semaphore(_max_concurrent_runs())
+    return _execution_semaphore
+
+
+def _semaphore_available_count() -> int:
+    """Return an approximate count of free execution slots (best-effort)."""
+    sem = _get_semaphore()
+    # Semaphore._value is CPython internal but stable across 3.8-3.12.
+    try:
+        return max(0, sem._value)  # type: ignore[attr-defined]
+    except AttributeError:
+        return -1
+
 from dotenv import load_dotenv
 
 from db.factory import Repositories, get_repositories
@@ -696,6 +732,122 @@ def was_shutdown_cancelled(run_id: str) -> bool:
         return run_id in _shutdown_cancelled_runs
 
 
+# ---------------------------------------------------------------------------
+# Queue drain loop
+# ---------------------------------------------------------------------------
+# The drain loop is a background daemon thread that wakes on a threading.Event,
+# polls the DB for queued runs (FIFO), and dispatches each one by acquiring the
+# execution semaphore.  This means run-create is always instant (returns
+# "queued") and the concurrency gate sits at the sandbox spawn boundary.
+
+_drain_event = threading.Event()
+_drain_stop = threading.Event()
+_drain_thread: Optional[threading.Thread] = None
+_drain_lock = threading.Lock()
+
+_DRAIN_POLL_INTERVAL = 0.5  # seconds between polls when runs are queued
+
+
+def _wake_drain() -> None:
+    """Signal the drain loop that new queued work may be available."""
+    _drain_event.set()
+
+
+def _drain_loop() -> None:
+    """Background thread: drain the queued-runs table as execution slots free up."""
+    logger.info("Queue drain loop started (max_concurrent=%d)", _max_concurrent_runs())
+    while not _drain_stop.is_set():
+        # Wait for a wake signal or the poll interval, then clear the event.
+        _drain_event.wait(timeout=_DRAIN_POLL_INTERVAL)
+        _drain_event.clear()
+        if _drain_stop.is_set():
+            break
+        _drain_one_batch()
+
+
+def _drain_one_batch() -> None:
+    """Pick up all drainable queued runs (up to semaphore count) and dispatch them."""
+    try:
+        repos_obj = get_repositories()
+        queued = repos_obj.runs.get_queued(limit=50)
+    except Exception as exc:
+        logger.warning("Queue drain: DB poll failed: %s", exc)
+        return
+
+    for row in queued:
+        if _drain_stop.is_set():
+            break
+        run_id = row["run_id"]
+        worker_id = row["worker_id"]
+        user_id = row["user_id"]
+        try:
+            input_json = row.get("input_json") or "{}"
+            inputs = json.loads(input_json) if isinstance(input_json, str) else input_json
+        except Exception:
+            inputs = {}
+
+        # Try to grab a slot non-blockingly; if none is free, stop for now.
+        # The drain loop will retry on the next wake (semaphore release calls
+        # _wake_drain via the run-thread finally block).
+        acquired = _get_semaphore().acquire(blocking=False)
+        if not acquired:
+            # No free slots right now — stop this batch; wake will come when
+            # a run completes (_run_thread_entry calls _wake_drain on exit).
+            logger.debug("Queue drain: no free execution slots, pausing")
+            break
+
+        # Slot acquired — dispatch the run in a thread.
+        # The semaphore is released inside _run_thread_entry_with_semaphore.
+        thread = threading.Thread(
+            target=_run_thread_entry_with_semaphore,
+            args=(run_id, worker_id, inputs, user_id, None),
+            daemon=True,
+            name=f"workeros-run-{run_id}",
+        )
+        _register_active_run(_ActiveRun(run_id=run_id, worker_id=worker_id, user_id=user_id, thread=thread))
+        thread.start()
+        logger.info("Queue drain: dispatched run %s for worker %s", run_id, worker_id)
+
+
+def start_drain_loop() -> None:
+    """Start the background queue drain thread (idempotent)."""
+    global _drain_thread
+    with _drain_lock:
+        if _drain_thread is not None and _drain_thread.is_alive():
+            return
+        _drain_stop.clear()
+        _drain_thread = threading.Thread(
+            target=_drain_loop,
+            daemon=True,
+            name="workeros-queue-drain",
+        )
+        _drain_thread.start()
+
+
+def stop_drain_loop(timeout: float = 5.0) -> None:
+    """Signal the drain loop to stop and wait for it to exit."""
+    global _drain_thread
+    _drain_stop.set()
+    _wake_drain()
+    with _drain_lock:
+        t = _drain_thread
+    if t is not None:
+        t.join(timeout=timeout)
+
+
+def queued_run_position(run_id: str) -> int:
+    """Return 1-based queue position of a queued run, or 0 if not found."""
+    try:
+        repos_obj = get_repositories()
+        queued = repos_obj.runs.get_queued(limit=200)
+        for i, row in enumerate(queued, start=1):
+            if row["run_id"] == run_id:
+                return i
+    except Exception:
+        pass
+    return 0
+
+
 def request_active_run_shutdown(
     *,
     repos: Repositories | None = None,
@@ -764,6 +916,9 @@ def fail_interrupted_runs_on_startup(
     Worker execution currently runs in process-local threads. A service restart
     terminates those threads, so any row that is still `running` at the next
     startup no longer has an executor attached.
+
+    Runs in status=`queued` are NOT failed here — they are re-enqueued by
+    re_enqueue_queued_runs_on_startup so they resume draining after boot.
     """
     repos_obj = _repos(repos)
     failed = repos_obj.runs.fail_running(
@@ -786,6 +941,23 @@ def fail_interrupted_runs_on_startup(
     if failed:
         logger.warning("Marked %d interrupted run(s) as failed on startup", len(failed))
     return len(failed)
+
+
+def re_enqueue_queued_runs_on_startup(
+    *,
+    repos: Repositories | None = None,
+) -> int:
+    """Wake the queue drain loop for runs left in status=queued by a prior process.
+
+    Queued runs already have the right DB state; we just need to ensure the
+    drain loop wakes and picks them up.  Returns the count of queued runs found.
+    """
+    repos_obj = _repos(repos)
+    count = repos_obj.runs.count_queued()
+    if count:
+        logger.info("Found %d queued run(s) on startup — drain loop will pick them up", count)
+        _wake_drain()
+    return count
 
 
 def execute_run(
@@ -968,14 +1140,13 @@ def start_run(
     user_id: str | None = None,
     repos: Repositories | None = None,
 ) -> None:
-    thread = threading.Thread(
-        target=_run_thread_entry,
-        args=(run_id, worker_id, inputs, user_id, repos),
-        daemon=True,
-        name=f"workeros-run-{run_id}",
-    )
-    _register_active_run(_ActiveRun(run_id=run_id, worker_id=worker_id, user_id=user_id, thread=thread))
-    thread.start()
+    """Enqueue a run for execution.
+
+    The run row already has status=queued (set by create_run).  We wake the
+    drain loop which will acquire an execution semaphore slot and dispatch the
+    run as soon as capacity is available.  This call is always instant.
+    """
+    _wake_drain()
 
 
 def _run_thread_entry(
@@ -989,3 +1160,50 @@ def _run_thread_entry(
         execute_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
     finally:
         _unregister_active_run(run_id)
+
+
+def _run_thread_entry_with_semaphore(
+    run_id: str,
+    worker_id: str,
+    inputs: Dict[str, Any],
+    user_id: str | None = None,
+    repos: Repositories | None = None,
+) -> None:
+    """Thread entry point used by the drain loop.
+
+    The semaphore is already acquired before this thread is created.  We
+    release it in the finally block so the next queued run can be dispatched.
+    """
+    try:
+        # Check for pre-dispatch cancellation (cancelled while queued).
+        repos_obj = _repos(repos)
+        run_row = repos_obj.runs.get_any(run_id=run_id)
+        if run_row and run_row.get("cancel_requested"):
+            owner_id = user_id or run_row.get("user_id")
+            cancelled_at = _now_iso()
+            cancel_error = "Run was cancelled before execution started."
+            logger.info("Run %s cancelled before dispatch — skipping execution", run_id)
+            try:
+                update_run_status(
+                    run_id,
+                    RunStatus.FAILED.value,
+                    error=cancel_error,
+                    error_code="cancelled_before_start",
+                    user_id=owner_id,
+                    repos=repos_obj,
+                )
+                _publish_sse(run_id, {
+                    "type": "status",
+                    "run_id": run_id,
+                    "status": RunStatus.FAILED.value,
+                    "error": cancel_error,
+                })
+            except Exception as exc:
+                logger.warning("Failed to mark pre-dispatch cancellation for run %s: %s", run_id, exc)
+            return
+        execute_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
+    finally:
+        _unregister_active_run(run_id)
+        _get_semaphore().release()
+        # Wake the drain loop so the next queued run can fill the freed slot.
+        _wake_drain()
