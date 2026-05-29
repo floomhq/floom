@@ -1287,3 +1287,39 @@ PR #244 (squash `8b0a674`, merged to main) + follow-up PR #249 (squash `4c5b859`
 **Root cause:** the `TriggersEditor` action bar rendered whenever `onSave` was provided (just disabled when clean).
 **Fix:** the action bar now only renders when `dirty || saving`.
 **Status:** VERIFIED LIVE — `/workers/csv_enricher#triggers` shows only Add/Edit/Remove trigger controls, no Save/Discard buttons on a clean tab.
+
+---
+
+# Operator-Surface Hygiene (G5 88→≥95) — 2026-05-29
+
+Driver: `docs/audits/final-gate-G5-rescore-2026-05-29.md` (88/100, Trust 6/10). One rule: nothing internal is ever visible on an operator surface. PR #253 (merged `9693f5d`). Full per-item before/after evidence: `docs/audits/operator-hygiene-2026-05-29.md`.
+
+### H1 — P0: `invoice-email-processor` broken on schedule (SyntaxError, 0% success, front-page)
+**Root cause:** `run.py:22` nested same-quote f-string `f'Bearer {os.getenv('GOOGLE_SHEETS_TOKEN')}'` → SyntaxError every tick; also needs an unavailable Gmail+Sheets connection.
+**Fix:** fixed the SyntaxError; archived (needs connections) with a clean operator reason. Removed from scheduler.
+**Status:** VERIFIED LIVE — see audit doc.
+
+### H2 — P1: `Environment Variables Worker` (debug) exposed in catalog
+**Fix:** `system_worker: true` on its worker.yml + removed from `PUBLIC_STOCK_WORKER_IDS`. Hidden from `/workers` + scheduler.
+**Status:** VERIFIED LIVE — see audit doc.
+
+### H3 — P1: archive_reason leaked env-var names, "KeyError guard", git branch name
+**Fix:** rewrote linkedin + 2 kugelaudio reasons to plain operator language; added `_sanitize_operator_text` guard at the WorkerSummary/Detail serialization boundary.
+**Status:** VERIFIED LIVE — see audit doc.
+
+### H4 — P1: raw Python tracebacks + sandbox paths shown as operator error
+**Fix:** `_operator_error_message` maps tracebacks/paths/env-var names to calm headlines (clean errors pass through); raw trace kept in `RunDetail.error_raw` for the Raw tab only. Applied to /runs, /runs/<id>, overview alerts.
+**Status:** VERIFIED LIVE — see audit doc + unit tests (`tests/test_operator_hygiene.py`).
+
+### H5 — P1: `/contexts` showed only the engine pack `worker-author-style`
+**Fix:** `_is_system_context_pack` hides system/engine packs from the operator /contexts list/detail/file endpoints; honest empty-state. Runtime mounting unaffected.
+**Status:** VERIFIED LIVE — see audit doc.
+
+### H6 — P1: approval trigger gap (no operator-reachable HITL worker)
+**Root cause:** `outbound-approval-demo` was tracked but not in `PUBLIC_STOCK_WORKER_IDS` → hidden, "Worker not found".
+**Fix:** added to `PUBLIC_STOCK_WORKER_IDS`; `is_example: true` already set. Operator-reachable.
+**Status:** VERIFIED LIVE — full approve round-trip run_ids in audit doc.
+
+### H7 — Sweep
+`github-pr-summary` + `github-pr-issue-digest` (broken/stub scheduled DB-only artifacts) archived with clean reasons. `TEST_SECRET` deleted. Expired connections / count drift left (real dogfood state, not leaks).
+**Status:** VERIFIED LIVE — see audit doc.
