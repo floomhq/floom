@@ -419,7 +419,7 @@ class TestMCPConnections:
             "mcp_allowed_tools_json",
             "display_name",
         } <= columns
-        assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 35
+        assert conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0] == 36
         file_owner_tables = {
             row[0]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")

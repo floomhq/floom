@@ -229,8 +229,11 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "opendraft",
         "research_brief",
         "reverse_match_crm",
+        "slack-listener",
         "weekly_update",
+        "whatsapp-listener",
         "worker-author",
+        "workspace-agent",
     }
 )
 
@@ -4863,6 +4866,7 @@ def create_worker_run(
         worker_id,
         payload.inputs,
         payload.trigger_source,
+        status=RunStatus.RUNNING.value,
         user_id=auth.user_id,
         repos=repos,
     )
@@ -4892,6 +4896,12 @@ def create_worker_run(
     # Persist resolved inputs (absolute file paths replace SHA values) so that
     # GET /runs/:id returns the staged paths, not raw SHA strings.
     repos.runs.set_input_json(user_id=auth.user_id, run_id=run_id, input_json=resolved_inputs)
+    repos.runs.update(
+        user_id=auth.user_id,
+        run_id=run_id,
+        status=RunStatus.QUEUED.value,
+        started_at=None,
+    )
     start_run(run_id, worker_id, resolved_inputs, user_id=auth.user_id, repos=repos)
     return ActionResponse(status="running", run_id=run_id)
 
