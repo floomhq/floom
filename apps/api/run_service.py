@@ -176,6 +176,52 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
     return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
 
 
+def _backfill_example_input(worker_yml: str, sample_input_json: Any, log_fn: Callable[..., None]) -> str:
+    """Ensure the drafted worker.yml carries an ``example_input`` block so the
+    "Fill with sample input" button is one-click runnable, even when the LLM
+    omits it (G5 FIX 4).
+
+    The generator already emits ``sample_input_json`` (realistic values used for
+    the smoke run). If the worker.yml has no usable ``example_input``, backfill
+    it from that sample so EVERY generated worker — including file-input ones —
+    ships a runnable sample. Lossless: only adds, never overwrites an existing
+    example_input. Returns the (possibly rewritten) YAML; input unchanged on any
+    parse error."""
+    try:
+        import yaml as pyyaml
+        raw = pyyaml.safe_load(worker_yml)
+    except Exception:
+        return worker_yml
+    if not isinstance(raw, dict):
+        return worker_yml
+
+    existing = raw.get("example_input")
+    if isinstance(existing, dict) and existing:
+        return worker_yml  # LLM already supplied one — keep it.
+
+    sample: Optional[Dict[str, Any]] = None
+    if isinstance(sample_input_json, str) and sample_input_json.strip():
+        try:
+            parsed = json.loads(sample_input_json)
+            if isinstance(parsed, dict) and parsed:
+                sample = parsed
+        except json.JSONDecodeError:
+            sample = None
+    elif isinstance(sample_input_json, dict) and sample_input_json:
+        sample = dict(sample_input_json)
+
+    if not sample:
+        return worker_yml
+
+    raw["example_input"] = sample
+    log_fn("Backfilled example_input from sample_input_json so the worker is one-click runnable", level="info")
+    try:
+        import yaml as pyyaml
+        return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
+    except Exception:
+        return worker_yml
+
+
 def _register_authored_worker(
     run_id: str,
     outputs: Dict[str, Any],
@@ -237,6 +283,8 @@ def _register_authored_worker(
     # functionally-valid worker still registers instead of dead-ending. This is
     # lossless to behaviour (these fields are display metadata only).
     worker_yml = _normalize_authored_worker_yml(worker_yml, log_fn)
+    # G5 FIX 4: guarantee a runnable sample even when the LLM omits example_input.
+    worker_yml = _backfill_example_input(worker_yml, bundle.get("sample_input_json"), log_fn)
 
     skill_md = bundle.get("skill_md")
     run_code = bundle.get("run_code")
