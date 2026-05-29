@@ -218,13 +218,18 @@ def _maybe_evict_conversation(conv_id: str, user_id: str) -> None:
             "DELETE FROM conversation_messages WHERE id = ?",
             [(mid,) for mid in ids_to_delete],
         )
-        # Insert summary as the first message
+        # Insert summary before the kept messages using the conversation's created_at
+        # which predates all messages.
+        conv_row = conn.execute(
+            "SELECT created_at FROM conversations WHERE id = ?", (conv_id,)
+        ).fetchone()
+        summary_ts = conv_row["created_at"] if conv_row else ts
         conn.execute(
             """
             INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
             VALUES (?, ?, 'assistant', ?, ?)
             """,
-            (summary_id, conv_id, summary, to_keep[0]["created_at"] if to_keep else ts),
+            (summary_id, conv_id, summary, summary_ts),
         )
 
 
@@ -606,9 +611,13 @@ def _tool_runs_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     limit = int(args.get("limit") or 20)
     statuses = [status] if status else None
     if worker_id:
-        runs = repos.runs.list_for_worker(user_id=user_id, worker_id=worker_id, limit=limit)
+        raw = repos.runs.list_for_worker(user_id=user_id, worker_id=worker_id, limit=limit)
+        # list_for_worker may return list or (list, total)
+        runs = raw[0] if isinstance(raw, tuple) else raw
     else:
-        runs = repos.runs.list(user_id=user_id, statuses=statuses, limit=limit)
+        raw = repos.runs.list(user_id=user_id, statuses=statuses, limit=limit)
+        # list returns (rows, total)
+        runs = raw[0] if isinstance(raw, tuple) else raw
     result = []
     for r in runs:
         result.append({
@@ -746,7 +755,7 @@ def _tool_contexts_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     if CONTEXTS_DIR.is_dir():
         for ctx_dir in sorted(CONTEXTS_DIR.iterdir()):
             if ctx_dir.is_dir():
-                files = list(iter_context_files(ctx_dir.name))
+                files = list(iter_context_files(ctx_dir))
                 result.append({"name": ctx_dir.name, "file_count": len(files)})
     return {"ok": True, "contexts": result}
 
