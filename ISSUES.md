@@ -1599,3 +1599,25 @@ Source: `docs/audits/final-gate-G5-rescore4-2026-05-29.md`. All three closed and
 **Honest residual:** generator first-pass run.py quality remains the ceiling (LLM non-determinism gates some fresh generations — caught durably, never green), unchanged from W7. The `enabled` resolver default-True for stock/filesystem workers (no recipe row) matches prior behavior. No env-var / FLOOM_SECRET changes; G4 security, the wedge gate, durable-disable+409, and 0-silently-broken all intact.
 
 **Status:** VERIFIED LIVE (deployed `9f30c198`, 2026-05-29 PM). Full evidence: `docs/audits/genquality-fix-2026-05-29.md` (Batch M section).
+
+---
+
+## P2 — Batch N: the last two trivial P2s toward a clean 100 (G5 A=96/B=95, 0 P0/P1) (2026-05-29 PM)
+
+### #W9 smoke_reason leaked a leading `output_validation_failed:` prefix; test_db_factory.py 2 red (missing `approvals`)
+
+**Where:** `apps/api/main.py` (`humanize_smoke_reason` + new `_SMOKE_REASON_LEADING_CODE_RE`), `apps/api/tests/test_batchj_hygiene.py` (+1 test), `apps/api/tests/db/test_db_factory.py` (`_fake_repos`).
+
+**Fixes (PR #300 — merged squash, deployed `8211c29`):**
+1. **FIX 1 (P2, G5-B) — leading error_code prefix leak.** `humanize_smoke_reason` stripped the TRAILING `(error_code=…)` the smoke pipeline appends, but NOT a LEADING `<code>:` prefix. `run_service.py` builds the empty-output reason as `output_validation_failed: <name> produced an empty result …` (no trailing code), so the raw `output_validation_failed:` code prefix + raw text reached the operator verbatim on the draft-and-create response / worker-author SSE. Fix: when no trailing code is found, detect a leading `^([a-z][a-z0-9_]+):\s*` prefix, treat it as the code, strip it from the text, then route through the SAME existing `_operator_error_message(text, code)` path (so `output_validation_failed` maps to the calm `_OUTPUT_HEADLINE`). All prior behavior preserved (trailing-code strip, bare-quoted-token → CODE_HEADLINE, defensive redaction).
+2. **FIX 2 (P2, test-only) — test_db_factory red.** `_fake_repos()` built `Repositories(...)` without the now-required `approvals` field (added after the test's last edit #117) → TypeError, 2 red tests. Added the missing `approvals=_FakeWorkerRepo()` arg, mirroring prod's `Repositories(...)`. Production approvals untouched.
+
+**Live verification (deployed `8211c29`, local prod backend 8011):**
+- **FIX 1 empty-output:** `POST /workers/draft-and-create` with a user-supplied SCRIPT worker that reports `status:success` but emits an empty required output → `smoke_status:failed`, `smoke_reason` = the calm `_OUTPUT_HEADLINE` ("This worker finished but its result didn't pass validation. Check the run logs, then re-run."). Grep of the live reason: 0 `output_validation_failed`, 0 raw text ("produced an empty result"/"no real output"), 0 leading-`code:` prefix.
+- **FIX 1 normal failure:** a div-by-zero worker → `smoke_status:failed`, `smoke_reason` = the calm `_CODE_HEADLINE` (trailing-code path intact, no regression).
+- **No regression:** a worker producing a real output → `smoke_status:passed`, `smoke_reason:null` (0-silently-broken intact). `/health` 200 after all probes. All 3 probe workers deleted (HTTP 204, none left on disk).
+- **FIX 2:** `tests/db/test_db_factory.py` 5/5 pass (the 2 previously red now green); `tests/test_batchj_hygiene.py` 39/39 pass incl. the new leading-prefix test. Confirmed origin/main's `_fake_repos` was missing `approvals`.
+
+**Scope:** ONLY these two fixes. No wedge-gate / security / env-var / FLOOM_SECRET changes.
+
+**Status:** VERIFIED LIVE (deployed `8211c29`, 2026-05-29 PM). PR #300.
