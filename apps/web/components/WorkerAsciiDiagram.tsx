@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogo, normalizeBrandSlug } from "@/components/connections/BrandLogo";
+import { workerIcon, type WorkerIconInput } from "@/lib/worker-icon";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,13 @@ type DiagramNode = { name?: string; label?: string; type?: string };
 
 export interface WorkerAsciiDiagramProps {
   workerName: string;
+  /**
+   * Worker identity used to resolve the central worker-node glyph via the
+   * shared workerIcon() resolver — so the diagram's worker node matches the
+   * card + detail-header icon (consistent identity, no sparkle-for-everyone).
+   * When omitted the node falls back to the trigger glyph.
+   */
+  worker?: WorkerIconInput;
   inputs?: DiagramNode[];
   outputs?: DiagramNode[];
   connections?: string[];
@@ -313,6 +321,7 @@ interface IconMark {
 
 export function WorkerAsciiDiagram({
   workerName,
+  worker,
   inputs = [],
   outputs = [],
   connections = [],
@@ -410,12 +419,19 @@ export function WorkerAsciiDiagram({
         tone: "ink",
       });
     });
-    // Worker glyph on the name row (centerRow - 1).
+    // Worker glyph on the name row (centerRow - 1). Uses the shared workerIcon
+    // resolver so the diagram's worker node matches the card + detail-header
+    // icon. workerIcon may resolve a brand (already drawn in the "powered by"
+    // strip below) — in that case the worker node shows the trigger glyph,
+    // which carries complementary "how it fires" info.
+    const resolvedWorker = worker ? workerIcon(worker) : null;
+    const workerGlyph =
+      resolvedWorker?.kind === "lucide" ? resolvedWorker.Icon : triggerGlyph(triggerType);
     marks.push({
       key: "worker",
       col: workerColStart + ICON_COL_OFFSET,
       row: centerRow - 1,
-      Icon: triggerGlyph(triggerType),
+      Icon: workerGlyph,
       tone: "accent",
     });
 
@@ -437,7 +453,7 @@ export function WorkerAsciiDiagram({
     ];
 
     return { headerRow: header, gridRows: rows, iconMarks: marks };
-  }, [workerName, inputs, outputs, triggerType]);
+  }, [workerName, worker, inputs, outputs, triggerType]);
 
   // Grid metrics — keep these in lockstep with the <pre> font below so the
   // `ch`/`em` overlay lands exactly on the character cells.

@@ -7,7 +7,6 @@ import {
   List,
   Mail,
   Play,
-  Sparkles,
   Table,
   ToggleLeft,
   Type,
@@ -15,7 +14,8 @@ import {
   Webhook,
   type LucideIcon,
 } from "lucide-react";
-import { BrandLogo } from "@/components/connections/BrandLogo";
+import { BrandLogo, normalizeBrandSlug } from "@/components/connections/BrandLogo";
+import { workerIcon, type WorkerIconInput } from "@/lib/worker-icon";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -29,13 +29,22 @@ import { cn } from "@/lib/utils";
 // chip at the end.
 //
 // So this is NOT three detached squares with gaps. It is one linked strip:
-//   1. START node    — the trigger (schedule→Clock, webhook→Webhook,
-//                       event→Play, manual→Sparkles). ALWAYS present, ALWAYS
+//   1. PRIMARY node   — the worker's MEANINGFUL identity glyph, resolved by
+//                       workerIcon(): connection brand → purpose category →
+//                       stable-hash neutral fallback. ALWAYS present, ALWAYS
 //                       first, ALWAYS accented (--accent tint) so it anchors
-//                       the composition like Langdock's orange start node.
-//   2. INPUT glyphs   — input-type icons (text→Type, person→User, web→Globe…).
-//   3. CONNECTION logos — real full-color brand SVGs via BrandLogo.
-//   4. +N overflow    — when the strip exceeds `max` cells.
+//                       the composition. This is the fix for the "identical
+//                       sparkle wall" (Federico 2026-05-29): manual workers no
+//                       longer all show the same ✦ — each gets a distinct,
+//                       meaningful glyph here.
+//   2. TRIGGER glyph  — schedule→Clock / webhook→Webhook / event→Play, shown
+//                       as a SECONDARY (non-accented) cell only when the
+//                       trigger carries real info. Manual triggers add NO cell
+//                       (manual is the default; a glyph for it was the wall).
+//   3. INPUT glyphs   — input-type icons (text→Type, person→User, web→Globe…).
+//   4. CONNECTION logos — real full-color brand SVGs via BrandLogo (any not
+//                       already shown as the primary).
+//   5. +N overflow    — when the strip exceeds `max` cells.
 //
 // The cells overlap (-ml-px) and each carries a ring so the seams read as a
 // connected unit, not gaps. Real brand SVGs only. No emoji, no text-in-circle,
@@ -76,16 +85,18 @@ function inputIcon(input: { type: string; name?: string; label?: string }): Luci
   }
 }
 
-// Trigger type → lucide glyph for the START node. Manual still gets a glyph
-// (Sparkles) because the start node is the anchor of the composition and is
-// always rendered.
-function triggerIcon(triggerType?: string): { Icon: LucideIcon; label: string } {
+// Trigger type → lucide glyph, ONLY for triggers that carry information
+// (schedule / webhook / event). Manual returns null: it is the default firing
+// mode, and rendering a glyph for it on every manual worker was the source of
+// the identical-icon wall. The worker's meaningful identity now lives in the
+// accented PRIMARY cell (workerIcon), not the trigger.
+function triggerIcon(triggerType?: string): { Icon: LucideIcon; label: string } | null {
   const t = (triggerType || "").toLowerCase();
   if (t === "schedule" || t === "cron" || t === "scheduled")
     return { Icon: Clock, label: "Scheduled trigger" };
   if (t === "webhook") return { Icon: Webhook, label: "Webhook trigger" };
   if (t === "composio" || t === "event") return { Icon: Play, label: "Event trigger" };
-  return { Icon: Sparkles, label: "Manual trigger" };
+  return null;
 }
 
 type PillSize = "sm" | "md";
@@ -133,16 +144,25 @@ function Cell({
 }
 
 export interface WorkerIconPillsProps {
+  /**
+   * Worker identity used to resolve the accented PRIMARY glyph (connection
+   * brand → purpose category → stable-hash fallback). The fix for the
+   * identical-sparkle wall. When omitted the strip still renders from the
+   * trigger/inputs/connections below (back-compat), but pass it so the primary
+   * cell is meaningful.
+   */
+  worker?: WorkerIconInput;
   inputs?: { type: string; name?: string; label?: string }[];
   connections?: string[];
   triggerType?: string;
-  /** Max cells (incl. the start node) before collapsing into a +N chip. */
+  /** Max cells (incl. the primary node) before collapsing into a +N chip. */
   max?: number;
   size?: PillSize;
   className?: string;
 }
 
 export function WorkerIconPills({
+  worker,
   inputs = [],
   connections = [],
   triggerType,
@@ -152,25 +172,60 @@ export function WorkerIconPills({
 }: WorkerIconPillsProps) {
   const glyph = SIZE[size].glyph;
 
-  // Build the ordered cell list. START node first (accented), then input-type
-  // glyphs, then connection brand logos. Each entry carries either a brand
-  // slug (rendered via BrandLogo) or a resolved lucide component type.
+  // Build the ordered cell list. PRIMARY node first (accented, meaningful),
+  // then the trigger glyph (only when informative), then input-type glyphs,
+  // then connection brand logos. Each entry carries either a brand slug
+  // (rendered via BrandLogo) or a resolved lucide component type.
   type Entry =
     | { kind: "brand"; key: string; title: string; slug: string; accent?: boolean }
     | { kind: "lucide"; key: string; title: string; Icon: LucideIcon; accent?: boolean };
   const entries: Entry[] = [];
 
-  // 1. START node — always present, always first, always accented.
-  const trigger = triggerIcon(triggerType);
-  entries.push({
-    kind: "lucide",
-    key: "start",
-    title: trigger.label,
-    Icon: trigger.Icon,
-    accent: true,
-  });
+  // The slug already shown as the primary brand cell — so it is not repeated in
+  // the connection-logo tail below.
+  let primaryBrandSlug: string | null = null;
 
-  // 2. Input-type glyphs.
+  // 1. PRIMARY node — always present, always first, always accented. Resolves
+  //    to a DISTINCT, meaningful glyph (connection brand / purpose category /
+  //    stable-hash fallback). Falls back to the trigger/connection signal when
+  //    no `worker` identity is supplied (back-compat).
+  const resolved = worker
+    ? workerIcon(worker)
+    : connections.find((c) => c && typeof c === "string")
+      ? ({ kind: "brand", slug: connections.find((c) => c && typeof c === "string")! } as const)
+      : null;
+  if (resolved?.kind === "brand") {
+    primaryBrandSlug = normalizeBrandSlug(resolved.slug);
+    entries.push({
+      kind: "brand",
+      key: "primary",
+      title: resolved.slug,
+      slug: resolved.slug,
+      accent: true,
+    });
+  } else if (resolved?.kind === "lucide") {
+    entries.push({
+      kind: "lucide",
+      key: "primary",
+      title: worker?.name || "Worker",
+      Icon: resolved.Icon,
+      accent: true,
+    });
+  }
+
+  // 2. Trigger glyph — secondary, non-accented, only when it carries info
+  //    (schedule / webhook / event). Manual adds nothing.
+  const trigger = triggerIcon(triggerType);
+  if (trigger) {
+    entries.push({
+      kind: "lucide",
+      key: "trigger",
+      title: trigger.label,
+      Icon: trigger.Icon,
+    });
+  }
+
+  // 3. Input-type glyphs.
   for (let i = 0; i < inputs.length; i++) {
     const inp = inputs[i];
     entries.push({
@@ -181,22 +236,21 @@ export function WorkerIconPills({
     });
   }
 
-  // 3. Connection brand logos (de-duped — a worker can declare the same app twice).
+  // 4. Connection brand logos (de-duped; skip the one already shown as primary).
   const seenConn = new Set<string>();
   for (const slug of connections) {
     if (!slug || typeof slug !== "string") continue;
-    const key = slug.toLowerCase();
+    const key = normalizeBrandSlug(slug);
+    if (key === primaryBrandSlug) continue;
     if (seenConn.has(key)) continue;
     seenConn.add(key);
     entries.push({ kind: "brand", key: `conn-${key}`, title: slug, slug });
   }
 
   // A worker card must NEVER read as visually empty (Federico 2026-05-29). The
-  // start node (trigger) is the always-present anchor, so the strip renders
-  // even when there are no inputs and no connections — the lone accented start
-  // node still carries "how this worker fires". `WorkerSummary` from the list
-  // endpoint has no inputs, so on /workers the strip is start-node + connection
-  // logos; on the detail header it also gets input glyphs.
+  // accented PRIMARY node is the always-present anchor (workerIcon always
+  // resolves something), so the strip renders even with no trigger/inputs/
+  // connections. The lone primary glyph still carries the worker's identity.
   if (entries.length === 0) return null;
 
   const visible = entries.length > max ? entries.slice(0, max) : entries;
