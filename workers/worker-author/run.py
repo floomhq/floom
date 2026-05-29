@@ -150,6 +150,16 @@ Script-mode run.py rules (these EXACT mistakes crash generated workers — never
 - if you include "tags", it MUST contain 8 or fewer flat (no "/") non-empty strings; otherwise omit it
 - KISS and YAGNI: the smallest bundle that does exactly what was described
 
+Output media_type rule for worker.yml (CRITICAL — wrong media_type makes a correct worker look broken):
+- For a structured/JSON result (e.g. stats like {"min":1,"max":9,"mean":5}, parsed
+  records, key-value summaries, any object/array the worker writes via json.dumps),
+  the output MUST declare media_type: "application/json" and a path under out/
+  (e.g. path: "out/<name>.json"). The validator gates JSON outputs on
+  parseability, not size, so a small valid JSON document passes; declaring it as
+  text/* would wrongly fail it against a byte floor.
+- For prose/markdown/CSV results, use the matching text media_type
+  (text/markdown, text/plain, text/csv) and a path under out/.
+
 Input-path rule for worker.yml (CRITICAL — gets workers wrong constantly):
 - SCALAR inputs (type: string | textarea | number | boolean | select | url):
   use kind: "scalar" and NO `path:` field. The value is passed inline.
