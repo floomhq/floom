@@ -452,8 +452,10 @@ export function TriggersEditor({
         </div>
       )}
 
-      {/* Save / Discard action bar (optional — only shown when onSave is provided) */}
-      {onSave && (
+      {/* Save / Discard action bar. P2-5: only render once there's an unsaved
+          change (or a save in flight). A view-like tab with no edits should
+          not show editing chrome. */}
+      {onSave && (dirty || saving) && (
         <div className="flex items-center gap-2 pt-2">
           <Button
             size="sm"
