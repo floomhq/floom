@@ -1858,6 +1858,22 @@ def _get_db_worker(
         return None
 
 
+def _archived_tracked_worker(worker_id: str) -> Optional[Dict[str, Any]]:
+    """Return a tracked worker's filesystem record iff it is archived.
+
+    Archived workers are intentionally inactive but NOT deleted: the detail
+    page must still render them (archived badge + reason + Restore) instead of
+    404ing (1.5.3). Only archived workers get this fallback — other hidden
+    tracked workers stay hidden.
+    """
+    if worker_id not in _tracked_worker_ids():
+        return None
+    worker = get_worker(worker_id)
+    if worker is not None and worker.get("archived"):
+        return worker
+    return None
+
+
 def _get_visible_worker(
     worker_id: str,
     *,
@@ -1867,9 +1883,20 @@ def _get_visible_worker(
     worker = _get_db_worker(worker_id, user_id=user_id, repos=repos)
     if worker is not None:
         if _worker_hidden_from_api(worker["id"]):
+            # Archived workers stay reachable for detail rendering (not 404).
+            if worker.get("archived"):
+                return worker
+            archived = _archived_tracked_worker(worker["id"])
+            if archived is not None:
+                return archived
             return None
         return worker
     if _worker_hidden_from_api(worker_id):
+        # 1.5.3: archived tracked workers must render, not 404. Archived means
+        # inactive, not deleted.
+        archived = _archived_tracked_worker(worker_id)
+        if archived is not None:
+            return archived
         return None
     if _shared_filesystem_fallback_allowed() or worker_id in PUBLIC_STOCK_WORKER_IDS:
         return get_worker(worker_id)
