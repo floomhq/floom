@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
-import type { PlatformConfig, SystemInfo } from "@/lib/types";
+import type { PlatformConfig, SystemInfo, WorkspaceAgentInfo } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,10 +24,10 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 // S22f: Notifications tab is currently hidden. The TabKey type still includes
 // it so the URL ?tab=notifications doesn't blow up; we just silently fall back
 // to "api" when a hidden tab is requested.
-type TabKey = "api" | "system" | "notifications" | "appearance" | "danger";
+type TabKey = "api" | "system" | "assistant" | "notifications" | "appearance" | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "appearance", "danger"];
-const TAB_KEYS: TabKey[] = ["api", "system", "notifications", "appearance", "danger"];
+const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "assistant", "appearance", "danger"];
+const TAB_KEYS: TabKey[] = ["api", "system", "assistant", "notifications", "appearance", "danger"];
 
 function isValidTab(value: string | null): value is TabKey {
   return value !== null && TAB_KEYS.includes(value as TabKey);
@@ -56,6 +56,9 @@ function SettingsContent() {
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
+  const [workspaceAgent, setWorkspaceAgent] = useState<WorkspaceAgentInfo | null>(null);
+  const [workspaceAgentLoading, setWorkspaceAgentLoading] = useState(false);
+  const [workspaceAgentError, setWorkspaceAgentError] = useState<string | null>(null);
   const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
@@ -81,6 +84,29 @@ function SettingsContent() {
   useEffect(() => {
     if (isValidTab(tabParam) && VISIBLE_TAB_KEYS.includes(tabParam) && tabParam !== tab) setTab(tabParam);
   }, [tabParam, tab]);
+
+  // Lazy-load the workspace agent prompt + tools only when the tab is opened —
+  // the system prompt can be large, so we don't fetch it on every settings view.
+  useEffect(() => {
+    if (tab !== "assistant" || workspaceAgent || workspaceAgentLoading) return;
+    let cancelled = false;
+    setWorkspaceAgentLoading(true);
+    setWorkspaceAgentError(null);
+    api.system
+      .workspaceAgent()
+      .then((res) => {
+        if (!cancelled) setWorkspaceAgent(res);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setWorkspaceAgentError(e instanceof Error ? e.message : "Failed to load");
+      })
+      .finally(() => {
+        if (!cancelled) setWorkspaceAgentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, workspaceAgent, workspaceAgentLoading]);
 
   function handleTabChange(value: string) {
     if (!isValidTab(value)) return;
@@ -145,6 +171,7 @@ function SettingsContent() {
         <TabsList>
           <TabsTrigger value="api">API access</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
+          <TabsTrigger value="assistant">Workspace agent</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
           <TabsTrigger value="danger">Danger zone</TabsTrigger>
         </TabsList>
@@ -232,6 +259,66 @@ function SettingsContent() {
               )}
             </div>
           </section>
+        </TabsContent>
+
+        <TabsContent value="assistant" className="space-y-8">
+          <section className="space-y-2">
+            <h2 className="text-sm font-medium text-muted-foreground">Workspace agent</h2>
+            <p className="text-sm text-muted-foreground">
+              This is the assistant behind <code className="text-foreground">/chat</code>. It reads
+              your workspace and can manage workers, runs, secrets, connections, contexts, and
+              approvals on your behalf. The instructions and tools below are read-only.
+            </p>
+          </section>
+
+          {workspaceAgentLoading && !workspaceAgent ? (
+            <div className="space-y-3">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-48 w-full" />
+            </div>
+          ) : workspaceAgentError ? (
+            <Alert variant="destructive">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>Couldn&apos;t load the workspace agent</AlertTitle>
+              <AlertDescription>{workspaceAgentError}</AlertDescription>
+            </Alert>
+          ) : workspaceAgent ? (
+            <>
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium">System instructions</h3>
+                  <Badge variant="outline" className="text-xs">
+                    Read-only
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  The full system prompt the agent runs with, including the live workspace snapshot.
+                </p>
+                <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
+                  {workspaceAgent.system_prompt}
+                </pre>
+              </section>
+
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium">
+                  Tools <span className="text-muted-foreground">({workspaceAgent.tools.length})</span>
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  The management actions the agent can call. It never returns secret values.
+                </p>
+                <div className="divide-y divide-[var(--border-default)] rounded-[var(--radius-button)] border border-[var(--border-default)]">
+                  {workspaceAgent.tools.map((tool) => (
+                    <div key={tool.name} className="px-3 py-2.5">
+                      <code className="text-xs font-medium text-foreground">{tool.name}</code>
+                      {tool.description && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="notifications" className="space-y-4">
