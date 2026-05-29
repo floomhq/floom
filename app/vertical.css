@@ -2,7 +2,7 @@
    Vertical landing pages (marketing / recruiting / support).
    Scoped lv-* classes that reuse landing.css tokens + primitives.
    The hero mock evokes the vertical's primary tool via a per-page
-   --tool accent, while the rest inherits the landing's blue accent.
+   --tool accent, while the rest inherits the landing's near-black accent.
    ================================================================= */
 
 /* ── Hero "agent-in-tool" mock ────────────────────────────────── */

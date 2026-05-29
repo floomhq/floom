@@ -4,25 +4,25 @@
    Uses skills-neo globals.css tokens. No Tailwind, no raw hex.
    ================================================================= */
 
-/* Matte adoption: no Inter/JetBrains @import (Geist via next/font), no
-   landing-only #3a6ea5 accent override. The landing now inherits the
-   dashboard tokens from globals.css verbatim: Floom-blue --accent,
-   pure-black --line, radius 0, flat opaque surfaces, matte shadows. */
+/* Engine system adoption: no Inter/JetBrains @import (Geist via next/font), no
+   landing-only #3a6ea5 accent override. The landing inherits the engine tokens
+   from globals.css verbatim (source of truth: engine/apps/web/app/globals.css,
+   workers.floom.dev): near-black #181818 --accent/--solid, warm-taupe #E7E0D6
+   --line, rounded radii (--r-md 8 / --r-lg 12 / --r-2xl 18), warm matte shadows. */
 
 /* ── Extra tokens not in globals.css ─────────────────────────────
-   Surfaces are now FLAT OPAQUE (matte), not translucent glass. They map
-   onto the dashboard's paper/paper-2 so cards read as solid panels with
-   pure-black hairline borders, not frosted glass. */
+   Surfaces are FLAT OPAQUE (warm matte), not translucent glass. They map
+   onto the engine's paper/paper-2 so cards read as solid panels with
+   warm-taupe hairline borders, not frosted glass. --positive inherits the
+   engine green (--success); do NOT remap it to accent. */
 :root {
   --surface-2: var(--paper);
   --surface-3: var(--paper-2);
-  --positive:  var(--accent);
   --ink-on-accent: var(--solid-fg);
 }
 html.dark {
   --surface-2: var(--paper);
   --surface-3: var(--paper-2);
-  --positive:  var(--accent);
   --ink-on-accent: var(--solid-fg);
 }
 
@@ -55,7 +55,7 @@ body:has(.ln-nav) { background: transparent !important; }
   justify-content: space-between;
   height: 54px;
   padding: 0 10px 0 18px;
-  border-radius: 0;
+  border-radius: var(--radius-card);
   border: 1px solid var(--line);
   background: var(--paper);
   box-shadow: var(--shadow-sm);
@@ -1427,15 +1427,15 @@ html.dark .ln-detail {
   .ln-feat-row.rev .ln-ft-txt { order: 0; }
 }
 
-/* Matte eyebrow: neutral label, flat opaque surface, pure-black hairline,
-   square. Blue restrained to the single live-state dot. */
+/* Warm-matte eyebrow: neutral label, flat opaque surface, warm-taupe hairline,
+   pill. Accent restrained to the single live-state dot. */
 .ln-ft-eye {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   height: 24px;
   padding: 0 11px 0 9px;
-  border-radius: 0;
+  border-radius: var(--radius-pill);
   background: var(--bg-2);
   border: 1px solid var(--line);
   font-size: 11px;

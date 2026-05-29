@@ -1,7 +1,8 @@
-/* Landing adopts the dashboard matte design system (web/app/globals.css):
-   Geist via next/font (loaded in layout.tsx), the openchat-v2 matte oklch
-   palette, Floom-blue accent, pure-black borders, radius 0. No Inter, no
-   JetBrains @import: the previous network hop is replaced by inlined Geist. */
+/* Design tokens are the source-of-truth copy of engine/apps/web/app/globals.css (workers.floom.dev). Do NOT diverge — update the engine first, then re-sync. */
+/* Landing adopts the engine "Langdock / openchat-v2" warm matte system
+   (engine/apps/web/app/globals.css, deployed at workers.floom.dev): Geist via
+   next/font (loaded in layout.tsx), warm off-white #FAFAF7 bg, warm-taupe
+   borders, near-black #181818 primary CTA, rounded corners (18px cards). */
 @import "tailwindcss";
 
 @custom-variant dark (&:is(.dark *));
@@ -13,9 +14,13 @@
   --font-mono: var(--font-mono);
   --font-heading: var(--font-sans);
   --color-bg: var(--bg);
+  --color-bg-app: var(--bg-app);
+  --color-bg-card: var(--bg-card);
   --color-paper: var(--paper);
   --color-ink: var(--ink);
   --color-line: var(--line);
+  --color-border-default: var(--border-default);
+  --color-border-soft: var(--border-soft);
   --color-glass-bg: var(--glass-bg);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -34,6 +39,10 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-success: var(--positive);
+  --color-error: var(--negative);
+  --color-pending: var(--pending);
+  --color-warning: var(--warning);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -59,74 +68,94 @@
   --radius-2xl: var(--r-2xl);
   --radius-3xl: calc(var(--r-2xl) + 6px);
   --radius-4xl: calc(var(--r-2xl) + 12px);
+  /* S45: design-system radius scale */
+  --radius-card: var(--radius-card);
+  --radius-button: var(--radius-button);
+  --radius-pill: var(--radius-pill);
+  --radius-input: var(--radius-input);
+  --radius-squircle: var(--radius-squircle);
 }
 
+/* ===== ENGINE TOKENS (verbatim from engine/apps/web/app/globals.css @ 8c26be9) ===== */
 :root {
-  /* Matte palette - ported verbatim from the dashboard (web/app/globals.css,
-     openchat-v2 / g-gpt.com). Warm off-white bg, FLAT OPAQUE surfaces (no
-     glass), PURE-BLACK borders in light mode (the matte signature), Floom
-     blue restrained to CTA / active / link / focus, radius 0 everywhere. */
-  --bg: oklch(0.985 0.002 90);
-  --bg-2: oklch(0.96 0.003 85);
-  --bg-3: oklch(0.94 0.004 85);
-  --paper: oklch(0.985 0.002 90);
-  --paper-2: oklch(0.975 0.002 90);
-  --ink: oklch(0.141 0.005 285.823);
-  --ink-soft: oklch(0.42 0.016 285.938);
-  --ink-mute: oklch(0.55 0.012 285.938);
-  --ink-faint: oklch(0.7 0.008 285.938);
-  --emerald: oklch(0.55 0.13 152);
-  --emerald-dark: oklch(0.4 0.12 152);
-  /* Floom blue, oklch. Lives in --accent + surfaces only where it matters:
-     focus rings, active tab/state, link colour, primary CTA. Hover surfaces
-     stay warm-neutral. */
-  --accent: oklch(0.52 0.13 250);
-  --accent-soft: oklch(0.94 0.012 250);
-  --accent-line: oklch(0.78 0.08 250);
-  --accent-hover-bg: oklch(0.94 0.004 85);
-  /* Primary button base: blue. solid-fg = button text colour. */
-  --solid: var(--accent);
-  --solid-2: oklch(0.46 0.14 250);
-  --solid-fg: oklch(0.985 0 0);
-  --sage: oklch(0.6 0.05 152);
-  --sage-tint: oklch(0.95 0.02 152);
-  /* Pure black border in light mode - the openchat-v2 matte signature. */
-  --line: hsl(0 0% 0% / 0.12);
-  --line-strong: hsl(0 0% 0% / 0.22);
-  --line-soft: hsl(0 0% 0% / 0.06);
-  --glass-bg: oklch(0.985 0.002 90);
-  --glass-bg-strong: oklch(0.985 0.002 90);
-  --glass-edge: hsl(0 0% 0% / 0.08);
-  --hairline: 0 0 0 1px var(--line);
+  /* Warm OS palette */
+  --bg-app: #FAFAF7;
+  --bg-card: #FFFFFF;
+  --text-primary: #141414;
+  --text-muted: #6B6861;
+  --border-default: #E7E0D6;
+  --border-soft: #E8E3DA;
+  --primary: #181818;
+  --primary-text: #FFFFFF;
+  --warning: #F9735B;
+  --success: #2F8F5B;
+  --pending: #E0B349;
+  --radius-card: 18px;
+  --radius-button: 12px;
+  --radius-pill: 9999px;
+  --radius-input: 12px;
+  /* Squircle for small icon pills (WorkerIconPills) — softer than a button,
+     not a full pill. Langdock-style rounded-square tool chips. */
+  --radius-squircle: 9px;
+  --shadow-card: 0 12px 30px rgba(0,0,0,0.04);
+  /* S45: light mode uses same color-mix pattern for active nav */
+  --active-nav-bg: #F1EEE8;
+  --active-nav-text: #111111;
+
+  --bg: var(--bg-app);
+  --bg-2: #F1EEE8;
+  --bg-3: #EDE8DF;
+  --paper: var(--bg-app);
+  --paper-2: #F4F1EA;
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-muted);
+  --ink-mute: color-mix(in srgb, var(--text-muted) 80%, transparent);
+  --ink-faint: color-mix(in srgb, var(--text-muted) 58%, transparent);
+  --emerald: var(--success);
+  --emerald-dark: color-mix(in srgb, var(--success) 80%, black);
+  --accent: var(--primary);
+  --accent-soft: var(--active-nav-bg);
+  --accent-line: var(--border-default);
+  --accent-hover-bg: var(--active-nav-bg);
+  --solid: var(--primary);
+  --solid-2: #2A2A2A;
+  --solid-fg: var(--primary-text);
+  --sage: var(--success);
+  --sage-tint: color-mix(in srgb, var(--success) 10%, var(--bg-card));
+  --line: var(--border-default);
+  --line-strong: #D8CFC2;
+  --line-soft: var(--border-soft);
+  --glass-bg: var(--bg-card);
+  --glass-bg-strong: var(--bg-card);
+  --glass-edge: var(--border-soft);
+  --hairline: 0 0 0 1px var(--border-default);
   --edge: none;
-  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.06), 0 0 0 1px var(--line);
-  --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.08), 0 0 0 1px var(--line);
-  --shadow-lg: 0 10px 24px hsl(0 0% 0% / 0.1), 0 0 0 1px var(--line);
-  --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.12), 0 0 0 1px var(--line);
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.04), 0 0 0 1px var(--border-soft);
+  --shadow-md: var(--shadow-card);
+  --shadow-lg: var(--shadow-card);
+  --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.10), 0 0 0 1px var(--border-default);
   --shadow-btn: 0 1px 0 hsl(0 0% 0% / 0.06);
   --focus: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
-  --sidebar-glass: oklch(0.975 0.002 90);
-  --sidebar-glass-shadow: 0 1px 0 hsl(0 0% 0% / 0.04);
-  --card-glass: var(--paper);
-  --card-border: var(--line);
-  --card-shadow: var(--shadow-sm);
-  /* Square everything. Federico: "everything should be square, no rounded
-     corners." Pill (avatars + status badges via rounded-full) stays 999. */
-  --r-xs: 0;
-  --r-sm: 0;
-  --r-md: 0;
-  --r-lg: 0;
-  --r-xl: 0;
-  --r-2xl: 0;
+  --sidebar-glass: var(--bg-app);
+  --sidebar-glass-shadow: none;
+  --card-glass: var(--bg-card);
+  --card-border: var(--border-default);
+  --card-shadow: var(--shadow-card);
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 18px;
+  --r-2xl: 18px;
   --r-pill: 999px;
   --spring: cubic-bezier(0.32, 1.06, 0.5, 1);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --t-fast: 110ms;
   --t-base: 190ms;
   --t-slow: 320ms;
-  --negative: #c0392b;
-  --positive: #2f7a59;
-  /* Geist via next/font (layout.tsx). Fallback chain kept for SSR. */
+  --negative: var(--warning);
+  --positive: var(--success);
+  /* PR S20: Geist via next/font. Fallback chain kept for SSR / pre-hydration. */
   --font-sans: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
   --font: var(--font-sans);
   --font-mono: var(--font-geist-mono), "SF Mono", ui-monospace, "Cascadia Code", monospace;
@@ -138,14 +167,13 @@
   --card-foreground: var(--ink);
   --popover: var(--paper);
   --popover-foreground: var(--ink);
-  --primary: var(--accent);
   --primary-foreground: var(--solid-fg);
   --secondary: var(--bg-2);
   --secondary-foreground: var(--ink);
   --muted: var(--bg-2);
   --muted-foreground: var(--ink-soft);
   --accent-foreground: var(--ink);
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: var(--warning);
   --border: var(--line);
   --input: var(--line-strong);
   --ring: var(--accent-line);
@@ -157,7 +185,7 @@
   --radius: var(--r-lg);
   --sidebar: var(--sidebar-glass);
   --sidebar-foreground: var(--ink);
-  --sidebar-primary: var(--accent);
+  --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--solid-fg);
   --sidebar-accent: var(--accent-soft);
   --sidebar-accent-foreground: var(--ink);
@@ -167,9 +195,9 @@
 
 html.dark {
   color-scheme: dark;
-  /* Matte dark - openchat-v2 palette. Pure white borders at 8-12% alpha
-     (the matte signature). Flat opaque surfaces. Floom blue lifted for
-     contrast against the dark bg. */
+  /* PR S20 matte dark — openchat-v2 palette.
+     Sidebar is the DARKEST surface (Federico's explicit preference).
+     Pure white borders at 8-12% alpha — the matte signature. */
   --bg: oklch(0.213 0 0);
   --bg-2: oklch(0.27 0 0);
   --bg-3: oklch(0.32 0 0);
@@ -181,8 +209,11 @@ html.dark {
   --ink-faint: oklch(0.42 0.01 286.067);
   --emerald: oklch(0.7 0.16 152);
   --emerald-dark: oklch(0.8 0.13 152);
+  /* S45: ONE blue hue in dark mode. --accent is canonical Floom blue.
+     --accent-soft is replaced by color-mix usage at call sites (18% alpha).
+     Keeping --accent-soft as alias for backwards compat (selection, etc.) */
   --accent: oklch(0.72 0.14 250);
-  --accent-soft: oklch(0.32 0.06 250);
+  --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
   --accent-line: oklch(0.45 0.1 250);
   --accent-hover-bg: hsl(0 0% 100% / 0.06);
   --solid: var(--accent);
@@ -190,7 +221,7 @@ html.dark {
   --solid-fg: oklch(0.13 0.02 285);
   --sage: oklch(0.65 0.06 152);
   --sage-tint: oklch(0.3 0.04 152);
-  /* Pure white borders in dark mode at low alpha - the matte hallmark. */
+  /* Pure white borders in dark mode at low alpha — the matte hallmark. */
   --line: hsl(0 0% 100% / 0.1);
   --line-strong: hsl(0 0% 100% / 0.18);
   --line-soft: hsl(0 0% 100% / 0.06);
@@ -208,6 +239,22 @@ html.dark {
   --card-glass: var(--paper);
   --card-border: var(--line);
   --card-shadow: var(--shadow-sm);
+  --bg-app: var(--bg);
+  --bg-card: var(--card-glass);
+  --text-primary: var(--ink);
+  --text-muted: var(--ink-soft);
+  --border-default: var(--line);
+  --border-soft: var(--line-soft);
+  --primary-text: var(--solid-fg);
+  --radius-card: var(--r-2xl);
+  --radius-button: 12px;
+  --radius-pill: 9999px;
+  --radius-input: 12px;
+  --radius-squircle: 9px;
+  --shadow-card: var(--shadow-sm);
+  /* S45: active nav bg uses single-blue alpha blend — same hue as accent */
+  --active-nav-bg: color-mix(in srgb, var(--accent) 18%, transparent);
+  --active-nav-text: var(--accent);
 
   --background: var(--bg);
   --foreground: var(--ink);
