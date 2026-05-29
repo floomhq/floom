@@ -1708,3 +1708,22 @@ Doc: `docs/audits/workspace-duplicate-2026-05-29.md`.
 **Proof:** Live (pre-fix) confirmed the inconsistency on :8011 — list `worker-author-style`=0, detail=1. `apps/api/tests/test_contexts_system_packs.py::test_list_worker_count_matches_detail` asserts list == detail == 1 after a worker mounts the pack. curl proof appended after deploy.
 
 **Status:** FIXED (live edge proof appended after deploy).
+
+---
+
+## P0 — generator first-pass quality: ~50% of awkward prompts gated on first run (2026-05-29)
+
+### #G1 Generated workers used a weak coder (gpt-4o-mini) → ~half gated, operator had to regen
+
+**Where:** the three codegen call sites — `workers/worker-author/run.py` (meta-worker generation), `apps/api/run_service.py` `_repair_run_py` (smoke-repair), `apps/api/main.py` `_call_draft_llm` (`/workers/draft-from-prompt`). All three used `gpt-4o-mini`.
+
+**Symptom:** A worker generated from a plain-English prompt ran green on the first try only ~50% of the time. The durable gate kept it safe (never silently broken), but the operator had to regenerate for the other half — not self-serve-grade.
+
+**Fix (PR #313, `f915580`; deployed SHA `d059d57…`):**
+1. **Model bump (biggest lever):** new single source of truth `apps/api/codegen_model.py` — `WORKEROS_CODEGEN_MODEL` env, default `gpt-5.1` (strongest *chat-capable* coder on the prod key; `gpt-5.1-codex` is not a chat model). `chat_completion_codegen()` handles the gpt-5.x `max_completion_tokens` vs gpt-4 `max_tokens` difference + self-heals on the param-name 400. Shared by all three call sites; the E2B sandbox env propagates the override to the meta-worker.
+2. **Contract tightening:** 6 worked run.py examples in `RUN_PY_TEMPLATE.py` (the single source of truth) covering historical failure classes; template injection cap 4000→9000; fixed the draft prompt's banned `from dotenv import` examples; added an explicit "implement EVERY declared output fully" rule to all three prompt surfaces.
+3. **Repair tuning:** `_MAX_SMOKE_REPAIRS` 2→3; the repair now gets the worker's intent (description) so it can fix under-implementation, not just syntax. `output_validation_failed` already routes into repair. 0-silently-broken durable gate unchanged.
+
+**Verification (real `/workers/new/from-prompt` flow, 10 diverse prompts, live on :8011):** 10/10 GREEN, 0 repairs (pure first-pass), 0 gated, 0 silently-broken; each worker produced correct real output on a fresh run; multi-output workers fully implemented. New `tests/test_codegen_model.py` passes. 10 test workers cleaned up (scoped DELETE); runs floor held (595→605). Full table: `docs/audits/generator-quality-2026-05-29.md`.
+
+**Status:** SHIPPED + VERIFIED.
