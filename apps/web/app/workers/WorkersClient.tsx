@@ -635,9 +635,12 @@ function WorkerCard({
               <CardStatusPill status={worker.status} />
             )}
 
-            {/* Description — clamped to 2 lines; overflow hidden so it can never
-                grow past its slot into the footer. */}
-            <p className="text-sm text-muted-foreground line-clamp-2 overflow-hidden">
+            {/* Description — clamped to 2 lines. `line-clamp-2` already sets
+                display:-webkit-box + overflow:hidden; do NOT add a separate
+                `overflow-hidden` utility — it conflicts with the webkit-box
+                display and collapses the paragraph to 0 height (caught live
+                2026-05-29). The min-h-0 flex parent bounds it instead. */}
+            <p className="text-sm text-muted-foreground line-clamp-2">
               {description}
             </p>
           </div>
