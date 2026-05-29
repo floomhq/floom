@@ -6370,8 +6370,12 @@ _OPERATOR_ERROR_RULES: List[tuple[re.Pattern[str], str]] = [
      _AUTH_HEADLINE),
     (re.compile(r"Event loop is closed|\basyncio\b|coroutine|RuntimeError", re.IGNORECASE),
      _RUNTIME_HEADLINE),
-    (re.compile(r"\bKeyError\b|\bNameError\b|\bAttributeError\b|\bTypeError\b|\bValueError\b", re.IGNORECASE),
-     _RUNTIME_HEADLINE),
+    (re.compile(
+        r"\bKeyError\b|\bNameError\b|\bAttributeError\b|\bTypeError\b|\bValueError\b"
+        r"|\bFileNotFoundError\b|\bUnboundLocalError\b|\bIndexError\b|\bOSError\b",
+        re.IGNORECASE,
+     ),
+     _CODE_HEADLINE),
     (re.compile(r"\b(?:Timed?\s?out|timeout|deadline exceeded)\b", re.IGNORECASE),
      _TIMEOUT_HEADLINE),
     (re.compile(r"\b(?:Connection|Network|DNS|getaddrinfo|ECONN|socket)\b", re.IGNORECASE),
@@ -6379,6 +6383,35 @@ _OPERATOR_ERROR_RULES: List[tuple[re.Pattern[str], str]] = [
     (re.compile(r"SHA-256 reference|from /uploads", re.IGNORECASE),
      "This worker needs a file uploaded for one of its inputs. Upload the file, then re-run."),
 ]
+
+
+# A worker's OWN code crashing (NameError, FileNotFoundError, etc. raised inside
+# its run.py) must read as a CODE error the operator can fix/re-generate, NOT as
+# a platform "internal error" and NEVER as "took too long". The E2B driver wraps
+# such a crash as error_code=execution_error (non-zero exit) or e2b_sandbox_error
+# with the exception class name in the raw string. Detect those classes so we can
+# route them to _CODE_HEADLINE before the generic code-taxonomy mapping.
+_WORKER_CODE_TRACEBACK_RE = re.compile(
+    r"\b(?:"
+    r"NameError|FileNotFoundError|AttributeError|TypeError|ValueError|KeyError"
+    r"|UnboundLocalError|IndexError|ZeroDivisionError|NotImplementedError"
+    r"|SyntaxError|IndentationError|TabError|RecursionError|AssertionError"
+    r"|ModuleNotFoundError|ImportError|OSError|IOError|JSONDecodeError"
+    r"|UnicodeDecodeError|UnicodeEncodeError"
+    r")\b"
+)
+# Error codes whose raw text can legitimately carry a worker-code traceback
+# (the worker's run.py crashed). For these, a code-class traceback in the raw
+# string outranks the generic headline so the operator sees "code has an error".
+_WORKER_CODE_ERROR_CODES = frozenset({"execution_error", "e2b_sandbox_error"})
+
+
+def _looks_like_worker_code_error(text: str) -> bool:
+    """True when the raw error text contains a Python exception class raised by
+    the worker's own code (so the operator headline should be _CODE_HEADLINE)."""
+    if not text:
+        return False
+    return bool(_WORKER_CODE_TRACEBACK_RE.search(text))
 
 
 def _has_internal_artifact(text: str) -> bool:
@@ -6416,6 +6449,18 @@ def _operator_error_message(
     Returns None when raw_error is empty.
     """
     code = (error_code or "").strip().lower()
+
+    # A worker's OWN code crash must read as a CODE error (fixable / re-generable),
+    # not a platform "internal error" and never "took too long". When the raw text
+    # carries a Python exception class AND the code is one that wraps worker
+    # execution (execution_error / e2b_sandbox_error) or is absent, route to the
+    # code headline before the generic taxonomy. Setup codes (missing_secret,
+    # missing_connection, etc.) are unaffected — they never carry a traceback.
+    if (not code or code in _WORKER_CODE_ERROR_CODES) and _looks_like_worker_code_error(
+        str(raw_error or "")
+    ):
+        return _CODE_HEADLINE
+
     if code and code in _OPERATOR_ERROR_CODE_HEADLINES:
         return _OPERATOR_ERROR_CODE_HEADLINES[code]
 
