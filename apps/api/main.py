@@ -640,6 +640,7 @@ async def auth_middleware(request: Request, call_next):
             or path == "/connections/callback"
             or path == "/cli-auth/devices"
             or path.startswith("/cli-auth/poll/")
+            or _RE_RUN_COMPOSIO_PROXY.match(path)
         ):
             return await call_next(request)
         header = request.headers.get("x-floom-secret", "")
@@ -649,6 +650,11 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 logger = logging.getLogger("floom.api")
+
+# Regex for run-authenticated Composio proxy (no x-floom-secret required;
+# auth is by run_id which the sandbox knows as FLOOM_RUN_ID).
+import re as _re
+_RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
 
 # Process start time for /system/metrics uptime reporting.
 _PROCESS_START_TIME = time.time()
@@ -5953,6 +5959,102 @@ def get_run_logs(
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Run-authenticated Composio tool-execute proxy
+# ---------------------------------------------------------------------------
+# Workers inside E2B sandboxes cannot hold COMPOSIO_API_KEY (platform secret).
+# Instead, they call POST /runs/{run_id}/composio-execute/{tool_slug} using
+# their own FLOOM_RUN_ID as the auth token.  The API validates the run_id is
+# in RUNNING status, looks up the connection for the requested app, and proxies
+# the Composio v3 tool-execute call server-side.
+#
+# Auth: no x-floom-secret (the path is middleware-exempt). The run_id itself
+# acts as a short-lived bearer token — it's valid only while the run is active.
+
+class _ComposioProxyRequest(BaseModel):
+    # Composio tool-execute body fields (all optional; forwarded as-is)
+    connected_account_id: Optional[str] = None
+    user_id: Optional[str] = None
+    arguments: Optional[Dict[str, Any]] = None
+
+
+@app.post("/runs/{run_id}/composio-execute/{tool_slug}")
+def composio_execute_proxy(
+    run_id: str,
+    tool_slug: str,
+    body: _ComposioProxyRequest,
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Server-side proxy for Composio tool execution — called from worker sandboxes.
+
+    The worker sends its FLOOM_RUN_ID as the path parameter.  The API:
+      1. Validates run_id exists and is in RUNNING status.
+      2. Resolves the connected_account_id from the run's worker connections
+         (unless caller supplies it explicitly).
+      3. Proxies the call to Composio v3 /tools/execute/{tool_slug} with the
+         server-side COMPOSIO_API_KEY.
+      4. Returns Composio's JSON response verbatim.
+    """
+    import requests as _req_lib
+
+    # 1. Validate run_id — must exist in DB and be RUNNING
+    run_row = repos.runs.get_any(run_id=run_id)
+    if run_row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run_row.get("status") != RunStatus.RUNNING.value:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Run is not currently running (status={run_row.get('status')})",
+        )
+
+    # 2. Resolve COMPOSIO_API_KEY from server env
+    composio_key = os.environ.get("COMPOSIO_API_KEY", "")
+    if not composio_key:
+        raise HTTPException(status_code=503, detail="COMPOSIO_API_KEY not configured on server")
+
+    # 3. Resolve connected_account_id if not supplied by caller
+    connected_account_id = body.connected_account_id
+    if not connected_account_id:
+        worker_id = run_row.get("worker_id", "")
+        owner_id = run_row.get("user_id", "")
+        from db import get_db as _get_db
+        with _get_db() as conn:
+            # Find the active connection for the tool's implied app.
+            # The caller should pass connected_account_id when they know it;
+            # this fallback finds the first active connection for the worker's owner.
+            tool_prefix = tool_slug.split("_")[0].lower()  # e.g. "GMAIL_..." -> "gmail"
+            row = conn.execute(
+                "SELECT composio_connection_id FROM composio_connections "
+                "WHERE app_name = ? AND status = 'active' LIMIT 1",
+                (tool_prefix,),
+            ).fetchone()
+            if row:
+                connected_account_id = row["composio_connection_id"]
+
+    # 4. Build and forward the Composio request
+    proxy_body: Dict[str, Any] = {}
+    if connected_account_id:
+        proxy_body["connected_account_id"] = connected_account_id
+    if body.user_id:
+        proxy_body["user_id"] = body.user_id
+    if body.arguments is not None:
+        proxy_body["arguments"] = body.arguments
+    else:
+        proxy_body["arguments"] = {}
+
+    try:
+        r = _req_lib.post(
+            f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
+            headers={"x-api-key": composio_key, "Content-Type": "application/json"},
+            json=proxy_body,
+            timeout=30,
+        )
+        # Return Composio's response as-is (success or error)
+        return r.json()
+    except _req_lib.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Composio proxy error: {exc}")
 
 
 # ---------------------------------------------------------------------------

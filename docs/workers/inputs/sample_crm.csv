@@ -1,0 +1,4 @@
+name,email,current_company,current_title,headline,last_active_iso,skills,notes
+Anna Keller,anna@example.com,Solaris,Senior Java Engineer,FinTech backend specialist,2025-03-01,Java;Kafka;Spring Boot,Available May
+Mehmet Yilmaz,mehmet@example.com,Zalando,Platform Engineer,Kubernetes and Python,2024-11-12,Kubernetes;Python;AWS,Open to contract
+Klaus Weber,k.weber@example.com,Deutsche Bank,Lead Backend Developer,Java and Spring expert,2025-01-15,Java;Spring Boot;Oracle;SOAP,Perm only - Berlin based
