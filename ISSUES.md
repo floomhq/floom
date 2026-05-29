@@ -4,6 +4,24 @@ Status legend: OPEN / FIXING / FIXED (merged, unverified) / VERIFIED (confirmed 
 
 ---
 
+## 2026-05-29 security + privacy checklist (lane/security-checklist) — 11 items + 3 NEW
+
+Full report: `docs/audits/security-checklist-2026-05-29.md`.
+
+| # | Issue | Sev | Status |
+|---|---|---|---|
+| SEC-P0 | `/api/floom-secret` returned the platform FLOOM_SECRET to ANY unauthenticated visitor (live, HTTP 200). Route removed; token now localStorage + paste-input only. | P0 | FIXED |
+| SEC-11 | `/chat` (OpenAI per request) had no per-user rate quota — bill-burn. Added `_enforce_chat_quota` (default 20/60s). | P1 | FIXED |
+| SEC-1 | No privacy/terms surface. Added `/privacy` + `/terms` (single-tenant statements). | P2 | FIXED |
+| SEC-2 | No data inventory. Added `docs/SECURITY-DATA-MAP.md`. | P2 | FIXED |
+| SEC-7 | `composio_connection_id` (`ca_*`) still in `/connections` response. Frontend currently depends on it; stripping needs a refactor to key off internal UUID. | P2 | OPEN |
+| SEC-NEW2 | cli-auth approval still hands out raw FLOOM_SECRET (confirm-code mitigates blind approval). Mint scoped CLI token instead. | P2 | OPEN |
+| SEC-A06 | `npm audit` / dependency CVE scan not run this pass. | P2 | OPEN |
+
+Items 3,4,5,6,8,10 + NEW-1, NEW-3 verified PASS (no fix needed).
+
+---
+
 ## 2026-05-29 evening review (Federico) — CURRENT, 13 items
 
 | # | Issue | Detail / evidence | Sev | Status |
