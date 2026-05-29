@@ -92,6 +92,7 @@
   --radius-card: var(--radius-card);
   --radius-button: var(--radius-button);
   --radius-pill: var(--radius-pill);
+  --radius-input: var(--radius-input);
 }
 
 :root {
@@ -110,6 +111,7 @@
   --radius-card: 18px;
   --radius-button: 12px;
   --radius-pill: 9999px;
+  --radius-input: 12px;
   --shadow-card: 0 12px 30px rgba(0,0,0,0.04);
   /* S45: light mode uses same color-mix pattern for active nav */
   --active-nav-bg: #F1EEE8;
@@ -260,6 +262,7 @@ html.dark {
   --radius-card: var(--r-2xl);
   --radius-button: 12px;
   --radius-pill: 9999px;
+  --radius-input: 12px;
   --shadow-card: var(--shadow-sm);
   /* S45: active nav bg uses single-blue alpha blend — same hue as accent */
   --active-nav-bg: color-mix(in srgb, var(--accent) 18%, transparent);
