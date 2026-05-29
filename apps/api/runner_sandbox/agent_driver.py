@@ -288,11 +288,21 @@ class AgentDriver(SandboxDriver):
             max_tokens=limits.max_output_tokens,
             include_usage=True,
         )
+        # Per-run, loop-local OpenAI client. The SDK's default provider shares a
+        # process-wide httpx client bound to the first loop that uses it; each
+        # worker run executes in its own fresh asyncio loop (see
+        # _run_coro_sync -> asyncio.run), so the shared client raises
+        # "Event loop is closed" when concurrent runs overlap. Binding a fresh
+        # client to THIS run's loop fully isolates concurrent runs.
+        from .loop_local_provider import LoopLocalModelProvider
+
+        loop_local_provider = LoopLocalModelProvider()
         run_config = RunConfig(
             workflow_name=f"workeros:{worker_id}",
             trace_id=trace_id,
             trace_metadata={"worker_id": worker_id, "run_id": run_id},
             model_settings=model_settings,
+            model_provider=loop_local_provider.provider,
         )
 
         total_tokens = 0
@@ -427,6 +437,10 @@ class AgentDriver(SandboxDriver):
             )
         finally:
             await self._cleanup_mcp_servers(mcp_servers, log_fn)
+            # Close the per-run OpenAI + httpx client while THIS run's loop is
+            # still alive, so the connection pool is released cleanly (no leaks,
+            # no "Event loop is closed" teardown warnings).
+            await loop_local_provider.aclose()
 
     async def _run_streamed(self, agent: Any, run_input: Any, max_turns: int, run_config: Any) -> Any:
         from agents import Runner
