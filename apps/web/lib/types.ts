@@ -264,6 +264,10 @@ export interface ContextSummary {
   writeable: boolean;
   worker_count?: number;
   description?: string | null;
+  /** Engine/system pack (e.g. worker-author-style): surfaced read-only. */
+  system?: boolean;
+  /** True when the operator cannot edit or delete this pack. */
+  read_only?: boolean;
 }
 
 export interface ContextWorkerRef {

@@ -277,6 +277,24 @@ _INTERNAL_WORKER_ID_PREFIXES = (
 # {"system": true}.
 SYSTEM_CONTEXT_PACKS = frozenset({"worker-author-style"})
 
+# One-line, operator-facing descriptions for system packs that ship without a
+# README.md. Surfaced read-only on the /contexts page so operators understand
+# what each engine pack does.
+SYSTEM_CONTEXT_DESCRIPTIONS: dict[str, str] = {
+    "worker-author-style": (
+        "Engine style guide and schema the worker author follows when "
+        "generating new workers from your prompts (read-only)."
+    ),
+}
+
+
+def _system_context_description(name: str) -> Optional[str]:
+    try:
+        safe_name = validate_context_name(name)
+    except ValueError:
+        return None
+    return SYSTEM_CONTEXT_DESCRIPTIONS.get(safe_name)
+
 # 1.5.2: trigger sources that belong in the operator /runs view. Everything
 # else (audit, test, smoke runs like s35_concurrency_*, synthetic data, etc.)
 # is internal telemetry and is hidden from the default view. Data is preserved
@@ -2825,6 +2843,11 @@ class ContextSummary(BaseModel):
     writeable: bool = False
     worker_count: int = 0
     description: Optional[str] = None
+    # Engine/system knowledge packs (e.g. worker-author-style) are surfaced
+    # read-only so operators can SEE what shapes worker generation, but cannot
+    # edit or delete them. Operator-created packs have system=False.
+    system: bool = False
+    read_only: bool = False
 
 
 class ContextFileItem(BaseModel):
@@ -2934,16 +2957,46 @@ def _require_context_for_user(
     return safe_name, meta
 
 
+def _require_readable_context_for_user(
+    name: str,
+    *,
+    user_id: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    """Read access: operator-visible packs OR read-only system packs.
+
+    Mutating endpoints must keep using ``_require_context_for_user`` so system
+    packs stay non-editable (it returns 404 for them).
+    """
+    safe_name = _context_name_or_400(name)
+    meta = metadata if metadata is not None else load_context_metadata()
+    if not context_dir(safe_name).is_dir():
+        raise HTTPException(status_code=404, detail="Context not found")
+    if _is_system_context_pack(safe_name, meta):
+        return safe_name, meta
+    if not _context_visible_to_user(safe_name, user_id=user_id, metadata=meta):
+        raise HTTPException(status_code=404, detail="Context not found")
+    return safe_name, meta
+
+
 def _context_summary(name: str, metadata: dict[str, dict[str, Any]]) -> ContextSummary:
     root = context_dir(name)
     files = list(iter_context_files(root))
     total_size = sum(path.stat().st_size for path in files)
+    is_system = _is_system_context_pack(name, metadata)
+    description = _context_description(root)
+    if description is None and is_system:
+        description = _system_context_description(name)
     return ContextSummary(
         name=name,
         file_count=len(files),
         total_size_bytes=total_size,
         updated_at=context_updated_at(root),
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
+        worker_count=0,
+        description=description,
+        system=is_system,
+        read_only=is_system,
     )
 
 
@@ -2995,6 +3048,8 @@ def _context_detail(
         except Exception:
             pass
     description = _context_description(root)
+    if description is None and summary.system:
+        description = _system_context_description(name)
     summary.worker_count = len(used_by)
     summary.description = description
     return ContextDetail(
@@ -3052,13 +3107,20 @@ def list_contexts(
     ensure_contexts_dir()
     metadata = load_context_metadata()
     root = current_contexts_root()
-    items = [
-        _context_summary(folder.name, metadata)
-        for folder in sorted(root.iterdir(), key=lambda p: p.name)
-        if folder.is_dir() and not folder.is_symlink() and not folder.name.startswith(".")
-        and _context_visible_to_user(folder.name, user_id=auth.user_id, metadata=metadata)
-    ]
-    return items
+    operator_items: List[ContextSummary] = []
+    system_items: List[ContextSummary] = []
+    for folder in sorted(root.iterdir(), key=lambda p: p.name):
+        if not folder.is_dir() or folder.is_symlink() or folder.name.startswith("."):
+            continue
+        # System/engine packs are surfaced read-only so operators can see what
+        # shapes worker generation; they cannot be edited or deleted.
+        if _is_system_context_pack(folder.name, metadata):
+            system_items.append(_context_summary(folder.name, metadata))
+            continue
+        if _context_visible_to_user(folder.name, user_id=auth.user_id, metadata=metadata):
+            operator_items.append(_context_summary(folder.name, metadata))
+    # Operator packs first, then read-only system packs.
+    return operator_items + system_items
 
 
 @app.post("/contexts/{name}", response_model=ContextDetail)
@@ -3089,7 +3151,7 @@ def get_context(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
-    safe_name, metadata = _require_context_for_user(name, user_id=auth.user_id)
+    safe_name, metadata = _require_readable_context_for_user(name, user_id=auth.user_id)
     return _context_detail(safe_name, metadata, repos=repos, user_id=auth.user_id)
 
 
@@ -3119,7 +3181,7 @@ def get_context_file(
     file_path: str,
     auth: AuthContext = Depends(get_auth_context),
 ):
-    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    safe_name, _metadata = _require_readable_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
     target = _safe_context_file_or_400(safe_name, rel)
     if not target.is_file():
