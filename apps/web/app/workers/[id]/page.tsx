@@ -20,7 +20,7 @@ import { toast } from "sonner";
 import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
-  Trash2, ArrowLeft, BookOpen, Save, X,
+  Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore,
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
@@ -297,14 +297,28 @@ export default function WorkerDetailPage() {
     if (activeRunStream.finishedPart) void loadActiveRun();
   }, [activeRunStream.finishedPart, loadActiveRun]);
 
-  function applyExampleInput() {
-    if (!worker?.example_input) return;
+  async function applyExampleInput() {
+    if (!worker) return;
+    // Prefer example_input from the yaml manifest. Fall back to the sample-input API endpoint.
+    let exampleInput = worker.example_input;
+    if (!exampleInput) {
+      try {
+        exampleInput = await api.workers.sampleInput(worker.id);
+      } catch {
+        toast.error("No sample input available for this worker");
+        return;
+      }
+    }
+    if (!exampleInput) {
+      toast.error("No sample input available for this worker");
+      return;
+    }
     const nextInputs: Record<string, unknown> = { ...inputs };
     const fileFieldNames = new Set(
       worker.config.inputs.filter((inp) => inp.type === "file").map((inp) => inp.name)
     );
     let skippedFileFields = false;
-    for (const [key, value] of Object.entries(worker.example_input)) {
+    for (const [key, value] of Object.entries(exampleInput)) {
       if (fileFieldNames.has(key)) {
         if (value == null) {
           // leave file field untouched
@@ -515,11 +529,9 @@ export default function WorkerDetailPage() {
     (slug) => !activeConnectionSlugs.has(slug.toLowerCase())
   );
   const canRun = !running && missingConnections.length === 0;
-  const canApplySample = worker.config.inputs.every((inp) => {
-    if (!inp.required || inp.type === "file") return true;
-    const sampleValue = worker.example_input?.[inp.name];
-    return sampleValue !== undefined && sampleValue !== null;
-  });
+  // canApplySample: true if there's any non-file sample input available.
+  // We allow it liberally — the button fetches from the API endpoint if yaml example_input is absent.
+  const canApplySample = worker.config.inputs.some((inp) => inp.type !== "file");
   const requiredSecrets: string[] = worker.config.secrets ?? [];
 
   // Summary counts for rail
@@ -554,14 +566,24 @@ export default function WorkerDetailPage() {
         <WorkerAvatar seed={worker.id} name={worker.name} size="size-12" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-semibold tracking-tight">{worker.name}</h1>
-            <StatusPill status={worker.status} />
-            {worker.is_example && (
+            <h1 className={`text-xl font-semibold tracking-tight ${worker.archived ? "text-muted-foreground" : ""}`}>{worker.name}</h1>
+            {worker.archived ? (
+              <span className="inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                <Archive className="size-2.5" />
+                Archived
+              </span>
+            ) : (
+              <StatusPill status={worker.status} />
+            )}
+            {!worker.archived && worker.is_example && (
               <span className="inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
                 Example
               </span>
             )}
           </div>
+          {worker.archived && worker.archive_reason && (
+            <p className="text-muted-foreground text-xs mt-1 italic">{worker.archive_reason}</p>
+          )}
           {worker.description && (
             <p className="text-muted-foreground text-sm mt-1">{worker.description}</p>
           )}
@@ -598,6 +620,24 @@ export default function WorkerDetailPage() {
               {anyDirty ? "Discard" : "Done"}
             </Button>
           </div>
+        ) : worker.archived ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={async () => {
+              try {
+                const updated = await api.workers.restore(worker.id);
+                setWorker(updated);
+                toast.success("Worker restored");
+              } catch (e: unknown) {
+                toast.error(e instanceof Error ? e.message : "Failed to restore worker");
+              }
+            }}
+          >
+            <ArchiveRestore className="w-4 h-4 mr-1.5" />
+            Restore
+          </Button>
         ) : (
           <Button
             variant="outline"
@@ -867,15 +907,14 @@ function RunSection({
   return (
     <div className="max-w-xl space-y-6">
       <div className="space-y-4">
-        {hasInputs && (worker.example_input || inputsFilled) && (
+        {hasInputs && (canApplySample || inputsFilled) && (
             <div className="flex items-center gap-2 pb-1">
-              {worker.example_input && (
+              {canApplySample && (
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-8 border-line"
                   onClick={onApplySample}
-                  disabled={!canApplySample}
                 >
                   <ClipboardCheck className="w-3.5 h-3.5 mr-1.5" />
                   Fill with sample input

@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Box, ChevronRight, Folder, Plus, Search, Star,
+  Box, ChevronRight, Folder, Plus, Search, Star, Archive,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,8 +19,8 @@ import { BrandLogo } from "@/components/connections/BrandLogo";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
-type WorkersTab = "all" | "starred" | "recent";
-const TAB_KEYS: WorkersTab[] = ["all", "starred", "recent"];
+type WorkersTab = "all" | "starred" | "recent" | "archived";
+const TAB_KEYS: WorkersTab[] = ["all", "starred", "recent", "archived"];
 function isValidTab(value: string | null): value is WorkersTab {
   return value !== null && TAB_KEYS.includes(value as WorkersTab);
 }
@@ -46,8 +46,10 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
 
   // S44: start with server-fetched data — no loading flash for the initial render.
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
+  const [archivedWorkers, setArchivedWorkers] = useState<WorkerSummary[]>([]);
   // Only show a loading state if initialWorkers is empty AND we're re-fetching
   const [loading, setLoading] = useState(false);
+  const [loadingArchived, setLoadingArchived] = useState(false);
   const [favorites, setFavorites] = useState<Set<string>>(() => getFavorites());
 
   // S28: tabs (All/Starred/Recent) live in URL hash.
@@ -86,6 +88,20 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
         .catch(() => setLoading(false));
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load archived workers when Archived tab is first selected.
+  useEffect(() => {
+    if (tab === "archived" && archivedWorkers.length === 0 && !loadingArchived) {
+      setLoadingArchived(true);
+      api.workers
+        .list({ include_archived: true })
+        .then((all) => {
+          setArchivedWorkers(all.filter((w) => w.archived));
+          setLoadingArchived(false);
+        })
+        .catch(() => setLoadingArchived(false));
+    }
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleFavorite = useCallback((id: string) => {
     setFavorites((prev) => {
@@ -172,6 +188,18 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   }, [workers]);
 
   const displayedWorkers = useMemo(() => {
+    if (tab === "archived") {
+      let pool = archivedWorkers;
+      if (searchLower) {
+        pool = pool.filter((w) => {
+          const blob = [w.name, w.description || "", ...(w.tags || []), w.archive_reason || ""]
+            .join(" ")
+            .toLowerCase();
+          return blob.includes(searchLower);
+        });
+      }
+      return pool;
+    }
     let pool = workers;
     if (tab === "starred") {
       pool = pool.filter((w) => favorites.has(w.id));
@@ -208,9 +236,10 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
       });
     }
     return pool;
-  }, [workers, tab, folderFilter, tagFilter, favorites, searchLower]);
+  }, [workers, archivedWorkers, tab, folderFilter, tagFilter, favorites, searchLower]);
 
   const showFolders = tab === "all" && subFolders.length > 0 && !searchLower && !tagFilter;
+  const isArchivedTab = tab === "archived";
 
   return (
     <div className="space-y-6">
@@ -245,6 +274,10 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
                   Starred
                 </TabsTrigger>
                 <TabsTrigger value="recent">Recent</TabsTrigger>
+                <TabsTrigger value="archived">
+                  <Archive className="size-3.5" />
+                  Archived
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -321,7 +354,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
           )}
 
           <div className="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {loading
+            {(loading || (isArchivedTab && loadingArchived))
               ? Array.from({ length: 8 }).map((_, i) => (
                   <WorkerCardSkeleton key={i} />
                 ))
@@ -336,12 +369,14 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
                 ))}
           </div>
 
-          {!loading && displayedWorkers.length === 0 && (
+          {!loading && !loadingArchived && displayedWorkers.length === 0 && (
             <p className="text-sm text-muted-foreground">
               {tab === "starred"
                 ? "Nothing starred yet. Click the star on any worker card to pin it here."
                 : tab === "recent"
                 ? "No workers run yet."
+                : tab === "archived"
+                ? "No archived workers."
                 : searchLower
                 ? `No workers match "${search}".`
                 : "No workers in this folder."}
@@ -579,34 +614,45 @@ function WorkerCard({
         <div className="flex items-start justify-between gap-3">
           <WorkerAvatar seed={worker.id} name={worker.name} size="size-10" />
           <div className="min-w-0 flex-1">
-            <h3 className="font-medium text-[15px] leading-snug line-clamp-2">{worker.name}</h3>
-            {worker.is_example && (
+            <h3 className={`font-medium text-[15px] leading-snug line-clamp-2 ${worker.archived ? "text-muted-foreground" : ""}`}>{worker.name}</h3>
+            {worker.archived ? (
+              <span className="mt-1 inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+                <Archive className="size-2.5" />
+                Archived
+              </span>
+            ) : worker.is_example && (
               <span className="mt-1 inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
                 Example
               </span>
             )}
           </div>
-          <button
-            type="button"
-            title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onFavoriteToggle(worker.id);
-            }}
-            className={`size-7 flex items-center justify-center rounded transition-colors shrink-0 ${
-              isFavorite
-                ? "text-[var(--accent)] hover:opacity-80"
-                : "text-muted-foreground/40 hover:text-[var(--accent)]"
-            }`}
-          >
-            <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
-          </button>
+          {!worker.archived && (
+            <button
+              type="button"
+              title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onFavoriteToggle(worker.id);
+              }}
+              className={`size-7 flex items-center justify-center rounded transition-colors shrink-0 ${
+                isFavorite
+                  ? "text-[var(--accent)] hover:opacity-80"
+                  : "text-muted-foreground/40 hover:text-[var(--accent)]"
+              }`}
+            >
+              <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
+            </button>
+          )}
         </div>
 
-        <CardStatusPill status={worker.status} />
+        {!worker.archived && <CardStatusPill status={worker.status} />}
 
-        <p className="text-sm text-muted-foreground line-clamp-1">{worker.description || "No description."}</p>
+        <p className="text-sm text-muted-foreground line-clamp-1">
+          {worker.archived && worker.archive_reason
+            ? worker.archive_reason
+            : worker.description || "No description."}
+        </p>
 
         {(worker.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1.5">
