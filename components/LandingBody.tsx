@@ -1003,6 +1003,12 @@ export function LandingBody() {
             <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer">GitHub</a>
           </div>
           <div className="ln-footer-col">
+            <h3>For your team</h3>
+            <Link href="/marketing">Marketing</Link>
+            <Link href="/recruiting">Recruiting</Link>
+            <Link href="/support">Support</Link>
+          </div>
+          <div className="ln-footer-col">
             <h3>Floom</h3>
             <a href="https://skills.floom.dev" target="_blank" rel="noopener noreferrer">Skills</a>
             <a href="https://floom.dev" target="_blank" rel="noopener noreferrer">Floom</a>
