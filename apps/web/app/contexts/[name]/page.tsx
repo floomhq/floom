@@ -5,11 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Check,
   Download,
   File as FileIcon,
   FileCode,
   FileText,
   Image as ImageIcon,
+  Link as LinkIcon,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -199,6 +201,7 @@ export default function PackDetailPage() {
                     <Button size="sm" variant="outline" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); openFile(file); }}>
                       Open
                     </Button>
+                    <CopyFileLinkButton packName={packName} filePath={file.path} />
                     <a
                       href={api.contexts.fileUrl(packName, file.path)}
                       title="Download"
@@ -240,5 +243,30 @@ export default function PackDetailPage() {
         }}
       />
     </div>
+  );
+}
+
+function CopyFileLinkButton({ packName, filePath }: { packName: string; filePath: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function copyLink(e: React.MouseEvent) {
+    e.stopPropagation();
+    const pathEncoded = filePath.split("/").map(encodeURIComponent).join("/");
+    const url = `${window.location.origin}/contexts/${encodeURIComponent(packName)}/files/${pathEncoded}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copyLink}
+      className="p-1 rounded hover:bg-muted inline-flex"
+      title="Copy link to this file"
+    >
+      {copied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5 text-muted-foreground" />}
+    </button>
   );
 }
