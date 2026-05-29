@@ -1394,6 +1394,55 @@ html.dark .ln-detail {
 .ln-trust {
   padding: 72px 0 0;
 }
+
+/* Three pillars — the why-it's-different band. */
+.ln-pillars {
+  padding: 88px 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+@media (max-width: 860px) {
+  .ln-pillars { grid-template-columns: 1fr; gap: 16px; padding-top: 64px; }
+}
+.ln-pillar {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+  padding: 24px 22px 26px;
+  box-shadow: 0 1px 0 rgba(15,15,15,0.03);
+}
+.ln-pillar-ic {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  margin-bottom: 14px;
+}
+.ln-pillar h3 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+.ln-pillar p {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin: 0;
+}
+.ln-pillar-tag {
+  margin-top: 14px;
+  display: inline-block;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--ink-mute);
+}
 .ln-trust-label {
   text-align: center;
   font-family: var(--font-mono, "JetBrains Mono", monospace);
