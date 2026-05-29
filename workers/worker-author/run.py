@@ -137,7 +137,9 @@ Script-mode run.py rules (these EXACT mistakes crash generated workers — never
 - import EVERY module you reference (os, json, csv, io, re, statistics, ...).
 - Write result.json to the WORKING DIRECTORY ("result.json"), NEVER "out/result.json".
 - Write output files under out/; map each declared output to its out/ path.
-- Read scalar inputs as literal values; read file inputs as relative paths under inputs/.
+- Read scalar inputs as literal values. A FILE input's value IS already the
+  relative path (e.g. "inputs/csv_file"); open(inputs["x"]) directly — NEVER
+  os.path.join("inputs", inputs["x"]) (double-prepending inputs/ is a top crash).
 - End with `if __name__ == "__main__": main()`.
 - If you `import requests`/`openai`/any third-party lib, requirements_txt MUST list it.
 - name must be lowercase hyphens/digits, 3-64 chars, unique (avoid the IDs listed below)
