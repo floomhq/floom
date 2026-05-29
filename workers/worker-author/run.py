@@ -1,11 +1,22 @@
 """Worker Author — generates Workeros worker bundles from natural-language prompts.
 
-This worker runs in an E2B sandbox. The worker-author-style context is mounted
-at context/worker-author-style/ inside the sandbox working directory.
+This worker runs in an E2B sandbox as a pure-script worker. The E2B driver
+executes ``python run.py`` and reads back ``result.json`` (schema
+``{"status", "outputs", "error"}``). The worker-author-style context is mounted
+at ``context/worker-author-style/`` inside the sandbox working directory.
 
-The worker calls the Workeros API (via the platform's OPENAI_API_KEY) to generate
-a valid worker.yml + SKILL.md or run.py bundle, validates the YAML, and writes
-the result as a JSON bundle to out/bundle.json.
+Protocol (matches the E2B pure-script contract, e.g. gmail_intake_brief):
+  1. Read inputs from ``inputs.json``.
+  2. Load secrets from ``.env.local`` (python-dotenv) — OPENAI_API_KEY ships here
+     because worker.yml declares ``exec.secrets: [OPENAI_API_KEY]``.
+  3. Call OpenAI to draft worker.yml + SKILL.md / run.py, validate the YAML.
+  4. Write the bundle to ``out/bundle.json``.
+  5. Write ``result.json`` with ``{"status", "outputs": {"bundle": "out/bundle.json"},
+     "artifacts": [...]}`` so the driver surfaces the result to the UI.
+
+Earlier this file defined a ``run(inputs, context)`` function that was never
+invoked under ``python run.py`` (no ``__main__`` block) and wrote out/bundle.json
+but never result.json — so every run failed with error_code=missing_result.
 """
 
 from __future__ import annotations
@@ -15,6 +26,12 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(".env.local")
+except ImportError:
+    pass  # dotenv optional; OPENAI_API_KEY may already be in os.environ
 
 
 # ---------------------------------------------------------------------------
@@ -166,18 +183,31 @@ def _build_messages(
 
 
 # ---------------------------------------------------------------------------
-# Main entry
+# Generation logic
 # ---------------------------------------------------------------------------
 
-def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _stdout_log(msg: str, **kwargs: Any) -> None:
+    """Default logger: print to stdout so the E2B driver streams it to the
+    run's SSE log (the GeneratingPanel reads these lines)."""
+    level = kwargs.get("level", "info")
+    print(f"[{level}] {msg}", flush=True)
+
+
+def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
+    """Draft a worker bundle from the prompt. Returns the bundle dict.
+
+    Raises ValueError for a missing prompt and RuntimeError if OPENAI_API_KEY
+    is not available. A bundle whose YAML failed validation after all retries
+    is still returned (with a ``bundle["error"]`` key) so the operator can fix
+    it in the editor rather than seeing a hard failure.
+    """
+    log = log or _stdout_log
     prompt = str(inputs.get("prompt") or "").strip()
     mode = str(inputs.get("mode") or "draft").strip()
     parent_worker_id = str(inputs.get("parent_worker_id") or "").strip() or None
 
     if not prompt:
         raise ValueError("prompt is required")
-
-    log = getattr(context, "log", None) or (lambda msg, **_: None)
 
     log("worker-author: reading style context")
     schema_md = _read_context_file("worker-author-style", "SCHEMA.md")
@@ -280,10 +310,63 @@ def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
     else:
         log(f"worker-author: bundle valid, suggested_id={bundle['suggested_id']!r}")
 
-    # Write output
+    return bundle
+
+
+# ---------------------------------------------------------------------------
+# E2B pure-script entry: read inputs.json, write result.json
+# ---------------------------------------------------------------------------
+
+def _write_error(error: str) -> None:
+    Path("result.json").write_text(
+        json.dumps({"status": "error", "error": error}), encoding="utf-8"
+    )
+
+
+def main() -> None:
+    try:
+        inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+        if not isinstance(inputs, dict):
+            inputs = {}
+    except FileNotFoundError:
+        _write_error("inputs.json not found in sandbox working directory")
+        return
+    except json.JSONDecodeError as exc:
+        _write_error(f"inputs.json is not valid JSON: {exc}")
+        return
+
+    try:
+        bundle = generate_bundle(inputs, log=_stdout_log)
+    except ValueError as exc:
+        _write_error(str(exc))
+        return
+    except RuntimeError as exc:
+        # OPENAI_API_KEY missing or other hard runtime failure.
+        _write_error(str(exc))
+        return
+    except Exception as exc:  # pragma: no cover - defensive
+        _write_error(f"worker-author failed: {exc}")
+        return
+
+    # Write the bundle artifact + result.json with the declared output.
     os.makedirs("out", exist_ok=True)
     bundle_json = json.dumps(bundle, ensure_ascii=False, indent=2)
     Path("out/bundle.json").write_text(bundle_json, encoding="utf-8")
 
-    log("worker-author: done")
-    return {"bundle": bundle_json}
+    result = {
+        "status": "success",
+        "outputs": {"bundle": "out/bundle.json"},
+        "artifacts": [
+            {
+                "name": "bundle.json",
+                "relative_path": "out/bundle.json",
+                "type": "application/json",
+            }
+        ],
+    }
+    Path("result.json").write_text(json.dumps(result), encoding="utf-8")
+    _stdout_log("worker-author: done")
+
+
+if __name__ == "__main__":
+    main()
