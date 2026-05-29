@@ -178,6 +178,44 @@ function NewWorkerContent() {
     navigateToRun(runId);
   }
 
+  // SSE through Vercel commonly drops MID-FLIGHT (before the run is terminal).
+  // When that happens we must NOT navigate to /runs/<id> while the worker is
+  // still being drafted — that strands the operator on a run page and the
+  // editor never opens. Instead we keep the drafting panel up and poll the run
+  // until it reaches a terminal state, then route correctly:
+  //   completed -> /workers/<id>?edit=1 (the registered worker)
+  //   failed    -> /runs/<id> (so the operator can see why)
+  // Bounded so a wedged run can't poll forever; on timeout we open the run view.
+  async function pollRunUntilTerminalThenRoute(runId: string) {
+    if (navigatedRef.current) return;
+    const startedAt = Date.now();
+    const maxMs = 5 * 60 * 1000; // generation is ~30s; 5min is a generous ceiling
+    while (!navigatedRef.current && Date.now() - startedAt < maxMs) {
+      try {
+        const run = await api.runs.get(runId);
+        const status = String(run.status || "");
+        if (status === "completed") {
+          const createdId = (run.output as Record<string, unknown> | undefined)?.["created_worker_id"];
+          if (typeof createdId === "string" && createdId) {
+            navigateToWorker(createdId);
+          } else {
+            navigateToRun(runId);
+          }
+          return;
+        }
+        if (status === "failed" || status === "rejected" || status === "cancelled") {
+          navigateToRun(runId, { failed: true });
+          return;
+        }
+      } catch {
+        // transient — keep polling
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    // Timed out without a terminal state — open the run so it isn't a dead-end.
+    if (!navigatedRef.current) navigateToRun(runId);
+  }
+
   async function fallbackDraftAndCreate(trimmed: string) {
     if (fallbackFiredRef.current || navigatedRef.current) return;
     fallbackFiredRef.current = true;
@@ -248,14 +286,15 @@ function NewWorkerContent() {
       evtSource.onerror = () => {
         evtSource.close();
         sseRef.current = null;
-        // SSE dropped. We already have a real run id, so resolve the worker it
-        // produced (via run-detail fetch) and open the editor; if the run is
-        // not yet done / produced no worker, this falls back to the run view.
+        // SSE dropped. We already have a real run id, so KEEP the drafting
+        // panel up and poll the run until it finishes, then route to the editor
+        // (completed) or the run view (failed). Navigating away mid-flight
+        // stranded the operator on /runs/<id> with the editor never opening.
         // NEVER fire a second draftAndCreate here — that created the duplicate
         // worker + the silent form reset the G5 audit hit.
         const id = runIdRef.current;
         if (id) {
-          void navigateToCreatedWorker(id);
+          void pollRunUntilTerminalThenRoute(id);
         } else if (!fallbackFiredRef.current) {
           // The run never started (no id yet) — fall back so a worker still
           // gets created rather than dead-ending on an empty stream.
