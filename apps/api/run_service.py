@@ -51,6 +51,7 @@ def _semaphore_available_count() -> int:
 
 from dotenv import load_dotenv
 
+from contexts import context_scope_for_user, use_context_scope
 from db.factory import Repositories, get_repositories
 from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR, get_worker_config
@@ -1143,17 +1144,19 @@ def execute_run(
         )
         log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
         driver = get_sandbox_driver(runner, config=config)
-        result = driver.run(
-            worker_id=worker_id,
-            run_id=run_id,
-            inputs=effective_inputs,
-            secrets=secrets,
-            log_fn=log_fn,
-            trace_id=trace_id,
-            timeout_seconds=timeout_seconds,
-            config=config,
-            connection_ids=connection_ids,
-        )
+        with use_context_scope(context_scope_for_user(owner_id)):
+            result = driver.run(
+                worker_id=worker_id,
+                run_id=run_id,
+                inputs=effective_inputs,
+                secrets=secrets,
+                log_fn=log_fn,
+                trace_id=trace_id,
+                timeout_seconds=timeout_seconds,
+                config=config,
+                connection_ids=connection_ids,
+                user_id=owner_id,
+            )
 
         if was_shutdown_cancelled(run_id):
             update_run_status(

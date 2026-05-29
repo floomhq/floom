@@ -11,6 +11,9 @@ import json
 import mimetypes
 import os
 import re
+import hashlib
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Optional
@@ -42,6 +45,11 @@ MAX_CONTEXT_BYTES = 50 * 1024 * 1024
 
 _CONTEXT_SCOPE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _scope_resolver: Optional[Callable[[], Optional[str]]] = None
+_SCOPE_OVERRIDE_UNSET = object()
+_scope_override: ContextVar[object | str | None] = ContextVar(
+    "workeros_context_scope_override",
+    default=_SCOPE_OVERRIDE_UNSET,
+)
 
 
 def set_context_scope_resolver(resolver: Optional[Callable[[], Optional[str]]]) -> None:
@@ -57,7 +65,38 @@ def set_context_scope_resolver(resolver: Optional[Callable[[], Optional[str]]]) 
     _scope_resolver = resolver
 
 
+def context_scope_for_user(user_id: str | None) -> str | None:
+    deploy_mode = (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower()
+    scoped_local = os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1"
+    if deploy_mode != "cloud" and not scoped_local:
+        return None
+    raw = str(user_id or "").strip()
+    if not raw:
+        return None
+    if _CONTEXT_SCOPE_NAME_RE.fullmatch(raw):
+        return raw
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+    return f"user-{digest}"
+
+
+@contextmanager
+def use_context_scope(scope: str | None):
+    safe_scope = None
+    if scope is not None:
+        raw = str(scope).strip()
+        if raw and _CONTEXT_SCOPE_NAME_RE.fullmatch(raw):
+            safe_scope = raw
+    token = _scope_override.set(safe_scope)
+    try:
+        yield safe_scope
+    finally:
+        _scope_override.reset(token)
+
+
 def _current_scope() -> Optional[str]:
+    override = _scope_override.get()
+    if override is not _SCOPE_OVERRIDE_UNSET:
+        return override if isinstance(override, str) and override else None
     if _scope_resolver is None:
         return None
     try:
