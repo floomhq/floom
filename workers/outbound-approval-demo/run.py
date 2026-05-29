@@ -1,56 +1,66 @@
 """
 outbound-approval-demo: two-phase HITL worker (S47).
 
-Phase 1 (run 1): draft outbound message + emit decision_required.
-Phase 2 (run 2): execute the approved message (harmless side-effect).
+Phase 1 (run 1): draft outbound message + emit decision_required (NO side-effect).
+Phase 2 (run 2): execute the approved message (the side-effect — recorded once).
 
 The side-effect MUST happen exactly once — in run 2 only.
+
+Workeros passes inputs as an inputs.json FILE in the working dir (the platform
+standard), NOT via an env var. The side-effect is recorded as an output field
+(`sent: true`) so it is verifiable from the run record — a sandbox-local /tmp
+file would be lost when the ephemeral sandbox tears down.
 """
 
 import json
-import os
 import sys
 
 
-def main():
-    inputs = json.loads(os.environ.get("WORKEROS_INPUTS", "{}"))
+def _read_inputs():
+    try:
+        with open("inputs.json") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
+
+def _write_result(result):
+    with open("result.json", "w") as f:
+        json.dump(result, f)
+
+
+def main():
+    inputs = _read_inputs()
     decision = inputs.get("decision")
     approved_output = inputs.get("approved_output")
 
     # -------------------------------------------------------------------------
-    # Phase 2: approval decision received — execute the approved action
+    # Phase 2: approval decision received — execute the approved action ONCE
     # -------------------------------------------------------------------------
     if decision == "approved":
-        # Read the approved output. It may be a dict (JSON) or a bare string.
         if isinstance(approved_output, dict):
-            message_text = approved_output.get("text") or json.dumps(approved_output, indent=2)
+            message_text = approved_output.get("message_draft") or approved_output.get("text") \
+                or json.dumps(approved_output, indent=2)
         elif isinstance(approved_output, str) and approved_output.strip():
             message_text = approved_output
         else:
-            # Fallback: use whatever was passed
             message_text = str(approved_output or "(empty)")
 
-        # Side-effect: write to a temp file (harmless, proves it ran exactly once)
-        side_effect_path = "/tmp/outbound-approval-demo-sent.txt"
-        with open(side_effect_path, "w") as f:
-            f.write(message_text)
-
-        result = {
+        # The side-effect. Recorded as an output so it is verifiable from the
+        # run record; fires exactly once because run 2 is spawned once per approval.
+        _write_result({
             "status": "success",
             "outputs": {
                 "phase": "run-2-execute",
-                "message_draft": message_text,
-                "side_effect_path": side_effect_path,
+                "sent": "true",
+                "sent_message": message_text,
             },
-        }
-        with open("result.json", "w") as f:
-            json.dump(result, f)
-        print(f"[phase-2] Side-effect written to {side_effect_path}")
+        })
+        print("[phase-2] Approved message sent. Side-effect fired exactly once.")
         sys.exit(0)
 
     # -------------------------------------------------------------------------
-    # Phase 1: draft the message + emit decision_required (NO side-effect here)
+    # Phase 1: draft the message + emit decision_required (NO side-effect)
     # -------------------------------------------------------------------------
     prospect_name = inputs.get("prospect_name", "Unknown prospect")
     role = inputs.get("role", "Engineer")
@@ -63,8 +73,7 @@ def main():
         "Best,\nThe Workeros team"
     )
 
-    # Emit decision_required — the API will intercept this and land PENDING_APPROVAL
-    result = {
+    _write_result({
         "status": "success",
         "outputs": {
             "phase": "run-1-propose",
@@ -74,10 +83,7 @@ def main():
             "label": "Approve outbound message before sending",
             "preview": draft,
         },
-    }
-    with open("result.json", "w") as f:
-        json.dump(result, f)
-
+    })
     print("[phase-1] Draft complete — awaiting approval. Side-effect NOT fired.")
     sys.exit(0)
 
