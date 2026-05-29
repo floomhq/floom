@@ -526,15 +526,35 @@ function PackDetail({
           </p>
         )}
 
-        {/* Stats row */}
-        <div className="flex gap-3 mt-3">
+        {/* Stats row. Federico Image #17 (2026-05-29): the used-by worker(s)
+            belong in the TOP panel, visible at a glance — Files · Used by
+            [worker] · Size. The redundant "Workers" count pill is replaced by
+            the actual worker chip(s); the separate lower "Used by" section is
+            gone. */}
+        <div className="flex flex-wrap items-center gap-3 mt-3">
           <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5">
             <span className="text-xs text-muted-foreground">Files</span>
             <span className="text-xs font-medium">{detail.file_count}</span>
           </div>
-          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5">
-            <span className="text-xs text-muted-foreground">Workers</span>
-            <span className="text-xs font-medium">{detail.worker_count}</span>
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5 min-w-0">
+            <span className="text-xs text-muted-foreground shrink-0">Used by</span>
+            {(detail.used_by ?? []).length === 0 ? (
+              <span className="text-xs text-muted-foreground italic">none yet</span>
+            ) : (
+              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
+                {(detail.used_by ?? []).map((ref, i, arr) => (
+                  <span key={ref.worker_id} className="inline-flex items-center min-w-0">
+                    <Link
+                      href={`/workers/${encodeURIComponent(ref.worker_id)}`}
+                      className="text-xs font-medium hover:underline truncate"
+                    >
+                      {ref.worker_name}
+                    </Link>
+                    {i < arr.length - 1 && <span className="text-xs text-muted-foreground ml-1.5">·</span>}
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5">
             <span className="text-xs text-muted-foreground">Size</span>
@@ -544,28 +564,6 @@ function PackDetail({
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-        {/* Used by */}
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Used by</p>
-          {(detail.used_by ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No workers reference this pack yet. Workers attach contexts in their <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">worker.yml</code>.
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {(detail.used_by ?? []).map((ref) => (
-                <Link
-                  key={ref.worker_id}
-                  href={`/workers/${encodeURIComponent(ref.worker_id)}`}
-                  className="inline-flex items-center rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-2.5 py-1 text-sm hover:bg-muted transition-colors"
-                >
-                  {ref.worker_name}
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* Files */}
         <div>
           <div className="flex items-center justify-between mb-2">

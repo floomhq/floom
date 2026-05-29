@@ -131,12 +131,29 @@ export default function FilePreviewPage() {
     return () => { cancelled = true; };
   }, [packName, loadableTextPath]);
 
-  // Keep URL in sync when selectedPath changes
+  // Keep the URL in sync when selectedPath changes — IN PLACE.
+  //
+  // Federico Image (2026-05-29): clicking a file in the left rail used to call
+  // router.replace(), which is a real App Router navigation to a new [...path]
+  // segment value. Next remounts the page segment on that change, so
+  // `loadingDetail` reset to true and the LEFT "Files" rail flashed its
+  // skeleton on every file switch — even though the rail is identical between
+  // files. The rail must stay put; only the RIGHT content pane should show a
+  // brief load (driven by `loadingText`).
+  //
+  // Fix (root cause): use history.replaceState to update the address bar
+  // without triggering a Next navigation/remount. `selectedPath` (client state)
+  // already drives the content pane, and a direct URL load / refresh still
+  // works because `useParams()` seeds `selectedPath` on mount.
   useEffect(() => {
-    if (selectedPath !== filePath) {
-      router.replace(`/contexts/${encodeURIComponent(packName)}/files/${selectedPath.split("/").map(encodeURIComponent).join("/")}`);
+    if (selectedPath !== filePath && typeof window !== "undefined") {
+      const url = `/contexts/${encodeURIComponent(packName)}/files/${selectedPath
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`;
+      window.history.replaceState(window.history.state, "", url);
     }
-  }, [selectedPath, filePath, packName, router]);
+  }, [selectedPath, filePath, packName]);
 
   async function saveFile() {
     if (!selectedFile) return;
