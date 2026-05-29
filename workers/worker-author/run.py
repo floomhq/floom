@@ -135,6 +135,22 @@ Rules:
 - if you include "use_cases", it MUST contain EXACTLY 3 to 5 short items; otherwise omit the field entirely
 - if you include "tags", it MUST contain 8 or fewer flat (no "/") non-empty strings; otherwise omit it
 - KISS and YAGNI: the smallest bundle that does exactly what was described
+
+Input-path rule for worker.yml (CRITICAL — gets workers wrong constantly):
+- SCALAR inputs (type: string | textarea | number | boolean | select | url):
+  use kind: "scalar" and NO `path:` field. The value is passed inline.
+- FILE inputs (an uploaded file): use kind: "file" and path: "inputs/<name>"
+  where <name> is the input's own name. The value the worker reads is that
+  relative path; open() it to get the bytes.
+
+run.py rule (CRITICAL — most generated script workers crash on first run):
+- The run_code you emit MUST follow the canonical contract shown below EXACTLY:
+  read inputs.json, distinguish scalar (literal) vs file (relative path under
+  inputs/) inputs, import EVERY module you reference (os, json, csv, io, re,
+  statistics, ...), write output files under out/, and write result.json with
+  {"status","outputs","artifacts","error?"} on BOTH the success and error
+  paths, ending with `if __name__ == "__main__": main()`. A missing `import`
+  or a missing result.json is the #1 cause of a worker failing its first run.
 """
 
 
@@ -147,6 +163,7 @@ def _build_messages(
     context_style: Optional[str],
     context_anti_patterns: Optional[str],
     example_files: List[tuple[str, str]],
+    run_py_template: Optional[str] = None,
 ) -> list[dict]:
     system_parts = [SYSTEM_PROMPT_HEADER]
 
@@ -158,6 +175,20 @@ def _build_messages(
 
     if context_schema:
         system_parts.append(f"\n## Schema reference\n{context_schema[:3000]}")
+
+    if run_py_template:
+        # The canonical, copy-pasteable run.py contract. For SCRIPT-mode workers
+        # the emitted run_code MUST follow this verbatim. This is the single
+        # source of truth (contexts/worker-author-style/RUN_PY_TEMPLATE.py).
+        system_parts.append(
+            "\n## Canonical run.py contract (script mode — follow EXACTLY)\n"
+            "When entry is run.py, your run_code MUST match the contract in this "
+            "template: read inputs.json, treat scalar inputs as literal values and "
+            "file inputs as relative paths under inputs/, import every module you "
+            "use, write outputs under out/, and write result.json on success AND "
+            "error. Do not deviate.\n"
+            f"```python\n{run_py_template[:4000]}\n```"
+        )
 
     if context_style:
         system_parts.append(f"\n## Style conventions\n{context_style[:2000]}")
@@ -215,6 +246,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
     schema_md = _read_context_file("worker-author-style", "SCHEMA.md")
     style_md = _read_context_file("worker-author-style", "STYLE.md")
     anti_patterns_md = _read_context_file("worker-author-style", "ANTI-PATTERNS.md")
+    run_py_template = _read_context_file("worker-author-style", "RUN_PY_TEMPLATE.py")
     example_filenames = _list_context_dir("worker-author-style", "EXAMPLES")
 
     example_files: list[tuple[str, str]] = []
@@ -236,6 +268,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
         context_style=style_md,
         context_anti_patterns=anti_patterns_md,
         example_files=example_files,
+        run_py_template=run_py_template,
     )
 
     # Call OpenAI

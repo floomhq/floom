@@ -189,6 +189,64 @@ def test_run_error_raw_kept_only_when_rewritten(api):
     assert api._run_error_raw("") is None
 
 
+# ---------------------------------------------------------------------------
+# Fix 4 (2026-05-29): a worker's OWN code crash must read as a CODE error the
+# operator can fix/re-generate — NOT a platform "internal error", and NEVER
+# "took too long". The E2B driver wraps such crashes as execution_error
+# (non-zero exit) or e2b_sandbox_error with the exception class in the raw text.
+# ---------------------------------------------------------------------------
+
+NAMEERROR_CRASH = "Worker exited with code 1: NameError: name 'os' is not defined"
+FILE_NOT_FOUND_CRASH = (
+    "Worker exited with code 1: FileNotFoundError: [Errno 2] No such file or "
+    "directory: 'inputs/text_block'"
+)
+
+
+def test_execution_error_with_nameerror_maps_to_code_headline(api):
+    # Was the launch blocker: generated worker crashed with NameError but the
+    # operator saw the generic "internal error" headline, not a code error.
+    msg = api._operator_error_message(NAMEERROR_CRASH, "execution_error")
+    assert msg == api._CODE_HEADLINE
+    assert "NameError" not in msg
+    assert "code" in msg.lower()
+
+
+def test_filenotfound_crash_maps_to_code_headline(api):
+    # FileNotFoundError (scalar input wrongly open()ed) — was unmatched/generic.
+    msg = api._operator_error_message(FILE_NOT_FOUND_CRASH, "execution_error")
+    assert msg == api._CODE_HEADLINE
+    assert "FileNotFoundError" not in msg
+    assert "inputs/text_block" not in msg
+
+
+def test_worker_code_crash_not_shown_as_timeout(api):
+    # A fast crash classified e2b_sandbox_error must NOT say "took too long".
+    msg = api._operator_error_message(NAMEERROR_CRASH, "e2b_sandbox_error")
+    assert msg == api._CODE_HEADLINE
+    assert msg != api._TIMEOUT_HEADLINE
+    assert "too long" not in msg.lower()
+
+
+def test_real_timeout_still_maps_to_timeout(api):
+    # Regression: a genuine timeout (no worker-code traceback) stays a timeout.
+    msg = api._operator_error_message(E2B_DEADLINE, "e2b_sandbox_error")
+    assert msg == api._TIMEOUT_HEADLINE
+
+
+def test_codeless_worker_traceback_maps_to_code_headline(api):
+    # No error_code at all but a worker exception class in the raw -> code error.
+    msg = api._operator_error_message(GENERIC_TRACE)  # KeyError traceback
+    assert msg == api._CODE_HEADLINE
+
+
+def test_setup_codes_unaffected_by_worker_code_detector(api):
+    # missing_secret / missing_connection never carry a traceback; even if the
+    # raw text mentioned an exception word, the setup headline must win.
+    assert api._operator_error_message(None, "missing_secret") == api._SECRET_HEADLINE
+    assert api._operator_error_message(None, "missing_connection") == api._CONNECTION_HEADLINE
+
+
 def test_system_context_pack_hidden(api):
     assert api._is_system_context_pack("worker-author-style")
     assert not api._is_system_context_pack("my-operator-pack")
