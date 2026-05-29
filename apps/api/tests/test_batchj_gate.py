@@ -202,3 +202,32 @@ def test_normalize_handles_exec_outputs_block():
     out = rs._normalize_authored_worker_yml(yml, lambda *a, **k: None)
     field = pyyaml.safe_load(out)["exec"]["outputs"][0]
     assert field.get("type") == "string"
+
+
+def test_normalize_resolves_contradictory_scalar_with_file_markers():
+    # The exact live failure: LLM declared kind:scalar BUT added path+media_type
+    # (file markers) and no type, which the schema rejects. Resolve to a clean
+    # scalar (strip the stray file markers, default type) so it registers and
+    # validates as a WorkerContract.
+    import run_service as rs
+    import yaml as pyyaml
+    from models import WorkerContract
+
+    yml = (
+        "schema_version: '0.3'\nname: string-reverser\ntitle: String Reverser\n"
+        "description: Reverses a string.\nversion: 0.1.0\n"
+        "exec:\n  entry: run.py\n  command: python run.py\n  runtime: python311\n  runner: e2b\n"
+        "  inputs:\n  - name: input_string\n    kind: scalar\n    type: string\n    required: true\n    label: Input\n"
+        "  outputs:\n  - name: reversed_string\n    kind: scalar\n    media_type: text/plain\n"
+        "    path: out/reversed_string.txt\n    required: true\n    label: Reversed\n"
+        "  trigger:\n    type: manual\n"
+    )
+    out = rs._normalize_authored_worker_yml(yml, lambda *a, **k: None)
+    parsed = pyyaml.safe_load(out)
+    field = parsed["exec"]["outputs"][0]
+    assert field.get("kind") == "scalar"
+    assert field.get("type") == "string"
+    assert "path" not in field
+    assert "media_type" not in field
+    # And it now validates as a real contract (no more "must declare type").
+    WorkerContract.model_validate(parsed)
