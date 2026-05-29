@@ -1315,7 +1315,7 @@ def _make_run_summary(row: Any) -> RunSummary:
         started_at=d.get("started_at"),
         completed_at=d.get("completed_at"),
         duration_ms=d.get("duration_ms"),
-        error=_operator_error_message(d.get("error")),
+        error=_operator_error_message(d.get("error"), d.get("error_code")),
         error_code=d.get("error_code"),
     )
 
@@ -6017,14 +6017,12 @@ def get_run(
         logs=logs,
         artifacts=artifacts,
         transcript=transcript,
-        error=_operator_error_message(run.get("error")),
+        error=_operator_error_message(run.get("error"), run.get("error_code")),
         # Raw error/traceback kept only for the debug "Raw" tab, secrets redacted.
-        # Surfaced separately so it is never the operator-facing headline.
-        error_raw=(
-            _redact_public_log_message(str(run.get("error") or "")) or None
-            if _has_internal_artifact(str(run.get("error") or ""))
-            else None
-        ),
+        # Surfaced separately so it is never the operator-facing headline. We keep
+        # it whenever the operator headline differs from the raw text (artifact,
+        # runtime jargon, or error_code mapping) so engineers can still see it.
+        error_raw=_run_error_raw(run.get("error"), run.get("error_code")),
         error_code=run.get("error_code"),
         started_at=run.get("started_at"),
         completed_at=run.get("completed_at"),
@@ -6240,20 +6238,88 @@ _GIT_BRANCH_RE = re.compile(
     r"\b(?:lane|feat|feature|fix|hotfix|chore|recover|docs|polish|backend|land)/[A-Za-z0-9._/-]+"
 )
 
+# Structured error_code -> calm operator headline. This is the PRIMARY mapping:
+# the run pipeline already classifies every failure into this taxonomy, so we
+# key the operator headline off the code FIRST (before any free-text matching).
+# That guarantees no raw runtime/sandbox jargon reaches the operator surface,
+# even when the raw string carries no traceback / path / env-var artifact.
+#
+# Any code not listed here falls through to _OPERATOR_ERROR_RULES (free-text)
+# and then to the generic fallback, so every failure gets a clean headline.
+_TIMEOUT_HEADLINE = "This worker took too long and was stopped. Try again, or simplify the input."
+_RUNTIME_HEADLINE = (
+    "This worker hit an internal error and stopped. Check the run logs, then edit or re-run the worker."
+)
+_CONNECTION_HEADLINE = "This worker needs an account connected before it can run. Connect it, then re-run."
+_AUTH_HEADLINE = "A connected account or key was rejected. Reconnect the account this worker uses, then re-run."
+_INPUT_HEADLINE = "This worker is missing a required input. Add it, then re-run."
+_SECRET_HEADLINE = "This worker is missing a required credential. Add it in settings, then re-run."
+_OUTPUT_HEADLINE = "This worker finished but its result didn't pass validation. Check the run logs, then re-run."
+_CODE_HEADLINE = "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it."
+_CANCELLED_HEADLINE = "This run was cancelled before it finished."
+
+_OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
+    # Runtime / agent / sandbox internals (the residual G5 leak class).
+    "agent_runtime_error": _RUNTIME_HEADLINE,
+    "run_execution_exception": _RUNTIME_HEADLINE,
+    "execution_error": _RUNTIME_HEADLINE,
+    "skill_runtime_error": _RUNTIME_HEADLINE,
+    "openai_call_failed": _RUNTIME_HEADLINE,
+    "interrupted_by_restart": "This run was interrupted while the service restarted. Re-run the worker.",
+    "context_mount_failed": _RUNTIME_HEADLINE,
+    "mcp_connect_failed": _CONNECTION_HEADLINE,
+    # Sandbox / timeout / resource.
+    "e2b_sandbox_error": _TIMEOUT_HEADLINE,
+    "timeout": _TIMEOUT_HEADLINE,
+    "sandbox_oom": "This worker ran out of memory and was stopped. Try simplifying the input.",
+    "token_cap_exceeded": "This worker reached its output limit and was stopped. Try simplifying the task.",
+    "tool_iteration_cap_exceeded": "This worker took too many steps and was stopped. Try simplifying the task.",
+    "tool_loop_exhausted": "This worker took too many steps and was stopped. Try simplifying the task.",
+    "missing_e2b_key": _RUNTIME_HEADLINE,
+    # Setup / configuration.
+    "missing_connection": _CONNECTION_HEADLINE,
+    "missing_secret": _SECRET_HEADLINE,
+    "missing_required_input": _INPUT_HEADLINE,
+    "install_failed": "This worker is missing a required package. Add it to the worker's requirements and re-run.",
+    "invalid_worker": _CODE_HEADLINE,
+    "skill_not_found": _CODE_HEADLINE,
+    "worker_not_found": "This worker no longer exists.",
+    "worker_disabled": "This worker is paused. Turn it on to run it again.",
+    # Output / result.
+    "output_validation_failed": _OUTPUT_HEADLINE,
+    "schema_violation": _OUTPUT_HEADLINE,
+    "quality_gate_failed": "This worker's result didn't meet its quality bar. Check the run logs, then re-run.",
+    "missing_result": "This worker finished but didn't produce a result. Check the run logs, then re-run.",
+    # Cancellation (not a true failure; kept calm).
+    "cancelled": _CANCELLED_HEADLINE,
+    "cancelled_queued": _CANCELLED_HEADLINE,
+    "cancelled_before_start": _CANCELLED_HEADLINE,
+}
+
+# Generic fallback for any unknown / future error_code — never raw jargon.
+_OPERATOR_ERROR_GENERIC = (
+    "This worker failed to run. Check the run logs for details, then edit or re-run the worker."
+)
+
 # Ordered (pattern, operator-message) map. First hit wins for the headline.
+# Free-text fallback used only when error_code is absent or unrecognised.
 _OPERATOR_ERROR_RULES: List[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bSyntaxError\b|\bIndentationError\b", re.IGNORECASE),
-     "This worker's code has an error and couldn't start. Edit the worker to fix it, or re-generate it."),
+     _CODE_HEADLINE),
     (re.compile(r"\bModuleNotFoundError\b|\bImportError\b", re.IGNORECASE),
      "This worker is missing a required package. Add it to the worker's requirements and re-run."),
     (re.compile(r"\b(?:401|403|Unauthorized|Forbidden|invalid[_ ]?token|authentication)\b", re.IGNORECASE),
-     "A connected account or key was rejected. Reconnect the account this worker uses, then re-run."),
+     _AUTH_HEADLINE),
+    (re.compile(r"Event loop is closed|\basyncio\b|coroutine|RuntimeError", re.IGNORECASE),
+     _RUNTIME_HEADLINE),
     (re.compile(r"\bKeyError\b|\bNameError\b|\bAttributeError\b|\bTypeError\b|\bValueError\b", re.IGNORECASE),
-     "This worker hit an unexpected error while running. Check the run logs, then edit or re-run the worker."),
+     _RUNTIME_HEADLINE),
     (re.compile(r"\b(?:Timed?\s?out|timeout|deadline exceeded)\b", re.IGNORECASE),
-     "This worker took too long and was stopped. Try again, or simplify the input."),
+     _TIMEOUT_HEADLINE),
     (re.compile(r"\b(?:Connection|Network|DNS|getaddrinfo|ECONN|socket)\b", re.IGNORECASE),
      "This worker couldn't reach an external service. Check the connection, then re-run."),
+    (re.compile(r"SHA-256 reference|from /uploads", re.IGNORECASE),
+     "This worker needs a file uploaded for one of its inputs. Upload the file, then re-run."),
 ]
 
 
@@ -6273,31 +6339,92 @@ def _has_internal_artifact(text: str) -> bool:
     return False
 
 
-def _operator_error_message(raw_error: Optional[str]) -> Optional[str]:
-    """Map a raw run error (possibly a full Python traceback) to a calm,
-    operator-readable headline. Returns None when raw_error is empty.
+def _operator_error_message(
+    raw_error: Optional[str], error_code: Optional[str] = None
+) -> Optional[str]:
+    """Map a run error to a calm, operator-readable headline.
 
-    If the raw text contains NO internal artifact (no traceback / path /
-    env-var / branch), it is returned as-is after light log redaction — many
-    errors are already operator-clean (e.g. 'Missing required inputs: …').
+    Resolution order (so NO raw runtime/sandbox jargon ever reaches an operator,
+    even when the raw string carries no traceback/path/env-var artifact):
+
+    1. Structured ``error_code`` taxonomy (PRIMARY). The pipeline classifies
+       every failure into a known code; we map the code to a fixed headline.
+    2. A small set of operator-clean structured messages that are safe to show
+       verbatim ("Missing required inputs: prospect_name", "Invalid value 'en';
+       expected one of: …", etc.) pass through unchanged.
+    3. Free-text rules (``_OPERATOR_ERROR_RULES``) for codeless errors.
+    4. Generic fallback. Never the raw string when it looks like jargon.
+
+    Returns None when raw_error is empty.
     """
+    code = (error_code or "").strip().lower()
+    if code and code in _OPERATOR_ERROR_CODE_HEADLINES:
+        return _OPERATOR_ERROR_CODE_HEADLINES[code]
+
     if raw_error is None:
-        return None
+        # No raw text but an unrecognised code -> generic operator headline.
+        return _OPERATOR_ERROR_GENERIC if code else None
     text = str(raw_error).strip()
     if not text:
-        return None
-    # First apply the existing log redactor. It cleanly maps known structured
-    # errors ("Missing secrets: X" -> "Missing required secrets", env-var "not
-    # configured" -> generic) without losing meaning. Only when the redacted
-    # text STILL carries a raw artifact (real traceback / sandbox path / git
-    # branch) do we fall back to a generic operator headline.
+        return _OPERATOR_ERROR_GENERIC if code else None
+
+    # Light log redaction first (maps "Missing secrets: X" -> generic, etc.).
     redacted = _redact_public_log_message(text)
-    if not _has_internal_artifact(redacted):
+
+    # Operator-clean structured messages may pass through verbatim ONLY when
+    # they carry no internal artifact AND are not raw runtime/sandbox jargon.
+    if not _has_internal_artifact(redacted) and not _looks_like_runtime_jargon(redacted):
         return redacted
+
+    # Free-text fallback for codeless / unrecognised-code errors.
     for pattern, message in _OPERATOR_ERROR_RULES:
         if pattern.search(text):
             return message
-    return "This worker failed to run. Check the run logs for details, then edit or re-run the worker."
+    return _OPERATOR_ERROR_GENERIC
+
+
+# Raw runtime/sandbox boilerplate that is artifact-free (no traceback/path/env)
+# yet pure jargon to an operator. Used to stop these from passing through
+# verbatim when an error_code is missing or unrecognised.
+_RUNTIME_JARGON_RE = re.compile(
+    r"(?i:Event loop is closed"
+    r"|context deadline exceeded"
+    r"|process or directory watch"
+    r"|use '0' to disable"
+    r"|\basyncio\b"
+    r"|\bcoroutine\b"
+    r"|SHA-256 reference"
+    r"|\bTraceback\b)"
+    # Bare Python exception class names (RuntimeError, KeyError, …) are jargon
+    # even without a traceback wrapper. CamelCase, case-sensitive, so we do NOT
+    # eat the ordinary lowercase word "error" in a clean operator message.
+    r"|\b[A-Z][A-Za-z0-9]*(?:Error|Exception)\b",
+)
+
+
+def _looks_like_runtime_jargon(text: str) -> bool:
+    """True for artifact-free strings that are still pure runtime/sandbox jargon
+    (e.g. 'Event loop is closed', E2B deadline boilerplate). These must not pass
+    through verbatim to the operator surface."""
+    if not text:
+        return False
+    return bool(_RUNTIME_JARGON_RE.search(text))
+
+
+def _run_error_raw(
+    raw_error: Optional[str], error_code: Optional[str] = None
+) -> Optional[str]:
+    """Redacted raw error for the debug 'Raw' tab. Returned only when the
+    operator-facing headline differs from the raw text (i.e. we rewrote it),
+    so engineers can still inspect what really happened. When the raw text is
+    already operator-clean and shown verbatim, there is nothing extra to keep."""
+    raw = str(raw_error or "").strip()
+    if not raw:
+        return None
+    headline = _operator_error_message(raw, error_code)
+    if headline is None or headline == raw:
+        return None
+    return _redact_public_log_message(raw) or None
 
 
 def _sanitize_operator_text(text: Optional[str]) -> Optional[str]:
@@ -8153,12 +8280,21 @@ def _overview_human_error_code(error_code: Optional[str]) -> str:
 
 
 def _overview_failure_cause(row: Dict[str, Any]) -> str:
-    error_code = _overview_human_error_code(row.get("error_code"))
+    raw_error_code = row.get("error_code")
+    error_code = _overview_human_error_code(raw_error_code)
     raw_message = str(row.get("error") or "").strip()
     # Operator hygiene (G5): never let a raw traceback / sandbox path / env-var
-    # name surface in the overview failure cause. Map it to a calm headline.
-    if raw_message and _has_internal_artifact(raw_message):
-        return _operator_error_message(raw_message) or error_code
+    # name OR artifact-free runtime jargon ("Event loop is closed", E2B deadline
+    # boilerplate) surface in the overview failure cause. The code-keyed
+    # sanitizer maps any recognised error_code, and any remaining jargon, to a
+    # calm headline before we ever fall through to "<code>: <raw message>".
+    code = str(raw_error_code or "").strip().lower()
+    if code and code in _OPERATOR_ERROR_CODE_HEADLINES:
+        return _OPERATOR_ERROR_CODE_HEADLINES[code]
+    if raw_message and (
+        _has_internal_artifact(raw_message) or _looks_like_runtime_jargon(raw_message)
+    ):
+        return _operator_error_message(raw_message, raw_error_code) or error_code
     error_message = raw_message
     if error_message:
         first_line = error_message.splitlines()[0].strip()
