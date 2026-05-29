@@ -249,6 +249,15 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                           {item.cause ? ` · ${item.cause}` : ""}
                         </p>
                         <div className="mt-2 flex flex-wrap gap-1.5">
+                          {item.worker_id && (
+                            <Link
+                              href={`/workers/${item.worker_id}`}
+                              onClick={() => setOpen(false)}
+                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                            >
+                              View worker
+                            </Link>
+                          )}
                           <Link
                             href={`/runs?worker=${item.worker_id}&status=failed`}
                             onClick={() => setOpen(false)}
