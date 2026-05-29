@@ -2007,6 +2007,58 @@ def _get_visible_run(
     return row
 
 
+# Hidden/system workers whose runs the operator nonetheless drives directly by
+# run_id through the product UI, so single-run-by-id reads must NOT be filtered
+# out the way the LIST view filters them. Currently just the generation
+# meta-worker: POST /workers/new/from-prompt returns its run_id and the
+# /workers/new GeneratingPanel polls GET /runs/{id} + /stream + /events + /logs.
+#
+# This is deliberately an ALLOWLIST, not "any hidden worker": internal infra
+# workers (e.g. the slack-listener trigger) stay inaccessible by id — see
+# test_round8_worker_authz.test_hidden_internal_worker_runs_stay_inaccessible.
+# "worker-author" — kept as a literal because _WORKER_AUTHOR_ID is defined
+# later in the module; asserted equal in a test.
+_OPERATOR_REACHABLE_HIDDEN_WORKER_IDS = frozenset({"worker-author"})
+
+
+def _get_run_by_explicit_id(
+    run_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Any:
+    """Fetch a run by its EXACT id, scoped to the caller's workspace.
+
+    Returns the run if EITHER:
+      - it passes the normal visibility filter (``_get_visible_run``), OR
+      - its worker is in ``_OPERATOR_REACHABLE_HIDDEN_WORKER_IDS`` (the
+        generation meta-worker), which the operator drives directly by run_id
+        from the product UI.
+
+    The system/audit visibility filter (``_run_visible_to_api`` ->
+    ``_worker_hidden_from_api``) is for the LIST view: it keeps meta/system runs
+    out of the operator's default /runs listing. But the /workers/new generation
+    UI already holds the precise worker-author ``run_id`` (returned by POST
+    /workers/new/from-prompt) and must be able to read its
+    detail/logs/output/stream/events to drive the GeneratingPanel. Filtering
+    those out returned a spurious 404 and hung generation (regression from PR
+    #231/#235).
+
+    This stays an allowlist so internal infra workers (slack-listener etc.)
+    remain inaccessible by id. Authorization is enforced via the user-scoped
+    ``repos.runs.get``.
+    """
+    row = repos.runs.get(user_id=user_id, run_id=run_id)
+    if row is None:
+        return None
+    if _run_visible_to_api(row, user_id=user_id, repos=repos):
+        return row
+    worker_id = str(row_to_dict(row).get("worker_id") or "")
+    if worker_id in _OPERATOR_REACHABLE_HIDDEN_WORKER_IDS:
+        return row
+    return None
+
+
 def _list_visible_runs(
     *,
     user_id: str,
@@ -5479,7 +5531,11 @@ def cancel_run(
     Returns 404 if no cancellable run is visible, 200 if cancellation was
     recorded.
     """
-    row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    # Cancellation operates on the caller's own run by explicit id, so it must
+    # work for system/meta runs too (e.g. aborting a worker-author generation
+    # from the /workers/new GeneratingPanel). The system/audit visibility filter
+    # is for the LIST view only.
+    row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if row["status"] in _TERMINAL_RUN_STATUSES:
@@ -5713,7 +5769,7 @@ def download_run_bundle(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if not run_row:
         raise HTTPException(status_code=404, detail="Run not found")
     artifact_rows = repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
@@ -5784,7 +5840,7 @@ def get_run_bundle_file(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    if _get_visible_run(run_id, user_id=auth.user_id, repos=repos) is None:
+    if _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos) is None:
         raise HTTPException(status_code=404, detail="Bundle file not found")
     snapshot_path = repos.runs.get_bundle_snapshot_path(user_id=auth.user_id, run_id=run_id)
     if snapshot_path is None:
@@ -5812,7 +5868,7 @@ def download_artifact(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    if _get_visible_run(run_id, user_id=auth.user_id, repos=repos) is None:
+    if _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos) is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
     row = next(
         (
@@ -5874,7 +5930,7 @@ def get_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> RunDetail:
-    run = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    run = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -5954,7 +6010,7 @@ async def stream_run_parts(
     repos: Repositories = Depends(get_repos),
 ):
     """Server-Sent Events stream of AI SDK parts for a single run."""
-    row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if not row:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -6044,7 +6100,7 @@ async def stream_run_events(
     - If run is already terminal when client connects, current state is emitted
       immediately then the stream closes.
     """
-    run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if not run_row:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -6061,7 +6117,7 @@ async def stream_run_events(
 
             # If run already terminal, emit current state and close immediately
             if already_terminal:
-                final_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+                final_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
                 if final_row:
                     evt = _public_sse_event({
                         "type": "status",
@@ -6158,7 +6214,7 @@ def get_run_logs(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[Dict[str, Any]]:
-    if _get_visible_run(run_id, user_id=auth.user_id, repos=repos) is None:
+    if _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     rows = repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
     return [
