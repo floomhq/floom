@@ -331,6 +331,17 @@ export interface PlatformConfig {
   required_count: number;
 }
 
+export interface WorkspaceAgentTool {
+  name: string;
+  description: string;
+}
+
+export interface WorkspaceAgentInfo {
+  agent_id: string;
+  system_prompt: string;
+  tools: WorkspaceAgentTool[];
+}
+
 export interface SystemOverviewStats {
   runs_24h: number;
   runs_24h_sparkline: number[];

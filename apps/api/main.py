@@ -9495,6 +9495,25 @@ def system_info():
     }
 
 
+@app.get("/system/workspace-agent")
+def system_workspace_agent(auth: AuthContext = Depends(get_auth_context)):
+    """Read-only view of the workspace agent that powers /chat.
+
+    GAP #5: operators had no way to see the assistant's system instructions or
+    which management tools it can call. Returns the resolved system prompt
+    (workspace.md + engine SKILL.md + live workspace snapshot) and the tool
+    names + one-line descriptions. Never returns secret values.
+    """
+    from chat_service import workspace_agent_info
+
+    info = workspace_agent_info(auth.user_id)
+    return {
+        "agent_id": info["agent_id"],
+        "system_prompt": info["system_prompt"],
+        "tools": info["tools"],
+    }
+
+
 @app.get("/system/alerts")
 def system_alerts(auth: AuthContext = Depends(get_auth_context)):
     """Return open (unresolved) alert incidents.
