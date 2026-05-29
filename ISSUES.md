@@ -1676,3 +1676,35 @@ round-trip verified (worker + pack appear, re-import dedups, traversal rejected)
 Doc: `docs/audits/workspace-duplicate-2026-05-29.md`.
 
 **Status:** SHIPPED. (live edge proof appended after deploy)
+
+---
+
+## Backend hardening + consistency batch (2026-05-29)
+
+### #BE-CLEAR-1 `/runs/clear` was a global, irreversible footgun that wiped 593 prod runs
+
+**Where:** `apps/api/main.py` `clear_runs` (`/runs/clear`); backup helpers `_backup_db_before_clear` / `_live_db_file_path` / `_preclear_backup_dir`. Repo delete: `apps/api/db/sqlite.py` `RunsRepository.clear_all` (already owner-scoped via `list_all_ids` `WHERE w.owner_id = ?`).
+
+**Symptom:** A referee agent called `POST /runs/clear?confirm=yes-wipe-all-runs` against prod :8011 thinking it was local dev and irreversibly wiped 593 runs/logs/artifacts. The only guard was the `?confirm=` query gate; one call destroyed all run history with no backup.
+
+**Fix:**
+1. **Auto-backup before wiping** — `_backup_db_before_clear` snapshots the live DB to `/root/backups/manual/floom-preclear-<epoch>.db` via SQLite `VACUUM INTO` (atomic, WAL-consistent, no sidecar). Backup dir overridable via `WORKEROS_PRECLEAR_BACKUP_DIR` (defaults to prod path).
+2. **Abort on backup failure** — if the snapshot raises or is missing/empty, the endpoint returns HTTP 500 and deletes NOTHING.
+3. **Owner-scoped** — delete already runs through `clear_all(user_id=...)` (`WHERE w.owner_id = ?`); never a cross-tenant wipe. Hardened the docstring + log line to make this explicit.
+4. Response now returns `{status, cleared_count, deleted_runs (back-compat alias), backup_path}`.
+
+**Proof:** `tests/test_runs_clear_hardening.py` (3/3): backup-created-before-delete + owner-scope + abort-on-backup-fail. `tests/test_round8_worker_authz.py::test_runs_clear_only_deletes_owner_history` updated to assert the backup + cleared_count contract (passes). Did NOT exercise a real wipe against prod; the 595 prod runs are untouched.
+
+**Status:** FIXED (live edge proof appended after deploy).
+
+### #BE-CTX-2 `/contexts` LIST showed "0 workers" while the pack was in use
+
+**Where:** `apps/api/main.py` `_context_summary` (hardcoded `worker_count=0`), `list_contexts`, new helper `_context_worker_counts`. Detail path `_context_detail` already computed `used_by` + `worker_count` correctly.
+
+**Symptom:** GET `/contexts` row for `worker-author-style` reported `worker_count: 0`, while GET `/contexts/worker-author-style` (detail) reported `worker_count: 1, used_by: [Worker Author]`. List and detail disagreed; the UI showed "0 workers" for packs that were actually mounted.
+
+**Fix:** `_context_worker_counts` builds a `pack_name -> count` map from a SINGLE `repos.workers.list()` call (no N+1 across packs), computed from the same `context_mount_names(config.contexts)` source the detail path uses. `list_contexts` passes the per-pack count into `_context_summary`.
+
+**Proof:** Live (pre-fix) confirmed the inconsistency on :8011 — list `worker-author-style`=0, detail=1. `apps/api/tests/test_contexts_system_packs.py::test_list_worker_count_matches_detail` asserts list == detail == 1 after a worker mounts the pack. curl proof appended after deploy.
+
+**Status:** FIXED (live edge proof appended after deploy).

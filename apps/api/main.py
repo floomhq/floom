@@ -2986,7 +2986,36 @@ def _require_readable_context_for_user(
     return safe_name, meta
 
 
-def _context_summary(name: str, metadata: dict[str, dict[str, Any]]) -> ContextSummary:
+def _context_worker_counts(repos: Optional[Repositories], user_id: str) -> dict[str, int]:
+    """Map context-pack name -> number of workers that mount it.
+
+    Computed from a single ``workers.list`` call so the LIST endpoint stays
+    O(workers) instead of O(packs * workers). Mirrors the per-pack ``used_by``
+    computation in ``_context_detail`` so list == detail.
+    """
+    counts: dict[str, int] = {}
+    if repos is None:
+        return counts
+    try:
+        workers = repos.workers.list(user_id=user_id)
+    except Exception:
+        return counts
+    for worker in workers:
+        try:
+            contexts = (worker.get("config") or {}).get("contexts") or []
+            for ctx_name in context_mount_names(contexts):
+                counts[ctx_name] = counts.get(ctx_name, 0) + 1
+        except Exception:
+            continue
+    return counts
+
+
+def _context_summary(
+    name: str,
+    metadata: dict[str, dict[str, Any]],
+    *,
+    worker_count: int = 0,
+) -> ContextSummary:
     root = context_dir(name)
     files = list(iter_context_files(root))
     total_size = sum(path.stat().st_size for path in files)
@@ -3000,7 +3029,7 @@ def _context_summary(name: str, metadata: dict[str, dict[str, Any]]) -> ContextS
         total_size_bytes=total_size,
         updated_at=context_updated_at(root),
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
-        worker_count=0,
+        worker_count=worker_count,
         description=description,
         system=is_system,
         read_only=is_system,
@@ -3110,10 +3139,14 @@ def _workers_referencing_context(name: str, *, user_id: str, repos: Repositories
 @app.get("/contexts", response_model=List[ContextSummary])
 def list_contexts(
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> List[ContextSummary]:
     ensure_contexts_dir()
     metadata = load_context_metadata()
     root = current_contexts_root()
+    # Compute worker_count for every pack from a single workers.list() call so
+    # the LIST row matches the DETAIL view (used_by) without N+1 queries.
+    worker_counts = _context_worker_counts(repos, auth.user_id)
     operator_items: List[ContextSummary] = []
     system_items: List[ContextSummary] = []
     for folder in sorted(root.iterdir(), key=lambda p: p.name):
@@ -3122,10 +3155,14 @@ def list_contexts(
         # System/engine packs are surfaced read-only so operators can see what
         # shapes worker generation; they cannot be edited or deleted.
         if _is_system_context_pack(folder.name, metadata):
-            system_items.append(_context_summary(folder.name, metadata))
+            system_items.append(_context_summary(
+                folder.name, metadata, worker_count=worker_counts.get(folder.name, 0)
+            ))
             continue
         if _context_visible_to_user(folder.name, user_id=auth.user_id, metadata=metadata):
-            operator_items.append(_context_summary(folder.name, metadata))
+            operator_items.append(_context_summary(
+                folder.name, metadata, worker_count=worker_counts.get(folder.name, 0)
+            ))
     # Operator packs first, then read-only system packs.
     return operator_items + system_items
 
@@ -6306,28 +6343,99 @@ def list_runs(
     return [_make_run_summary(r) for r in visible_rows]
 
 
+_DEFAULT_PRECLEAR_BACKUP_DIR = "/root/backups/manual"
+
+
+def _preclear_backup_dir() -> str:
+    return os.environ.get("WORKEROS_PRECLEAR_BACKUP_DIR") or _DEFAULT_PRECLEAR_BACKUP_DIR
+
+
+def _live_db_file_path() -> Optional[str]:
+    """Resolve the on-disk path of the main SQLite database, or None for
+    an in-memory DB. Uses PRAGMA database_list so it reflects the connection
+    actually in use rather than a possibly-stale module global."""
+    with get_db() as conn:
+        for row in conn.execute("PRAGMA database_list").fetchall():
+            # row: (seq, name, file). The main schema is named 'main'.
+            if row["name"] == "main":
+                file_path = row["file"]
+                return file_path or None
+    return None
+
+
+def _backup_db_before_clear() -> str:
+    """Snapshot the live DB to a timestamped file before a destructive clear.
+
+    Uses SQLite ``VACUUM INTO`` for an atomic, WAL-consistent single-file copy.
+    Raises on any failure so the caller can ABORT the clear (never wipe without
+    a verified backup). Returns the backup file path.
+    """
+    db_file = _live_db_file_path()
+    if not db_file:
+        raise RuntimeError("cannot back up an in-memory database before clear")
+    backup_dir = _preclear_backup_dir()
+    os.makedirs(backup_dir, exist_ok=True)
+    backup_path = os.path.join(
+        backup_dir, f"floom-preclear-{int(time.time())}.db"
+    )
+    with get_db() as conn:
+        # VACUUM INTO writes a fresh, fully-consistent copy (no WAL sidecar).
+        conn.execute("VACUUM INTO ?", (backup_path,))
+    if not os.path.isfile(backup_path) or os.path.getsize(backup_path) == 0:
+        raise RuntimeError(f"backup file missing or empty after VACUUM INTO: {backup_path}")
+    return backup_path
+
+
 @app.post("/runs/clear")
 def clear_runs(
     confirm: str = Query("", description="Must be 'yes-wipe-all-runs' to proceed."),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    """Wipe all run history.
+    """Clear the caller's run history.
 
     Destructive operation. Requires explicit `?confirm=yes-wipe-all-runs`
     query param to proceed.
+
+    Hardened (post-incident 2026-05-29):
+    - Backs up the full DB to ``/root/backups/manual/floom-preclear-<epoch>.db``
+      BEFORE deleting anything. If the backup fails, the clear is ABORTED.
+    - Scopes deletion to the caller (``owner_id``) only — never a global wipe
+      of every user's runs.
     """
     if confirm != "yes-wipe-all-runs":
         raise HTTPException(
             status_code=400,
             detail=(
                 "Destructive endpoint. Append ?confirm=yes-wipe-all-runs to "
-                "proceed. This wipes every run, log, and artifact record."
+                "proceed. This backs up the DB, then clears YOUR run/log/"
+                "artifact history."
             ),
         )
+    try:
+        backup_path = _backup_db_before_clear()
+    except Exception as exc:
+        logger.error("Aborting /runs/clear: pre-clear backup failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pre-clear backup failed; clear aborted (no data deleted): {exc}",
+        ) from exc
+    # clear_all is owner-scoped (WHERE w.owner_id = ?), so this never touches
+    # other tenants' runs.
     deleted_count = repos.runs.clear_all(user_id=auth.user_id)
-    logger.warning("All run history cleared (%d runs deleted)", deleted_count)
-    return {"status": "cleared", "deleted_runs": deleted_count}
+    logger.warning(
+        "Run history cleared for user %s (%d runs deleted, backup at %s)",
+        auth.user_id,
+        deleted_count,
+        backup_path,
+    )
+    return {
+        "status": "cleared",
+        "cleared_count": deleted_count,
+        # Back-compat alias for pre-hardening callers.
+        "deleted_runs": deleted_count,
+        "backup_path": backup_path,
+    }
 
 
 _TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "pending_approval"})
