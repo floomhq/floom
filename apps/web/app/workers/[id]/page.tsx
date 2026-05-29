@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
+import { WorkerIconPills } from "@/components/WorkerIconPills";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { FileInputUpload } from "@/components/FileInputUpload";
@@ -743,6 +744,24 @@ export default function WorkerDetailPage() {
           {worker.description && (
             <p className="text-muted-foreground text-sm mt-1">{worker.description}</p>
           )}
+          {/* FIX 1 (Federico 2026-05-29): Langdock-grade icon-pill row near the
+              title — input-type glyphs (text/person/web/…) + real brand logos
+              for declared connections + a trigger glyph, as squircle pills with
+              +N overflow. Same WorkerIconPills as the /workers cards. Hidden in
+              edit mode (the metadata form owns that surface). Renders nothing
+              when the worker has no inputs/connections/trigger. */}
+          {!worker.archived && !isEditMode && (
+            <WorkerIconPills
+              inputs={worker.config.inputs}
+              connections={(worker.config.connections ?? []).filter(
+                (c): c is string => typeof c === "string",
+              )}
+              triggerType={worker.trigger_type || worker.config.trigger?.type}
+              size="md"
+              max={8}
+              className="mt-2.5"
+            />
+          )}
           {(worker.tags || []).length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 mt-2">
               {(worker.tags || []).map((tag) => (
@@ -1183,7 +1202,7 @@ function RunSection({
           )}
 
           {missingConnections.length > 0 && (
-            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800">
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
               <Plug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <div>
                 <p className="font-medium">Connection required</p>
@@ -1228,7 +1247,7 @@ function RunSection({
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">Webhook URL</Label>
             <div className="flex items-center gap-2">
-              <code className="flex-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1.5 break-all">
+              <code className="flex-1 text-xs font-mono bg-muted border border-border rounded-[var(--radius-button)] px-2 py-1.5 break-all">
                 {worker.webhook_url}
               </code>
               <button
@@ -1240,7 +1259,7 @@ function RunSection({
                     () => toast.error("Failed to copy"),
                   );
                 }}
-                className="shrink-0 p-1.5 rounded border border-border bg-card hover:bg-muted transition-colors"
+                className="shrink-0 p-1.5 rounded-[var(--radius-button)] border border-border bg-card hover:bg-muted transition-colors"
               >
                 <Copy className="w-3.5 h-3.5 text-muted-foreground" />
               </button>
@@ -1248,7 +1267,7 @@ function RunSection({
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">Example curl</Label>
-            <pre className="text-xs font-mono bg-[var(--bg-2)] dark:bg-[#1a1a1a] text-foreground dark:text-[#a8e6a3] border border-line rounded p-2 overflow-x-auto whitespace-pre-wrap">
+            <pre className="text-xs font-mono bg-[var(--bg-2)] dark:bg-[#1a1a1a] text-foreground dark:text-[#a8e6a3] border border-line rounded-[var(--radius-button)] p-2 overflow-x-auto whitespace-pre-wrap">
               {`curl -X POST '${worker.webhook_url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
             </pre>
           </div>
