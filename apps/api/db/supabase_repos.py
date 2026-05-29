@@ -464,13 +464,33 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             worker_id, manifest_json
         )
 
-        # Ownership guard: if the row exists under a different user_id,
-        # refuse rather than reassign. Worker IDs are globally unique by
-        # PK so two tenants can't legitimately own the same id, but a
-        # filesystem rename + re-discover could surface a collision and
-        # we should fail loud rather than steal someone else's worker.
+        # Ownership guard: if the row exists under a different user_id we must
+        # never reassign it (no theft / no clobber of another tenant's worker).
+        #
+        # The engine's _persist_discovered_workers re-upserts EVERY worker it
+        # discovers on the shared filesystem on every draft-and-create — and
+        # in cloud the shared var/workers/ holds demo/seed bundles owned by
+        # DIFFERENT demo users (e.g. morning-brief/meeting-prep/slack-weekly-
+        # recap are seeded to depontefede@gmail.com, applicant-followup et al.
+        # to fede@rocketlist.ai). So when fede drafts a new worker, the bulk
+        # re-persist pass reaches meeting-prep (owned by depontefede) and the
+        # old behavior RAISED, and the engine re-raises, aborting the WHOLE
+        # draft with a 409 — even though the user's newly authored worker was
+        # written fine.
+        #
+        # Skipping (returning the existing row unchanged) is safe here:
+        #   - It does NOT reassign ownership or mutate the other tenant's row.
+        #   - It is NOT a theft vector: an INTENTIONAL create can never reach a
+        #     cross-user id, because _free_worker_id (#54/#186) consults the
+        #     unscoped get_any and renames any colliding id to a free one
+        #     BEFORE we get here. A cross-user collision at upsert time is
+        #     therefore always a discovery re-persist of a shared seed bundle,
+        #     never a claim attempt.
         existing_owner = self.get_owner(worker_id=worker_id)
         if existing_owner is not None and existing_owner != user_id:
+            existing_row = self.get_any(worker_id=worker_id)
+            if existing_row is not None:
+                return existing_row
             raise RuntimeError(
                 f"worker {worker_id!r} already exists for a different user"
             )
