@@ -5848,10 +5848,15 @@ _INTERNAL_LOG_TOKEN_RE = re.compile(
 )
 _LOG_METADATA_RE = re.compile(r"\b(?:mode|runner)=[^\s,;]+", re.IGNORECASE)
 _MISSING_SECRETS_RE = re.compile(r"Missing secrets?:\s*[A-Z0-9_, ]+", re.IGNORECASE)
+_ENV_SECRET_CONFIG_RE = re.compile(
+    r"\b[A-Z][A-Z0-9]{1,63}(?:_[A-Z0-9]{1,64})+\b(?:\s+is)?\s+(?:not set|not configured|missing)\b(?:\.[^\n]*)?",
+    re.IGNORECASE,
+)
 
 
 def _redact_public_log_message(message: str) -> str:
     redacted = _MISSING_SECRETS_RE.sub("Missing required secrets", message or "")
+    redacted = _ENV_SECRET_CONFIG_RE.sub("Required platform secret is not configured", redacted)
     redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", redacted)
     redacted = _LOG_METADATA_RE.sub("[redacted-metadata]", redacted)
     return redacted
@@ -5869,7 +5874,9 @@ def _public_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
 
 def _public_run_part(part: Dict[str, Any]) -> Dict[str, Any]:
     public_part = dict(part)
-    if public_part.get("type") == "finish" and public_part.get("error") is not None:
+    if "message" in public_part:
+        public_part["message"] = _redact_public_log_message(str(public_part.get("message") or ""))
+    if public_part.get("error") is not None:
         public_part["error"] = _redact_public_log_message(str(public_part["error"]))
     return public_part
 
