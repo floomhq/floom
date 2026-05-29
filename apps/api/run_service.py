@@ -404,8 +404,15 @@ _PLACEHOLDER_RUN_PY_MARKER = "# Placeholder worker"
 
 # Failure error_codes that mean the worker's own code is broken (worth a repair
 # attempt). Setup/auth/secret/connection failures are NOT code bugs.
+#
+# output_validation_failed (2026-05-29, gen-quality): a worker that ran GREEN but
+# wrote a PATH into a SCALAR output (or an empty/missing declared output) is a
+# CODE bug — the generated logic confused the scalar-vs-file output contract.
+# Routing it into the bounded repair loop (with the corrected contract in the
+# repair prompt) lets it self-heal instead of gating on the first try. The gate
+# remains the fallback if repair still fails (0-silently-broken still HOLDs).
 _SMOKE_CODE_FAILURE_CODES = frozenset(
-    {"execution_error", "e2b_sandbox_error", "missing_result"}
+    {"execution_error", "e2b_sandbox_error", "missing_result", "output_validation_failed"}
 )
 
 _SMOKE_REPAIR_SYSTEM_PROMPT = (
@@ -420,16 +427,27 @@ _SMOKE_REPAIR_SYSTEM_PROMPT = (
     "secrets from os.environ with a secrets.json fallback. If you import any "
     "third-party lib it would also need a requirements entry, so prefer stdlib;\n"
     "- import EVERY module it references (os, json, csv, io, re, statistics, ...);\n"
-    "- write output files under out/ (mkdir it);\n"
+    "- OUTPUT CONTRACT (scalar vs file — the INVERSE of the input contract). For "
+    "each declared output, match its kind:\n"
+    "    * SCALAR output (kind 'scalar', no path) -> outputs[name] is the LITERAL "
+    "VALUE (a string or number), NOT a path. No out/ file, no artifact. "
+    "e.g. outputs={'reversed':'olleh'}. Writing a path string like "
+    "'out/reversed.txt' into a scalar output FAILS with 'scalar output leaked a "
+    "path string' — return the value itself instead.\n"
+    "    * FILE output (kind 'file', has a path) -> write the file under out/ "
+    "(mkdir it) and put its RELATIVE PATH in outputs[name] plus one matching "
+    "artifacts[] entry, e.g. outputs={'report':'out/report.csv'};\n"
     "- write result.json to the WORKING DIRECTORY ('result.json'), NOT "
     "'out/result.json' (writing it under out/ makes the run produce no result);\n"
     "- result.json schema: {\"status\":\"success\"|\"error\",\"outputs\":"
-    "{<name>:\"out/<file>\"},\"artifacts\":[{\"name\",\"relative_path\",\"type\"}],"
-    "\"error\":<msg on error>} on BOTH success and error paths;\n"
+    "{<name>:<literal-value-for-scalar OR out/path-for-file>},\"artifacts\":"
+    "[{\"name\",\"relative_path\",\"type\"}],\"error\":<msg on error>} on BOTH "
+    "success and error paths;\n"
     "- end with `if __name__ == \"__main__\": main()`.\n"
-    "The failure traceback tells you exactly what broke — fix THAT. "
-    "Return ONLY the corrected, complete run.py file. No markdown fences, no "
-    "commentary."
+    "The failure message tells you exactly what broke — fix THAT. If it says "
+    "'scalar output leaked a path string', return the literal value in that "
+    "output instead of a path. Return ONLY the corrected, complete run.py file. "
+    "No markdown fences, no commentary."
 )
 
 
