@@ -23,6 +23,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
@@ -107,6 +115,12 @@ export default function WorkerDetailPage() {
   const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([]);
   const [savingTriggers, setSavingTriggers] = useState(false);
   const [triggersDirty, setTriggersDirty] = useState(false);
+
+  // BUG #47: delete-worker confirm dialog state. Type-to-confirm ("DELETE"),
+  // mirroring the "DELETE ALL RUNS" pattern in settings.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const setSection = useCallback((s: Section) => {
     setActiveSection(s);
@@ -202,6 +216,10 @@ export default function WorkerDetailPage() {
 
   async function handleRun() {
     if (!worker) return;
+    // BUG #40: guard against rapid double-clicks creating two runs. The
+    // button is disabled while `running`, but two clicks can fire before
+    // React re-renders the disabled state, so guard the handler directly.
+    if (running) return;
     setRunning(true);
     try {
       const result = await api.workers.run(worker.id, inputs);
@@ -280,6 +298,21 @@ export default function WorkerDetailPage() {
       toast.success("Sample applied. Upload a file for the file field(s)");
     } else {
       toast.success("Sample input applied");
+    }
+  }
+
+  async function handleDeleteWorker() {
+    if (!worker) return;
+    if (deleteConfirmText.trim() !== "DELETE") return;
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await api.workers.delete(worker.id);
+      toast.success("Worker deleted");
+      router.push("/workers");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete worker");
+      setDeleting(false);
     }
   }
 
@@ -589,6 +622,79 @@ export default function WorkerDetailPage() {
           <RunsSection worker={worker} />
         )}
       </div>
+
+      {/* BUG #47: Danger zone — delete worker. Mirrors the settings Danger
+          zone visual language (destructive-bordered section + type-to-confirm
+          dialog). Backend: DELETE /api/workers/<id> via api.workers.delete. */}
+      <section className="max-w-xl space-y-3 pt-4 border-t border-line">
+        <div>
+          <h2 className="text-base font-semibold text-destructive">Danger zone</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            Permanently delete this worker, its files, triggers, and run history. This cannot be undone.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          onClick={() => {
+            setDeleteConfirmText("");
+            setDeleteOpen(true);
+          }}
+        >
+          <Trash2 className="w-4 h-4 mr-1.5" />
+          Delete worker
+        </Button>
+      </section>
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (deleting) return;
+          setDeleteOpen(open);
+          if (!open) setDeleteConfirmText("");
+        }}
+      >
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Delete {worker.name}?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes the worker, its files, triggers, and run history. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="delete-worker-confirm" className="text-xs text-muted-foreground">
+              Type <code className="text-foreground">DELETE</code> to confirm.
+            </Label>
+            <Input
+              id="delete-worker-confirm"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="DELETE"
+              autoComplete="off"
+              disabled={deleting}
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void handleDeleteWorker()}
+              disabled={deleting || deleteConfirmText.trim() !== "DELETE"}
+            >
+              {deleting ? "Deleting…" : "Delete worker"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
