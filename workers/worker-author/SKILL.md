@@ -63,7 +63,13 @@ Pick the right mode for the task:
 ## worker.yml rules (non-negotiable)
 
 - `schema_version: "0.3"` — always
-- `name` — lowercase, hyphens only, 3-64 chars, unique vs existing workers
+- `name` — lowercase, hyphens only, 3-64 chars, unique vs existing workers. DERIVE
+  IT FROM THE USER'S PROMPT: take the primary verb + primary noun/object and
+  slugify them (e.g. "follow up with applicants" → `applicant-followup`, "chase
+  overdue invoices" → `invoice-chaser`, "summarise Granola meetings into HubSpot"
+  → `granola-hubspot-summary`). The name MUST reflect THIS prompt's task — never
+  reuse a generic placeholder or an example name when it does not match. Two
+  different prompts must produce two different names.
 - `title` — human-readable, title case, 5-60 chars
 - `description` — one sentence, 20-120 chars, starts with a verb
 - `version: "0.1.0"` — new workers always start here
