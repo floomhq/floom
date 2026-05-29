@@ -10,10 +10,10 @@ long_description: |
   decision_required so a human can review before anything is sent.
 
   Phase 2 (run 2): reads inputs.decision and inputs.approved_output, then
-  executes the approved message as a no-op side-effect: writes the final
-  message to /tmp/outbound-approval-demo-sent.txt on the sandbox.
+  executes the approved message and records the side-effect as the output
+  fields sent=true + sent_message.
 
-  Idempotency constraint: only run 2 writes the side-effect. Run 1 NEVER
+  Idempotency constraint: only run 2 fires the side-effect. Run 1 NEVER
   sends anything.
 use_cases:
 - Approve outbound recruiting emails before they reach candidates.
@@ -25,7 +25,7 @@ example_input:
 how_it_works: |
   Run 1: draft message -> emit decision_required -> land PENDING_APPROVAL
   Human: approve (optionally edit) or reject via /approvals
-  Run 2 (spawned): read approved_output -> write to side-effect file
+  Run 2 (spawned): read approved_output -> record sent=true + sent_message
 version: 0.1.0
 folder: Demo
 tags:
@@ -77,11 +77,16 @@ exec:
     type: text
     required: true
     label: Run phase
-  - name: side_effect_path
+  - name: sent
     kind: scalar
     type: text
     required: false
-    label: Side-effect file path (run 2 only)
+    label: Sent (run 2 only)
+  - name: sent_message
+    kind: scalar
+    type: text
+    required: false
+    label: Sent message (run 2 only)
 limits:
   max_tool_iterations: 4
   max_output_tokens: 2048
