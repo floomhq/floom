@@ -7,6 +7,7 @@ import {
   List,
   Mail,
   Play,
+  Sparkles,
   Table,
   ToggleLeft,
   Type,
@@ -18,23 +19,32 @@ import { BrandLogo } from "@/components/connections/BrandLogo";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
-// WorkerIconPills — Langdock-grade horizontal row of squircle icon pills.
+// WorkerIconPills — a COMPOSED, Langdock-style icon strip for a worker.
 //
-// Each pill represents, in order:
-//   1. Input-type icons   (string→Type, textarea→AlignLeft, number→Hash, …)
-//   2. Connection brand logos (real full-color SVG via BrandLogo / IconSprite)
-//   3. Trigger icon       (schedule→Clock, webhook→Webhook) — optional
-//   4. +N overflow pill   when the row exceeds `max` pills.
+// Federico (2026-05-29): "should be composed like for langdock — understand
+// the logic?" Langdock's template-card icon row is a SINGLE composed unit:
+// connected/overlapping rounded squares butted together so they read as ONE
+// glyph for the workflow, with the FIRST node accented (their orange
+// start/trigger node), the tool/connection logos following, and a +N overflow
+// chip at the end.
 //
-// Real brand SVGs only (reused from the Connections page source). No emoji,
-// no text-in-circle, no dashed borders. Design-system radius via
-// --radius-squircle, subtle --bg-2 fill + hairline border. Premium in
+// So this is NOT three detached squares with gaps. It is one linked strip:
+//   1. START node    — the trigger (schedule→Clock, webhook→Webhook,
+//                       event→Play, manual→Sparkles). ALWAYS present, ALWAYS
+//                       first, ALWAYS accented (--accent tint) so it anchors
+//                       the composition like Langdock's orange start node.
+//   2. INPUT glyphs   — input-type icons (text→Type, person→User, web→Globe…).
+//   3. CONNECTION logos — real full-color brand SVGs via BrandLogo.
+//   4. +N overflow    — when the strip exceeds `max` cells.
+//
+// The cells overlap (-ml-px) and each carries a ring so the seams read as a
+// connected unit, not gaps. Real brand SVGs only. No emoji, no text-in-circle,
+// no dashed borders. Design-system radius via --radius-squircle. Premium in
 // light AND dark.
 // ---------------------------------------------------------------------------
 
-// Map a worker input `type` to a crisp lucide glyph. The "icons for text,
-// person, web, etc." Federico asked for. Names are also matched (person/name,
-// csv) since the manifest types are coarse.
+// Map a worker input `type` to a crisp lucide glyph. Names are also matched
+// (person/name, csv) since the manifest types are coarse.
 function inputIcon(input: { type: string; name?: string; label?: string }): LucideIcon {
   const t = (input.type || "").toLowerCase();
   const hint = `${input.name || ""} ${input.label || ""}`.toLowerCase();
@@ -66,38 +76,53 @@ function inputIcon(input: { type: string; name?: string; label?: string }): Luci
   }
 }
 
-// Trigger type → lucide glyph. Only schedule + webhook get a pill; manual is
-// the default and not worth a chip (keeps the row clean).
-function triggerIcon(triggerType: string): LucideIcon | null {
+// Trigger type → lucide glyph for the START node. Manual still gets a glyph
+// (Sparkles) because the start node is the anchor of the composition and is
+// always rendered.
+function triggerIcon(triggerType?: string): { Icon: LucideIcon; label: string } {
   const t = (triggerType || "").toLowerCase();
-  if (t === "schedule" || t === "cron" || t === "scheduled") return Clock;
-  if (t === "webhook") return Webhook;
-  if (t === "composio" || t === "event") return Play;
-  return null;
+  if (t === "schedule" || t === "cron" || t === "scheduled")
+    return { Icon: Clock, label: "Scheduled trigger" };
+  if (t === "webhook") return { Icon: Webhook, label: "Webhook trigger" };
+  if (t === "composio" || t === "event") return { Icon: Play, label: "Event trigger" };
+  return { Icon: Sparkles, label: "Manual trigger" };
 }
 
 type PillSize = "sm" | "md";
 
-const SIZE: Record<PillSize, { box: string; glyph: string; gap: string }> = {
+const SIZE: Record<PillSize, { box: string; glyph: string; overflow: string }> = {
   // sm — worker cards. md — detail header.
-  sm: { box: "size-7", glyph: "size-3.5", gap: "gap-1" },
-  md: { box: "size-8", glyph: "size-4", gap: "gap-1.5" },
+  sm: { box: "size-7", glyph: "size-3.5", overflow: "h-7 min-w-7" },
+  md: { box: "size-8", glyph: "size-4", overflow: "h-8 min-w-8" },
 };
 
-function Pill({
+// A single cell in the composed strip. `accent` marks the start node; `first`
+// drops the negative margin so the strip butts cleanly against its left edge.
+function Cell({
   size,
   title,
+  accent,
+  first,
   children,
 }: {
   size: PillSize;
   title: string;
+  accent?: boolean;
+  first?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <span
       title={title}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center border border-[var(--line-soft)] bg-[var(--bg-2)] text-[var(--ink-soft)]",
+        // ring-* + a matching --bg-card backing makes the seams read as one
+        // connected unit while keeping each cell crisp. relative + z keeps the
+        // overlap order stable (left cell sits above the one to its right).
+        "relative inline-flex shrink-0 items-center justify-center ring-1",
+        first ? "z-20" : "-ml-px z-10",
+        accent
+          ? "bg-[var(--accent-soft)] text-[var(--accent)] ring-[var(--accent-line)]"
+          : "bg-[var(--bg-card)] text-[var(--ink-soft)] ring-[var(--line-soft)]",
         SIZE[size].box,
       )}
       style={{ borderRadius: "var(--radius-squircle)" }}
@@ -111,7 +136,7 @@ export interface WorkerIconPillsProps {
   inputs?: { type: string; name?: string; label?: string }[];
   connections?: string[];
   triggerType?: string;
-  /** Max pills before collapsing the remainder into a +N chip. Default 5. */
+  /** Max cells (incl. the start node) before collapsing into a +N chip. */
   max?: number;
   size?: PillSize;
   className?: string;
@@ -127,25 +152,25 @@ export function WorkerIconPills({
 }: WorkerIconPillsProps) {
   const glyph = SIZE[size].glyph;
 
-  // Build the ordered pill list. Connections first (the most recognizable,
-  // full-color brand marks lead), then input-type icons, then trigger. Each
-  // entry carries either a brand slug (rendered via BrandLogo) or a resolved
-  // lucide component type (rendered in JSX below — never instantiated here).
+  // Build the ordered cell list. START node first (accented), then input-type
+  // glyphs, then connection brand logos. Each entry carries either a brand
+  // slug (rendered via BrandLogo) or a resolved lucide component type.
   type Entry =
-    | { kind: "brand"; key: string; title: string; slug: string }
-    | { kind: "lucide"; key: string; title: string; Icon: LucideIcon };
+    | { kind: "brand"; key: string; title: string; slug: string; accent?: boolean }
+    | { kind: "lucide"; key: string; title: string; Icon: LucideIcon; accent?: boolean };
   const entries: Entry[] = [];
 
-  // De-dupe connection slugs (a worker can declare the same app twice).
-  const seenConn = new Set<string>();
-  for (const slug of connections) {
-    if (!slug || typeof slug !== "string") continue;
-    const key = slug.toLowerCase();
-    if (seenConn.has(key)) continue;
-    seenConn.add(key);
-    entries.push({ kind: "brand", key: `conn-${key}`, title: slug, slug });
-  }
+  // 1. START node — always present, always first, always accented.
+  const trigger = triggerIcon(triggerType);
+  entries.push({
+    kind: "lucide",
+    key: "start",
+    title: trigger.label,
+    Icon: trigger.Icon,
+    accent: true,
+  });
 
+  // 2. Input-type glyphs.
   for (let i = 0; i < inputs.length; i++) {
     const inp = inputs[i];
     entries.push({
@@ -156,48 +181,50 @@ export function WorkerIconPills({
     });
   }
 
-  if (triggerType) {
-    const TIcon = triggerIcon(triggerType);
-    if (TIcon) {
-      entries.push({
-        kind: "lucide",
-        key: "trigger",
-        title: `${triggerType} trigger`,
-        Icon: TIcon,
-      });
-    }
+  // 3. Connection brand logos (de-duped — a worker can declare the same app twice).
+  const seenConn = new Set<string>();
+  for (const slug of connections) {
+    if (!slug || typeof slug !== "string") continue;
+    const key = slug.toLowerCase();
+    if (seenConn.has(key)) continue;
+    seenConn.add(key);
+    entries.push({ kind: "brand", key: `conn-${key}`, title: slug, slug });
   }
 
-  // Nothing to show — render nothing (no empty box).
-  if (entries.length === 0) return null;
+  // The start node alone (no inputs, no connections) is not worth a strip — it
+  // would just be a lone accent square pretending to be a composition.
+  if (entries.length <= 1) return null;
 
   const visible = entries.length > max ? entries.slice(0, max) : entries;
   const overflow = entries.length - visible.length;
 
   return (
-    <div className={cn("flex flex-wrap items-center", SIZE[size].gap, className)}>
-      {visible.map((e) => (
-        <Pill key={e.key} size={size} title={e.title}>
-          {e.kind === "brand" ? (
-            <BrandLogo icon={e.slug} className={glyph} />
-          ) : (
-            <e.Icon className={glyph} aria-hidden="true" />
-          )}
-        </Pill>
-      ))}
-      {overflow > 0 && (
-        <span
-          title={`+${overflow} more`}
-          className={cn(
-            "inline-flex shrink-0 items-center justify-center border border-[var(--line-soft)] bg-[var(--bg-2)] px-1.5 text-[11px] font-medium leading-none text-[var(--ink-mute)]",
-            SIZE[size].box === "size-7" ? "h-7 min-w-7" : "h-8 min-w-8",
-          )}
-          style={{ borderRadius: "var(--radius-squircle)" }}
-          aria-label={`${overflow} more`}
-        >
-          +{overflow}
-        </span>
-      )}
+    <div className={cn("flex items-center", className)}>
+      {/* The composed strip: one connected unit, no gaps between cells. */}
+      <div className="flex items-center">
+        {visible.map((e, i) => (
+          <Cell key={e.key} size={size} title={e.title} accent={e.accent} first={i === 0}>
+            {e.kind === "brand" ? (
+              <BrandLogo icon={e.slug} className={glyph} />
+            ) : (
+              <e.Icon className={glyph} aria-hidden="true" />
+            )}
+          </Cell>
+        ))}
+        {overflow > 0 && (
+          <span
+            title={`+${overflow} more`}
+            className={cn(
+              "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1.5 text-[11px] font-medium leading-none ring-1 ring-[var(--line-soft)] bg-[var(--bg-2)] text-[var(--ink-mute)]",
+              SIZE[size].overflow,
+            )}
+            style={{ borderRadius: "var(--radius-squircle)" }}
+            aria-label={`${overflow} more`}
+          >
+            +{overflow}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
