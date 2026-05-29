@@ -19,6 +19,7 @@ import collections
 import threading
 import tempfile
 import secrets as pysecrets
+import subprocess
 import uuid as _uuid_mod
 import zipfile
 import ipaddress
@@ -26,6 +27,7 @@ import math
 import requests
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, TypedDict
 
@@ -237,6 +239,30 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "worker-author",
         "workspace-agent",
     }
+)
+
+PUBLIC_STOCK_WORKER_IDS = frozenset(
+    {
+        "csv_enricher",
+        "cv_writeup",
+        "dach_compliance",
+        "env-vars-worker",
+        "github-digest",
+        "gmail_intake_brief",
+        "linkedin-post-engagements",
+        "openblog",
+        "opendraft",
+        "research_brief",
+        "reverse_match_crm",
+        "weekly_update",
+    }
+)
+
+_INTERNAL_WORKER_ID_PREFIXES = (
+    "_mcp_",
+    "audit-",
+    "audit-local-",
+    "smoke-",
 )
 
 
@@ -1155,7 +1181,7 @@ def _make_run_summary(row: Any) -> RunSummary:
         started_at=d.get("started_at"),
         completed_at=d.get("completed_at"),
         duration_ms=d.get("duration_ms"),
-        error=d.get("error"),
+        error=_redact_public_log_message(str(d.get("error") or "")) or None,
         error_code=d.get("error_code"),
     )
 
@@ -1681,11 +1707,51 @@ def _shared_filesystem_fallback_allowed() -> bool:
     return not _is_cloud_deploy() and not _user_scoped_local_mode()
 
 
+@lru_cache(maxsize=1)
+def _tracked_worker_ids() -> frozenset[str]:
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(repo_root), "ls-files", "workers/*/worker.yml"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        worker_ids = {
+            worker_yml.parent.name
+            for worker_yml in (repo_root / "workers").glob("*/worker.yml")
+            if worker_yml.is_file()
+        }
+    else:
+        worker_ids = {
+            Path(line.strip()).parent.name
+            for line in tracked.stdout.splitlines()
+            if line.strip().endswith("/worker.yml")
+        }
+    return frozenset(worker_ids)
+
+
+def _worker_hidden_from_api(worker_id: str) -> bool:
+    if any(worker_id.startswith(prefix) for prefix in _INTERNAL_WORKER_ID_PREFIXES):
+        return True
+    tracked_ids = _tracked_worker_ids()
+    if worker_id in tracked_ids:
+        return worker_id not in PUBLIC_STOCK_WORKER_IDS
+    return False
+
+
+def _worker_source_visible_to_api(worker_id: str) -> bool:
+    if _worker_hidden_from_api(worker_id):
+        return False
+    return worker_id not in _tracked_worker_ids()
+
+
 def _stock_workers_from_filesystem(*, use_cache: bool = True) -> List[Dict[str, Any]]:
     return [
         worker
         for worker in discover_workers(use_cache=use_cache)
-        if worker["id"] in PROTECTED_STOCK_WORKER_IDS
+        if worker["id"] in PUBLIC_STOCK_WORKER_IDS
     ]
 
 
@@ -1695,13 +1761,18 @@ def _list_visible_workers(
     repos: Repositories,
     use_cache: bool = True,
 ) -> List[Dict[str, Any]]:
-    db_workers = _list_db_workers(user_id=user_id, repos=repos)
-    if _shared_filesystem_fallback_allowed():
-        return db_workers if db_workers else discover_workers(use_cache=use_cache)
-
-    visible = {worker["id"]: worker for worker in db_workers}
+    visible = {
+        worker["id"]: worker
+        for worker in _list_db_workers(user_id=user_id, repos=repos)
+        if not _worker_hidden_from_api(worker["id"])
+    }
     for worker in _stock_workers_from_filesystem(use_cache=use_cache):
         visible.setdefault(worker["id"], worker)
+    if _shared_filesystem_fallback_allowed():
+        for worker in discover_workers(use_cache=use_cache):
+            worker_id = str(worker.get("id") or "")
+            if worker_id and not _worker_hidden_from_api(worker_id):
+                visible.setdefault(worker_id, worker)
     return list(visible.values())
 
 
@@ -1725,10 +1796,33 @@ def _get_visible_worker(
 ) -> Optional[Dict[str, Any]]:
     worker = _get_db_worker(worker_id, user_id=user_id, repos=repos)
     if worker is not None:
+        if _worker_hidden_from_api(worker["id"]):
+            return None
         return worker
-    if _shared_filesystem_fallback_allowed() or worker_id in PROTECTED_STOCK_WORKER_IDS:
+    if _worker_hidden_from_api(worker_id):
+        return None
+    if _shared_filesystem_fallback_allowed() or worker_id in PUBLIC_STOCK_WORKER_IDS:
         return get_worker(worker_id)
     return None
+
+
+def _run_visible_to_api(row: Any, *, user_id: str, repos: Repositories) -> bool:
+    worker_id = str(row_to_dict(row).get("worker_id") or "")
+    if not worker_id:
+        return False
+    return _get_visible_worker(worker_id, user_id=user_id, repos=repos) is not None
+
+
+def _get_visible_run(
+    run_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Any:
+    row = repos.runs.get(user_id=user_id, run_id=run_id)
+    if row is None or not _run_visible_to_api(row, user_id=user_id, repos=repos):
+        return None
+    return row
 
 
 # ---------------------------------------------------------------------------
@@ -2850,31 +2944,31 @@ def _build_worker_detail(
     ):
         status = WorkerStatus.NEEDS_ATTENTION
 
-    # Read all files from the worker directory for Code tab and edit page
     manifest_yaml: Optional[str] = None
     run_py: Optional[str] = None
     skill_md_content: Optional[str] = None
     run_py_content: Optional[str] = None
     worker_files: List[WorkerFile] = []
-    try:
-        from worker_registry import WORKERS_DIR
-        worker_dir = WORKERS_DIR / worker_id
-        yml_path = worker_dir / "worker.yml"
-        run_path = worker_dir / "run.py"
-        skill_path = worker_dir / "SKILL.md"
-        if yml_path.is_file():
-            manifest_yaml = yml_path.read_text()
-        elif worker.get("manifest"):
-            import yaml as pyyaml
-            manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
-        if run_path.is_file():
-            run_py = run_path.read_text()
-            run_py_content = run_py
-        if skill_path.is_file():
-            skill_md_content = skill_path.read_text()
-        worker_files = _read_worker_files(worker_dir)
-    except Exception:
-        pass
+    if _worker_source_visible_to_api(worker_id):
+        try:
+            from worker_registry import WORKERS_DIR
+            worker_dir = WORKERS_DIR / worker_id
+            yml_path = worker_dir / "worker.yml"
+            run_path = worker_dir / "run.py"
+            skill_path = worker_dir / "SKILL.md"
+            if yml_path.is_file():
+                manifest_yaml = yml_path.read_text()
+            elif worker.get("manifest"):
+                import yaml as pyyaml
+                manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
+            if run_path.is_file():
+                run_py = run_path.read_text()
+                run_py_content = run_py
+            if skill_path.is_file():
+                skill_md_content = skill_path.read_text()
+            worker_files = _read_worker_files(worker_dir)
+        except Exception:
+            pass
 
     # Build webhook URL if this worker has a webhook trigger
     from webhook_service import build_webhook_url as _build_webhook_url
@@ -5030,7 +5124,11 @@ def list_runs(
     if since_dt and until_dt and since_dt > until_dt:
         raise HTTPException(status_code=400, detail="since must be before until")
 
-    rows, total_count = repos.runs.list(
+    if worker_id and _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
+        response.headers["X-Total-Count"] = "0"
+        return []
+
+    rows, _total_count = repos.runs.list(
         user_id=auth.user_id,
         worker_id=worker_id,
         statuses=statuses,
@@ -5039,8 +5137,13 @@ def list_runs(
         limit=limit,
         offset=offset,
     )
-    response.headers["X-Total-Count"] = str(int(total_count or 0))
-    return [_make_run_summary(r) for r in rows]
+    visible_rows = [
+        row
+        for row in rows
+        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+    ]
+    response.headers["X-Total-Count"] = str(len(visible_rows))
+    return [_make_run_summary(r) for r in visible_rows]
 
 
 @app.post("/runs/clear")
@@ -5089,7 +5192,7 @@ def cancel_run(
     Returns 404 if no cancellable run is visible, 200 if cancellation was
     recorded.
     """
-    row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if row["status"] in _TERMINAL_RUN_STATUSES:
@@ -5185,7 +5288,7 @@ def approve_run(
       - decision: "approved"
       - approved_output: the (optionally edited) proposed output
     """
-    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if run_row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if row_to_dict(run_row).get("status") != RunStatus.PENDING_APPROVAL.value:
@@ -5269,7 +5372,7 @@ def reject_run(
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
     """Reject a PENDING_APPROVAL run. No follow-up run is spawned."""
-    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if run_row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if row_to_dict(run_row).get("status") != RunStatus.PENDING_APPROVAL.value:
@@ -5305,7 +5408,7 @@ def download_run_bundle(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if not run_row:
         raise HTTPException(status_code=404, detail="Run not found")
     artifact_rows = repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
@@ -5376,6 +5479,8 @@ def get_run_bundle_file(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
+    if _get_visible_run(run_id, user_id=auth.user_id, repos=repos) is None:
+        raise HTTPException(status_code=404, detail="Bundle file not found")
     snapshot_path = repos.runs.get_bundle_snapshot_path(user_id=auth.user_id, run_id=run_id)
     if snapshot_path is None:
         raise HTTPException(status_code=404, detail="Bundle file not found")
@@ -5402,6 +5507,8 @@ def download_artifact(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
+    if _get_visible_run(run_id, user_id=auth.user_id, repos=repos) is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
     row = next(
         (
             artifact
@@ -5462,7 +5569,7 @@ def get_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> RunDetail:
-    run = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    run = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -5542,7 +5649,7 @@ async def stream_run_parts(
     repos: Repositories = Depends(get_repos),
 ):
     """Server-Sent Events stream of AI SDK parts for a single run."""
-    row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if not row:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -5625,8 +5732,7 @@ async def stream_run_events(
     - If run is already terminal when client connects, current state is emitted
       immediately then the stream closes.
     """
-    # Check run exists
-    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if not run_row:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -5638,7 +5744,7 @@ async def stream_run_events(
 
         # If run already terminal, emit current state and close immediately
         if already_terminal:
-            final_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+            final_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
             if final_row:
                 evt = _public_sse_event({
                     "type": "status",
@@ -5693,10 +5799,12 @@ _INTERNAL_LOG_TOKEN_RE = re.compile(
     r"\b(?:trace_[A-Za-z0-9_.:-]+|(?:thread|step|run|call|msg|tool)_[A-Za-z0-9][A-Za-z0-9_-]{7,})\b"
 )
 _LOG_METADATA_RE = re.compile(r"\b(?:mode|runner)=[^\s,;]+", re.IGNORECASE)
+_MISSING_SECRETS_RE = re.compile(r"Missing secrets?:\s*[A-Z0-9_, ]+", re.IGNORECASE)
 
 
 def _redact_public_log_message(message: str) -> str:
-    redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", message or "")
+    redacted = _MISSING_SECRETS_RE.sub("Missing required secrets", message or "")
+    redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", redacted)
     redacted = _LOG_METADATA_RE.sub("[redacted-metadata]", redacted)
     return redacted
 
@@ -5724,7 +5832,7 @@ def get_run_logs(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[Dict[str, Any]]:
-    if repos.runs.get(user_id=auth.user_id, run_id=run_id) is None:
+    if _get_visible_run(run_id, user_id=auth.user_id, repos=repos) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     rows = repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
     return [
