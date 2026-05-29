@@ -392,23 +392,91 @@ export default function WorkerDetailPage() {
       return;
     }
     const nextInputs: Record<string, unknown> = { ...inputs };
-    const fileFieldNames = new Set(
-      worker.config.inputs.filter((inp) => inp.type === "file").map((inp) => inp.name)
+    const nextFileNames: Record<string, string> = { ...fileNames };
+    const fileInputsByName = new Map(
+      worker.config.inputs.filter((inp) => inp.type === "file").map((inp) => [inp.name, inp])
     );
-    let skippedFileFields = false;
+    // File fields whose sample is INLINE TEXT CONTENT (a string) are synthesized
+    // into a real uploaded file so the worker is one-click runnable — no manual
+    // upload required (G5 FIX 4). Fields with no usable inline content fall back
+    // to the prior behaviour (operator must upload a file).
+    const fileUploads: Array<{ name: string; content: string; mediaType: string; ext: string }> = [];
+    let unfillableFileFields = false;
     for (const [key, value] of Object.entries(exampleInput)) {
-      if (fileFieldNames.has(key)) {
-        if (value == null) {
-          // leave file field untouched
-        } else {
-          skippedFileFields = true;
+      const fileInp = fileInputsByName.get(key);
+      if (fileInp) {
+        if (typeof value === "string" && value.trim()) {
+          const accepts = (fileInp as WorkerInput & { accepts?: string[] }).accepts ?? [];
+          const acceptCsv = (fileInp as WorkerInput & { accept_csv?: boolean }).accept_csv === true;
+          // accept_csv inputs are rendered by CsvColumnMapper, which passes the
+          // RAW CSV STRING inline as the run value (not an upload hash). Fill
+          // that field directly — uploading it would bind the wrong type.
+          if (acceptCsv) {
+            nextInputs[key] = value;
+            continue;
+          }
+          // Other file inputs upload to a SHA-256 reference. Match the file's
+          // declared media type so a CSV-only input gets a text/csv upload (not
+          // text/plain). Default to text/plain.
+          let mediaType = "text/plain";
+          let ext = "txt";
+          if (accepts.includes("text/csv")) {
+            mediaType = "text/csv";
+            ext = "csv";
+          } else if (accepts.includes("text/markdown")) {
+            mediaType = "text/markdown";
+            ext = "md";
+          } else if (accepts.includes("application/json")) {
+            mediaType = "application/json";
+            ext = "json";
+          } else if (accepts.length > 0 && !accepts.includes("text/plain")) {
+            // Declared accepts that we cannot synthesize as text -> leave to
+            // the operator rather than upload a mismatched type.
+            unfillableFileFields = true;
+            continue;
+          }
+          fileUploads.push({ name: key, content: value, mediaType, ext });
+        } else if (value != null) {
+          unfillableFileFields = true;
         }
         continue;
       }
       nextInputs[key] = value;
     }
+
+    // Apply scalar inputs immediately so the form fills even if uploads are slow.
     setInputs(nextInputs);
-    if (skippedFileFields) {
+
+    let uploadedFileFields = 0;
+    let uploadFailed = false;
+    for (const { name, content, mediaType, ext } of fileUploads) {
+      try {
+        const fileName = `sample-${name}.${ext}`;
+        const blob = new Blob([content], { type: mediaType });
+        const form = new FormData();
+        form.append("file", blob, fileName);
+        const resp = await fetch("/api/proxy/uploads", { method: "POST", body: form });
+        if (!resp.ok) {
+          uploadFailed = true;
+          continue;
+        }
+        const parsed = (await resp.json()) as { sha256: string };
+        nextInputs[name] = parsed.sha256;
+        nextFileNames[name] = fileName;
+        uploadedFileFields += 1;
+      } catch {
+        uploadFailed = true;
+      }
+    }
+
+    if (uploadedFileFields > 0) {
+      setInputs({ ...nextInputs });
+      setFileNames(nextFileNames);
+    }
+
+    if (uploadFailed) {
+      toast.success("Sample applied. Upload a file for the remaining field(s)");
+    } else if (unfillableFileFields) {
       toast.success("Sample applied. Upload a file for the file field(s)");
     } else {
       toast.success("Sample input applied");
@@ -610,9 +678,12 @@ export default function WorkerDetailPage() {
     (slug) => !activeConnectionSlugs.has(slug.toLowerCase())
   );
   const canRun = !running && missingConnections.length === 0;
-  // canApplySample: true if there's any non-file sample input available.
-  // We allow it liberally — the button fetches from the API endpoint if yaml example_input is absent.
-  const canApplySample = worker.config.inputs.some((inp) => inp.type !== "file");
+  // canApplySample: allowed when the worker declares any input. File-only
+  // workers are now fillable too — applyExampleInput synthesizes a real upload
+  // from the inline example_input content (G5 FIX 4), so a non-technical user
+  // gets a one-click runnable sample. The button no-ops gracefully (toast) when
+  // no inline sample exists for a file field.
+  const canApplySample = worker.config.inputs.length > 0;
   const requiredSecrets: string[] = worker.config.secrets ?? [];
 
   // Summary counts for rail
