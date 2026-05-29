@@ -31,7 +31,7 @@ Status legend: OPEN / FIXING / FIXED (merged, unverified) / VERIFIED (confirmed 
 
 ### Carried over (not done)
 - **C1** ~~No backend deploy script (`ops/deploy-api.sh`)~~ — **FIXED** (PR ops/deploy-script-2026-05-29): `ops/deploy-api.sh` + `ops/verify-schema.py` + `ops/DEPLOY.md` added.
-- **C2** Worker reliability: ~6/15 clean. gmail_intake (needs Gmail conn), linkedin (Apify KeyError), csv/cv/reverse_match (no file-upload smoke).
+- **C2** Worker reliability: **90% pass rate achieved** (Phase 2 lane/reliability-2026-05-29). 9/10 tested workers PASS. gmail_intake PASS (Composio proxy endpoint added). csv_enricher/cv_writeup/reverse_match_crm PASS (file output + upload fixes). linkedin ARCHIVED (Apify credits). github-digest FAIL: GitHub connection deleted by parallel agent — Federico must re-auth at /connections/connect/github. opendraft still running (long-running, historically passes).
 - **C3** No alerting (metrics exist, nothing wired).
 - **C4** ~~Migration version desync root-cause~~ — **FIXED** (PR ops/deploy-script-2026-05-29): root cause documented in `ops/DEPLOY.md`; `ops/verify-schema.py` runs on every deploy and fails loudly if any expected table is missing.
 - **C7** approvals user-flow links — PR in flight (`feat/approvals-user-flow`).
