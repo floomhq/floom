@@ -92,7 +92,7 @@ Pick the right mode for the task:
 - Keep it under 500 words
 - No hallucinated tools — only tools that are actually available in the Workeros agent runtime
 
-## Input path rules (worker.yml)
+## Input/output kind rules (worker.yml)
 
 - **Scalar inputs** (`type: string | textarea | number | boolean | select | url`):
   set `kind: "scalar"` and **NO `path:` field**. The value is passed inline in
@@ -100,6 +100,13 @@ Pick the right mode for the task:
 - **File inputs** (an uploaded file): set `kind: "file"` and
   `path: "inputs/<name>"`, where `<name>` is the input's own `name`. The value
   the worker reads from `inputs.json` is that relative path; `open()` it.
+- **Scalar outputs** (a single short string/number — reverse/title-case/sum/
+  median): set `kind: "scalar"` and **declare `type`** (`string | textarea |
+  number | boolean | select | url`); **omit `media_type` and `path`**. A scalar
+  output without `type` FAILS registration ("scalar field '<name>' must declare
+  type"). run.py returns the literal value (no out/ file).
+- **File outputs** (a generated file): set `kind: "file"` + `media_type` +
+  `path: "out/<name>.<ext>"`. run.py writes the file under out/ and returns the path.
 
 ## run.py rules (script mode — E2B pure-script contract)
 
