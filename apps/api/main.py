@@ -976,16 +976,22 @@ def _log_replay_parts(repos: "Repositories", user_id: str, run_id: str) -> List[
     except Exception:
         logger.exception("Failed to load logs for SSE replay (run %s)", run_id)
         return parts
+    # G5 P1: collapse the e2b stderr code-echo on the RAW ordered rows FIRST,
+    # THEN per-row redact, so the rebuilt transcript is as calm as the live panel.
+    _raw_parts: List[Dict[str, Any]] = []
     for r in rows:
         row = row_to_dict(r)
-        parts.append(
+        _raw_parts.append(
             {
                 "type": "log",
                 "level": row.get("level"),
-                "message": _redact_public_log_message(row.get("message") or ""),
+                "message": row.get("message") or "",
                 "timestamp": row.get("timestamp"),
             }
         )
+    for part in _collapse_stderr_code_echo_rows(_raw_parts):
+        part["message"] = _redact_public_log_message(part["message"])
+        parts.append(part)
     return parts
 
 
@@ -6192,13 +6198,19 @@ def get_run(
                 value=raw_output.get(out.name),
             ))
 
+    # G5 P1: collapse the e2b stderr code-echo on the RAW ordered rows FIRST
+    # (frame + caret anchors intact), THEN per-row redact each survivor.
+    _raw_log_rows = [
+        {"level": r["level"], "message": r["message"], "timestamp": r["timestamp"]}
+        for r in repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
+    ]
     logs = [
         LogEntry(
-            level=r["level"],
-            message=_redact_public_log_message(r["message"]),
-            timestamp=r["timestamp"],
+            level=row["level"],
+            message=_redact_public_log_message(row["message"]),
+            timestamp=row["timestamp"],
         )
-        for r in repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
+        for row in _collapse_stderr_code_echo_rows(_raw_log_rows)
     ]
 
     artifacts = [
@@ -6441,6 +6453,105 @@ _CALM_CODE_ERROR_LOG = "Worker code raised an error (see the Error card for deta
 _TRACEBACK_FRAME_LINE_RE = re.compile(r'File\s+"[^"]*",\s*line\s+\d+', re.IGNORECASE)
 # A final 'ExcClass: message' line (TypeError: ...), or a bare Traceback header.
 _TRACEBACK_HEADER_RE = re.compile(r"Traceback \(most recent call last\)", re.IGNORECASE)
+
+# G5 P1 (2026-05-29): the residual e2b stderr code-echo. Each stderr line is
+# emitted as a SEPARATE log row (e2b_driver._emit_command_output splits + strips
+# per line), so the multiline-collapse in _redact_runtime_jargon_in_log never
+# sees the block, and the single-line branch only matched traceback/exc regexes.
+# Three line classes still leaked verbatim to the operator "Recent logs" panel:
+#   - the caret marker line  '~~~~~~~~^~~~~~~~~'  (Python 3.11+ error-pointer)
+#   - the Command-exit boilerplate  'Command exited with code 1'
+#   - the source-line echo  'quotient = number1 / number2' (the line above the caret)
+# The caret line is the unambiguous anchor: Python ALWAYS prints the offending
+# source line immediately ABOVE the caret. So we collapse these at the ORDERED
+# log-list level (where adjacency is preserved) with ZERO false positives — a
+# clean stderr print only gets collapsed if it is itself caret-only or the row
+# directly followed by a caret row.
+_CARET_ONLY_RE = re.compile(r"^[\s~^|+]*[~^][\s~^|+]*$")
+_COMMAND_EXIT_RE = re.compile(r"\bCommand exited with code\s+\d+\b", re.IGNORECASE)
+# Strip the streaming '[e2b] stderr: ' / '[e2b] ' prefix so the markers above
+# match the content even after the driver prepends a channel label.
+_E2B_LOG_PREFIX_RE = re.compile(r"^\[e2b\](?:\s+stderr:)?\s*")
+
+
+def _e2b_log_content(message: str) -> str:
+    """Content of an e2b log row with the streaming channel prefix removed."""
+    return _E2B_LOG_PREFIX_RE.sub("", str(message or "")).strip()
+
+
+def _is_caret_marker_line(message: str) -> bool:
+    content = _e2b_log_content(message)
+    return bool(content) and bool(_CARET_ONLY_RE.match(content))
+
+
+def _is_command_exit_line(message: str) -> bool:
+    return bool(_COMMAND_EXIT_RE.search(_e2b_log_content(message)))
+
+
+def _collapse_stderr_code_echo_rows(
+    rows: List[Dict[str, Any]], message_key: str = "message"
+) -> List[Dict[str, Any]]:
+    """Drop the residual e2b stderr code-echo from an ORDERED list of RAW log-row
+    dicts (call this BEFORE per-row redaction so the 'File ... line N' frame and
+    caret anchors are still intact). Anchored on the two unambiguous traceback
+    markers Python emits, so it is leak-proof with no false positives:
+
+      - a 'File "...", line N' FRAME row -> the row DIRECTLY AFTER it is the
+        echoed source line (Python prints frame then source); drop the echo,
+      - a CARET row ('~~~^~~~') -> drop it AND the row directly above it (the
+        echoed source line, when not already dropped),
+      - a 'Command exited with code N' row -> drop it.
+
+    The frame row / traceback header / exception line themselves are left in
+    place — per-row redaction (run AFTER this) collapses them into the single
+    calm 'Worker code raised an error' note. Clean rows ('Run started',
+    'Worker completed: 9 words') never match these anchors, so they pass through.
+    Preserves level/timestamp on surviving rows."""
+    n = len(rows)
+    drop = [False] * n
+    msgs = [str(row.get(message_key) or "") for row in rows]
+    for i, msg in enumerate(msgs):
+        content = _e2b_log_content(msg)
+        if _is_caret_marker_line(msg):
+            drop[i] = True
+            if i > 0 and not drop[i - 1]:
+                drop[i - 1] = True
+        elif _is_command_exit_line(msg):
+            drop[i] = True
+        elif _TRACEBACK_FRAME_LINE_RE.search(content):
+            # The line Python prints directly under a frame is the echoed
+            # source. Only drop it if it is itself a stderr/e2b row (so we never
+            # eat an unrelated subsequent log line) and not already a frame.
+            if i + 1 < n:
+                nxt = msgs[i + 1]
+                nxt_content = _e2b_log_content(nxt)
+                is_e2b_row = _E2B_LOG_PREFIX_RE.match(nxt) is not None
+                if (
+                    is_e2b_row
+                    and not _TRACEBACK_FRAME_LINE_RE.search(nxt_content)
+                    and not _TRACEBACK_HEADER_RE.search(nxt_content)
+                    and not _WORKER_CODE_TRACEBACK_RE.search(nxt_content)
+                    and not _is_caret_marker_line(nxt)
+                    and not _is_command_exit_line(nxt)
+                ):
+                    drop[i + 1] = True
+    survivors = [row for i, row in enumerate(rows) if not drop[i]]
+    # Dedupe CONSECUTIVE rows that per-row redaction will collapse into the same
+    # calm note (the traceback header + each frame + the exception line each
+    # become _CALM_CODE_ERROR_LOG), so the operator panel shows ONE calm note
+    # for the whole traceback block, not five. Only collapses adjacent rows that
+    # ALREADY redact to the calm note; unrelated rows are never merged.
+    deduped: List[Dict[str, Any]] = []
+    prev_calm = False
+    for row in survivors:
+        redacts_calm = (
+            _redact_public_log_message(str(row.get(message_key) or "")) == _CALM_CODE_ERROR_LOG
+        )
+        if redacts_calm and prev_calm:
+            continue
+        deduped.append(row)
+        prev_calm = redacts_calm
+    return deduped
 
 
 def _redact_runtime_jargon_in_log(message: str) -> str:
@@ -6893,12 +7004,34 @@ def _sanitize_operator_text(text: Optional[str]) -> Optional[str]:
     return value
 
 
+def _public_error_field(raw_error: Any, error_code: Any = None) -> str:
+    """Map a part/event 'error' field to the calm operator HEADLINE — the SAME
+    text the Error card and GET /runs error show (G5 P1). Before this, the SSE
+    finish 'error' was only path/traceback-scrubbed (_redact_public_log_message),
+    so a bare 'ZeroDivisionError: division by zero' / 'Run failed: <raw>' read as
+    jargon to a recruiter. Now it carries the headline, then the redactor as a
+    belt-and-braces fallback so no internal artifact can ever slip through."""
+    raw = str(raw_error or "")
+    # A bare 'Command exited with code N' is the non-zero-exit signal of a
+    # crashed worker — calm it like any other code error before mapping.
+    if _COMMAND_EXIT_RE.search(_e2b_log_content(raw)) and not _looks_like_worker_code_error(raw):
+        return _CODE_HEADLINE
+    headline = _operator_error_message(raw, str(error_code) if error_code else None)
+    redacted = _redact_public_log_message(headline or raw)
+    # Final belt-and-braces: never let the exit boilerplate slip through.
+    if _COMMAND_EXIT_RE.search(_e2b_log_content(redacted)):
+        return _CODE_HEADLINE
+    return redacted
+
+
 def _public_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
     public_event = dict(event)
     if "message" in public_event:
         public_event["message"] = _redact_public_log_message(str(public_event.get("message") or ""))
     if public_event.get("error") is not None:
-        public_event["error"] = _redact_public_log_message(str(public_event["error"]))
+        public_event["error"] = _public_error_field(
+            public_event["error"], public_event.get("error_code")
+        )
     public_event.pop("trace_id", None)
     return public_event
 
@@ -6908,7 +7041,9 @@ def _public_run_part(part: Dict[str, Any]) -> Dict[str, Any]:
     if "message" in public_part:
         public_part["message"] = _redact_public_log_message(str(public_part.get("message") or ""))
     if public_part.get("error") is not None:
-        public_part["error"] = _redact_public_log_message(str(public_part["error"]))
+        public_part["error"] = _public_error_field(
+            public_part["error"], public_part.get("error_code")
+        )
     return public_part
 
 
@@ -6921,13 +7056,19 @@ def get_run_logs(
     if _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     rows = repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
+    # G5 P1: collapse the e2b stderr code-echo on RAW ordered rows FIRST, THEN
+    # per-row redact, so GET /runs/{id}/logs matches the calm panel.
+    raw = [
+        {"level": r["level"], "message": r["message"], "timestamp": r["timestamp"]}
+        for r in rows
+    ]
     return [
         {
-            "level": r["level"],
-            "message": _redact_public_log_message(r["message"]),
-            "timestamp": r["timestamp"],
+            "level": row["level"],
+            "message": _redact_public_log_message(row["message"]),
+            "timestamp": row["timestamp"],
         }
-        for r in rows
+        for row in _collapse_stderr_code_echo_rows(raw)
     ]
 
 
