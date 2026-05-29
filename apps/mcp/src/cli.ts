@@ -131,13 +131,13 @@ export function buildCliProgram(): Command {
   const mcp = program.command("mcp").description("Manage MCP client config");
   mcp.command("install")
     .description("Install MCP config for a client")
-    .option("--target <target>", "claude | cursor | continue")
-    .action(async (options: { target?: "claude" | "cursor" | "continue" }) =>
+    .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
+    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
       runAction(mcpInstallCommand(options)));
   mcp.command("uninstall")
     .description("Remove MCP config for a client")
-    .option("--target <target>", "claude | cursor | continue")
-    .action(async (options: { target?: "claude" | "cursor" | "continue" }) =>
+    .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
+    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
       runAction(mcpUninstallCommand(options)));
 
   program.command("completion")
