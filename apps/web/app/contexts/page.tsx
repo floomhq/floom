@@ -414,14 +414,14 @@ function ContextsPage() {
       {/* Page header */}
       <div className="flex items-start justify-between gap-4 shrink-0">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Contexts</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Contexts</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Reusable knowledge packs your workers can read before they act.
           </p>
         </div>
         <Button size="sm" onClick={() => setShowNewContext(true)}>
           <Plus className="size-4" />
-          New
+          New pack
         </Button>
       </div>
 
@@ -446,12 +446,13 @@ function ContextsPage() {
         </div>
       )}
 
-      {/* Progressive miller-column panes. Desktop: side-by-side, compressing as
-          a file opens. Mobile: a single drill-in column controlled by mobilePane. */}
-      <div className="flex flex-col lg:flex-row gap-3 flex-1 min-h-0">
+      {/* Progressive miller-column panes inside ONE unified container. Desktop:
+          side-by-side panes separated by internal dividers (not floating cards),
+          compressing as a file opens. Mobile: a single drill-in column. */}
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
         {/* ---- Packs pane (30% default → 10% when a file is open) ---------- */}
         <section
-          className={`flex flex-col rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden w-full shrink-0 transition-all duration-300 ${packsWidth} ${
+          className={`flex flex-col w-full shrink-0 transition-all duration-300 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] ${packsWidth} ${
             mobilePane === "packs" ? "flex" : "hidden lg:flex"
           }`}
         >
@@ -534,7 +535,7 @@ function ContextsPage() {
 
         {/* ---- Pack detail / miller folder columns ------------------------ */}
         {!selectedName ? (
-          <section className="flex-1 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden flex items-center justify-center p-8">
+          <section className="flex-1 overflow-hidden flex items-center justify-center p-8">
             <div className="max-w-md text-center space-y-4">
               <div className="space-y-1.5">
                 <h2 className="text-base font-semibold">Give your workers knowledge</h2>
@@ -551,7 +552,7 @@ function ContextsPage() {
             </div>
           </section>
         ) : !detail ? (
-          <section className="flex-1 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden flex items-center justify-center">
+          <section className="flex-1 overflow-hidden flex items-center justify-center">
             <Skeleton className="h-10 w-48 rounded-[var(--radius-button)]" />
           </section>
         ) : !fileOpen ? (
@@ -576,7 +577,7 @@ function ContextsPage() {
           /* FILE OPEN: 20% folder columns + 70% file content. */
           <>
             <section
-              className={`flex rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden w-full lg:w-[20%] lg:min-w-[200px] shrink-0 transition-all duration-300 ${
+              className={`flex overflow-hidden w-full lg:w-[20%] lg:min-w-[200px] shrink-0 transition-all duration-300 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] ${
                 mobilePane === "files" ? "flex" : "hidden lg:flex"
               }`}
             >
@@ -593,7 +594,7 @@ function ContextsPage() {
             </section>
 
             <section
-              className={`flex-1 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden flex flex-col min-w-0 transition-all duration-300 ${
+              className={`flex-1 overflow-hidden flex flex-col min-w-0 transition-all duration-300 ${
                 mobilePane === "file" ? "flex" : "hidden lg:flex"
               }`}
             >
@@ -762,7 +763,7 @@ function PackDetailPane({
 
   return (
     <section
-      className={`flex-1 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden flex-col min-w-0 transition-colors ${
+      className={`flex-1 overflow-hidden flex-col min-w-0 transition-colors ${
         dragActive && !readOnly ? "bg-muted/30" : ""
       } ${mobileVisible ? "flex" : "hidden lg:flex"}`}
       onDragOver={(e) => { e.preventDefault(); onDragState(true); }}
@@ -844,7 +845,12 @@ function PackDetailPane({
       {/* Files toolbar */}
       <div className="flex items-center justify-between px-5 py-2.5 border-b border-[var(--border-default)] shrink-0">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Files</p>
-        {!readOnly && (
+        {readOnly ? (
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <Lock className="size-3" />
+            Read-only — uploads disabled
+          </span>
+        ) : (
           <Button size="sm" variant="outline" onClick={onAddFile} className="h-7 text-xs gap-1">
             <Plus className="size-3.5" />
             Add file
