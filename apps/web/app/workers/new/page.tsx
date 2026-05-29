@@ -83,6 +83,11 @@ function NewWorkerContent() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sseRef = useRef<EventSource | null>(null);
+  const runIdRef = useRef<string | null>(null);
+  // Guards against double navigation (e.g. onerror firing right after onmessage
+  // already navigated on the terminal `close`/status event).
+  const navigatedRef = useRef(false);
+  const fallbackFiredRef = useRef(false);
 
   function getLivePrompt(): string {
     return (textareaRef.current?.value ?? prompt).trim();
@@ -93,29 +98,48 @@ function NewWorkerContent() {
       sseRef.current.close();
       sseRef.current = null;
     }
+    runIdRef.current = null;
+    navigatedRef.current = false;
+    fallbackFiredRef.current = false;
     setGenerating(false);
     setStreamRunId(null);
     setStreamLogs([]);
   }, []);
 
   // ---- Generate from prompt ------------------------------------------------
-  // Uses the new /workers/new/from-prompt endpoint which returns a run_id.
-  // We then subscribe to SSE on that run to get real-time progress.
-  // On completion we navigate to /runs/<id> so the user can save the bundle.
+  // Uses the /workers/new/from-prompt endpoint which creates a worker-author
+  // run and returns its run_id. We subscribe to SSE on that run for real-time
+  // progress, and on terminal state navigate to /runs/<id> so the user can see
+  // the drafted bundle and save it.
   //
-  // ROBUST FALLBACK (P0 2026-05-29): the user must NEVER see a dead/hung
-  // generation. If the streaming path fails for ANY reason — endpoint 404,
-  // the worker-author run reaches status=failed, or the SSE connection drops
-  // before completion — fall back to the synchronous draftAndCreate path
-  // (which runs the generation in-process and reliably returns a worker_id)
-  // so a worker still gets created.
+  // G5 P1 (2026-05-29): the hero flow MUST NEVER silently reset to the empty
+  // form on a successful (or completing) generation. The earlier code read the
+  // run id from a stale `streamRunId` state closure and, on an SSE drop, fired
+  // a *second* synchronous draftAndCreate — creating a DUPLICATE worker and, if
+  // that second call raced/failed, resetting to an empty form. Fix:
+  //   1. Keep the run id in a ref so onmessage/onerror never read a stale null.
+  //   2. Once we HAVE a run id (the worker-author run is in flight / done), an
+  //      SSE drop navigates to that run (`/runs/<id>`) + toasts — it does NOT
+  //      fire a duplicate-creating fallback. The run page streams the rest.
+  //   3. Only a hard failure to even start the run falls back to draftAndCreate.
 
-  // Guards against a double-fallback (e.g. onerror firing after a failed
-  // status already triggered the fallback).
-  const fallbackFiredRef = useRef(false);
+  function navigateToRun(runId: string, opts?: { failed?: boolean }) {
+    if (navigatedRef.current) return;
+    navigatedRef.current = true;
+    if (sseRef.current) {
+      sseRef.current.close();
+      sseRef.current = null;
+    }
+    if (opts?.failed) {
+      toast.error("Worker generation hit an error — opening the run so you can see what happened.");
+    } else {
+      toast.success("Worker drafted");
+    }
+    router.push(`/runs/${runId}`);
+  }
 
   async function fallbackDraftAndCreate(trimmed: string) {
-    if (fallbackFiredRef.current) return;
+    if (fallbackFiredRef.current || navigatedRef.current) return;
     fallbackFiredRef.current = true;
     if (sseRef.current) {
       sseRef.current.close();
@@ -123,11 +147,14 @@ function NewWorkerContent() {
     }
     try {
       const result = await api.workers.draftAndCreate({ prompt: trimmed });
+      navigatedRef.current = true;
+      toast.success("Worker drafted");
       router.push(`/workers/${result.worker_id}?edit=1`);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to generate worker");
       setGenerating(false);
       setStreamRunId(null);
+      runIdRef.current = null;
       setStreamLogs([]);
     }
   }
@@ -140,15 +167,18 @@ function NewWorkerContent() {
     }
     if (overridePrompt) setPrompt(overridePrompt);
     fallbackFiredRef.current = false;
+    navigatedRef.current = false;
+    runIdRef.current = null;
+    setStreamRunId(null);
     setGenerating(true);
     setStreamLogs([]);
 
-    let completed = false;
-
     try {
-      // Try the new streaming endpoint first
+      // Create the worker-author run. After this resolves a run EXISTS — every
+      // terminal/drop path below navigates to it, never resets the form.
       const result = await api.workers.newFromPrompt({ prompt: trimmed, mode: "draft" });
       const runId = result.run_id;
+      runIdRef.current = runId;
       setStreamRunId(runId);
 
       // Subscribe to SSE events for real-time progress
@@ -162,18 +192,9 @@ function NewWorkerContent() {
             setStreamLogs((prev: string[]) => [...prev.slice(-19), event.log as string]);
           }
           if (event.type === "status" && (event.status === "completed" || event.status === "failed")) {
-            evtSource.close();
-            sseRef.current = null;
-            if (event.status === "completed") {
-              completed = true;
-              // Navigate to the run page so user can see the bundle and save it
-              router.push(`/runs/${runId}`);
-            } else {
-              // The worker-author run failed — don't dead-end. Fall back to
-              // draftAndCreate so a worker still gets created.
-              console.warn("worker-author run failed, falling back to draftAndCreate:", event.error);
-              void fallbackDraftAndCreate(trimmed);
-            }
+            // Either way the run is real and openable — go to it. A failed
+            // worker-author run still has a viewable run page (logs + error).
+            navigateToRun(runIdRef.current ?? runId, { failed: event.status === "failed" });
           }
         } catch {
           // Non-JSON keepalive lines — ignore
@@ -183,16 +204,23 @@ function NewWorkerContent() {
       evtSource.onerror = () => {
         evtSource.close();
         sseRef.current = null;
-        // SSE dropped. If the run already completed we've navigated away.
-        // Otherwise fall back to draftAndCreate rather than navigating to a
-        // possibly-incomplete run page or hanging on the GeneratingPanel.
-        if (!completed) {
-          console.warn("worker-author SSE dropped before completion, falling back to draftAndCreate");
+        // SSE dropped. We already have a real run id, so navigate to that run
+        // (it streams the rest of progress + the final bundle). NEVER fire a
+        // second draftAndCreate here — that created the duplicate worker + the
+        // silent form reset the G5 audit hit.
+        const id = runIdRef.current;
+        if (id) {
+          navigateToRun(id);
+        } else if (!fallbackFiredRef.current) {
+          // The run never started (no id yet) — fall back so a worker still
+          // gets created rather than dead-ending on an empty stream.
           void fallbackDraftAndCreate(trimmed);
         }
       };
     } catch (streamErr) {
-      // The /workers/new/from-prompt endpoint itself failed (e.g. 404/503).
+      // The /workers/new/from-prompt endpoint itself failed before a run was
+      // created (e.g. 404/503). No run id exists, so fall back to the
+      // synchronous path so a worker still gets created.
       console.warn("worker-author endpoint unavailable, falling back to draftAndCreate:", streamErr);
       void fallbackDraftAndCreate(trimmed);
     }
