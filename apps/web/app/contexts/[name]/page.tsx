@@ -252,7 +252,10 @@ function PackDetailContent() {
         ) : (
           <p className="text-xs text-muted-foreground mt-0.5 italic">No description. Add a README.md.</p>
         )}
-        <div className="flex gap-3 mt-3">
+        {/* Top metrics row. Federico Image #17 (2026-05-29): "Used by" now lives
+            INLINE in this row (alongside Files / Workers / Size) as worker-name
+            chips, not as a separate section below. */}
+        <div className="flex flex-wrap items-center gap-3 mt-3">
           {[
             { label: "Files", value: detail.file_count ?? 0 },
             { label: "Workers", value: detail.worker_count ?? 0 },
@@ -263,32 +266,32 @@ function PackDetailContent() {
               <span className="text-xs font-medium">{value}</span>
             </div>
           ))}
+          {(detail.used_by ?? []).length > 0 && (
+            <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5 min-w-0">
+              <span className="text-xs text-muted-foreground shrink-0">Used by</span>
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                {(detail.used_by ?? []).map((ref) => (
+                  <Link
+                    key={ref.worker_id}
+                    href={`/workers/${encodeURIComponent(ref.worker_id)}`}
+                    className="text-xs font-medium hover:underline truncate"
+                  >
+                    {ref.worker_name}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto space-y-5">
-        {/* Used by */}
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Used by</p>
-          {(detail.used_by ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No workers reference this pack yet. Workers attach contexts in their{" "}
-              <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">worker.yml</code>.
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {(detail.used_by ?? []).map((ref) => (
-                <Link
-                  key={ref.worker_id}
-                  href={`/workers/${encodeURIComponent(ref.worker_id)}`}
-                  className="inline-flex items-center rounded-md border border-[var(--border-default)] bg-[var(--bg-app)] px-2.5 py-1 text-sm hover:bg-muted transition-colors"
-                >
-                  {ref.worker_name}
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
+        {(detail.used_by ?? []).length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No workers reference this pack yet. Workers attach contexts in their{" "}
+            <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">worker.yml</code>.
+          </p>
+        )}
 
         {/* Files */}
         <div
