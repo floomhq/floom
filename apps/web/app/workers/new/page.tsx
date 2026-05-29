@@ -79,6 +79,7 @@ function NewWorkerContent() {
   const [streamRunId, setStreamRunId] = useState<string | null>(null);
   const [streamLogs, setStreamLogs] = useState<string[]>([]);
   const [uploadState, setUploadState] = useState<UploadState>("idle");
+  const [dragActive, setDragActive] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sseRef = useRef<EventSource | null>(null);
@@ -299,6 +300,29 @@ function NewWorkerContent() {
     e.target.value = "";
   }
 
+  // Drag-and-drop onto the prompt box (Federico 2026-05-29). Dropping a bundle
+  // zip, a folder of files, or a single .md/.py/.txt is handled by the same
+  // handleFiles path the Upload button uses. Additive: the textarea + Upload
+  // button keep working unchanged.
+  function handleDragOver(e: React.DragEvent) {
+    if (isBusy) return;
+    e.preventDefault();
+    if (!dragActive) setDragActive(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    // Only clear when the pointer actually leaves the card, not on child enter.
+    if (e.currentTarget === e.target) setDragActive(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragActive(false);
+    if (isBusy) return;
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) void handleFiles(files);
+  }
+
   const isUploading = uploadState !== "idle";
   const isBusy = generating || isUploading;
 
@@ -338,8 +362,22 @@ function NewWorkerContent() {
       </div>
 
       {/* S25: hero textarea card sized to feel like the centerpiece, not a
-          form field. Bigger min-height + tighter footer. */}
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)] space-y-4">
+          form field. Bigger min-height + tighter footer.
+          2026-05-29: card is now a dropzone (drag a bundle zip / folder /
+          .md / .py onto it — same path as the Upload button). */}
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`relative rounded-xl border bg-[var(--bg-card)] p-5 shadow-[var(--shadow-card)] space-y-4 transition-colors ${
+          dragActive ? "border-[var(--accent)] border-dashed" : "border-[var(--border-default)]"
+        }`}
+      >
+        {dragActive && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-[var(--bg-card)]/85 backdrop-blur-[1px]">
+            <p className="text-sm font-medium text-foreground">Drop a .md / .py / .zip or a worker folder to import</p>
+          </div>
+        )}
         <Textarea
           ref={textareaRef}
           placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
