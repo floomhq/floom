@@ -20,9 +20,23 @@ import { toast } from "sonner";
 import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
-  Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore,
+  Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
@@ -193,6 +207,14 @@ export default function WorkerDetailPage() {
 
   // S42: saving state
   const [saving, setSaving] = useState(false);
+
+  // P1-C (prove100 2026-05-30): worker actions — Archive (reversible) and
+  // Delete (destructive, confirm-gated). The API exposed both DELETE and a
+  // /restore counterpart but no UI surfaced either, so generated/test workers
+  // could not be removed from the product.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Derived dirty flags
   const filesDirty = editFiles.some((f) => f.content !== (editFilesOriginal[f.path] ?? ""));
@@ -576,6 +598,38 @@ export default function WorkerDetailPage() {
     }
   }
 
+  // P1-C: archive this worker (reversible). Stays on the page; the header
+  // flips to the Archived badge + Restore button via the returned detail.
+  async function handleArchive() {
+    if (!worker) return;
+    setArchiving(true);
+    try {
+      const updated = await api.workers.archive(worker.id);
+      setWorker(updated);
+      toast.success("Worker archived");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to archive worker");
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  // P1-C: permanently delete this worker (destructive, confirm-gated), then
+  // route back to the list.
+  async function handleDelete() {
+    if (!worker) return;
+    setDeleting(true);
+    try {
+      await api.workers.delete(worker.id);
+      toast.success("Worker deleted");
+      router.push("/workers");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete worker");
+      setDeleting(false);
+      setDeleteOpen(false);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Loading / not found states
   // ---------------------------------------------------------------------------
@@ -837,9 +891,69 @@ export default function WorkerDetailPage() {
               <Pencil className="w-4 h-4 mr-1.5" />
               Edit
             </Button>
+            {/* P1-C: worker actions (Archive / Delete). Hidden for example
+                workers — those are read-only stock workers the backend rejects
+                mutating (403), so we don't offer a dead-end control. */}
+            {!worker.is_example && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-button)] border border-input bg-background text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                  aria-label="Worker actions"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleArchive} disabled={archiving}>
+                    <Archive className="w-4 h-4 mr-2" />
+                    {archiving ? "Archiving..." : "Archive"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         )}
       </div>
+
+      {/* P1-C: destructive delete confirm. Archive is reversible so it acts
+          immediately from the menu; Delete removes the worker and all of its
+          runs/logs/artifacts and cannot be undone, so it is gated here. */}
+      <Dialog open={deleteOpen} onOpenChange={(o) => !deleting && setDeleteOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete {worker.name}?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes the worker and all of its runs, logs, and
+              artifacts. This cannot be undone. To keep it recoverable, archive it
+              instead.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete worker"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Top tabs (shadcn). MOBILE-375: the 6-tab bar (About/Run/Triggers/
           History/Apps/Source) is `inline-flex w-fit whitespace-nowrap` — it
