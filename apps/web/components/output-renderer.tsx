@@ -54,7 +54,7 @@ function OutputCSV({ value, filename }: { value: string; filename: string }) {
   const [header, ...body] = rows;
   return (
     <div className="space-y-2">
-      <div className="overflow-auto max-h-[400px] rounded border border-border">
+      <div className="overflow-auto max-h-[400px] rounded-[var(--radius-card)] border border-border">
         <Table>
           <TableHeader>
             <TableRow>
