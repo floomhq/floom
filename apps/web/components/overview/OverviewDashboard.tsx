@@ -89,45 +89,48 @@ function MetricCard({
   loading: boolean;
   sparkline?: OverviewSparklineBucket[];
 }) {
+  const hasSparkline = Boolean(sparkline && sparkline.length > 0);
   return (
-    <div className={cn(cardClass, "p-4")}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          {loading ? (
-            <Skeleton className="h-7 w-16 rounded-[var(--radius-button)]" />
-          ) : (
-            <div className="text-2xl font-semibold text-[var(--text-primary)]">{value}</div>
-          )}
-          <div className="mt-1 flex items-center gap-1.5">
-            {warning ? (
-              <span
-                className="size-1.5 rounded-[var(--radius-pill)] bg-[var(--warning)]"
-                aria-label="Has failures"
-              />
-            ) : null}
-            <p className="text-xs text-[var(--text-muted)]">{label}</p>
-          </div>
+    <div className={cn(cardClass, "flex flex-col overflow-hidden")}>
+      {/* Stat at the top */}
+      <div className="px-4 pt-4">
+        {loading ? (
+          <Skeleton className="h-7 w-16 rounded-[var(--radius-button)]" />
+        ) : (
+          <div className="text-2xl font-semibold text-[var(--text-primary)]">{value}</div>
+        )}
+        <div className="mt-1 flex items-center gap-1.5">
+          {warning ? (
+            <span
+              className="size-1.5 rounded-[var(--radius-pill)] bg-[var(--warning)]"
+              aria-label="Has failures"
+            />
+          ) : null}
+          <p className="text-xs text-[var(--text-muted)]">{label}</p>
         </div>
-        {sparkline && sparkline.length > 0 && !loading ? (
+        <p className="mt-2 flex items-center gap-1 text-xs text-[var(--text-muted)]">
+          {trend !== null && trend !== undefined && trend > 0 ? (
+            <ArrowUp className="size-3 opacity-50" aria-hidden="true" />
+          ) : null}
+          <span className={trend !== null && trend !== undefined ? "opacity-70" : undefined}>
+            {context}
+          </span>
+        </p>
+      </div>
+      {/* Full-width sparkline pinned to the bottom, edge-to-edge */}
+      <div className="mt-3 h-12">
+        {loading ? (
+          <Skeleton className="h-full w-full rounded-none" />
+        ) : hasSparkline ? (
           <Sparkline
-            data={sparkline}
-            width={72}
-            height={32}
-            tone="overview"
-            className="shrink-0 opacity-60"
+            data={sparkline as OverviewSparklineBucket[]}
+            width={240}
+            height={48}
+            variant="area"
+            className="h-full w-full"
           />
-        ) : loading ? (
-          <Skeleton className="h-8 w-[72px] rounded-[var(--radius-button)]" />
         ) : null}
       </div>
-      <p className="mt-2 flex items-center gap-1 text-xs text-[var(--text-muted)]">
-        {trend !== null && trend !== undefined && trend > 0 ? (
-          <ArrowUp className="size-3 opacity-50" aria-hidden="true" />
-        ) : null}
-        <span className={trend !== null && trend !== undefined ? "opacity-70" : undefined}>
-          {context}
-        </span>
-      </p>
     </div>
   );
 }
