@@ -640,18 +640,25 @@ function WorkerCard({
               reserving 2 lines for every title starved the description to 0px
               on cards that also show a status pill (caught live 2026-05-29). */}
           <h3
-            className={`font-medium text-[15px] leading-snug line-clamp-2 ${
+            className={`font-medium text-[15px] leading-snug overflow-hidden shrink-0 ${
               worker.archived ? "text-muted-foreground" : ""
             }`}
+            style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }}
           >
             {worker.name}
           </h3>
 
-          {/* 2. Description — a CLEAN 2-line clamp at its natural height (never
-              flex-grown, so it can't be crushed/cut mid-line — the cutoff bug
-              Federico flagged 2026-05-30). The flex-1 spacer below absorbs the
-              slack and pins the footer. */}
-          <p className="text-sm text-muted-foreground line-clamp-2">
+          {/* 2. Description — a CLEAN 2-line clamp. The Tailwind line-clamp-2
+              utility computed display:flow-root here (clamp ignored → text
+              sliced mid-line), and as a flex child it was shrunk below 2 lines.
+              Force the -webkit-box clamp via inline style + shrink-0 so it
+              renders exactly 2 lines with an ellipsis and flexbox can't squeeze
+              it (the cutoff bug Federico flagged 2026-05-30). The flex-1 spacer
+              below absorbs slack and pins the footer. */}
+          <p
+            className="text-sm text-muted-foreground overflow-hidden shrink-0"
+            style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }}
+          >
             {description}
           </p>
 
