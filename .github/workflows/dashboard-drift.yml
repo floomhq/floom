@@ -1,0 +1,64 @@
+name: Dashboard drift guard
+
+# Prevents the synced dashboard (web/) from silently re-forking away from the
+# engine UI (engine/apps/web). Runs web/scripts/check-engine-sync.mjs, which
+# diffs the two trees (overlay paths excluded) and exits non-zero on drift.
+#
+# REQUIRES a token that can clone the private engine submodule
+# (github.com/floomhq/workeros). Add a fine-grained PAT or classic PAT with
+# read access to floomhq/workeros as repo/org secret ENGINE_SUBMODULE_TOKEN.
+# The default GITHUB_TOKEN cannot read a *different* private repo, so without
+# this secret the submodule checkout (and therefore the drift check) will fail.
+
+on:
+  pull_request:
+    paths:
+      - "web/**"
+      - "engine"
+      - ".gitmodules"
+      - ".github/workflows/dashboard-drift.yml"
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "engine"
+      - ".gitmodules"
+      - ".github/workflows/dashboard-drift.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with engine submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # Token used for the private engine submodule clone. Falls back to the
+          # default GITHUB_TOKEN, which only works if org settings allow it to
+          # read floomhq/workeros; otherwise set ENGINE_SUBMODULE_TOKEN.
+          token: ${{ secrets.ENGINE_SUBMODULE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Verify engine submodule is present
+        run: |
+          if [ ! -d engine/apps/web ]; then
+            echo "::error::engine/apps/web missing - the private engine submodule"
+            echo "::error::did not check out. Add secret ENGINE_SUBMODULE_TOKEN"
+            echo "::error::(PAT with read access to floomhq/workeros)."
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Check dashboard is in sync with engine
+        working-directory: web
+        run: node scripts/check-engine-sync.mjs
+
+      - name: Verify sync script runs cleanly
+        working-directory: web
+        run: node scripts/sync-engine-web.mjs --quiet
