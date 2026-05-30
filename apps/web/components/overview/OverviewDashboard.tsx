@@ -213,8 +213,8 @@ function WorkerActivity({
   loading: boolean;
 }) {
   return (
-    <section className={cn(cardClass, "p-6 lg:col-span-2")}>
-      <div className="mb-3 flex items-center justify-between">
+    <section className={cn(cardClass, "flex flex-col p-6 lg:col-span-2")}>
+      <div className="mb-3 flex items-center justify-between shrink-0">
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">Worker activity</h2>
         <Link href="/runs" className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]">
           See all
@@ -222,15 +222,15 @@ function WorkerActivity({
       </div>
       {loading ? (
         <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, index) => (
+          {Array.from({ length: 7 }).map((_, index) => (
             <Skeleton key={index} className="h-11 w-full rounded-lg" />
           ))}
         </div>
       ) : runs.length === 0 ? (
-        <p className="py-8 text-center text-sm text-[var(--text-muted)]">No runs yet.</p>
+        <p className="flex flex-1 items-center justify-center py-8 text-center text-sm text-[var(--text-muted)]">No runs yet.</p>
       ) : (
-        <div className="divide-y divide-[var(--border-soft)]">
-          {runs.slice(0, 5).map((run) => {
+        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-[var(--border-soft)]">
+          {runs.slice(0, 12).map((run) => {
             const meta = statusMeta(run.status);
             return (
               <Link
@@ -276,8 +276,8 @@ function ComingUp({
   loading: boolean;
 }) {
   return (
-    <section className={cn(cardClass, "p-6")}>
-      <h2 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">Coming up today</h2>
+    <section className={cn(cardClass, "flex flex-col p-6")}>
+      <h2 className="mb-3 text-sm font-semibold text-[var(--text-primary)] shrink-0">Coming up today</h2>
       {loading ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, index) => (
@@ -285,7 +285,7 @@ function ComingUp({
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="flex min-h-44 flex-col items-center justify-center text-center">
+        <div className="flex flex-1 min-h-44 flex-col items-center justify-center text-center">
           <CalendarClock className="mb-3 size-8 text-[var(--text-muted)]" aria-hidden="true" />
           <p className="max-w-48 text-sm font-medium text-[var(--text-primary)]">
             No runs scheduled in the next 24 hours
@@ -298,7 +298,7 @@ function ComingUp({
           </Link>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
           {items.map((item) => (
             <Link
               key={`${item.worker_id}-${item.next_fire_at}`}
@@ -452,7 +452,7 @@ export function OverviewDashboard({
   );
 
   return (
-    <div className="space-y-5 pt-6">
+    <div className="flex min-h-[calc(100dvh-5.5rem)] flex-col space-y-5 pt-6">
       {/* Hero — compact */}
       <section>
         <h1 className="text-xl font-semibold tracking-normal text-[var(--text-primary)]">Work done</h1>
@@ -476,8 +476,9 @@ export function OverviewDashboard({
         </span>
       </div>
 
-      {/* Activity + Coming up — 2-col, capped at 8 rows each */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+      {/* Activity + Coming up — 2-col; grows to fill remaining viewport height
+          so the page doesn't leave a whitespace band at the bottom. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3 flex-1 min-h-0">
         <WorkerActivity runs={data?.recent_runs ?? []} loading={loading} />
         <ComingUp items={data?.scheduled_today ?? []} loading={loading} />
       </div>
