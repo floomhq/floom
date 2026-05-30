@@ -66,32 +66,54 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     }
   }, [initialWorkers]);
 
-  // S44: if RSC delivered empty (API unavailable), fall back to client fetch.
+  // On mount, reconcile the list with a fresh client fetch.
+  // - When RSC delivered data, the App Router client cache can hand back a stale
+  //   payload after navigating back from a mutation (e.g. delete), so the All
+  //   list briefly shows a ghost of the deleted worker. A mount refetch drops it
+  //   without weakening the deliberate 30s RSC cache used for the no-flash render.
+  // - When RSC delivered empty (API unavailable), this is the only fetch, so show
+  //   a loading state.
   useEffect(() => {
-    if (initialWorkers.length === 0) {
-      setLoading(true);
-      api.workers
-        .list()
-        .then((w) => {
-          setWorkers(w);
-          setLoading(false);
-        })
-        .catch(() => setLoading(false));
-    }
+    const cameWithoutData = initialWorkers.length === 0;
+    if (cameWithoutData) setLoading(true);
+    let cancelled = false;
+    api.workers
+      .list()
+      .then((w) => {
+        if (!cancelled) setWorkers(w);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled && cameWithoutData) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load archived workers when Archived tab is first selected.
+  // Refetch archived workers every time the Archived tab is entered.
+  // Previously this was guarded by `archivedWorkers.length === 0`, which only
+  // ever fetched once per mount — so a worker archived from its detail page
+  // (then routed back here) never showed up while any archived workers were
+  // already cached, leaving the tab stuck on a stale "No archived workers".
+  // The archived list is small, so an unconditional refetch on tab-enter is the
+  // smallest correct fix; the cancelled flag drops a stale in-flight response.
   useEffect(() => {
-    if (tab === "archived" && archivedWorkers.length === 0 && !loadingArchived) {
-      setLoadingArchived(true);
-      api.workers
-        .list({ include_archived: true })
-        .then((all) => {
-          setArchivedWorkers(all.filter((w) => w.archived));
-          setLoadingArchived(false);
-        })
-        .catch(() => setLoadingArchived(false));
-    }
+    if (tab !== "archived") return;
+    let cancelled = false;
+    setLoadingArchived(true);
+    api.workers
+      .list({ include_archived: true })
+      .then((all) => {
+        if (!cancelled) setArchivedWorkers(all.filter((w) => w.archived));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoadingArchived(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleFavorite = useCallback((id: string) => {
