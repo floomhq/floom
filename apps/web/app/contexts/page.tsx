@@ -384,6 +384,46 @@ function ContextsPage() {
     }
   }
 
+  // ---- Drag-and-drop upload ----------------------------------------------
+  // The previous wiring set `dragActive` on every `dragover` and cleared it on
+  // every `dragleave`. Because dragleave fires when the cursor crosses onto a
+  // CHILD element, the highlight flickered and the drop affordance was unclear,
+  // making drops feel broken. Track an enter-counter so `dragActive` is stable
+  // for the whole pane, and only treat the event as a file drag (ignore text /
+  // element drags that can't be uploaded).
+  const dragDepth = useRef(0);
+  const isFileDrag = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer?.types ?? []).includes("Files");
+
+  const dropHandlers = readOnly
+    ? {}
+    : {
+        onDragEnter: (e: React.DragEvent) => {
+          if (!isFileDrag(e)) return;
+          e.preventDefault();
+          dragDepth.current += 1;
+          setDragActive(true);
+        },
+        // preventDefault on dragover is REQUIRED or the browser never fires drop.
+        onDragOver: (e: React.DragEvent) => {
+          if (!isFileDrag(e)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          if (!dragActive) setDragActive(true);
+        },
+        onDragLeave: (e: React.DragEvent) => {
+          if (!isFileDrag(e)) return;
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setDragActive(false);
+        },
+        onDrop: (e: React.DragEvent) => {
+          e.preventDefault();
+          dragDepth.current = 0;
+          setDragActive(false);
+          if (e.dataTransfer.files?.length) void uploadFiles(e.dataTransfer.files);
+        },
+      };
+
   async function saveFile() {
     if (!fileObj) return;
     try {
@@ -577,8 +617,7 @@ function ContextsPage() {
             onOpenFile={openFile}
             onDeleteFile={deleteFile}
             onAddFile={() => fileInputRef.current?.click()}
-            onDragState={setDragActive}
-            onUpload={uploadFiles}
+            dropHandlers={dropHandlers}
           />
         ) : (
           /* FILE OPEN: 20% folder columns + 70% file content. */
@@ -601,9 +640,10 @@ function ContextsPage() {
             </section>
 
             <section
-              className={`flex-1 overflow-hidden flex flex-col min-w-0 transition-all duration-300 ${
-                mobilePane === "file" ? "flex" : "hidden lg:flex"
-              }`}
+              {...dropHandlers}
+              className={`relative flex-1 overflow-hidden flex flex-col min-w-0 transition-colors duration-300 ${
+                dragActive && !readOnly ? "bg-muted/30" : ""
+              } ${mobilePane === "file" ? "flex" : "hidden lg:flex"}`}
             >
               <FilePane
                 file={fileObj}
@@ -623,6 +663,11 @@ function ContextsPage() {
                 onClose={closeFile}
                 onBackMobile={() => setMobilePane("files")}
               />
+              {dragActive && !readOnly && (
+                <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-[var(--primary)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
+                  Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
+                </div>
+              )}
             </section>
           </>
         )}
@@ -741,8 +786,7 @@ function PackDetailPane({
   onOpenFile,
   onDeleteFile,
   onAddFile,
-  onDragState,
-  onUpload,
+  dropHandlers,
 }: {
   detail: ContextDetail;
   folderColumns: { folder: string; entries: Entry[] }[];
@@ -755,8 +799,12 @@ function PackDetailPane({
   onOpenFile: (path: string) => void;
   onDeleteFile: (path: string) => void;
   onAddFile: () => void;
-  onDragState: (active: boolean) => void;
-  onUpload: (files: FileList | File[]) => void;
+  dropHandlers: Partial<{
+    onDragEnter: React.DragEventHandler<HTMLElement>;
+    onDragOver: React.DragEventHandler<HTMLElement>;
+    onDragLeave: React.DragEventHandler<HTMLElement>;
+    onDrop: React.DragEventHandler<HTMLElement>;
+  }>;
 }) {
   const [packLinkCopied, setPackLinkCopied] = useState(false);
 
@@ -770,12 +818,10 @@ function PackDetailPane({
 
   return (
     <section
-      className={`flex-1 overflow-hidden flex-col min-w-0 transition-colors ${
+      {...dropHandlers}
+      className={`relative flex-1 overflow-hidden flex-col min-w-0 transition-colors ${
         dragActive && !readOnly ? "bg-muted/30" : ""
       } ${mobileVisible ? "flex" : "hidden lg:flex"}`}
-      onDragOver={(e) => { e.preventDefault(); onDragState(true); }}
-      onDragLeave={() => onDragState(false)}
-      onDrop={(e) => { e.preventDefault(); onDragState(false); onUpload(e.dataTransfer.files); }}
     >
       {/* Pack header / metadata (used-by chips live here) */}
       <div className="border-b border-[var(--border-default)] px-5 py-4 shrink-0">
@@ -902,9 +948,12 @@ function PackDetailPane({
         </div>
       )}
 
+      {/* Full-pane drop overlay (covers the whole detail pane, including the
+          miller columns) so a drop anywhere over a writable pack uploads.
+          pointer-events-none lets the underlying drag events keep firing. */}
       {dragActive && !readOnly && (
-        <div className="m-4 rounded-[var(--radius-button)] border-2 border-dashed border-[var(--border-default)] p-4 text-center text-sm text-muted-foreground shrink-0">
-          Drop files here to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
+        <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-[var(--primary)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
+          Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
         </div>
       )}
     </section>
@@ -1233,7 +1282,7 @@ function FileContent({
     return (
       <Tabs defaultValue="preview" className="flex flex-col h-full">
         <div className="border-b border-[var(--border-default)] px-4 pt-2 shrink-0">
-          <TabsList className="h-8">
+          <TabsList variant="line" className="h-8">
             <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
             <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
           </TabsList>
@@ -1254,7 +1303,7 @@ function FileContent({
     return (
       <Tabs defaultValue="preview" className="flex flex-col h-full">
         <div className="border-b border-[var(--border-default)] px-4 pt-2 shrink-0">
-          <TabsList className="h-8">
+          <TabsList variant="line" className="h-8">
             <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
             <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
           </TabsList>
