@@ -9,6 +9,12 @@ interface SparklineProps {
   height?: number;
   className?: string;
   tone?: "status" | "overview";
+  /**
+   * Full-width area+line variant for metric cards. Renders a single accent
+   * line with a subtle gradient fill beneath, stretched edge-to-edge via
+   * width="100%" + preserveAspectRatio="none". Ignores the bar rendering.
+   */
+  variant?: "bars" | "area";
 }
 
 /**
@@ -29,6 +35,7 @@ export function Sparkline({
   height = 32,
   className,
   tone = "status",
+  variant = "bars",
 }: SparklineProps) {
   if (!data || data.length === 0) return null;
 
@@ -38,6 +45,51 @@ export function Sparkline({
     : (data as number[]);
 
   const maxTotal = Math.max(...counts, 1);
+
+  // Full-width area+line variant — a single accent line with a low-opacity
+  // gradient fill, stretched edge-to-edge. preserveAspectRatio="none" lets the
+  // fixed viewBox scale to whatever width="100%" resolves to in the card.
+  if (variant === "area") {
+    const fillId = `spark-fill-${counts.length}-${maxTotal}`;
+    const stepX = counts.length > 1 ? width / (counts.length - 1) : width;
+    const yFor = (v: number) => {
+      const h = Math.max(0, Math.round((v / maxTotal) * (height - 2)));
+      return height - 1 - h;
+    };
+    const points = counts.map((v, i) => `${(i * stepX).toFixed(2)},${yFor(v).toFixed(2)}`);
+    const linePath = `M ${points.join(" L ")}`;
+    const areaPath = `${linePath} L ${width},${height} L 0,${height} Z`;
+
+    return (
+      <svg
+        width="100%"
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+        style={{ display: "block" }}
+        className={className}
+      >
+        <defs>
+          <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill={`url(#${fillId})`} stroke="none" />
+        <path
+          d={linePath}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    );
+  }
+
   const barW = Math.max(1, Math.floor((width - 2) / data.length) - 1);
   const gap = 1;
 
