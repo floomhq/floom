@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
@@ -47,17 +47,26 @@ export default function SettingsPage() {
 }
 
 function SettingsContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   // S28: tabs use URL hash now (#api, #danger, etc.). Fall back to legacy
   // ?tab= for old links.
-  const tabParam =
-    (typeof window !== "undefined" && window.location.hash.replace(/^#/, "")) ||
-    searchParams.get("tab");
-  // S22f: hidden tab (e.g. notifications) requested via URL falls back to api.
-  const [tab, setTab] = useState<TabKey>(
-    isValidTab(tabParam) && VISIBLE_TAB_KEYS.includes(tabParam) ? tabParam : "api"
-  );
+  // S30: own the hash via the History API instead of router.replace. The App
+  // Router treated a same-pathname `#hash` navigation as an append (clicking
+  // System then Appearance produced `/settings#system#appearance`), so the tab
+  // could only switch once per load. We are the single source of truth for the
+  // hash now: state drives history.replaceState, and a hashchange listener
+  // keeps deep-links + back/forward in sync.
+  const initialTab = (() => {
+    const fromHash =
+      typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : null;
+    const fromQuery = searchParams.get("tab");
+    const candidate = fromHash || fromQuery;
+    // S22f: hidden tab (e.g. notifications) requested via URL falls back to api.
+    return isValidTab(candidate) && VISIBLE_TAB_KEYS.includes(candidate)
+      ? candidate
+      : "api";
+  })();
+  const [tab, setTab] = useState<TabKey>(initialTab);
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
@@ -92,9 +101,17 @@ function SettingsContent() {
     void loadData();
   }, [loadData]);
 
+  // Keep state in sync with the URL hash for deep-links and back/forward.
   useEffect(() => {
-    if (isValidTab(tabParam) && VISIBLE_TAB_KEYS.includes(tabParam) && tabParam !== tab) setTab(tabParam);
-  }, [tabParam, tab]);
+    function syncFromHash() {
+      const fromHash = window.location.hash.replace(/^#/, "");
+      if (isValidTab(fromHash) && VISIBLE_TAB_KEYS.includes(fromHash)) {
+        setTab((prev) => (prev === fromHash ? prev : fromHash));
+      }
+    }
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
+  }, []);
 
   // Lazy-load the workspace agent prompt + tools only when the tab is opened —
   // the system prompt can be large, so we don't fetch it on every settings view.
@@ -128,11 +145,12 @@ function SettingsContent() {
   function handleTabChange(value: string) {
     if (!isValidTab(value)) return;
     setTab(value);
-    // S28: hash slug instead of query param.
+    // S30: set the hash to exactly the clicked tab via the History API so it
+    // REPLACES rather than appends. Drop the legacy ?tab= param if present.
     const params = new URLSearchParams(searchParams.toString());
     params.delete("tab");
     const qs = params.size ? `?${params.toString()}` : "";
-    router.replace(`/settings${qs}#${value}`, { scroll: false });
+    window.history.replaceState(null, "", `/settings${qs}#${value}`);
   }
 
   async function handleReload() {
@@ -223,6 +241,13 @@ function SettingsContent() {
           placeholder toggles, which read as "this team ships features that
           don't exist yet". When the feature ships, restore the tab. */}
       <Tabs value={tab} onValueChange={handleTabChange}>
+        {/* S30: on narrow viewports the w-fit tab strip ran off the right edge
+            (scrollWidth 489 > 375) and clipped "Danger zone", forcing a
+            horizontal page scroll. Wrap it in an overflow-x-auto, full-width
+            container with a hidden scrollbar so the page stays at viewport
+            width while the strip scrolls internally. Desktop is unchanged: the
+            strip fits, so nothing scrolls. */}
+        <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <TabsList>
           <TabsTrigger value="api">API access</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
@@ -230,6 +255,7 @@ function SettingsContent() {
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
           <TabsTrigger value="danger">Danger zone</TabsTrigger>
         </TabsList>
+        </div>
 
         <TabsContent value="api" className="space-y-4">
           <CliCommandPanel />
