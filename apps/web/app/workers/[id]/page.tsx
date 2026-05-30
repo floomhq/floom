@@ -609,6 +609,10 @@ export default function WorkerDetailPage() {
       await api.workers.archive(worker.id);
       toast.success("Worker archived");
       router.push("/workers");
+      // Bust the App Router client cache so the list re-renders fresh instead of
+      // the stale RSC payload (otherwise the just-archived worker still shows in
+      // All until a hard reload).
+      router.refresh();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to archive worker");
       setArchiving(false);
@@ -626,12 +630,16 @@ export default function WorkerDetailPage() {
       await api.workers.delete(worker.id);
       toast.success("Worker deleted");
       router.push("/workers");
+      // Bust the App Router client cache so the deleted worker doesn't linger as
+      // a ghost in the All list (the stale RSC payload still contains it).
+      router.refresh();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "";
       if (/\b404\b|not found/i.test(msg)) {
         // Already deleted — treat as success.
         toast.success("Worker deleted");
         router.push("/workers");
+        router.refresh();
         return;
       }
       toast.error(msg || "Failed to delete worker");
