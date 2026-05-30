@@ -3602,6 +3602,40 @@ def get_worker_detail(
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
+def _set_db_manifest_archived(
+    worker_id: str,
+    *,
+    archived: bool,
+    user_id: str,
+    repos: Repositories,
+) -> None:
+    """Mirror a worker's archived flag into its DB manifest (skill_versions.manifest_json).
+
+    The API resolves ``archived`` from the DB manifest (via ``repos.workers.get``),
+    not from worker.yml on disk. Archive/restore write worker.yml for restart
+    durability, so the DB copy must be updated in lockstep or the detail response,
+    the Archived list view, and the Restore button all read stale state.
+
+    No-op (and non-fatal) for filesystem-only workers that have no DB row — those
+    are served from disk via ``discover_workers`` after cache invalidation.
+    """
+    try:
+        db_worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
+    except sqlite3.OperationalError:
+        db_worker = None
+    if db_worker is None:
+        return
+    manifest = dict(db_worker.get("manifest") or {})
+    if archived:
+        manifest["archived"] = True
+    else:
+        # Restore: drop the flag entirely so it defaults to false, matching the
+        # worker.yml write which removes/clears archived + archive_reason.
+        manifest.pop("archived", None)
+        manifest.pop("archive_reason", None)
+    repos.workers.update(user_id=user_id, worker_id=worker_id, manifest_json=manifest)
+
+
 @app.post("/workers/{worker_id}/restore", response_model=WorkerDetail)
 def restore_worker(
     worker_id: str,
@@ -3636,6 +3670,9 @@ def restore_worker(
         worker_yml_path.write_text(updated)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
+    # Mirror the cleared archived flag into the DB manifest (see archive_worker:
+    # the API reads `archived` from the DB, not disk).
+    _set_db_manifest_archived(worker_id, archived=False, user_id=auth.user_id, repos=repos)
     invalidate_worker_cache()
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
@@ -3677,6 +3714,12 @@ def archive_worker(
         worker_yml_path.write_text(updated)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
+    # Persist the archived flag to the DB manifest too. The API reads `archived`
+    # from skill_versions.manifest_json (via repos.workers.get), NOT from disk —
+    # writing worker.yml alone left the detail response, the Archived view, and
+    # the Restore button stale (archived:false) for DB-tracked workers, because
+    # invalidate_worker_cache() only clears the filesystem discovery cache.
+    _set_db_manifest_archived(worker_id, archived=True, user_id=auth.user_id, repos=repos)
     invalidate_worker_cache()
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
