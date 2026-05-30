@@ -199,7 +199,6 @@ export const GCalLogo = () => (
     <path fill="#34A853" d="M7.64 22h8.72v-5.64H7.64z" />
     <path fill="#188038" d="M22 7.64h-5.64v8.72H22a0 0 0 0 0 0 0V7.64z" opacity="0" />
     <path fill="#1967D2" d="M16.36 16.36V7.64H22v8.72z" opacity="0" />
-    <text x="12" y="14.2" fontSize="6.5" fontWeight="700" fill="#4285F4" textAnchor="middle" fontFamily="Inter, Arial, sans-serif">31</text>
   </svg>
 );
 

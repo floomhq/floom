@@ -1,7 +1,11 @@
 /* Per-vertical landing data. One entry per department.
    Adding a 4th vertical = add an entry here + a 3-line route file.
    Keep capabilities to what the product genuinely does: connect tools
-   via OAuth, run an LLM job on a trigger, draft/summarize/enrich/post. */
+   via OAuth, run an LLM job on a trigger, draft/summarize/enrich/post.
+
+   v2 (2026-05-30): each vertical now leads with a Slack demo for THAT team
+   (same SlackThreadMock spine as the homepage hero) and an expanded outcome
+   grid for the department, scoped to the spec's locked H1s. */
 import type { ReactNode } from "react";
 import {
   AnalyticsLogo,
@@ -39,24 +43,32 @@ export interface ToolPill {
   logo: LogoComp;
 }
 
-/* The hero mock evokes the worker's primary tool (a tasteful chrome +
-   rows panel), with the agent doing one real task inside it. */
-export interface HeroMock {
-  /* tool-tinted accent, e.g. Slack aubergine, Zendesk teal, LinkedIn blue */
-  accent: string;
-  /* fake URL in the chrome bar */
-  url: string;
-  /* the tool surface title + the agent's task line */
-  app: string;
-  appIcon: () => ReactNode;
-  taskKicker: string;
-  task: string;
-  /* the agent's run, as 3 concrete steps it took inside the tool */
-  steps: string[];
-  /* the artifact it produced + where it landed */
+/* The hero demo is a Slack exchange for THIS team: someone asks @workeros to
+   do the department's core job, and the worker returns finished artifacts +
+   anything held for approval. Mirrors the homepage SlackThreadMock exactly. */
+export interface SlackDemo {
+  /* the Slack channel the exchange happens in (no leading #) */
+  channel: string;
+  /* the human asking */
+  userInitials: string;
+  userName: string;
+  /* the request, after the @workeros mention */
+  ask: string;
+  /* one-line summary the worker leads with (bolded "Done.") */
+  doneLine: string;
+  /* the primary artifact file it produced */
   artifactName: string;
   artifactMeta: string;
-  artifactCta: string;
+  /* secondary created items (checklist) */
+  created: string[];
+  /* the single action held for approval */
+  approval: string;
+}
+
+/* Outcome bullets for this department, expanded from the homepage grid. */
+export interface OutcomeItem {
+  title: string;
+  body: string;
 }
 
 export interface Vertical {
@@ -70,9 +82,12 @@ export interface Vertical {
   h1Accent: string;
   sub: string;
   primaryCtaLabel: string;
-  hero: HeroMock;
+  slack: SlackDemo;
   toolsLabel: string;
   tools: ToolPill[];
+  outcomesHead: string;
+  outcomesSub: string;
+  outcomes: OutcomeItem[];
   capabilitiesHead: string;
   capabilitiesSub: string;
   capabilities: Capability[];
@@ -89,23 +104,18 @@ export const VERTICALS: Record<string, Vertical> = {
     eyebrow: "Workeros for Marketing",
     h1: "Campaign reporting that writes itself",
     h1Accent: "writes itself",
-    sub: "Describe the job once, connect Analytics, HubSpot, and Slack, and your worker pulls the numbers, drafts the posts, and scores the leads, on a schedule, a webhook, or with your approval.",
+    sub: "Ask in Slack, connect Analytics, HubSpot, and Slack, and your worker pulls the numbers, drafts the posts, and scores the leads, using your brand voice and ICP, on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your marketing worker",
-    hero: {
-      accent: "#FF7A59",
-      url: "workeros.floom.dev/runs · marketing-digest",
-      app: "Weekly Performance Digest",
-      appIcon: TrendIcon,
-      taskKicker: "Runs every Monday 08:00",
-      task: "Summarize last week's traffic + funnel and post it to #marketing",
-      steps: [
-        "Pulled sessions, conversions + top pages from Google Analytics",
-        "Joined spend from the campaign sheet · computed CAC delta",
-        "Wrote the digest + 3 callouts · posted to Slack #marketing",
-      ],
-      artifactName: "weekly-digest.md + Slack post",
-      artifactMeta: "artifact · 6.2 KB · posted to #marketing",
-      artifactCta: "Open",
+    slack: {
+      channel: "marketing",
+      userInitials: "PL",
+      userName: "Priya Lang",
+      ask: "write last week's performance digest and post it here",
+      doneLine: "Last week's digest is up.",
+      artifactName: "weekly-digest.md",
+      artifactMeta: "Markdown · 6.2 KB · posted to #marketing",
+      created: ["3 LinkedIn drafts from the new post", "CAC delta vs prior week"],
+      approval: "Publish the 3 social drafts",
     },
     toolsLabel: "Connects to your marketing stack",
     tools: [
@@ -115,6 +125,15 @@ export const VERTICALS: Record<string, Vertical> = {
       { label: "LinkedIn", logo: LinkedInLogo },
       { label: "Sheets", logo: SheetsLogo },
       { label: "Gmail", logo: GmailLogo },
+    ],
+    outcomesHead: "What your marketing worker ships.",
+    outcomesSub:
+      "Each one connects the tools you already pay for, runs on a trigger you set, and returns a finished artifact, not a to-do.",
+    outcomes: [
+      { title: "Competitor research", body: "Tracks named competitors and your category, posts only what changed." },
+      { title: "Campaign briefs", body: "Turns a goal into a brief with audience, angles, and channels." },
+      { title: "Content repurposing", body: "Reworks one post into LinkedIn, X, and newsletter drafts in your voice." },
+      { title: "Market digests", body: "Pulls the numbers and writes the weekly performance summary." },
     ],
     capabilitiesHead: "Four jobs it does on day one.",
     capabilitiesSub:
@@ -129,7 +148,7 @@ export const VERTICALS: Record<string, Vertical> = {
       {
         icon: SparkIcon,
         title: "Draft social from every new post",
-        body: "When a new blog or press post ships, it drafts LinkedIn and X copy in your voice from a mounted style guide, and holds them for your approval.",
+        body: "When a new blog or press post ships, it drafts LinkedIn and X copy in your voice from your brand context, and holds them for your approval.",
         tools: [LinkedInLogo, SlackLogo],
       },
       {
@@ -147,7 +166,7 @@ export const VERTICALS: Record<string, Vertical> = {
     ],
     closingHead: "Hire your marketing worker in two minutes.",
     closingSub:
-      "Describe the job, connect Analytics, HubSpot, and Slack, set the approval policy. It runs on a schedule, a webhook, or on demand.",
+      "Ask the job in Slack, connect Analytics, HubSpot, and Slack, set the approval policy. It runs on a schedule, a webhook, or on demand.",
   },
 
   recruiting: {
@@ -158,23 +177,18 @@ export const VERTICALS: Record<string, Vertical> = {
     eyebrow: "Workeros for Recruiting",
     h1: "Screen every applicant before standup",
     h1Accent: "before standup",
-    sub: "Describe the role, connect your ATS, Gmail, and Calendar, and your worker scores each new applicant against the brief, drafts the outreach, and books the interviews, on a schedule, a webhook, or with your approval.",
+    sub: "Ask in Slack, connect your ATS, Gmail, and Calendar, and your worker scores each new applicant against the brief, drafts the outreach, and books the interviews, on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your recruiting worker",
-    hero: {
-      accent: "#24A47F",
-      url: "workeros.floom.dev/runs · applicant-screen",
-      app: "New Applicant Screen",
-      appIcon: UsersIcon,
-      taskKicker: "Runs on every new application",
-      task: "Score the candidate against the Senior Backend role brief",
-      steps: [
-        "Read the resume + answers from your ATS",
-        "Scored against the role brief in mounted context · 4 / 5 fit",
-        "Drafted a personalized first message · held for your approval",
-      ],
-      artifactName: "scorecard.md + outreach draft",
-      artifactMeta: "artifact · 3.4 KB · awaiting your approval",
-      artifactCta: "Review",
+    slack: {
+      channel: "hiring",
+      userInitials: "SM",
+      userName: "Sam Mehta",
+      ask: "screen the overnight applicants for the Senior Backend role",
+      doneLine: "Screened 9 overnight applicants.",
+      artifactName: "shortlist.md",
+      artifactMeta: "Markdown · 4.0 KB · 3 strong fits",
+      created: ["Scorecards for all 9 vs the role brief", "3 outreach drafts for top fits"],
+      approval: "Send 3 first-touch messages",
     },
     toolsLabel: "Connects to your recruiting stack",
     tools: [
@@ -185,6 +199,15 @@ export const VERTICALS: Record<string, Vertical> = {
       { label: "Sheets", logo: SheetsLogo },
       { label: "Slack", logo: SlackLogo },
     ],
+    outcomesHead: "What your recruiting worker ships.",
+    outcomesSub:
+      "Each one connects the tools you already pay for, runs on a trigger you set, and returns a finished artifact, not a to-do.",
+    outcomes: [
+      { title: "Candidate sourcing", body: "Finds and reads candidates against the role brief, ranks by fit." },
+      { title: "Shortlists", body: "Turns the overnight pile into a ranked shortlist with rationale." },
+      { title: "Outreach drafts", body: "Writes personalized first messages grounded in real background." },
+      { title: "Interview summaries", body: "Summarizes calls and updates the candidate record." },
+    ],
     capabilitiesHead: "Four jobs it does on day one.",
     capabilitiesSub:
       "Each one connects the tools you already pay for, runs on a trigger you set, and shows you the artifact it produced.",
@@ -192,7 +215,7 @@ export const VERTICALS: Record<string, Vertical> = {
       {
         icon: UsersIcon,
         title: "Screen new applicants",
-        body: "Every new application is read against the role brief in a mounted context, scored for fit, and written back to your ATS with a short rationale.",
+        body: "Every new application is read against the role brief in your company context, scored for fit, and written back to your ATS with a short rationale.",
         tools: [ATSLogo, SheetsLogo],
       },
       {
@@ -216,7 +239,7 @@ export const VERTICALS: Record<string, Vertical> = {
     ],
     closingHead: "Hire your recruiting worker in two minutes.",
     closingSub:
-      "Describe the job, connect your ATS, Gmail, and Calendar, set the approval policy. It runs on a schedule, a webhook, or on demand.",
+      "Ask the job in Slack, connect your ATS, Gmail, and Calendar, set the approval policy. It runs on a schedule, a webhook, or on demand.",
   },
 
   support: {
@@ -227,23 +250,18 @@ export const VERTICALS: Record<string, Vertical> = {
     eyebrow: "Workeros for Support",
     h1: "Every ticket triaged the moment it lands",
     h1Accent: "the moment it lands",
-    sub: "Describe the job, connect your helpdesk, Slack, and Notion, and your worker tags and prioritizes each ticket, drafts the first reply, and escalates what's urgent, on a schedule, a webhook, or with your approval.",
+    sub: "Ask in Slack, connect your helpdesk, Slack, and Notion, and your worker tags and prioritizes each ticket, drafts the first reply, and escalates what's urgent, on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your support worker",
-    hero: {
-      accent: "#03363D",
-      url: "workeros.floom.dev/runs · ticket-triage",
-      app: "Incoming Ticket Triage",
-      appIcon: TicketIcon,
-      taskKicker: "Runs on every new ticket",
-      task: "Tag, prioritize, and draft a first reply for the new ticket",
-      steps: [
-        "Read the ticket + customer history from your helpdesk",
-        "Tagged billing · priority high · matched a known issue",
-        "Drafted a first-response reply · held for your approval",
-      ],
-      artifactName: "tagged ticket + reply draft",
-      artifactMeta: "artifact · 2.1 KB · awaiting your approval",
-      artifactCta: "Review",
+    slack: {
+      channel: "support",
+      userInitials: "TK",
+      userName: "Tess Koh",
+      ask: "triage the new tickets and draft replies for the easy ones",
+      doneLine: "Triaged 12 new tickets.",
+      artifactName: "triage-summary.md",
+      artifactMeta: "Markdown · 3.1 KB · 12 tickets tagged",
+      created: ["7 first-response drafts", "2 urgent issues flagged to #oncall"],
+      approval: "Send 7 first-response replies",
     },
     toolsLabel: "Connects to your support stack",
     tools: [
@@ -252,6 +270,15 @@ export const VERTICALS: Record<string, Vertical> = {
       { label: "Slack", logo: SlackLogo },
       { label: "Gmail", logo: GmailLogo },
       { label: "Notion", logo: NotionLogo },
+    ],
+    outcomesHead: "What your support worker ships.",
+    outcomesSub:
+      "Each one connects the tools you already pay for, runs on a trigger you set, and returns a finished artifact, not a to-do.",
+    outcomes: [
+      { title: "Ticket triage", body: "Reads each ticket with history, tags topic, and sets priority." },
+      { title: "First-response drafts", body: "Writes accurate first replies grounded in your help docs." },
+      { title: "Urgent escalation", body: "Posts outages, churn risks, and security reports to Slack fast." },
+      { title: "Weekly trends report", body: "Groups tickets by theme and writes what's rising to Notion." },
     ],
     capabilitiesHead: "Four jobs it does on day one.",
     capabilitiesSub:
@@ -266,7 +293,7 @@ export const VERTICALS: Record<string, Vertical> = {
       {
         icon: MailIcon,
         title: "Draft first-response replies",
-        body: "It drafts an accurate first reply grounded in your help docs mounted as context, then holds it for an agent to approve and send.",
+        body: "It drafts an accurate first reply grounded in your help docs in company context, then holds it for an agent to approve and send.",
         tools: [ZendeskLogo, NotionLogo],
       },
       {
@@ -284,7 +311,7 @@ export const VERTICALS: Record<string, Vertical> = {
     ],
     closingHead: "Hire your support worker in two minutes.",
     closingSub:
-      "Describe the job, connect your helpdesk, Slack, and Notion, set the approval policy. It runs on a schedule, a webhook, or on demand.",
+      "Ask the job in Slack, connect your helpdesk, Slack, and Notion, set the approval policy. It runs on a schedule, a webhook, or on demand.",
   },
 
   sales: {
@@ -295,23 +322,18 @@ export const VERTICALS: Record<string, Vertical> = {
     eyebrow: "Workeros for Sales",
     h1: "Every lead researched before you call",
     h1Accent: "before you call",
-    sub: "Describe the job, connect your CRM, LinkedIn, and Gmail, and your worker enriches and scores each new lead, drafts the first touch, and briefs you on the account, on a schedule, a webhook, or with your approval.",
+    sub: "Ask in Slack, connect your CRM, LinkedIn, and Gmail, and your worker enriches and scores each new lead, drafts the first touch, and briefs you on the account, on a schedule, a webhook, or with your approval.",
     primaryCtaLabel: "Hire your sales worker",
-    hero: {
-      accent: "#6D5CE0",
-      url: "workeros.floom.dev/runs · lead-enrich",
-      app: "New Inbound Lead",
-      appIcon: UsersIcon,
-      taskKicker: "Runs on every new lead",
-      task: "Enrich + score the new inbound lead against your ICP",
-      steps: [
-        "Read the lead + company from your CRM",
-        "Enriched headcount, funding + role from LinkedIn · scored 4 / 5 fit",
-        "Wrote the fit note back to the CRM · flagged for fast follow-up",
-      ],
-      artifactName: "enriched lead + fit note",
-      artifactMeta: "artifact · 2.8 KB · written to your CRM",
-      artifactCta: "Open",
+    slack: {
+      channel: "revenue",
+      userInitials: "JR",
+      userName: "Jordan Rivera",
+      ask: "research these 5 inbound leads before my 2pm calls",
+      doneLine: "Done.",
+      artifactName: "lead-brief.md",
+      artifactMeta: "Markdown · 6.2 KB · 5 leads",
+      created: ["3 follow-up drafts", "HubSpot score updates"],
+      approval: "Send 3 external replies",
     },
     toolsLabel: "Connects to your sales stack",
     tools: [
@@ -321,6 +343,15 @@ export const VERTICALS: Record<string, Vertical> = {
       { label: "Gmail", logo: GmailLogo },
       { label: "Google Calendar", logo: GCalLogo },
       { label: "Sheets", logo: SheetsLogo },
+    ],
+    outcomesHead: "What your sales worker ships.",
+    outcomesSub:
+      "Each one connects the tools you already pay for, runs on a trigger you set, and returns a finished artifact, not a to-do.",
+    outcomes: [
+      { title: "Lead research", body: "Enriches each new lead with company, funding, role, and news." },
+      { title: "CRM updates", body: "Scores fit against your ICP and writes the note back to the CRM." },
+      { title: "Follow-up drafts", body: "Drafts personalized first-touch replies grounded in your messaging." },
+      { title: "Account briefs", body: "Pulls signals and writes a pre-call brief so you walk in ready." },
     ],
     capabilitiesHead: "Four jobs it does on day one.",
     capabilitiesSub:
@@ -353,7 +384,7 @@ export const VERTICALS: Record<string, Vertical> = {
     ],
     closingHead: "Hire your sales worker in two minutes.",
     closingSub:
-      "Describe the job, connect your CRM, LinkedIn, and Gmail, set the approval policy. It runs on a schedule, a webhook, or on demand.",
+      "Ask the job in Slack, connect your CRM, LinkedIn, and Gmail, set the approval policy. It runs on a schedule, a webhook, or on demand.",
   },
 };
 

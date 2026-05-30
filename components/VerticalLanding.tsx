@@ -1,27 +1,41 @@
 "use client";
 import "../app/landing.css";
 import "../app/vertical.css";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import { ThemeModeButton } from "./ThemeModeButton";
 import { VERTICALS } from "@/lib/verticals";
 import type { Vertical } from "@/lib/verticals";
 import {
-  ChatGPTSVG,
+  ArrowSVG,
   CheckIcon,
-  ClaudeSVG,
   ClockIcon,
-  CodexSVG,
-  CopySVG,
-  CursorSVG,
   FileTextIcon,
+  FolderIcon,
   GitHubSVG,
-  LockSVG,
-  SparkIcon,
-  WindsurfSVG,
+  MailIcon,
+  PlugIcon,
+  ShieldIcon,
 } from "./landing-icons";
 
 const SIGN_IN_HREF = "/login";
+
+/* Local glyphs not in landing-icons (mirrors LandingBody's hero mock). */
+const HashIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+    <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+  </svg>
+);
+const PlayIcon = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="0" aria-hidden="true">
+    <polygon points="6 4 20 12 6 20 6 4" />
+  </svg>
+);
+const WorkerosMarkSVG = () => (
+  <svg viewBox="0 0 100 100" width="18" height="18" fill="currentColor" aria-hidden="true">
+    <path d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z" />
+  </svg>
+);
 
 /* Nav scroll docking, same behavior as the main landing. */
 function useNavScroll() {
@@ -59,134 +73,70 @@ function useNavScroll() {
   }, []);
 }
 
-/* ── Hero "agent-in-tool" mock ────────────────────────────────────
-   Evokes the vertical's primary tool (tinted chrome + a task panel),
-   with the worker doing one real task: reads, acts, produces an
-   artifact. Staged reveal mirrors the main landing's new-worker flow. */
-function HeroAgentInTool({ v }: { v: Vertical }) {
-  const { hero } = v;
-  const [step, setStep] = useState(0);
-  const [done, setDone] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const startedRef = useRef(false);
-
-  const run = useCallback(() => {
-    const timers: number[] = [];
-    const rm = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (rm) {
-      setStep(hero.steps.length);
-      setDone(true);
-      return () => {};
-    }
-    setStep(0);
-    setDone(false);
-    hero.steps.forEach((_, i) => {
-      timers.push(window.setTimeout(() => setStep(i + 1), 620 + i * 720));
-    });
-    timers.push(
-      window.setTimeout(() => setDone(true), 620 + hero.steps.length * 720 + 320),
-    );
-    return () => timers.forEach(clearTimeout);
-  }, [hero.steps]);
-
-  useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    function start() {
-      if (startedRef.current) return;
-      startedRef.current = true;
-      cleanup = run();
-    }
-    if ("IntersectionObserver" in window && rootRef.current) {
-      const io = new IntersectionObserver(
-        (es) => {
-          if (es.some((e) => e.isIntersecting)) {
-            start();
-            io.disconnect();
-          }
-        },
-        { threshold: 0.3 },
-      );
-      io.observe(rootRef.current);
-      return () => {
-        io.disconnect();
-        cleanup?.();
-      };
-    }
-    start();
-    return () => cleanup?.();
-  }, [run]);
-
-  const AppIcon = hero.appIcon;
-
+/* The hero demo: a Slack exchange for THIS team, returning finished work +
+   one action held for approval. Same designed-mock spine as the homepage. */
+function SlackThreadMock({ v }: { v: Vertical }) {
+  const s = v.slack;
   return (
-    <div
-      className="lv-mock"
-      ref={rootRef}
-      style={{ ["--tool" as string]: hero.accent }}
-    >
-      <div className="ln-nw-chrome">
-        <div className="ln-nw-chrome-tl">
-          <i />
-          <i />
-          <i />
-        </div>
-        <div className="ln-nw-chrome-url">
-          <LockSVG />
-          {hero.url}
-        </div>
-        <span className="lv-mock-by">
-          <SparkIcon />
-          worker
-        </span>
+    <div className="ln-slack" id="see-how-it-works" aria-label={`How Workeros works for ${v.eyebrow}`}>
+      <div className="ln-slack-bar">
+        <span className="ln-slack-chan"><HashIcon />{s.channel}</span>
+        <span className="ln-slack-mock-tag">Designed preview</span>
       </div>
 
-      <div className="lv-mock-body">
-        {/* The tool surface header, tinted to read as the real app. */}
-        <div className="lv-app-head">
-          <span className="lv-app-ic">
-            <AppIcon />
-          </span>
-          <div className="lv-app-id">
-            <div className="lv-app-nm">{hero.app}</div>
-            <div className="lv-app-trig">
-              <ClockIcon />
-              {hero.taskKicker}
+      <div className="ln-slack-body">
+        <div className="ln-slack-msg">
+          <span className="ln-slack-av user">{s.userInitials}</span>
+          <div className="ln-slack-bd">
+            <div className="ln-slack-meta">
+              <b>{s.userName}</b>
+              <span className="ln-slack-time">9:02 AM</span>
+            </div>
+            <div className="ln-slack-text">
+              <span className="ln-slack-mention">@workeros</span> {s.ask}
             </div>
           </div>
-          <span className="lv-app-badge">
-            <i />
-            {done ? "Done" : "Running"}
-          </span>
         </div>
 
-        {/* The worker's task. */}
-        <div className="lv-task">
-          <span className="lv-task-k">Task</span>
-          <p>{hero.task}</p>
-        </div>
-
-        {/* The run, concrete steps it took inside the tool. */}
-        <div className="lv-steps">
-          {hero.steps.map((s, i) => (
-            <div key={s} className={"lv-step" + (i < step ? " on" : "")}>
-              <span className="lv-step-dot">
-                {i < step ? <CheckIcon /> : <i />}
-              </span>
-              {s}
+        <div className="ln-slack-msg">
+          <span className="ln-slack-av bot"><WorkerosMarkSVG /></span>
+          <div className="ln-slack-bd">
+            <div className="ln-slack-meta">
+              <b>Workeros</b>
+              <span className="ln-slack-app">APP</span>
+              <span className="ln-slack-time">9:03 AM</span>
             </div>
-          ))}
-        </div>
+            <div className="ln-slack-text"><b>{s.doneLine}</b></div>
 
-        {/* The artifact it produced. */}
-        <div className={"lv-artifact" + (done ? " on" : "")}>
-          <span className="lv-art-ic">
-            <FileTextIcon />
-          </span>
-          <div className="lv-art-id">
-            <div className="lv-art-nm">{hero.artifactName}</div>
-            <div className="lv-art-mt">{hero.artifactMeta}</div>
+            <div className="ln-slack-sub">Created</div>
+            <div className="ln-slack-files">
+              <div className="ln-slack-file">
+                <span className="ln-slack-file-ic"><FileTextIcon /></span>
+                <div className="ln-slack-file-id">
+                  <div className="ln-slack-file-nm">{s.artifactName}</div>
+                  <div className="ln-slack-file-mt">{s.artifactMeta}</div>
+                </div>
+                <span className="ln-slack-file-open">Open<ArrowSVG /></span>
+              </div>
+              <div className="ln-slack-created">
+                {s.created.map((c) => (
+                  <div key={c} className="ln-slack-created-row">
+                    <span className="ln-slack-dot"><CheckIcon /></span>
+                    {c}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="ln-slack-approval">
+              <div className="ln-slack-sub ln-slack-sub-wait">Waiting for approval</div>
+              <div className="ln-slack-approve-row">
+                <span className="ln-slack-approve-ic"><MailIcon /></span>
+                <span className="ln-slack-approve-tx">{s.approval}</span>
+                <span className="ln-slack-approve-btn"><CheckIcon />Approve</span>
+              </div>
+            </div>
           </div>
-          <span className="lv-art-cta">{hero.artifactCta}</span>
         </div>
       </div>
     </div>
@@ -197,27 +147,13 @@ export function VerticalLanding({ slug }: { slug: string }) {
   const v: Vertical = VERTICALS[slug];
   useNavScroll();
 
-  const [copied, setCopied] = useState(false);
-  const CMD = "npx -y @floomhq/workeros";
-  async function copyCmd() {
-    try {
-      await navigator.clipboard.writeText(CMD);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* ignore */
-    }
-  }
-
   return (
     <>
       <nav className="ln-nav" id="lnNav" aria-label="Main navigation">
         <Link href="/" className="ln-brand">
           <span className="ln-mark" aria-hidden="true" />
           Floom{" "}
-          <span
-            style={{ color: "var(--ink-mute)", fontWeight: 450, marginLeft: 4 }}
-          >
+          <span style={{ color: "var(--ink-mute)", fontWeight: 450, marginLeft: 4 }}>
             / workeros
           </span>
         </Link>
@@ -247,6 +183,7 @@ export function VerticalLanding({ slug }: { slug: string }) {
       </nav>
 
       <main id="flm-main">
+        {/* HERO — department outcome + a Slack demo for that team */}
         <section className="lp1 ln-hero-section">
           <div className="ln-hero ln-rise ln-rise-1">
             <div className="ln-badge">
@@ -254,9 +191,7 @@ export function VerticalLanding({ slug }: { slug: string }) {
               <span className="ln-badge-v">{v.eyebrow}</span>
             </div>
 
-            <h1 className="ln-h1">
-              {renderH1(v.h1, v.h1Accent)}
-            </h1>
+            <h1 className="ln-h1">{renderH1(v.h1, v.h1Accent)}</h1>
 
             <p className="ln-sub">{v.sub}</p>
 
@@ -264,48 +199,19 @@ export function VerticalLanding({ slug }: { slug: string }) {
               <a href={SIGN_IN_HREF} className="ln-btn-primary">
                 {v.primaryCtaLabel}
               </a>
-              <button
-                type="button"
-                className={"ln-cmd" + (copied ? " copied" : "")}
-                onClick={copyCmd}
-                aria-label="Copy the MCP install command"
-              >
-                <span className="ln-cmd-pr">$</span>
-                <code>{CMD}</code>
-                <CopySVG />
-                <span className="ln-cmd-ok" aria-hidden="true">
-                  Copied
-                </span>
-              </button>
-            </div>
-
-            <div className="ln-hero-trust" aria-label="Works with">
-              <span>Works in</span>
-              <span className="flogo">
-                <ClaudeSVG />
-                Claude
-              </span>
-              <span className="flogo">
-                <CodexSVG />
-                Codex
-              </span>
-              <span className="flogo">
-                <CursorSVG />
-                Cursor
-              </span>
-              <span>or any agent that speaks MCP</span>
+              <a href="#see-how-it-works" className="ln-secondary-btn">
+                <PlayIcon />
+                See how it works
+              </a>
             </div>
           </div>
 
-          <div
-            className="ln-hero-visual ln-rise ln-rise-2"
-            style={{ ["--tool" as string]: v.hero.accent }}
-          >
-            <HeroAgentInTool v={v} />
+          <div className="ln-hero-visual ln-rise ln-rise-2">
+            <SlackThreadMock v={v} />
           </div>
         </section>
 
-        {/* Tools strip, what this vertical's worker connects to. */}
+        {/* Tools strip — what this vertical's worker connects to. */}
         <section className="ln-trust lp1">
           <div className="ln-trust-label">{v.toolsLabel}</div>
           <div className="ln-logos">
@@ -321,7 +227,26 @@ export function VerticalLanding({ slug }: { slug: string }) {
           </div>
         </section>
 
-        {/* Capabilities, 4 jobs it does on day one. */}
+        {/* Outcome grid — the department's jobs, expanded. */}
+        <section className="ln-outcome-sec lp1" aria-label="What it ships">
+          <div className="ln-sec-head">
+            <div className="ln-ft-eye">Outcomes</div>
+            <h2>{v.outcomesHead}</h2>
+            <p>{v.outcomesSub}</p>
+          </div>
+          <div className="ln-outcome-grid ln-outcome-grid-detail">
+            {v.outcomes.map((o) => (
+              <div key={o.title} className="ln-og-card">
+                <div className="ln-og-head">
+                  <span className="ln-og-dept">{o.title}</span>
+                </div>
+                <p className="ln-og-body">{o.body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Capabilities — 4 jobs it does on day one. */}
         <section className="ln-team lp1" aria-label="What it does">
           <div className="ln-sec-head">
             <div className="ln-ft-eye">Capabilities</div>
@@ -352,72 +277,41 @@ export function VerticalLanding({ slug }: { slug: string }) {
           </div>
         </section>
 
-        {/* MCP trust strip, drive it from any agent (shared idea). */}
-        <section className="ln-trust lp1">
-          <div className="ln-trust-label">
-            Drive Workeros from any MCP-capable agent
+        {/* Control — the same trust spine as the homepage. */}
+        <section className="ln-control-sec lp1" aria-label="Control">
+          <div className="ln-sec-head">
+            <div className="ln-ft-eye">Control</div>
+            <h2>It does the work. You stay in control.</h2>
           </div>
-          <div className="ln-logos">
-            <span className="ln-logo-cell">
-              <ClaudeSVG />
-              Claude
-            </span>
-            <span className="ln-logo-cell">
-              <ChatGPTSVG />
-              ChatGPT
-            </span>
-            <span className="ln-logo-cell">
-              <CursorSVG />
-              Cursor
-            </span>
-            <span className="ln-logo-cell">
-              <CodexSVG />
-              Codex
-            </span>
-            <span className="ln-logo-cell">
-              <WindsurfSVG />
-              Windsurf
-            </span>
-          </div>
-        </section>
-
-        {/* Three shared pillars, what makes a Workeros worker different. */}
-        <section className="ln-pillars lp1" aria-label="Why Workeros">
-          <div className="ln-pillar">
-            <span className="ln-pillar-ic" aria-hidden="true">
-              <FileTextIcon />
-            </span>
-            <h3>Never starts from scratch</h3>
-            <p>
-              Drop your brand voice, playbooks, or help docs into a Context. It
-              mounts read-only into every run, so your worker carries the same
-              knowledge across days, triggers, and tools.
-            </p>
-            <span className="ln-pillar-tag">Contexts, mounted per run</span>
-          </div>
-          <div className="ln-pillar">
-            <span className="ln-pillar-ic" aria-hidden="true">
-              <SparkIcon />
-            </span>
-            <h3>Approval on your terms</h3>
-            <p>
-              You set the policy per worker: auto-post the low-stakes work, hold
-              anything that leaves the building for your sign-off. Nothing goes
-              out you didn&apos;t allow.
-            </p>
-            <span className="ln-pillar-tag">Approval gates, per worker</span>
-          </div>
-          <div className="ln-pillar">
-            <span className="ln-pillar-ic" aria-hidden="true">
-              <ClockIcon />
-            </span>
-            <h3>Glass box, not black box</h3>
-            <p>
-              Open any run and see the inputs, every step, each tool call, the
-              output, the errors, and the cost. Replay it. Nothing your worker
-              did is hidden behind a spinner.
-            </p>
-            <span className="ln-pillar-tag">Artifact-native runs</span>
+          <div className="ln-control-grid">
+            <div className="ln-control-item">
+              <span className="ln-control-ic"><ShieldIcon /></span>
+              <div className="ln-control-tx">
+                <h3>Approvals</h3>
+                <p>External actions pause before they ship.</p>
+              </div>
+            </div>
+            <div className="ln-control-item">
+              <span className="ln-control-ic"><ClockIcon /></span>
+              <div className="ln-control-tx">
+                <h3>Replay every run</h3>
+                <p>See inputs, steps, tools, cost, and output.</p>
+              </div>
+            </div>
+            <div className="ln-control-item">
+              <span className="ln-control-ic"><FolderIcon /></span>
+              <div className="ln-control-tx">
+                <h3>Context-bound</h3>
+                <p>Workers follow your ICP, style guide, playbooks, and rules.</p>
+              </div>
+            </div>
+            <div className="ln-control-item">
+              <span className="ln-control-ic"><PlugIcon /></span>
+              <div className="ln-control-tx">
+                <h3>Tool permissions</h3>
+                <p>Each worker only gets the tools it needs.</p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -428,19 +322,10 @@ export function VerticalLanding({ slug }: { slug: string }) {
             <a href={SIGN_IN_HREF} className="ln-btn-primary">
               {v.primaryCtaLabel}
             </a>
-            <button
-              type="button"
-              className={"ln-cmd" + (copied ? " copied" : "")}
-              onClick={copyCmd}
-              aria-label="Copy the MCP install command"
-            >
-              <span className="ln-cmd-pr">$</span>
-              <code>{CMD}</code>
-              <CopySVG />
-              <span className="ln-cmd-ok" aria-hidden="true">
-                Copied
-              </span>
-            </button>
+            <a href="#see-how-it-works" className="ln-secondary-btn">
+              <PlayIcon />
+              See how it works
+            </a>
           </div>
         </section>
       </main>

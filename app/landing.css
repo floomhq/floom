@@ -3077,3 +3077,463 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
   gap: 16px;
 }
 @media (max-width: 860px) { .ln-dev-side { align-items: stretch; } }
+
+/* =================================================================
+   v2 spec sections (2026-05-30): outcome grid, comparison, how-it-works
+   flow, control grid, company-context tree, connections, + Slack hero
+   "created / waiting approval" blocks. Engine tokens only, no raw hex.
+   ================================================================= */
+
+/* ── Section head (generic, used by several v2 sections) ─────────── */
+.ln-outcome-sec,
+.ln-compare-sec,
+.ln-control-sec,
+.ln-conn { padding: 120px 0 0; }
+
+/* ── Hero: secondary "See how it works" button ──────────────────── */
+.ln-secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 20px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 560;
+  letter-spacing: -.01em;
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: background .15s, border-color .15s, transform .18s var(--ease);
+}
+.ln-secondary-btn:hover {
+  background: var(--bg-2);
+  border-color: var(--accent-line);
+  transform: translateY(-1px);
+}
+.ln-secondary-btn svg { width: 12px; height: 12px; color: var(--accent); }
+
+/* ── Slack hero: created list + approval block ──────────────────── */
+.ln-slack-sub {
+  margin-top: 10px;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--ink-mute);
+  margin-bottom: 7px;
+}
+.ln-slack-sub-wait { color: var(--ink-mute); }
+.ln-slack-files { display: grid; gap: 8px; }
+.ln-slack-created { display: grid; gap: 6px; padding: 2px 0 0 2px; }
+.ln-slack-created-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.ln-slack-approval {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+}
+.ln-slack-approve-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-3));
+}
+.ln-slack-approve-ic {
+  width: 28px; height: 28px;
+  border-radius: var(--r-sm);
+  display: grid; place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.ln-slack-approve-ic svg { width: 14px; height: 14px; }
+.ln-slack-approve-tx {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--ink);
+}
+.ln-slack-approve-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--solid-fg);
+  box-shadow: var(--shadow-btn);
+}
+html.dark .ln-slack-approve-btn { color: var(--ink-on-accent); }
+.ln-slack-approve-btn svg { width: 11px; height: 11px; }
+
+/* ── Section 2: outcome grid (departments) ──────────────────────── */
+.ln-outcome-grid {
+  margin-top: 48px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+@media (max-width: 900px) { .ln-outcome-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 480px) { .ln-outcome-grid { grid-template-columns: 1fr; } }
+.ln-og-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2xl);
+  background: var(--paper);
+  padding: 22px 20px;
+  box-shadow: var(--shadow-md);
+  text-decoration: none;
+  transition: transform .2s var(--ease), box-shadow .2s, border-color .2s;
+}
+.ln-og-link:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--accent-line);
+}
+.ln-og-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.ln-og-ic {
+  width: 34px; height: 34px;
+  border-radius: var(--r-lg);
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--solid-fg) 50%, transparent);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.ln-og-ic svg { width: 16px; height: 16px; }
+.ln-og-dept {
+  font-size: 15px;
+  font-weight: 640;
+  letter-spacing: -.02em;
+  color: var(--ink);
+}
+.ln-og-arrow {
+  margin-left: auto;
+  color: var(--ink-mute);
+  display: inline-flex;
+  transition: transform .15s, color .15s;
+}
+.ln-og-arrow svg { width: 13px; height: 13px; }
+.ln-og-link:hover .ln-og-arrow { color: var(--accent); transform: translateX(2px); }
+.ln-og-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.ln-og-items li {
+  position: relative;
+  padding-left: 16px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+}
+.ln-og-items li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 8px;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--accent-line);
+}
+
+/* ── Section 3: comparison ──────────────────────────────────────── */
+.ln-compare {
+  margin: 44px auto 0;
+  max-width: 560px;
+  display: grid;
+  gap: 10px;
+}
+.ln-compare-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+}
+.ln-compare-row.us {
+  border-color: var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 5%, var(--paper));
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-sm);
+}
+.ln-compare-who {
+  width: 116px;
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 640;
+  letter-spacing: -.02em;
+  color: var(--ink-mute);
+}
+.ln-compare-row.us .ln-compare-who { color: var(--ink); }
+.ln-compare-verb {
+  font-size: 15px;
+  color: var(--ink-soft);
+}
+.ln-compare-row.us .ln-compare-verb {
+  color: var(--ink);
+  font-weight: 560;
+}
+.ln-compare-sub {
+  margin: 22px auto 0;
+  max-width: 52ch;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+/* ── Section 4: how-it-works flow (5 steps) ─────────────────────── */
+.ln-flow {
+  margin-top: 54px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+}
+@media (max-width: 1040px) { .ln-flow { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { .ln-flow { grid-template-columns: 1fr; } }
+.ln-flow-step {
+  position: relative;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2xl);
+  background: var(--paper);
+  padding: 22px 18px;
+  box-shadow: var(--shadow-md);
+}
+.ln-flow-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.ln-flow-num {
+  display: inline-grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--solid-fg);
+  font-size: 12.5px;
+  font-weight: 680;
+  flex-shrink: 0;
+}
+html.dark .ln-flow-num { color: var(--ink-on-accent); }
+.ln-flow-ic {
+  width: 32px; height: 32px;
+  border-radius: var(--r-md);
+  display: grid; place-items: center;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+}
+.ln-flow-ic svg { width: 16px; height: 16px; }
+.ln-flow-step h3 {
+  font-size: 14px;
+  font-weight: 640;
+  letter-spacing: -.02em;
+  color: var(--ink);
+  margin-bottom: 6px;
+  line-height: 1.25;
+}
+.ln-flow-step p {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+/* ── Section 5: control grid ────────────────────────────────────── */
+.ln-control-grid {
+  margin-top: 48px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+@media (max-width: 760px) { .ln-control-grid { grid-template-columns: 1fr; } }
+.ln-control-item {
+  display: flex;
+  gap: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2xl);
+  background: var(--paper);
+  padding: 22px 22px;
+  box-shadow: var(--shadow-md);
+}
+.ln-control-ic {
+  width: 38px; height: 38px;
+  border-radius: var(--r-lg);
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--solid-fg) 50%, transparent);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.ln-control-ic svg { width: 18px; height: 18px; }
+.ln-control-tx h3 {
+  font-size: 15px;
+  font-weight: 640;
+  letter-spacing: -.02em;
+  color: var(--ink);
+  margin-bottom: 5px;
+}
+.ln-control-tx p {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+/* ── Section 7: company-context tree ────────────────────────────── */
+.ln-ctx { padding: 130px 0 0; }
+.ln-ctx-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 64px;
+  align-items: center;
+}
+@media (max-width: 900px) { .ln-ctx-grid { grid-template-columns: 1fr; gap: 32px; } }
+.ln-ctx-txt h2 {
+  margin-top: 16px;
+  font-size: clamp(26px, 3.4vw, 33px);
+  font-weight: 670;
+  letter-spacing: -.03em;
+  line-height: 1.12;
+  color: var(--ink);
+}
+.ln-ctx-txt p {
+  margin-top: 16px;
+  font-size: 15.5px;
+  line-height: 1.66;
+  color: var(--ink-soft);
+  max-width: 46ch;
+}
+.ln-ctx-vis {
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2xl);
+  background: var(--paper);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+.ln-ctx-tree { padding: 22px 24px 24px; }
+.ln-ctx-root {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 6%, var(--paper));
+  font-size: 13px;
+  font-weight: 640;
+  color: var(--ink);
+}
+.ln-ctx-root-ic { color: var(--accent); display: inline-flex; }
+.ln-ctx-root-ic svg { width: 15px; height: 15px; }
+.ln-ctx-leaves {
+  margin: 14px 0 0 14px;
+  padding-left: 16px;
+  border-left: 1px solid var(--line-strong);
+  display: grid;
+  gap: 7px;
+}
+.ln-ctx-leaf {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+.ln-ctx-leaf svg { width: 13px; height: 13px; color: var(--ink-mute); flex-shrink: 0; }
+.ln-ctx-usedby {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.ln-ctx-usedby-k {
+  display: block;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--ink-mute);
+  margin-bottom: 10px;
+}
+.ln-ctx-usedby-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ln-ctx-worker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  font-size: 11.5px;
+  font-weight: 540;
+  color: var(--ink);
+}
+.ln-ctx-worker svg { width: 12px; height: 12px; color: var(--accent); }
+
+/* ── Section 8: connections ─────────────────────────────────────── */
+.ln-conn-logos {
+  margin-top: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.ln-conn-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+  font-size: 13.5px;
+  font-weight: 540;
+  color: var(--ink);
+}
+.ln-conn-logo {
+  display: inline-grid;
+  place-items: center;
+  width: 18px; height: 18px;
+}
+.ln-conn-logo svg { width: 16px; height: 16px; }
+.ln-conn-trust {
+  margin: 26px auto 0;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--ink-mute);
+}

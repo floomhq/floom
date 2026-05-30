@@ -335,3 +335,12 @@
 .lv-cap-tool:first-child {
   margin-left: 0;
 }
+
+/* ── v2: outcome grid cards with a body line (verticals) ───────── */
+.ln-outcome-grid-detail .ln-og-card { gap: 0; }
+.ln-og-body {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
