@@ -647,83 +647,71 @@ function WorkerCard({
             {worker.name}
           </h3>
 
-          {!worker.archived && worker.status !== "healthy" && worker.status !== "ready" && worker.status && (
-            <CardStatusPill status={worker.status} />
-          )}
-
-          {/* 3. Description — clamped to 2 lines, given a 1-line min-height
-              floor so flexbox can never crush it to 0 (the bug on pill cards),
-              and flex-1 so it absorbs the slack between the title/pill and the
-              pinned footer. FIX 3 (Federico 2026-05-29): this is what keeps the
-              description off the footer — it can never grow past its 2-line
-              clamp, and the footer is pinned below with mt-auto. */}
-          <p className="text-sm text-muted-foreground line-clamp-2 flex-1 min-h-[1.25rem]">
+          {/* 2. Description — a CLEAN 2-line clamp at its natural height (never
+              flex-grown, so it can't be crushed/cut mid-line — the cutoff bug
+              Federico flagged 2026-05-30). The flex-1 spacer below absorbs the
+              slack and pins the footer. */}
+          <p className="text-sm text-muted-foreground line-clamp-2">
             {description}
           </p>
 
-          {/* 3. Quiet footer — one line: relative last-run + a small success
-              bar (filled % of last-7d success). Pinned below the body block. */}
-          <CardFooterLine stats={stats} />
+          {/* Spacer pushes the footer to the bottom on a fixed-height card. */}
+          <div className="flex-1" />
+
+          {/* 3. Quiet footer — relative last-run time + a single small status
+              dot (Federico 2026-05-30: drop the distracting green % bar; demote
+              "Needs attention" from a title-row pill to a small footer dot+label
+              so it never blocks the title). */}
+          <CardFooterLine stats={stats} status={worker.archived ? undefined : worker.status} />
         </CardContent>
       </Link>
     </Card>
   );
 }
 
-function CardFooterLine({ stats }: { stats?: import("@/lib/types").RecentStats | null }) {
-  if (!stats || (!stats.last_run_at && stats.runs_7d === 0)) {
+// Footer status: a single small dot + label. Attention states (error /
+// needs-attention / missing-secret) surface here instead of as a title-row pill.
+// Healthy/ready workers show no dot — just the last-run time, kept quiet.
+function footerStatus(status?: string): { cls: string; label: string } | null {
+  switch (status) {
+    case "error":
+      return { cls: "bg-red-500", label: "Error" };
+    case "needs_attention":
+      return { cls: "bg-amber-500", label: "Needs attention" };
+    case "missing_secret":
+      return { cls: "bg-amber-500", label: "Missing secret" };
+    default:
+      return null;
+  }
+}
+
+function CardFooterLine({
+  stats,
+  status,
+}: {
+  stats?: import("@/lib/types").RecentStats | null;
+  status?: string;
+}) {
+  const attention = footerStatus(status);
+  const lastRun = stats?.last_run_at ? formatRelativeTime(stats.last_run_at) : null;
+
+  if (!attention && !lastRun) {
     // Keep the footer slot present so card content lands at the same baseline.
     return <div className="mt-auto h-4" aria-hidden />;
   }
-  const pct =
-    stats.success_rate_7d != null ? Math.round(stats.success_rate_7d * 100) : null;
   return (
     <div className="mt-auto flex items-center gap-2 text-xs text-[var(--ink-soft)]">
-      <span className="truncate">
-        {stats.last_run_at ? formatRelativeTime(stats.last_run_at) : "no recent runs"}
-      </span>
-      {pct != null && (
-        <span className="ml-auto flex items-center gap-1.5 shrink-0" title={`${pct}% success (7d)`}>
-          <span className="relative h-1 w-12 overflow-hidden rounded-full bg-[var(--line-soft)]">
-            <span
-              className="absolute inset-y-0 left-0 rounded-full bg-[var(--success)]"
-              style={{ width: `${pct}%` }}
-            />
-          </span>
-          <span className="tabular-nums text-[var(--ink-mute)]">{pct}%</span>
+      {lastRun && <span className="truncate">{lastRun}</span>}
+      {attention && (
+        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+          <span className={`size-1.5 rounded-full ${attention.cls}`} aria-hidden="true" />
+          <span className="text-[var(--ink-mute)]">{attention.label}</span>
         </span>
       )}
     </div>
   );
 }
 
-function CardStatusPill({ status }: { status: string }) {
-  // P2: "ready" (never-run) is treated exactly like "healthy" — no pill.
-  if (status === "healthy" || status === "ready" || !status) return null;
-  const conf: Record<string, { label: string; classes: string }> = {
-    needs_attention: {
-      label: "Needs attention",
-      classes: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
-    },
-    missing_secret: {
-      label: "Missing secret",
-      classes: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
-    },
-    error: {
-      label: "Error",
-      classes: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900",
-    },
-  };
-  const { label, classes } = conf[status] ?? { label: status, classes: "bg-muted text-muted-foreground border-border" };
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${classes}`}
-    >
-      <span className="size-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
-      {label}
-    </span>
-  );
-}
 
 function firstLine(value?: string): string {
   return (value || "").split("\n").map((line) => line.trim()).find(Boolean) || "";
