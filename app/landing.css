@@ -2803,6 +2803,10 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
   --slack-aubergine: #3F0E40;
   --slack-aubergine-2: #4A154B;
   --slack-active: #1164A3;
+  /* Slack's primary confirm green — used for the in-mock Approve button. */
+  --slack-green: #007a5a;
+  --slack-green-2: #006a4e;
+  --slack-green-soft: rgba(0,122,90,.12);
   width: 100%;
   max-width: 760px;
   margin: 48px auto 0;
@@ -3242,21 +3246,25 @@ html.dark .ln-how-num { color: var(--ink-on-accent); }
   padding-top: 14px;
   border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
 }
+/* The approval row lives INSIDE the Slack mock, so it stays in the Slack
+   colour world — neutral warm surface + Slack-green confirm — never OUR
+   cloud-marketing blue accent. Keeps the hero's two regions distinct:
+   our-blue CTAs around the mock, Slack-native colours inside it. */
 .ln-slack-approve-row {
   display: flex;
   align-items: center;
   gap: 11px;
   padding: 12px 14px;
-  border: 1px solid var(--accent-line);
+  border: 1px solid var(--line);
   border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-2));
+  background: var(--bg-2);
 }
 .ln-slack-approve-ic {
   width: 30px; height: 30px;
   border-radius: var(--r-sm);
   display: grid; place-items: center;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--slack-green-soft);
+  color: var(--slack-green);
   flex-shrink: 0;
 }
 .ln-slack-approve-ic svg { width: 15px; height: 15px; }
@@ -3267,7 +3275,8 @@ html.dark .ln-how-num { color: var(--ink-on-accent); }
   font-weight: 560;
   color: var(--ink);
 }
-/* Approve button = OUR cloud-marketing blue accent (NOT Slack purple). */
+/* Approve button = SLACK GREEN (#007a5a), Slack's primary confirm colour.
+   Inside the mock we depict Slack, so this is Slack-native — NOT our blue. */
 .ln-slack-approve-btn {
   display: inline-flex;
   align-items: center;
@@ -3277,11 +3286,12 @@ html.dark .ln-how-num { color: var(--ink-on-accent); }
   font-weight: 640;
   padding: 7px 14px;
   border-radius: var(--r-md);
-  background: var(--accent);
-  color: var(--solid-fg);
+  background: var(--slack-green);
+  color: #fff;
   box-shadow: var(--shadow-btn);
 }
-html.dark .ln-slack-approve-btn { color: var(--ink-on-accent); }
+.ln-slack-approve-btn:hover { background: var(--slack-green-2); }
+html.dark .ln-slack-approve-btn { color: #fff; }
 .ln-slack-approve-btn svg { width: 12px; height: 12px; }
 
 /* ── Section 2: outcome grid (departments) ──────────────────────── */
