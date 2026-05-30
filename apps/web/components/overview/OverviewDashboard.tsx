@@ -452,7 +452,7 @@ export function OverviewDashboard({
   );
 
   return (
-    <div className="flex min-h-[calc(100dvh-5.5rem)] flex-col space-y-5 pt-6">
+    <div className="flex h-[calc(100dvh-3rem)] sm:h-[calc(100dvh-4rem)] flex-col space-y-5 overflow-hidden pt-6">
       {/* Hero — compact */}
       <section>
         <h1 className="text-xl font-semibold tracking-normal text-[var(--text-primary)]">Work done</h1>
