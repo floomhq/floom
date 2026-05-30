@@ -8,14 +8,6 @@ import { ThemeModeButton } from "./ThemeModeButton";
 const SIGN_IN_HREF = "/login";
 
 /* ─── SVG icons ──────────────────────────────────────────────────── */
-const MarkSVG = ({ size = 17 }: { size?: number }) => (
-  <span
-    className="ln-sb-mark"
-    style={{ width: size, height: size }}
-    aria-hidden="true"
-  />
-);
-
 const GitHubSVG = () => (
   <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true">
     <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2 0 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2 0-.4-.5-1.6.2-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3" />
@@ -39,13 +31,6 @@ const LockSVG = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
     <rect width="18" height="11" x="3" y="11" rx="2" />
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-  </svg>
-);
-
-const BoxIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-    <path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12" />
   </svg>
 );
 
@@ -75,14 +60,6 @@ const MailIcon = () => (
   </svg>
 );
 
-const GlobeIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-    <circle cx="12" cy="12" r="10" />
-    <line x1="2" x2="22" y1="12" y2="12" />
-    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-  </svg>
-);
-
 const FileTextIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -105,13 +82,6 @@ const TrendIcon = () => (
   </svg>
 );
 
-const WebhookIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 1 1 8.36 13.4" />
-    <path d="m6.97 8.65 3.04 6.05M9 5l6 .03M14.95 5.04a4 4 0 1 1 .98 7.34" />
-  </svg>
-);
-
 const PlayIcon = () => (
   <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="0" aria-hidden="true">
     <polygon points="6 4 20 12 6 20 6 4" />
@@ -128,12 +98,6 @@ const ShieldIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
     <path d="m9 12 2 2 4-4" />
-  </svg>
-);
-
-const ChevronIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M7 9l5-5 5 5M7 15l5 5 5-5" />
   </svg>
 );
 
@@ -212,6 +176,94 @@ const HubSpotLogo = () => (
     <path fill="#FF7A59" d="M18.2 7.9V5.5a1.9 1.9 0 1 0-1.7 0v2.4a5.6 5.6 0 0 0-2.6 1.1L6.7 4.3a2.1 2.1 0 1 0-1 1.5l7.1 4.6a5.4 5.4 0 0 0-.9 3 5.5 5.5 0 1 0 6.3-5.5m-2.6 8.4a2.9 2.9 0 1 1 2.9-2.9 2.9 2.9 0 0 1-2.9 2.9" />
   </svg>
 );
+
+/* Workeros mark used as the agent avatar inside the Slack mock. Same glyph
+   as the nav brand mark, rendered on a near-black tile so it reads as the
+   "@workeros" app icon in a channel. */
+const WorkerosMarkSVG = () => (
+  <svg viewBox="0 0 100 100" width="18" height="18" fill="currentColor" aria-hidden="true">
+    <path d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z" />
+  </svg>
+);
+
+const HashIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+    <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+  </svg>
+);
+
+/* ── Slack thread mock (the hero money shot) ───────────────────────────
+   A faithful, designed-from-scratch Slack-style thread in the engine tokens
+   (warm paper, near-black ink, rounded). NOT a screenshot, NOT interactive:
+   a static, honest depiction of how the agent behaves in a channel. */
+function SlackThreadMock() {
+  return (
+    <div className="ln-slack" id="see-it-work" aria-label="How Workeros works in Slack">
+      <div className="ln-slack-bar">
+        <span className="ln-slack-chan"><HashIcon />revenue</span>
+        <span className="ln-slack-mock-tag">Designed preview</span>
+      </div>
+
+      <div className="ln-slack-body">
+        {/* The ask */}
+        <div className="ln-slack-msg">
+          <span className="ln-slack-av user">JR</span>
+          <div className="ln-slack-bd">
+            <div className="ln-slack-meta">
+              <b>Jordan Rivera</b>
+              <span className="ln-slack-time">1:46 PM</span>
+            </div>
+            <div className="ln-slack-text">
+              <span className="ln-slack-mention">@workeros</span> research these 5
+              inbound leads before my 2pm calls
+            </div>
+          </div>
+        </div>
+
+        {/* The agent working */}
+        <div className="ln-slack-msg">
+          <span className="ln-slack-av bot"><WorkerosMarkSVG /></span>
+          <div className="ln-slack-bd">
+            <div className="ln-slack-meta">
+              <b>Workeros</b>
+              <span className="ln-slack-app">APP</span>
+              <span className="ln-slack-time">1:46 PM</span>
+            </div>
+            <div className="ln-slack-text ln-slack-muted">On it — researching 5 leads.</div>
+            <div className="ln-slack-steps">
+              <div className="ln-slack-step"><span className="ln-slack-dot"><CheckIcon /></span>Pulled the 5 from HubSpot</div>
+              <div className="ln-slack-step"><span className="ln-slack-dot"><CheckIcon /></span>Enriched each — company, funding, role, recent news</div>
+              <div className="ln-slack-step"><span className="ln-slack-dot"><CheckIcon /></span>Drafted a one-line angle per lead</div>
+            </div>
+          </div>
+        </div>
+
+        {/* The delivery */}
+        <div className="ln-slack-msg">
+          <span className="ln-slack-av bot"><WorkerosMarkSVG /></span>
+          <div className="ln-slack-bd">
+            <div className="ln-slack-meta">
+              <b>Workeros</b>
+              <span className="ln-slack-app">APP</span>
+              <span className="ln-slack-time">1:47 PM</span>
+            </div>
+            <div className="ln-slack-text">
+              <b>Done</b> — 5 leads researched, posted to <span className="ln-slack-chan-inline"><HashIcon />revenue</span>.
+            </div>
+            <div className="ln-slack-file">
+              <span className="ln-slack-file-ic"><FileTextIcon /></span>
+              <div className="ln-slack-file-id">
+                <div className="ln-slack-file-nm">lead-brief.md</div>
+                <div className="ln-slack-file-mt">Markdown · 6.2 KB · 5 leads</div>
+              </div>
+              <span className="ln-slack-file-open">Open<ArrowSVG /></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* Nav scroll docking */
 function useNavScroll() {
@@ -524,12 +576,6 @@ function Sparkline({ data }: { data: number[] }) {
   );
 }
 
-const WORKSPACES = [
-  { id: "rocketlist", short: "RL", name: "Rocketlist", role: "Owner · 6 workers", active: true },
-  { id: "floom",      short: "FL", name: "Floom",       role: "Owner · 3 workers" },
-  { id: "personal",   short: "FD", name: "Personal",    role: "Owner · 2 workers" },
-];
-
 export function LandingBody() {
   useNavScroll();
 
@@ -584,54 +630,126 @@ export function LandingBody() {
               </span>
             </div>
 
-            <h1 className="ln-h1">Hire AI workers for your company</h1>
+            <h1 className="ln-h1">Get the work done.<br />Not another tool to manage.</h1>
 
             <p className="ln-sub">
-              Describe the job. Connect your tools. Workeros runs it on a
-              schedule, a webhook, or with your approval.
+              One agent in Slack that knows your business and gets things done.
+              It puts a team of AI workers on the job and hands you finished
+              work, not a to-do list.
             </p>
 
             <div className="ln-ctas">
-              <a href={SIGN_IN_HREF} className="ln-btn-primary">Hire your first worker</a>
-              <button
-                type="button"
-                className={"ln-cmd" + (copied ? " copied" : "")}
-                onClick={copyCmd}
-                aria-label="Copy the MCP install command"
-              >
-                <span className="ln-cmd-pr">$</span>
-                <code>{CMD}</code>
-                <CopySVG />
-                <span className="ln-cmd-ok" aria-hidden="true">Copied</span>
-              </button>
+              <a href={SIGN_IN_HREF} className="ln-btn-primary">Get your first worker</a>
+              <a href="#see-it-work" className="ln-secondary-btn">
+                <PlayIcon />
+                See it work
+              </a>
             </div>
 
-            <div className="ln-hero-trust" aria-label="Works with">
-              <span>Works in</span>
-              <span className="flogo"><ClaudeSVG />Claude</span>
-              <span className="flogo"><CodexSVG />Codex</span>
-              <span className="flogo"><CursorSVG />Cursor</span>
-              <span>or any agent that speaks MCP</span>
+            <div className="ln-hero-trust" aria-label="How it works">
+              <span>Lives in Slack</span>
+              <span aria-hidden="true" className="ln-trust-dot">·</span>
+              <span>connects to the tools you already use</span>
             </div>
           </div>
 
           <div className="ln-hero-visual ln-rise ln-rise-2">
+            <SlackThreadMock />
+          </div>
+
+          <div className="ln-hero-aside ln-rise ln-rise-3">
+            <div className="ln-hero-aside-k">Or build it yourself in plain English</div>
             <HeroNewWorker />
           </div>
         </section>
 
-        <section className="ln-trust lp1">
-          <div className="ln-trust-label">Drive Workeros from any MCP-capable agent</div>
-          <div className="ln-logos">
-            <span className="ln-logo-cell"><ClaudeSVG />Claude</span>
-            <span className="ln-logo-cell"><ChatGPTSVG />ChatGPT</span>
-            <span className="ln-logo-cell"><CursorSVG />Cursor</span>
-            <span className="ln-logo-cell"><CodexSVG />Codex</span>
-            <span className="ln-logo-cell"><WindsurfSVG />Windsurf</span>
+        {/* SECTION 2 — How it works, 3 outcome beats */}
+        <section className="ln-how lp1" aria-label="How it works">
+          <div className="ln-sec-head">
+            <div className="ln-ft-eye">One agent, your whole team</div>
+            <h2>Ask in plain English. Get finished work back.</h2>
+          </div>
+          <div className="ln-how-beats">
+            <div className="ln-how-beat">
+              <span className="ln-how-num">1</span>
+              <h3>You ask</h3>
+              <p>
+                In Slack: <span className="ln-how-q">&ldquo;Draft the Q2 board
+                update from our metrics.&rdquo;</span>
+              </p>
+            </div>
+            <div className="ln-how-beat">
+              <span className="ln-how-num">2</span>
+              <h3>It runs the team</h3>
+              <p>
+                The agent puts the right workers on it — pull the numbers,
+                draft, check against your OKRs.
+              </p>
+            </div>
+            <div className="ln-how-beat">
+              <span className="ln-how-num">3</span>
+              <h3>You get the thing</h3>
+              <p>
+                The artifact lands in the thread, with what it did and anything
+                waiting on your approval.
+              </p>
+            </div>
           </div>
         </section>
 
-        {/* Your team, outcome tiles + employee-shaped worker cards */}
+        {/* SECTION 3 — It knows your business (Contexts) */}
+        <section className="ln-knows lp1" aria-label="It knows your business">
+          <div className="ln-knows-grid">
+            <div className="ln-knows-txt">
+              <div className="ln-ft-eye">Contexts</div>
+              <h2>It doesn&rsquo;t start from zero every time.</h2>
+              <p>
+                Drop your style guide, ICP, CRM playbook, or 2026 OKRs into a
+                Context. Every worker mounts it on every run — so the work
+                sounds like you and uses what you know, across days, triggers,
+                and tools.
+              </p>
+            </div>
+            <div className="ln-ft-vis">
+              <div className="ln-ftv-bar">
+                <i /><i /><i />
+                <span>workeros.floom.dev/contexts</span>
+              </div>
+              <div className="ln-ftv-body ln-sync">
+                <div className="ln-sync-hd">
+                  <span className="ln-sync-t">Contexts in this workspace</span>
+                  <span className="ln-sync-sub">3 folders</span>
+                </div>
+                <div className="ln-sync-row">
+                  <span className="ln-sync-ag">
+                    <FolderIcon />
+                    icp-profile
+                    <span className="ln-sync-d">12 files · 84 KB · used by 2 workers</span>
+                  </span>
+                  <span className="ln-sync-st ok">Mounted</span>
+                </div>
+                <div className="ln-sync-row">
+                  <span className="ln-sync-ag">
+                    <FolderIcon />
+                    voice-guide
+                    <span className="ln-sync-d">8 files · 31 KB · used by 1 worker</span>
+                  </span>
+                  <span className="ln-sync-st ok">Mounted</span>
+                </div>
+                <div className="ln-sync-row">
+                  <span className="ln-sync-ag">
+                    <FolderIcon />
+                    2026-OKRs
+                    <span className="ln-sync-d">3 files · 14 KB · used by 1 worker</span>
+                  </span>
+                  <span className="ln-sync-st ok">Mounted</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* SECTION 4 — Workers you hire: outcome tiles + employee cards (KEEP) */}
         <section className="ln-team lp1" aria-label="Your team of AI workers">
           <div className="ln-sec-head">
             <div className="ln-ft-eye">Your team</div>
@@ -689,58 +807,16 @@ export function LandingBody() {
           </div>
         </section>
 
-        {/* Three pillars, what makes a Workeros worker different. */}
-        <section className="ln-pillars lp1" aria-label="Why Workeros">
-          <div className="ln-pillar">
-            <span className="ln-pillar-ic" aria-hidden="true">
-              <FolderIcon />
-            </span>
-            <h3>Never starts from scratch</h3>
-            <p>
-              Drop your style guide, CRM playbook, or 2026 OKRs into a
-              Context. It mounts into every run, so your worker carries the
-              same knowledge across days, triggers, and tools, not a blank
-              slate each time.
-            </p>
-            <span className="ln-pillar-tag">Contexts, mounted per run</span>
-          </div>
-          <div className="ln-pillar">
-            <span className="ln-pillar-ic" aria-hidden="true">
-              <TrendIcon />
-            </span>
-            <h3>Sharper every run</h3>
-            <p>
-              Every run is captured and every worker is versioned. Read the
-              real transcript, tweak the brief, re-run in one click, by hand
-              or from your agent over MCP. Each run teaches the next.
-            </p>
-            <span className="ln-pillar-tag">Versioned + replayable</span>
-          </div>
-          <div className="ln-pillar">
-            <span className="ln-pillar-ic" aria-hidden="true">
-              <ClockIcon />
-            </span>
-            <h3>Glass box, not black box</h3>
-            <p>
-              Open any run and see the inputs, every step, each tool call, the
-              output, the errors, and the cost. Replay it. Nothing your worker
-              did is hidden behind a spinner.
-            </p>
-            <span className="ln-pillar-tag">Artifact-native runs</span>
-          </div>
-        </section>
-
         <section className="ln-feat lp1">
-          {/* Runs, artifact-native. A run produces the THING. */}
+          {/* SECTION 5 — Every run produces the thing (KEEP, aligned to run-detail) */}
           <div className="ln-feat-row">
             <div className="ln-ft-txt">
               <div className="ln-ft-eye">Runs</div>
-              <h2>Every run produces the thing, not a log line.</h2>
+              <h2>Every run ends in finished work, not a log line.</h2>
               <p>
-                Open any run and you get the artifact your worker made, the
-                drafted replies, the parsed invoices, the digest, plus the
-                inputs, every step, each tool call, the cost, and the approval
-                trail. Replay it in one click.
+                A doc, a post, an enriched sheet, a sent message — plus the
+                inputs, every step, each tool call, the cost, and a replay. Not
+                a checkmark you have to trust.
               </p>
               <a href={SIGN_IN_HREF} className="ln-ft-lnk">
                 See a run
@@ -779,18 +855,17 @@ export function LandingBody() {
             </div>
           </div>
 
-          {/* Workspaces, multi-tenant. */}
+          {/* SECTION 6 — Approvals (trust) */}
           <div className="ln-feat-row rev">
             <div className="ln-ft-txt">
-              <div className="ln-ft-eye">Workspaces</div>
-              <h2>One account. As many teams as you run.</h2>
+              <div className="ln-ft-eye">Approvals</div>
+              <h2>It waits for your call on what matters.</h2>
               <p>
-                Your company work, your fund, your personal automations: keep
-                them separate. Workers, runs, connections, secrets, and
-                contexts are scoped per workspace, with one click to switch.
+                Set what runs automatically and what waits for you. High-stakes
+                steps pause for one click; routine work just ships.
               </p>
               <a href={SIGN_IN_HREF} className="ln-ft-lnk">
-                Create your first workspace
+                Set an approval policy
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" aria-hidden="true">
                   <path d="M5 12h14M13 6l6 6-6 6" />
                 </svg>
@@ -799,95 +874,53 @@ export function LandingBody() {
             <div className="ln-ft-vis">
               <div className="ln-ftv-bar">
                 <i /><i /><i />
-                <span>workeros.floom.dev/workspaces</span>
+                <span>workeros.floom.dev/runs/0193f7c4</span>
               </div>
               <div className="ln-ftv-body ln-sync">
                 <div className="ln-sync-hd">
-                  <span className="ln-sync-t">Switch workspace</span>
-                  <span className="ln-sync-sub">3 yours</span>
+                  <span className="ln-sync-t">Awaiting your approval</span>
+                  <span className="ln-sync-sub">1 paused</span>
                 </div>
-                {WORKSPACES.map((w) => (
-                  <div key={w.id} className="ln-sync-row">
-                    <span className="ln-sync-ag">
-                      <span aria-hidden="true" className="ln-ws-chip">{w.short}</span>
-                      {w.name}
-                      <span className="ln-sync-d">{w.role}</span>
-                    </span>
-                    <span className={"ln-sync-st" + (w.active ? " ok" : "")}>
-                      {w.active ? "Active" : "Switch"}
-                    </span>
-                  </div>
-                ))}
+                <div className="ln-sync-row pending">
+                  <span className="ln-sync-ag">
+                    <span className="ln-sync-logo"><MailIcon /></span>
+                    Send 3 external replies
+                    <span className="ln-sync-d">Inbound Lead Researcher · drafts ready</span>
+                  </span>
+                  <span className="ln-approve-actions">
+                    <span className="ln-approve-btn"><CheckIcon />Approve</span>
+                  </span>
+                </div>
+                <div className="ln-sync-row">
+                  <span className="ln-sync-ag">
+                    <span className="ln-sync-logo"><SheetsLogo /></span>
+                    Log 4 invoices to Sheets
+                    <span className="ln-sync-d">Invoice Processor · under $2k</span>
+                  </span>
+                  <span className="ln-sync-st ok">Auto-shipped</span>
+                </div>
+                <div className="ln-sync-row">
+                  <span className="ln-sync-ag">
+                    <span className="ln-sync-logo"><SlackLogo /></span>
+                    Post digest to #market
+                    <span className="ln-sync-d">Market Digest Writer · routine</span>
+                  </span>
+                  <span className="ln-sync-st ok">Auto-shipped</span>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Contexts, knowledge mounted into every run. */}
+          {/* SECTION 7 — Connects to your stack (fixed number: 1,000+) */}
           <div className="ln-feat-row">
             <div className="ln-ft-txt">
-              <div className="ln-ft-eye">Contexts</div>
-              <h2>Your knowledge, mounted into every run.</h2>
-              <p>
-                Style guide, CRM playbook, OKRs, prior emails: drop them in a
-                Context folder. Workeros mounts it read-only into the sandbox
-                at run time. Your worker reads it like local files. No vector
-                store, no retrieval guessing.
-              </p>
-              <a href={SIGN_IN_HREF} className="ln-ft-lnk">
-                See contexts in action
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" aria-hidden="true">
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </a>
-            </div>
-            <div className="ln-ft-vis">
-              <div className="ln-ftv-bar">
-                <i /><i /><i />
-                <span>workeros.floom.dev/contexts</span>
-              </div>
-              <div className="ln-ftv-body ln-sync">
-                <div className="ln-sync-hd">
-                  <span className="ln-sync-t">Contexts in this workspace</span>
-                  <span className="ln-sync-sub">3 folders</span>
-                </div>
-                <div className="ln-sync-row">
-                  <span className="ln-sync-ag">
-                    <FolderIcon />
-                    icp-profile
-                    <span className="ln-sync-d">12 files · 84 KB · used by 2 workers</span>
-                  </span>
-                  <span className="ln-sync-st ok">Mounted</span>
-                </div>
-                <div className="ln-sync-row">
-                  <span className="ln-sync-ag">
-                    <FolderIcon />
-                    voice-guide
-                    <span className="ln-sync-d">8 files · 31 KB · used by 1 worker</span>
-                  </span>
-                  <span className="ln-sync-st ok">Mounted</span>
-                </div>
-                <div className="ln-sync-row">
-                  <span className="ln-sync-ag">
-                    <FolderIcon />
-                    2026-OKRs
-                    <span className="ln-sync-d">3 files · 14 KB · used by 1 worker</span>
-                  </span>
-                  <span className="ln-sync-st ok">Mounted</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Connections, live OAuth + MCP. */}
-          <div className="ln-feat-row rev">
-            <div className="ln-ft-txt">
               <div className="ln-ft-eye">Connections</div>
-              <h2>1,043 apps via OAuth. Any MCP server as a tool.</h2>
+              <h2>Connects to the tools you already pay for.</h2>
               <p>
-                Workers reuse the same OAuth token Workeros holds for each
-                service. Add any MCP server with a URL and an auth header to
-                expose its tools to your worker. No secrets in code, no
-                expired tokens silently failing in cron.
+                Gmail, Slack, HubSpot, Salesforce, Google Analytics, Notion,
+                Sheets — and 1,000+ more via OAuth. Add any MCP server as a
+                tool. No secrets in code, no expired tokens silently failing in
+                cron.
               </p>
               <a href={SIGN_IN_HREF} className="ln-ft-lnk">
                 See connections
@@ -942,78 +975,26 @@ export function LandingBody() {
             </div>
           </div>
 
-          {/* Agent-native. */}
-          <div className="ln-feat-row">
-            <div className="ln-ft-txt">
-              <div className="ln-ft-eye">Agent-native</div>
-              <h2>Your agent creates the worker. Workeros runs it.</h2>
-              <p>
-                Run <code>floom login</code> once, then call{" "}
-                <code>workers.create</code>, <code>workspaces.switch</code>,
-                or <code>runs.tail</code> from Claude, Codex, or Cursor.
-                Skip the canvas. The brief is the workflow.
-              </p>
-              <a
-                href="https://github.com/floomhq/workeros"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ln-ft-lnk"
-              >
-                MCP reference
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" aria-hidden="true">
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </a>
-            </div>
-            <div className="ln-ft-vis">
-              <div className="ln-share-head">
-                <div className="ln-share-av"><ClaudeSVG /></div>
-                <div className="ln-share-tx">
-                  <div className="ln-share-who">
-                    <b>Claude</b>
-                    <span className="ln-share-time">via MCP · 2h</span>
-                  </div>
-                  <div className="ln-share-msg">In the Rocketlist workspace, every weekday at 9am send a digest of new jobs scraped and post it to #market-digest.</div>
-                </div>
-              </div>
-              <div className="ln-share-body">
-                <div className="ln-share-sk">
-                  <div className="ln-share-si"><TrendIcon /></div>
-                  <div className="ln-share-skid">
-                    <div className="ln-share-sn">Market Digest Writer</div>
-                    <div className="ln-share-sm">schedule · 09:00 daily · slack</div>
-                  </div>
-                  <span className="ln-share-badge"><i />Active</span>
-                </div>
-                <div className="ln-share-trust">
-                  <SparkIcon />
-                  Created via <code>workers.create</code> in workspace{" "}
-                  <code>rocketlist</code>. Scheduled before you finish the sentence.
-                </div>
-                <div className="ln-share-actions">
-                  <div className="ln-share-btn p">
-                    <PlayIcon />
-                    Run now
-                  </div>
-                  <div className="ln-share-btn s">
-                    <CopySVG />
-                    Copy worker.yml
-                  </div>
-                </div>
-                <div className="ln-share-nf">Works in any agent that speaks MCP</div>
-              </div>
+          </section>
+
+        {/* SECTION 8 — For developers / MCP (demoted to one strip) */}
+        <section className="ln-dev lp1" aria-label="For developers">
+          <div className="ln-dev-txt">
+            <div className="ln-ft-eye">For developers</div>
+            <h2>Drive Workeros from your own agent.</h2>
+            <p>
+              Everything is callable over MCP — spin up and run workers from
+              Claude, Cursor, Codex, or any MCP agent.
+            </p>
+            <div className="ln-dev-logos" aria-label="Works in">
+              <span className="ln-logo-cell"><ClaudeSVG />Claude</span>
+              <span className="ln-logo-cell"><ChatGPTSVG />ChatGPT</span>
+              <span className="ln-logo-cell"><CursorSVG />Cursor</span>
+              <span className="ln-logo-cell"><CodexSVG />Codex</span>
+              <span className="ln-logo-cell"><WindsurfSVG />Windsurf</span>
             </div>
           </div>
-        </section>
-
-        <section className="ln-cta-section lp1">
-          <h2>Hire your first AI worker in two minutes.</h2>
-          <p className="ln-cta-sub">
-            Describe the job, connect its tools, set the approval policy. It
-            runs on a schedule, a webhook, or on demand.
-          </p>
-          <div className="ln-ctas" style={{ marginTop: 34 }}>
-            <a href={SIGN_IN_HREF} className="ln-btn-primary">Hire your first worker</a>
+          <div className="ln-dev-side">
             <button
               type="button"
               className={"ln-cmd" + (copied ? " copied" : "")}
@@ -1025,6 +1006,33 @@ export function LandingBody() {
               <CopySVG />
               <span className="ln-cmd-ok" aria-hidden="true">Copied</span>
             </button>
+            <a
+              href="https://github.com/floomhq/workeros"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ln-ft-lnk"
+            >
+              MCP reference
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14" aria-hidden="true">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </a>
+          </div>
+        </section>
+
+        {/* SECTION 9 — Closing CTA */}
+        <section className="ln-cta-section lp1">
+          <h2>Put your first AI coworker to work today.</h2>
+          <p className="ln-cta-sub">
+            Describe the job in Slack, set the approval policy, and let it hand
+            you finished work — on a schedule, a webhook, or on demand.
+          </p>
+          <div className="ln-ctas" style={{ marginTop: 34 }}>
+            <a href={SIGN_IN_HREF} className="ln-btn-primary">Get your first worker</a>
+            <a href="#see-it-work" className="ln-secondary-btn">
+              <PlayIcon />
+              See it work
+            </a>
           </div>
         </section>
       </main>
