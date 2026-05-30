@@ -414,7 +414,7 @@ function OutputSummary({ run }: { run: RunDetail }) {
       </div>
 
       {metricEntries.length > 0 && (
-        <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--border-default)] sm:grid-cols-2 lg:grid-cols-4">
+        <dl className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-px overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--border-default)]">
           {metricEntries.map(([key, value]) => (
             <div key={key} className="min-w-0 bg-card px-3 py-2">
               {/* P2-1: human label (no raw uppercased JSON key) */}
@@ -741,6 +741,14 @@ function logsToTimeline(logs: LogEntry[], status: string): TimelineItem[] {
 }
 
 function latestStatus(run: RunDetail, parts: RunPart[]): string {
+  // The persisted run.status is authoritative once the run reaches a terminal
+  // state. A HITL run that was approved and finished has run.status
+  // "completed", but its transcript can still end on a stale "pending_approval"
+  // finish part (no fresh completed finish is appended on resume). Trusting the
+  // part there made the header badge read "Awaiting approval" while the STATUS
+  // tile and Result overview correctly read "completed". Prefer run.status when
+  // it is already terminal so all three surfaces agree.
+  if (run.status === "completed" || run.status === "failed") return run.status;
   const finish = [...parts].reverse().find((part) => part.type === "finish");
   if (finish?.type === "finish") {
     // G5 P3 (rescore2 2026-05-29): a HITL run that parks for approval emits a
