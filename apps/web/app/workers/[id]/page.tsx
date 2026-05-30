@@ -598,24 +598,27 @@ export default function WorkerDetailPage() {
     }
   }
 
-  // P1-C: archive this worker (reversible). Stays on the page; the header
-  // flips to the Archived badge + Restore button via the returned detail.
+  // P1-C: archive this worker (reversible). On success route back to the list:
+  // the archived worker correctly drops out of the default view and surfaces in
+  // the Archived view (which offers Restore). Redirecting avoids relying on the
+  // archive response reflecting the just-written manifest state.
   async function handleArchive() {
     if (!worker) return;
     setArchiving(true);
     try {
-      const updated = await api.workers.archive(worker.id);
-      setWorker(updated);
+      await api.workers.archive(worker.id);
       toast.success("Worker archived");
+      router.push("/workers");
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to archive worker");
-    } finally {
       setArchiving(false);
     }
   }
 
   // P1-C: permanently delete this worker (destructive, confirm-gated), then
-  // route back to the list.
+  // route back to the list. Idempotent-safe: a 404 means the worker is already
+  // gone (e.g. a double-submit), which is still a successful outcome — redirect
+  // rather than show an error toast.
   async function handleDelete() {
     if (!worker) return;
     setDeleting(true);
@@ -624,7 +627,14 @@ export default function WorkerDetailPage() {
       toast.success("Worker deleted");
       router.push("/workers");
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete worker");
+      const msg = e instanceof Error ? e.message : "";
+      if (/\b404\b|not found/i.test(msg)) {
+        // Already deleted — treat as success.
+        toast.success("Worker deleted");
+        router.push("/workers");
+        return;
+      }
+      toast.error(msg || "Failed to delete worker");
       setDeleting(false);
       setDeleteOpen(false);
     }

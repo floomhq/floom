@@ -28,7 +28,19 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     }
     throw new Error(err);
   }
-  return res.json();
+  // No-content responses (204, or any empty body) carry no JSON. Calling
+  // res.json() on them throws ("Unexpected end of JSON input"), which used to
+  // send no-content mutations (e.g. DELETE /workers/{id}, status 204) into the
+  // caller's catch block even though the request succeeded. Return null in that
+  // case so callers that don't read the body (delete) resolve cleanly.
+  if (res.status === 204) {
+    return null as T;
+  }
+  const text = await res.text();
+  if (!text) {
+    return null as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 async function fetchRaw(path: string, options?: RequestInit): Promise<Response> {
