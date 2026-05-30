@@ -607,15 +607,10 @@ function WorkerCard({
             )}
             {!worker.archived && (
               <div className="flex items-center gap-1.5 shrink-0">
-                {/* FIX 2 (Federico 2026-05-29): the "Example" tag moved OFF the
-                    title row to a subtle top-right corner chip, aligned with
-                    the star. Quiet (--bg-2, muted, text-[10px]) so the title
-                    row reads clean — just the title. */}
-                {worker.is_example && (
-                  <span className="inline-flex items-center rounded-[var(--radius-button)] border border-[var(--line-soft)] bg-[var(--bg-2)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--ink-mute)]">
-                    Example
-                  </span>
-                )}
+                {/* Favourite star (Federico 2026-05-30): hover-only to cut
+                    cognitive load — except an already-favourited worker keeps
+                    its filled star at rest. focus-visible keeps it reachable
+                    for keyboard users. */}
                 <button
                   type="button"
                   title={isFavorite ? "Remove from favourites" : "Add to favourites"}
@@ -624,10 +619,10 @@ function WorkerCard({
                     e.stopPropagation();
                     onFavoriteToggle(worker.id);
                   }}
-                  className={`size-7 -mt-0.5 -mr-1 flex items-center justify-center rounded transition-colors shrink-0 ${
+                  className={`size-7 -mt-0.5 -mr-1 flex items-center justify-center rounded transition-[color,opacity] shrink-0 focus-visible:opacity-100 ${
                     isFavorite
                       ? "text-[var(--accent)] hover:opacity-80"
-                      : "text-muted-foreground/40 hover:text-[var(--accent)]"
+                      : "text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-[var(--accent)]"
                   }`}
                 >
                   <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
