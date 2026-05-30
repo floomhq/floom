@@ -30,6 +30,36 @@ html.dark {
 body:has(#lnNav),
 body:has(.ln-nav) { background: transparent !important; }
 
+/* =================================================================
+   CLOUD-MARKETING BLUE ACCENT (day mode, LANDING ONLY)
+   -----------------------------------------------------------------
+   INTENTIONAL DIVERGENCE — do NOT "revert to match the engine".
+   The engine-token rule (near-black #181818 --accent) governs web/
+   (the dashboard at workers.floom.dev). This is the public cloud
+   MARKETING landing, where Federico wants a restrained blue accent
+   in light mode as the cloud brand colour. We reuse the SAME blue
+   hue family that the engine already ships in DARK mode
+   (oklch(0.72 0.14 250)) so the two modes stay coherent.
+
+   Scope: only inside the landing (body:has(.ln-nav)), and only in
+   light mode (html.dark already carries the blue accent natively).
+   We flip ONLY the accent + the primary "solid" CTA fill to blue.
+   Text stays near-black (--ink), bg stays warm #FAFAF7, borders stay
+   warm-taupe (--line). One accent colour, used with restraint.
+   ================================================================= */
+html:not(.dark) body:has(.ln-nav) {
+  /* Floom cloud-marketing blue, light-mode tuned (slightly deeper than
+     the dark-mode accent so it reads on a warm off-white surface). */
+  --accent: oklch(0.55 0.16 252);
+  --accent-soft: color-mix(in srgb, var(--accent) 11%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 32%, var(--border-default));
+  --accent-hover-bg: color-mix(in srgb, var(--accent) 10%, transparent);
+  /* Primary CTAs ("Get your first worker" / "Join the waitlist") go blue. */
+  --solid: var(--accent);
+  --solid-2: oklch(0.49 0.17 252);
+  --solid-fg: #FFFFFF;
+}
+
 /* ── Layout wrapper ─────────────────────────────────────────────── */
 .lp1 {
   max-width: 1180px;
@@ -200,58 +230,58 @@ html.dark .ln-cta:hover { background: var(--solid-2) !important; }
   position: relative;
 }
 
+/* "Backed by Founders Inc" — subtle trust signal, NOT a headline.
+   Federico polish 2026-05-30: reduce size/weight. No box, no shadow;
+   a quiet inline line above the H1. */
 .ln-badge {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 5px 14px 5px 13px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-pill);
-  background: var(--surface-3);
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 18px;
-  font-size: 12px;
-  letter-spacing: -.005em;
+  gap: 6px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  margin-bottom: 16px;
+  font-size: 11px;
+  letter-spacing: 0;
 }
 .ln-badge-k {
-  font-family: var(--font-mono, "JetBrains Mono", monospace);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .1em;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--ink-mute);
+  font-weight: 450;
 }
 .ln-badge-v {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding-left: 11px;
-  font-weight: 600;
-  color: var(--ink);
+  gap: 5px;
+  padding-left: 0;
+  font-weight: 540;
+  font-size: 11px;
+  color: var(--ink-soft);
 }
-.ln-badge-v::before {
-  content: "";
-  position: absolute;
-  left: 0; top: 50%;
-  width: 1px; height: 11px;
-  transform: translateY(-50%);
-  background: var(--line-strong);
-}
+.ln-badge-v::before { content: none; }
 .ln-badge-logo {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   flex-shrink: 0;
-  color: var(--ink);
+  color: var(--ink-soft);
+  opacity: .8;
 }
 
 .ln-h1 {
-  font-size: clamp(46px, 6.2vw, 78px);
+  /* Smaller, confident (not shouty) — Federico polish 2026-05-30.
+     Was clamp(46px, 6.2vw, 78px). */
+  font-size: clamp(40px, 4.6vw, 60px);
   font-weight: 680;
-  letter-spacing: -.045em;
-  line-height: 0.98;
+  letter-spacing: -.035em;
+  line-height: 1.04;
   color: var(--ink);
-  max-width: 16ch;
+  max-width: 17ch;
   margin: 0 auto;
   text-wrap: balance;
 }
@@ -1886,11 +1916,12 @@ html.dark .ln-sync-pull { color: var(--ink-on-accent); }
 
 /* Mobile tuning */
 @media (max-width: 640px) {
+  :root { --ln-sec-pad: 72px; }
   .ln-hero { padding: 104px 0 0 !important; }
   .ln-h1 {
-    font-size: clamp(38px, 8vw, 76px) !important;
+    font-size: clamp(34px, 7.2vw, 50px) !important;
     line-height: 1.12 !important;
-    letter-spacing: -.025em !important;
+    letter-spacing: -.02em !important;
     max-width: 100% !important;
     padding: 0 18px !important;
     box-sizing: border-box !important;
@@ -1935,7 +1966,7 @@ html.dark .ln-sync-pull { color: var(--ink-on-accent); }
   }
 }
 @media (max-width: 400px) {
-  .ln-h1 { font-size: clamp(38px, 9vw, 56px) !important; }
+  .ln-h1 { font-size: clamp(32px, 8.4vw, 44px) !important; }
   .ln-right .ln-link:not([aria-label]) { display: none !important; }
 }
 
@@ -2447,7 +2478,7 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
 .ln-team {
   position: relative;
   padding: 92px 0 96px;
-  margin-top: 96px;
+  margin-top: var(--ln-sec-pad);
 }
 /* Matte: neutral full-bleed band for section rhythm. No blue wash; a flat
    warm-neutral surface separated by a pure-black hairline. */
@@ -2759,106 +2790,171 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
   border-color: var(--accent-line);
 }
 
-/* ── Slack thread mock (hero money shot) ───────────────────────── */
+/* ── Slack thread mock (hero money shot) ───────────────────────────
+   Federico polish 2026-05-30: must read as REAL Slack at a glance, and
+   be the BIGGER visual anchor of the hero. We render an authentic Slack
+   shell — aubergine workspace rail + channel header — with proper
+   message rows (avatar, bold name, greyed timestamp, indented body).
+   SLACK AUBERGINE (#3F0E40 / #4A154B) is used ONLY for the Slack-brand
+   chrome (the rail + header). Our CTAs / approve button stay on OUR
+   cloud-marketing blue accent — the mock is "Slack-shaped", the brand
+   accents are ours. */
 .ln-slack {
+  --slack-aubergine: #3F0E40;
+  --slack-aubergine-2: #4A154B;
+  --slack-active: #1164A3;
   width: 100%;
-  max-width: 640px;
-  margin: 56px auto 0;
+  max-width: 760px;
+  margin: 48px auto 0;
+  display: grid;
+  grid-template-columns: 64px 1fr;
   border-radius: var(--radius-card);
   border: 1px solid var(--line);
-  background: var(--paper);
-  box-shadow: var(--shadow-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-pop);
   overflow: hidden;
   text-align: left;
 }
-@media (max-width: 980px) { .ln-slack { margin: 40px auto 0; } }
+@media (max-width: 980px) { .ln-slack { margin: 36px auto 0; } }
+@media (max-width: 560px) { .ln-slack { grid-template-columns: 0 1fr; } }
+
+/* Slack workspace rail (aubergine) — the unmistakable Slack signature. */
+.ln-slack-rail {
+  background: var(--slack-aubergine);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+}
+@media (max-width: 560px) { .ln-slack-rail { display: none; } }
+.ln-slack-rail-ws {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: #fff;
+  color: var(--slack-aubergine);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+}
+.ln-slack-rail-ico {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: rgba(255,255,255,.62);
+  background: rgba(255,255,255,.08);
+}
+.ln-slack-rail-ico svg { width: 18px; height: 18px; }
+.ln-slack-rail-ico.on {
+  background: rgba(255,255,255,.16);
+  color: #fff;
+  box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.28);
+}
+
+.ln-slack-main { min-width: 0; background: var(--bg-card); }
 
 .ln-slack-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 44px;
-  padding: 0 16px;
+  height: 52px;
+  padding: 0 18px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface-3);
+  background: var(--bg-card);
 }
 .ln-slack-chan {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-weight: 640;
-  font-size: 14px;
+  gap: 6px;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: -.01em;
   color: var(--ink);
 }
-.ln-slack-chan svg { width: 15px; height: 15px; color: var(--ink-mute); }
+.ln-slack-chan svg { width: 16px; height: 16px; color: var(--ink-mute); }
+.ln-slack-chan-meta {
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 450;
+  color: var(--ink-mute);
+}
 .ln-slack-mock-tag {
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 500;
   letter-spacing: .02em;
   color: var(--ink-mute);
   padding: 3px 9px;
   border-radius: 999px;
   border: 1px solid var(--line);
-  background: var(--paper);
+  background: var(--bg-2);
 }
 
 .ln-slack-body {
-  padding: 18px 18px 20px;
+  padding: 18px 20px 22px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
 }
-.ln-slack-msg { display: flex; gap: 11px; }
+.ln-slack-msg { display: flex; gap: 12px; }
 .ln-slack-av {
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  border-radius: var(--r-md);
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: 680;
+  font-size: 13px;
+  font-weight: 700;
 }
+/* Human avatar — warm Slack-style coloured tile. */
 .ln-slack-av.user {
-  background: var(--accent-soft);
-  color: var(--ink-soft);
-  border: 1px solid var(--line);
+  background: #2EB67D;
+  color: #fff;
 }
+/* Workeros app avatar — our near-black/blue brand mark on a tile. */
 .ln-slack-av.bot {
   background: var(--ink);
-  color: var(--solid-fg);
+  color: var(--bg-card);
 }
 .ln-slack-bd { flex: 1; min-width: 0; }
 .ln-slack-meta {
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: 8px;
   margin-bottom: 3px;
 }
-.ln-slack-meta b { font-size: 13.5px; font-weight: 660; color: var(--ink); }
+.ln-slack-meta b { font-size: 15px; font-weight: 800; letter-spacing: -.01em; color: var(--ink); }
 .ln-slack-app {
-  font-size: 9.5px;
-  font-weight: 660;
-  letter-spacing: .04em;
-  color: var(--ink-mute);
-  background: var(--surface-3);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  color: var(--ink-soft);
+  background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 3px;
-  padding: 1px 4px;
+  padding: 1px 5px;
+  text-transform: uppercase;
 }
-.ln-slack-time { font-size: 11.5px; color: var(--ink-faint); }
+.ln-slack-time { font-size: 12px; color: var(--ink-faint); }
 .ln-slack-text {
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink);
 }
-.ln-slack-text b { color: var(--ink); font-weight: 660; }
+.ln-slack-text b { color: var(--ink); font-weight: 700; }
 .ln-slack-muted { color: var(--ink-mute); }
+/* Slack @-mention pill — Slack's own mention styling (blue link tint),
+   distinct from our CTA accent. */
 .ln-slack-mention {
   font-weight: 600;
-  color: var(--ink);
-  background: var(--accent-soft);
+  color: #1264A3;
+  background: rgba(18,100,163,.12);
   border-radius: 4px;
   padding: 0 4px;
 }
@@ -2898,38 +2994,38 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
 .ln-slack-dot svg { width: 10px; height: 10px; }
 
 .ln-slack-file {
-  margin-top: 11px;
+  margin-top: 12px;
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 11px 13px;
+  gap: 12px;
+  padding: 12px 14px;
   border-radius: var(--r-lg);
   border: 1px solid var(--line);
-  background: var(--surface-3);
+  background: var(--bg-2);
 }
 .ln-slack-file-ic {
   flex-shrink: 0;
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   border-radius: var(--r-md);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--paper);
+  background: var(--bg-card);
   border: 1px solid var(--line);
   color: var(--ink-soft);
 }
-.ln-slack-file-ic svg { width: 15px; height: 15px; }
+.ln-slack-file-ic svg { width: 16px; height: 16px; }
 .ln-slack-file-id { flex: 1; min-width: 0; }
-.ln-slack-file-nm { font-size: 13px; font-weight: 600; color: var(--ink); }
-.ln-slack-file-mt { font-size: 11.5px; color: var(--ink-mute); margin-top: 1px; }
+.ln-slack-file-nm { font-size: 14px; font-weight: 640; color: var(--ink); }
+.ln-slack-file-mt { font-size: 12px; color: var(--ink-mute); margin-top: 1px; }
 .ln-slack-file-open {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 560;
-  color: var(--ink-soft);
+  color: #1264A3;
 }
 .ln-slack-file-open svg { width: 12px; height: 12px; }
 
@@ -2950,7 +3046,7 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
 .ln-hero-aside .ln-nw { margin-top: 0; }
 
 /* ── Section 2: How it works (3 beats) ─────────────────────────── */
-.ln-how { padding: 64px 0 8px; }
+.ln-how { padding: var(--ln-sec-pad) 0 0; }
 .ln-how-beats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2972,12 +3068,14 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
   width: 30px;
   height: 30px;
   border-radius: var(--r-md);
-  background: var(--ink);
+  /* Numbered step badge: cloud-marketing blue accent (see top of file). */
+  background: var(--accent);
   color: var(--solid-fg);
   font-size: 14px;
   font-weight: 660;
   margin-bottom: 16px;
 }
+html.dark .ln-how-num { color: var(--ink-on-accent); }
 .ln-how-beat h3 {
   font-size: 17px;
   font-weight: 640;
@@ -3037,13 +3135,13 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
 
 /* ── Section 8: For developers / MCP strip (demoted) ───────────── */
 .ln-dev {
-  margin-top: 80px;
+  margin-top: var(--ln-sec-pad);
   display: grid;
   grid-template-columns: 1.1fr 0.9fr;
   gap: 40px;
   align-items: center;
-  padding-top: 40px;
-  padding-bottom: 40px;
+  padding-top: 48px;
+  padding-bottom: 8px;
   border-top: 1px solid var(--line);
 }
 @media (max-width: 860px) {
@@ -3084,11 +3182,15 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
    "created / waiting approval" blocks. Engine tokens only, no raw hex.
    ================================================================= */
 
-/* ── Section head (generic, used by several v2 sections) ─────────── */
+/* ── Consistent section rhythm (Federico polish 2026-05-30) ───────
+   One vertical-rhythm scale across ALL top-level landing sections so
+   the page reads calm and intentional instead of a pile of blocks.
+   Single source of truth: --ln-sec-pad. */
+:root { --ln-sec-pad: 112px; }
 .ln-outcome-sec,
 .ln-compare-sec,
 .ln-control-sec,
-.ln-conn { padding: 120px 0 0; }
+.ln-conn { padding: var(--ln-sec-pad) 0 0; }
 
 /* ── Hero: secondary "See how it works" button ──────────────────── */
 .ln-secondary-btn {
@@ -3117,69 +3219,70 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
 
 /* ── Slack hero: created list + approval block ──────────────────── */
 .ln-slack-sub {
-  margin-top: 10px;
+  margin-top: 12px;
   font-family: var(--font-mono, "JetBrains Mono", monospace);
-  font-size: 9px;
+  font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: .1em;
   color: var(--ink-mute);
-  margin-bottom: 7px;
+  margin-bottom: 8px;
 }
 .ln-slack-sub-wait { color: var(--ink-mute); }
 .ln-slack-files { display: grid; gap: 8px; }
-.ln-slack-created { display: grid; gap: 6px; padding: 2px 0 0 2px; }
+.ln-slack-created { display: grid; gap: 7px; padding: 4px 0 0 2px; }
 .ln-slack-created-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
+  gap: 9px;
+  font-size: 13.5px;
   color: var(--ink);
 }
 .ln-slack-approval {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
 }
 .ln-slack-approve-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 11px 13px;
+  gap: 11px;
+  padding: 12px 14px;
   border: 1px solid var(--accent-line);
   border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface-3));
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-2));
 }
 .ln-slack-approve-ic {
-  width: 28px; height: 28px;
+  width: 30px; height: 30px;
   border-radius: var(--r-sm);
   display: grid; place-items: center;
   background: var(--accent-soft);
   color: var(--accent);
   flex-shrink: 0;
 }
-.ln-slack-approve-ic svg { width: 14px; height: 14px; }
+.ln-slack-approve-ic svg { width: 15px; height: 15px; }
 .ln-slack-approve-tx {
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-weight: 560;
   color: var(--ink);
 }
+/* Approve button = OUR cloud-marketing blue accent (NOT Slack purple). */
 .ln-slack-approve-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 640;
+  padding: 7px 14px;
   border-radius: var(--r-md);
   background: var(--accent);
   color: var(--solid-fg);
   box-shadow: var(--shadow-btn);
 }
 html.dark .ln-slack-approve-btn { color: var(--ink-on-accent); }
-.ln-slack-approve-btn svg { width: 11px; height: 11px; }
+.ln-slack-approve-btn svg { width: 12px; height: 12px; }
 
 /* ── Section 2: outcome grid (departments) ──────────────────────── */
 .ln-outcome-grid {
@@ -3408,7 +3511,7 @@ html.dark .ln-flow-num { color: var(--ink-on-accent); }
 }
 
 /* ── Section 7: company-context tree ────────────────────────────── */
-.ln-ctx { padding: 130px 0 0; }
+.ln-ctx { padding: var(--ln-sec-pad) 0 0; }
 .ln-ctx-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -3536,4 +3639,88 @@ html.dark .ln-flow-num { color: var(--ink-on-accent); }
   text-align: center;
   font-size: 13.5px;
   color: var(--ink-mute);
+}
+
+/* =================================================================
+   Waitlist CTA (NEXT_PUBLIC_WAITLIST_MODE=1) — inline email capture.
+   Sits in the same .ln-ctas row as the secondary button; matches the
+   primary-button height so the row stays aligned.
+   ================================================================= */
+.ln-wl {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: flex-start;
+}
+.ln-wl-field {
+  display: inline-flex;
+  align-items: center;
+  height: 46px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .15s, box-shadow .15s;
+}
+.ln-wl-field:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ln-wl-input {
+  height: 100%;
+  width: 220px;
+  max-width: 52vw;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  padding: 0 12px;
+  font-family: var(--font);
+  font-size: 14.5px;
+  color: var(--ink);
+}
+.ln-wl-input::placeholder { color: var(--ink-mute); }
+.ln-wl-submit {
+  height: 38px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: var(--solid);
+  color: var(--solid-fg);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 620;
+  letter-spacing: -.01em;
+  cursor: pointer;
+  box-shadow: var(--shadow-btn);
+  transition: background .15s;
+}
+.ln-wl-submit:hover { background: var(--solid-2); }
+.ln-wl-submit:disabled { opacity: .65; cursor: default; }
+html.dark .ln-wl-submit { color: var(--solid-fg); }
+.ln-wl-msg {
+  font-size: 12.5px;
+  font-weight: 500;
+  padding-left: 4px;
+}
+.ln-wl-msg.err { color: var(--warning); }
+.ln-wl-done {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 18px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 580;
+}
+.ln-wl-done svg { color: var(--accent); flex-shrink: 0; }
+@media (max-width: 640px) {
+  .ln-wl { width: 100%; align-items: stretch; }
+  .ln-wl-field { width: 100%; }
+  .ln-wl-input { flex: 1; width: auto; max-width: none; }
 }

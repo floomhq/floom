@@ -4,6 +4,7 @@ import "../app/vertical.css";
 import { useEffect } from "react";
 import Link from "next/link";
 import { ThemeModeButton } from "./ThemeModeButton";
+import { WaitlistCTA } from "./WaitlistCTA";
 import { VERTICALS } from "@/lib/verticals";
 import type { Vertical } from "@/lib/verticals";
 import {
@@ -34,6 +35,16 @@ const PlayIcon = () => (
 const WorkerosMarkSVG = () => (
   <svg viewBox="0 0 100 100" width="18" height="18" fill="currentColor" aria-hidden="true">
     <path d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z" />
+  </svg>
+);
+const RailHomeIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 10.5 12 4l9 6.5M5 9.5V20h14V9.5" />
+  </svg>
+);
+const RailDMIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M4 5h16v11H8l-4 3z" />
   </svg>
 );
 
@@ -79,8 +90,14 @@ function SlackThreadMock({ v }: { v: Vertical }) {
   const s = v.slack;
   return (
     <div className="ln-slack" id="see-how-it-works" aria-label={`How Workeros works for ${v.eyebrow}`}>
+      <div className="ln-slack-rail" aria-hidden="true">
+        <span className="ln-slack-rail-ws">A</span>
+        <span className="ln-slack-rail-ico on"><RailHomeIcon /></span>
+        <span className="ln-slack-rail-ico"><RailDMIcon /></span>
+      </div>
+      <div className="ln-slack-main">
       <div className="ln-slack-bar">
-        <span className="ln-slack-chan"><HashIcon />{s.channel}</span>
+        <span className="ln-slack-chan"><HashIcon />{s.channel}<span className="ln-slack-chan-meta">Acme · 28 members</span></span>
         <span className="ln-slack-mock-tag">Designed preview</span>
       </div>
 
@@ -139,6 +156,7 @@ function SlackThreadMock({ v }: { v: Vertical }) {
           </div>
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -196,9 +214,7 @@ export function VerticalLanding({ slug }: { slug: string }) {
             <p className="ln-sub">{v.sub}</p>
 
             <div className="ln-ctas">
-              <a href={SIGN_IN_HREF} className="ln-btn-primary">
-                {v.primaryCtaLabel}
-              </a>
+              <WaitlistCTA label={v.primaryCtaLabel} source={`${v.slug}-hero`} />
               <a href="#see-how-it-works" className="ln-secondary-btn">
                 <PlayIcon />
                 See how it works
@@ -319,9 +335,7 @@ export function VerticalLanding({ slug }: { slug: string }) {
           <h2>{v.closingHead}</h2>
           <p className="ln-cta-sub">{v.closingSub}</p>
           <div className="ln-ctas" style={{ marginTop: 34 }}>
-            <a href={SIGN_IN_HREF} className="ln-btn-primary">
-              {v.primaryCtaLabel}
-            </a>
+            <WaitlistCTA label={v.primaryCtaLabel} source={`${v.slug}-footer`} />
             <a href="#see-how-it-works" className="ln-secondary-btn">
               <PlayIcon />
               See how it works
