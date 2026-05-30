@@ -3640,6 +3640,47 @@ def restore_worker(
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
+@app.post("/workers/{worker_id}/archive", response_model=WorkerDetail)
+def archive_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """Archive a worker (set archived: true in worker.yml).
+
+    Reversible counterpart to /restore. Writes back to the bundle file so the
+    change survives server restarts, and invalidates the worker cache so the
+    worker drops out of the default list (it stays reachable under the Archived
+    view + by direct link, where Restore is offered).
+    """
+    from worker_registry import WORKERS_DIR as _WORKERS_DIR
+    import re as _re
+
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
+    if not worker_yml_path.exists():
+        raise HTTPException(status_code=404, detail="Worker not found")
+    try:
+        raw_yml = worker_yml_path.read_text()
+        # Flip an existing `archived: false` to true; otherwise append the field.
+        # Match both `archived: true` and `archived:true` spacing, same as restore.
+        updated, n = _re.subn(r"(?m)^(archived:\s*)false\s*$", r"\1true\n", raw_yml)
+        if n == 0 and not _re.search(r"(?m)^archived:\s*true\s*$", raw_yml):
+            # Field missing entirely — append it (default was false).
+            if not updated.endswith("\n"):
+                updated += "\n"
+            updated += "archived: true\n"
+        worker_yml_path.write_text(updated)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
+    invalidate_worker_cache()
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
 @app.get("/workers/{worker_id}/sample-input")
 def get_worker_sample_input(
     worker_id: str,

@@ -58,6 +58,7 @@ export const api = {
     get: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}`),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
+    archive: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
     run: (id: string, inputs: Record<string, unknown>) =>
