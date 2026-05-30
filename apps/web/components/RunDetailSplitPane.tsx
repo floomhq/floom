@@ -137,8 +137,13 @@ export function RunDetailSplitPane({
       {/* R4: the split pane was unbounded — long transcripts/logs grew the
           whole page so it scrolled "into infinity". Cap the pane at a
           viewport-relative height and let each pane scroll WITHIN itself. */}
-      <div className="flex min-h-[280px] max-h-[calc(100vh-13rem)] flex-col gap-0 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] md:flex-row">
-        <aside className="max-h-44 w-full shrink-0 overflow-y-auto border-b border-border bg-muted/25 md:max-h-none md:w-[320px] md:min-w-[240px] md:max-w-[460px] md:resize-x md:border-r md:border-b-0">
+      <div className="flex min-h-[280px] max-h-[calc(100vh-13rem)] flex-col gap-0 overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] md:flex-row">
+        {/* R5 (2026-05-30): the timeline pane previously had `md:resize-x` (a
+            CSS textarea-style drag handle showed in its corner) and
+            `md:max-h-none`, which stretched a short timeline into a huge empty
+            box reserving dead vertical height. Drop the resize affordance and
+            let the pane size to its content (self-scroll only when long). */}
+        <aside className="max-h-44 w-full shrink-0 self-start overflow-y-auto border-b border-border bg-muted/25 md:max-h-[calc(100vh-13rem)] md:w-[320px] md:min-w-[240px] md:max-w-[460px] md:border-r md:border-b-0">
           {/* S29q: dropped the SMALL-CAPS "TIMELINE" panel label entirely.
               The timeline IS the panel; the label was dead weight (ChatGPT
               audit P-1). */}
@@ -160,19 +165,23 @@ export function RunDetailSplitPane({
                 <TabsTrigger value="metadata">Metadata</TabsTrigger>
               </TabsList>
             </div>
-            <TabsContent value="transcript" className="min-h-0 flex-1 overflow-y-auto p-4">
+            {/* R5 (2026-05-30): add min-w-0 + overflow-x-auto so wide content
+                (markdown tables, long unbreakable strings, the Output table)
+                scrolls within the Result column instead of overflowing and
+                getting clipped by the pane's `overflow-hidden`. */}
+            <TabsContent value="transcript" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <TranscriptView run={run} parts={transcriptParts} />
             </TabsContent>
-            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto p-4">
+            <TabsContent value="logs" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <OperatorLogs run={run} />
             </TabsContent>
-            <TabsContent value="output" className="min-h-0 flex-1 overflow-y-auto p-4">
+            <TabsContent value="output" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <OutputView run={run} />
             </TabsContent>
-            <TabsContent value="raw" className="min-h-0 flex-1 overflow-y-auto p-4">
+            <TabsContent value="raw" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <RawView run={run} parts={transcriptParts} />
             </TabsContent>
-            <TabsContent value="metadata" className="min-h-0 flex-1 overflow-y-auto p-4">
+            <TabsContent value="metadata" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <MetadataView run={run} />
             </TabsContent>
           </Tabs>
@@ -205,7 +214,7 @@ function OperatorLogs({ run }: { run: RunDetail }) {
 
 function RunMetricsStrip({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
   return (
-    <dl className="grid gap-px overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-5">
+    <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-5">
       <RunMetric label="Status" value={statusLabel(latestStatus(run, parts))} />
       <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
       <RunMetric label="Duration" value={run.duration_ms != null ? formatDuration(run.duration_ms) : "Running"} />
@@ -354,7 +363,7 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
 function RunResultOverview({ run }: { run: RunDetail }) {
   return (
     <div className="space-y-6">
-      <section className="border border-line bg-muted/20 p-4">
+      <section className="rounded-[var(--radius-card)] border border-line bg-muted/20 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold">{run.status === "completed" ? "Run completed" : statusLabel(run.status)}</p>
@@ -405,7 +414,7 @@ function OutputSummary({ run }: { run: RunDetail }) {
       </div>
 
       {metricEntries.length > 0 && (
-        <dl className="grid gap-px overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--border-default)] sm:grid-cols-2 lg:grid-cols-4">
+        <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--border-default)] sm:grid-cols-2 lg:grid-cols-4">
           {metricEntries.map(([key, value]) => (
             <div key={key} className="min-w-0 bg-card px-3 py-2">
               {/* P2-1: human label (no raw uppercased JSON key) */}
@@ -519,7 +528,7 @@ function RecentLogsPreview({ run }: { run: RunDetail }) {
         <h2 className="text-sm font-semibold">Recent logs</h2>
         <p className="text-xs text-muted-foreground">Last {recent.length} server-side log entr{recent.length === 1 ? "y" : "ies"}.</p>
       </div>
-      <div className="overflow-hidden rounded-xl border border-[var(--border-default)]">
+      <div className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)]">
         {recent.map((log, index) => (
           <div key={`${log.timestamp}-${index}`} className="grid gap-2 border-b border-[var(--border-default)] bg-[var(--bg-card)] px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[8.5rem_5rem_1fr]">
             <span className="font-mono text-muted-foreground">{formatTime(log.timestamp)}</span>
