@@ -6,6 +6,7 @@ from fastapi import Request
 
 from .context import AuthContext, set_current_auth_context
 from .factory import get_auth_provider
+from .local_workspaces import scope_local_auth_context
 
 
 def _local_dev_context() -> AuthContext:
@@ -34,5 +35,6 @@ async def get_auth_context(request: Request) -> AuthContext:
         ctx = _local_dev_context()
     else:
         ctx = await get_auth_provider().verify(request)
+    ctx = scope_local_auth_context(request, ctx)
     set_current_auth_context(ctx)
     return ctx

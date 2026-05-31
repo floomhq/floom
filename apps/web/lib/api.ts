@@ -4,11 +4,47 @@
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
 // Cloud wrapper consume this file unmodified (no fork).
 const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
+const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
+
+export function getActiveWorkspaceId(): string | null {
+  if (typeof window === "undefined") return null;
+  const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  return value && value !== "local-default" ? value : null;
+}
+
+export function setActiveWorkspaceId(workspaceId: string | null) {
+  if (typeof window === "undefined") return;
+  if (!workspaceId || workspaceId === "local-default") {
+    window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  } else {
+    window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
+  }
+}
+
+function withWorkspaceHeaders(headers?: HeadersInit): Headers {
+  const merged = new Headers(headers);
+  const activeWorkspace = getActiveWorkspaceId();
+  if (activeWorkspace) {
+    merged.set("x-workeros-workspace", activeWorkspace);
+  }
+  return merged;
+}
+
+function withWorkspaceQuery(path: string): string {
+  const activeWorkspace = getActiveWorkspaceId();
+  if (!activeWorkspace) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}workspace_id=${encodeURIComponent(activeWorkspace)}`;
+}
 
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers = withWorkspaceHeaders(options?.headers);
+  if (!headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
+    headers,
   });
   if (!res.ok) {
     // PR S19 (I-6): surface SOMETHING actionable even when the upstream
@@ -44,7 +80,10 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 async function fetchRaw(path: string, options?: RequestInit): Promise<Response> {
-  const res = await fetch(`${API_BASE}${path}`, options);
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: withWorkspaceHeaders(options?.headers),
+  });
   if (!res.ok) {
     let err = "";
     try {
@@ -101,7 +140,11 @@ export const api = {
     createFromBundle: async (zipBlob: Blob): Promise<import("./types").WorkerDetail> => {
       const form = new FormData();
       form.append("bundle", zipBlob, "bundle.zip");
-      const res = await fetch(`${API_BASE}/workers/from-bundle`, { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/workers/from-bundle`, {
+        method: "POST",
+        headers: withWorkspaceHeaders(),
+        body: form,
+      });
       if (!res.ok) {
         let err: string;
         try {
@@ -166,11 +209,12 @@ export const api = {
         `/workers/${encodeURIComponent(workerId)}/runs/${encodeURIComponent(runId)}/replay`,
         { method: "POST" }
       ),
-    downloadUrl: (id: string) => `${API_BASE}/runs/${encodeURIComponent(id)}/download`,
+    downloadUrl: (id: string) =>
+      `${API_BASE}${withWorkspaceQuery(`/runs/${encodeURIComponent(id)}/download`)}`,
     artifactUrl: (id: string, artifactId: string) =>
-      `${API_BASE}/runs/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+      `${API_BASE}${withWorkspaceQuery(`/runs/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/download`)}`,
     bundleUrl: (id: string, filename: string) =>
-      `${API_BASE}/runs/${encodeURIComponent(id)}/bundle/${encodeURIComponent(filename)}`,
+      `${API_BASE}${withWorkspaceQuery(`/runs/${encodeURIComponent(id)}/bundle/${encodeURIComponent(filename)}`)}`,
   },
   approvals: {
     list: (status?: string) => {
@@ -231,6 +275,7 @@ export const api = {
       if (pathPrefix) form.append("path_prefix", pathPrefix);
       const res = await fetch(`${API_BASE}/contexts/${encodeURIComponent(name)}/upload`, {
         method: "POST",
+        headers: withWorkspaceHeaders(),
         body: form,
       });
       if (!res.ok) {
@@ -246,7 +291,7 @@ export const api = {
       return res.json() as Promise<{ files: import("./types").ContextFileItem[]; total_size_bytes: number }>;
     },
     fileUrl: (name: string, path: string) =>
-      `${API_BASE}/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+      `${API_BASE}${withWorkspaceQuery(`/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`)}`,
   },
   system: {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
@@ -300,7 +345,11 @@ export const api = {
     ): Promise<import("./types").WorkspaceImportResult> => {
       const form = new FormData();
       form.append("bundle", zipBlob, "workspace-template.zip");
-      const res = await fetch(`${API_BASE}/workspace/import`, { method: "POST", body: form });
+      const res = await fetch(`${API_BASE}/workspace/import`, {
+        method: "POST",
+        headers: withWorkspaceHeaders(),
+        body: form,
+      });
       if (!res.ok) {
         let err = "";
         try {
@@ -313,6 +362,16 @@ export const api = {
       }
       return res.json() as Promise<import("./types").WorkspaceImportResult>;
     },
+    list: () => fetchJson<import("./types").LocalWorkspaceListResponse>("/workspaces"),
+    create: (name: string) =>
+      fetchJson<import("./types").LocalWorkspace>("/workspaces", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    select: (id: string) =>
+      fetchJson<import("./types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}/select`, {
+        method: "POST",
+      }),
   },
   integrations: {
     triggers: () =>

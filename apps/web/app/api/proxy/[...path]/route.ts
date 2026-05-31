@@ -24,6 +24,8 @@ async function handler(
   const forwardHeaders: Record<string, string> = {
     "x-floom-secret": API_SECRET,
   };
+  const activeWorkspace = req.headers.get("x-workeros-workspace");
+  if (activeWorkspace) forwardHeaders["x-workeros-workspace"] = activeWorkspace;
   const contentType = req.headers.get("content-type");
   if (contentType) forwardHeaders["content-type"] = contentType;
   const lastEventId = req.headers.get("last-event-id");

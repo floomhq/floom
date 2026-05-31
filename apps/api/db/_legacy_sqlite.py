@@ -936,6 +936,21 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_alert_incidents_worker
         ON alert_incidents(worker_id);
     """,
+    # -- migration 39: local OSS workspaces ----------------------------------
+    # Cloud owns Supabase workspaces. The OSS engine keeps a tiny local
+    # workspace registry so the single-user dashboard can switch isolated local
+    # workspaces without adding workspace_id columns to every existing table.
+    """
+    CREATE TABLE IF NOT EXISTS local_workspaces (
+        id            TEXT NOT NULL,
+        owner_user_id TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        created_at    TEXT NOT NULL,
+        PRIMARY KEY (owner_user_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_local_workspaces_owner_created
+        ON local_workspaces(owner_user_id, created_at);
+    """,
 ]
 
 
