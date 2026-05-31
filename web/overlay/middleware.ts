@@ -2,6 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "workeros_cloud_session";
 
+// The backend API base — available server-side in both middleware and
+// route handlers. Falls back to the production cloud API if not set.
+const API_BASE =
+  process.env.FLOOM_API_BASE ||
+  process.env.WORKEROS_API_BASE ||
+  "https://workeros-api.floom.dev";
+
 function isPublicPath(pathname: string): boolean {
   // Next.js with basePath strips it before passing to middleware in matcher,
   // but path here can be either /workers OR /app/workers depending on the
@@ -20,16 +27,15 @@ export function middleware(req: NextRequest): NextResponse {
   }
   const session = req.cookies.get(SESSION_COOKIE);
   if (!session?.value) {
-    // Marketing project owns /login. We're on the dashboard at /app/*.
-    // Build an absolute URL so basePath doesn't prepend /app/ to the
-    // redirect destination — otherwise we'd infinitely loop on /app/login
-    // (which doesn't exist in this project).
+    // Redirect directly to the backend OAuth login. In production the
+    // landing's /login page does this too, but in local dev the landing
+    // isn't running. Going straight to the backend's /auth/login works in
+    // both environments and avoids a dependency on the landing project.
     const path = req.nextUrl.pathname.startsWith("/app")
       ? req.nextUrl.pathname.slice(4) || "/"
       : req.nextUrl.pathname;
-    const next = `/app${path === "/" ? "" : path}${req.nextUrl.search}`;
-    const target = new URL(`/login?next=${encodeURIComponent(next)}`, req.nextUrl);
-    return NextResponse.redirect(target);
+    const next = encodeURIComponent(`/app${path === "/" ? "" : path}${req.nextUrl.search}`);
+    return NextResponse.redirect(`${API_BASE}/auth/login?provider=google&next=${next}`);
   }
   return NextResponse.next();
 }

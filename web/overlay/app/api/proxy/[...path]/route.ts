@@ -112,6 +112,10 @@ async function handler(
   if (cl) responseHeaders.set("content-length", cl);
   const cacheControl = upstream.headers.get("cache-control");
   if (cacheControl) responseHeaders.set("cache-control", cacheControl);
+  // Forward Location so backend-initiated redirects (e.g. /auth/login →
+  // Google OAuth 307) actually reach the browser through the proxy.
+  const location = upstream.headers.get("location");
+  if (location) responseHeaders.set("location", location);
   // Forward Set-Cookie so backend-initiated cookie writes (e.g. /auth/logout
   // clearing workeros_cloud_session on .floom.dev) actually reach the browser.
   // Vercel's route runtime does not consistently expose the Node/undici

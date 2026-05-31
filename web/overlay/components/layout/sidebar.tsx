@@ -131,7 +131,12 @@ function UserProfileFooter() {
     fetch("/app/api/me", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
-        if (!cancelled && d?.user?.email) setEmail(d.user.email as string);
+        if (!cancelled && d?.user?.email) {
+          setEmail(d.user.email as string);
+          // Ensure the user has at least one PAT (fire-and-forget).
+          // bootstrap is idempotent — no-ops if a token already exists.
+          fetch("/app/api/proxy/auth/tokens/bootstrap", { method: "POST" }).catch(() => {});
+        }
       })
       .catch(() => {});
     return () => {
@@ -149,7 +154,11 @@ function UserProfileFooter() {
     try {
       await fetch("/app/api/proxy/auth/logout", { method: "POST" });
     } finally {
-      window.location.href = "/login";
+      // Redirect to /app — the middleware runs server-side and has access to
+      // WORKEROS_API_BASE, so it will immediately redirect unauthenticated
+      // visitors to the backend's /auth/login?provider=google OAuth URL.
+      // This avoids needing a NEXT_PUBLIC_ env var here.
+      window.location.href = "/app";
     }
   };
   return (

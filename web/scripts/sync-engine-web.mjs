@@ -72,6 +72,7 @@ export const OVERLAY_FILES = [
   "components/layout/WorkspaceSwitcher.tsx",
   "components/layout/sidebar.tsx",
   "middleware.ts",
+  "lib/useRunStream.ts",
 ];
 
 const CLOUD_TAILWIND_SOURCE_MARKER = "/* workeros-cloud generated Tailwind sources */";
