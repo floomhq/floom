@@ -352,6 +352,18 @@ export interface WorkspaceImportResult {
   workspace_md_present: boolean;
 }
 
+export interface LocalWorkspace {
+  id: string;
+  name: string;
+  owner_user_id: string;
+  created_at: string;
+}
+
+export interface LocalWorkspaceListResponse {
+  workspaces: LocalWorkspace[];
+  active_id: string;
+}
+
 export interface SystemOverviewStats {
   runs_24h: number;
   runs_24h_sparkline: number[];
