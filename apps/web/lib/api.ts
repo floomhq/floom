@@ -182,6 +182,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
       }),
+    suggest: (id: string, newDescription: string) =>
+      fetchJson<import("./types").WorkerSuggestResponse>(`/workers/${id}/suggest`, {
+        method: "POST",
+        body: JSON.stringify({ new_description: newDescription }),
+      }),
     updateFiles: (id: string, files: { path: string; content: string }[]) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}/files`, {
         method: "PUT",
