@@ -1,31 +1,47 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
+import secrets
 import time
 from functools import lru_cache
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from apps.api._engine import ensure_engine_api_path
+from apps.api.auth.supabase_provider import PAT_HEADER
 from apps.api.config import (
     get_cloud_settings,
     new_supabase_anon_client,
     new_supabase_service_client,
 )
+from apps.api.db.supabase_repos import SupabaseApiTokenRepository
 
 ensure_engine_api_path()
 
+from auth.context import AuthContext  # noqa: E402
+from auth.dependency import get_auth_context  # noqa: E402
 from db.factory import get_repositories  # noqa: E402
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_TOKEN_PREFIX = "floom_"
+
+
+def _generate_raw_token() -> str:
+    return _TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 _SESSION_COOKIE_NAME = "workeros_cloud_session"
 _OAUTH_VERIFIER_COOKIE_NAME = "workeros_cloud_pkce_verifier"
@@ -550,6 +566,53 @@ def cli_deny(payload: CliDenyRequest, request: Request):
         secret=None,
     )
     return {"ok": True, "client_name": record.get("client_name") or "workeros-cli"}
+
+
+class TokenCreateRequest(BaseModel):
+    name: str = Field(default="default", min_length=1, max_length=100)
+
+
+@router.get("/tokens")
+def list_tokens(ctx: AuthContext = Depends(get_auth_context)):
+    """List all PATs for the authenticated user (no raw values)."""
+    repo = SupabaseApiTokenRepository()
+    return repo.list_for_user(user_id=ctx.user_id)
+
+
+@router.post("/tokens", status_code=201)
+def create_token(body: TokenCreateRequest, ctx: AuthContext = Depends(get_auth_context)):
+    """Create a new PAT. Returns the raw token value ONCE — never retrievable again."""
+    raw = _generate_raw_token()
+    token_hash = _hash_token(raw)
+    repo = SupabaseApiTokenRepository()
+    row = repo.create(user_id=ctx.user_id, name=body.name, token_hash=token_hash)
+    return {**row, "token": raw, "header": PAT_HEADER}
+
+
+@router.delete("/tokens/{token_id}", status_code=200)
+def delete_token(token_id: str, ctx: AuthContext = Depends(get_auth_context)):
+    """Revoke a PAT by ID."""
+    repo = SupabaseApiTokenRepository()
+    deleted = repo.delete(token_id=token_id, user_id=ctx.user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="token not found")
+    return {"ok": True}
+
+
+@router.post("/tokens/bootstrap", status_code=201)
+def bootstrap_token(ctx: AuthContext = Depends(get_auth_context)):
+    """Ensure user has at least one PAT. If none exist, creates a default token.
+
+    Called automatically on first login from the UI. Safe to call multiple
+    times — returns existing token metadata (not raw value) if already present.
+    """
+    repo = SupabaseApiTokenRepository()
+    if repo.has_any(user_id=ctx.user_id):
+        return {"created": False, "tokens": repo.list_for_user(user_id=ctx.user_id)}
+    raw = _generate_raw_token()
+    token_hash = _hash_token(raw)
+    row = repo.create(user_id=ctx.user_id, name="default", token_hash=token_hash)
+    return {"created": True, "token": raw, "header": PAT_HEADER, **row}
 
 
 @router.post("/logout")

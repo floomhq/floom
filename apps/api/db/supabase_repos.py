@@ -1669,3 +1669,70 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
                 expired,
             ).execute()
         return expired
+
+
+class SupabaseApiTokenRepository(_BaseSupabaseRepository):
+    """PAT (Personal Access Token) storage.
+
+    Raw token values are NEVER stored — only SHA-256 hashes.
+    The caller is responsible for generating the raw token, hashing it,
+    and showing the raw value to the user exactly once.
+    """
+
+    def create(self, *, user_id: str, name: str, token_hash: str) -> dict[str, Any]:
+        self._client.table("api_tokens").insert(
+            {
+                "user_id": user_id,
+                "name": name,
+                "token_hash": token_hash,
+            }
+        ).execute()
+        row = self.get_by_hash(token_hash)
+        if row is None:
+            raise RuntimeError("failed to create api token")
+        return row
+
+    def get_by_hash(self, token_hash: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("api_tokens")
+            .select("id,user_id,name,created_at,last_used_at")
+            .eq("token_hash", token_hash)
+            .limit(1)
+            .execute()
+        )
+        return _first_row(response)
+
+    def list_for_user(self, *, user_id: str) -> list[dict[str, Any]]:
+        response = (
+            self._client.table("api_tokens")
+            .select("id,user_id,name,created_at,last_used_at")
+            .eq("user_id", user_id)
+            .order("created_at")
+            .execute()
+        )
+        return _response_rows(response)
+
+    def has_any(self, *, user_id: str) -> bool:
+        response = (
+            self._client.table("api_tokens")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        return int(getattr(response, "count", 0) or 0) > 0
+
+    def touch(self, *, token_id: str) -> None:
+        self._client.table("api_tokens").update(
+            {"last_used_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", token_id).execute()
+
+    def delete(self, *, token_id: str, user_id: str) -> bool:
+        response = (
+            self._client.table("api_tokens")
+            .delete()
+            .eq("id", token_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return bool(_response_rows(response))

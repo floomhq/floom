@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import urllib.request
@@ -18,6 +19,12 @@ from apps.api.db import workspaces as workspace_repo
 ensure_engine_api_path()
 
 from auth.context import AuthContext  # noqa: E402
+
+PAT_HEADER = "x-floom-token"
+
+
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 # Cookie name shared with apps.api.routes.workspaces and the dashboard
@@ -146,6 +153,14 @@ class SupabaseAuthProvider:
         self._settings = get_cloud_settings()
 
     async def verify(self, request: Request) -> AuthContext:
+        # PAT path: x-floom-token header takes priority over Bearer JWT.
+        # Simple opaque tokens — no expiry, no SDK required, just hash lookup.
+        pat_raw = (request.headers.get(PAT_HEADER) or "").strip()
+        if pat_raw:
+            return await self._verify_pat(pat_raw, request)
+
+        # JWT path: existing Supabase Bearer token flow (browser dashboard,
+        # CLI via refresh-token exchange).
         token = _parse_bearer_token(request.headers.get("authorization"))
         claims = _verify_jwt(token, self._settings.supabase_url)
         user_id = claims.get("sub")
@@ -158,6 +173,31 @@ class SupabaseAuthProvider:
         if isinstance(app_metadata, dict):
             scopes = _normalize_scopes(app_metadata.get("scopes"))
 
+        return await self._resolve_workspace_and_build_context(
+            user_id=str(user_id), email=email, scopes=scopes, request=request
+        )
+
+    async def _verify_pat(self, raw: str, request: Request) -> AuthContext:
+        from apps.api.db.supabase_repos import SupabaseApiTokenRepository
+        repo = SupabaseApiTokenRepository()
+        token_hash = _hash_token(raw)
+        row = repo.get_by_hash(token_hash)
+        if not row:
+            raise HTTPException(status_code=401, detail="invalid token")
+        repo.touch(token_id=str(row["id"]))
+        user_id = str(row["user_id"])
+        return await self._resolve_workspace_and_build_context(
+            user_id=user_id, email=None, scopes=("api",), request=request
+        )
+
+    async def _resolve_workspace_and_build_context(
+        self,
+        *,
+        user_id: str,
+        email: str | None,
+        scopes: tuple[str, ...],
+        request: Request,
+    ) -> AuthContext:
         # Workspace resolution: header (CLI) -> cookie (dashboard) -> owner
         # check -> default -> lazy bootstrap. The contextvar feeds every
         # repository call inside this request, so all queries scope by the
@@ -172,7 +212,7 @@ class SupabaseAuthProvider:
         )
         try:
             active = workspace_repo.resolve_active_workspace(
-                user_id=str(user_id),
+                user_id=user_id,
                 email=email,
                 requested_id=requested_workspace_id,
             )
@@ -185,7 +225,7 @@ class SupabaseAuthProvider:
             set_active_workspace_id(None)
 
         return AuthContext(
-            user_id=str(user_id),
+            user_id=user_id,
             email=email,
             scopes=scopes,
         )
