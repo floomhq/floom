@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
+import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 
 // Exported so the Downstream host's sidebar overlay can compose the engine's
 // brand mark + nav + primary actions and only add its account/workspace
@@ -166,6 +167,9 @@ export function Sidebar() {
         </div>
         <SidebarPrimaryActions />
         <NavLinks pathname={pathname} />
+        <div className="mt-auto pt-3 border-t border-[var(--border-soft)]">
+          <WorkspaceSwitcher />
+        </div>
         <UserProfileFooter />
       </aside>
 
@@ -195,6 +199,9 @@ export function Sidebar() {
             <div className="py-3 flex-1 overflow-auto">
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
+            </div>
+            <div className="pt-3 border-t border-[var(--border-soft)]">
+              <WorkspaceSwitcher />
             </div>
             <UserProfileFooter />
           </aside>

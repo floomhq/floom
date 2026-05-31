@@ -68,9 +68,10 @@ def set_context_scope_resolver(resolver: Optional[Callable[[], Optional[str]]]) 
 def context_scope_for_user(user_id: str | None) -> str | None:
     deploy_mode = (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower()
     scoped_local = os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1"
-    if deploy_mode != "cloud" and not scoped_local:
-        return None
     raw = str(user_id or "").strip()
+    is_local_workspace = bool(re.search(r"__ws_[a-f0-9]{14}$", raw))
+    if deploy_mode != "cloud" and not scoped_local and not is_local_workspace:
+        return None
     if not raw:
         return None
     if _CONTEXT_SCOPE_NAME_RE.fullmatch(raw):
