@@ -3830,6 +3830,81 @@ def archive_worker(
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
+class _WorkerSuggestion(BaseModel):
+    field: str
+    current: str
+    suggested: str
+    reason: str
+
+class _WorkerSuggestResponse(BaseModel):
+    has_conflicts: bool
+    suggestions: list[_WorkerSuggestion]
+
+class _WorkerSuggestRequest(BaseModel):
+    new_description: str
+
+@app.post("/workers/{worker_id}/suggest", response_model=_WorkerSuggestResponse)
+async def suggest_worker_updates(
+    worker_id: str,
+    payload: _WorkerSuggestRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _WorkerSuggestResponse:
+    """Compare a new description against the current worker config and surface conflicts.
+
+    Makes a single focused OpenAI call. Returns structured suggestions so the UI
+    can show a conflict-resolution modal before the user saves.
+    """
+    import json as _json
+    import os as _os
+    from openai import OpenAI as _OpenAI
+    from worker_registry import WORKERS_DIR as _WORKERS_DIR
+
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
+    current_yml = worker_yml_path.read_text(encoding="utf-8") if worker_yml_path.exists() else (
+        getattr(worker, "manifest_yaml", "") or ""
+    )
+
+    api_key = _os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return _WorkerSuggestResponse(has_conflicts=False, suggestions=[])
+
+    prompt = (
+        "You are reviewing a Workeros worker configuration for consistency with a new description.\n\n"
+        f"New description from user:\n{payload.new_description}\n\n"
+        f"Current worker.yml:\n{current_yml}\n\n"
+        "Identify ONLY real conflicts between the new description and the existing config.\n"
+        "Focus on: trigger schedule/type, required inputs, connections, and secrets.\n"
+        "Ignore stylistic or wording differences — only flag functional mismatches.\n"
+        "If the description does not clearly imply a change, do NOT flag a conflict.\n\n"
+        'Return JSON: {"has_conflicts": bool, "suggestions": [{"field": str, "current": str, "suggested": str, "reason": str}]}\n'
+        'If no conflicts: {"has_conflicts": false, "suggestions": []}'
+    )
+
+    try:
+        client = _OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+            max_tokens=512,
+        )
+        raw = response.choices[0].message.content or "{}"
+        result = _json.loads(raw)
+        return _WorkerSuggestResponse(
+            has_conflicts=bool(result.get("has_conflicts", False)),
+            suggestions=[_WorkerSuggestion(**s) for s in result.get("suggestions", [])],
+        )
+    except Exception as exc:
+        logger.warning("suggest_worker_updates LLM call failed: %s", exc)
+        return _WorkerSuggestResponse(has_conflicts=False, suggestions=[])
+
+
 @app.get("/workers/{worker_id}/sample-input")
 def get_worker_sample_input(
     worker_id: str,
