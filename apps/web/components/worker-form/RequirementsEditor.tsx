@@ -51,11 +51,11 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
 
   if (status === "set") {
     return (
-      <div className="flex items-center justify-between py-2 px-3 rounded-[var(--radius-button)] border border-border bg-[#f0fdf4]">
+      <div className="flex items-center justify-between py-2 px-3 rounded-[var(--radius-button)] border border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)]">
         <div className="flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
-          <span className="text-sm font-mono font-medium text-[#15803d]">{name}</span>
-          <span className="text-xs text-[#16a34a]">Set</span>
+          <CheckCircle2 className="w-4 h-4 text-[var(--positive)] flex-shrink-0" />
+          <span className="text-sm font-mono font-medium text-[var(--positive)]">{name}</span>
+          <span className="text-xs text-[var(--positive)]">Set</span>
         </div>
         <button type="button" onClick={() => { setStatus("missing"); setShowInput(true); }} className="text-xs text-muted-foreground hover:text-muted-foreground transition-colors">
           Change
@@ -68,7 +68,7 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
     <div className="rounded-[var(--radius-button)] border border-border bg-card p-3 space-y-2">
       <div className="flex items-center gap-2">
         <span className="text-sm font-mono font-medium text-foreground">{name}</span>
-        <span className="text-xs text-[#e67e22] bg-[#fef3c7] px-1.5 py-0.5 rounded border border-[#fde68a]">required</span>
+        <span className="rounded border border-[color-mix(in_srgb,var(--warning)_28%,var(--line))] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-1.5 py-0.5 text-xs text-[var(--warning)]">required</span>
       </div>
       {showInput && (
         <div className="flex gap-2">
@@ -220,7 +220,7 @@ function InlineRequirementRow({
           onClick={() => onMethodChange(requirement.app, m)}
           className={`px-2 py-0.5 transition-colors ${
             requirement.method === m
-              ? m === "oauth" ? "bg-[#2563eb] text-white" : "bg-[#7c3aed] text-white"
+              ? m === "oauth" ? "bg-[var(--primary)] text-[var(--primary-text)]" : "bg-[var(--accent)] text-white"
               : "bg-card text-muted-foreground hover:bg-muted"
           }`}
         >
@@ -231,8 +231,8 @@ function InlineRequirementRow({
   ) : (
     <span className={`text-xs px-1.5 py-0.5 rounded border font-mono ${
       isOAuth
-        ? "text-[#2563eb] bg-[#eff6ff] border-[#bfdbfe]"
-        : "text-[#7c3aed] bg-[#f5f3ff] border-[#ddd6fe]"
+        ? "text-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_9%,transparent)] border-[color-mix(in_srgb,var(--primary)_22%,var(--line))]"
+        : "text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_9%,transparent)] border-[color-mix(in_srgb,var(--accent)_22%,var(--line))]"
     }`}>
       {isOAuth ? "OAuth" : "API key"}
     </span>
@@ -240,11 +240,11 @@ function InlineRequirementRow({
 
   if (isReady) {
     return (
-      <div className="rounded-[var(--radius-button)] border border-border bg-[#f0fdf4] p-3 space-y-2">
+      <div className="rounded-[var(--radius-button)] border border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] p-3 space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-[#16a34a] flex-shrink-0" />
-            <span className="text-sm font-medium text-[#15803d]">{app.displayName}</span>
+            <CheckCircle2 className="w-4 h-4 text-[var(--positive)] flex-shrink-0" />
+            <span className="text-sm font-medium text-[var(--positive)]">{app.displayName}</span>
             {methodToggle}
           </div>
           {isOAuth ? (
@@ -459,7 +459,7 @@ export function RequirementsEditor({
           <CardTitle className="text-sm font-medium">
             {allReady ? (
               <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-[#16a34a]" />
+                <CheckCircle2 className="w-4 h-4 text-[var(--positive)]" />
                 Requirements ready
               </span>
             ) : "Set up requirements"}
@@ -476,7 +476,7 @@ export function RequirementsEditor({
           </p>
         )}
         {skipped && (
-          <p className="text-xs text-amber-600 mt-0.5">
+          <p className="mt-0.5 text-xs text-[var(--warning)]">
             Skipped. You can configure these later in Settings / Connections.
           </p>
         )}
@@ -523,8 +523,8 @@ export function RequirementsEditor({
                           <span className="text-sm font-medium text-foreground">{appData.displayName}</span>
                           {c.connected ? (
                             <div className="flex items-center gap-2">
-                              <CheckCircle2 className="w-4 h-4 text-[#16a34a]" />
-                              <span className="text-xs text-[#16a34a]">Connected</span>
+                              <CheckCircle2 className="w-4 h-4 text-[var(--positive)]" />
+                              <span className="text-xs text-[var(--positive)]">Connected</span>
                             </div>
                           ) : (
                             <Button

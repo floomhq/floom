@@ -461,7 +461,7 @@ function ContextsPage() {
       {/* Page header */}
       <div className="flex items-start justify-between gap-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Contexts</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Brain</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Reusable knowledge packs your workers can read before they act.
           </p>
@@ -472,7 +472,7 @@ function ContextsPage() {
         </Button>
       </div>
 
-      {/* New context inline form */}
+      {/* New brain-pack inline form */}
       {showNewContext && (
         <div className="shrink-0 flex items-center gap-2 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] px-3 py-2">
           <Input

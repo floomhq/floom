@@ -63,7 +63,7 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
           </div>
         </div>
         {detectedEntry === "none" && (
-          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-[var(--radius-button)] px-3 py-2">
+          <p className="rounded-[var(--radius-button)] border border-[color-mix(in_srgb,var(--warning)_28%,var(--line))] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">
             Add SKILL.md (agent) or run.py (script) to the file list to set the entry point.
           </p>
         )}
