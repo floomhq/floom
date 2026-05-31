@@ -8,6 +8,25 @@ from threading import Lock
 from typing import Iterable
 from urllib.parse import urljoin
 
+# ---------------------------------------------------------------------------
+# Short-lived in-process caches to avoid a Supabase round-trip on every
+# authenticated request.
+#
+# PAT cache: hash → (user_id, cached_at). TTL 60 s — PAT revocation takes
+# effect within one minute, which is acceptable for an API token.
+#
+# Workspace cache: user_id → (workspace_id, cached_at). TTL 30 s — workspace
+# switches are infrequent; stale workspace selection for <30 s is fine.
+#
+# Both caches are process-local dicts protected by a single RLock so they
+# are safe under uvicorn's threaded worker model (default sync workers).
+# ---------------------------------------------------------------------------
+_cache_lock = Lock()
+_pat_cache: dict[str, tuple[str, float]] = {}   # hash → (user_id, ts)
+_ws_cache:  dict[str, tuple[str, float]] = {}   # user_id → (workspace_id, ts)
+_PAT_TTL = 60.0
+_WS_TTL  = 30.0
+
 import jwt
 from fastapi import HTTPException, Request
 
@@ -178,14 +197,35 @@ class SupabaseAuthProvider:
         )
 
     async def _verify_pat(self, raw: str, request: Request) -> AuthContext:
+        token_hash = _hash_token(raw)
+        now = time.time()
+
+        # Fast path: PAT already in cache and not expired.
+        with _cache_lock:
+            cached = _pat_cache.get(token_hash)
+        if cached and (now - cached[1]) < _PAT_TTL:
+            user_id = cached[0]
+            return await self._resolve_workspace_and_build_context(
+                user_id=user_id, email=None, scopes=("api",), request=request
+            )
+
+        # Slow path: DB lookup (one round-trip to Supabase).
         from apps.api.db.supabase_repos import SupabaseApiTokenRepository
         repo = SupabaseApiTokenRepository()
-        token_hash = _hash_token(raw)
         row = repo.get_by_hash(token_hash)
         if not row:
+            # Evict stale cache entry on explicit miss (token was revoked).
+            with _cache_lock:
+                _pat_cache.pop(token_hash, None)
             raise HTTPException(status_code=401, detail="invalid token")
-        repo.touch(token_id=str(row["id"]))
+
         user_id = str(row["user_id"])
+        with _cache_lock:
+            _pat_cache[token_hash] = (user_id, now)
+
+        # Touch last_used_at at most once per cache TTL, not on every request.
+        repo.touch(token_id=str(row["id"]))
+
         return await self._resolve_workspace_and_build_context(
             user_id=user_id, email=None, scopes=("api",), request=request
         )
@@ -210,19 +250,32 @@ class SupabaseAuthProvider:
         requested_workspace_id = (
             (header_workspace_id or "").strip() or cookie_workspace_id
         )
-        try:
-            active = workspace_repo.resolve_active_workspace(
-                user_id=user_id,
-                email=email,
-                requested_id=requested_workspace_id,
-            )
-            set_active_workspace_id(str(active["id"]))
-        except Exception:
-            # If workspace resolution fails (e.g. transient Supabase
-            # error), fall back to user-scoped behavior so the request
-            # doesn't 500. Repos will scope by user_id when contextvar
-            # is None.
-            set_active_workspace_id(None)
+
+        # Cache key includes the requested workspace so explicit switches
+        # (workspace switcher, CLI --workspace flag) are not served stale.
+        ws_cache_key = f"{user_id}:{requested_workspace_id or ''}"
+        now = time.time()
+        workspace_id: str | None = None
+
+        with _cache_lock:
+            ws_cached = _ws_cache.get(ws_cache_key)
+        if ws_cached and (now - ws_cached[1]) < _WS_TTL:
+            workspace_id = ws_cached[0]
+        else:
+            try:
+                active = workspace_repo.resolve_active_workspace(
+                    user_id=user_id,
+                    email=email,
+                    requested_id=requested_workspace_id,
+                )
+                workspace_id = str(active["id"])
+                with _cache_lock:
+                    _ws_cache[ws_cache_key] = (workspace_id, now)
+            except Exception:
+                # Transient Supabase error — fall back to user-scoped behavior.
+                workspace_id = None
+
+        set_active_workspace_id(workspace_id)
 
         return AuthContext(
             user_id=user_id,
