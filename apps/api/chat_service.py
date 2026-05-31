@@ -351,7 +351,7 @@ def _workspace_tools(user_id: str) -> List[Any]:
         ),
         _make_tool(
             "secrets__list_names",
-            "List secret names (never values).",
+            "List secret names and status metadata. Never returns secret values.",
             {"type": "object", "properties": {}, "required": []},
             _tool_secrets_list_names,
         ),
@@ -370,7 +370,7 @@ def _workspace_tools(user_id: str) -> List[Any]:
         ),
         _make_tool(
             "connections__list",
-            "List all connections (Composio and MCP).",
+            "List all connections with app, account label, status, scopes, and MCP tool allowlists.",
             {"type": "object", "properties": {}, "required": []},
             _tool_connections_list,
         ),
@@ -391,7 +391,7 @@ def _workspace_tools(user_id: str) -> List[Any]:
         ),
         _make_tool(
             "contexts__list",
-            "List all brain packs.",
+            "List all brain packs with file counts and top-level file names.",
             {"type": "object", "properties": {}, "required": []},
             _tool_contexts_list,
         ),
@@ -729,8 +729,22 @@ def _tool_runs_cancel(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 def _tool_secrets_list_names(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from db import get_repositories
     repos = get_repositories()
-    names = repos.secrets.list_names(user_id=user_id)
-    return {"ok": True, "names": sorted(names)}
+    rows = repos.secrets.list(user_id=user_id)
+    secrets = []
+    for row in rows:
+        item = dict(row)
+        secrets.append({
+            "name": item.get("name"),
+            "status": item.get("status") or ("set" if item.get("value") else "missing"),
+            "last_used_at": item.get("last_used_at"),
+            "last_checked_at": item.get("last_checked_at"),
+            "last_check_status": item.get("last_check_status"),
+        })
+    return {
+        "ok": True,
+        "names": sorted(s["name"] for s in secrets if s.get("name")),
+        "secrets": sorted(secrets, key=lambda s: str(s.get("name") or "")),
+    }
 
 
 def _tool_secrets_set(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -764,14 +778,35 @@ def _tool_connections_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
     connections = repos.connections.list(user_id=user_id)
     result = []
     for c in connections:
+        raw_scopes = c.get("scopes_json")
+        try:
+            scopes = json.loads(raw_scopes or "[]")
+        except Exception:
+            scopes = []
+        if not isinstance(scopes, list):
+            scopes = []
+        raw_allowed_tools = c.get("mcp_allowed_tools_json")
+        try:
+            allowed_tools = json.loads(raw_allowed_tools or "[]")
+        except Exception:
+            allowed_tools = []
+        if not isinstance(allowed_tools, list):
+            allowed_tools = []
+        account_label = c.get("display_name") or c.get("account_label")
         result.append({
             "id": c.get("id"),
             "kind": c.get("kind") or "composio",
             "app_name": c.get("app_name"),
             "status": c.get("status"),
+            "account_label": account_label,
+            "display_name": account_label,
+            "scopes": [scope for scope in scopes if isinstance(scope, str)],
+            "last_checked_at": c.get("last_checked_at"),
+            "last_check_status": c.get("last_check_status"),
             "mcp_label": c.get("mcp_label"),
             "mcp_url": c.get("mcp_url"),
-            "account_label": c.get("account_label"),
+            "mcp_auth_secret": c.get("mcp_auth_secret"),
+            "mcp_allowed_tools": [tool for tool in allowed_tools if isinstance(tool, str)],
         })
     return {"ok": True, "connections": result, "count": len(result)}
 
@@ -816,7 +851,12 @@ def _tool_contexts_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         for ctx_dir in sorted(CONTEXTS_DIR.iterdir()):
             if ctx_dir.is_dir():
                 files = list(iter_context_files(ctx_dir))
-                result.append({"name": ctx_dir.name, "file_count": len(files)})
+                result.append({
+                    "name": ctx_dir.name,
+                    "file_count": len(files),
+                    "files": [str(path.relative_to(ctx_dir)) for path in files[:25]],
+                    "truncated": len(files) > 25,
+                })
     return {"ok": True, "contexts": result}
 
 
@@ -927,6 +967,24 @@ def _build_workspace_preamble(user_id: str) -> str:
         if CONTEXTS_DIR.is_dir():
             context_names = [d.name for d in sorted(CONTEXTS_DIR.iterdir()) if d.is_dir()]
 
+        # Connections and secrets inventory. Keep this compact; the tools expose
+        # full metadata without secret values.
+        connection_lines: list[str] = []
+        secret_names: list[str] = []
+        try:
+            from db import get_repositories
+            repos = get_repositories()
+            for c in repos.connections.list(user_id=user_id):
+                app_name = c.get("app_name") or "connection"
+                status = c.get("status") or "unknown"
+                account = c.get("display_name") or c.get("account_label")
+                label = f"{app_name} · {account}" if account else str(app_name)
+                connection_lines.append(f"  {label} ({status})")
+            secret_names = sorted(repos.secrets.list_names(user_id=user_id))
+        except Exception:
+            connection_lines = []
+            secret_names = []
+
         # Pending approvals count
         try:
             with get_db() as _conn:
@@ -945,6 +1003,11 @@ def _build_workspace_preamble(user_id: str) -> str:
             "- Runs (last 24h):",
         ]
         preamble_lines.extend(run_lines if run_lines else ["  (none)"])
+        preamble_lines.append("- Connections:")
+        preamble_lines.extend(connection_lines if connection_lines else ["  (none)"])
+        preamble_lines.append(
+            f"- Secret names: {', '.join(secret_names) if secret_names else '(none)'}"
+        )
         preamble_lines.append(f"- Brain packs: {', '.join(context_names) if context_names else '(none)'}")
         if pending_approvals > 0:
             preamble_lines.append(

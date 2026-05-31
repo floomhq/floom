@@ -1128,6 +1128,7 @@ export default function WorkerDetailPage() {
         {activeSection === "connections" && (
           <ConnectionsSection
             worker={worker}
+            connections={connections}
             requiredConnections={requiredConnections}
             configuredMcpConnections={configuredMcpConnections}
             activeConnectionSlugs={activeConnectionSlugs}
@@ -1471,12 +1472,14 @@ function RunSection({
 
 function ConnectionsSection({
   worker,
+  connections,
   requiredConnections,
   configuredMcpConnections,
   activeConnectionSlugs,
   requiredSecrets,
 }: {
   worker: WorkerDetail;
+  connections: ConnectionItem[];
   requiredConnections: string[];
   configuredMcpConnections: {
     label: string;
@@ -1496,12 +1499,35 @@ function ConnectionsSection({
           <h2 className="text-base font-semibold text-foreground">Required connections</h2>
           <ul className="space-y-2">
             {requiredConnections.map((slug) => {
-              const isActive = activeConnectionSlugs.has(slug.toLowerCase());
+              const slugKey = slug.toLowerCase();
+              const appConnections = connections.filter(
+                (connection) =>
+                  connection.kind !== "mcp" &&
+                  connection.app_name.toLowerCase() === slugKey,
+              );
+              const activeConnections = appConnections.filter(
+                (connection) => connection.status === "active",
+              );
+              const isActive = activeConnectionSlugs.has(slugKey);
+              const connectionLabel = activeConnections
+                .map((connection) => connection.display_name || connection.account_label)
+                .filter(Boolean)
+                .join(", ");
+              const latestStatus = appConnections[0]?.status;
               return (
                 <li key={slug} className="flex items-center justify-between py-2 border-b border-line last:border-0">
-                  <span className="text-sm capitalize font-medium">{slug}</span>
+                  <div className="min-w-0">
+                    <span className="block text-sm capitalize font-medium">{slug}</span>
+                    {connectionLabel ? (
+                      <span className="block truncate text-xs text-muted-foreground">{connectionLabel}</span>
+                    ) : latestStatus ? (
+                      <span className="block truncate text-xs text-muted-foreground">Status: {latestStatus}</span>
+                    ) : null}
+                  </div>
                   {isActive ? (
-                    <span className="text-xs text-muted-foreground">Active</span>
+                    <Badge variant="outline" className="text-xs border-line text-muted-foreground">
+                      Active
+                    </Badge>
                   ) : (
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="text-xs text-amber-600 border-amber-200 bg-amber-50">

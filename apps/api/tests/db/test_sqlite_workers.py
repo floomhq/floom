@@ -37,3 +37,21 @@ def test_worker_repo_scopes_crud_by_user(repo_bundle):
     assert repos.workers.delete(user_id="user-a", worker_id="worker-a") is True
     assert repos.workers.get(user_id="user-a", worker_id="worker-a") is None
     assert repos.workers.get(user_id="user-b", worker_id="worker-b") is not None
+
+
+def test_worker_repo_treats_cron_alias_as_scheduled(repo_bundle):
+    repos, _db, manifest = repo_bundle
+
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="cron-worker",
+        name="Cron Worker",
+        manifest_json=manifest("cron-worker", "Cron Worker"),
+        bundle_path="workers/cron-worker",
+        trigger_type="cron",
+        cron_expr="0 7 * * *",
+    )
+
+    scheduled = repos.workers.list_scheduled()
+    assert [item["id"] for item in scheduled] == ["cron-worker"]
+    assert scheduled[0]["cron_expr"] == "0 7 * * *"

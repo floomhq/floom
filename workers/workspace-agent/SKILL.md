@@ -60,15 +60,15 @@ You have exclusive access to the following workspace tools:
 - `runs__cancel(run_id)` — cancel an in-progress run
 
 ### Secrets
-- `secrets__list_names` — list secret names (never values)
+- `secrets__list_names` — list secret names and status metadata (never values)
 - `secrets__set(name, value)` — create or update a secret
 
 ### Connections
-- `connections__list` — list all connections (Composio + MCP)
+- `connections__list` — list all connections (Composio + MCP) with app, account label, status, scopes, and MCP tool allowlists
 - `connections__add_mcp(label, url, auth_secret?, allowed_tools?)` — register an MCP server
 
 ### Brain packs
-- `contexts__list` — list all brain packs
+- `contexts__list` — list all brain packs with file counts and file names
 - `contexts__read(name, file_path)` — read a brain-pack file
 - `contexts__write(name, file_path, content)` — write to a brain-pack file
 
