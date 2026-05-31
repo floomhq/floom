@@ -205,6 +205,7 @@ export interface WorkerSummary {
   recent_stats?: RecentStats | null;
   timeseries?: TimeseriesDay[] | null;
   connections: string[];  // Composio app slugs declared in worker.yml
+  inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
 }
 

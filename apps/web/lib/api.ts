@@ -79,6 +79,26 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+async function fetchText(path: string, options?: RequestInit): Promise<string> {
+  const headers = withWorkspaceHeaders(options?.headers);
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+  });
+  if (!res.ok) {
+    let err = "";
+    try {
+      const body = await res.json();
+      err = body.detail || JSON.stringify(body);
+    } catch {
+      err = "";
+    }
+    throw new Error(err || res.statusText || `HTTP ${res.status}`);
+  }
+  if (res.status === 204) return "";
+  return res.text();
+}
+
 async function fetchRaw(path: string, options?: RequestInit): Promise<Response> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -301,6 +321,14 @@ export const api = {
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("./types").WorkspaceAgentInfo>("/system/workspace-agent"),
+    workspaceInstructions: () =>
+      fetchText("/workspace"),
+    updateWorkspaceInstructions: (content: string) =>
+      fetchText("/workspace", {
+        method: "PUT",
+        headers: { "Content-Type": "text/markdown" },
+        body: content,
+      }),
   },
   connections: {
     list: () => fetchJson<import("./types").ConnectionItem[]>("/connections"),

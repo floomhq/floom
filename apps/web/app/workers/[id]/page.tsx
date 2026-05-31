@@ -72,7 +72,7 @@ function isValidSection(s: string): s is Section {
 }
 
 // P2-3: the URL hash must match the visible tab label, not the internal
-// Section id. Labels: About / Run / Triggers / History / Apps / Source.
+// Section id. Labels: About / Run / Triggers / History / Connections / Source.
 // Internal ids stay stable (runs/connections/code) for back-compat; only the
 // hash slug the user sees/links changes.
 const SECTION_TO_HASH: Record<Section, string> = {
@@ -80,7 +80,7 @@ const SECTION_TO_HASH: Record<Section, string> = {
   run: "run",
   triggers: "triggers",
   runs: "history",
-  connections: "apps",
+  connections: "connections",
   code: "source",
 };
 const HASH_TO_SECTION: Record<string, Section> = {
@@ -89,6 +89,7 @@ const HASH_TO_SECTION: Record<string, Section> = {
   triggers: "triggers",
   history: "runs",
   apps: "connections",
+  connection: "connections",
   source: "code",
   // legacy hashes still resolve so old deep-links keep working
   runs: "runs",
@@ -115,7 +116,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
   { id: "triggers", label: "Triggers", icon: <Clock className="w-4 h-4" /> },
   { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
-  { id: "connections", label: "Apps", icon: <Plug2 className="w-4 h-4" /> },
+  { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
   { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
 ];
 
@@ -309,7 +310,7 @@ export default function WorkerDetailPage() {
         });
         setInputs(defaults);
         const files = deriveSourceFiles(w);
-        const defaultFile = files.find((f) => f.path === "SKILL.md") || files.find((f) => f.path === "worker.yml") || files[0];
+        const defaultFile = files.find((f) => f.path === "worker.yml") || files.find((f) => f.path === "SKILL.md") || files[0];
         if (defaultFile) setSelectedFile(defaultFile.path);
         // S42: init edit-mode file state
         const editableFiles = files
@@ -974,7 +975,7 @@ export default function WorkerDetailPage() {
       </Dialog>
 
       {/* Top tabs (shadcn). MOBILE-375: the 6-tab bar (About/Run/Triggers/
-          History/Apps/Source) is `inline-flex w-fit whitespace-nowrap` — it
+          History/Connections/Source) is `inline-flex w-fit whitespace-nowrap` — it
           cannot shrink below its content width and at 375 it forced the whole
           page wider than the viewport (Federico's screenshot: title cut off
           on the left, tabs pushed off-screen, page-level horizontal scroll).
@@ -1492,7 +1493,7 @@ function ConnectionsSection({
     <div className="max-w-xl space-y-8">
       {requiredConnections.length > 0 ? (
         <section className="space-y-3">
-          <h2 className="text-base font-semibold text-foreground">Required integrations</h2>
+          <h2 className="text-base font-semibold text-foreground">Required connections</h2>
           <ul className="space-y-2">
             {requiredConnections.map((slug) => {
               const isActive = activeConnectionSlugs.has(slug.toLowerCase());
@@ -1519,7 +1520,7 @@ function ConnectionsSection({
           </ul>
         </section>
       ) : (
-        <p className="text-sm text-muted-foreground">This worker requires no integrations.</p>
+        <p className="text-sm text-muted-foreground">This worker requires no connections.</p>
       )}
 
       {configuredMcpConnections.length > 0 && (

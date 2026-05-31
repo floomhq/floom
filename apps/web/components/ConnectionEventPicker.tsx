@@ -16,8 +16,8 @@ import { api } from "@/lib/api";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import type { ConnectionItem, ComposioTriggerItem } from "@/lib/types";
+import { getSupportedApp } from "@/components/connections/connection-data";
 
 function triggerEventId(item: ComposioTriggerItem): string {
   return item.event || item.slug || item.id || item.name || "";
@@ -25,17 +25,6 @@ function triggerEventId(item: ComposioTriggerItem): string {
 
 function triggerLabel(item: ComposioTriggerItem): string {
   return item.display_name || item.name || triggerEventId(item);
-}
-
-function triggerAppSlug(item: ComposioTriggerItem): string {
-  const loose = item as unknown as { toolkit_slug?: string; app_name?: string };
-  return (
-    item.toolkit?.slug ||
-    item.app?.slug ||
-    loose.toolkit_slug ||
-    loose.app_name ||
-    ""
-  ).toLowerCase();
 }
 
 interface ConnectionEventPickerProps {
@@ -138,8 +127,14 @@ export function ConnectionEventPicker({
   }
 
   function appDisplayName(slug: string): string {
-    const conn = activeConnections.find((c) => c.app_name.toLowerCase() === slug);
-    return conn?.display_name || slug.charAt(0).toUpperCase() + slug.slice(1);
+    return getSupportedApp(slug).displayName;
+  }
+
+  function connectionAccountLabel(conn: ConnectionItem): string {
+    const app = appDisplayName(conn.app_name.toLowerCase());
+    const account = conn.display_name || conn.account_label;
+    if (account) return `${app} · ${account}`;
+    return `${app} · account ending ${conn.composio_connection_id.slice(-6)}`;
   }
 
   if (loadingConnections) {
@@ -198,9 +193,11 @@ export function ConnectionEventPicker({
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground ">Event</Label>
           {loadingTriggers ? (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Loading events...
+            <div className="space-y-1.5 py-1" aria-label={`Loading ${appDisplayName(selectedApp)} events`}>
+              <div className="h-8 rounded-[var(--radius-button)] border border-border bg-muted/50" />
+              <p className="text-xs text-muted-foreground">
+                Loading {appDisplayName(selectedApp)} events...
+              </p>
             </div>
           ) : triggers.length === 0 ? (
             <p className="text-xs text-muted-foreground">No events found for this integration.</p>
@@ -236,12 +233,16 @@ export function ConnectionEventPicker({
           <Label className="text-xs text-muted-foreground ">Account</Label>
           <Select value={composioConnectionId} onValueChange={(v) => onConnectionIdChange(v ?? "")}>
             <SelectTrigger className="w-full border-border">
-              <SelectValue placeholder="Select account" />
+              <SelectValue placeholder="Select account">
+                {composioConnectionId
+                  ? connectionAccountLabel(appConnections.find((conn) => conn.composio_connection_id === composioConnectionId) || appConnections[0])
+                  : null}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent className="z-50">
               {appConnections.map((conn) => (
                 <SelectItem key={conn.composio_connection_id} value={conn.composio_connection_id}>
-                  {conn.account_label || conn.composio_connection_id}
+                  {connectionAccountLabel(conn)}
                 </SelectItem>
               ))}
             </SelectContent>
