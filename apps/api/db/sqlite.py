@@ -634,7 +634,7 @@ class SqliteWorkerRepository:
                 """
                 SELECT id, owner_id, cron_expr, next_run_at
                 FROM workers
-                WHERE enabled = 1 AND trigger_type = 'schedule'
+                WHERE enabled = 1 AND trigger_type IN ('schedule', 'cron', 'scheduled')
                 ORDER BY created_at, id
                 """
             ).fetchall()

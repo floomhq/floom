@@ -161,6 +161,8 @@ trigger:
     allowed_methods: ["POST"]
 ```
 
+Use `type: "schedule"` for cron-based workers. `type: "cron"` is a legacy alias that the engine accepts, but templates and new worker drafts must not emit it.
+
 ## Contexts (read-only knowledge mounts)
 
 ```yaml
@@ -177,6 +179,8 @@ connections:
   - "gmail"
   - "slack"
 ```
+
+Connection selection is account-aware. Check the current workspace inventory before choosing an app: `connections__list` reports app slug, account label, status, scopes, and MCP allowed tools. If a worker only needs read actions, expose only read tools in the runner/session. If the token itself must be read-only, use a separate Composio readonly auth config such as `gmail.readonly`.
 
 ## Secrets
 

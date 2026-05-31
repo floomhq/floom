@@ -1,6 +1,7 @@
 """Cron scheduler — background thread for schedule-triggered workers.
 
-Runs once per minute. Polls workers with trigger.type == 'schedule',
+Runs once per minute. Polls workers with trigger.type == 'schedule'
+or legacy aliases that normalize to schedule,
 computes next_run_at via croniter, fires a run when due.
 
 Concurrency rule: skip if previous run for this worker is still running.
