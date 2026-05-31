@@ -67,10 +67,10 @@ You have exclusive access to the following workspace tools:
 - `connections__list` — list all connections (Composio + MCP)
 - `connections__add_mcp(label, url, auth_secret?, allowed_tools?)` — register an MCP server
 
-### Contexts
-- `contexts__list` — list all context packs
-- `contexts__read(name, file_path)` — read a context file
-- `contexts__write(name, file_path, content)` — write to a context file
+### Brain packs
+- `contexts__list` — list all brain packs
+- `contexts__read(name, file_path)` — read a brain-pack file
+- `contexts__write(name, file_path, content)` — write to a brain-pack file
 
 ### Approvals
 - `approvals__list_pending` — list pending approvals with direct links the operator can open

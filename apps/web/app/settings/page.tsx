@@ -31,7 +31,7 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 // to "api" when a hidden tab is requested.
 type TabKey = "api" | "system" | "assistant" | "notifications" | "appearance" | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "assistant", "appearance", "danger"];
+const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "appearance", "danger"];
 const TAB_KEYS: TabKey[] = ["api", "system", "assistant", "notifications", "appearance", "danger"];
 
 function isValidTab(value: string | null): value is TabKey {
@@ -100,6 +100,12 @@ function SettingsContent() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (window.location.hash.replace(/^#/, "") === "assistant") {
+      window.location.replace("/assistant#instructions");
+    }
+  }, []);
 
   // Keep state in sync with the URL hash for deep-links and back/forward.
   useEffect(() => {
@@ -251,7 +257,6 @@ function SettingsContent() {
         <TabsList>
           <TabsTrigger value="api">API access</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
-          <TabsTrigger value="assistant">Workspace agent</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
           <TabsTrigger value="danger">Danger zone</TabsTrigger>
         </TabsList>
@@ -347,7 +352,7 @@ function SettingsContent() {
             <h2 className="text-sm font-medium text-muted-foreground">Workspace agent</h2>
             <p className="text-sm text-muted-foreground">
               This is the assistant behind <code className="text-foreground">/chat</code>. It reads
-              your workspace and can manage workers, runs, secrets, connections, contexts, and
+              your workspace and can manage workers, runs, secrets, connections, brain packs, and
               approvals on your behalf. The instructions and tools below are read-only.
             </p>
           </section>

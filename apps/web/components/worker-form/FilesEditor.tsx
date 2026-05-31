@@ -9,8 +9,10 @@ import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Editor from "react-simple-code-editor";
+import { load as parseYaml } from "js-yaml";
 import "highlight.js/styles/github.css";
 import type { WorkerFile } from "@/lib/types";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ---------------------------------------------------------------------------
 // Language detection helpers
@@ -207,6 +209,8 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
               <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px]">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content || ""}</ReactMarkdown>
               </div>
+            ) : selected.language === "yaml" && selected.path.endsWith("worker.yml") ? (
+              <WorkerYamlView content={selected.content || ""} />
             ) : (
               <SyntaxHighlightedCode content={selected.content || ""} language={selected.language} />
             )}
@@ -216,6 +220,148 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
         )}
       </div>
     </div>
+  );
+}
+
+function WorkerYamlView({ content }: { content: string }) {
+  const parsed = parseWorkerYaml(content);
+  if (!parsed) {
+    return <SyntaxHighlightedCode content={content} language="yaml" />;
+  }
+
+  const entries = [
+    ["ID", parsed.name],
+    ["Title", parsed.title],
+    ["Trigger", triggerLabel(parsed.trigger)],
+    ["Runtime", runtimeLabel(parsed.exec ?? parsed.runtime)],
+    ["Inputs", countLabel(parsed.inputs, "input")],
+    ["Connections", countLabel(parsed.connections, "connection")],
+    ["Brain packs", countLabel(parsed.contexts, "brain pack")],
+    ["Secrets", countLabel(parsed.secrets, "secret")],
+  ].filter(([, value]) => value);
+
+  return (
+    <Tabs defaultValue="preview" className="bg-muted/20">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
+        <div>
+          <p className="text-xs font-medium text-foreground">Worker manifest</p>
+          <p className="text-[11px] text-muted-foreground">Readable preview with raw YAML one tab away.</p>
+        </div>
+        <TabsList>
+          <TabsTrigger value="preview">Preview</TabsTrigger>
+          <TabsTrigger value="raw">Raw</TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent value="preview" className="m-0 max-h-[640px] overflow-auto p-4">
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-base font-semibold text-foreground">{parsed.title || parsed.name || "Untitled worker"}</h3>
+            {parsed.description ? (
+              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{parsed.description}</p>
+            ) : null}
+          </div>
+          <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] border border-line bg-line text-sm sm:grid-cols-2">
+            {entries.map(([label, value]) => (
+              <div key={label} className="bg-card px-3 py-2">
+                <dt className="text-[11px] font-medium uppercase text-muted-foreground">{label}</dt>
+                <dd className="mt-0.5 truncate text-foreground" title={String(value)}>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <YamlList title="Inputs" items={parsed.inputs} getLabel={(item) => itemLabel(item)} />
+          <YamlList title="Connections" items={parsed.connections} getLabel={(item) => itemLabel(item)} />
+          <YamlList title="Brain packs" items={parsed.contexts} getLabel={(item) => itemLabel(item)} />
+        </div>
+      </TabsContent>
+      <TabsContent value="raw" className="m-0">
+        <SyntaxHighlightedCode content={content} language="yaml" />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+type WorkerYaml = Record<string, unknown> & {
+  name?: string;
+  title?: string;
+  description?: string;
+  trigger?: unknown;
+  exec?: unknown;
+  runtime?: unknown;
+  inputs?: unknown[];
+  connections?: unknown[];
+  contexts?: unknown[];
+  secrets?: unknown[];
+};
+
+function parseWorkerYaml(content: string): WorkerYaml | null {
+  try {
+    const parsed = parseYaml(content);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as WorkerYaml;
+  } catch {
+    return null;
+  }
+}
+
+function countLabel(value: unknown, singular: string) {
+  const count = Array.isArray(value) ? value.length : 0;
+  if (count === 0) return "";
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function triggerLabel(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  const type = String((value as Record<string, unknown>).type || "manual");
+  const cron = (value as Record<string, unknown>).cron;
+  return cron ? `${type} · ${cron}` : type;
+}
+
+function runtimeLabel(value: unknown) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value !== "object") return "";
+  const raw = value as Record<string, unknown>;
+  return [raw.runtime || raw.type, raw.command || raw.entry].filter(Boolean).join(" · ");
+}
+
+function itemLabel(value: unknown) {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  const raw = value as Record<string, unknown>;
+  if (raw.name) return String(raw.name);
+  if (raw.label) return String(raw.label);
+  if (raw.type) return String(raw.type);
+  if (raw.mcp && typeof raw.mcp === "object") {
+    return String((raw.mcp as Record<string, unknown>).label || "MCP server");
+  }
+  return JSON.stringify(raw);
+}
+
+function YamlList({
+  title,
+  items,
+  getLabel,
+}: {
+  title: string;
+  items?: unknown[];
+  getLabel: (item: unknown) => string;
+}) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return (
+    <section className="space-y-2">
+      <h4 className="text-xs font-medium uppercase text-muted-foreground">{title}</h4>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((item, index) => (
+          <span
+            key={`${title}-${index}`}
+            className="rounded-[var(--radius-button)] border border-line bg-card px-2 py-1 text-xs text-foreground"
+            title={getLabel(item)}
+          >
+            {getLabel(item)}
+          </span>
+        ))}
+      </div>
+    </section>
   );
 }
 

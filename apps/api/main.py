@@ -3520,6 +3520,13 @@ def list_workers(
             _raw_runtime.get("type") if isinstance(_raw_runtime, dict)
             else (str(_raw_runtime) if _raw_runtime else None)
         )
+        _inputs = []
+        for _raw_input in _worker_config_dict.get("inputs") or []:
+            if isinstance(_raw_input, dict):
+                try:
+                    _inputs.append(WorkerInput(**_raw_input))
+                except Exception:
+                    continue
 
         result.append(
             WorkerSummary(
@@ -3547,6 +3554,7 @@ def list_workers(
                 timeseries=None if list_shape else timeseries,
                 # B7: always include connection slugs and runtime for worker card tool strip.
                 connections=_conn_slugs,
+                inputs=_inputs,
                 runtime=_runtime_type,
             )
         )
