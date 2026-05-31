@@ -128,6 +128,48 @@ const NAV_ITEMS: NavItem[] = [
 // dir isn't on disk in that deploy layout), but the source IS present in the
 // dedicated content fields (run_py_content / skill_md_content / manifest_yaml).
 // Build a WorkerFile[] from those fields so the Source tab actually renders.
+// Patches or inserts a `default:` field for a named input inside a worker.yml string.
+function patchInputDefault(yaml: string, inputName: string, value: string): string {
+  const lines = yaml.split('\n');
+  let inTargetBlock = false;
+  let fieldIndent = '      ';
+  let defaultLineIdx = -1;
+  let lastFieldIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    const indent = line.length - trimmed.length;
+
+    if (trimmed.startsWith('- name:')) {
+      if (inTargetBlock) break;
+      const nameVal = trimmed.slice('- name:'.length).trim().replace(/^["']|["']$/g, '');
+      if (nameVal === inputName) {
+        inTargetBlock = true;
+        fieldIndent = ' '.repeat(indent + 2);
+        lastFieldIdx = i;
+      }
+    } else if (inTargetBlock) {
+      if (trimmed !== '' && indent < fieldIndent.length) break;
+      if (trimmed.startsWith('default:')) {
+        defaultLineIdx = i;
+      }
+      if (trimmed && !trimmed.startsWith('#')) {
+        lastFieldIdx = i;
+      }
+    }
+  }
+
+  if (!inTargetBlock) return yaml;
+
+  if (defaultLineIdx >= 0) {
+    lines[defaultLineIdx] = `${fieldIndent}default: ${JSON.stringify(value)}`;
+  } else {
+    lines.splice(lastFieldIdx + 1, 0, `${fieldIndent}default: ${JSON.stringify(value)}`);
+  }
+  return lines.join('\n');
+}
+
 function deriveSourceFiles(worker: WorkerDetail | null): WorkerFile[] {
   if (!worker) return [];
   if (worker.files && worker.files.length > 0) return worker.files;
@@ -207,6 +249,10 @@ export default function WorkerDetailPage() {
 
   // S42: saving state
   const [saving, setSaving] = useState(false);
+
+  // Setup defaults: fill in missing defaults for scheduled workers
+  const [setupDefaults, setSetupDefaults] = useState<Record<string, string>>({});
+  const [savingDefaults, setSavingDefaults] = useState(false);
 
   // P1-C (prove100 2026-05-30): worker actions — Archive (reversible) and
   // Delete (destructive, confirm-gated). The API exposed both DELETE and a
@@ -524,6 +570,12 @@ export default function WorkerDetailPage() {
   // S42: save all edit-mode changes (metadata + files)
   async function handleSave() {
     if (!worker) return;
+    // Warn if saving a scheduled worker that still has required inputs without defaults.
+    if (incompleteScheduledInputs.length > 0) {
+      toast.warning(
+        `Scheduled runs will fail: set default values for ${incompleteScheduledInputs.map((i) => i.name).join(", ")} in the setup banner above.`
+      );
+    }
     setSaving(true);
     try {
       const patchedFiles: { path: string; content: string }[] = [...editFiles];
@@ -595,6 +647,38 @@ export default function WorkerDetailPage() {
       toast.error(e instanceof Error ? e.message : "Failed to save triggers");
     } finally {
       setSavingTriggers(false);
+    }
+  }
+
+  async function handleSaveDefaults() {
+    if (!worker) return;
+    setSavingDefaults(true);
+    try {
+      const currentYml =
+        deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
+        worker.manifest_yaml || "";
+      let patched = currentYml;
+      for (const [name, value] of Object.entries(setupDefaults)) {
+        if (value.trim()) {
+          patched = patchInputDefault(patched, name, value.trim());
+        }
+      }
+      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      toast.success("Defaults saved — scheduled runs will now use these values");
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      setSetupDefaults({});
+      const updatedFiles = (updated.files || [])
+        .filter((f: WorkerFile) => !f.binary)
+        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to save defaults");
+    } finally {
+      setSavingDefaults(false);
     }
   }
 
@@ -763,6 +847,17 @@ export default function WorkerDetailPage() {
   // no inline sample exists for a file field.
   const canApplySample = worker.config.inputs.length > 0;
   const requiredSecrets: string[] = worker.config.secrets ?? [];
+
+  // Detect scheduled workers with required inputs that have no default value.
+  // Scheduled runs are headless — they can't prompt for inputs at runtime.
+  const isScheduled = ["schedule", "cron"].includes(
+    (worker.trigger_type || worker.config?.trigger?.type || "").toLowerCase()
+  );
+  const incompleteScheduledInputs = isScheduled
+    ? (worker.config.inputs || []).filter(
+        (inp) => inp.required && (inp.default === undefined || inp.default === null || inp.default === "")
+      )
+    : [];
 
   // Summary counts for rail
   const runsCount = worker.recent_runs?.length ?? 0;
@@ -973,6 +1068,44 @@ export default function WorkerDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Setup banner: shown when a scheduled worker has required inputs with no defaults */}
+      {incompleteScheduledInputs.length > 0 && !worker.archived && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 p-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <Clock className="size-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                Finish setup to enable scheduled runs
+              </p>
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                This worker runs on a schedule but has required inputs with no default values. Scheduled runs can&apos;t prompt for inputs — set defaults below so they run automatically.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2 pl-7">
+            {incompleteScheduledInputs.map((inp) => (
+              <div key={inp.name} className="flex items-center gap-2">
+                <Label className="text-xs w-40 shrink-0 text-amber-800 dark:text-amber-300 font-mono truncate">{inp.label || inp.name}</Label>
+                <Input
+                  className="h-7 text-xs flex-1"
+                  placeholder={inp.placeholder || `Default for ${inp.name}`}
+                  value={setupDefaults[inp.name] ?? ""}
+                  onChange={(e) => setSetupDefaults((prev) => ({ ...prev, [inp.name]: e.target.value }))}
+                />
+              </div>
+            ))}
+            <Button
+              size="sm"
+              className="mt-1 h-7 text-xs"
+              disabled={savingDefaults || incompleteScheduledInputs.every((inp) => !setupDefaults[inp.name]?.trim())}
+              onClick={handleSaveDefaults}
+            >
+              {savingDefaults ? "Saving..." : "Save defaults"}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Top tabs (shadcn). MOBILE-375: the 6-tab bar (About/Run/Triggers/
           History/Connections/Source) is `inline-flex w-fit whitespace-nowrap` — it
