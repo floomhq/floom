@@ -79,6 +79,7 @@ Pick the right mode for the task:
 - Agent mode: `exec.entry: "SKILL.md"`, `exec.runtime: "skill"`, no `exec.command`
 - Script mode: `exec.entry: "run.py"`, `exec.runtime: "python311"`, `exec.command: "python run.py"`
 - `trigger.type: "manual"` — unless the prompt explicitly describes a schedule or webhook. For cron, emit `type: "schedule"`, never `type: "cron"`.
+- **Scheduled workers MUST have `default:` values for every `required: true` input.** Scheduled runs are headless — there is no user present to fill in inputs. A scheduled worker with `required: true` and no `default` will always fail with "Missing required input". Either set a realistic `default:` value, or mark the input `required: false` with a default. If you cannot determine a sensible default from the prompt, ask the user before generating.
 - Declare ALL connections the worker needs; declare NO connections it doesn't need. Use the workspace connection inventory to choose the account by app, account label, status, and scopes.
 - For read-only workers, expose only read tools in the runner/session. For true OAuth least privilege, use a separate readonly Composio auth config and connection.
 - `is_example: false` — always for new workers
