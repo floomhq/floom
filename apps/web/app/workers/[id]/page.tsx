@@ -1575,7 +1575,7 @@ function ConnectionsSection({
             {requiredSecrets.map((s) => (
               <li key={s} className="flex items-center justify-between py-2 border-b border-line last:border-0">
                 <span className="text-sm font-mono font-medium">{s}</span>
-                <Link href="/settings">
+                <Link href="/connections/secrets">
                   <Button size="sm" variant="outline" className="h-6 text-xs border-line">
                     Configure
                   </Button>
