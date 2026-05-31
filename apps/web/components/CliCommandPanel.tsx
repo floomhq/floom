@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const SECRET_STORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
 const API_BASE = "https://workers-api.floom.dev";
+const PROXY_BASE = "/api/proxy";
 
 type McpTarget = "claude" | "cursor" | "vscode" | "windsurf" | "generic";
 
@@ -44,27 +45,71 @@ function buildMcpSnippet(target: McpTarget): string {
 export function CliCommandPanel() {
   const [copiedKey, setCopiedKey] = useState("");
   const [storedSecret, setStoredSecret] = useState("");
-  const [secretInput, setSecretInput] = useState("");
   const [revealed, setRevealed] = useState(false);
   const [mcpTarget, setMcpTarget] = useState<McpTarget>("claude");
+  const [generating, setGenerating] = useState(false);
+  const [errorText, setErrorText] = useState("");
 
   useEffect(() => {
-    // Security: the OSS API secret lives only in this browser's localStorage. We do NOT
-    // fetch it from the server. A prior /api/floom-secret route returned the
-    // platform admin secret to ANY unauthenticated visitor (public credential
-    // leak); it has been removed. The user pastes their secret once below.
+    // The generated OSS token is cached in this browser so setup snippets can
+    // show the same credential the CLI receives from the device-flow endpoint.
     const stored = readStoredSecret();
     if (stored) setStoredSecret(stored);
   }, []);
 
-  function saveSecret() {
-    const value = secretInput.trim();
-    if (!value) return;
+  function storeSecret(value: string) {
     try {
       window.localStorage.setItem("floom_secret", value);
     } catch {}
     setStoredSecret(value);
-    setSecretInput("");
+  }
+
+  async function generateToken() {
+    setGenerating(true);
+    setErrorText("");
+    try {
+      const startedResponse = await fetch(`${PROXY_BASE}/cli-auth/devices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_name: "workers-settings", scopes: [] }),
+      });
+      const started = (await startedResponse.json().catch(() => ({}))) as {
+        device_code?: string;
+        user_code?: string;
+        detail?: string;
+      };
+      if (!startedResponse.ok || !started.device_code || !started.user_code) {
+        throw new Error(started.detail || "Could not start token generation");
+      }
+
+      const approvedResponse = await fetch(`${PROXY_BASE}/cli-auth/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_code: started.user_code }),
+      });
+      const approved = (await approvedResponse.json().catch(() => ({}))) as { detail?: string };
+      if (!approvedResponse.ok) {
+        throw new Error(approved.detail || "Could not approve token generation");
+      }
+
+      const polledResponse = await fetch(
+        `${PROXY_BASE}/cli-auth/poll/${encodeURIComponent(started.device_code)}`
+      );
+      const polled = (await polledResponse.json().catch(() => ({}))) as {
+        api_secret?: string;
+        detail?: string;
+      };
+      if (!polledResponse.ok || !polled.api_secret) {
+        throw new Error(polled.detail || "Generated token was not returned");
+      }
+
+      storeSecret(polled.api_secret);
+      setRevealed(true);
+    } catch (error) {
+      setErrorText(error instanceof Error ? error.message : "Could not generate token");
+    } finally {
+      setGenerating(false);
+    }
   }
 
   function clearSecret() {
@@ -72,7 +117,6 @@ export function CliCommandPanel() {
       for (const key of SECRET_STORAGE_KEYS) window.localStorage.removeItem(key);
     } catch {}
     setStoredSecret("");
-    setSecretInput("");
     setRevealed(false);
   }
 
@@ -113,12 +157,12 @@ export function CliCommandPanel() {
           section matching Setup commands below. */}
       <section className="space-y-3">
         <div>
-          <h2 className="text-base font-medium text-foreground">Saved OSS API secret</h2>
+          <h2 className="text-base font-medium text-foreground">OSS API token</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Browser-saved <code className="font-mono">FLOOM_SECRET</code>{" "}
-            for <code className="font-mono">workers-api.floom.dev</code>. Use
-            it as <code className="font-mono">x-floom-secret</code>; Cloud PATs
-            start with <code className="font-mono">floom_</code> and belong to{" "}
+            Generate a browser copy of the single-user token for{" "}
+            <code className="font-mono">workers-api.floom.dev</code>. Use it as{" "}
+            <code className="font-mono">x-floom-secret</code>; Cloud PATs start
+            with <code className="font-mono">floom_</code> and belong to{" "}
             <code className="font-mono">workeros-api.floom.dev</code>.
           </p>
         </div>
@@ -149,37 +193,36 @@ export function CliCommandPanel() {
               variant="outline"
               size="sm"
               className="h-7 px-2 text-xs"
-              onClick={clearSecret}
+              disabled={generating}
+              onClick={() => void generateToken()}
             >
               <RefreshCw className="mr-1 h-3.5 w-3.5" />
-              Replace
+              {generating ? "Refreshing" : "Refresh"}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={clearSecret}
+            >
+              Clear
             </Button>
           </div>
         ) : (
-          <div className="flex items-center gap-2">
-            <input
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="Paste the OSS FLOOM_SECRET for workers-api.floom.dev"
-              value={secretInput}
-              onChange={(e) => setSecretInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveSecret();
-              }}
-              className="flex-1 rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] px-3 py-2 font-mono text-xs outline-none"
-            />
+          <div className="space-y-2">
             <Button
               variant="outline"
               size="sm"
-              className="h-9 px-3 text-xs"
-              disabled={!secretInput.trim()}
-              onClick={saveSecret}
+              className="h-8 px-3 text-xs"
+              disabled={generating}
+              onClick={() => void generateToken()}
             >
-              Save
+              <RefreshCw className="mr-1 h-3.5 w-3.5" />
+              {generating ? "Generating" : "Generate token"}
             </Button>
           </div>
         )}
+        {errorText && <p className="text-xs text-destructive">{errorText}</p>}
       </section>
 
       {/* S29f (F8.2): was a nested Card with floating Copy button + small
