@@ -605,6 +605,7 @@ function WorkerCard({
             // header shows.
             <WorkerIconPills
               worker={worker}
+              inputs={worker.inputs ?? []}
               connections={worker.connections}
               triggerType={worker.trigger_type}
               size="sm"

@@ -391,13 +391,13 @@ def _workspace_tools(user_id: str) -> List[Any]:
         ),
         _make_tool(
             "contexts__list",
-            "List all context packs.",
+            "List all brain packs.",
             {"type": "object", "properties": {}, "required": []},
             _tool_contexts_list,
         ),
         _make_tool(
             "contexts__read",
-            "Read a file from a context pack.",
+            "Read a file from a brain pack.",
             {
                 "type": "object",
                 "properties": {
@@ -410,7 +410,7 @@ def _workspace_tools(user_id: str) -> List[Any]:
         ),
         _make_tool(
             "contexts__write",
-            "Write content to a file in a context pack.",
+            "Write content to a file in a brain pack.",
             {
                 "type": "object",
                 "properties": {
@@ -945,7 +945,7 @@ def _build_workspace_preamble(user_id: str) -> str:
             "- Runs (last 24h):",
         ]
         preamble_lines.extend(run_lines if run_lines else ["  (none)"])
-        preamble_lines.append(f"- Contexts: {', '.join(context_names) if context_names else '(none)'}")
+        preamble_lines.append(f"- Brain packs: {', '.join(context_names) if context_names else '(none)'}")
         if pending_approvals > 0:
             preamble_lines.append(
                 f"- Pending approvals: {pending_approvals} — operator can act at {base}/approvals"
