@@ -41,7 +41,7 @@ const nav = [
   { href: "/overview", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box },
   { href: "/assistant", label: "Agent", icon: Bot },
-  { href: "/contexts", label: "Brain", icon: Folder },
+  { href: "/brain", label: "Brain", icon: Folder },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
   { href: "/connections", label: "Connections", icon: Plug },

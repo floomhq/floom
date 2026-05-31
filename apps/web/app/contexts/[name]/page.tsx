@@ -1,9 +1,9 @@
 "use client";
 
-// Legacy pack-detail route. The contexts surface is now a single-page,
-// progressive miller-columns layout at /contexts. This route only exists so
+// Legacy pack-detail route. The brain surface is now a single-page,
+// progressive miller-columns layout at /brain. This route only exists so
 // old deep links (and the old folder ?path= query) keep working: it redirects
-// into /contexts with the pack (and folder) pre-selected.
+// into /brain with the pack (and folder) pre-selected.
 import { useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
@@ -17,7 +17,7 @@ export default function LegacyPackDetailRedirect() {
     params.set("pack", decodeURIComponent(name));
     const path = searchParams.get("path");
     if (path) params.set("path", path);
-    router.replace(`/contexts?${params.toString()}`);
+    router.replace(`/brain?${params.toString()}`);
   }, [name, router, searchParams]);
 
   return null;

@@ -36,6 +36,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 const TEXT_PREVIEW_LIMIT = 256 * 1024;
+const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const BRAIN_ROUTE = `${APP_BASE_PATH}/brain`;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -187,7 +189,7 @@ function ContextsPage() {
     if (folderPath.length) params.set("path", folderPath.join("/"));
     if (selectedFile) params.set("file", selectedFile);
     const qs = params.toString();
-    const next = `/contexts${qs ? `?${qs}` : ""}`;
+    const next = `${BRAIN_ROUTE}${qs ? `?${qs}` : ""}`;
     if (window.location.pathname + window.location.search !== next) {
       window.history.replaceState(window.history.state, "", next);
     }
@@ -589,7 +591,7 @@ function ContextsPage() {
                 <p className="text-sm text-muted-foreground">
                   A knowledge pack is a small set of files your workers read before they act:
                   company facts, your ICP, product details, and brand voice. Attach a pack to a
-                  worker and it references that context on every run.
+                  worker and it uses that brain pack on every run.
                 </p>
               </div>
               <Button onClick={() => setShowNewContext(true)}>
@@ -708,7 +710,7 @@ function PackRow({
 
   function copyLink(e: React.MouseEvent) {
     e.stopPropagation();
-    const url = `${window.location.origin}/contexts?pack=${encodeURIComponent(ctx.name)}`;
+    const url = `${window.location.origin}${BRAIN_ROUTE}?pack=${encodeURIComponent(ctx.name)}`;
     navigator.clipboard.writeText(url).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -809,7 +811,7 @@ function PackDetailPane({
   const [packLinkCopied, setPackLinkCopied] = useState(false);
 
   function copyPackLink() {
-    const url = `${window.location.origin}/contexts?pack=${encodeURIComponent(detail.name)}`;
+    const url = `${window.location.origin}${BRAIN_ROUTE}?pack=${encodeURIComponent(detail.name)}`;
     navigator.clipboard.writeText(url).then(() => {
       setPackLinkCopied(true);
       setTimeout(() => setPackLinkCopied(false), 1500);
@@ -1164,7 +1166,7 @@ function FilePane({
 
   function copyFileLink() {
     if (!file) return;
-    const url = `${window.location.origin}/contexts?pack=${encodeURIComponent(packName)}&file=${encodeURIComponent(file.path)}`;
+    const url = `${window.location.origin}${BRAIN_ROUTE}?pack=${encodeURIComponent(packName)}&file=${encodeURIComponent(file.path)}`;
     navigator.clipboard.writeText(url).then(() => {
       setFileLinkCopied(true);
       setTimeout(() => setFileLinkCopied(false), 1500);
