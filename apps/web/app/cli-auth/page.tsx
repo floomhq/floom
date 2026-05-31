@@ -2,24 +2,12 @@
 
 export const dynamic = "force-dynamic";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
-const API_BASE = process.env.NEXT_PUBLIC_FLOOM_API_BASE || "https://workers-api.floom.dev";
-const SECRET_STORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
-
-function readStoredSecret(): string {
-  if (typeof window === "undefined") return "";
-  for (const key of SECRET_STORAGE_KEYS) {
-    const value = window.localStorage.getItem(key);
-    if (value && value.trim()) return value.trim();
-  }
-  return "";
-}
+const API_BASE = "/api/proxy";
 
 export default function CliAuthPage() {
   return <CliAuthContent />;
@@ -28,22 +16,20 @@ export default function CliAuthPage() {
 function CliAuthContent() {
   const router = useRouter();
   const [code, setCode] = useState("");
-  const [secret, setSecret] = useState("");
   const [busyAction, setBusyAction] = useState<"approve" | "deny" | null>(null);
   const [statusText, setStatusText] = useState("");
   const [confirmCode, setConfirmCode] = useState("");
 
   useEffect(() => {
     setCode(new URLSearchParams(window.location.search).get("code")?.trim().toUpperCase() || "");
-    setSecret(readStoredSecret());
   }, []);
 
   const normalizedConfirmCode = confirmCode.trim().toUpperCase();
-  const canApprove = Boolean(secret) && Boolean(code) && normalizedConfirmCode === code;
-  const canDeny = Boolean(secret) && Boolean(code);
+  const canApprove = Boolean(code) && normalizedConfirmCode === code;
+  const canDeny = Boolean(code);
 
   async function submit(action: "approve" | "deny") {
-    if (!code || !secret) return;
+    if (!code) return;
     setBusyAction(action);
     setStatusText("");
     try {
@@ -51,7 +37,6 @@ function CliAuthContent() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-floom-secret": secret,
         },
         body: JSON.stringify({ user_code: code }),
       });
@@ -101,11 +86,6 @@ function CliAuthContent() {
             onChange={(event) => setConfirmCode(event.target.value.toUpperCase())}
           />
         </div>
-        {!secret && (
-          <p className="text-muted-foreground">
-            Sign in first. Paste your secret in <Link className="underline" href="/settings">Settings</Link>, then reload this page.
-          </p>
-        )}
         <div className="flex gap-2">
           <Button
             disabled={!canApprove || busyAction !== null}
