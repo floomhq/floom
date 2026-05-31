@@ -63,9 +63,9 @@ import { useRunStream } from "@/lib/useRunStream";
 // ABOVE the Run form on the Run tab. Danger zone moves to /edit only
 // (already exists there). Tech details + I/O chips dropped (redundant
 // with the form fields below + the Run/Source/Edit tabs).
-type Section = "about" | "run" | "code" | "triggers" | "connections" | "runs";
+type Section = "about" | "run" | "configure" | "code" | "triggers" | "connections" | "runs";
 
-const VALID_SECTIONS: Section[] = ["about", "run", "code", "triggers", "connections", "runs"];
+const VALID_SECTIONS: Section[] = ["about", "run", "configure", "code", "triggers", "connections", "runs"];
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
@@ -78,18 +78,21 @@ function isValidSection(s: string): s is Section {
 const SECTION_TO_HASH: Record<Section, string> = {
   about: "about",
   run: "run",
+  configure: "configure",
   triggers: "triggers",
   runs: "history",
   connections: "connections",
-  code: "source",
+  code: "advanced",
 };
 const HASH_TO_SECTION: Record<string, Section> = {
   about: "about",
   run: "run",
+  configure: "configure",
   triggers: "triggers",
   history: "runs",
   apps: "connections",
   connection: "connections",
+  advanced: "code",
   source: "code",
   // legacy hashes still resolve so old deep-links keep working
   runs: "runs",
@@ -114,10 +117,11 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "about", label: "About", icon: <BookOpen className="w-4 h-4" /> },
   { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
+  { id: "configure", label: "Configure", icon: <Pencil className="w-4 h-4" /> },
   { id: "triggers", label: "Triggers", icon: <Clock className="w-4 h-4" /> },
   { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
   { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
-  { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
+  { id: "code", label: "Advanced", icon: <Code2 className="w-4 h-4" /> },
 ];
 
 // ---------------------------------------------------------------------------
@@ -254,6 +258,16 @@ export default function WorkerDetailPage() {
   const [setupDefaults, setSetupDefaults] = useState<Record<string, string>>({});
   const [savingDefaults, setSavingDefaults] = useState(false);
 
+  // Configure tab state
+  const [configDesc, setConfigDesc] = useState("");
+  const [configDescOriginal, setConfigDescOriginal] = useState("");
+  const [configInputDefaults, setConfigInputDefaults] = useState<Record<string, string>>({});
+  const [configSaving, setConfigSaving] = useState(false);
+  const [checkingConflicts, setCheckingConflicts] = useState(false);
+  const [conflictSuggestions, setConflictSuggestions] = useState<import("@/lib/types").WorkerSuggestion[]>([]);
+  const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  const [pendingSaveAfterConflict, setPendingSaveAfterConflict] = useState(false);
+
   // P1-C (prove100 2026-05-30): worker actions — Archive (reversible) and
   // Delete (destructive, confirm-gated). The API exposed both DELETE and a
   // /restore counterpart but no UI surfaced either, so generated/test workers
@@ -382,6 +396,15 @@ export default function WorkerDetailPage() {
         } else if (w.config.trigger) {
           setTriggerRows([makeTriggerRow(w.config.trigger as TriggerSpec)]);
         }
+        // Init configure tab state
+        const desc = w.description || "";
+        setConfigDesc(desc);
+        setConfigDescOriginal(desc);
+        const inputDefs: Record<string, string> = {};
+        (w.config.inputs || []).forEach((inp: WorkerInput) => {
+          inputDefs[inp.name] = inp.default !== undefined && inp.default !== null ? String(inp.default) : "";
+        });
+        setConfigInputDefaults(inputDefs);
       } catch (e: unknown) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
@@ -680,6 +703,80 @@ export default function WorkerDetailPage() {
     } finally {
       setSavingDefaults(false);
     }
+  }
+
+  async function commitConfigureSave() {
+    if (!worker) return;
+    setConfigSaving(true);
+    try {
+      const currentYml =
+        deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
+        worker.manifest_yaml || "";
+
+      // Patch description into worker.yml
+      let patched = currentYml;
+      if (configDesc !== configDescOriginal) {
+        patched = patched.replace(
+          /^description:\s*.*/m,
+          `description: ${JSON.stringify(configDesc)}`
+        );
+        if (!/^description:/m.test(patched)) {
+          patched = patched.replace(/^name:\s*.*/m, (m) => `${m}\ndescription: ${JSON.stringify(configDesc)}`);
+        }
+      }
+
+      // Patch input defaults
+      for (const [name, value] of Object.entries(configInputDefaults)) {
+        patched = patchInputDefault(patched, name, value);
+      }
+
+      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      toast.success("Worker saved");
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      setConfigDesc(updated.description || "");
+      setConfigDescOriginal(updated.description || "");
+      const inputDefs: Record<string, string> = {};
+      (updated.config.inputs || []).forEach((inp: WorkerInput) => {
+        inputDefs[inp.name] = inp.default !== undefined && inp.default !== null ? String(inp.default) : "";
+      });
+      setConfigInputDefaults(inputDefs);
+      const updatedFiles = (updated.files || [])
+        .filter((f: WorkerFile) => !f.binary)
+        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setConfigSaving(false);
+      setConflictModalOpen(false);
+      setPendingSaveAfterConflict(false);
+    }
+  }
+
+  async function handleSaveConfigure() {
+    if (!worker) return;
+    const descChanged = configDesc.trim() !== configDescOriginal.trim();
+    if (descChanged) {
+      setCheckingConflicts(true);
+      try {
+        const result = await api.workers.suggest(worker.id, configDesc.trim());
+        if (result.has_conflicts && result.suggestions.length > 0) {
+          setConflictSuggestions(result.suggestions);
+          setConflictModalOpen(true);
+          setPendingSaveAfterConflict(true);
+          return;
+        }
+      } catch {
+        // If suggest fails, proceed with save
+      } finally {
+        setCheckingConflicts(false);
+      }
+    }
+    await commitConfigureSave();
   }
 
   // P1-C: archive this worker (reversible). On success route back to the list:
@@ -1069,6 +1166,47 @@ export default function WorkerDetailPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Conflict resolution modal */}
+      <Dialog open={conflictModalOpen} onOpenChange={(o) => { if (!o) { setConflictModalOpen(false); setPendingSaveAfterConflict(false); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Potential conflicts detected</DialogTitle>
+            <DialogDescription>
+              Your new description may conflict with the current configuration. Review the items below, then choose to save anyway or cancel to fix them first.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+            {conflictSuggestions.map((s, i) => (
+              <div key={i} className="rounded-lg border border-border p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-medium text-foreground">{s.field}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">{s.reason}</p>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <div className="rounded bg-muted/50 px-2 py-1">
+                    <p className="text-[10px] text-muted-foreground mb-0.5">Current</p>
+                    <p className="text-xs font-mono truncate">{s.current}</p>
+                  </div>
+                  <div className="rounded bg-muted/50 px-2 py-1">
+                    <p className="text-[10px] text-muted-foreground mb-0.5">Suggested</p>
+                    <p className="text-xs font-mono truncate">{s.suggested}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground italic">Go to the Triggers or Advanced tab to apply the suggestion.</p>
+              </div>
+            ))}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setConflictModalOpen(false); setPendingSaveAfterConflict(false); }}>
+              Cancel — I&apos;ll fix it
+            </Button>
+            <Button size="sm" onClick={() => { if (pendingSaveAfterConflict) commitConfigureSave(); }}>
+              Save anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Setup banner: shown when a scheduled worker has required inputs with no defaults */}
       {incompleteScheduledInputs.length > 0 && !worker.archived && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 p-4 space-y-3">
@@ -1212,24 +1350,127 @@ export default function WorkerDetailPage() {
           )
         )}
 
+        {activeSection === "configure" && (
+          <div className="max-w-2xl space-y-6">
+            {/* Description */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Description</Label>
+              <p className="text-xs text-muted-foreground">Describe what this worker does. If you change this, we&apos;ll check for any conflicts with your current configuration.</p>
+              <Textarea
+                rows={3}
+                value={configDesc}
+                onChange={(e) => setConfigDesc(e.target.value)}
+                placeholder="Describe what this worker does…"
+                className="text-sm resize-none"
+              />
+            </div>
+
+            {/* Inputs */}
+            {(worker.config.inputs || []).length > 0 && (
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-sm font-medium">Inputs</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Default values are used when the worker runs on a schedule or without manual input.</p>
+                </div>
+                <div className="rounded-lg border border-border divide-y divide-border">
+                  {(worker.config.inputs || []).map((inp) => (
+                    <div key={inp.name} className="flex items-center gap-3 px-4 py-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">{inp.label || inp.name}</span>
+                          {inp.required && (
+                            <span className="text-[10px] text-muted-foreground border border-border rounded px-1 shrink-0">required</span>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground font-mono">{inp.name}</span>
+                      </div>
+                      <Input
+                        className="h-7 text-xs w-48 shrink-0"
+                        placeholder={inp.placeholder || "Default value…"}
+                        value={configInputDefaults[inp.name] ?? ""}
+                        onChange={(e) =>
+                          setConfigInputDefaults((prev) => ({ ...prev, [inp.name]: e.target.value }))
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Secrets (read-only) */}
+            {requiredSecrets.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Secrets</Label>
+                <div className="rounded-lg border border-border divide-y divide-border">
+                  {requiredSecrets.map((s) => (
+                    <div key={s} className="flex items-center justify-between px-4 py-2.5">
+                      <span className="text-sm font-mono">{s}</span>
+                      <Link href="/connections/secrets">
+                        <Button size="sm" variant="outline" className="h-6 text-xs border-line">Configure</Button>
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Save button */}
+            <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                onClick={handleSaveConfigure}
+                disabled={configSaving || checkingConflicts}
+              >
+                {checkingConflicts ? "Checking…" : configSaving ? "Saving…" : "Save"}
+              </Button>
+              {(configDesc !== configDescOriginal) && (
+                <span className="text-xs text-muted-foreground">Description changed — will check for conflicts on save</span>
+              )}
+            </div>
+
+            {/* Advanced YAML link */}
+            <div className="border-t border-border pt-4">
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                onClick={() => setSection("code")}
+              >
+                <Code2 className="size-3" />
+                View or edit raw YAML (Advanced)
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeSection === "code" && (
-          isEditMode ? (
-            <FilesEditor
-              mode="edit"
-              files={editFiles}
-              selectedPath={editSelectedPath}
-              onSelect={setEditSelectedPath}
-              onSelectedPathChange={setEditSelectedPath}
-              onChange={setEditFiles}
-            />
-          ) : (
-            <FilesEditor
-              mode="view"
-              files={deriveSourceFiles(worker)}
-              selectedPath={selectedFile}
-              onSelect={setSelectedFile}
-            />
-          )
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 px-3 py-2">
+              <Info className="size-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Editing YAML directly. Changes here override the Configure form. Use the{" "}
+                <button type="button" className="underline" onClick={() => setSection("configure")}>Configure tab</button>{" "}
+                for guided editing.
+              </p>
+            </div>
+            {isEditMode ? (
+              <FilesEditor
+                mode="edit"
+                files={editFiles}
+                selectedPath={editSelectedPath}
+                onSelect={setEditSelectedPath}
+                onSelectedPathChange={setEditSelectedPath}
+                onChange={setEditFiles}
+              />
+            ) : (
+              <FilesEditor
+                mode="view"
+                files={deriveSourceFiles(worker)}
+                selectedPath={selectedFile}
+                onSelect={setSelectedFile}
+              />
+            )}
+          </div>
         )}
 
         {activeSection === "triggers" && (
