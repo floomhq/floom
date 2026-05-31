@@ -43,6 +43,13 @@ from dotenv import load_dotenv
 
 from auth import AuthContext, get_auth_context, get_auth_provider
 from auth.context import current_auth_user_id
+from auth.local_workspaces import (
+    DEFAULT_WORKSPACE_ID,
+    create_local_workspace,
+    get_local_workspace,
+    list_local_workspaces,
+    local_workspace_base_user_id,
+)
 from contexts import (
     MAX_CONTEXT_BYTES,
     CONTEXTS_DIR,
@@ -382,6 +389,85 @@ async def require_secret(request: Request) -> str:
     """DEPRECATED: use Depends(get_auth_context) instead."""
     ctx = await get_auth_context(request)
     return ctx.user_id
+
+
+class LocalWorkspaceCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+
+
+class LocalWorkspaceOut(BaseModel):
+    id: str
+    name: str
+    owner_user_id: str
+    created_at: str
+
+
+class LocalWorkspaceListResponse(BaseModel):
+    workspaces: List[LocalWorkspaceOut]
+    active_id: str
+
+
+def _local_workspace_out(row: Dict[str, Any]) -> LocalWorkspaceOut:
+    return LocalWorkspaceOut(
+        id=str(row["id"]),
+        name=str(row["name"]),
+        owner_user_id=str(row["owner_user_id"]),
+        created_at=str(row["created_at"]),
+    )
+
+
+def _active_local_workspace_id(auth: AuthContext) -> str:
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    if auth.user_id == base_user_id:
+        return DEFAULT_WORKSPACE_ID
+    marker = "__"
+    return auth.user_id.split(marker, 1)[1]
+
+
+def _require_local_workspace_mode() -> None:
+    if _is_cloud_deploy():
+        raise HTTPException(status_code=404, detail="not found")
+
+
+@app.get("/workspaces", response_model=LocalWorkspaceListResponse)
+def list_workspaces(auth: AuthContext = Depends(get_auth_context)) -> LocalWorkspaceListResponse:
+    """List local OSS workspaces for the single-user dashboard."""
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    rows = list_local_workspaces(base_user_id)
+    return LocalWorkspaceListResponse(
+        workspaces=[_local_workspace_out(row) for row in rows],
+        active_id=_active_local_workspace_id(auth),
+    )
+
+
+@app.post("/workspaces", response_model=LocalWorkspaceOut)
+def create_workspace(
+    payload: LocalWorkspaceCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> LocalWorkspaceOut:
+    """Create a local OSS workspace.
+
+    Selection is client-side for OSS: the web app stores the active workspace id
+    and sends it as x-workeros-workspace on every proxied request.
+    """
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    return _local_workspace_out(create_local_workspace(base_user_id, payload.name))
+
+
+@app.post("/workspaces/{workspace_id}/select", response_model=LocalWorkspaceOut)
+def select_workspace(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> LocalWorkspaceOut:
+    """Validate and echo a local OSS workspace selection."""
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    workspace = get_local_workspace(base_user_id, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    return _local_workspace_out(workspace)
 
 
 def _connection_row_for_user(
