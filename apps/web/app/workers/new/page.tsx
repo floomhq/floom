@@ -641,7 +641,7 @@ async function readText(file: File): Promise<string | null> {
 // Falls back to timer-based stage hints when no stream logs are available yet.
 const DRAFT_STAGES = [
   { id: "read",     label: "Reading your prompt",           targetSec: 3 },
-  { id: "plan",     label: "Reading style context",         targetSec: 9 },
+  { id: "plan",     label: "Reading style guide",           targetSec: 9 },
   { id: "draft",    label: "Drafting worker.yml",           targetSec: 16 },
   { id: "write",    label: "Writing SKILL.md / run.py",     targetSec: 24 },
   { id: "validate", label: "Validating schema",             targetSec: 38 },
