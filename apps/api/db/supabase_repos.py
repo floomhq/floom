@@ -1847,6 +1847,137 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
         return expired
 
 
+def _is_table_not_found(exc: Exception) -> bool:
+    """Return True when a PostgREST error indicates the table does not exist yet."""
+    msg = str(exc).lower()
+    return "relation" in msg and "does not exist" in msg or "42p01" in msg
+
+
+class SupabaseApprovalRepository(_BaseSupabaseRepository):
+    """Supabase-backed HITL approval repository.
+
+    Methods degrade gracefully if the `approvals` table has not yet been
+    created (migration 0011_approvals.sql pending). Read operations return
+    empty results; write operations raise so callers see a clear error rather
+    than a 500 crash.
+    """
+
+    _TABLE = "approvals"
+
+    def create(self, *, owner_id: str, **fields: Any) -> dict[str, Any]:
+        allowed = {
+            "id", "run_id", "worker_id", "status", "label", "preview",
+            "created_at", "decided_at", "reason",
+            "decision_input_json", "edited_output_json", "follow_up_run_id",
+        }
+        row: dict[str, Any] = {k: v for k, v in fields.items() if k in allowed}
+        row["owner_id"] = owner_id
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            row["workspace_id"] = workspace_id
+        self._client.table(self._TABLE).insert(row).execute()
+        return self.get(owner_id=owner_id, approval_id=str(fields["id"])) or row  # type: ignore[return-value]
+
+    def get(self, *, owner_id: str, approval_id: str) -> dict[str, Any] | None:
+        try:
+            response = (
+                self._client.table(self._TABLE)
+                .select("*")
+                .eq("owner_id", owner_id)
+                .eq("id", approval_id)
+                .limit(1)
+                .execute()
+            )
+            return _first_row(response)
+        except Exception as exc:
+            if _is_table_not_found(exc):
+                return None
+            raise
+
+    def get_by_run_id(self, *, run_id: str) -> dict[str, Any] | None:
+        try:
+            response = (
+                self._client.table(self._TABLE)
+                .select("*")
+                .eq("run_id", run_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            return _first_row(response)
+        except Exception as exc:
+            if _is_table_not_found(exc):
+                return None
+            raise
+
+    def list_pending(self, *, owner_id: str) -> list[dict[str, Any]]:
+        try:
+            response = (
+                self._client.table(self._TABLE)
+                .select("*")
+                .eq("owner_id", owner_id)
+                .eq("status", "pending")
+                .order("created_at")
+                .execute()
+            )
+            return _response_rows(response)
+        except Exception as exc:
+            if _is_table_not_found(exc):
+                return []
+            raise
+
+    def count_pending(self, *, owner_id: str) -> int:
+        try:
+            response = (
+                self._client.table(self._TABLE)
+                .select("id", count="exact")
+                .eq("owner_id", owner_id)
+                .eq("status", "pending")
+                .execute()
+            )
+            return int(getattr(response, "count", 0) or 0)
+        except Exception as exc:
+            if _is_table_not_found(exc):
+                return 0
+            raise
+
+    def approve(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        edited_output_json: str | None = None,
+        follow_up_run_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        self._client.table(self._TABLE).update(
+            {
+                "status": "approved",
+                "decided_at": decided_at,
+                "edited_output_json": edited_output_json,
+                "follow_up_run_id": follow_up_run_id,
+            }
+        ).eq("run_id", run_id).eq("owner_id", owner_id).eq("status", "pending").execute()
+        return self.get_by_run_id(run_id=run_id)
+
+    def reject(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        self._client.table(self._TABLE).update(
+            {
+                "status": "rejected",
+                "decided_at": decided_at,
+                "reason": reason,
+            }
+        ).eq("run_id", run_id).eq("owner_id", owner_id).eq("status", "pending").execute()
+        return self.get_by_run_id(run_id=run_id)
+
+
 class SupabaseApiTokenRepository(_BaseSupabaseRepository):
     """PAT (Personal Access Token) storage.
 

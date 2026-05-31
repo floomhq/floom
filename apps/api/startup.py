@@ -162,7 +162,14 @@ def register_cloud_components() -> None:
     register_repositories("cloud", _cloud_repositories)
     apply_engine_overrides()
     _register_contexts_scope_resolver()
-    engine_db.init_db = lambda: None
+    # Run the real init_db() once so the engine's local SQLite DB has the
+    # full schema. Several engine endpoints (draft_and_create_worker,
+    # _persist_discovered_workers, etc.) bypass the Supabase repos and call
+    # get_db() directly; without the schema they crash with
+    # "no such table: skill_versions". The primary datastore is Supabase —
+    # the SQLite file is a local sidecar for engine-internal operations.
+    engine_db.init_db()
+    engine_db.init_db = lambda: None  # prevent double-init on subsequent imports
 
     # Bypass the engine's lru_cache on get_repositories. Otherwise the
     # cached Repositories instance holds repo objects that hold a stale
