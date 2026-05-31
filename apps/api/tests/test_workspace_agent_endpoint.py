@@ -81,12 +81,16 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
     assert "You manage the workspace." in body["system_prompt"]
     assert "{{WORKSPACE_PREAMBLE}}" not in body["system_prompt"]
     assert "Workspace snapshot" in body["system_prompt"]
+    assert "Secret names: OPENAI_API_KEY" in body["system_prompt"]
     # Tools are present with names + descriptions.
     tools = body["tools"]
     names = {t["name"] for t in tools}
     assert "workers__list_all" in names
     assert "secrets__list_names" in names
     assert "approvals__list_pending" in names
+    descriptions = {t["name"]: t["description"] for t in tools}
+    assert "status metadata" in descriptions["secrets__list_names"]
+    assert "account label" in descriptions["connections__list"]
     assert all(t.get("description") for t in tools)
 
 
