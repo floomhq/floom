@@ -113,12 +113,20 @@ async function handler(
   const cacheControl = upstream.headers.get("cache-control");
   if (cacheControl) responseHeaders.set("cache-control", cacheControl);
   // Forward Set-Cookie so backend-initiated cookie writes (e.g. /auth/logout
-  // clearing workeros_cloud_session on .floom.dev) actually reach the
-  // browser. Use getSetCookie() (Node 20+) which preserves the individual
-  // values rather than collapsing multiple Set-Cookie headers into one
-  // comma-joined string (which would break cookie parsing).
-  for (const cookie of upstream.headers.getSetCookie()) {
-    responseHeaders.append("set-cookie", cookie);
+  // clearing workeros_cloud_session on .floom.dev) actually reach the browser.
+  // Vercel's route runtime does not consistently expose the Node/undici
+  // getSetCookie() extension on Headers, so guard it. Without this guard,
+  // successful upstream API calls crashed here and returned a proxy 500.
+  const getSetCookie = (upstream.headers as Headers & {
+    getSetCookie?: () => string[];
+  }).getSetCookie;
+  if (typeof getSetCookie === "function") {
+    for (const cookie of getSetCookie.call(upstream.headers)) {
+      responseHeaders.append("set-cookie", cookie);
+    }
+  } else {
+    const cookie = upstream.headers.get("set-cookie");
+    if (cookie) responseHeaders.append("set-cookie", cookie);
   }
 
   return new NextResponse(upstream.body, {

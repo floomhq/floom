@@ -16,7 +16,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
-import { OVERLAY_FILES, ENGINE_STALE_REMOVED } from "./sync-engine-web.mjs";
+import { OVERLAY_FILES, ENGINE_STALE_REMOVED, withCloudTailwindSources } from "./sync-engine-web.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = resolve(__dirname, "..");
@@ -82,7 +82,10 @@ function main() {
           errors.push(`MISSING in synced tree: ${rel}`);
           continue;
         }
-        if (read(join(ENGINE_WEB, rel)) !== read(synced)) {
+        const expected = rel === "app/globals.css"
+          ? withCloudTailwindSources(read(join(ENGINE_WEB, rel)))
+          : read(join(ENGINE_WEB, rel));
+        if (expected !== read(synced)) {
           errors.push(`DRIFT (differs from engine): ${rel}`);
         }
       }

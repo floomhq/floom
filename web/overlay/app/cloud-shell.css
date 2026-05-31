@@ -1,0 +1,11 @@
+.cloud-app-shell {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+@media (min-width: 48rem) {
+  .cloud-app-shell {
+    flex-direction: row;
+  }
+}

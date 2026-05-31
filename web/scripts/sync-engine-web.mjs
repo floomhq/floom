@@ -12,7 +12,7 @@
 // Also usable from anywhere via --engine / --dest flags (the drift guard
 // uses these to sync into a temp dir).
 
-import { existsSync, mkdirSync, readdirSync, rmSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -64,6 +64,8 @@ const COPY_ROOT_FILES = [
 // the "must equal engine" check. Keep in sync with overlay/ contents.
 export const OVERLAY_FILES = [
   "app/api/proxy/[...path]/route.ts",
+  "app/cloud-shell.css",
+  "app/layout.tsx",
   "app/api/me/route.ts",
   "app/api/cli-auth/[action]/route.ts",
   "app/cli-auth/page.tsx",
@@ -71,6 +73,20 @@ export const OVERLAY_FILES = [
   "components/layout/sidebar.tsx",
   "middleware.ts",
 ];
+
+const CLOUD_TAILWIND_SOURCE_MARKER = "/* workeros-cloud generated Tailwind sources */";
+
+export function withCloudTailwindSources(css) {
+  if (css.includes(CLOUD_TAILWIND_SOURCE_MARKER)) return css;
+  const insert = [
+    CLOUD_TAILWIND_SOURCE_MARKER,
+    "@source \"../app\";",
+    "@source \"../components\";",
+    "@source \"../lib\";",
+    "",
+  ].join("\n");
+  return css.replace('@import "tailwindcss";', `@import "tailwindcss";\n${insert}`);
+}
 
 // Files that exist in the engine tree but must NOT be carried into the Cloud
 // generated tree (stale forks the engine has since removed). The engine
@@ -195,6 +211,16 @@ function main() {
       overlaid++;
       log(`[sync]   overlay: ${rel}`);
     }
+  }
+
+  // 6) Tailwind v4 auto source detection ignores .gitignore entries. In Cloud,
+  // app/components/lib are generated and intentionally gitignored, so Vercel's
+  // builder otherwise scans only the small tracked overlay and drops most app
+  // utilities (grid-cols, responsive variants, etc.). Keep globals.css equal to
+  // the engine source plus explicit generated-source directives.
+  const globalsPath = join(DEST, "app", "globals.css");
+  if (existsSync(globalsPath)) {
+    writeFileSync(globalsPath, withCloudTailwindSources(readFileSync(globalsPath, "utf8")));
   }
 
   log(
