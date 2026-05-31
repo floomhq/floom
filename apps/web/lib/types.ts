@@ -248,6 +248,18 @@ export interface WorkerDetail {
   triggers_spec: TriggerSpec[];
 }
 
+export interface WorkerSuggestion {
+  field: string;
+  current: string;
+  suggested: string;
+  reason: string;
+}
+
+export interface WorkerSuggestResponse {
+  has_conflicts: boolean;
+  suggestions: WorkerSuggestion[];
+}
+
 export interface SecretItem {
   name: string;
   status: SecretStatus;
