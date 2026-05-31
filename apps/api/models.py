@@ -114,6 +114,14 @@ class WorkerTrigger(BaseModel):
     webhook: Optional[WorkerWebhookConfig] = None
     composio: Optional[WorkerComposioTriggerConfig] = None
 
+    @field_validator("type")
+    @classmethod
+    def normalize_type(cls, value: str) -> str:
+        normalized = (value or "manual").strip().lower()
+        if normalized in {"cron", "scheduled"}:
+            return "schedule"
+        return normalized
+
 
 class WorkerMCPConnection(BaseModel):
     label: str
@@ -506,6 +514,14 @@ class WorkerContractTrigger(BaseModel):
     timezone: Optional[str] = None
     webhook: Optional[WorkerWebhookConfig] = None
     composio: Optional[WorkerComposioTriggerConfig] = None
+
+    @field_validator("type")
+    @classmethod
+    def normalize_type(cls, value: str) -> str:
+        normalized = (value or "manual").strip().lower()
+        if normalized in {"cron", "scheduled"}:
+            return "schedule"
+        return normalized
 
     @model_validator(mode="after")
     def validate_composio(self) -> "WorkerContractTrigger":

@@ -1562,9 +1562,16 @@ def get_worker_timeseries(
     return batch.get(worker_id, [])
 
 
+def _normalize_trigger_type(value: Any) -> str:
+    normalized = str(value or "manual").strip().lower()
+    if normalized in {"cron", "scheduled"}:
+        return "schedule"
+    return normalized or "manual"
+
+
 def _trigger_label(trigger: Dict[str, Any]) -> str:
     """Return a human-readable label for one trigger dict."""
-    t_type = (trigger.get("type") or "manual").lower()
+    t_type = _normalize_trigger_type(trigger.get("type"))
     if t_type == "manual":
         return "Manual"
     if t_type in ("schedule", "scheduled"):
@@ -1610,7 +1617,7 @@ def _build_triggers_spec(worker: Dict[str, Any]) -> List[TriggerSpec]:
                     if not isinstance(t, dict):
                         continue
                     specs.append(TriggerSpec(
-                        type=t.get("type", "manual"),
+                        type=_normalize_trigger_type(t.get("type")),
                         cron=t.get("cron"),
                         timezone=t.get("timezone"),
                         webhook=t.get("webhook"),
@@ -1624,7 +1631,7 @@ def _build_triggers_spec(worker: Dict[str, Any]) -> List[TriggerSpec]:
     # Fall back to single trigger from config
     config: Dict[str, Any] = worker.get("config") or {}
     trigger: Dict[str, Any] = config.get("trigger") or {}
-    trigger_type = (worker.get("trigger_type") or trigger.get("type") or "manual").lower()
+    trigger_type = _normalize_trigger_type(worker.get("trigger_type") or trigger.get("type"))
     return [TriggerSpec(
         type=trigger_type,
         cron=trigger.get("cron"),
@@ -1653,7 +1660,7 @@ def _build_triggers_list(worker: Dict[str, Any]) -> List[str]:
     # Fall back to single-trigger logic from config
     config: Dict[str, Any] = worker.get("config") or {}
     trigger: Dict[str, Any] = config.get("trigger") or {}
-    trigger_type = (worker.get("trigger_type") or trigger.get("type") or "manual").lower()
+    trigger_type = _normalize_trigger_type(worker.get("trigger_type") or trigger.get("type"))
     trigger_with_type = dict(trigger)
     trigger_with_type.setdefault("type", trigger_type)
     label = _trigger_label(trigger_with_type)
@@ -1832,18 +1839,23 @@ def _extract_triggers_from_manifest(manifest: Dict[str, Any], config: Dict[str, 
     Checks manifest.triggers first (new format), then manifest.trigger,
     then config.trigger as fallback.
     """
+    def normalize_trigger(trigger: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(trigger)
+        normalized["type"] = _normalize_trigger_type(normalized.get("type"))
+        return normalized
+
     # New format: manifest.triggers list
     raw_triggers = manifest.get("triggers")
     if isinstance(raw_triggers, list) and raw_triggers:
-        return [t for t in raw_triggers if isinstance(t, dict)]
+        return [normalize_trigger(t) for t in raw_triggers if isinstance(t, dict)]
     # Old format: manifest.trigger single object
     manifest_trigger = manifest.get("trigger")
     if isinstance(manifest_trigger, dict) and manifest_trigger:
-        return [manifest_trigger]
+        return [normalize_trigger(manifest_trigger)]
     # Fallback: config.trigger
     config_trigger = config.get("trigger")
     if isinstance(config_trigger, dict) and config_trigger:
-        return [config_trigger]
+        return [normalize_trigger(config_trigger)]
     return [{"type": "manual"}]
 
 

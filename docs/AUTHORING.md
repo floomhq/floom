@@ -287,7 +287,9 @@ trigger:
 ### Connections (Composio)
 
 - Composio connections (Gmail, Calendar, GitHub, etc.) are passed to the worker as objects on `context.connections[<provider>]`.
-- Required connections are declared via `triggers` (`composio` event-triggered) or implicitly by the SKILL.md tool list (agent mode). Future: explicit `requires_connections: [gmail]`.
+- Required connections are declared in `connections:` for tool access and in `triggers` for Composio event-triggered workers.
+- The Connections UI and `connections__list` agent tool expose app slug, connected account label, status, scopes, and MCP allowed tools so the author can pick the right account.
+- For prompt-injection safety, restrict the worker's visible tool list in the runner/session and, for MCP servers, set `allowed_tools`. For true OAuth least privilege, use a separate Composio auth config with narrower scopes such as Gmail readonly; tool filtering does not shrink the underlying OAuth refresh token.
 
 ### Triggers
 
@@ -297,6 +299,8 @@ trigger:
 - **composio** — fires when the named Composio event arrives, scoped to the named connection.
 
 A worker can have multiple triggers (use the `triggers:` plural form). Federico tip: keep it to one when possible; two becomes confusing fast.
+
+Use `type: schedule` for cron workers. Legacy manifests with `type: cron` are accepted and normalized to `schedule`, but new templates must emit `schedule`.
 
 ### Approvals (S47 two-run HITL model)
 

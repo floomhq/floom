@@ -22,10 +22,18 @@ export interface TriggerRow {
   composioConnectionId: string;
 }
 
+function normalizeTriggerType(value?: string): TriggerType {
+  if (value === "cron" || value === "scheduled") return "schedule";
+  if (value === "schedule" || value === "webhook" || value === "composio" || value === "manual") {
+    return value;
+  }
+  return "manual";
+}
+
 export function makeTriggerRow(spec?: TriggerSpec): TriggerRow {
   return {
     id: Math.random().toString(36).slice(2),
-    type: ((spec?.type as TriggerType) || "manual"),
+    type: normalizeTriggerType(spec?.type),
     cronExpr: spec?.cron || "0 9 * * MON",
     cronTimezone: spec?.timezone || "Europe/Berlin",
     composioEvent: spec?.composio?.event || "",
