@@ -37,7 +37,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
@@ -791,9 +790,10 @@ export default function WorkerDetailPage() {
       </Link>
       {/* Worker header. Status dot replaced with a labelled pill so users
           can read the state at a glance. */}
+      {/* U2 (Federico 2026-05-31): letter-avatar removed. The tool/connection
+          icon strip (WorkerIconPills, below) + the title carry identity now —
+          no initials circle anywhere. */}
       <div className="flex items-start gap-4">
-        {/* S29n: WorkerAvatar — workers feel like employees, not scripts. */}
-        <WorkerAvatar seed={worker.id} name={worker.name} size="size-12" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className={`text-xl font-semibold tracking-tight ${worker.archived ? "text-muted-foreground" : ""}`}>{worker.name}</h1>

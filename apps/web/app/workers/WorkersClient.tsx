@@ -332,15 +332,11 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
             <Tabs value={tab} onValueChange={handleTabChange}>
               <TabsList>
                 <TabsTrigger value="all">All</TabsTrigger>
-                <TabsTrigger value="starred">
-                  <Star className="size-3.5" />
-                  Starred
-                </TabsTrigger>
+                {/* U7 (Federico 2026-05-31): "the logos say enough" — drop the
+                    Star + Archive glyphs from the filter tabs; text labels alone. */}
+                <TabsTrigger value="starred">Starred</TabsTrigger>
                 <TabsTrigger value="recent">Recent</TabsTrigger>
-                <TabsTrigger value="archived">
-                  <Archive className="size-3.5" />
-                  Archived
-                </TabsTrigger>
+                <TabsTrigger value="archived">Archived</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -561,6 +557,12 @@ function EmptyWorkersState() {
 // size jump (Federico 2026-05-29).
 const CARD_HEIGHT = "h-[188px]";
 
+// U4 (Federico 2026-05-31): Langdock-style card. A distinct tinted HEADER BAND
+// (--bg-2) at the top holds the composed icon strip + the favourite star; the
+// white card body (--bg-card) below holds title / description / footer. The
+// band reads as a separate surface from the body, like a Langdock workflow
+// card. Typography is dialled to a compact Langdock scale: title 14px,
+// description 12.5px (text-[13px] leading-snug), footer/meta 11px.
 function WorkerCard({
   worker,
   isFavorite,
@@ -579,63 +581,66 @@ function WorkerCard({
 
   return (
     <Card
-      className={`group ${CARD_HEIGHT} hover:shadow-sm transition-shadow overflow-hidden`}
+      className={`group ${CARD_HEIGHT} gap-0 py-0 hover:shadow-sm transition-shadow overflow-hidden`}
       title={hoverDescription || undefined}
     >
-      <Link href={`/workers/${worker.id}`} className="block h-full">
-        <CardContent className="h-full flex flex-col p-4 gap-2">
-          {/* 1. Composed Langdock-style pill strip at the TOP — the start-node
-              (trigger) + connection brand logos. No letter-avatar: the pills +
-              title carry identity. Never visually empty (start node always
-              renders). */}
-          <div className="flex items-start justify-between gap-2">
-            {worker.archived ? (
-              <span
-                className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
-                title="Archived"
-              >
-                <Archive className="size-3.5" />
-                Archived
-              </span>
-            ) : (
-              <WorkerIconPills
-                worker={worker}
-                connections={worker.connections}
-                triggerType={worker.trigger_type}
-                size="sm"
-              />
-            )}
-            {!worker.archived && (
-              <div className="flex items-center gap-1.5 shrink-0">
-                {/* Favourite star (Federico 2026-05-30): hover-only to cut
-                    cognitive load — except an already-favourited worker keeps
-                    its filled star at rest. focus-visible keeps it reachable
-                    for keyboard users. */}
-                <button
-                  type="button"
-                  title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onFavoriteToggle(worker.id);
-                  }}
-                  className={`size-7 -mt-0.5 -mr-1 flex items-center justify-center rounded transition-[color,opacity] shrink-0 focus-visible:opacity-100 ${
-                    isFavorite
-                      ? "text-[var(--accent)] hover:opacity-80"
-                      : "text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-[var(--accent)]"
-                  }`}
-                >
-                  <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
-                </button>
-              </div>
-            )}
-          </div>
+      <Link href={`/workers/${worker.id}`} className="flex h-full flex-col">
+        {/* HEADER BAND — distinct tinted top surface (Langdock). Holds the
+            composed icon strip (U3: all the worker's tool/connection/category
+            glyphs, capped at 5 then +N) and the favourite star. Top corners
+            follow the card radius; a hairline separates it from the body. */}
+        <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--line-soft)] bg-[var(--bg-2)] px-3.5 py-2.5">
+          {worker.archived ? (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] border border-border bg-card/60 px-2 py-1 text-[11px] text-muted-foreground"
+              title="Archived"
+            >
+              <Archive className="size-3" />
+              Archived
+            </span>
+          ) : (
+            // U3: render the full available icon set (primary category/brand
+            // glyph + trigger glyph + ALL connection logos), capped at 5 cells
+            // then a +N overflow chip — the same composed strip the detail
+            // header shows.
+            <WorkerIconPills
+              worker={worker}
+              connections={worker.connections}
+              triggerType={worker.trigger_type}
+              size="sm"
+              max={5}
+            />
+          )}
+          {!worker.archived && (
+            // Favourite star (Federico 2026-05-30): hover-only to cut cognitive
+            // load — except an already-favourited worker keeps its filled star
+            // at rest. focus-visible keeps it reachable for keyboard users.
+            <button
+              type="button"
+              title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onFavoriteToggle(worker.id);
+              }}
+              className={`-mr-1 flex size-6 shrink-0 items-center justify-center rounded transition-[color,opacity] focus-visible:opacity-100 ${
+                isFavorite
+                  ? "text-[var(--accent)] hover:opacity-80"
+                  : "text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-[var(--accent)]"
+              }`}
+            >
+              <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
+            </button>
+          )}
+        </div>
 
-          {/* 2. Title — natural height, capped at 2 lines. No rigid min-height:
-              reserving 2 lines for every title starved the description to 0px
-              on cards that also show a status pill (caught live 2026-05-29). */}
+        {/* BODY — white card surface with title / description / footer. */}
+        <div className="flex flex-1 flex-col gap-1.5 p-4">
+          {/* Title — compact Langdock scale (14px), capped at 2 lines. No rigid
+              min-height: reserving 2 lines for every title starved the
+              description on cards that also show a status pill. */}
           <h3
-            className={`font-medium text-[15px] leading-snug overflow-hidden shrink-0 ${
+            className={`text-sm font-medium leading-snug overflow-hidden shrink-0 ${
               worker.archived ? "text-muted-foreground" : ""
             }`}
             style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }}
@@ -643,15 +648,15 @@ function WorkerCard({
             {worker.name}
           </h3>
 
-          {/* 2. Description — a CLEAN 2-line clamp. The Tailwind line-clamp-2
-              utility computed display:flow-root here (clamp ignored → text
-              sliced mid-line), and as a flex child it was shrunk below 2 lines.
-              Force the -webkit-box clamp via inline style + shrink-0 so it
-              renders exactly 2 lines with an ellipsis and flexbox can't squeeze
-              it (the cutoff bug Federico flagged 2026-05-30). The flex-1 spacer
-              below absorbs slack and pins the footer. */}
+          {/* U1 — Description: a CLEAN 2-line clamp ending in an ellipsis. The
+              Tailwind line-clamp-2 utility computed display:flow-root here
+              (clamp ignored → text sliced mid-line), and as a flex child it was
+              shrunk below 2 lines. Force the -webkit-box clamp via inline style
+              + shrink-0 so it renders exactly 2 lines + ellipsis and flexbox
+              can't squeeze it (the cutoff bug Federico flagged 2026-05-30).
+              Smaller Langdock body size (13px). */}
           <p
-            className="text-sm text-muted-foreground overflow-hidden shrink-0"
+            className="text-[13px] leading-snug text-muted-foreground overflow-hidden shrink-0"
             style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }}
           >
             {description}
@@ -660,12 +665,9 @@ function WorkerCard({
           {/* Spacer pushes the footer to the bottom on a fixed-height card. */}
           <div className="flex-1" />
 
-          {/* 3. Quiet footer — relative last-run time + a single small status
-              dot (Federico 2026-05-30: drop the distracting green % bar; demote
-              "Needs attention" from a title-row pill to a small footer dot+label
-              so it never blocks the title). */}
+          {/* Quiet footer — relative last-run time + a single small status dot. */}
           <CardFooterLine stats={stats} status={worker.archived ? undefined : worker.status} />
-        </CardContent>
+        </div>
       </Link>
     </Card>
   );
@@ -702,7 +704,8 @@ function CardFooterLine({
     return <div className="mt-auto h-4" aria-hidden />;
   }
   return (
-    <div className="mt-auto flex items-center gap-2 text-xs text-[var(--ink-soft)]">
+    // U4: meta row at the compact Langdock scale (11px).
+    <div className="mt-auto flex items-center gap-2 text-[11px] text-[var(--ink-soft)]">
       {lastRun && <span className="truncate">{lastRun}</span>}
       {attention && (
         <span className="ml-auto flex items-center gap-1.5 shrink-0">
@@ -721,18 +724,19 @@ function firstLine(value?: string): string {
 
 function WorkerCardSkeleton() {
   return (
-    <Card className={`${CARD_HEIGHT} overflow-hidden`}>
-      <CardContent className="h-full flex flex-col p-4 gap-2">
-        {/* Pill strip + star row */}
-        <div className="flex items-start justify-between gap-2">
-          <Skeleton className="h-7 w-20 rounded-[var(--radius-squircle)]" />
-          <Skeleton className="size-5 rounded shrink-0" />
-        </div>
+    <Card className={`${CARD_HEIGHT} gap-0 py-0 overflow-hidden`}>
+      {/* Header band: icon strip + star */}
+      <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--line-soft)] bg-[var(--bg-2)] px-3.5 py-2.5">
+        <Skeleton className="h-7 w-20 rounded-[var(--radius-squircle)]" />
+        <Skeleton className="size-5 rounded shrink-0" />
+      </div>
+      {/* Body */}
+      <div className="flex flex-1 flex-col gap-1.5 p-4">
         <Skeleton className="h-4 w-3/4" />
         <Skeleton className="h-3 w-full" />
         <Skeleton className="h-3 w-2/3" />
         <Skeleton className="mt-auto h-3 w-24" />
-      </CardContent>
+      </div>
     </Card>
   );
 }
