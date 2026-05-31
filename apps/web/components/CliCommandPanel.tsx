@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Eye, EyeOff } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -32,7 +32,7 @@ function maskSecret(secret: string): string {
   // Federico 2026-05-29: show a full-length-style masked key like any other app
   // (first 4 + a run of bullets + last 4), not a truncated "924a…fe59". The
   // bullet run is fixed-width so it does not leak the secret's exact length.
-  if (!secret) return "<YOUR_FLOOM_SECRET>";
+  if (!secret) return "<YOUR_OSS_FLOOM_SECRET>";
   if (secret.length <= 8) return "•".repeat(secret.length);
   return `${secret.slice(0, 4)}${"•".repeat(24)}${secret.slice(-4)}`;
 }
@@ -49,10 +49,10 @@ export function CliCommandPanel() {
   const [mcpTarget, setMcpTarget] = useState<McpTarget>("claude");
 
   useEffect(() => {
-    // Security: the token lives only in this browser's localStorage. We do NOT
+    // Security: the OSS API secret lives only in this browser's localStorage. We do NOT
     // fetch it from the server. A prior /api/floom-secret route returned the
     // platform admin secret to ANY unauthenticated visitor (public credential
-    // leak); it has been removed. The user pastes their token once below.
+    // leak); it has been removed. The user pastes their secret once below.
     const stored = readStoredSecret();
     if (stored) setStoredSecret(stored);
   }, []);
@@ -67,7 +67,16 @@ export function CliCommandPanel() {
     setSecretInput("");
   }
 
-  const apiSecret = revealed ? (storedSecret || "<YOUR_FLOOM_SECRET>") : maskSecret(storedSecret);
+  function clearSecret() {
+    try {
+      for (const key of SECRET_STORAGE_KEYS) window.localStorage.removeItem(key);
+    } catch {}
+    setStoredSecret("");
+    setSecretInput("");
+    setRevealed(false);
+  }
+
+  const apiSecret = revealed ? (storedSecret || "<YOUR_OSS_FLOOM_SECRET>") : maskSecret(storedSecret);
 
   const snippets = useMemo(
     () => ({
@@ -104,11 +113,13 @@ export function CliCommandPanel() {
           section matching Setup commands below. */}
       <section className="space-y-3">
         <div>
-          <h2 className="text-base font-medium text-foreground">Your Floom token</h2>
+          <h2 className="text-base font-medium text-foreground">Saved OSS API secret</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Single-user v0: this token is the credential for every CLI / MCP /
-            API call. Keep it private. Rotate from your env config on the API
-            host if you ever paste it somewhere by accident.
+            Browser-saved <code className="font-mono">FLOOM_SECRET</code>{" "}
+            for <code className="font-mono">workers-api.floom.dev</code>. Use
+            it as <code className="font-mono">x-floom-secret</code>; Cloud PATs
+            start with <code className="font-mono">floom_</code> and belong to{" "}
+            <code className="font-mono">workeros-api.floom.dev</code>.
           </p>
         </div>
         {storedSecret ? (
@@ -134,6 +145,15 @@ export function CliCommandPanel() {
               {copiedKey === "token" ? <Check className="mr-1 h-3.5 w-3.5" /> : <Copy className="mr-1 h-3.5 w-3.5" />}
               {copiedKey === "token" ? "Copied" : "Copy"}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={clearSecret}
+            >
+              <RefreshCw className="mr-1 h-3.5 w-3.5" />
+              Replace
+            </Button>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -141,7 +161,7 @@ export function CliCommandPanel() {
               type="password"
               autoComplete="off"
               spellCheck={false}
-              placeholder="Paste your FLOOM_SECRET to store it in this browser"
+              placeholder="Paste the OSS FLOOM_SECRET for workers-api.floom.dev"
               value={secretInput}
               onChange={(e) => setSecretInput(e.target.value)}
               onKeyDown={(e) => {
