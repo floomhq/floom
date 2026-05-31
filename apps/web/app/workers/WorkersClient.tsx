@@ -589,7 +589,7 @@ function WorkerCard({
             composed icon strip (U3: all the worker's tool/connection/category
             glyphs, capped at 5 then +N) and the favourite star. Top corners
             follow the card radius; a hairline separates it from the body. */}
-        <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--line-soft)] bg-[var(--bg-2)] px-3.5 py-2.5">
+        <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--border-default)] bg-[color-mix(in_srgb,var(--foreground)_7%,var(--bg-card))] px-3.5 py-2.5">
           {worker.archived ? (
             <span
               className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] border border-border bg-card/60 px-2 py-1 text-[11px] text-muted-foreground"
@@ -726,7 +726,7 @@ function WorkerCardSkeleton() {
   return (
     <Card className={`${CARD_HEIGHT} gap-0 py-0 overflow-hidden`}>
       {/* Header band: icon strip + star */}
-      <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--line-soft)] bg-[var(--bg-2)] px-3.5 py-2.5">
+      <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--border-default)] bg-[color-mix(in_srgb,var(--foreground)_7%,var(--bg-card))] px-3.5 py-2.5">
         <Skeleton className="h-7 w-20 rounded-[var(--radius-squircle)]" />
         <Skeleton className="size-5 rounded shrink-0" />
       </div>
