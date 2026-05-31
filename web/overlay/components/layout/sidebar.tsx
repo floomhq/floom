@@ -131,12 +131,7 @@ function UserProfileFooter() {
     fetch("/app/api/me", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
-        if (!cancelled && d?.user?.email) {
-          setEmail(d.user.email as string);
-          // Ensure the user has at least one PAT (fire-and-forget).
-          // bootstrap is idempotent — no-ops if a token already exists.
-          fetch("/app/api/proxy/auth/tokens/bootstrap", { method: "POST" }).catch(() => {});
-        }
+        if (!cancelled && d?.user?.email) setEmail(d.user.email as string);
       })
       .catch(() => {});
     return () => {

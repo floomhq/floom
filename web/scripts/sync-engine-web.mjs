@@ -71,7 +71,6 @@ export const OVERLAY_FILES = [
   "app/cli-auth/page.tsx",
   "components/layout/WorkspaceSwitcher.tsx",
   "components/layout/sidebar.tsx",
-  "components/CliCommandPanel.tsx",
   "middleware.ts",
   "lib/useRunStream.ts",
 ];
