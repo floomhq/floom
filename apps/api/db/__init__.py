@@ -1,6 +1,7 @@
 """Cloud database adapters."""
 
 from .supabase_repos import (
+    SupabaseApprovalRepository,
     SupabaseCliAuthRepository,
     SupabaseConnectionRepository,
     SupabaseRunRepository,
@@ -9,6 +10,7 @@ from .supabase_repos import (
 )
 
 __all__ = [
+    "SupabaseApprovalRepository",
     "SupabaseCliAuthRepository",
     "SupabaseConnectionRepository",
     "SupabaseRunRepository",

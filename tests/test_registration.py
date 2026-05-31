@@ -4,6 +4,7 @@ import importlib
 
 from apps.api.auth.supabase_provider import SupabaseAuthProvider
 from apps.api.db.supabase_repos import (
+    SupabaseApprovalRepository,
     SupabaseSecretRepository,
 )
 from auth.factory import get_auth_provider
@@ -24,3 +25,4 @@ def test_registration_registers_cloud_implementations_when_workeros_cloud_true(
 
     assert isinstance(provider, SupabaseAuthProvider)
     assert isinstance(repos.secrets, SupabaseSecretRepository)
+    assert isinstance(repos.approvals, SupabaseApprovalRepository)

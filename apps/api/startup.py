@@ -23,6 +23,7 @@ from apps.api.cloud_webhooks import apply_engine_overrides
 from apps.api.config import get_cloud_settings
 from apps.api.db._secret_crypto import ensure_secret_crypto_ready
 from apps.api.db.supabase_repos import (
+    SupabaseApprovalRepository,
     SupabaseCliAuthRepository,
     SupabaseConnectionRepository,
     SupabaseRunRepository,
@@ -37,7 +38,6 @@ import contexts as engine_contexts  # noqa: E402
 import db as engine_db  # noqa: E402
 from db import factory as engine_db_factory  # noqa: E402
 from db.factory import Repositories, register_repositories  # noqa: E402
-from db.sqlite import SqliteApprovalRepository  # noqa: E402
 
 
 def _activate_cloud_deploy() -> None:
@@ -69,6 +69,8 @@ def _disable_postgrest_http2() -> None:
     except Exception:
         return
     base_class = getattr(_pg_client, "BasePostgrestClient", None) or _pg_client.SyncPostgrestClient
+    if not hasattr(base_class, "create_session"):
+        return
     orig = base_class.create_session
     if getattr(orig, "_workeros_http1_patched", False):
         return
@@ -128,16 +130,7 @@ def _cloud_repositories() -> Repositories:
         connections=SupabaseConnectionRepository(),
         secrets=SupabaseSecretRepository(),
         cli_auth=SupabaseCliAuthRepository(),
-        # HITL approvals are not yet Supabase-backed in cloud. Until a
-        # SupabaseApprovalRepository exists, reuse the engine's SQLite
-        # approval repo so the Repositories tuple is complete and the
-        # scheduler / get_repositories() construct without TypeError.
-        # The scheduler tick does not touch approvals; this only unblocks
-        # construction. (Engine added approvals to the required
-        # Repositories fields; the cloud factory had never supplied it,
-        # crashing every scheduler tick with "missing positional
-        # argument: 'approvals'".)
-        approvals=SqliteApprovalRepository(),
+        approvals=SupabaseApprovalRepository(),
     )
 
 

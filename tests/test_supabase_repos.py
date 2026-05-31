@@ -85,6 +85,8 @@ def test_supabase_repositories_enforce_rls_between_users():
         skill_version_b = f"sv-{uuid4().hex}"
         worker_a = f"worker-{uuid4().hex}"
         worker_b = f"worker-{uuid4().hex}"
+        workspace_a = f"ws_{uuid4().hex[:14]}"
+        workspace_b = f"ws_{uuid4().hex[:14]}"
         run_a = f"run-{uuid4().hex}"
         run_b = f"run-{uuid4().hex}"
         connection_a = f"conn-{uuid4().hex}"
@@ -95,6 +97,23 @@ def test_supabase_repositories_enforce_rls_between_users():
         device_b = f"device-{uuid4().hex}"
         user_code_a = f"A{uuid4().hex[:3]}-A{uuid4().hex[:3]}".upper()
         user_code_b = f"B{uuid4().hex[:3]}-B{uuid4().hex[:3]}".upper()
+
+        service.table("workspaces").insert(
+            [
+                {
+                    "id": workspace_a,
+                    "owner_user_id": user_a["id"],
+                    "name": "User A workspace",
+                    "created_at": now_iso,
+                },
+                {
+                    "id": workspace_b,
+                    "owner_user_id": user_b["id"],
+                    "name": "User B workspace",
+                    "created_at": now_iso,
+                },
+            ]
+        ).execute()
 
         service.table("skill_versions").insert(
             [
@@ -131,6 +150,7 @@ def test_supabase_repositories_enforce_rls_between_users():
                     "triggers_json": [],
                     "enabled": True,
                     "created_at": now_iso,
+                    "workspace_id": workspace_a,
                 },
                 {
                     "id": worker_b,
@@ -143,6 +163,7 @@ def test_supabase_repositories_enforce_rls_between_users():
                     "triggers_json": [],
                     "enabled": True,
                     "created_at": now_iso,
+                    "workspace_id": workspace_b,
                 },
             ]
         ).execute()
@@ -158,6 +179,7 @@ def test_supabase_repositories_enforce_rls_between_users():
                     "input_json": {},
                     "output_json": {},
                     "created_at": now_iso,
+                    "workspace_id": workspace_a,
                 },
                 {
                     "id": run_b,
@@ -169,6 +191,7 @@ def test_supabase_repositories_enforce_rls_between_users():
                     "input_json": {},
                     "output_json": {},
                     "created_at": now_iso,
+                    "workspace_id": workspace_b,
                 },
             ]
         ).execute()
@@ -184,6 +207,7 @@ def test_supabase_repositories_enforce_rls_between_users():
                     "created_at": now_iso,
                     "updated_at": now_iso,
                     "scopes_json": ["gmail.read"],
+                    "workspace_id": workspace_a,
                 },
                 {
                     "id": connection_b,
@@ -195,6 +219,7 @@ def test_supabase_repositories_enforce_rls_between_users():
                     "created_at": now_iso,
                     "updated_at": now_iso,
                     "scopes_json": ["repo"],
+                    "workspace_id": workspace_b,
                 },
             ]
         ).execute()
@@ -207,6 +232,7 @@ def test_supabase_repositories_enforce_rls_between_users():
                     "status": "set",
                     "created_at": now_iso,
                     "updated_at": now_iso,
+                    "workspace_id": workspace_a,
                 },
                 {
                     "user_id": user_b["id"],
@@ -215,6 +241,7 @@ def test_supabase_repositories_enforce_rls_between_users():
                     "status": "set",
                     "created_at": now_iso,
                     "updated_at": now_iso,
+                    "workspace_id": workspace_b,
                 },
             ]
         ).execute()
@@ -297,6 +324,7 @@ def test_supabase_repositories_enforce_rls_between_users():
             service.table("runs").delete().in_("user_id", user_ids).execute()
             service.table("workers").delete().in_("user_id", user_ids).execute()
             service.table("skill_versions").delete().in_("user_id", user_ids).execute()
+            service.table("workspaces").delete().in_("owner_user_id", user_ids).execute()
             service.table("users").delete().in_("id", user_ids).execute()
         for user in (user_a, user_b):
             if user is None:

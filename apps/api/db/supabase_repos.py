@@ -1289,6 +1289,182 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         return str(run["bundle_snapshot_path"]) if run and run.get("bundle_snapshot_path") else None
 
 
+class SupabaseApprovalRepository(_BaseSupabaseRepository):
+    """Cloud approval adapter backed by Supabase runs.
+
+    The engine's approval repository is a SQLite table. Cloud stores run state in
+    Supabase, and pending approvals are represented by runs with
+    status='pending_approval'. This adapter presents those runs through the
+    engine's ApprovalRepository protocol without introducing a second store.
+    """
+
+    @staticmethod
+    def _approval_status_from_run(row: dict[str, Any]) -> str:
+        approval_status = str(row.get("approval_status") or "")
+        if approval_status in {"pending", "approved", "rejected"}:
+            return approval_status
+        if row.get("status") == RunStatus.PENDING_APPROVAL.value:
+            return "pending"
+        return approval_status or str(row.get("status") or "")
+
+    def _row_from_run(self, row: dict[str, Any], worker_name: str | None = None) -> dict[str, Any]:
+        run_id = str(row["id"])
+        output_json = _json_storage_value(row.get("output_json"), {})
+        input_json = _json_storage_value(row.get("input_json"), {})
+        return {
+            "id": f"apr_{run_id}",
+            "run_id": run_id,
+            "worker_id": row.get("worker_id"),
+            "owner_id": row.get("user_id"),
+            "status": self._approval_status_from_run(row),
+            "label": "Approve action",
+            "preview": self._preview_from_output(output_json),
+            "created_at": row.get("created_at"),
+            "decided_at": None,
+            "reason": None,
+            "decision_input_json": _json_dump(input_json),
+            "edited_output_json": None,
+            "follow_up_run_id": None,
+            "worker_name": worker_name,
+        }
+
+    @staticmethod
+    def _preview_from_output(output_json: Any) -> str:
+        output = _json_storage_value(output_json, {})
+        if isinstance(output, dict):
+            for key in ("text", "message", "preview", "body", "summary"):
+                value = output.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+            if output:
+                return json.dumps(output, indent=2, ensure_ascii=False)
+            return ""
+        if isinstance(output, list):
+            return json.dumps(output, indent=2, ensure_ascii=False)
+        return str(output or "")
+
+    def create(self, *, owner_id: str, **fields: Any) -> dict[str, Any]:
+        run_id = str(fields.get("run_id") or "")
+        if run_id:
+            self._client.table("runs").update(
+                {"approval_status": fields.get("status") or "pending"}
+            ).eq("id", run_id).eq("user_id", owner_id).execute()
+            existing = self.get_by_run_id(run_id=run_id)
+            if existing is not None:
+                if fields.get("label"):
+                    existing["label"] = fields["label"]
+                if fields.get("preview"):
+                    existing["preview"] = fields["preview"]
+                if fields.get("decision_input_json"):
+                    existing["decision_input_json"] = fields["decision_input_json"]
+                return existing
+        created_at = fields.get("created_at") or datetime.now(timezone.utc).isoformat()
+        return {
+            "id": fields.get("id") or f"apr_{run_id}",
+            "run_id": run_id,
+            "worker_id": fields.get("worker_id"),
+            "owner_id": owner_id,
+            "status": fields.get("status") or "pending",
+            "label": fields.get("label") or "Approve action",
+            "preview": fields.get("preview") or "",
+            "created_at": created_at,
+            "decided_at": fields.get("decided_at"),
+            "reason": fields.get("reason"),
+            "decision_input_json": fields.get("decision_input_json") or "{}",
+            "edited_output_json": fields.get("edited_output_json"),
+            "follow_up_run_id": fields.get("follow_up_run_id"),
+        }
+
+    def get(self, *, owner_id: str, approval_id: str) -> dict[str, Any] | None:
+        prefix = "apr_"
+        if not approval_id.startswith(prefix):
+            return None
+        row = self.get_by_run_id(run_id=approval_id[len(prefix):])
+        if row is None or row.get("owner_id") != owner_id:
+            return None
+        return row
+
+    def get_by_run_id(self, *, run_id: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("runs")
+            .select("id,user_id,worker_id,status,approval_status,input_json,output_json,created_at")
+            .eq("id", run_id)
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(response)
+        if row is None:
+            return None
+        worker_names = SupabaseWorkerRepository(self._client)._worker_name_map([str(row["worker_id"])])
+        return self._row_from_run(row, worker_names.get(str(row["worker_id"])))
+
+    def list_pending(self, *, owner_id: str) -> list[dict[str, Any]]:
+        builder = self._client.table("runs").select(
+            "id,user_id,worker_id,status,approval_status,input_json,output_json,created_at"
+        )
+        builder = _scope_by_workspace(builder, user_id=owner_id)
+        response = (
+            builder
+            .eq("status", RunStatus.PENDING_APPROVAL.value)
+            .order("created_at")
+            .execute()
+        )
+        rows = _response_rows(response)
+        worker_names = SupabaseWorkerRepository(self._client)._worker_name_map(
+            str(row["worker_id"]) for row in rows if row.get("worker_id")
+        )
+        return [
+            self._row_from_run(row, worker_names.get(str(row["worker_id"])))
+            for row in rows
+        ]
+
+    def count_pending(self, *, owner_id: str) -> int:
+        builder = self._client.table("runs").select("id", count="exact")
+        builder = _scope_by_workspace(builder, user_id=owner_id)
+        response = builder.eq("status", RunStatus.PENDING_APPROVAL.value).execute()
+        return int(getattr(response, "count", 0) or 0)
+
+    def approve(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        edited_output_json: str | None = None,
+        follow_up_run_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        row = self.get_by_run_id(run_id=run_id)
+        if row is None or row.get("owner_id") != owner_id:
+            return None
+        self._client.table("runs").update(
+            {"approval_status": "approved"}
+        ).eq("id", run_id).eq("user_id", owner_id).execute()
+        row["decided_at"] = decided_at
+        row["status"] = "approved"
+        row["edited_output_json"] = edited_output_json
+        row["follow_up_run_id"] = follow_up_run_id
+        return row
+
+    def reject(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        row = self.get_by_run_id(run_id=run_id)
+        if row is None or row.get("owner_id") != owner_id:
+            return None
+        self._client.table("runs").update(
+            {"approval_status": "rejected"}
+        ).eq("id", run_id).eq("user_id", owner_id).execute()
+        row["decided_at"] = decided_at
+        row["status"] = "rejected"
+        row["reason"] = reason
+        return row
+
+
 class SupabaseConnectionRepository(_BaseSupabaseRepository):
     # Columns selected on every read. MCP fields (engine PR #161 / 8136efc,
     # mirrored to Supabase via migration 0006) are part of every projection
