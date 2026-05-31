@@ -1,6 +1,20 @@
 from __future__ import annotations
 
 import os
+import sys
+
+# Windows compatibility: fcntl is Linux/Mac only. The engine's sqlite.py uses
+# it for file locking (flock). In cloud mode, SQLite is not the primary store
+# (Supabase repos are used instead), so a no-op stub is safe.
+if sys.platform == "win32":
+    import types as _types
+    _fcntl = _types.ModuleType("fcntl")
+    _fcntl.LOCK_EX = 2  # type: ignore[attr-defined]
+    _fcntl.LOCK_SH = 1  # type: ignore[attr-defined]
+    _fcntl.LOCK_UN = 8  # type: ignore[attr-defined]
+    _fcntl.LOCK_NB = 4  # type: ignore[attr-defined]
+    _fcntl.flock = lambda fd, operation: None  # type: ignore[attr-defined]
+    sys.modules.setdefault("fcntl", _fcntl)
 
 from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.supabase_provider import SupabaseAuthProvider

@@ -2,8 +2,22 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
+
+# Windows compatibility: inject fcntl stub BEFORE any engine module imports.
+# fcntl is Linux/Mac only; the engine's sqlite.py uses it for file locking.
+# Cloud mode uses Supabase repos, so a no-op stub is safe here.
+if sys.platform == "win32":
+    import types as _types
+    _fcntl = _types.ModuleType("fcntl")
+    _fcntl.LOCK_EX = 2  # type: ignore[attr-defined]
+    _fcntl.LOCK_SH = 1  # type: ignore[attr-defined]
+    _fcntl.LOCK_UN = 8  # type: ignore[attr-defined]
+    _fcntl.LOCK_NB = 4  # type: ignore[attr-defined]
+    _fcntl.flock = lambda fd, operation: None  # type: ignore[attr-defined]
+    sys.modules.setdefault("fcntl", _fcntl)
 
 from fastapi import FastAPI, HTTPException, Query, Request
 
@@ -31,7 +45,11 @@ if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
-        if not start_cloud_scheduler():
+        dev_mode = (os.environ.get("WORKEROS_DEV") or "").strip()
+        db_host = (os.environ.get("WORKEROS_CLOUD_DB_HOST") or "").strip()
+        if dev_mode and not db_host:
+            pass  # Skip scheduler in dev mode when DB creds are absent
+        elif not start_cloud_scheduler():
             raise RuntimeError("Cloud scheduler advisory lock is already held.")
     try:
         yield
