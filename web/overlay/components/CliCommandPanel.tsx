@@ -17,6 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
+const CLOUD_API_BASE =
+  process.env.NEXT_PUBLIC_WORKEROS_API_BASE || "https://workeros-api.floom.dev";
 
 type McpTarget = "claude" | "cursor" | "vscode" | "windsurf" | "generic";
 
@@ -101,7 +103,7 @@ export function CliCommandPanel() {
   const snippets = useMemo(() => ({
     cli: "npm i -g @floomhq/workeros\nworkeros login",
     mcp: buildMcpSnippet(mcpTarget),
-    api: `curl -sS ${API_BASE.replace("/api/proxy", "")}/api/workers \\\n  -H "x-floom-token: <YOUR_TOKEN>"`,
+    api: `curl -sS ${CLOUD_API_BASE}/api/workers \\\n  -H "x-floom-token: <YOUR_CLOUD_PAT>"`,
   }), [mcpTarget]);
 
   const activeMcpTarget = MCP_TARGETS.find((t) => t.value === mcpTarget)!;
@@ -110,10 +112,14 @@ export function CliCommandPanel() {
     <div className="space-y-8">
       <section className="space-y-3">
         <div>
-          <h2 className="text-base font-medium text-foreground">Your API tokens</h2>
+          <h2 className="text-base font-medium text-foreground">Cloud API tokens</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Personal Access Tokens for CLI, MCP, and direct API access. Each token is scoped to your account.
-            Raw values are shown only once — save them somewhere safe.
+            Personal Access Tokens for CLI, MCP, and direct API access on{" "}
+            <code className="font-mono">workeros-api.floom.dev</code>. Use them
+            as <code className="font-mono">x-floom-token</code>; OSS secrets use{" "}
+            <code className="font-mono">x-floom-secret</code> on{" "}
+            <code className="font-mono">workers-api.floom.dev</code>.
+            Raw values are shown only once.
           </p>
         </div>
 
