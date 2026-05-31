@@ -20,9 +20,25 @@ def reset_cloud_state():
     os.environ.setdefault("WORKEROS_CLOUD", "true")
     reset_cloud_caches()
     _secret_crypto._fernet.cache_clear()
+    try:
+        import apps.api.auth.supabase_provider as supabase_provider
+
+        with supabase_provider._cache_lock:
+            supabase_provider._pat_cache.clear()
+            supabase_provider._ws_cache.clear()
+    except Exception:
+        pass
     yield
     reset_cloud_caches()
     _secret_crypto._fernet.cache_clear()
+    try:
+        import apps.api.auth.supabase_provider as supabase_provider
+
+        with supabase_provider._cache_lock:
+            supabase_provider._pat_cache.clear()
+            supabase_provider._ws_cache.clear()
+    except Exception:
+        pass
     try:
         import apps.api.routes.auth as auth_routes
 

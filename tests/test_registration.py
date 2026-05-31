@@ -13,9 +13,11 @@ from db.factory import get_repositories
 
 def test_registration_registers_cloud_implementations_when_workeros_cloud_true(
     monkeypatch,
+    tmp_path,
 ):
     monkeypatch.setenv("WORKEROS_CLOUD", "true")
     monkeypatch.delenv("WORKEROS_DEPLOY", raising=False)
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "workeros-test.db"))
     import apps.api.startup as startup
 
     importlib.reload(startup)
