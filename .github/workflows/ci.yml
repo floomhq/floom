@@ -31,6 +31,7 @@ jobs:
           WORKEROS_DEPLOY: local
           FLOOM_SECRET: ci-test-secret
           OPENAI_API_KEY: ""
+          HOME: /tmp/ci-home
         run: pytest tests/ -v --tb=short
 
   web-tests:
