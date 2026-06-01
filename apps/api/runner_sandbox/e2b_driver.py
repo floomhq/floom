@@ -383,6 +383,7 @@ class E2BSandboxDriver(SandboxDriver):
             )
 
         # e2b 2.x: use Sandbox.create()
+        from run_token import make_run_token  # noqa: PLC0415
         _sandbox_envs = {
             "FLOOM_RUN_ID": run_id,
             "FLOOM_TRACE_ID": trace_id,
@@ -392,6 +393,9 @@ class E2BSandboxDriver(SandboxDriver):
                 or os.environ.get("WORKERS_API_URL")
                 or "https://workers-api.floom.dev"
             ).rstrip("/"),
+            # Scoped capability token — valid only for /runs/{run_id}/composio-execute/*
+            # Never inject the full FLOOM_SECRET into sandboxes (it grants full API access).
+            "WORKEROS_RUN_TOKEN": make_run_token(run_id),
         }
         # Propagate the codegen model override so the worker-author meta-worker
         # (which generates code from inside the sandbox) uses the same model the

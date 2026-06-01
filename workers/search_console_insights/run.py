@@ -28,6 +28,7 @@ BRANDED_TERMS = ["rocketlist"]
 
 WORKEROS_API_URL = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev").rstrip("/")
 FLOOM_RUN_ID = os.environ.get("FLOOM_RUN_ID", "")
+WORKEROS_RUN_TOKEN = os.environ.get("WORKEROS_RUN_TOKEN", "")
 
 
 def _read_connection_id() -> str:
@@ -52,12 +53,10 @@ def composio_execute(slug: str, payload: Dict[str, Any]) -> Optional[Dict[str, A
     }
     url = f"{WORKEROS_API_URL}/runs/{FLOOM_RUN_ID}/composio-execute/{slug}"
     encoded = json.dumps(body).encode("utf-8")
-    req = urlrequest.Request(
-        url,
-        data=encoded,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    req_headers = {"Content-Type": "application/json"}
+    if WORKEROS_RUN_TOKEN:
+        req_headers["X-Workeros-Run-Token"] = WORKEROS_RUN_TOKEN
+    req = urlrequest.Request(url, data=encoded, headers=req_headers, method="POST")
     try:
         with urlrequest.urlopen(req, timeout=120) as response:
             output = json.loads(response.read().decode("utf-8"))
