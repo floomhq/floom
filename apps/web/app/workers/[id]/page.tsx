@@ -132,47 +132,7 @@ const NAV_ITEMS: NavItem[] = [
 // dir isn't on disk in that deploy layout), but the source IS present in the
 // dedicated content fields (run_py_content / skill_md_content / manifest_yaml).
 // Build a WorkerFile[] from those fields so the Source tab actually renders.
-// Patches or inserts a `default:` field for a named input inside a worker.yml string.
-function patchInputDefault(yaml: string, inputName: string, value: string): string {
-  const lines = yaml.split('\n');
-  let inTargetBlock = false;
-  let fieldIndent = '      ';
-  let defaultLineIdx = -1;
-  let lastFieldIdx = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trimStart();
-    const indent = line.length - trimmed.length;
-
-    if (trimmed.startsWith('- name:')) {
-      if (inTargetBlock) break;
-      const nameVal = trimmed.slice('- name:'.length).trim().replace(/^["']|["']$/g, '');
-      if (nameVal === inputName) {
-        inTargetBlock = true;
-        fieldIndent = ' '.repeat(indent + 2);
-        lastFieldIdx = i;
-      }
-    } else if (inTargetBlock) {
-      if (trimmed !== '' && indent < fieldIndent.length) break;
-      if (trimmed.startsWith('default:')) {
-        defaultLineIdx = i;
-      }
-      if (trimmed && !trimmed.startsWith('#')) {
-        lastFieldIdx = i;
-      }
-    }
-  }
-
-  if (!inTargetBlock) return yaml;
-
-  if (defaultLineIdx >= 0) {
-    lines[defaultLineIdx] = `${fieldIndent}default: ${JSON.stringify(value)}`;
-  } else {
-    lines.splice(lastFieldIdx + 1, 0, `${fieldIndent}default: ${JSON.stringify(value)}`);
-  }
-  return lines.join('\n');
-}
+import { patchInputDefault } from "@/lib/yaml-utils";
 
 function deriveSourceFiles(worker: WorkerDetail | null): WorkerFile[] {
   if (!worker) return [];
