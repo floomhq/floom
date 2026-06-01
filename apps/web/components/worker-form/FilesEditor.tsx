@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Code2, AlignLeft, File, FilePlus, FolderOpen, Trash2 } from "lucide-react";
+import { Code2, AlignLeft, Download, ExternalLink, File, FilePlus, FolderOpen, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,8 +24,50 @@ function detectLanguage(path: string): string {
   if (path.endsWith(".yml") || path.endsWith(".yaml")) return "yaml";
   if (path.endsWith(".json")) return "json";
   if (path.endsWith(".md") || path.endsWith(".txt")) return "markdown";
+  if (path.endsWith(".html") || path.endsWith(".htm")) return "html";
+  if (path.endsWith(".csv") || path.endsWith(".tsv")) return "csv";
   if (path.endsWith(".sh")) return "bash";
   return "plaintext";
+}
+
+function sourceFileKind(path: string, language?: string) {
+  const lower = path.toLowerCase();
+  const detected = language || detectLanguage(lower);
+  if (lower === "worker.yml" || lower.endsWith(".yaml") || lower.endsWith(".yml")) return "yaml";
+  if (detected === "markdown" || lower.endsWith(".md") || lower.endsWith(".mdx")) return "markdown";
+  if (detected === "html" || lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
+  if (detected === "csv" || lower.endsWith(".csv") || lower.endsWith(".tsv")) return "table";
+  if (lower.endsWith(".xlsx")) return "spreadsheet";
+  if (lower.endsWith(".pdf")) return "pdf";
+  if (/\.(png|jpe?g|gif|webp|svg)$/.test(lower)) return "image";
+  if (/\.(mp4|webm|mov|m4v|ogv)$/.test(lower)) return "video";
+  return "code";
+}
+
+function supportsRenderedPreview(path: string, binary?: boolean): boolean {
+  if (binary) return false;
+  return ["yaml", "markdown", "html", "table"].includes(sourceFileKind(path));
+}
+
+function sourceFileDownloadName(path: string): string {
+  return path.split("/").filter(Boolean).pop() || "worker-source-file";
+}
+
+function openSourceContent(path: string, content: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+  window.open(url, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+function downloadSourceContent(path: string, content: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = sourceFileDownloadName(path);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +239,9 @@ interface FilesEditorViewProps {
 interface FilesEditorEditEntry {
   path: string;
   content: string;
+  binary?: boolean;
+  language?: string;
+  size?: number;
 }
 
 interface FilesEditorEditProps {
@@ -220,21 +265,17 @@ export function FilesEditor(props: FilesEditorProps) {
   return <FilesEditorEdit {...props} />;
 }
 
-function supportsRenderedPreview(path: string, binary?: boolean): boolean {
-  return !binary && Boolean(path);
-}
-
 function defaultSourceMode(path: string, hasForm: boolean, binary?: boolean): SourceMode {
   if (binary) return "raw";
   if (path === "worker.yml") return "preview";
-  if (detectLanguage(path) === "markdown") return "preview";
+  if (supportsRenderedPreview(path)) return "preview";
   return hasForm ? "form" : "raw";
 }
 
 function sourceModeLabel(mode: SourceMode): string {
-  if (mode === "raw") return "Raw";
+  if (mode === "raw") return "Raw source";
   if (mode === "form") return "Form";
-  return "Rendered";
+  return "Rendered preview";
 }
 
 function sourceModeIcon(mode: SourceMode) {
@@ -310,19 +351,33 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
 
 function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
   if (file.binary) {
-    return <div className="p-4 text-sm text-muted-foreground">Binary file -- cannot display.</div>;
+    return (
+      <UnsupportedSourcePreview
+        title="Binary source file"
+        detail="This worker source listing does not include inline bytes for binary files, so this file cannot be rendered here."
+        path={file.path}
+      />
+    );
   }
 
   if (!supportsRenderedPreview(file.path, file.binary)) {
-    return <SyntaxHighlightedCode content={file.content || ""} language={file.language} />;
+    return (
+      <div>
+        <SourcePreviewToolbar path={file.path} content={file.content || ""} label="Raw source" />
+        <SyntaxHighlightedCode content={file.content || ""} language={file.language || detectLanguage(file.path)} />
+      </div>
+    );
   }
 
   return (
     <Tabs defaultValue="preview" className="bg-muted/20">
-      <div className="flex items-center justify-end border-b border-line px-4 py-2">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
+        <p className="text-xs text-muted-foreground">
+          Rendered preview for {sourceFileKind(file.path, file.language)}
+        </p>
         <TabsList>
-          <TabsTrigger value="preview">Rendered</TabsTrigger>
-          <TabsTrigger value="raw">Raw</TabsTrigger>
+          <TabsTrigger value="preview">Rendered preview</TabsTrigger>
+          <TabsTrigger value="raw">Raw source</TabsTrigger>
         </TabsList>
       </div>
       <TabsContent value="preview" className="m-0">
@@ -333,9 +388,66 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
         />
       </TabsContent>
       <TabsContent value="raw" className="m-0">
+        <SourcePreviewToolbar path={file.path} content={file.content || ""} label="Raw source" />
         <SyntaxHighlightedCode content={file.content || ""} language={file.language || detectLanguage(file.path)} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+function SourcePreviewToolbar({
+  path,
+  content,
+  label,
+}: {
+  path: string;
+  content: string;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-line bg-card px-4 py-2">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={() => openSourceContent(path, content)}
+        >
+          <ExternalLink className="size-3.5" />
+          Open
+        </button>
+        <button
+          type="button"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={() => downloadSourceContent(path, content)}
+        >
+          <Download className="size-3.5" />
+          Download
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function UnsupportedSourcePreview({
+  title,
+  detail,
+  path,
+}: {
+  title: string;
+  detail: string;
+  path: string;
+}) {
+  return (
+    <div className="flex min-h-[280px] items-center justify-center bg-muted/20 p-6">
+      <div className="max-w-lg rounded-[var(--radius-card)] border border-border bg-card p-5 text-sm">
+        <p className="font-medium text-foreground">{title}</p>
+        <p className="mt-2 leading-6 text-muted-foreground">{detail}</p>
+        <p className="mt-3 rounded-[var(--radius-button)] border border-line bg-muted/30 px-3 py-2 font-mono text-xs text-muted-foreground">
+          {path}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -366,7 +478,63 @@ function RenderedFilePreview({
     );
   }
 
+  if (sourceFileKind(path, detected) === "html") {
+    return (
+      <iframe
+        title={path}
+        srcDoc={content}
+        sandbox=""
+        referrerPolicy="no-referrer"
+        className="h-[640px] w-full border-0 bg-white"
+      />
+    );
+  }
+
+  if (sourceFileKind(path, detected) === "table") {
+    return <SourceDelimitedTablePreview content={content} path={path} />;
+  }
+
+  if (["spreadsheet", "pdf", "image", "video"].includes(sourceFileKind(path, detected))) {
+    return (
+      <UnsupportedSourcePreview
+        title={`${sourceFileKind(path, detected)} preview unavailable`}
+        detail="This worker source payload only includes text content for source files. This renderer needs file bytes or a backend download URL, which is not present in WorkerFile."
+        path={path}
+      />
+    );
+  }
+
   return <SyntaxHighlightedCode content={content} language={detected} />;
+}
+
+function SourceDelimitedTablePreview({ content, path }: { content: string; path: string }) {
+  const rows = content
+    .split(/\r?\n/)
+    .filter((line) => line.length > 0)
+    .slice(0, 100)
+    .map((line) => line.split(path.toLowerCase().endsWith(".tsv") ? "\t" : ",").slice(0, 12));
+
+  if (rows.length === 0) {
+    return <p className="p-4 text-sm text-muted-foreground">No rows found.</p>;
+  }
+
+  return (
+    <div className="max-h-[640px] overflow-auto bg-card">
+      <table className="min-w-full border-collapse text-left text-xs">
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex} className={rowIndex === 0 ? "bg-muted/60 font-medium" : "odd:bg-muted/20"}>
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex} className="max-w-[240px] border border-line px-2.5 py-1.5 align-top">
+                  <span className="block truncate" title={cell}>{cell}</span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function WorkerYamlPreviewContent({ content }: { content: string }) {
@@ -521,7 +689,7 @@ function FilesEditorEdit({
   const effectiveSelected = selectedPath ?? files[0]?.path ?? "worker.yml";
   const selectedFile = files.find((f) => f.path === effectiveSelected) || null;
   const selectedHasForm = Boolean(selectedFile && selectedFile.path === "worker.yml" && renderYamlPreview);
-  const selectedHasPreview = Boolean(selectedFile && supportsRenderedPreview(selectedFile.path));
+  const selectedHasPreview = Boolean(selectedFile && supportsRenderedPreview(selectedFile.path, selectedFile.binary));
 
   const [sourceMode, setSourceMode] = useState<SourceMode>(() =>
     defaultSourceMode(effectiveSelected, Boolean(renderYamlPreview))
@@ -564,7 +732,7 @@ function FilesEditorEdit({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 items-start">
       <Card size="sm" className="border-border shadow-none bg-card self-start lg:sticky lg:top-3">
-        <CardHeader className="px-3 flex flex-row items-center justify-between">
+        <CardHeader className="px-3 py-2 flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <FolderOpen className="w-3.5 h-3.5" />
             Files
@@ -608,7 +776,7 @@ function FilesEditorEdit({
             >
               <File className="w-3 h-3 shrink-0 text-muted-foreground" />
               <span className="text-xs font-mono truncate flex-1" title={f.path}>{f.path}</span>
-              {f.path !== "worker.yml" && (
+              {f.path !== "worker.yml" && !f.binary && (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); deleteFile(f.path); }}
@@ -656,36 +824,63 @@ function FilesEditorEdit({
             sourceMode === "form" && selectedFile.path === "worker.yml" && renderYamlPreview ? (
               <div className="p-4">{renderYamlPreview}</div>
             ) : sourceMode === "preview" ? (
-              <RenderedFilePreview
-                path={selectedFile.path}
-                content={selectedFile.content}
-                language={detectLanguage(selectedFile.path)}
-              />
-            ) : (
-              <div
-                className="rounded-b-[var(--radius-card)] overflow-hidden bg-[var(--bg-2)] dark:bg-[#1e1e2e]"
-                style={{ minHeight: 640 }}
-              >
-                <Editor
-                  key={selectedFile.path}
-                  value={selectedFile.content}
-                  onValueChange={(code) => setContent(selectedFile.path, code)}
-                  highlight={makeHighlighter(detectLanguage(selectedFile.path))}
-                  padding={12}
-                  tabSize={2}
-                  insertSpaces
-                  style={{
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                    fontSize: 13,
-                    minHeight: 640,
-                    background: "transparent",
-                    color: "var(--foreground)",
-                    outline: "none",
-                    lineHeight: "1.75",
-                  }}
-                  textareaClassName="focus:outline-none"
+              selectedFile.binary ? (
+                <UnsupportedSourcePreview
+                  title="Binary source file"
+                  detail="This worker source listing does not include inline bytes for binary files, so this file cannot be rendered or edited here."
+                  path={selectedFile.path}
                 />
-              </div>
+              ) : supportsRenderedPreview(selectedFile.path) ? (
+                <RenderedFilePreview
+                  path={selectedFile.path}
+                  content={selectedFile.content}
+                  language={selectedFile.language || detectLanguage(selectedFile.path)}
+                />
+              ) : (
+                <UnsupportedSourcePreview
+                  title="Rendered preview unavailable"
+                  detail="This source file type does not have a renderer in the worker Source editor. Use Raw source, Open, or Download."
+                  path={selectedFile.path}
+                />
+              )
+            ) : (
+              <>
+                {selectedFile.binary ? (
+                  <UnsupportedSourcePreview
+                    title="Binary source file"
+                    detail="This worker source listing does not include inline bytes for binary files, so this file cannot be rendered or edited here."
+                    path={selectedFile.path}
+                  />
+                ) : (
+                  <>
+                    <SourcePreviewToolbar path={selectedFile.path} content={selectedFile.content} label="Raw source" />
+                    <div
+                      className="rounded-b-[var(--radius-card)] overflow-hidden bg-[var(--bg-2)] dark:bg-[#1e1e2e]"
+                      style={{ minHeight: 640 }}
+                    >
+                      <Editor
+                        key={selectedFile.path}
+                        value={selectedFile.content}
+                        onValueChange={(code) => setContent(selectedFile.path, code)}
+                        highlight={makeHighlighter(selectedFile.language || detectLanguage(selectedFile.path))}
+                        padding={12}
+                        tabSize={2}
+                        insertSpaces
+                        style={{
+                          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                          fontSize: 13,
+                          minHeight: 640,
+                          background: "transparent",
+                          color: "var(--foreground)",
+                          outline: "none",
+                          lineHeight: "1.75",
+                        }}
+                        textareaClassName="focus:outline-none"
+                      />
+                    </div>
+                  </>
+                )}
+              </>
             )
           ) : (
             <p className="text-sm text-muted-foreground p-3">Select a file to edit.</p>
