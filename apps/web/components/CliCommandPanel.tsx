@@ -10,10 +10,11 @@ const SECRET_STORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secre
 const API_BASE = "https://workers-api.floom.dev";
 const PROXY_BASE = "/api/proxy";
 
-type McpTarget = "claude" | "cursor" | "vscode" | "windsurf" | "generic";
+type McpTarget = "claude" | "codex" | "cursor" | "vscode" | "windsurf" | "generic";
 
 const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
   { value: "claude",   label: "Claude",   hint: "~/.claude/settings.json" },
+  { value: "codex",    label: "Codex",    hint: "prints a generic snippet for Codex MCP config" },
   { value: "cursor",   label: "Cursor",   hint: "~/.cursor/mcp.json" },
   { value: "vscode",   label: "VS Code",  hint: ".vscode/mcp.json" },
   { value: "windsurf", label: "Windsurf", hint: "~/.codeium/windsurf/mcp_config.json" },
@@ -39,7 +40,11 @@ function maskSecret(secret: string): string {
 }
 
 function buildMcpSnippet(target: McpTarget): string {
-  return `npx @floomhq/workeros install --target ${target}`;
+  const cliTarget = target === "codex" ? "generic" : target;
+  const note = target === "codex"
+    ? "\n# Codex uses a manual MCP config paste today; the command prints the server snippet."
+    : "";
+  return `npm i -g @floomhq/workeros\nworkeros mcp add --target ${cliTarget}${note}`;
 }
 
 export function CliCommandPanel() {
@@ -259,10 +264,10 @@ export function CliCommandPanel() {
                   type="button"
                   onClick={() => setMcpTarget(t.value)}
                   className={
-                    `h-7 px-2.5 text-xs rounded-[var(--radius-button)] border transition-colors ` +
+                    `inline-flex h-8 items-center rounded-[var(--radius-button)] border px-3 text-xs font-medium transition-colors ` +
                     (mcpTarget === t.value
-                      ? "border-blue-500 bg-blue-500 text-white"
-                      : "border-line bg-card text-muted-foreground hover:text-foreground hover:bg-muted")
+                      ? "border-[var(--foreground)] bg-[var(--foreground)] text-[var(--background)]"
+                      : "border-line bg-[var(--bg-2)] text-muted-foreground hover:text-foreground hover:bg-muted")
                   }
                 >
                   {t.label}
