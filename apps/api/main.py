@@ -1757,7 +1757,7 @@ def create_worker_alert(
             detail=f"Invalid events: {invalid}. Allowed: {sorted(valid_events)}",
         )
     import json as _json
-    alert_id = f"alrt_{uuid.uuid4().hex[:12]}"
+    alert_id = f"alrt_{_uuid_mod.uuid4().hex[:12]}"
     email_to_json = _json.dumps(body.email_to) if body.email_to else None
     row = repos.alerts.add(
         alert_id=alert_id,
