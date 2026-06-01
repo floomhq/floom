@@ -364,6 +364,7 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
+      "connections.add_mcp",
       "connections.list",
       "contexts.list",
       "contexts.read",

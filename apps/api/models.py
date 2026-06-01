@@ -125,7 +125,12 @@ class WorkerTrigger(BaseModel):
 
 class WorkerMCPConnection(BaseModel):
     label: str
-    url: str
+    transport: Literal["streamable_http", "sse", "stdio"] = "streamable_http"
+    url: Optional[str] = None
+    command: Optional[str] = None
+    args: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
+    cwd: Optional[str] = None
     auth: Optional[str] = None
     allowed_tools: Optional[List[str]] = None
     require_approval: Literal["never", "always"] = "never"
@@ -140,11 +145,49 @@ class WorkerMCPConnection(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def validate_url(cls, value: str) -> str:
+    def validate_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
         stripped = value.strip()
         if not stripped.startswith(("http://", "https://")):
             raise ValueError("mcp url must start with http:// or https://")
         return stripped
+
+    @field_validator("command")
+    @classmethod
+    def validate_command(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        return stripped
+
+    @field_validator("args")
+    @classmethod
+    def validate_args(cls, value: List[str]) -> List[str]:
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    @field_validator("env")
+    @classmethod
+    def validate_env(cls, value: Dict[str, str]) -> Dict[str, str]:
+        cleaned: Dict[str, str] = {}
+        for key, raw in value.items():
+            name = str(key).strip()
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise ValueError("mcp env keys must be valid environment variable names")
+            val = str(raw).strip()
+            if val:
+                cleaned[name] = val
+        return cleaned
+
+    @field_validator("cwd")
+    @classmethod
+    def validate_cwd(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
     @field_validator("auth")
     @classmethod
@@ -170,6 +213,22 @@ class WorkerMCPConnection(BaseModel):
         if len(cleaned) != len(value):
             raise ValueError("mcp allowed_tools entries must be non-empty")
         return cleaned
+
+    @model_validator(mode="after")
+    def validate_transport_shape(self) -> "WorkerMCPConnection":
+        if self.transport in {"streamable_http", "sse"}:
+            if not self.url:
+                raise ValueError("mcp url is required for HTTP/SSE transports")
+            if self.command:
+                raise ValueError("mcp command is only valid for stdio transport")
+        elif self.transport == "stdio":
+            if not self.command:
+                raise ValueError("mcp command is required for stdio transport")
+            if self.url:
+                raise ValueError("mcp url is not valid for stdio transport")
+            if self.auth:
+                raise ValueError("mcp auth is only valid for HTTP/SSE transports")
+        return self
 
 
 class WorkerConnection(BaseModel):

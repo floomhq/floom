@@ -488,6 +488,11 @@ def _ensure_mcp_connection_columns(conn: sqlite3.Connection) -> None:
         ("kind", "ALTER TABLE composio_connections ADD COLUMN kind TEXT NOT NULL DEFAULT 'composio'"),
         ("mcp_label", "ALTER TABLE composio_connections ADD COLUMN mcp_label TEXT"),
         ("mcp_url", "ALTER TABLE composio_connections ADD COLUMN mcp_url TEXT"),
+        ("mcp_transport", "ALTER TABLE composio_connections ADD COLUMN mcp_transport TEXT NOT NULL DEFAULT 'streamable_http'"),
+        ("mcp_command", "ALTER TABLE composio_connections ADD COLUMN mcp_command TEXT"),
+        ("mcp_args_json", "ALTER TABLE composio_connections ADD COLUMN mcp_args_json TEXT"),
+        ("mcp_env_json", "ALTER TABLE composio_connections ADD COLUMN mcp_env_json TEXT"),
+        ("mcp_cwd", "ALTER TABLE composio_connections ADD COLUMN mcp_cwd TEXT"),
         ("mcp_auth_secret", "ALTER TABLE composio_connections ADD COLUMN mcp_auth_secret TEXT"),
         ("mcp_allowed_tools_json", "ALTER TABLE composio_connections ADD COLUMN mcp_allowed_tools_json TEXT"),
     ]
@@ -855,6 +860,11 @@ MIGRATIONS: list[Migration] = [
     ALTER TABLE composio_connections ADD COLUMN kind TEXT NOT NULL DEFAULT 'composio';
     ALTER TABLE composio_connections ADD COLUMN mcp_label TEXT;
     ALTER TABLE composio_connections ADD COLUMN mcp_url TEXT;
+    ALTER TABLE composio_connections ADD COLUMN mcp_transport TEXT NOT NULL DEFAULT 'streamable_http';
+    ALTER TABLE composio_connections ADD COLUMN mcp_command TEXT;
+    ALTER TABLE composio_connections ADD COLUMN mcp_args_json TEXT;
+    ALTER TABLE composio_connections ADD COLUMN mcp_env_json TEXT;
+    ALTER TABLE composio_connections ADD COLUMN mcp_cwd TEXT;
     ALTER TABLE composio_connections ADD COLUMN mcp_auth_secret TEXT;
     ALTER TABLE composio_connections ADD COLUMN mcp_allowed_tools_json TEXT;
     CREATE INDEX IF NOT EXISTS idx_composio_connections_kind

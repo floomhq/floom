@@ -52,6 +52,7 @@ import type {
   ContextSummary,
   WorkerConnectionSpec,
   WorkerContextSpec,
+  WorkerMcpConnection,
   VersionSummary,
 } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
@@ -2591,12 +2592,7 @@ function ConnectionsSection({
   worker: WorkerDetail;
   connections: ConnectionItem[];
   requiredConnections: string[];
-  configuredMcpConnections: {
-    label: string;
-    url: string;
-    auth?: string | null;
-    allowed_tools?: string[] | null;
-  }[];
+  configuredMcpConnections: WorkerMcpConnection[];
   activeConnectionSlugs: Set<string>;
   requiredSecrets: string[];
 }) {
@@ -2663,17 +2659,22 @@ function ConnectionsSection({
         <section className="space-y-3">
           <h2 className="text-base font-semibold text-foreground">MCP servers</h2>
           <ul className="space-y-2">
-            {configuredMcpConnections.map((connection) => (
-              <li key={`${connection.label}:${connection.url}`} className="py-2 border-b border-line last:border-0">
+            {configuredMcpConnections.map((connection) => {
+              const summary = connection.transport === "stdio"
+                ? [connection.command, ...(connection.args ?? [])].filter(Boolean).join(" ")
+                : connection.url;
+              return (
+              <li key={`${connection.label}:${summary ?? ""}`} className="py-2 border-b border-line last:border-0">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-medium">{connection.label}</span>
                   {connection.auth ? (
                     <span className="text-xs text-muted-foreground">{connection.auth}</span>
                   ) : null}
                 </div>
-                <p className="mt-1 truncate text-xs text-muted-foreground">{connection.url}</p>
+                <p className="mt-1 truncate text-xs text-muted-foreground">{summary}</p>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </section>
       )}

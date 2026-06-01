@@ -1288,7 +1288,8 @@ class SqliteConnectionRepository:
     _columns = """
         id, app_name, composio_connection_id, status, created_at, updated_at,
         scopes_json, account_label, display_name, last_checked_at, last_check_status, last_check_error, user_id,
-        kind, mcp_label, mcp_url, mcp_auth_secret, mcp_allowed_tools_json
+        kind, mcp_label, mcp_url, mcp_transport, mcp_command, mcp_args_json, mcp_env_json, mcp_cwd,
+        mcp_auth_secret, mcp_allowed_tools_json
     """
 
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
@@ -1346,8 +1347,17 @@ class SqliteConnectionRepository:
         kind = fields.get("kind") or "composio"
         mcp_label = fields.get("mcp_label")
         mcp_url = fields.get("mcp_url")
+        mcp_transport = fields.get("mcp_transport") or "streamable_http"
+        mcp_command = fields.get("mcp_command")
+        mcp_args_json = fields.get("mcp_args_json")
+        mcp_env_json = fields.get("mcp_env_json")
+        mcp_cwd = fields.get("mcp_cwd")
         mcp_auth_secret = fields.get("mcp_auth_secret")
         mcp_allowed_tools_json = fields.get("mcp_allowed_tools_json")
+        if mcp_args_json is not None and not isinstance(mcp_args_json, str):
+            mcp_args_json = _json_dump(mcp_args_json)
+        if mcp_env_json is not None and not isinstance(mcp_env_json, str):
+            mcp_env_json = _json_dump(mcp_env_json)
         if mcp_allowed_tools_json is not None and not isinstance(mcp_allowed_tools_json, str):
             mcp_allowed_tools_json = _json_dump(mcp_allowed_tools_json)
         with get_db() as conn:
@@ -1356,8 +1366,9 @@ class SqliteConnectionRepository:
                 INSERT INTO composio_connections
                     (id, app_name, composio_connection_id, status, created_at, updated_at,
                      scopes_json, account_label, display_name, last_checked_at, last_check_status, last_check_error, user_id,
-                     kind, mcp_label, mcp_url, mcp_auth_secret, mcp_allowed_tools_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     kind, mcp_label, mcp_url, mcp_transport, mcp_command, mcp_args_json, mcp_env_json, mcp_cwd,
+                     mcp_auth_secret, mcp_allowed_tools_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     app_name = excluded.app_name,
                     composio_connection_id = excluded.composio_connection_id,
@@ -1373,6 +1384,11 @@ class SqliteConnectionRepository:
                     kind = excluded.kind,
                     mcp_label = excluded.mcp_label,
                     mcp_url = excluded.mcp_url,
+                    mcp_transport = excluded.mcp_transport,
+                    mcp_command = excluded.mcp_command,
+                    mcp_args_json = excluded.mcp_args_json,
+                    mcp_env_json = excluded.mcp_env_json,
+                    mcp_cwd = excluded.mcp_cwd,
                     mcp_auth_secret = excluded.mcp_auth_secret,
                     mcp_allowed_tools_json = excluded.mcp_allowed_tools_json
                 """,
@@ -1393,6 +1409,11 @@ class SqliteConnectionRepository:
                     kind,
                     mcp_label,
                     mcp_url,
+                    mcp_transport,
+                    mcp_command,
+                    mcp_args_json,
+                    mcp_env_json,
+                    mcp_cwd,
                     mcp_auth_secret,
                     mcp_allowed_tools_json,
                 ),
@@ -1417,6 +1438,11 @@ class SqliteConnectionRepository:
             "kind",
             "mcp_label",
             "mcp_url",
+            "mcp_transport",
+            "mcp_command",
+            "mcp_args_json",
+            "mcp_env_json",
+            "mcp_cwd",
             "mcp_auth_secret",
             "mcp_allowed_tools_json",
         }
@@ -1426,7 +1452,7 @@ class SqliteConnectionRepository:
             if key not in allowed:
                 continue
             updates.append(f"{key} = ?")
-            if key == "scopes_json" and value is not None and not isinstance(value, str):
+            if key in {"scopes_json", "mcp_args_json", "mcp_env_json", "mcp_allowed_tools_json"} and value is not None and not isinstance(value, str):
                 params.append(_json_dump(value))
             else:
                 params.append(value)

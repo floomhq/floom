@@ -400,6 +400,43 @@ class TestMCPConnections:
         )
         assert bad_secret.status_code == 400
 
+        bad_stdio = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={"label": "github", "transport": "stdio", "url": "https://example.com/mcp"},
+        )
+        assert bad_stdio.status_code == 400
+
+    def test_create_stdio_mcp_connection(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        create_resp = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={
+                "label": "filesystem",
+                "transport": "stdio",
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+                "env": {"GITHUB_TOKEN": "secret:GITHUB_PAT"},
+                "cwd": "/workspace",
+                "allowed_tools": ["read_file"],
+            },
+        )
+
+        assert create_resp.status_code == 200, create_resp.text
+        created = create_resp.json()
+        assert created["kind"] == "mcp"
+        assert created["mcp_transport"] == "stdio"
+        assert created["mcp_url"] is None
+        assert created["mcp_command"] == "npx"
+        assert created["mcp_args"] == ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+        assert created["mcp_env"] == {"GITHUB_TOKEN": "secret:GITHUB_PAT"}
+        assert created["mcp_cwd"] == "/workspace"
+        assert created["mcp_auth_secret"] is None
+        assert created["mcp_allowed_tools"] == ["read_file"]
+
     def test_create_mcp_connection_rejects_duplicate_label(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)

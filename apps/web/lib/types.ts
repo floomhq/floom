@@ -61,7 +61,12 @@ export interface WorkerRuntime {
 
 export interface WorkerMcpConnection {
   label: string;
-  url: string;
+  transport?: "streamable_http" | "sse" | "stdio";
+  url?: string | null;
+  command?: string | null;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string | null;
   auth?: string | null;
   allowed_tools?: string[] | null;
   require_approval?: "never" | "always";
@@ -501,6 +506,11 @@ export interface ConnectionItem {
   last_check_status?: string | null;
   mcp_label?: string | null;
   mcp_url?: string | null;
+  mcp_transport?: "streamable_http" | "sse" | "stdio";
+  mcp_command?: string | null;
+  mcp_args?: string[];
+  mcp_env?: Record<string, string>;
+  mcp_cwd?: string | null;
   mcp_auth_secret?: string | null;
   mcp_allowed_tools?: string[];
 }
