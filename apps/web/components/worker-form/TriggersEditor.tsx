@@ -413,8 +413,8 @@ export function TriggersEditor({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-base font-medium text-foreground">Triggers</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">
+        <h2 className="text-sm font-medium text-foreground">Triggers</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
           Decide when this worker runs. Use one trigger or chain several.
         </p>
       </div>
