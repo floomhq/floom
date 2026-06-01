@@ -67,7 +67,16 @@ export interface WorkerMcpConnection {
   require_approval?: "never" | "always";
 }
 
-export type WorkerConnectionSpec = string | { mcp: WorkerMcpConnection };
+export interface WorkerComposioConnection {
+  app: string;
+  allowed_tools?: string[] | null;
+}
+
+export type WorkerConnectionSpec =
+  | string
+  | { mcp: WorkerMcpConnection }
+  | { composio: WorkerComposioConnection }
+  | { app: string; allowed_tools?: string[] | null };
 
 export interface WorkerContextMount {
   name: string;

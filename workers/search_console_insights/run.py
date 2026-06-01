@@ -2,12 +2,13 @@
 
 import json
 import math
-import subprocess
-import sys
+import os
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib import request as urlrequest
+from urllib.error import HTTPError, URLError
 
 THRESHOLDS = {
     "ctr_opportunity_impressions": 100,
@@ -25,12 +26,45 @@ THRESHOLDS = {
 BRANDED_TERMS = ["rocketlist"]
 
 
-def composio_execute(slug: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    cmd = ["composio", "execute", slug, "-d", json.dumps(payload)]
+WORKEROS_API_URL = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev").rstrip("/")
+FLOOM_RUN_ID = os.environ.get("FLOOM_RUN_ID", "")
+
+
+def _read_connection_id() -> str:
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=True)
-        output = json.loads(result.stdout)
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
+        with open("connections.json") as f:
+            connections = json.load(f)
+    except FileNotFoundError:
+        connections = {}
+    return str(connections.get("google_search_console") or "").strip()
+
+
+def composio_execute(slug: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not FLOOM_RUN_ID:
+        return {"successful": False, "error": "FLOOM_RUN_ID is not set"}
+    connection_id = _read_connection_id()
+    if not connection_id:
+        return {"successful": False, "error": "google_search_console connection is not active"}
+
+    body = {
+        "connected_account_id": connection_id,
+        "arguments": payload,
+    }
+    url = f"{WORKEROS_API_URL}/runs/{FLOOM_RUN_ID}/composio-execute/{slug}"
+    encoded = json.dumps(body).encode("utf-8")
+    req = urlrequest.Request(
+        url,
+        data=encoded,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=120) as response:
+            output = json.loads(response.read().decode("utf-8"))
+    except HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        return {"successful": False, "error": f"Workeros proxy HTTP {e.code}: {detail}"}
+    except (URLError, TimeoutError, json.JSONDecodeError) as e:
         return {"successful": False, "error": str(e)}
 
     if output.get("successful") and output.get("storedInFile"):
@@ -487,8 +521,9 @@ def run_diagnostics(site_url: str, decayed_paths: List[str]) -> str:
 
 
 def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-    log = context["log"]
-    artifact_dir = Path(context["artifact_dir"])
+    log = context.get("log", print)
+    artifact_dir = Path(context.get("artifact_dir", "out"))
+    artifact_dir.mkdir(parents=True, exist_ok=True)
     site_url = inputs.get("site_url", "https://rocketlist.ai/")
     should_diagnose = inputs.get("run_diagnostics", True)
 
@@ -524,7 +559,7 @@ def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     log(f"SEO report saved: {seo_file}")
 
     outputs = {"seo_report": seo_report}
-    artifacts = [{"name": str(seo_file.name), "path": str(seo_file), "type": "markdown"}]
+    artifacts = [{"name": str(seo_file.name), "path": str(seo_file), "relative_path": str(seo_file), "type": "markdown"}]
 
     if should_diagnose:
         log("Running diagnostics...")
@@ -545,10 +580,25 @@ def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         diag_file.write_text(diagnostics)
         log(f"Diagnostics saved: {diag_file}")
         outputs["diagnostics"] = diagnostics
-        artifacts.append({"name": str(diag_file.name), "path": str(diag_file), "type": "markdown"})
+        artifacts.append({"name": str(diag_file.name), "path": str(diag_file), "relative_path": str(diag_file), "type": "markdown"})
 
     return {
         "status": "success",
         "outputs": outputs,
         "artifacts": artifacts,
     }
+
+
+def main() -> None:
+    try:
+        with open("inputs.json") as f:
+            inputs = json.load(f)
+        result = run(inputs, {"log": print, "artifact_dir": "out"})
+    except Exception as exc:
+        result = {"status": "error", "error": str(exc)}
+    with open("result.json", "w") as f:
+        json.dump(result, f)
+
+
+if __name__ == "__main__":
+    main()

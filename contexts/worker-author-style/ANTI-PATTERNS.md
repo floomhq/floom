@@ -71,6 +71,31 @@ connections:
   - github
 ```
 
+For Composio workers, prefer per-worker tool scope over full app access:
+
+```yaml
+# BAD — lets the worker call any Gmail tool
+connections:
+  - gmail
+
+# GOOD — this worker can only read messages through the proxy
+connections:
+  - app: gmail
+    allowed_tools:
+      - GMAIL_FETCH_EMAILS
+      - GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID
+```
+
+Never call Composio through a local subprocess:
+
+```python
+# BAD — the Composio CLI is not installed in E2B
+subprocess.run(["composio", "execute", "GMAIL_FETCH_EMAILS"])
+
+# GOOD — use the stdlib proxy helper from RUN_PY_TEMPLATE.py
+composio_execute("gmail", "GMAIL_FETCH_EMAILS", {"query": "is:unread"})
+```
+
 ## 5. Generic names
 
 **Never** use vague names like `my-worker`, `test`, `automation`, `new-worker`.

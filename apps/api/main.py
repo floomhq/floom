@@ -108,6 +108,8 @@ from models import (
     WorkerAlertCreate,
     WorkerStats,
     WorkspaceStats,
+    composio_app_for_tool_slug,
+    declared_composio_connections,
 )
 from worker_registry import (
     WORKERS_DIR,
@@ -8501,31 +8503,57 @@ def composio_execute_proxy(
     if not composio_key:
         raise HTTPException(status_code=503, detail="COMPOSIO_API_KEY not configured on server")
 
-    # 3. Resolve connected_account_id if not supplied by caller.
-    #    SECURITY (multi-tenant): the connection MUST be scoped to the run's
-    #    OWNER, never "first active connection for the app". The runs table has
-    #    no owner column — the owner lives on workers.owner_id — so derive it via
-    #    the run's worker. In single-tenant OS there is one owner so this is a
-    #    no-op; in multi-tenant Cloud it prevents worker A's run from driving
-    #    worker B's owner's Composio connection.
-    connected_account_id = body.connected_account_id
-    if not connected_account_id:
-        worker_id = run_row.get("worker_id", "")
-        worker_row = repos.workers.get_any(worker_id=worker_id) if worker_id else None
-        if worker_row is None:
-            raise HTTPException(status_code=404, detail="Run worker not found")
-        owner_id = worker_row.get("owner_id") or ""
-        if not owner_id:
-            raise HTTPException(status_code=403, detail="Run owner could not be resolved")
-        # Find the run-owner's active connection for the tool's implied app.
-        # repos.connections.list(user_id=...) is owner-scoped at the SQL layer.
-        tool_prefix = tool_slug.split("_")[0].lower()  # e.g. "GMAIL_..." -> "gmail"
-        for conn_row in repos.connections.list(user_id=owner_id):
-            if conn_row.get("app_name") == tool_prefix and conn_row.get("status") == "active":
-                connected_account_id = conn_row.get("composio_connection_id")
-                break
+    # 3. Authorize the worker's tool call against its declared connection scope.
+    #    SECURITY (multi-tenant): a run_id is a sandbox capability, not carte
+    #    blanche to drive every owner connection. The worker manifest must
+    #    declare the Composio app, and structured declarations can restrict the
+    #    exact tool slugs available to this worker.
+    worker_id = run_row.get("worker_id", "")
+    worker_row = repos.workers.get_any(worker_id=worker_id) if worker_id else None
+    if worker_row is None:
+        raise HTTPException(status_code=404, detail="Run worker not found")
+    owner_id = worker_row.get("owner_id") or ""
+    if not owner_id:
+        raise HTTPException(status_code=403, detail="Run owner could not be resolved")
 
-    # 4. Build and forward the Composio request
+    config = get_worker_config_for_run(worker_id)
+    declared_connections = declared_composio_connections(config)
+    tool_prefix = composio_app_for_tool_slug(tool_slug, list(declared_connections.keys()))
+    if not tool_prefix:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Worker did not declare a connection matching tool {tool_slug}",
+        )
+    allowed_tools = declared_connections.get(tool_prefix)
+    if allowed_tools is not None and tool_slug.upper() not in allowed_tools:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tool {tool_slug} is not allowed for worker connection {tool_prefix}",
+        )
+
+    # 4. Resolve connected_account_id. If the worker supplies one from
+    #    connections.json, verify it still belongs to the run owner and app.
+    #    Otherwise pick the run-owner's active connection for the declared app.
+    connected_account_id = body.connected_account_id
+    active_owner_connections = [
+        conn_row for conn_row in repos.connections.list(user_id=owner_id)
+        if conn_row.get("app_name") == tool_prefix and conn_row.get("status") == "active"
+    ]
+    if connected_account_id:
+        if not any(conn_row.get("composio_connection_id") == connected_account_id for conn_row in active_owner_connections):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Connection is not active for owner/app {tool_prefix}",
+            )
+    elif active_owner_connections:
+        connected_account_id = active_owner_connections[0].get("composio_connection_id")
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail=f"No active Composio connection found for app {tool_prefix}",
+        )
+
+    # 5. Build and forward the Composio request
     proxy_body: Dict[str, Any] = {}
     if connected_account_id:
         proxy_body["connected_account_id"] = connected_account_id

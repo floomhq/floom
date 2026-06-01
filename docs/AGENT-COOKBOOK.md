@@ -456,6 +456,18 @@ connections.list()
 triggers.list({ worker_id: "text-summarizer" })
 ```
 
+When authoring a worker with Composio tools, declare both the app and the exact tools the worker may call:
+
+```yaml
+connections:
+  - app: google_search_console
+    allowed_tools:
+      - GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY
+      - GOOGLE_SEARCH_CONSOLE_LIST_SITEMAPS
+```
+
+Run `workeros workers validate ./workers/<id>` before pushing. It catches E2B anti-patterns like `subprocess.run(["composio", "execute", ...])`, missing `connections:`, and tool slugs not listed in `allowed_tools`.
+
 ---
 
 ## 9. The agent-side draft contract

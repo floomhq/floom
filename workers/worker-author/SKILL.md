@@ -126,7 +126,16 @@ copy-pasteable template is `contexts/worker-author-style/RUN_PY_TEMPLATE.py`
   `import dotenv` / `from dotenv import ...` — it is NOT preinstalled and will
   crash with `ModuleNotFoundError`. Use the stdlib-only `_load_secrets()` helper
   in the template. Never hardcode a secret.
-- **Connections** (Composio): read `connections.json` when present (app slug -> connection_id).
+- **Connections** (Composio): declare the app in `worker.yml`, read `connections.json`
+  when present (app slug -> connection_id), and call the Workeros proxy with
+  `urllib`:
+  `POST {WORKEROS_API_URL}/runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}`.
+  Do NOT shell out to `composio execute`; the CLI is not installed in E2B and
+  `COMPOSIO_API_KEY` is server-side only.
+- For a worker that only needs read access to a full OAuth connection, use
+  structured connection scope:
+  `connections: [{app: gmail, allowed_tools: [GMAIL_FETCH_EMAILS]}]`.
+  The proxy rejects any tool slug outside `allowed_tools`.
 - **Use ONLY the standard library** unless you also add the package to
   requirements.txt. Generated workers crash on `import dotenv`, `import requests`,
   etc. when those aren't in requirements. Stdlib (os, json, csv, io, re,
