@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
@@ -268,3 +269,112 @@ def test_declared_output_validation(tmp_path):
     )
     assert response["ok"] is False
     assert "Undeclared output" in response["error"]
+
+
+def test_composio_execute_uses_run_owner_and_resolved_connection(tmp_path, monkeypatch):
+    config = make_config(
+        tmp_path,
+        connections=[{"app": "gmail", "allowed_tools": ["GMAIL_SEND_EMAIL"]}],
+    )
+    driver = AgentDriver()
+    _entries, log_fn = logs()
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {"data": {"ok": True}}
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setenv("COMPOSIO_API_KEY", "test-composio-key")
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    result = driver._handle_tool(
+        "composio__gmail__execute",
+        {"tool": "GMAIL_SEND_EMAIL", "arguments": {"to": "test@example.com"}},
+        "agent-test",
+        "run_composio",
+        {},
+        {},
+        log_fn,
+        "trace",
+        config,
+        Path(config.runtime.bundle_path),
+        tmp_path / "inputs",
+        tmp_path / "outputs",
+        {},
+        [],
+        30,
+        connection_ids={"gmail": "conn-owner-a"},
+        user_id="owner-a",
+    )
+
+    assert result["ok"] is True
+    assert captured["json"]["connected_account_id"] == "conn-owner-a"
+    assert captured["json"]["entity_id"] == "owner-a"
+    assert captured["json"]["arguments"] == {"to": "test@example.com"}
+
+
+def test_composio_execute_requires_scoped_active_connection(tmp_path, monkeypatch):
+    config = make_config(tmp_path, connections=["gmail"])
+    driver = AgentDriver()
+    _entries, log_fn = logs()
+    monkeypatch.setenv("COMPOSIO_API_KEY", "test-composio-key")
+
+    result = driver._handle_tool(
+        "composio__gmail__execute",
+        {"tool": "GMAIL_FETCH_EMAILS", "arguments": {}},
+        "agent-test",
+        "run_composio_missing",
+        {},
+        {},
+        log_fn,
+        "trace",
+        config,
+        Path(config.runtime.bundle_path),
+        tmp_path / "inputs",
+        tmp_path / "outputs",
+        {},
+        [],
+        30,
+        connection_ids={},
+        user_id=None,
+    )
+
+    assert result["ok"] is False
+    assert "Missing active Composio connection for gmail" in result["error"]
+
+
+def test_invoke_worker_requires_authenticated_owner(tmp_path):
+    config = make_config(tmp_path)
+    driver = AgentDriver()
+    _entries, log_fn = logs()
+
+    result = driver._handle_tool(
+        "invoke_worker",
+        {"id": "other-worker", "inputs": {}},
+        "agent-test",
+        "run_invoke",
+        {},
+        {},
+        log_fn,
+        "trace",
+        config,
+        Path(config.runtime.bundle_path),
+        tmp_path / "inputs",
+        tmp_path / "outputs",
+        {},
+        [],
+        30,
+    )
+
+    assert result["ok"] is False
+    assert "authenticated owner" in result["error"]

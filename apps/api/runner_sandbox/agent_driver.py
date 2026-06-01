@@ -114,6 +114,8 @@ class _AgentRunState:
     outputs: Dict[str, Any]
     artifacts: list[Dict[str, Any]]
     timeout_seconds: int
+    connection_ids: Dict[str, str]
+    user_id: str | None = None
     finished: bool = False
 
 
@@ -153,6 +155,8 @@ class AgentDriver(SandboxDriver):
                     trace_id=trace_id,
                     timeout_seconds=timeout_seconds,
                     config=config,
+                    connection_ids=connection_ids or {},
+                    user_id=user_id,
                 )
             )
         except Exception as exc:
@@ -196,6 +200,8 @@ class AgentDriver(SandboxDriver):
         trace_id: str,
         timeout_seconds: int,
         config: Optional[WorkerConfig],
+        connection_ids: Dict[str, str],
+        user_id: str | None,
     ) -> WorkerResult:
         if not config or not config.runtime:
             return WorkerResult(status="error", error="Worker config not found", error_code="invalid_worker")
@@ -213,6 +219,8 @@ class AgentDriver(SandboxDriver):
                     trace_id=trace_id,
                     timeout_seconds=timeout_seconds,
                     config=config,
+                    connection_ids=connection_ids,
+                    user_id=user_id,
                 ),
                 timeout=timeout_seconds,
             )
@@ -233,6 +241,8 @@ class AgentDriver(SandboxDriver):
         trace_id: str,
         timeout_seconds: int,
         config: WorkerConfig,
+        connection_ids: Dict[str, str],
+        user_id: str | None,
     ) -> WorkerResult:
         from agents import Agent, ModelSettings, RunConfig
 
@@ -269,6 +279,8 @@ class AgentDriver(SandboxDriver):
             outputs=outputs,
             artifacts=artifacts,
             timeout_seconds=timeout_seconds,
+            connection_ids=connection_ids,
+            user_id=user_id,
         )
 
         system_prompt = self._load_system_prompt(bundle_dir, config)
@@ -1007,6 +1019,8 @@ class AgentDriver(SandboxDriver):
                     outputs=state.outputs,
                     artifacts=state.artifacts,
                     timeout_seconds=state.timeout_seconds,
+                    connection_ids=state.connection_ids,
+                    user_id=state.user_id,
                 )
                 if tool_name == "finish_with_outputs" and result.get("ok"):
                     state.finished = True
@@ -1061,6 +1075,8 @@ class AgentDriver(SandboxDriver):
         outputs: Dict[str, Any],
         artifacts: list[Dict[str, Any]],
         timeout_seconds: int,
+        connection_ids: Optional[Dict[str, str]] = None,
+        user_id: str | None = None,
     ) -> Dict[str, Any]:
         try:
             if name == "list_dir":
@@ -1082,13 +1098,13 @@ class AgentDriver(SandboxDriver):
                     timeout_seconds=timeout_seconds,
                 )
             if name == "invoke_worker":
-                return self._invoke_worker(args)
+                return self._invoke_worker(args, state_user_id=user_id)
             if name == "log":
                 level = str(args.get("level") or "info")
                 log_fn(str(args.get("message") or ""), level)
                 return {"ok": True}
             if name.startswith("composio__") or name.startswith("composio."):
-                return self._composio_execute(name, args, worker_id, log_fn, config)
+                return self._composio_execute(name, args, worker_id, log_fn, config, connection_ids or {}, user_id)
             return {"ok": False, "error": f"Unknown tool: {name}"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -1394,28 +1410,38 @@ class AgentDriver(SandboxDriver):
     def _shell_quote(self, value: str) -> str:
         return "'" + value.replace("'", "'\"'\"'") + "'"
 
-    def _invoke_worker(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def _invoke_worker(self, args: Dict[str, Any], *, state_user_id: str | None) -> Dict[str, Any]:
         target_id = str(args.get("id") or "")
         target_inputs = args.get("inputs") or {}
         if not target_id:
             return {"ok": False, "error": "id is required"}
         if not isinstance(target_inputs, dict):
             return {"ok": False, "error": "inputs must be an object"}
-        from db import get_db
+        if not state_user_id:
+            return {"ok": False, "error": "invoke_worker requires an authenticated owner"}
+        from db import get_repositories
         from run_service import create_run, execute_run
 
-        child_run_id = create_run(target_id, target_inputs, trigger_source="invoke_worker")
-        execute_run(child_run_id, target_id, target_inputs)
-        with get_db() as conn:
-            row = conn.execute("SELECT status, output_json, error FROM runs WHERE id = ?", (child_run_id,)).fetchone()
+        repos = get_repositories()
+        if repos.workers.get(user_id=state_user_id, worker_id=target_id) is None:
+            return {"ok": False, "error": f"Worker not found or not owned by this run: {target_id}"}
+        child_run_id = create_run(
+            target_id,
+            target_inputs,
+            trigger_source="invoke_worker",
+            user_id=state_user_id,
+            repos=repos,
+        )
+        execute_run(child_run_id, target_id, target_inputs, user_id=state_user_id, repos=repos)
+        row = repos.runs.get(user_id=state_user_id, run_id=child_run_id)
         if not row:
             return {"ok": False, "error": f"Child run not found: {child_run_id}"}
         return {
             "ok": row["status"] in {"completed", "pending_approval"},
             "run_id": child_run_id,
             "status": row["status"],
-            "outputs": json.loads(row["output_json"] or "{}"),
-            "error": row["error"],
+            "outputs": json.loads(row.get("output_json") or "{}"),
+            "error": row.get("error"),
         }
 
     def _composio_execute(
@@ -1425,6 +1451,8 @@ class AgentDriver(SandboxDriver):
         worker_id: str,
         log_fn: Callable[[str, str], None],
         config: WorkerConfig,
+        connection_ids: Dict[str, str],
+        user_id: str | None,
     ) -> Dict[str, Any]:
         tool = str(args.get("tool") or "")
         arguments = args.get("arguments") or {}
@@ -1432,7 +1460,7 @@ class AgentDriver(SandboxDriver):
             return {"ok": False, "error": "tool is required"}
         if not isinstance(arguments, dict):
             return {"ok": False, "error": "arguments must be an object"}
-        from db import get_db
+        from db import get_repositories
         import requests
 
         app_name = ""
@@ -1448,28 +1476,29 @@ class AgentDriver(SandboxDriver):
         allowed_tools = declared.get(app_name.lower())
         if allowed_tools is not None and tool.upper() not in allowed_tools:
             return {"ok": False, "error": f"Tool {tool} is not allowed for worker connection {app_name}", "error_code": "tool_outside_connection_scope"}
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT composio_connection_id FROM composio_connections WHERE app_name = ? AND status = 'active'",
-                (app_name.lower(),),
-            ).fetchone()
-        if not row:
+        connection_id = connection_ids.get(app_name.lower())
+        if not connection_id and user_id:
+            repos = get_repositories()
+            active_owner_connections = [
+                row for row in repos.connections.list(user_id=user_id)
+                if row.get("app_name") == app_name.lower() and row.get("status") == "active"
+            ]
+            if active_owner_connections:
+                connection_id = str(active_owner_connections[0].get("composio_connection_id") or "")
+        if not connection_id:
             return {"ok": False, "error": f"Missing active Composio connection for {app_name}"}
         api_key = os.environ.get("COMPOSIO_API_KEY")
         if not api_key:
             return {"ok": False, "error": "COMPOSIO_API_KEY is not configured"}
         log_fn(f"Executing Composio tool {tool}", "debug")
-        # Composio v3 requires entity_id alongside connected_account_id, even
-        # for single-tenant. Smoke run_c4d428a0d4f4 failed every call with
-        # `ActionExecute_ConnectedAccountEntityIdRequired` until we started
-        # passing one. Workeros is single-user; "federico" matches what the
-        # OAuth flow uses on auth-config setup.
-        entity_id = os.environ.get("FLOOM_USER_ID", "federico")
+        # Composio v3 requires entity_id alongside connected_account_id. Use the
+        # run owner so local agent-mode matches the E2B HTTP proxy's tenant scope.
+        entity_id = user_id or os.environ.get("FLOOM_USER_ID", "federico")
         response = requests.post(
             f"https://backend.composio.dev/api/v3/tools/execute/{tool}",
             headers={"x-api-key": api_key, "Content-Type": "application/json"},
             json={
-                "connected_account_id": row["composio_connection_id"],
+                "connected_account_id": connection_id,
                 "entity_id": entity_id,
                 "arguments": arguments,
             },

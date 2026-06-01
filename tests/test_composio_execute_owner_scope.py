@@ -106,6 +106,12 @@ def _seed_running_run(main, *, owner_id: str, worker_id: str) -> str:
     return run_id
 
 
+def _run_headers(run_id: str) -> dict[str, str]:
+    from run_token import make_run_token
+
+    return {"X-Workeros-Run-Token": make_run_token(run_id, secret=AUTH_HEADERS["x-floom-secret"])}
+
+
 def _seed_connection(main, *, owner_id: str, app_name: str, composio_connection_id: str) -> None:
     """Insert an active Composio connection for ``owner_id``."""
     repos = main.get_repositories()
@@ -155,6 +161,7 @@ class TestComposioExecuteOwnerScope:
         with patch("requests.post", side_effect=fake_post):
             resp = client.post(
                 f"/runs/{run_a}/composio-execute/GMAIL_SEND_EMAIL",
+                headers=_run_headers(run_a),
                 json={"arguments": {"to": "x@example.com"}},
             )
 
@@ -173,8 +180,10 @@ class TestComposioExecuteOwnerScope:
 
         captured, fake_post = _patch_composio_post()
         with patch("requests.post", side_effect=fake_post):
+            unknown_run_id = f"nonexistent_{uuid.uuid4().hex}"
             resp = client.post(
-                f"/runs/nonexistent_{uuid.uuid4().hex}/composio-execute/GMAIL_SEND_EMAIL",
+                f"/runs/{unknown_run_id}/composio-execute/GMAIL_SEND_EMAIL",
+                headers=_run_headers(unknown_run_id),
                 json={"arguments": {}},
             )
 
@@ -204,6 +213,7 @@ class TestComposioExecuteOwnerScope:
         with patch("requests.post", side_effect=fake_post):
             resp = client.post(
                 f"/runs/{run_id}/composio-execute/GMAIL_SEND_EMAIL",
+                headers=_run_headers(run_id),
                 json={"arguments": {}},
             )
 
@@ -223,6 +233,7 @@ class TestComposioExecuteOwnerScope:
         with patch("requests.post", side_effect=fake_post):
             resp = client.post(
                 f"/runs/{run_id}/composio-execute/GMAIL_SEND_EMAIL",
+                headers=_run_headers(run_id),
                 json={"arguments": {}},
             )
 
@@ -252,6 +263,7 @@ connections:
         with patch("requests.post", side_effect=fake_post):
             resp = client.post(
                 f"/runs/{run_id}/composio-execute/GMAIL_SEND_EMAIL",
+                headers=_run_headers(run_id),
                 json={"arguments": {}},
             )
 
@@ -281,6 +293,7 @@ connections:
         with patch("requests.post", side_effect=fake_post):
             resp = client.post(
                 f"/runs/{run_id}/composio-execute/GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY",
+                headers=_run_headers(run_id),
                 json={"arguments": {}},
             )
 
