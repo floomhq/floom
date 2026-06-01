@@ -63,27 +63,10 @@ from models import (
 
 import hashlib
 import hmac
-import smtplib
 import urllib.request
 import urllib.error
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 logger = logging.getLogger("floom.run_service")
-
-
-def _smtp_config() -> dict[str, Any] | None:
-    """Return SMTP config from env vars, or None if not configured."""
-    host = os.environ.get("SMTP_HOST", "").strip()
-    if not host:
-        return None
-    return {
-        "host": host,
-        "port": int(os.environ.get("SMTP_PORT", "587")),
-        "user": os.environ.get("SMTP_USER", "").strip(),
-        "password": os.environ.get("SMTP_PASSWORD", "").strip(),
-        "from_addr": os.environ.get("SMTP_FROM", os.environ.get("SMTP_USER", "")).strip(),
-    }
 
 
 def _send_email_notification(
@@ -96,44 +79,52 @@ def _send_email_notification(
     error: str | None,
     subject_template: str | None = None,
 ) -> None:
-    """Send a run-notification email via SMTP (configured by SMTP_* env vars)."""
-    cfg = _smtp_config()
-    if not cfg:
-        logger.debug("SMTP not configured — skipping email notification for run %s", run_id)
+    """Send a run-notification email via Resend (RESEND_API_KEY env var required)."""
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
+    if not api_key:
+        logger.debug("RESEND_API_KEY not set — skipping email notification for run %s", run_id)
         return
     if not to_addrs:
         return
 
+    from_addr = os.environ.get("NOTIFY_FROM_EMAIL", "notifications@workeros.floom.dev").strip()
     status_label = "failed" if status == "failed" else "completed"
-    subject = (subject_template or "Worker {worker_name} run {status}").format(
+    subject = (subject_template or "Worker {worker_name} {status}").format(
         worker_name=worker_name, status=status_label, run_id=run_id
     )
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    body_lines = [
+    html_lines = [
+        f"<p><strong>Worker:</strong> {worker_name} <code>({worker_id})</code></p>",
+        f"<p><strong>Run ID:</strong> <code>{run_id}</code></p>",
+        f"<p><strong>Status:</strong> {status_label}</p>",
+        f"<p><strong>Time:</strong> {timestamp}</p>",
+    ]
+    if error:
+        html_lines.append(f"<p><strong>Error:</strong> <code>{error}</code></p>")
+
+    text_lines = [
         f"Worker: {worker_name} ({worker_id})",
         f"Run ID: {run_id}",
         f"Status: {status_label}",
-        f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        f"Time: {timestamp}",
     ]
     if error:
-        body_lines += ["", f"Error: {error}"]
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = cfg["from_addr"] or cfg["user"]
-    msg["To"] = ", ".join(to_addrs)
-    msg.attach(MIMEText("\n".join(body_lines), "plain"))
+        text_lines += ["", f"Error: {error}"]
 
     try:
-        with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as smtp:
-            smtp.ehlo()
-            smtp.starttls()
-            if cfg["user"] and cfg["password"]:
-                smtp.login(cfg["user"], cfg["password"])
-            smtp.sendmail(cfg["from_addr"] or cfg["user"], to_addrs, msg.as_string())
-        logger.debug("Email notification sent to %s for run %s (%s)", to_addrs, run_id, status)
+        import resend
+        resend.api_key = api_key
+        resend.Emails.send({
+            "from": from_addr,
+            "to": to_addrs,
+            "subject": subject,
+            "html": "\n".join(html_lines),
+            "text": "\n".join(text_lines),
+        })
+        logger.debug("Email notification sent via Resend to %s for run %s (%s)", to_addrs, run_id, status)
     except Exception as exc:
-        logger.warning("Email notification failed for run %s: %s", run_id, exc)
+        logger.warning("Resend email notification failed for run %s: %s", run_id, exc)
 
 
 def _fire_alert_webhooks(
