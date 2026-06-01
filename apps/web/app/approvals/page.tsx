@@ -38,6 +38,15 @@ function formatPending(iso: string): string {
   return `pending ${Math.floor(hrs / 24)}d`;
 }
 
+function parseDecisionInput(raw?: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 function ApprovalCard({
   approval,
   highlighted,
@@ -62,6 +71,9 @@ function ApprovalCard({
   const [showReject, setShowReject] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
+  const decisionInput = parseDecisionInput(approval.decision_input_json);
+  const isDestructiveDelete = decisionInput.kind === "destructive_delete";
+
   // Scroll into view and briefly highlight when this card is the deep-link target.
   useEffect(() => {
     if (!highlighted) return;
@@ -73,34 +85,43 @@ function ApprovalCard({
   const handleApprove = useCallback(async () => {
     setBusy("approve");
     try {
-      let editedOutput: Record<string, unknown> | undefined;
-      if (editing && editedText !== (approval.preview ?? "")) {
-        editedOutput = { text: editedText };
+      if (isDestructiveDelete) {
+        const res = await api.approvals.approveAction(approval.id);
+        toast.success(res.detail || "Delete approved and executed");
+        notifyApprovalsChanged();
+        onDecision();
+      } else {
+        let editedOutput: Record<string, unknown> | undefined;
+        if (editing && editedText !== (approval.preview ?? "")) {
+          editedOutput = { text: editedText };
+        }
+        const res = await api.runs.approve(approval.run_id, editedOutput);
+        toast.success("Approved — follow-up run started");
+        notifyApprovalsChanged();
+        if (res.run_id) {
+          setTimeout(() => {
+            window.location.href = `/runs/${res.run_id}`;
+          }, 800);
+        }
+        onDecision();
       }
-      const res = await api.runs.approve(approval.run_id, editedOutput);
-      toast.success("Approved — follow-up run started");
-      // Tell the nav badge + any other subscriber to revalidate now, so the
-      // badge drops to 0 without a manual reload (G5 P2).
-      notifyApprovalsChanged();
-      if (res.run_id) {
-        // Brief delay then navigate to follow-up run
-        setTimeout(() => {
-          window.location.href = `/runs/${res.run_id}`;
-        }, 800);
-      }
-      onDecision();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Approve failed");
     } finally {
       setBusy(null);
     }
-  }, [approval.run_id, editing, editedText, approval.preview, onDecision]);
+  }, [approval.id, approval.run_id, editing, editedText, approval.preview, isDestructiveDelete, onDecision]);
 
   const handleReject = useCallback(async () => {
     setBusy("reject");
     try {
-      await api.runs.reject(approval.run_id, rejectReason || undefined);
-      toast.success("Rejected");
+      if (isDestructiveDelete) {
+        await api.approvals.rejectAction(approval.id, rejectReason || undefined);
+        toast.success("Delete request rejected");
+      } else {
+        await api.runs.reject(approval.run_id, rejectReason || undefined);
+        toast.success("Rejected");
+      }
       notifyApprovalsChanged();
       onDecision();
     } catch (err) {
@@ -108,7 +129,7 @@ function ApprovalCard({
     } finally {
       setBusy(null);
     }
-  }, [approval.run_id, rejectReason, onDecision]);
+  }, [approval.id, approval.run_id, rejectReason, isDestructiveDelete, onDecision]);
 
   return (
     <div
@@ -141,6 +162,11 @@ function ApprovalCard({
               >
                 {approval.worker_name ?? approval.worker_id}
               </Link>
+              {isDestructiveDelete && (
+                <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-red-50 dark:bg-red-950/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800">
+                  Delete request
+                </span>
+              )}
               <span
                 className={cn(
                   "text-xs",
@@ -204,13 +230,18 @@ function ApprovalCard({
           type="button"
           onClick={handleApprove}
           disabled={!!busy}
-          className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-40 transition-opacity"
+          className={cn(
+            "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] px-3 text-sm font-medium transition-opacity disabled:opacity-40",
+            isDestructiveDelete
+              ? "bg-red-600 text-white hover:bg-red-700"
+              : "bg-[var(--primary)] text-[var(--primary-text)] hover:opacity-90"
+          )}
         >
           <CheckCircle className="h-3.5 w-3.5" />
-          {editing ? "Approve edited" : "Approve"}
+          {isDestructiveDelete ? "Approve & delete" : editing ? "Approve edited" : "Approve"}
         </button>
 
-        {approval.preview && !editing && (
+        {approval.preview && !editing && !isDestructiveDelete && (
           <button
             type="button"
             onClick={() => setEditing(true)}
@@ -400,8 +431,15 @@ function ApprovalsContent() {
       let failed = 0;
       for (const row of ids) {
         try {
-          if (action === "approve") await api.runs.approve(row.run_id);
-          else await api.runs.reject(row.run_id);
+          const di = parseDecisionInput(row.decision_input_json);
+          const isDelete = di.kind === "destructive_delete";
+          if (action === "approve") {
+            if (isDelete) await api.approvals.approveAction(row.id);
+            else await api.runs.approve(row.run_id);
+          } else {
+            if (isDelete) await api.approvals.rejectAction(row.id);
+            else await api.runs.reject(row.run_id);
+          }
           ok += 1;
         } catch {
           failed += 1;
