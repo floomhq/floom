@@ -288,6 +288,8 @@ export const api = {
           body: JSON.stringify({ reason: reason ?? null }),
         }
       ),
+    publicArtifactUrl: (approvalId: string, artifactId: string, token: string) =>
+      `${API_BASE}/approvals/public/${encodeURIComponent(approvalId)}/artifacts/${encodeURIComponent(artifactId)}/download?token=${encodeURIComponent(token)}`,
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),
