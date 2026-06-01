@@ -321,7 +321,7 @@ class TestVersioningIntegration:
             "WORKEROS_DB_PATH": str(tmp_path / "workeros.db"),
             "WORKEROS_DEPLOY": "local",
             "WORKEROS_AUTH_MODE": "env",
-            "WORKEROS_SECRET": "test-secret",
+            "FLOOM_SECRET": "test-secret",
             "WORKEROS_OWNER_ID": "owner-1",
         }
         with pytest.MonkeyPatch().context() as mp:
