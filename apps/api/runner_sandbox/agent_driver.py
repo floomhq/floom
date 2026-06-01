@@ -260,7 +260,7 @@ class AgentDriver(SandboxDriver):
         output_dir = _safe_path(artifact_dir, "outputs")
         input_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
-        _safe_path(input_dir, "inputs.json").write_text(json.dumps(inputs, indent=2))
+        _safe_path(input_dir, "inputs.json").write_text(json.dumps(inputs, indent=2), encoding="utf-8")
 
         outputs: Dict[str, Any] = {}
         artifacts: list[Dict[str, Any]] = []
@@ -1174,7 +1174,7 @@ class AgentDriver(SandboxDriver):
         relative_path = declared.path if declared and declared.path else f"outputs/{name}.txt"
         path = _safe_path(artifact_root, relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(serialized)
+        path.write_text(serialized, encoding="utf-8")
         artifact = {
             "name": relative_path,
             "type": self._artifact_media_type(declared),
@@ -1262,7 +1262,7 @@ class AgentDriver(SandboxDriver):
         artifacts: list[Dict[str, Any]],
     ) -> None:
         transcript_path = _safe_path(output_dir, "transcript.jsonl")
-        transcript_path.write_text("\n".join(json.dumps(message, default=str) for message in messages) + "\n")
+        transcript_path.write_text("\n".join(json.dumps(message, default=str) for message in messages) + "\n", encoding="utf-8")
         artifacts[:] = [item for item in artifacts if item.get("path") != str(transcript_path)]
         artifacts.append(
             {
