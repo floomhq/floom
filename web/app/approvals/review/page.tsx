@@ -123,14 +123,20 @@ function ApprovalFilePreview({
   file,
   approval,
   isSignedLink,
+  token,
 }: {
   file: PreviewFile;
   approval: ApprovalRow;
   isSignedLink: boolean;
+  token: string | null;
 }) {
-  const artifactHref = file.artifact && !isSignedLink ? api.runs.artifactUrl(approval.run_id, file.artifact.id) : null;
+  const artifactHref = file.artifact
+    ? isSignedLink && token
+      ? api.approvals.publicArtifactUrl(approval.id, file.artifact.id, token)
+      : api.runs.artifactUrl(approval.run_id, file.artifact.id)
+    : null;
   const href = file.href || artifactHref;
-  const isImage = Boolean(file.href && file.mimeType?.startsWith("image/"));
+  const isImage = Boolean(href && file.mimeType?.startsWith("image/"));
   const meta = [file.mimeType || (file.artifact ? "artifact" : "file"), file.artifact ? formatBytes(file.artifact.size_bytes) : null]
     .filter(Boolean)
     .join(" · ");
@@ -161,14 +167,14 @@ function ApprovalFilePreview({
         {isImage ? (
           <div className="max-h-[46vh] overflow-auto p-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={file.href} alt={file.title} className="max-h-[42vh] max-w-full rounded-[var(--radius-button)] object-contain" />
+            <img src={href ?? undefined} alt={file.title} className="max-h-[42vh] max-w-full rounded-[var(--radius-button)] object-contain" />
           </div>
         ) : file.text ? (
           <pre className="max-h-[46vh] overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-[var(--ink)]">{file.text}</pre>
         ) : (
           <div className="p-4 text-sm text-[var(--ink-soft)]">
-            {isSignedLink && file.artifact
-              ? "This approval includes a run artifact, but the backend does not expose a signed public artifact download endpoint for standalone approval links."
+            {href
+              ? "This approval includes a file artifact. Download it to inspect the contents."
               : "This approval includes a file artifact. Open the run to inspect the file contents."}
           </div>
         )}
@@ -357,6 +363,7 @@ function ReviewContent() {
                 file={previewFile}
                 approval={approval}
                 isSignedLink={isSignedLink}
+                token={token}
               />
             )}
 
