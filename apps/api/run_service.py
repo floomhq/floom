@@ -8,6 +8,7 @@ import re
 import logging
 import shutil
 import time
+from html import escape
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
@@ -93,15 +94,20 @@ def _send_email_notification(
         worker_name=worker_name, status=status_label, run_id=run_id
     )
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    safe_worker_name = escape(worker_name)
+    safe_worker_id = escape(worker_id)
+    safe_run_id = escape(run_id)
+    safe_status_label = escape(status_label)
+    safe_error = escape(error) if error else None
 
     html_lines = [
-        f"<p><strong>Worker:</strong> {worker_name} <code>({worker_id})</code></p>",
-        f"<p><strong>Run ID:</strong> <code>{run_id}</code></p>",
-        f"<p><strong>Status:</strong> {status_label}</p>",
+        f"<p><strong>Worker:</strong> {safe_worker_name} <code>({safe_worker_id})</code></p>",
+        f"<p><strong>Run ID:</strong> <code>{safe_run_id}</code></p>",
+        f"<p><strong>Status:</strong> {safe_status_label}</p>",
         f"<p><strong>Time:</strong> {timestamp}</p>",
     ]
-    if error:
-        html_lines.append(f"<p><strong>Error:</strong> <code>{error}</code></p>")
+    if safe_error:
+        html_lines.append(f"<p><strong>Error:</strong> <code>{safe_error}</code></p>")
 
     text_lines = [
         f"Worker: {worker_name} ({worker_id})",
