@@ -341,7 +341,7 @@ export interface ApprovalRow {
   decision_input_json?: string;
   edited_output_json?: string;
   follow_up_run_id?: string;
-  owner_id: string;
+  owner_id?: string;
 }
 
 export interface SystemInfo {
