@@ -1105,6 +1105,267 @@ export function createServer(): McpServer {
     async () => callTool(async () => jsonResult(await request("GET", "/stats"))),
   );
 
+  // ---------------------------------------------------------------------------
+  // HIGH: Versioning — workers
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "workers.versions",
+    {
+      title: "List Worker Versions",
+      description: "List saved versions of a worker, newest first. Use before rollback to find the right version_id.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        limit: z.number().int().min(1).max(100).default(50).describe("Maximum versions to return."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ id, limit }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", `/workers/${encodeURIComponent(id)}/versions`, undefined, { limit })),
+      ),
+  );
+
+  server.registerTool(
+    "workers.rollback",
+    {
+      title: "Rollback Worker",
+      description: "Restore a worker to a previous version. Use workers.versions to list available versions and find the version_id.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        version_id: z.string().min(1).describe("Version ID to restore (from workers.versions)."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ id, version_id }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/workers/${encodeURIComponent(id)}/rollback/${encodeURIComponent(version_id)}`),
+          "Worker rolled back.",
+        ),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // HIGH: Versioning — contexts/brain packs
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "contexts.versions",
+    {
+      title: "List Context Versions",
+      description: "List saved versions of a brain pack context, newest first.",
+      inputSchema: {
+        name: z.string().min(1).describe("Context name."),
+        limit: z.number().int().min(1).max(100).default(50).describe("Maximum versions to return."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ name, limit }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", `/contexts/${encodeURIComponent(name)}/versions`, undefined, { limit })),
+      ),
+  );
+
+  server.registerTool(
+    "contexts.rollback",
+    {
+      title: "Rollback Context",
+      description: "Restore a brain pack context to a previous version. Use contexts.versions to find the version_id.",
+      inputSchema: {
+        name: z.string().min(1).describe("Context name."),
+        version_id: z.string().min(1).describe("Version ID to restore."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ name, version_id }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/contexts/${encodeURIComponent(name)}/rollback/${encodeURIComponent(version_id)}`),
+          "Context rolled back.",
+        ),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // HIGH: Context CRUD
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "contexts.create",
+    {
+      title: "Create Context",
+      description: "Create a new brain pack context folder.",
+      inputSchema: {
+        name: z.string().min(1).describe("Context name (slug, e.g. 'company-docs')."),
+        writeable: z.boolean().default(false).describe("Whether the context is writeable by workers at runtime."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ name, writeable }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/contexts/${encodeURIComponent(name)}`, { writeable }),
+          "Context created.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "contexts.delete",
+    {
+      title: "Delete Context",
+      description: "Delete a brain pack context and all its files.",
+      inputSchema: {
+        name: z.string().min(1).describe("Context name."),
+        force: z.boolean().default(false).describe("Force delete even if referenced by workers."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ name, force }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("DELETE", `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`),
+          "Context deleted.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "contexts.delete_file",
+    {
+      title: "Delete Context File",
+      description: "Delete a specific file from a brain pack context.",
+      inputSchema: {
+        name: z.string().min(1).describe("Context name."),
+        path: z.string().min(1).describe("File path inside the context."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ name, path }) =>
+      callTool(async () =>
+        jsonResult(
+          await request(
+            "DELETE",
+            `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+          ),
+          "Context file deleted.",
+        ),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // HIGH: Worker alerts
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "workers.alerts.list",
+    {
+      title: "List Worker Alerts",
+      description: "List configured alerts for a worker (email/webhook on failure, success, etc.).",
+      inputSchema: workerIdSchema.shape,
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ id }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", `/workers/${encodeURIComponent(id)}/alerts`)),
+      ),
+  );
+
+  server.registerTool(
+    "workers.alerts.create",
+    {
+      title: "Create Worker Alert",
+      description: "Add an alert to a worker — fires on specified events (failed, completed, approval_required) via webhook or email.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        on: z.array(z.string()).min(1).describe("Events to alert on, e.g. ['failed', 'approval_required']."),
+        url: z.string().optional().describe("Webhook URL to POST the alert to."),
+        email_to: z.array(z.string()).optional().describe("Email addresses to notify."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ id, ...body }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/workers/${encodeURIComponent(id)}/alerts`, body),
+          "Alert created.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "workers.alerts.delete",
+    {
+      title: "Delete Worker Alert",
+      description: "Remove a worker alert by its ID.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        alert_id: z.string().min(1).describe("Alert ID to delete."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ id, alert_id }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("DELETE", `/workers/${encodeURIComponent(id)}/alerts/${encodeURIComponent(alert_id)}`),
+          "Alert deleted.",
+        ),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // HIGH: Worker lifecycle — archive / restore / stats
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "workers.archive",
+    {
+      title: "Archive Worker",
+      description: "Archive a worker so it no longer appears in the active list or runs on schedule. Reversible with workers.restore.",
+      inputSchema: workerIdSchema.shape,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ id }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/workers/${encodeURIComponent(id)}/archive`),
+          "Worker archived.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "workers.restore",
+    {
+      title: "Restore Worker",
+      description: "Restore an archived worker back to active status.",
+      inputSchema: workerIdSchema.shape,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ id }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/workers/${encodeURIComponent(id)}/restore`),
+          "Worker restored.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "workers.stats",
+    {
+      title: "Get Worker Stats",
+      description: "Get run statistics for a specific worker — success rate, error rate, average duration, run counts for the last 7 days.",
+      inputSchema: workerIdSchema.shape,
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ id }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", `/workers/${encodeURIComponent(id)}/stats`)),
+      ),
+  );
+
   return server;
 }
 
