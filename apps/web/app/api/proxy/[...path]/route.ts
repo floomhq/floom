@@ -14,7 +14,9 @@ async function handler(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await params;
-  const upstreamPath = "/" + path.join("/");
+  // Next decodes catch-all route segments before handing them to us. Re-encode
+  // each segment so literal percent-encoded filenames survive proxying.
+  const upstreamPath = "/" + path.map(encodeURIComponent).join("/");
 
   // Preserve query string
   const search = req.nextUrl.search;
