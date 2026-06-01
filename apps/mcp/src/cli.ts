@@ -7,7 +7,13 @@ import { runLoginCommand } from "./commands/login.js";
 import { runLogoutCommand } from "./commands/logout.js";
 import { runWhoamiCommand } from "./commands/whoami.js";
 import { runWorkerCommand } from "./commands/run.js";
-import { workersListCommand, workersShowCommand, workersInfoCommand } from "./commands/workers.js";
+import {
+  workersListCommand,
+  workersShowCommand,
+  workersInfoCommand,
+  workersPushCommand,
+  workersValidateCommand,
+} from "./commands/workers.js";
 import {
   workspacesListCommand,
   workspacesShowCommand,
@@ -94,6 +100,14 @@ export function buildCliProgram(): Command {
     .argument("<id>", "Worker id")
     .option("--json", "Print raw JSON")
     .action(async (id: string, options: { json?: boolean }) => runAction(workersInfoCommand(id, options)));
+  workers.command("validate")
+    .description("Validate a local worker directory")
+    .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")
+    .action(async (dir: string) => runAction(workersValidateCommand(dir)));
+  workers.command("push")
+    .description("Create or update a worker from a local worker directory")
+    .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")
+    .action(async (dir: string) => runAction(workersPushCommand(dir)));
   workers.command("run")
     .description("Trigger a worker run (alias for `floom run`)")
     .argument("<id>", "Worker id")
