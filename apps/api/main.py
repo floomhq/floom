@@ -2019,6 +2019,25 @@ def list_worker_versions(
     return [VersionSummary(**r) for r in rows]
 
 
+@app.get("/workers/{worker_id}/versions/{version_id}")
+def get_worker_version(
+    worker_id: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the file snapshot for a specific worker version."""
+    import json as _json
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    version = repos.versions.get(version_id=version_id)
+    if not version or version.get("asset_type") != "worker" or version.get("asset_id") != worker_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"files": snapshot.get("files") or []}
+
+
 @app.post("/workers/{worker_id}/rollback/{version_id}", response_model=WorkerDetail)
 def rollback_worker(
     worker_id: str,
@@ -2154,6 +2173,23 @@ def list_context_versions(
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rows = repos.versions.list(asset_type="brain_pack", asset_id=safe_name, limit=min(limit, 100))
     return [VersionSummary(**r) for r in rows]
+
+
+@app.get("/contexts/{name}/versions/{version_id}")
+def get_context_version(
+    name: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the file snapshot for a specific brain pack version."""
+    import json as _json
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    version = repos.versions.get(version_id=version_id)
+    if not version or version.get("asset_type") != "brain_pack" or version.get("asset_id") != safe_name:
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"files": snapshot.get("files") or []}
 
 
 @app.post("/contexts/{name}/rollback/{version_id}")
