@@ -13,6 +13,7 @@ import Editor from "react-simple-code-editor";
 import { load as parseYaml } from "js-yaml";
 import "highlight.js/styles/github.css";
 import type { WorkerFile } from "@/lib/types";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ---------------------------------------------------------------------------
 // Language detection helpers
@@ -25,10 +26,6 @@ function detectLanguage(path: string): string {
   if (path.endsWith(".md") || path.endsWith(".txt")) return "markdown";
   if (path.endsWith(".sh")) return "bash";
   return "plaintext";
-}
-
-function supportsRenderedPreview(path: string, language: string): boolean {
-  return language === "markdown" || (language === "yaml" && path.endsWith("worker.yml"));
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +211,7 @@ interface FilesEditorEditProps {
 }
 
 type FilesEditorProps = FilesEditorViewProps | FilesEditorEditProps;
+type SourceMode = "raw" | "preview" | "form";
 
 export function FilesEditor(props: FilesEditorProps) {
   if (props.mode === "view") {
@@ -222,20 +220,34 @@ export function FilesEditor(props: FilesEditorProps) {
   return <FilesEditorEdit {...props} />;
 }
 
+function supportsRenderedPreview(path: string, binary?: boolean): boolean {
+  return !binary && Boolean(path);
+}
+
+function defaultSourceMode(path: string, hasForm: boolean, binary?: boolean): SourceMode {
+  if (binary) return "raw";
+  if (path === "worker.yml") return "preview";
+  if (detectLanguage(path) === "markdown") return "preview";
+  return hasForm ? "form" : "raw";
+}
+
+function sourceModeLabel(mode: SourceMode): string {
+  if (mode === "raw") return "Raw";
+  if (mode === "form") return "Form";
+  return "Rendered";
+}
+
+function sourceModeIcon(mode: SourceMode) {
+  if (mode === "raw") return <Code2 className="w-3 h-3" />;
+  return <AlignLeft className="w-3 h-3" />;
+}
+
 // ---------------------------------------------------------------------------
 // View mode
 // ---------------------------------------------------------------------------
 
 function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps) {
   const selected = files.find((f) => f.path === selectedPath) || null;
-  const canPreviewSelected = selected
-    ? !selected.binary && supportsRenderedPreview(selected.path, selected.language)
-    : false;
-  const [viewMode, setViewMode] = useState<"raw" | "preview">("raw");
-
-  useEffect(() => {
-    setViewMode(canPreviewSelected ? "preview" : "raw");
-  }, [canPreviewSelected, selected?.path]);
 
   if (files.length === 0) {
     return <p className="text-sm text-muted-foreground">No files found for this worker.</p>;
@@ -249,11 +261,11 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
       {/* FIX 2 (Federico 2026-05-29): the file rail must stay visible while a
           long file (e.g. a big run.py) scrolls. Sticky to the viewport with a
           top offset that clears the sticky mobile header (h-14 ≈ 56px); on
-          desktop there is no top header over <main>, so it pins close to the
-          viewport top while the document scrolls. self-start lets the sticky
+          desktop there is no top header over <main>, so it simply pins 72px
+          from the top while the document scrolls. self-start lets the sticky
           element detach from the flex stretch.
           Mobile (< lg): full-width rail, no sticky (stacks above the code pane). */}
-      <div className="w-full lg:w-64 shrink-0 lg:self-start lg:sticky lg:top-3 border border-line rounded-[var(--radius-card)] overflow-hidden">
+      <div className="w-full lg:w-64 shrink-0 lg:self-start lg:sticky lg:top-[4.5rem] border border-line rounded-[var(--radius-card)] overflow-hidden">
         <div className="px-3 py-2 border-b border-line">
           <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
             <FolderOpen className="w-3.5 h-3.5" />
@@ -283,50 +295,10 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
       <div className="flex-1 min-w-0">
         {selected ? (
           <div className="border border-line rounded-[var(--radius-card)] overflow-hidden">
-            <div className="flex items-center justify-between gap-3 py-2 px-4 border-b border-line">
+            <div className="py-2 px-4 border-b border-line">
               <p className="text-xs font-mono text-muted-foreground">{selected.path}</p>
-              {!selected.binary && (
-                <div className="flex items-center gap-0 rounded-md border border-border overflow-hidden shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setViewMode("raw")}
-                    className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
-                      viewMode === "raw"
-                        ? "bg-muted text-foreground font-medium"
-                        : "text-muted-foreground hover:bg-muted/40"
-                    }`}
-                  >
-                    <Code2 className="w-3 h-3" />
-                    Raw
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => canPreviewSelected && setViewMode("preview")}
-                    disabled={!canPreviewSelected}
-                    title={canPreviewSelected ? `${selected.path} preview` : "No rendered preview for this file type"}
-                    className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-                      viewMode === "preview"
-                        ? "bg-muted text-foreground font-medium"
-                        : "text-muted-foreground hover:bg-muted/40"
-                    }`}
-                  >
-                    <AlignLeft className="w-3 h-3" />
-                    Preview
-                  </button>
-                </div>
-              )}
             </div>
-            {selected.binary ? (
-              <div className="p-4 text-sm text-muted-foreground">Binary file -- cannot display.</div>
-            ) : viewMode === "preview" && selected.language === "markdown" ? (
-              <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px]">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content || ""}</ReactMarkdown>
-              </div>
-            ) : viewMode === "preview" && selected.language === "yaml" && selected.path.endsWith("worker.yml") ? (
-              <WorkerYamlView content={selected.content || ""} />
-            ) : (
-              <SyntaxHighlightedCode content={selected.content || ""} language={selected.language} />
-            )}
+            <ReadOnlyFileContent file={selected} />
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">Select a file to view.</p>
@@ -336,7 +308,68 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
   );
 }
 
-function WorkerYamlView({ content }: { content: string }) {
+function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
+  if (file.binary) {
+    return <div className="p-4 text-sm text-muted-foreground">Binary file -- cannot display.</div>;
+  }
+
+  if (!supportsRenderedPreview(file.path, file.binary)) {
+    return <SyntaxHighlightedCode content={file.content || ""} language={file.language} />;
+  }
+
+  return (
+    <Tabs defaultValue="preview" className="bg-muted/20">
+      <div className="flex items-center justify-end border-b border-line px-4 py-2">
+        <TabsList>
+          <TabsTrigger value="preview">Rendered</TabsTrigger>
+          <TabsTrigger value="raw">Raw</TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent value="preview" className="m-0">
+        <RenderedFilePreview
+          path={file.path}
+          content={file.content || ""}
+          language={file.language || detectLanguage(file.path)}
+        />
+      </TabsContent>
+      <TabsContent value="raw" className="m-0">
+        <SyntaxHighlightedCode content={file.content || ""} language={file.language || detectLanguage(file.path)} />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function RenderedFilePreview({
+  path,
+  content,
+  language,
+}: {
+  path: string;
+  content: string;
+  language: string;
+}) {
+  const detected = language || detectLanguage(path);
+
+  if (path === "worker.yml") {
+    return (
+      <div className="max-h-[640px] overflow-auto bg-muted/20 p-4">
+        <WorkerYamlPreviewContent content={content} />
+      </div>
+    );
+  }
+
+  if (detected === "markdown") {
+    return (
+      <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px]">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      </div>
+    );
+  }
+
+  return <SyntaxHighlightedCode content={content} language={detected} />;
+}
+
+function WorkerYamlPreviewContent({ content }: { content: string }) {
   const parsed = parseWorkerYaml(content);
   if (!parsed) {
     return <SyntaxHighlightedCode content={content} language="yaml" />;
@@ -349,39 +382,29 @@ function WorkerYamlView({ content }: { content: string }) {
     ["Runtime", runtimeLabel(parsed.exec ?? parsed.runtime)],
     ["Inputs", countLabel(parsed.inputs, "input")],
     ["Connections", countLabel(parsed.connections, "connection")],
-    ["Brain packs", countLabel(parsed.contexts, "brain pack")],
+    ["Brain resources", countLabel(parsed.contexts, "brain resource")],
     ["Secrets", countLabel(parsed.secrets, "secret")],
   ].filter(([, value]) => value);
 
   return (
-    <div className="bg-muted/20">
-      <div className="border-b border-line px-4 py-2">
-        <div>
-          <p className="text-xs font-medium text-foreground">Worker manifest</p>
-          <p className="text-[11px] text-muted-foreground">Readable manifest preview. Raw YAML is available from the file toolbar.</p>
-        </div>
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-base font-semibold text-foreground">{parsed.title || parsed.name || "Untitled worker"}</h3>
+        {parsed.description ? (
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{parsed.description}</p>
+        ) : null}
       </div>
-      <div className="max-h-[640px] overflow-auto p-4">
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">{parsed.title || parsed.name || "Untitled worker"}</h3>
-            {parsed.description ? (
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{parsed.description}</p>
-            ) : null}
+      <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] border border-line bg-line text-sm sm:grid-cols-2">
+        {entries.map(([label, value]) => (
+          <div key={label} className="bg-card px-3 py-2">
+            <dt className="text-[11px] font-medium uppercase text-muted-foreground">{label}</dt>
+            <dd className="mt-0.5 truncate text-foreground" title={String(value)}>{value}</dd>
           </div>
-          <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] border border-line bg-line text-sm sm:grid-cols-2">
-            {entries.map(([label, value]) => (
-              <div key={label} className="bg-card px-3 py-2">
-                <dt className="text-[11px] font-medium uppercase text-muted-foreground">{label}</dt>
-                <dd className="mt-0.5 truncate text-foreground" title={String(value)}>{value}</dd>
-              </div>
-            ))}
-          </dl>
-          <YamlList title="Inputs" items={parsed.inputs} getLabel={(item) => itemLabel(item)} />
-          <YamlList title="Connections" items={parsed.connections} getLabel={(item) => itemLabel(item)} />
-          <YamlList title="Brain packs" items={parsed.contexts} getLabel={(item) => itemLabel(item)} />
-        </div>
-      </div>
+        ))}
+      </dl>
+      <YamlList title="Inputs" items={parsed.inputs} getLabel={(item) => itemLabel(item)} />
+      <YamlList title="Connections" items={parsed.connections} getLabel={(item) => itemLabel(item)} />
+      <YamlList title="Brain resources" items={parsed.contexts} getLabel={(item) => contextItemLabel(item)} />
     </div>
   );
 }
@@ -443,6 +466,15 @@ function itemLabel(value: unknown) {
   return JSON.stringify(raw);
 }
 
+function contextItemLabel(value: unknown) {
+  if (typeof value === "string") return `${value} · Read-only`;
+  if (!value || typeof value !== "object") return "";
+  const raw = value as Record<string, unknown>;
+  const name = raw.name || raw.label || "Unnamed resource";
+  const access = raw.writeable === true ? "Read/write" : "Read-only";
+  return `${String(name)} · ${access}`;
+}
+
 function YamlList({
   title,
   items,
@@ -488,15 +520,15 @@ function FilesEditorEdit({
 
   const effectiveSelected = selectedPath ?? files[0]?.path ?? "worker.yml";
   const selectedFile = files.find((f) => f.path === effectiveSelected) || null;
+  const selectedHasForm = Boolean(selectedFile && selectedFile.path === "worker.yml" && renderYamlPreview);
+  const selectedHasPreview = Boolean(selectedFile && supportsRenderedPreview(selectedFile.path));
 
-  // Per-file preview toggle — default to preview for worker.yml and .md files
-  const fileSupportsPreview = (path: string) =>
-    path === "worker.yml" ? Boolean(renderYamlPreview) : supportsRenderedPreview(path, detectLanguage(path));
-  const [previewActive, setPreviewActive] = useState(() => fileSupportsPreview(effectiveSelected));
+  const [sourceMode, setSourceMode] = useState<SourceMode>(() =>
+    defaultSourceMode(effectiveSelected, Boolean(renderYamlPreview))
+  );
   useEffect(() => {
-    setPreviewActive(fileSupportsPreview(effectiveSelected));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveSelected]);
+    setSourceMode(defaultSourceMode(effectiveSelected, selectedHasForm));
+  }, [effectiveSelected, selectedHasForm]);
 
   function setContent(path: string, content: string) {
     onChange(files.map((f) => (f.path === path ? { ...f, content } : f)));
@@ -530,13 +562,13 @@ function FilesEditorEdit({
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6 items-start">
-      {/* FIX 2 (Federico 2026-05-29): keep the file rail pinned while editing a
-          long file. items-start on the grid lets this track sticky; the small
-          top offset keeps the rail close to the editor pane on initial render. */}
-      <Card className="border-border shadow-none bg-card self-start lg:sticky lg:top-3 !py-0">
-        <CardHeader className="py-2 px-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-xs font-medium text-muted-foreground">Files</CardTitle>
+    <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 items-start">
+      <Card size="sm" className="border-border shadow-none bg-card self-start lg:sticky lg:top-3">
+        <CardHeader className="px-3 flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <FolderOpen className="w-3.5 h-3.5" />
+            Files
+          </CardTitle>
           <button
             type="button"
             onClick={() => setAddingFile((v) => !v)}
@@ -592,52 +624,43 @@ function FilesEditorEdit({
         </CardContent>
       </Card>
 
-      <Card className="border-border shadow-none bg-card !py-0">
+      <Card className="border-border shadow-none bg-card">
         <CardHeader className="py-2 px-4 border-b border-border">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-xs font-medium font-mono text-muted-foreground">
               {selectedFile ? selectedFile.path : "Select a file"}
             </CardTitle>
-            {selectedFile && (
+            {selectedFile && (selectedHasPreview || selectedHasForm) && (
               <div className="flex items-center gap-0 rounded-md border border-border overflow-hidden shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setPreviewActive(false)}
-                  className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
-                    !previewActive
-                      ? "bg-muted text-foreground font-medium"
-                      : "text-muted-foreground hover:bg-muted/40"
-                  }`}
-                >
-                  <Code2 className="w-3 h-3" />
-                  Raw
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fileSupportsPreview(selectedFile.path) && setPreviewActive(true)}
-                  disabled={!fileSupportsPreview(selectedFile.path)}
-                  title={fileSupportsPreview(selectedFile.path) ? `${selectedFile.path} preview` : "No rendered preview for this file type"}
-                  className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-                    previewActive
-                      ? "bg-muted text-foreground font-medium"
-                      : "text-muted-foreground hover:bg-muted/40"
-                  }`}
-                >
-                  <AlignLeft className="w-3 h-3" />
-                  {selectedFile.path === "worker.yml" ? "Form" : "Preview"}
-                </button>
+                {(["raw", "preview", ...(selectedHasForm ? ["form"] : [])] as SourceMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setSourceMode(mode)}
+                    className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
+                      sourceMode === mode
+                        ? "bg-muted text-foreground font-medium"
+                        : "text-muted-foreground hover:bg-muted/40"
+                    }`}
+                  >
+                    {sourceModeIcon(mode)}
+                    {sourceModeLabel(mode)}
+                  </button>
+                ))}
               </div>
             )}
           </div>
         </CardHeader>
         <CardContent className="p-0">
           {selectedFile ? (
-            previewActive && selectedFile.path === "worker.yml" && renderYamlPreview ? (
+            sourceMode === "form" && selectedFile.path === "worker.yml" && renderYamlPreview ? (
               <div className="p-4">{renderYamlPreview}</div>
-            ) : previewActive && detectLanguage(selectedFile.path) === "markdown" ? (
-              <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px]">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedFile.content || ""}</ReactMarkdown>
-              </div>
+            ) : sourceMode === "preview" ? (
+              <RenderedFilePreview
+                path={selectedFile.path}
+                content={selectedFile.content}
+                language={detectLanguage(selectedFile.path)}
+              />
             ) : (
               <div
                 className="rounded-b-[var(--radius-card)] overflow-hidden bg-[var(--bg-2)] dark:bg-[#1e1e2e]"

@@ -19,11 +19,20 @@ import {
 async function withTempHome(fn) {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-cloud-"));
   const originalHome = process.env.HOME;
+  const originalToken = process.env.WORKEROS_API_TOKEN;
+  const originalBase = process.env.WORKEROS_API_BASE;
+  const originalWorkspace = process.env.WORKEROS_WORKSPACE_ID;
   process.env.HOME = home;
   try {
     return await fn(home);
   } finally {
     process.env.HOME = originalHome;
+    if (originalToken === undefined) delete process.env.WORKEROS_API_TOKEN;
+    else process.env.WORKEROS_API_TOKEN = originalToken;
+    if (originalBase === undefined) delete process.env.WORKEROS_API_BASE;
+    else process.env.WORKEROS_API_BASE = originalBase;
+    if (originalWorkspace === undefined) delete process.env.WORKEROS_WORKSPACE_ID;
+    else process.env.WORKEROS_WORKSPACE_ID = originalWorkspace;
   }
 }
 
@@ -73,6 +82,20 @@ test("updateCredentials persists workspace_id without dropping refresh_token", a
     assert.equal(creds.workspace_id, "ws_test123");
     assert.equal(creds.workspace_name, "Test WS");
     assert.equal(creds.refresh_token, "rt-1");
+  });
+});
+
+test("readCredentials accepts cloud PAT from environment", async () => {
+  await withTempHome(async () => {
+    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
+    process.env.WORKEROS_API_TOKEN = "floom_pat_123";
+    process.env.WORKEROS_WORKSPACE_ID = "ws_env";
+    const creds = await readCredentials();
+    assert.ok(creds);
+    assert.equal(creds.mode, "cloud");
+    assert.equal(creds.api_base, "https://workeros-api.floom.dev");
+    assert.equal(creds.api_token, "floom_pat_123");
+    assert.equal(creds.workspace_id, "ws_env");
   });
 });
 
@@ -153,6 +176,29 @@ test("cloud client sends JWT + X-Workeros-Workspace and rewrites /workers to /ap
       assert.equal(refreshed.refresh_token, "rt-2");
     } finally {
       supa.server.close();
+      api.server.close();
+    }
+  });
+});
+
+test("cloud client sends PAT + X-Workeros-Workspace and rewrites /workers to /api/workers", async () => {
+  await withTempHome(async () => {
+    const api = await startMockApi();
+    try {
+      process.env.WORKEROS_API_BASE = `http://127.0.0.1:${api.port}`;
+      process.env.WORKEROS_API_TOKEN = "floom_pat_456";
+      process.env.WORKEROS_WORKSPACE_ID = "ws_pat";
+      const { client } = await createAuthenticatedClient();
+      const workers = await client.requestJson("GET", "/workers");
+      assert.deepEqual(workers, [{ id: "w_1", name: "Test", status: "healthy" }]);
+
+      const workersCall = api.seen.find((r) => r.url === "/api/workers");
+      assert.ok(workersCall, "expected /api/workers call (engine mounted under /api)");
+      assert.equal(workersCall.headers["x-floom-token"], "floom_pat_456");
+      assert.equal(workersCall.headers["x-workeros-workspace"], "ws_pat");
+      assert.equal(workersCall.headers["authorization"], undefined);
+      assert.equal(workersCall.headers["x-floom-secret"], undefined);
+    } finally {
       api.server.close();
     }
   });

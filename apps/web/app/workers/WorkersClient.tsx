@@ -609,7 +609,7 @@ function WorkerCard({
               connections={worker.connections}
               triggerType={worker.trigger_type}
               size="sm"
-              max={5}
+              max={8}
             />
           )}
           {!worker.archived && (
@@ -727,7 +727,7 @@ function WorkerCardSkeleton() {
   return (
     <Card className={`${CARD_HEIGHT} gap-0 py-0 overflow-hidden`}>
       {/* Header band: icon strip + star */}
-      <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--border-default)] bg-[color-mix(in_srgb,var(--foreground)_7%,var(--bg-card))] px-3.5 py-2.5">
+        <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--border-default)] bg-[color-mix(in_srgb,var(--foreground)_7%,var(--bg-card))] px-3.5 py-2">
         <Skeleton className="h-7 w-20 rounded-[var(--radius-squircle)]" />
         <Skeleton className="size-5 rounded shrink-0" />
       </div>

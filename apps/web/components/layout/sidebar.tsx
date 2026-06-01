@@ -45,7 +45,6 @@ const nav = [
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
   { href: "/connections", label: "Connections", icon: Plug },
-  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
@@ -119,6 +118,25 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   );
 }
 
+export function SidebarSettingsLink({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const active = pathname === "/settings" || pathname.startsWith("/settings/");
+  return (
+    <Link
+      href="/settings"
+      onClick={onNavigate}
+      className={cn(
+        "mx-3 mb-2 flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
+        active
+          ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
+          : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
+      )}
+    >
+      <Settings className="h-4 w-4" />
+      Settings
+    </Link>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -170,6 +188,7 @@ export function Sidebar() {
         <NavLinks pathname={pathname} />
         <div className="mt-auto pt-3 border-t border-[var(--border-soft)]">
           <WorkspaceSwitcher />
+          <SidebarSettingsLink pathname={pathname} />
         </div>
         <UserProfileFooter />
       </aside>
@@ -203,6 +222,7 @@ export function Sidebar() {
             </div>
             <div className="pt-3 border-t border-[var(--border-soft)]">
               <WorkspaceSwitcher />
+              <SidebarSettingsLink pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
             <UserProfileFooter />
           </aside>

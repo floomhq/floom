@@ -16,6 +16,7 @@ import {
   FileCode,
   FilePlus,
   FileText,
+  Film,
   Folder,
   Image as ImageIcon,
   Link as LinkIcon,
@@ -23,9 +24,11 @@ import {
   Plus,
   Save,
   Search,
+  Table,
   Trash2,
   X,
 } from "lucide-react";
+import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ContextDetail, ContextFileItem, ContextSummary } from "@/lib/types";
@@ -36,6 +39,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 const TEXT_PREVIEW_LIMIT = 256 * 1024;
+const TABLE_PREVIEW_ROWS = 100;
+const TABLE_PREVIEW_COLS = 12;
 const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const BRAIN_ROUTE = `${APP_BASE_PATH}/brain`;
 
@@ -57,6 +62,8 @@ function displayTypeIcon(displayType: string) {
   if (["YAML", "Python", "JavaScript", "TypeScript", "JSON", "Shell", "SQL"].includes(displayType))
     return <FileCode className="size-4 shrink-0 text-muted-foreground" />;
   if (displayType === "Image") return <ImageIcon className="size-4 shrink-0 text-muted-foreground" />;
+  if (displayType === "CSV" || displayType === "Spreadsheet") return <Table className="size-4 shrink-0 text-muted-foreground" />;
+  if (displayType === "Video") return <Film className="size-4 shrink-0 text-muted-foreground" />;
   return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
 }
 
@@ -75,13 +82,17 @@ function isKnownTextFile(file: ContextFileItem): boolean {
   );
 }
 
-type FileKind = "markdown" | "code" | "image" | "pdf" | "binary";
+type FileKind = "markdown" | "code" | "html" | "table" | "spreadsheet" | "image" | "pdf" | "video" | "binary";
 
 function fileKind(file: ContextFileItem): FileKind {
   const mime = file.mime_type.toLowerCase();
   const path = file.path.toLowerCase();
   if (path.endsWith(".md") || path.endsWith(".mdx") || mime === "text/markdown") return "markdown";
+  if (path.endsWith(".html") || path.endsWith(".htm") || mime === "text/html") return "html";
+  if (path.endsWith(".csv") || path.endsWith(".tsv") || mime === "text/csv" || mime === "text/tab-separated-values") return "table";
+  if (path.endsWith(".xlsx") || mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") return "spreadsheet";
   if (mime === "application/pdf" || path.endsWith(".pdf")) return "pdf";
+  if (mime.startsWith("video/") || /\.(mp4|webm|mov|m4v|ogv)$/.test(path)) return "video";
   if (mime.startsWith("image/")) return "image";
   if (isKnownTextFile(file)) return "code";
   return "binary";
@@ -505,7 +516,7 @@ function ContextsPage() {
             mobilePane === "packs" ? "flex" : "hidden lg:flex"
           }`}
         >
-          <div className="border-b border-[var(--border-default)] p-3 shrink-0">
+          <div className="flex min-h-[82px] shrink-0 flex-col justify-center border-b border-[var(--border-default)] p-3">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Knowledge packs</p>
             {!fileOpen && (
               <div className="relative">
@@ -826,7 +837,7 @@ function PackDetailPane({
       } ${mobileVisible ? "flex" : "hidden lg:flex"}`}
     >
       {/* Pack header / metadata (used-by chips live here) */}
-      <div className="border-b border-[var(--border-default)] px-5 py-4 shrink-0">
+      <div className="min-h-[82px] shrink-0 border-b border-[var(--border-default)] px-5 py-4">
         <div className="flex items-start justify-between gap-2">
           <h2 className="flex items-center gap-2 text-base font-semibold min-w-0">
             <button
@@ -988,7 +999,7 @@ function FolderColumns({
 }) {
   return (
     <div className="flex flex-col w-full min-w-0">
-      <div className="px-3 py-2.5 border-b border-[var(--border-default)] shrink-0 flex items-center gap-1.5">
+      <div className="flex min-h-[82px] shrink-0 items-center gap-1.5 border-b border-[var(--border-default)] px-3 py-2.5">
         <button
           type="button"
           onClick={onBackMobile}
@@ -1178,7 +1189,7 @@ function FilePane({
   return (
     <>
       {/* Breadcrumb + actions */}
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-2.5 shrink-0">
+      <div className="flex min-h-[82px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm min-w-0">
           <button
             type="button"
@@ -1320,6 +1331,54 @@ function FileContent({
     );
   }
 
+  if (kind === "html") {
+    return (
+      <Tabs defaultValue="preview" className="flex flex-col h-full">
+        <div className="border-b border-[var(--border-default)] px-4 pt-2 shrink-0">
+          <TabsList variant="line" className="h-8">
+            <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
+            <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="preview" className="flex-1 overflow-auto p-0 mt-0 bg-white">
+          <iframe
+            title={file.path}
+            srcDoc={text}
+            sandbox=""
+            referrerPolicy="no-referrer"
+            className="h-full min-h-[600px] w-full border-0 bg-white"
+          />
+        </TabsContent>
+        <TabsContent value="raw" className="flex-1 overflow-auto p-0 mt-0">
+          <CodeBlock text={text} filePath={file.path} />
+        </TabsContent>
+      </Tabs>
+    );
+  }
+
+  if (kind === "table") {
+    return (
+      <Tabs defaultValue="preview" className="flex flex-col h-full">
+        <div className="border-b border-[var(--border-default)] px-4 pt-2 shrink-0">
+          <TabsList variant="line" className="h-8">
+            <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
+            <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="preview" className="flex-1 overflow-auto p-0 mt-0">
+          <DelimitedTablePreview text={text} path={file.path} />
+        </TabsContent>
+        <TabsContent value="raw" className="flex-1 overflow-auto p-0 mt-0">
+          <pre className="p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-words">{text}</pre>
+        </TabsContent>
+      </Tabs>
+    );
+  }
+
+  if (kind === "spreadsheet") {
+    return <SpreadsheetPreview fileUrl={fileUrl} />;
+  }
+
   if (kind === "image") {
     return (
       <div className="flex items-center justify-center p-6 min-h-[300px] bg-muted/20">
@@ -1333,6 +1392,16 @@ function FileContent({
     return <embed src={fileUrl} type="application/pdf" className="w-full h-full min-h-[600px]" />;
   }
 
+  if (kind === "video") {
+    return (
+      <div className="flex h-full min-h-[420px] items-center justify-center bg-muted/20 p-6">
+        <video src={fileUrl} controls className="max-h-[650px] max-w-full rounded-[var(--radius-button)] border border-[var(--border-default)] bg-black">
+          <a href={fileUrl}>Download video</a>
+        </video>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 space-y-3 text-sm">
       <p className="text-muted-foreground">{file.display_type ?? "File"} file · {formatBytes(file.size)}</p>
@@ -1342,6 +1411,152 @@ function FileContent({
       </a>
     </div>
   );
+}
+
+function DelimitedTablePreview({ text, path }: { text: string; path: string }) {
+  const parsed = useMemo(() => {
+    const delimiter = path.toLowerCase().endsWith(".tsv") ? "\t" : undefined;
+    return Papa.parse<string[]>(text, {
+      delimiter,
+      skipEmptyLines: true,
+    }).data;
+  }, [path, text]);
+
+  if (parsed.length === 0) {
+    return <p className="p-4 text-sm text-muted-foreground">No rows found.</p>;
+  }
+
+  return <TablePreview rows={parsed} />;
+}
+
+function SpreadsheetPreview({ fileUrl }: { fileUrl: string }) {
+  const [rows, setRows] = useState<string[][]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    async function load() {
+      try {
+        const [{ default: JSZip }, response] = await Promise.all([
+          import("jszip"),
+          fetch(fileUrl),
+        ]);
+        if (!response.ok) throw new Error(`Download failed (${response.status})`);
+        const zip = await JSZip.loadAsync(await response.arrayBuffer());
+        const sheetName = Object.keys(zip.files)
+          .filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))
+          .sort()[0];
+        if (!sheetName) throw new Error("Workbook has no visible worksheet XML.");
+
+        const [sheetXml, sharedXml] = await Promise.all([
+          zip.file(sheetName)?.async("text"),
+          zip.file("xl/sharedStrings.xml")?.async("text"),
+        ]);
+        if (!sheetXml) throw new Error("Worksheet data is empty.");
+        const nextRows = parseXlsxSheet(sheetXml, sharedXml ?? "");
+        if (!cancelled) setRows(nextRows);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not preview spreadsheet.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void load();
+    return () => { cancelled = true; };
+  }, [fileUrl]);
+
+  if (loading) {
+    return (
+      <div className="p-4 space-y-2">
+        {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-button)]" />)}
+      </div>
+    );
+  }
+
+  if (error) {
+    return <p className="p-4 text-sm text-muted-foreground">Spreadsheet preview unavailable: {error}</p>;
+  }
+
+  return <TablePreview rows={rows} />;
+}
+
+function TablePreview({ rows }: { rows: string[][] }) {
+  const visibleRows = rows.slice(0, TABLE_PREVIEW_ROWS);
+  const colCount = Math.min(
+    TABLE_PREVIEW_COLS,
+    Math.max(...visibleRows.map((row) => row.length), 1)
+  );
+
+  return (
+    <div className="overflow-auto">
+      <table className="min-w-full border-collapse text-left text-xs">
+        <tbody>
+          {visibleRows.map((row, rowIndex) => (
+            <tr key={rowIndex} className={rowIndex === 0 ? "bg-muted/60 font-medium" : "odd:bg-muted/20"}>
+              {Array.from({ length: colCount }).map((_, colIndex) => (
+                <td key={colIndex} className="max-w-[260px] border border-[var(--border-default)] px-2.5 py-1.5 align-top">
+                  <span className="block truncate" title={row[colIndex] ?? ""}>
+                    {row[colIndex] ?? ""}
+                  </span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {(rows.length > TABLE_PREVIEW_ROWS || rows.some((row) => row.length > TABLE_PREVIEW_COLS)) && (
+        <p className="border-t border-[var(--border-default)] px-3 py-2 text-xs text-muted-foreground">
+          Showing first {Math.min(rows.length, TABLE_PREVIEW_ROWS)} rows and {colCount} columns.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function parseXlsxSheet(sheetXml: string, sharedXml: string): string[][] {
+  const parser = new DOMParser();
+  const sharedDoc = sharedXml ? parser.parseFromString(sharedXml, "application/xml") : null;
+  const sharedStrings = sharedDoc
+    ? Array.from(sharedDoc.querySelectorAll("si")).map((node) =>
+        Array.from(node.querySelectorAll("t")).map((part) => part.textContent ?? "").join("")
+      )
+    : [];
+  const sheetDoc = parser.parseFromString(sheetXml, "application/xml");
+  const rows: string[][] = [];
+
+  for (const row of Array.from(sheetDoc.querySelectorAll("sheetData row")).slice(0, TABLE_PREVIEW_ROWS)) {
+    const cells: string[] = [];
+    for (const cell of Array.from(row.querySelectorAll("c")).slice(0, TABLE_PREVIEW_COLS)) {
+      const ref = cell.getAttribute("r") ?? "";
+      const colIndex = Math.min(columnIndexFromCellRef(ref), TABLE_PREVIEW_COLS - 1);
+      const type = cell.getAttribute("t");
+      const valueNode = cell.querySelector("v");
+      let value = valueNode?.textContent ?? "";
+      if (type === "s") {
+        value = sharedStrings[Number(value)] ?? value;
+      } else if (type === "inlineStr") {
+        value = Array.from(cell.querySelectorAll("is t")).map((part) => part.textContent ?? "").join("");
+      }
+      cells[colIndex] = value;
+    }
+    rows.push(cells);
+  }
+
+  return rows;
+}
+
+function columnIndexFromCellRef(ref: string): number {
+  const letters = (ref.match(/[A-Z]+/i)?.[0] ?? "A").toUpperCase();
+  let index = 0;
+  for (const char of letters) {
+    index = index * 26 + char.charCodeAt(0) - 64;
+  }
+  return Math.max(index - 1, 0);
 }
 
 function MarkdownRenderer({ content }: { content: string }) {

@@ -34,6 +34,7 @@ type WorkerSource = {
   workerId: string;
   displayName: string;
   runtime: string;
+  entrypoint?: string;
 };
 
 type WorkerSourcePayload = {
@@ -80,13 +81,13 @@ function readRuntime(manifest: Record<string, unknown>): string | undefined {
 }
 
 function readEntrypoint(manifest: Record<string, unknown>): string | undefined {
-  const topLevel = nonEmptyString(manifest.entrypoint);
-  if (topLevel) return topLevel;
+  const exec = readNestedRecord(manifest, "exec");
+  const execEntry = exec ? nonEmptyString(exec.entry) : undefined;
+  if (execEntry) return execEntry;
   const runtime = readNestedRecord(manifest, "runtime");
   const runtimeEntrypoint = runtime ? nonEmptyString(runtime.entrypoint) : undefined;
   if (runtimeEntrypoint) return runtimeEntrypoint;
-  const exec = readNestedRecord(manifest, "exec");
-  return exec ? nonEmptyString(exec.entry) : undefined;
+  return nonEmptyString(manifest.entrypoint);
 }
 
 function declaredComposioConnections(manifest: Record<string, unknown>): Map<string, Set<string> | null> {
@@ -129,6 +130,28 @@ function declaredComposioConnections(manifest: Record<string, unknown>): Map<str
   return result;
 }
 
+function declaredSecrets(manifest: Record<string, unknown>): Set<string> {
+  const result = new Set<string>();
+  const collect = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    for (const item of value) {
+      if (typeof item === "string" && item.trim()) {
+        result.add(item.trim().toUpperCase());
+      }
+    }
+  };
+  collect(manifest.secrets);
+  const capabilities = readNestedRecord(manifest, "capabilities");
+  if (capabilities) {
+    collect(capabilities.secrets);
+  }
+  const exec = readNestedRecord(manifest, "exec");
+  if (exec) {
+    collect(exec.secrets);
+  }
+  return result;
+}
+
 function toolApp(toolSlug: string, declaredApps: Iterable<string>): string {
   const normalized = toolSlug.toUpperCase();
   const matches = [...declaredApps].filter((app) =>
@@ -145,6 +168,7 @@ function validateNativeRuntimeContract(
   if (!runPy?.trim()) return [];
   const errors: string[] = [];
   const declared = declaredComposioConnections(manifest);
+  const secrets = declaredSecrets(manifest);
   const usesComposioCli =
     /subprocess\.(?:run|Popen|call|check_call|check_output)\s*\(/.test(runPy) &&
     /["']composio["']/.test(runPy) &&
@@ -168,6 +192,9 @@ function validateNativeRuntimeContract(
   for (const match of runPy.matchAll(/["']([A-Z][A-Z0-9]+_[A-Z0-9_]+)["']/g)) {
     const candidate = match[1].toUpperCase();
     if (["FLOOM_RUN_ID", "FLOOM_TRACE_ID", "WORKEROS_API_URL", "WORKEROS_API_BASE"].includes(candidate)) {
+      continue;
+    }
+    if (secrets.has(candidate)) {
       continue;
     }
     toolSlugs.add(candidate);
@@ -262,7 +289,9 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
   if (entrypoint === "SKILL.md" && !hasSkillMd) {
     errors.push("worker.yml entrypoint is SKILL.md, but SKILL.md is missing or empty");
   }
-  errors.push(...validateNativeRuntimeContract(manifest, runPy));
+  if (entrypoint !== "SKILL.md") {
+    errors.push(...validateNativeRuntimeContract(manifest, runPy));
+  }
 
   if (errors.length > 0 || !workerId || !displayName || !runtime) {
     return { errors };
@@ -277,6 +306,7 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
       workerId,
       displayName,
       runtime,
+      entrypoint,
     },
     errors: [],
   };
@@ -320,7 +350,7 @@ export async function workersValidateCommand(dir: string): Promise<number> {
   log.kv("Directory", result.source.dir);
   log.kv("Name", result.source.displayName);
   log.kv("Runtime", result.source.runtime);
-  log.kv("Source", result.source.runPy?.trim() ? "run.py" : "SKILL.md");
+  log.kv("Source", result.source.entrypoint === "SKILL.md" ? "SKILL.md" : result.source.runPy?.trim() ? "run.py" : "SKILL.md");
   return 0;
 }
 
