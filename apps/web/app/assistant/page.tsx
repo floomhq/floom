@@ -4,10 +4,12 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, RotateCcw, Save } from "lucide-react";
 
 import { api } from "@/lib/api";
-import type { WorkspaceAgentInfo } from "@/lib/types";
+import type { VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
+import { formatRelative } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,12 +17,149 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-type TabKey = "instructions" | "prompt" | "tools" | "channels";
+type TabKey = "instructions" | "prompt" | "tools" | "channels" | "versions";
 
-const TABS: TabKey[] = ["instructions", "prompt", "tools", "channels"];
+const TABS: TabKey[] = ["instructions", "prompt", "tools", "channels", "versions"];
 
 function validTab(value: string): value is TabKey {
   return TABS.includes(value as TabKey);
+}
+
+function changeSourceLabel(src: string): string {
+  if (src === "user") return "Manual save";
+  if (src === "ai") return "AI edit";
+  if (src.startsWith("rollback:")) return "Rollback";
+  return src;
+}
+
+function changeSourceBadge(src: string) {
+  const label = changeSourceLabel(src);
+  const isRollback = src.startsWith("rollback:");
+  const isAi = src === "ai";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border",
+        isRollback
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          : isAi
+            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
+            : "border-border bg-muted text-muted-foreground"
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+function WorkspaceInstructionsVersionsSection({
+  onRollback,
+}: {
+  onRollback: (content: string) => void;
+}) {
+  const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+
+  const loadVersions = useCallback(async () => {
+    setLoading(true);
+    try {
+      const rows = await api.system.listWorkspaceVersions();
+      setVersions(rows);
+    } catch {
+      setVersions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadVersions();
+  }, [loadVersions]);
+
+  async function handleRollback(v: VersionSummary) {
+    if (
+      !confirm(
+        `Restore workspace instructions to version ${v.version_number} (saved ${formatRelative(v.created_at)})?\n\nThis will overwrite the current instructions.`
+      )
+    ) {
+      return;
+    }
+    setRollingBack(v.id);
+    try {
+      const content = await api.system.rollbackWorkspaceInstructions(v.id);
+      onRollback(content);
+      await loadVersions();
+      toast.success(`Rolled back to version ${v.version_number}`);
+    } catch (e: unknown) {
+      toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
+    } finally {
+      setRollingBack(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {[...Array(3)].map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+
+  if (versions.length === 0) {
+    return (
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 space-y-2">
+        <p className="text-sm font-medium text-foreground">No versions yet</p>
+        <p className="text-xs text-muted-foreground">
+          Versions are saved automatically each time workspace instructions are updated. Save
+          instructions to create the first version.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        {versions.length} version{versions.length !== 1 ? "s" : ""} · newest first
+      </p>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden divide-y divide-[var(--border-default)]">
+        {versions.map((v, idx) => (
+          <div key={v.id} className="flex items-center justify-between gap-3 px-4 py-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 text-right">
+                v{v.version_number}
+              </span>
+              <div className="min-w-0 flex flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  {changeSourceBadge(v.change_source)}
+                  {idx === 0 && (
+                    <span className="text-[10px] text-muted-foreground font-medium">(current)</span>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground">{formatRelative(v.created_at)}</span>
+              </div>
+            </div>
+            {idx !== 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={rollingBack === v.id}
+                onClick={() => void handleRollback(v)}
+                className="shrink-0 h-7 text-xs"
+              >
+                <RotateCcw className="h-3 w-3 mr-1" />
+                {rollingBack === v.id ? "Restoring…" : "Rollback"}
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function AssistantPage() {
@@ -35,6 +174,7 @@ export default function AssistantPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [versionsKey, setVersionsKey] = useState(0);
 
   const dirty = instructions !== originalInstructions;
 
@@ -85,12 +225,19 @@ export default function AssistantPage() {
       await api.system.updateWorkspaceInstructions(instructions);
       setOriginalInstructions(instructions);
       toast.success("Instructions saved");
+      setVersionsKey((k) => k + 1);
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save instructions");
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleInstructionsRollback(content: string) {
+    setInstructions(content);
+    setOriginalInstructions(content);
+    setVersionsKey((k) => k + 1);
   }
 
   return (
@@ -117,6 +264,7 @@ export default function AssistantPage() {
             <TabsTrigger value="prompt">Resolved prompt</TabsTrigger>
             <TabsTrigger value="tools">Tools</TabsTrigger>
             <TabsTrigger value="channels">Channels</TabsTrigger>
+            <TabsTrigger value="versions">Versions</TabsTrigger>
           </TabsList>
         </div>
 
@@ -157,7 +305,9 @@ export default function AssistantPage() {
             <>
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-sm font-medium">Resolved system prompt</h2>
-                <Badge variant="outline" className="text-xs">Read-only</Badge>
+                <Badge variant="outline" className="text-xs">
+                  Read-only
+                </Badge>
               </div>
               <pre className="max-h-[42rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
                 {agent.system_prompt}
@@ -193,7 +343,8 @@ export default function AssistantPage() {
               <div>
                 <h2 className="text-sm font-medium">Slack</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Slack uses the same workspace instructions plus the Slack connection selected by the worker or listener.
+                  Slack uses the same workspace instructions plus the Slack connection selected by
+                  the worker or listener.
                 </p>
               </div>
             </div>
@@ -204,6 +355,19 @@ export default function AssistantPage() {
               OAuth and MCP credentials are managed on the Connections page.
             </p>
           </section>
+        </TabsContent>
+
+        <TabsContent value="versions" className="space-y-3">
+          <div>
+            <h2 className="text-sm font-medium">Instruction versions</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Automatic snapshots on every save. Roll back to undo AI or manual changes.
+            </p>
+          </div>
+          <WorkspaceInstructionsVersionsSection
+            key={versionsKey}
+            onRollback={handleInstructionsRollback}
+          />
         </TabsContent>
       </Tabs>
     </div>
