@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { File, FilePlus, FolderOpen, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { Code2, AlignLeft, File, FilePlus, FolderOpen, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -205,6 +206,8 @@ interface FilesEditorEditProps {
   onSelect?: (path: string) => void;
   onChange: (updated: FilesEditorEditEntry[]) => void;
   onSelectedPathChange?: (path: string) => void;
+  /** Rendered in the right pane when worker.yml is selected and preview mode is active */
+  renderYamlPreview?: ReactNode;
 }
 
 type FilesEditorProps = FilesEditorViewProps | FilesEditorEditProps;
@@ -444,12 +447,22 @@ function FilesEditorEdit({
   onSelect,
   onChange,
   onSelectedPathChange,
+  renderYamlPreview,
 }: FilesEditorEditProps) {
   const [addingFile, setAddingFile] = useState(false);
   const [newFilePath, setNewFilePath] = useState("");
 
   const effectiveSelected = selectedPath ?? files[0]?.path ?? "worker.yml";
   const selectedFile = files.find((f) => f.path === effectiveSelected) || null;
+
+  // Per-file preview toggle — default to preview for worker.yml and .md files
+  const fileSupportsPreview = (path: string) =>
+    path === "worker.yml" ? Boolean(renderYamlPreview) : detectLanguage(path) === "markdown";
+  const [previewActive, setPreviewActive] = useState(() => fileSupportsPreview(effectiveSelected));
+  useEffect(() => {
+    setPreviewActive(fileSupportsPreview(effectiveSelected));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveSelected]);
 
   function setContent(path: string, content: string) {
     onChange(files.map((f) => (f.path === path ? { ...f, content } : f)));
@@ -547,36 +560,74 @@ function FilesEditorEdit({
 
       <Card className="border-border shadow-none bg-card">
         <CardHeader className="py-2 px-4 border-b border-border">
-          <CardTitle className="text-xs font-medium font-mono text-muted-foreground">
-            {selectedFile ? selectedFile.path : "Select a file"}
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-xs font-medium font-mono text-muted-foreground">
+              {selectedFile ? selectedFile.path : "Select a file"}
+            </CardTitle>
+            {selectedFile && fileSupportsPreview(selectedFile.path) && (
+              <div className="flex items-center gap-0 rounded-md border border-border overflow-hidden shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setPreviewActive(false)}
+                  className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
+                    !previewActive
+                      ? "bg-muted text-foreground font-medium"
+                      : "text-muted-foreground hover:bg-muted/40"
+                  }`}
+                >
+                  <Code2 className="w-3 h-3" />
+                  Code
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewActive(true)}
+                  className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
+                    previewActive
+                      ? "bg-muted text-foreground font-medium"
+                      : "text-muted-foreground hover:bg-muted/40"
+                  }`}
+                >
+                  <AlignLeft className="w-3 h-3" />
+                  {selectedFile.path === "worker.yml" ? "Form" : "Preview"}
+                </button>
+              </div>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {selectedFile ? (
-            <div
-              className="rounded-b-[var(--radius-card)] overflow-hidden bg-[var(--bg-2)] dark:bg-[#1e1e2e]"
-              style={{ minHeight: 640 }}
-            >
-              <Editor
-                key={selectedFile.path}
-                value={selectedFile.content}
-                onValueChange={(code) => setContent(selectedFile.path, code)}
-                highlight={makeHighlighter(detectLanguage(selectedFile.path))}
-                padding={12}
-                tabSize={2}
-                insertSpaces
-                style={{
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 13,
-                  minHeight: 640,
-                  background: "transparent",
-                  color: "var(--foreground)",
-                  outline: "none",
-                  lineHeight: "1.75",
-                }}
-                textareaClassName="focus:outline-none"
-              />
-            </div>
+            previewActive && selectedFile.path === "worker.yml" && renderYamlPreview ? (
+              <div className="p-4">{renderYamlPreview}</div>
+            ) : previewActive && detectLanguage(selectedFile.path) === "markdown" ? (
+              <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px]">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedFile.content || ""}</ReactMarkdown>
+              </div>
+            ) : (
+              <div
+                className="rounded-b-[var(--radius-card)] overflow-hidden bg-[var(--bg-2)] dark:bg-[#1e1e2e]"
+                style={{ minHeight: 640 }}
+              >
+                <Editor
+                  key={selectedFile.path}
+                  value={selectedFile.content}
+                  onValueChange={(code) => setContent(selectedFile.path, code)}
+                  highlight={makeHighlighter(detectLanguage(selectedFile.path))}
+                  padding={12}
+                  tabSize={2}
+                  insertSpaces
+                  style={{
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontSize: 13,
+                    minHeight: 640,
+                    background: "transparent",
+                    color: "var(--foreground)",
+                    outline: "none",
+                    lineHeight: "1.75",
+                  }}
+                  textareaClassName="focus:outline-none"
+                />
+              </div>
+            )
           ) : (
             <p className="text-sm text-muted-foreground p-3">Select a file to edit.</p>
           )}
