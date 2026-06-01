@@ -4,6 +4,32 @@
 
 This is lane A: product-feedback reconciliation. It does not edit application code.
 
+## 2026-06-01 18:20 CEST Operational Update
+
+This update supersedes older rows in this document that said the OSS Workers API was still Cloudflare-blocked or that versioning routes were returning 404.
+
+Verified fixed:
+
+- `workers-api.floom.dev` health is reachable: public `GET /healthz` returns `200 {"status":"ok"}`.
+- Browser CORS preflight is reachable: `OPTIONS /workers` with `Origin: https://workers.floom.dev` and `Access-Control-Request-Method: GET` returns `200` with CORS headers.
+- OSS versioning routes are live behind Cloudflare with the production `x-floom-secret`: `/workspace/versions`, `/workers/weekly_update/versions`, and `/contexts/rocketlist-seo-reports/versions` each return `200 []`.
+- The OSS API service now runs GitHub source from `/opt/workeros-api-main` at `floomhq/workeros@04e1591`, replacing the stale detached `/opt/workeros-live` source that caused Vivek's 404s.
+- The Cloud API service now runs `/opt/workeros-cloud` at `floomhq/workeros-cloud@985eea6` with engine submodule `04e1591`.
+- Cloud versioning route aliases exist at both root and `/api`; unauthenticated requests now return `401`, not `404`.
+- Both backend API services have systemd auto-deploy timers from GitHub `main`. The units live at `/etc/systemd/system/workeros-api-autodeploy.*` and `/etc/systemd/system/workeros-cloud-api-autodeploy.*`; scripts live at `/usr/local/bin/workeros-api-autodeploy` and `/usr/local/bin/workeros-cloud-api-autodeploy`. The timers fired at 18:19 CEST and both one-shot services exited `0/SUCCESS`.
+
+Still open after this operational pass:
+
+- Slack is not end-to-end verified.
+- Command-first MCP add/import is not implemented.
+- Standalone approval-review pages are not implemented.
+- Workspace fork/share/transfer is not implemented.
+- Telemetry/data collection is documented but not implemented.
+- Email notifications are not verified production-ready.
+- UI polish items for overview/cards/Brain/source/connections remain.
+- Granular connection-scope UI remains incomplete.
+- Workspace switcher and per-workspace token behavior need live authenticated retest.
+
 Products:
 
 | Surface | Repo | Live app | API | Current local evidence |
@@ -40,8 +66,8 @@ Status precedence:
 | `https://workers.floom.dev/assistant` | `200` |
 | `https://workeros.floom.dev/app/overview` without session | `307` to `/login?next=%2Fapp%2Foverview`; cloud sign-out/auth guard is now active |
 | `https://workeros-api.floom.dev/healthz` | `{"status":"ok","deploy":"cloud"}` |
-| `https://workers-api.floom.dev/healthz` from AX41 | Cloudflare `403` HTML |
-| `OPTIONS https://workers-api.floom.dev/workers` from AX41 | Cloudflare `403` HTML |
+| `https://workers-api.floom.dev/healthz` from AX41 | `200 {"status":"ok"}` after Cloudflare rule fix |
+| `OPTIONS https://workers-api.floom.dev/workers` from AX41 | Browser preflight returns `200` with CORS headers after Cloudflare rule fix |
 
 ## Implemented Or Mostly Implemented
 
