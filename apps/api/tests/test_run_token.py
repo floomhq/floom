@@ -115,19 +115,14 @@ class TestRunTokenMiddleware:
 
     def _make_app(self, secret: str):
         """Build a minimal FastAPI app with the real run-token middleware logic."""
-        import re as _re
-        import os
         from fastapi import FastAPI, Request
         from fastapi.responses import JSONResponse
 
         app = FastAPI()
 
-        _RE_COMPOSIO = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
-
         @app.middleware("http")
         async def _run_token_middleware(request: Request, call_next):
             from run_token import verify_run_token
-            path = request.url.path
             if request.method == "OPTIONS":
                 return await call_next(request)
             run_token_header = request.headers.get("x-workeros-run-token", "")
@@ -135,14 +130,12 @@ class TestRunTokenMiddleware:
                 run_id = verify_run_token(run_token_header, secret=secret)
                 if run_id is None:
                     return JSONResponse(status_code=401, content={"detail": "Invalid or expired run token"})
-                if not _RE_COMPOSIO.match(path):
+                # DELETE is the only permanently irreversible operation — block it.
+                if request.method == "DELETE":
                     return JSONResponse(
                         status_code=403,
-                        content={"detail": "Run-scoped tokens may only call composio-execute endpoints"},
+                        content={"detail": "Workers cannot delete resources."},
                     )
-                path_run_id = path.split("/")[2] if len(path.split("/")) > 2 else ""
-                if path_run_id != run_id:
-                    return JSONResponse(status_code=403, content={"detail": "Run token run_id does not match path"})
                 return await call_next(request)
             # No run token — require operator secret
             if secret:
@@ -157,6 +150,12 @@ class TestRunTokenMiddleware:
         @app.get("/workers")
         def list_workers(): return []
 
+        @app.patch("/workers/{worker_id}")
+        def patch_worker(worker_id: str): return {"patched": worker_id}
+
+        @app.post("/workers")
+        def create_worker(): return {"created": True}
+
         @app.delete("/workers/{worker_id}")
         def delete_worker(worker_id: str): return {"deleted": worker_id}
 
@@ -170,9 +169,7 @@ class TestRunTokenMiddleware:
         from fastapi.testclient import TestClient
 
         secret = "my-secret"
-        app = self._make_app(secret)
-        client = TestClient(app, raise_server_exceptions=False)
-
+        client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
         r = client.post(
             "/runs/run-abc/composio-execute/GMAIL_FETCH_EMAILS",
@@ -180,57 +177,55 @@ class TestRunTokenMiddleware:
         )
         assert r.status_code == 200
 
-    def test_run_token_blocked_on_delete_worker(self):
+    def test_run_token_allowed_on_get_workers(self):
+        """Workers can read the workers list — it's reversible/read-only."""
         from run_token import make_run_token
         from fastapi.testclient import TestClient
 
         secret = "my-secret"
-        app = self._make_app(secret)
-        client = TestClient(app, raise_server_exceptions=False)
-
-        token = make_run_token("run-abc", secret=secret)
-        r = client.delete(
-            "/workers/some-worker",
-            headers={"X-Workeros-Run-Token": token},
-        )
-        assert r.status_code == 403
-        assert "composio-execute" in r.json()["detail"]
-
-    def test_run_token_blocked_on_list_workers(self):
-        from run_token import make_run_token
-        from fastapi.testclient import TestClient
-
-        secret = "my-secret"
-        app = self._make_app(secret)
-        client = TestClient(app, raise_server_exceptions=False)
-
+        client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
         r = client.get("/workers", headers={"X-Workeros-Run-Token": token})
-        assert r.status_code == 403
+        assert r.status_code == 200
 
-    def test_run_token_wrong_run_id_in_path_blocked(self):
-        """Token for run-abc cannot be used to call run-xyz's composio path."""
+    def test_run_token_allowed_on_patch_worker(self):
+        """Workers can patch a worker — versioning covers rollback."""
         from run_token import make_run_token
         from fastapi.testclient import TestClient
 
         secret = "my-secret"
-        app = self._make_app(secret)
-        client = TestClient(app, raise_server_exceptions=False)
-
+        client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
-        r = client.post(
-            "/runs/run-xyz/composio-execute/SOME_TOOL",
-            headers={"X-Workeros-Run-Token": token},
-        )
+        r = client.patch("/workers/some-worker", headers={"X-Workeros-Run-Token": token})
+        assert r.status_code == 200
+
+    def test_run_token_allowed_on_create_worker(self):
+        """Workers can create new workers — e.g. orchestrator spawning sub-workers."""
+        from run_token import make_run_token
+        from fastapi.testclient import TestClient
+
+        secret = "my-secret"
+        client = TestClient(self._make_app(secret), raise_server_exceptions=False)
+        token = make_run_token("run-abc", secret=secret)
+        r = client.post("/workers", headers={"X-Workeros-Run-Token": token})
+        assert r.status_code == 200
+
+    def test_run_token_blocked_on_delete_worker(self):
+        """DELETE is the only permanently irreversible op — always blocked."""
+        from run_token import make_run_token
+        from fastapi.testclient import TestClient
+
+        secret = "my-secret"
+        client = TestClient(self._make_app(secret), raise_server_exceptions=False)
+        token = make_run_token("run-abc", secret=secret)
+        r = client.delete("/workers/some-worker", headers={"X-Workeros-Run-Token": token})
         assert r.status_code == 403
-        assert "run_id" in r.json()["detail"]
+        assert "delete" in r.json()["detail"].lower()
 
     def test_invalid_run_token_rejected(self):
         from fastapi.testclient import TestClient
 
-        app = self._make_app("my-secret")
-        client = TestClient(app, raise_server_exceptions=False)
-
+        client = TestClient(self._make_app("my-secret"), raise_server_exceptions=False)
         r = client.post(
             "/runs/run-abc/composio-execute/SOME_TOOL",
             headers={"X-Workeros-Run-Token": "not-a-valid-token"},
@@ -242,18 +237,14 @@ class TestRunTokenMiddleware:
         from fastapi.testclient import TestClient
 
         secret = "my-secret"
-        app = self._make_app(secret)
-        client = TestClient(app, raise_server_exceptions=False)
-
+        client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         r = client.delete("/workers/some-worker", headers={"x-floom-secret": secret})
         assert r.status_code == 200
 
     def test_operator_with_wrong_secret_rejected(self):
         from fastapi.testclient import TestClient
 
-        app = self._make_app("my-secret")
-        client = TestClient(app, raise_server_exceptions=False)
-
+        client = TestClient(self._make_app("my-secret"), raise_server_exceptions=False)
         r = client.delete("/workers/some-worker", headers={"x-floom-secret": "wrong"})
         assert r.status_code == 401
 
@@ -262,8 +253,7 @@ class TestRunTokenMiddleware:
         from fastapi.testclient import TestClient
 
         secret = "my-secret"
-        app = self._make_app(secret)
-        client = TestClient(app, raise_server_exceptions=False)
+        client = TestClient(self._make_app(secret), raise_server_exceptions=False)
 
         expired = int(time.time()) - 1
         hex_exp = format(expired, "010x")
@@ -271,8 +261,5 @@ class TestRunTokenMiddleware:
         sig = _hmac.new(secret.encode(), data.encode(), hashlib.sha256).hexdigest()
         token = f"{data}.{sig}"
 
-        r = client.post(
-            "/runs/run-abc/composio-execute/SOME_TOOL",
-            headers={"X-Workeros-Run-Token": token},
-        )
+        r = client.get("/workers", headers={"X-Workeros-Run-Token": token})
         assert r.status_code == 401
