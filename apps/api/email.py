@@ -24,6 +24,30 @@ class TransactionalEmail:
     tags: dict[str, str] | None = None
 
 
+def build_welcome_email(*, to: str, dashboard_url: str) -> TransactionalEmail:
+    safe_dashboard_url = dashboard_url.rstrip("/") or "https://workeros.floom.dev"
+    html = f"""
+<p>Welcome to Workeros.</p>
+<p>Your workspace is ready. You can create workers, connect apps, attach Brain packs, and approve work from the dashboard.</p>
+<p><a href="{safe_dashboard_url}/app">Open Workeros</a></p>
+""".strip()
+    text = "\n".join(
+        [
+            "Welcome to Workeros.",
+            "",
+            "Your workspace is ready. You can create workers, connect apps, attach Brain packs, and approve work from the dashboard.",
+            f"Open Workeros: {safe_dashboard_url}/app",
+        ]
+    )
+    return TransactionalEmail(
+        to=to,
+        subject="Welcome to Workeros",
+        html=html,
+        text=text,
+        tags={"kind": "welcome"},
+    )
+
+
 def _enabled() -> bool:
     return (os.environ.get("WORKEROS_EMAIL_ENABLED") or "").strip().lower() in {
         "1",

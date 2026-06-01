@@ -43,6 +43,19 @@ def test_email_readiness_requires_enabled_key_from_and_not_dry_run(monkeypatch):
     assert readiness["ready"] is False
 
 
+def test_welcome_email_uses_dashboard_link():
+    message = email.build_welcome_email(
+        to="user@example.com",
+        dashboard_url="https://workeros.floom.dev",
+    )
+
+    assert message.to == "user@example.com"
+    assert message.subject == "Welcome to Workeros"
+    assert "https://workeros.floom.dev/app" in message.html
+    assert "https://workeros.floom.dev/app" in (message.text or "")
+    assert message.tags == {"kind": "welcome"}
+
+
 def test_email_dry_run_does_not_import_or_call_resend(monkeypatch):
     monkeypatch.setenv("WORKEROS_EMAIL_ENABLED", "1")
     monkeypatch.setenv("RESEND_API_KEY", "re_test_key")

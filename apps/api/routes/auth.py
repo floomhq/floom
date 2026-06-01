@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from apps.api import email as email_service
 from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.supabase_provider import PAT_HEADER
 from apps.api.config import (
@@ -214,6 +215,96 @@ def _upsert_user_row(user: Any) -> None:
     ).execute()
 
 
+def _email_config_can_send() -> bool:
+    readiness = email_service.email_readiness()
+    return bool(
+        readiness.get("enabled")
+        and readiness.get("has_api_key")
+        and readiness.get("has_from")
+    )
+
+
+def _record_email_event_once(*, user_id: str, email_address: str, kind: str) -> bool:
+    dedupe_key = f"{kind}:{user_id}"
+    try:
+        new_supabase_service_client().table("email_events").insert(
+            {
+                "dedupe_key": dedupe_key,
+                "user_id": user_id,
+                "kind": kind,
+                "recipient_email": email_address,
+                "status": "pending",
+            }
+        ).execute()
+    except Exception:
+        return False
+    return True
+
+
+def _update_email_event(
+    *,
+    user_id: str,
+    kind: str,
+    status: str,
+    provider: str | None = None,
+    message_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    dedupe_key = f"{kind}:{user_id}"
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    payload: dict[str, Any] = {
+        "status": status,
+        "updated_at": now_iso,
+    }
+    if provider:
+        payload["provider"] = provider
+    if message_id:
+        payload["provider_message_id"] = message_id
+    if reason:
+        payload["reason"] = reason[:500]
+    if status in {"sent", "dry_run"}:
+        payload["sent_at"] = now_iso
+    try:
+        new_supabase_service_client().table("email_events").update(payload).eq(
+            "dedupe_key",
+            dedupe_key,
+        ).execute()
+    except Exception:
+        return
+
+
+def _maybe_send_welcome_email(user: Any) -> None:
+    user_id = str(getattr(user, "id", "") or "")
+    email_address = str(getattr(user, "email", "") or "").strip().lower()
+    if not user_id or not email_address or not _email_config_can_send():
+        return
+    if not _record_email_event_once(user_id=user_id, email_address=email_address, kind="welcome"):
+        return
+    try:
+        result = email_service.send_transactional_email(
+            email_service.build_welcome_email(
+                to=email_address,
+                dashboard_url=get_cloud_settings().dashboard_origin,
+            )
+        )
+    except Exception as exc:
+        _update_email_event(
+            user_id=user_id,
+            kind="welcome",
+            status="failed",
+            reason=str(exc),
+        )
+        return
+    _update_email_event(
+        user_id=user_id,
+        kind="welcome",
+        status=result.status,
+        provider=result.provider,
+        message_id=result.message_id,
+        reason=result.reason,
+    )
+
+
 def _store_cli_exchange(
     *,
     request: Request,
@@ -344,6 +435,7 @@ def password_login(payload: PasswordLoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     _upsert_user_row(user)
+    _maybe_send_welcome_email(user)
     response = JSONResponse({"ok": True, "next": _safe_next(payload.next)})
     _set_cookie(
         response,
@@ -413,6 +505,7 @@ def callback(
         raise HTTPException(status_code=401, detail="No authenticated session returned")
 
     _upsert_user_row(user)
+    _maybe_send_welcome_email(user)
     if device_code and user_code:
         _store_cli_exchange(
             request=request,
