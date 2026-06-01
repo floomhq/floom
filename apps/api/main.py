@@ -1929,6 +1929,32 @@ def _build_triggers_list(worker: Dict[str, Any]) -> List[str]:
     return [label] if label else [trigger_type.title()]
 
 
+def _connection_slug_for_worker_card(connection: Any) -> Optional[str]:
+    """Return a display slug for list-card connection icons.
+
+    Worker manifests have accepted several connection shapes over time:
+    plain app slugs, typed app dicts, and MCP dicts. A malformed/null entry in
+    one worker must not take down the whole `/workers` list endpoint.
+    """
+    if isinstance(connection, str):
+        return connection
+    if not isinstance(connection, dict):
+        return None
+
+    mcp = connection.get("mcp")
+    if isinstance(mcp, dict):
+        label = mcp.get("label")
+        if isinstance(label, str) and label.strip():
+            return label
+
+    for key in ("app", "slug", "toolkit", "label", "name"):
+        value = connection.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+
+    return None
+
+
 def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Dict[str, Any]]:
     if not (run_runner or "").startswith("skill"):
         return []
@@ -3786,8 +3812,9 @@ def list_workers(
         _worker_config_dict = w.get("config") or {}
         _raw_connections = _worker_config_dict.get("connections") or w.get("connections") or []
         _conn_slugs = [
-            c if isinstance(c, str) else (c.get("mcp", {}).get("label") or "mcp")
+            slug
             for c in _raw_connections
+            if (slug := _connection_slug_for_worker_card(c))
         ]
         _raw_runtime = _worker_config_dict.get("runtime") or {}
         _runtime_type = (
