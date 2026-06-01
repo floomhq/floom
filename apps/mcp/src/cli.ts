@@ -30,6 +30,10 @@ import {
   secretsListCommand,
   secretsSetCommand,
 } from "./commands/secrets.js";
+import {
+  connectionsImportMcpConfigCommand,
+  connectionsListCommand,
+} from "./commands/connections.js";
 import { mcpInstallCommand, mcpUninstallCommand } from "./commands/mcp.js";
 import { completionCommand } from "./commands/completion.js";
 import { doctorCommand } from "./commands/doctor.js";
@@ -177,6 +181,18 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .argument("<key>", "Secret name")
     .option("-y, --yes", "Skip confirmation")
     .action(async (key: string, options: { yes?: boolean }) => runAction(secretsDeleteCommand(key, options)));
+
+  const connections = program.command("connections").description("Manage app and MCP connections");
+  connections.command("list")
+    .description("List saved connections")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(connectionsListCommand(options)));
+  connections.command("import-mcp-config")
+    .description("Import MCP servers from a Claude/Cursor/VS Code mcpServers JSON file")
+    .argument("<path>", "Path to MCP client config JSON")
+    .option("--json", "Print raw JSON")
+    .action(async (path: string, options: { json?: boolean }) =>
+      runAction(connectionsImportMcpConfigCommand(path, options)));
 
   const mcp = program.command("mcp").description("Manage MCP client config");
   mcp.command("install")

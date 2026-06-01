@@ -825,6 +825,28 @@ export function createServer(): McpServer {
   );
 
   server.registerTool(
+    "connections.add_mcp",
+    {
+      title: "Add MCP Connection",
+      description: "Save an MCP server connection. Supports streamable_http, sse, and stdio transports.",
+      inputSchema: {
+        label: z.string().min(1).describe("Stable MCP label."),
+        transport: z.enum(["streamable_http", "sse", "stdio"]).default("streamable_http"),
+        url: z.string().optional().describe("HTTP/SSE endpoint URL."),
+        command: z.string().optional().describe("Stdio command, for example npx."),
+        args: z.array(z.string()).optional().default([]).describe("Stdio command arguments."),
+        env: z.record(z.string(), z.string()).optional().default({}).describe("Stdio env map. Use secret:SECRET_NAME values for secrets."),
+        cwd: z.string().optional().describe("Optional stdio working directory."),
+        auth_secret: z.string().optional().describe("Secret name for HTTP/SSE bearer auth."),
+        allowed_tools: z.array(z.string()).optional().default([]).describe("Optional allowed tool names."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async (payload) =>
+      callTool(async () => jsonResult(await request("POST", "/connections/mcp", payload), "MCP connection saved.")),
+  );
+
+  server.registerTool(
     "contexts.list",
     {
       title: "List Contexts",
