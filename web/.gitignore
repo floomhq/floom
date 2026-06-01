@@ -43,26 +43,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# ---------------------------------------------------------------------------
-# De-fork: the engine/apps/web tree is COPIED in at build time by
-# scripts/sync-engine-web.mjs (generated, do NOT commit). Only overlay/,
-# scripts/, package.json, lockfiles, config above, and .env are tracked.
-# Keep this list in sync with COPY_DIRS / COPY_ROOT_FILES + OVERLAY_FILES
-# in scripts/sync-engine-web.mjs.
-# ---------------------------------------------------------------------------
-/app/
-/components/
-/lib/
-/public/
-/tests/
-/middleware.ts
-/next.config.ts
-/tsconfig.json
-/postcss.config.mjs
-/tailwind.config.ts
-/components.json
-/eslint.config.mjs
-
-
 # Use npm (package-lock.json); avoid pnpm-lock so Vercel picks npm deterministically
 pnpm-lock.yaml
