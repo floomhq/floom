@@ -605,3 +605,12 @@ export interface IntegrationCatalogResponse {
   next_page: number | null;
   categories: string[];
 }
+
+export interface VersionSummary {
+  id: string;
+  asset_type: string;
+  asset_id: string;
+  version_number: number;
+  change_source: string;
+  created_at: string;
+}

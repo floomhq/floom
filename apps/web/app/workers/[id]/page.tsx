@@ -21,7 +21,7 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight,
   Copy, Code2, Clock, Plug2, ListChecks,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, Plus,
+  Brain as BrainIcon, Settings2, Plus, GitFork, RotateCcw,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -52,6 +52,7 @@ import type {
   ContextSummary,
   WorkerConnectionSpec,
   WorkerContextSpec,
+  VersionSummary,
 } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { FileInputUpload } from "@/components/FileInputUpload";
@@ -76,9 +77,9 @@ import { useRunStream } from "@/lib/useRunStream";
 // ABOVE the Run form on the Run tab. Danger zone moves to /edit only
 // (already exists there). Tech details + I/O chips dropped (redundant
 // with the form fields below + the Run/Source/Edit tabs).
-type Section = "about" | "run" | "settings" | "brain" | "code" | "connections" | "runs";
+type Section = "about" | "run" | "settings" | "brain" | "code" | "connections" | "runs" | "versions";
 
-const VALID_SECTIONS: Section[] = ["about", "run", "settings", "brain", "code", "connections", "runs"];
+const VALID_SECTIONS: Section[] = ["about", "run", "settings", "brain", "code", "connections", "runs", "versions"];
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
@@ -96,6 +97,7 @@ const SECTION_TO_HASH: Record<Section, string> = {
   runs: "history",
   connections: "connections",
   code: "source",
+  versions: "versions",
 };
 const HASH_TO_SECTION: Record<string, Section> = {
   about: "about",
@@ -115,6 +117,7 @@ const HASH_TO_SECTION: Record<string, Section> = {
   overview: "about",
   runs: "runs",
   connections: "connections",
+  versions: "versions",
 };
 
 function hashToSection(h: string): Section | null {
@@ -138,6 +141,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
   { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
   { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
+  { id: "versions", label: "Versions", icon: <GitFork className="w-4 h-4" /> },
 ];
 
 // ---------------------------------------------------------------------------
@@ -2082,6 +2086,9 @@ export default function WorkerDetailPage() {
         {activeSection === "runs" && (
           <RunsSection worker={worker} />
         )}
+        {activeSection === "versions" && (
+          <VersionsSection worker={worker} onRollback={(updated) => setWorker(updated)} />
+        )}
       </div>
     </div>
   );
@@ -2749,5 +2756,145 @@ function StatusPill({ status }: { status: string }) {
       <span className="size-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
       {label}
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Versions section
+// ---------------------------------------------------------------------------
+
+function VersionsSection({
+  worker,
+  onRollback,
+}: {
+  worker: WorkerDetail;
+  onRollback: (updated: WorkerDetail) => void;
+}) {
+  const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    api.workers
+      .listVersions(worker.id)
+      .then(setVersions)
+      .catch(() => setVersions([]))
+      .finally(() => setLoading(false));
+  }, [worker.id]);
+
+  async function handleRollback(v: VersionSummary) {
+    if (
+      !confirm(
+        `Restore worker to version ${v.version_number} (saved ${formatRelative(v.created_at)})?\n\nThis will overwrite current source files.`
+      )
+    )
+      return;
+    setRollingBack(v.id);
+    try {
+      const updated = await api.workers.rollback(worker.id, v.id);
+      onRollback(updated);
+      // Refresh versions list
+      const fresh = await api.workers.listVersions(worker.id);
+      setVersions(fresh);
+      toast.success(`Rolled back to version ${v.version_number}`);
+    } catch (e: unknown) {
+      toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
+    } finally {
+      setRollingBack(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {[...Array(3)].map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+
+  if (versions.length === 0) {
+    return (
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 space-y-2">
+        <p className="text-sm font-medium text-foreground">No versions yet</p>
+        <p className="text-xs text-muted-foreground">
+          Versions are saved automatically each time you update the worker&apos;s source files. Save the worker to create the first version.
+        </p>
+      </div>
+    );
+  }
+
+  function changeSourceLabel(src: string): string {
+    if (src === "user") return "Manual save";
+    if (src === "ai") return "AI edit";
+    if (src === "api") return "API";
+    if (src.startsWith("rollback:")) return "Rollback";
+    return src;
+  }
+
+  function changeSourceBadge(src: string) {
+    const label = changeSourceLabel(src);
+    const isRollback = src.startsWith("rollback:");
+    const isAi = src === "ai";
+    return (
+      <span
+        className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border ${
+          isRollback
+            ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+            : isAi
+            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
+            : "border-border bg-muted text-muted-foreground"
+        }`}
+      >
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        {versions.length} version{versions.length !== 1 ? "s" : ""} · newest first
+      </p>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden divide-y divide-[var(--border-default)]">
+        {versions.map((v, idx) => (
+          <div
+            key={v.id}
+            className="flex items-center justify-between gap-3 px-4 py-3"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 text-right">
+                v{v.version_number}
+              </span>
+              <div className="min-w-0 flex flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  {changeSourceBadge(v.change_source)}
+                  {idx === 0 && (
+                    <span className="text-[10px] text-muted-foreground font-medium">(current)</span>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {formatRelative(v.created_at)}
+                </span>
+              </div>
+            </div>
+            {idx !== 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 h-7 text-xs gap-1.5"
+                disabled={rollingBack === v.id}
+                onClick={() => handleRollback(v)}
+              >
+                <RotateCcw className="size-3" />
+                {rollingBack === v.id ? "Restoring…" : "Restore"}
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

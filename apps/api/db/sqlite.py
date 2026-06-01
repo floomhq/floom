@@ -5,6 +5,8 @@ import json
 import os
 import re
 import sqlite3
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -1797,6 +1799,84 @@ class SqliteApprovalRepository:
                 (decided_at, reason, run_id, owner_id),
             )
         return self.get_by_run_id(run_id=run_id)
+
+
+class SqliteVersionRepository:
+    """SQLite implementation of VersionRepository."""
+
+    def create(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        user_id: str,
+        snapshot_json: str,
+        change_source: str,
+    ) -> dict[str, Any]:
+        version_id = f"ver_{uuid.uuid4().hex[:12]}"
+        created_at = datetime.now(timezone.utc).isoformat()
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(version_number), 0) FROM asset_versions WHERE asset_type = ? AND asset_id = ?",
+                (asset_type, asset_id),
+            ).fetchone()
+            next_version = (row[0] if row else 0) + 1
+            conn.execute(
+                """
+                INSERT INTO asset_versions (id, asset_type, asset_id, user_id, version_number, snapshot_json, change_source, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (version_id, asset_type, asset_id, user_id, next_version, snapshot_json, change_source, created_at),
+            )
+        return self.get(version_id=version_id) or {}
+
+    def list(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, asset_type, asset_id, user_id, version_number, change_source, created_at
+                FROM asset_versions
+                WHERE asset_type = ? AND asset_id = ?
+                ORDER BY version_number DESC
+                LIMIT ?
+                """,
+                (asset_type, asset_id, limit),
+            ).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def get(self, *, version_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, asset_type, asset_id, user_id, version_number, snapshot_json, change_source, created_at FROM asset_versions WHERE id = ?",
+                (version_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def prune(self, *, asset_type: str, asset_id: str, keep: int = 50) -> int:
+        with get_db() as conn:
+            ids_to_keep = conn.execute(
+                """
+                SELECT id FROM asset_versions
+                WHERE asset_type = ? AND asset_id = ?
+                ORDER BY version_number DESC LIMIT ?
+                """,
+                (asset_type, asset_id, keep),
+            ).fetchall()
+            if not ids_to_keep:
+                return 0
+            placeholders = ",".join("?" * len(ids_to_keep))
+            keep_ids = [r[0] for r in ids_to_keep]
+            cursor = conn.execute(
+                f"DELETE FROM asset_versions WHERE asset_type = ? AND asset_id = ? AND id NOT IN ({placeholders})",
+                [asset_type, asset_id] + keep_ids,
+            )
+        return cursor.rowcount
 
 
 class SqliteAlertRepository:

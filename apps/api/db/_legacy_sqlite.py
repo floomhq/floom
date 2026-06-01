@@ -1017,6 +1017,21 @@ MIGRATIONS: list[Migration] = [
     # Migration 42 introduced email-only alerts, but SQLite cannot alter an
     # existing NOT NULL column in place. Rebuild the table for older DB files.
     _make_worker_alerts_url_nullable,
+    # -- migration 44: asset_versions (worker + brain-pack versioning) --------
+    """
+    CREATE TABLE IF NOT EXISTS asset_versions (
+        id              TEXT PRIMARY KEY,
+        asset_type      TEXT NOT NULL,
+        asset_id        TEXT NOT NULL,
+        user_id         TEXT NOT NULL,
+        version_number  INTEGER NOT NULL,
+        snapshot_json   TEXT NOT NULL,
+        change_source   TEXT NOT NULL DEFAULT 'user',
+        created_at      TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS asset_versions_asset_idx
+        ON asset_versions (asset_type, asset_id, version_number DESC);
+    """,
 ]
 
 
