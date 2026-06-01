@@ -7,6 +7,7 @@ import {
   Loader2,
   Plus,
   Server,
+  Terminal,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -25,6 +26,14 @@ type McpConnection = ConnectionItem & {
   kind: "mcp";
   mcp_label: string;
 };
+
+const MCP_INSTALL_TARGETS = [
+  { label: "Codex", target: "generic", command: "workeros mcp install --target generic" },
+  { label: "Claude", target: "claude", command: "workeros mcp install --target claude" },
+  { label: "Cursor", target: "cursor", command: "workeros mcp install --target cursor" },
+  { label: "VS Code", target: "vscode", command: "workeros mcp install --target vscode" },
+  { label: "Windsurf", target: "windsurf", command: "workeros mcp install --target windsurf" },
+] as const;
 
 // Subset of Claude Desktop / VS Code / Cursor mcpServers shape
 interface ParsedMcpServer {
@@ -114,6 +123,8 @@ export default function McpConnectionsPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
+  const [installTarget, setInstallTarget] = useState<(typeof MCP_INSTALL_TARGETS)[number]["target"]>("generic");
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
 
   // Add-form state
   const [formOpen, setFormOpen] = useState(false);
@@ -217,6 +228,13 @@ export default function McpConnectionsPage() {
     }
   }
 
+  function copyCommand(value: string) {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedCommand(value);
+      setTimeout(() => setCopiedCommand(null), 1500);
+    });
+  }
+
   function handleParseImport() {
     setImportError("");
     if (!importRaw.trim()) return;
@@ -291,10 +309,67 @@ export default function McpConnectionsPage() {
 
         <ConnectionsTabs />
 
+        <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="flex items-center gap-2">
+                <Terminal className="size-4 text-muted-foreground" />
+                <h2 className="text-base font-medium">Add MCP servers from your terminal</h2>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Import existing Claude, Cursor, or VS Code configs, or install Workeros as an MCP server for an agent client.
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => { setImportOpen((v) => !v); setFormOpen(false); }}
+            >
+              <Upload className="size-4" />
+              Paste config
+            </Button>
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <CommandBlock
+              title="Import existing MCP config"
+              command="workeros connections import-mcp-config ~/.claude/settings.json"
+              copied={copiedCommand === "workeros connections import-mcp-config ~/.claude/settings.json"}
+              onCopy={() => copyCommand("workeros connections import-mcp-config ~/.claude/settings.json")}
+            />
+            <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)] p-3">
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {MCP_INSTALL_TARGETS.map((target) => (
+                  <button
+                    key={target.target}
+                    type="button"
+                    onClick={() => setInstallTarget(target.target)}
+                    className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                      installTarget === target.target
+                        ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg-app)]"
+                        : "border-[var(--border-default)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {target.label}
+                  </button>
+                ))}
+              </div>
+              <CommandBlock
+                title="Install Workeros MCP"
+                command={MCP_INSTALL_TARGETS.find((target) => target.target === installTarget)?.command ?? MCP_INSTALL_TARGETS[0].command}
+                copied={copiedCommand === (MCP_INSTALL_TARGETS.find((target) => target.target === installTarget)?.command ?? MCP_INSTALL_TARGETS[0].command)}
+                onCopy={() => copyCommand(MCP_INSTALL_TARGETS.find((target) => target.target === installTarget)?.command ?? MCP_INSTALL_TARGETS[0].command)}
+                embedded
+              />
+            </div>
+          </div>
+        </section>
+
         {/* Actions row */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-medium">MCP servers</h2>
+            <h2 className="text-base font-medium">Saved MCP servers</h2>
             <p className="text-sm text-muted-foreground">
               HTTP/SSE tool servers exposed to agent workers at run time.
             </p>
@@ -315,7 +390,7 @@ export default function McpConnectionsPage() {
               onClick={() => { setFormOpen((v) => !v); setImportOpen(false); }}
             >
               <Plus className="size-4" />
-              Add MCP server
+              Advanced add
             </Button>
           </div>
         </div>
@@ -323,7 +398,7 @@ export default function McpConnectionsPage() {
         {/* Add form */}
         {formOpen && (
           <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4">
-            <p className="text-sm font-medium mb-3">New MCP server</p>
+            <p className="text-sm font-medium mb-3">Advanced MCP server</p>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="mcp-label" className="text-xs text-muted-foreground">Label</Label>
@@ -592,6 +667,39 @@ export default function McpConnectionsPage() {
         </p>
       </div>
     </>
+  );
+}
+
+function CommandBlock({
+  title,
+  command,
+  copied,
+  onCopy,
+  embedded = false,
+}: {
+  title: string;
+  command: string;
+  copied: boolean;
+  onCopy: () => void;
+  embedded?: boolean;
+}) {
+  return (
+    <div className={embedded ? "" : "rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)] p-3"}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</span>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="inline-flex size-7 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
+          title="Copy command"
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        </button>
+      </div>
+      <pre className="overflow-x-auto rounded-md bg-[var(--ink)] px-3 py-2 text-xs text-[var(--bg-app)]">
+        <code>{command}</code>
+      </pre>
+    </div>
   );
 }
 
