@@ -1513,6 +1513,7 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
         "id,app_name,composio_connection_id,composio_user_id,status,"
         "created_at,updated_at,scopes_json,account_label,last_checked_at,"
         "last_check_status,last_check_error,user_id,kind,mcp_label,mcp_url,"
+        "mcp_transport,mcp_command,mcp_args_json,mcp_env_json,mcp_cwd,"
         "mcp_auth_secret,mcp_allowed_tools_json"
     )
 
@@ -1524,9 +1525,12 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
         # Python list). Supabase returns the column as a Python list because
         # we declared it jsonb. Re-stringify so the engine parser succeeds.
         item["mcp_allowed_tools_json"] = _json_text(item.get("mcp_allowed_tools_json"), [])
+        item["mcp_args_json"] = _json_text(item.get("mcp_args_json"), [])
+        item["mcp_env_json"] = _json_text(item.get("mcp_env_json"), {})
         # Default kind for legacy rows where the column was added with a
         # default but the row predates the migration's default fill.
         item["kind"] = item.get("kind") or "composio"
+        item["mcp_transport"] = item.get("mcp_transport") or "streamable_http"
         return item
 
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
@@ -1583,9 +1587,20 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
         # the column defaults apply (kind='composio', tools='[]'::jsonb).
         if "kind" in fields:
             payload["kind"] = fields["kind"] or "composio"
-        for key in ("mcp_label", "mcp_url", "mcp_auth_secret"):
+        for key in (
+            "mcp_label",
+            "mcp_url",
+            "mcp_transport",
+            "mcp_command",
+            "mcp_cwd",
+            "mcp_auth_secret",
+        ):
             if key in fields:
                 payload[key] = fields[key]
+        if "mcp_args_json" in fields:
+            payload["mcp_args_json"] = _json_storage_value(fields["mcp_args_json"], [])
+        if "mcp_env_json" in fields:
+            payload["mcp_env_json"] = _json_storage_value(fields["mcp_env_json"], {})
         if "mcp_allowed_tools_json" in fields:
             payload["mcp_allowed_tools_json"] = _json_storage_value(
                 fields["mcp_allowed_tools_json"], []
@@ -1610,12 +1625,19 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
             "kind",
             "mcp_label",
             "mcp_url",
+            "mcp_transport",
+            "mcp_command",
+            "mcp_cwd",
             "mcp_auth_secret",
         ):
             if key in fields:
                 payload[key] = fields[key]
         if "scopes_json" in fields:
             payload["scopes_json"] = _json_storage_value(fields["scopes_json"], [])
+        if "mcp_args_json" in fields:
+            payload["mcp_args_json"] = _json_storage_value(fields["mcp_args_json"], [])
+        if "mcp_env_json" in fields:
+            payload["mcp_env_json"] = _json_storage_value(fields["mcp_env_json"], {})
         if "mcp_allowed_tools_json" in fields:
             payload["mcp_allowed_tools_json"] = _json_storage_value(
                 fields["mcp_allowed_tools_json"], []
