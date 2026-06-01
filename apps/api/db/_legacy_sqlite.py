@@ -1042,6 +1042,8 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS asset_versions_asset_idx
         ON asset_versions (asset_type, asset_id, version_number DESC);
     """,
+    # -- migration 45: repair DBs that already consumed older MCP migrations ---
+    _ensure_mcp_connection_columns,
 ]
 
 
