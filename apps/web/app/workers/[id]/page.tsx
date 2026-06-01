@@ -1879,24 +1879,28 @@ export default function WorkerDetailPage() {
                                 )
                               }
                             />
-                            <select
-                              className="h-7 text-xs border border-border rounded-md px-1.5 bg-background text-foreground shrink-0"
+                            <Select
                               value={inp.type || "text"}
-                              onChange={(e) =>
+                              onValueChange={(v) =>
                                 setFormInputs((prev) =>
-                                  prev.map((p, i) => i === idx ? { ...p, type: e.target.value } : p)
+                                  prev.map((p, i) => i === idx ? { ...p, type: v } : p)
                                 )
                               }
                             >
-                              {["text", "textarea", "number", "file", "select"].map((t) => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
+                              <SelectTrigger className="h-7 text-xs w-28 shrink-0">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {["text", "textarea", "number", "file", "select"].map((t) => (
+                                  <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                             <button
                               type="button"
                               role="switch"
                               aria-checked={!!inp.required}
-                              title="Required"
+                              title="Toggle required"
                               onClick={() =>
                                 setFormInputs((prev) =>
                                   prev.map((p, i) => i === idx ? { ...p, required: !p.required } : p)
@@ -1914,19 +1918,10 @@ export default function WorkerDetailPage() {
                               <X className="size-3.5" />
                             </button>
                           </div>
-                          {/* Row 2: key name, placeholder */}
+                          {/* Row 2: key name (read-only) + placeholder */}
                           <div className="flex items-center gap-2">
                             <span className="text-xs text-muted-foreground w-14 shrink-0">Key</span>
-                            <Input
-                              className="h-7 text-xs font-mono w-36 shrink-0"
-                              placeholder="field_name"
-                              value={inp.name}
-                              onChange={(e) =>
-                                setFormInputs((prev) =>
-                                  prev.map((p, i) => i === idx ? { ...p, name: e.target.value } : p)
-                                )
-                              }
-                            />
+                            <span className="text-xs font-mono text-muted-foreground bg-muted border border-border rounded px-2 h-7 flex items-center w-36 shrink-0 truncate">{inp.name}</span>
                             <span className="text-xs text-muted-foreground w-20 shrink-0 text-right">Placeholder</span>
                             <Input
                               className="h-7 text-xs flex-1"
@@ -2000,29 +1995,24 @@ export default function WorkerDetailPage() {
                                   )
                                 }
                               />
-                              <select
-                                className="h-7 text-xs border border-border rounded-md px-1.5 bg-background text-foreground shrink-0"
+                              <Select
                                 value={out.type || "text"}
-                                onChange={(e) =>
+                                onValueChange={(v) =>
                                   setFormOutputs((prev) =>
-                                    prev.map((p, i) => i === idx ? { ...p, type: e.target.value } : p)
+                                    prev.map((p, i) => i === idx ? { ...p, type: v } : p)
                                   )
                                 }
                               >
-                                {["text", "json", "file", "markdown", "number"].map((t) => (
-                                  <option key={t} value={t}>{t}</option>
-                                ))}
-                              </select>
-                              <Input
-                                className="h-7 text-xs font-mono w-32 shrink-0"
-                                placeholder="key_name"
-                                value={out.name}
-                                onChange={(e) =>
-                                  setFormOutputs((prev) =>
-                                    prev.map((p, i) => i === idx ? { ...p, name: e.target.value } : p)
-                                  )
-                                }
-                              />
+                                <SelectTrigger className="h-7 text-xs w-28 shrink-0">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {["text", "json", "file", "markdown", "number"].map((t) => (
+                                    <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <span className="text-xs font-mono text-muted-foreground bg-muted border border-border rounded px-2 h-7 flex items-center w-32 shrink-0 truncate">{out.name}</span>
                               <button
                                 type="button"
                                 onClick={() => setFormOutputs((prev) => prev.filter((_, i) => i !== idx))}
