@@ -2741,6 +2741,8 @@ def _tracked_worker_ids() -> frozenset[str]:
 
 
 def _worker_hidden_from_api(worker_id: str) -> bool:
+    if worker_id.startswith("."):
+        return True
     if any(worker_id.startswith(prefix) for prefix in _INTERNAL_WORKER_ID_PREFIXES):
         return True
     tracked_ids = _tracked_worker_ids()
