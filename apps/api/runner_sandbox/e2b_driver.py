@@ -386,6 +386,12 @@ class E2BSandboxDriver(SandboxDriver):
         _sandbox_envs = {
             "FLOOM_RUN_ID": run_id,
             "FLOOM_TRACE_ID": trace_id,
+            "WORKEROS_API_URL": (
+                os.environ.get("WORKEROS_API_URL")
+                or os.environ.get("WORKEROS_API_BASE")
+                or os.environ.get("WORKERS_API_URL")
+                or "https://workers-api.floom.dev"
+            ).rstrip("/"),
         }
         # Propagate the codegen model override so the worker-author meta-worker
         # (which generates code from inside the sandbox) uses the same model the
@@ -572,6 +578,7 @@ class E2BSandboxDriver(SandboxDriver):
                 envs={
                     "FLOOM_RUN_ID": run_id,
                     "FLOOM_TRACE_ID": trace_id,
+                    "WORKEROS_API_URL": _sandbox_envs["WORKEROS_API_URL"],
                 },
                 on_stdout=on_stdout,
                 on_stderr=on_stderr,

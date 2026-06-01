@@ -32,7 +32,7 @@ import logging
 from typing import Dict, Any, Callable, List, Optional
 from pathlib import Path
 
-from models import WorkerConfig, WorkerContext, WorkerResult
+from models import WorkerConfig, WorkerContext, WorkerResult, declared_composio_connections
 from worker_registry import get_worker_entrypoint, get_worker_config
 
 logger = logging.getLogger("floom.runner_utils")
@@ -75,6 +75,7 @@ def _resolve_connections(
     worker_id: str,
     log_fn: Callable,
     config: Optional[WorkerConfig] = None,
+    user_id: Optional[str] = None,
 ) -> tuple[Dict[str, str], Optional[str]]:
     """Look up active Composio connections for the worker's declared apps.
 
@@ -82,7 +83,8 @@ def _resolve_connections(
     error_string is set if any declared connection is missing/inactive.
     """
     config = config or get_worker_config(worker_id)
-    if not config or not config.connections:
+    declared = declared_composio_connections(config)
+    if not declared:
         return {}, None
 
     from db import get_db
@@ -92,11 +94,29 @@ def _resolve_connections(
 
     with get_db() as conn:
         cursor = conn.cursor()
-        for app_name in (connection for connection in config.connections if isinstance(connection, str)):
-            cursor.execute(
-                "SELECT composio_connection_id, status FROM composio_connections WHERE app_name = ?",
-                (app_name.lower(),),
-            )
+        for app_name in declared:
+            if user_id:
+                cursor.execute(
+                    """
+                    SELECT composio_connection_id, status
+                    FROM composio_connections
+                    WHERE app_name = ? AND user_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (app_name.lower(), user_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT composio_connection_id, status
+                    FROM composio_connections
+                    WHERE app_name = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (app_name.lower(),),
+                )
             row = cursor.fetchone()
             if row and row["status"] == "active":
                 connection_ids[app_name.lower()] = row["composio_connection_id"]

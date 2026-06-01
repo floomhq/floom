@@ -89,6 +89,107 @@ function readEntrypoint(manifest: Record<string, unknown>): string | undefined {
   return exec ? nonEmptyString(exec.entry) : undefined;
 }
 
+function declaredComposioConnections(manifest: Record<string, unknown>): Map<string, Set<string> | null> {
+  const result = new Map<string, Set<string> | null>();
+  const raw = manifest.connections;
+  if (!Array.isArray(raw)) return result;
+  for (const item of raw) {
+    let app: string | undefined;
+    let allowedTools: string[] | undefined;
+    if (typeof item === "string") {
+      app = item;
+    } else if (isRecord(item)) {
+      if (typeof item.app === "string") {
+        app = item.app;
+        allowedTools = Array.isArray(item.allowed_tools)
+          ? item.allowed_tools.filter((tool): tool is string => typeof tool === "string")
+          : undefined;
+      } else if (isRecord(item.composio) && typeof item.composio.app === "string") {
+        app = item.composio.app;
+        allowedTools = Array.isArray(item.composio.allowed_tools)
+          ? item.composio.allowed_tools.filter((tool): tool is string => typeof tool === "string")
+          : undefined;
+      }
+    }
+    const normalizedApp = app?.trim().toLowerCase();
+    if (!normalizedApp) continue;
+    if (!allowedTools || allowedTools.length === 0) {
+      result.set(normalizedApp, null);
+      continue;
+    }
+    const normalizedTools = new Set(allowedTools.map((tool) => tool.trim().toUpperCase()).filter(Boolean));
+    const existing = result.get(normalizedApp);
+    if (existing === null) continue;
+    if (!existing) {
+      result.set(normalizedApp, normalizedTools);
+    } else {
+      for (const tool of normalizedTools) existing.add(tool);
+    }
+  }
+  return result;
+}
+
+function toolApp(toolSlug: string, declaredApps: Iterable<string>): string {
+  const normalized = toolSlug.toUpperCase();
+  const matches = [...declaredApps].filter((app) =>
+    normalized.startsWith(`${app.toUpperCase().replaceAll("-", "_")}_`),
+  );
+  if (matches.length === 0) return "";
+  return matches.sort((a, b) => b.length - a.length)[0];
+}
+
+function validateNativeRuntimeContract(
+  manifest: Record<string, unknown>,
+  runPy: string | undefined,
+): string[] {
+  if (!runPy?.trim()) return [];
+  const errors: string[] = [];
+  const declared = declaredComposioConnections(manifest);
+  const usesComposioCli =
+    /subprocess\.(?:run|Popen|call|check_call|check_output)\s*\(/.test(runPy) &&
+    /["']composio["']/.test(runPy) &&
+    /["']execute["']/.test(runPy);
+  if (usesComposioCli) {
+    errors.push(
+      "run.py shells out to `composio execute`; E2B workers must call the Workeros proxy at /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}",
+    );
+  }
+
+  const usesProxy = /composio-execute\/[A-Z0-9_]+/.test(runPy);
+  const readsConnections = /connections\.json/.test(runPy);
+  if ((usesProxy || readsConnections) && declared.size === 0) {
+    errors.push("run.py uses Composio/connections.json but worker.yml has no `connections:` declaration");
+  }
+
+  const toolSlugs = new Set<string>();
+  for (const match of runPy.matchAll(/composio-execute\/([A-Z0-9_]+)/g)) {
+    toolSlugs.add(match[1].toUpperCase());
+  }
+  for (const match of runPy.matchAll(/["']([A-Z][A-Z0-9]+_[A-Z0-9_]+)["']/g)) {
+    const candidate = match[1].toUpperCase();
+    if (["FLOOM_RUN_ID", "FLOOM_TRACE_ID", "WORKEROS_API_URL", "WORKEROS_API_BASE"].includes(candidate)) {
+      continue;
+    }
+    toolSlugs.add(candidate);
+  }
+  for (const slug of toolSlugs) {
+    const app = toolApp(slug, declared.keys());
+    if (!app || !declared.has(app)) {
+      errors.push(`run.py references ${slug}, but worker.yml does not declare connection '${app || "unknown"}'`);
+      continue;
+    }
+    const allowed = declared.get(app);
+    if (allowed !== null && allowed && !allowed.has(slug)) {
+      errors.push(`run.py references ${slug}, but ${app}.allowed_tools does not include it`);
+    }
+  }
+
+  if (/FLOOM_RUN_ID/.test(runPy) && !/WORKEROS_API_URL/.test(runPy)) {
+    errors.push("run.py uses FLOOM_RUN_ID but does not read WORKEROS_API_URL for the API proxy base");
+  }
+  return errors;
+}
+
 async function readOptionalText(path: string): Promise<string | undefined> {
   try {
     return await readFile(path, "utf8");
@@ -161,6 +262,7 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
   if (entrypoint === "SKILL.md" && !hasSkillMd) {
     errors.push("worker.yml entrypoint is SKILL.md, but SKILL.md is missing or empty");
   }
+  errors.push(...validateNativeRuntimeContract(manifest, runPy));
 
   if (errors.length > 0 || !workerId || !displayName || !runtime) {
     return { errors };

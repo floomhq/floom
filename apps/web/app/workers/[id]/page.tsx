@@ -21,7 +21,7 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, AlignLeft,
+  Brain as BrainIcon, Settings2, AlignLeft, Plus,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -44,11 +44,13 @@ import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import type {
   WorkerDetail,
   WorkerInput,
+  WorkerOutput,
   WorkerFile,
   ConnectionItem,
   TriggerSpec,
   RunDetail,
   ContextSummary,
+  WorkerConnectionSpec,
   WorkerContextSpec,
 } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
@@ -170,6 +172,13 @@ function contextSpecName(spec: WorkerContextSpec): string {
 
 function contextSpecWritable(spec: WorkerContextSpec): boolean {
   return typeof spec === "object" && spec.writeable === true;
+}
+
+function connectionSpecApp(spec: WorkerConnectionSpec): string | null {
+  if (typeof spec === "string") return spec;
+  if ("composio" in spec && spec.composio?.app) return spec.composio.app;
+  if ("app" in spec && spec.app) return spec.app;
+  return null;
 }
 
 function replaceTopLevelYamlBlock(yaml: string, key: string, replacement: string): string {
@@ -1199,11 +1208,11 @@ export default function WorkerDetailPage() {
   // ---------------------------------------------------------------------------
 
   const connectionSpecs = worker.config.connections ?? [];
-  const requiredConnections: string[] = connectionSpecs.filter(
-    (connection): connection is string => typeof connection === "string"
-  );
+  const requiredConnections: string[] = connectionSpecs
+    .map(connectionSpecApp)
+    .filter((connection): connection is string => Boolean(connection));
   const configuredMcpConnections = connectionSpecs.flatMap((connection) => {
-    if (typeof connection === "string" || !connection.mcp) return [];
+    if (typeof connection === "string" || !("mcp" in connection) || !connection.mcp) return [];
     return [connection.mcp];
   });
   const activeConnectionSlugs = new Set(
@@ -1299,14 +1308,14 @@ export default function WorkerDetailPage() {
                 description: worker.description,
                 folder: worker.folder,
                 tags: worker.tags,
-                connections: (worker.config.connections ?? []).filter(
-                  (c): c is string => typeof c === "string",
-                ),
+                connections: (worker.config.connections ?? [])
+                  .map(connectionSpecApp)
+                  .filter((c): c is string => Boolean(c)),
               }}
               inputs={worker.config.inputs}
-              connections={(worker.config.connections ?? []).filter(
-                (c): c is string => typeof c === "string",
-              )}
+              connections={(worker.config.connections ?? [])
+                .map(connectionSpecApp)
+                .filter((c): c is string => Boolean(c))}
               triggerType={worker.trigger_type || worker.config.trigger?.type}
               size="md"
               max={8}
@@ -1883,7 +1892,7 @@ export default function WorkerDetailPage() {
                               value={inp.type || "text"}
                               onValueChange={(v) =>
                                 setFormInputs((prev) =>
-                                  prev.map((p, i) => i === idx ? { ...p, type: v } : p)
+                                  prev.map((p, i) => i === idx ? { ...p, type: v || "text" } : p)
                                 )
                               }
                             >
@@ -1996,12 +2005,12 @@ export default function WorkerDetailPage() {
                                 }
                               />
                               <Select
-                                value={out.type || "text"}
-                                onValueChange={(v) =>
-                                  setFormOutputs((prev) =>
-                                    prev.map((p, i) => i === idx ? { ...p, type: v } : p)
-                                  )
-                                }
+                              value={out.type || "text"}
+                              onValueChange={(v) =>
+                                setFormOutputs((prev) =>
+                                  prev.map((p, i) => i === idx ? { ...p, type: v || "text" } : p)
+                                )
+                              }
                               >
                                 <SelectTrigger className="h-7 text-xs w-28 shrink-0">
                                   <SelectValue />
@@ -2182,15 +2191,15 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
         description: worker.description,
         folder: worker.folder,
         tags: worker.tags,
-        connections: (worker.config.connections ?? []).filter(
-          (c): c is string => typeof c === "string",
-        ),
+        connections: (worker.config.connections ?? [])
+                  .map(connectionSpecApp)
+                  .filter((c): c is string => Boolean(c)),
       }}
       inputs={worker.config.inputs}
       outputs={worker.config.outputs}
-      connections={(worker.config.connections ?? []).filter(
-        (c): c is string => typeof c === "string",
-      )}
+      connections={(worker.config.connections ?? [])
+                .map(connectionSpecApp)
+                .filter((c): c is string => Boolean(c))}
       triggerType={worker.trigger_type || worker.config.trigger?.type}
     />
   );

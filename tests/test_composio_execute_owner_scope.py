@@ -48,7 +48,7 @@ def _load_api(monkeypatch, tmp_path):
     return main
 
 
-def _valid_manifest(worker_id: str) -> dict:
+def _valid_manifest(worker_id: str, connections: str = "connections: [gmail]") -> dict:
     import yaml as _yaml
 
     return _yaml.safe_load(
@@ -71,11 +71,13 @@ exec:
 
 trigger:
   type: manual
+
+{connections}
 """
     )
 
 
-def _seed_worker(main, *, owner_id: str) -> str:
+def _seed_worker(main, *, owner_id: str, connections: str = "connections: [gmail]") -> str:
     """Create a worker owned by ``owner_id``; return its id."""
     repos = main.get_repositories()
     worker_id = f"wk{uuid.uuid4().hex[:8]}"
@@ -83,7 +85,7 @@ def _seed_worker(main, *, owner_id: str) -> str:
         user_id=owner_id,
         worker_id=worker_id,
         name=worker_id,
-        manifest_json=_valid_manifest(worker_id),
+        manifest_json=_valid_manifest(worker_id, connections=connections),
         trigger_type="manual",
     )
     return worker_id
@@ -207,3 +209,80 @@ class TestComposioExecuteOwnerScope:
 
         assert resp.status_code == 403, resp.text
         assert "url" not in captured
+
+    def test_undeclared_connection_rejected_before_proxy(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        owner = "federico"
+        worker = _seed_worker(main, owner_id=owner, connections="connections: []")
+        run_id = _seed_running_run(main, owner_id=owner, worker_id=worker)
+        _seed_connection(main, owner_id=owner, app_name="gmail", composio_connection_id="CONN_A")
+
+        captured, fake_post = _patch_composio_post()
+        with patch("requests.post", side_effect=fake_post):
+            resp = client.post(
+                f"/runs/{run_id}/composio-execute/GMAIL_SEND_EMAIL",
+                json={"arguments": {}},
+            )
+
+        assert resp.status_code == 403, resp.text
+        assert "did not declare" in resp.text
+        assert "url" not in captured
+
+    def test_structured_connection_allowed_tools_rejects_write_tool(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        owner = "federico"
+        worker = _seed_worker(
+            main,
+            owner_id=owner,
+            connections="""\
+connections:
+  - app: gmail
+    allowed_tools:
+      - GMAIL_FETCH_EMAILS
+""",
+        )
+        run_id = _seed_running_run(main, owner_id=owner, worker_id=worker)
+        _seed_connection(main, owner_id=owner, app_name="gmail", composio_connection_id="CONN_A")
+
+        captured, fake_post = _patch_composio_post()
+        with patch("requests.post", side_effect=fake_post):
+            resp = client.post(
+                f"/runs/{run_id}/composio-execute/GMAIL_SEND_EMAIL",
+                json={"arguments": {}},
+            )
+
+        assert resp.status_code == 403, resp.text
+        assert "not allowed" in resp.text
+        assert "url" not in captured
+
+    def test_longest_declared_app_prefix_supports_google_search_console(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        owner = "federico"
+        worker = _seed_worker(
+            main,
+            owner_id=owner,
+            connections="""\
+connections:
+  - app: google_search_console
+    allowed_tools:
+      - GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY
+""",
+        )
+        run_id = _seed_running_run(main, owner_id=owner, worker_id=worker)
+        _seed_connection(main, owner_id=owner, app_name="google_search_console", composio_connection_id="CONN_GSC")
+
+        captured, fake_post = _patch_composio_post()
+        with patch("requests.post", side_effect=fake_post):
+            resp = client.post(
+                f"/runs/{run_id}/composio-execute/GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY",
+                json={"arguments": {}},
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert captured["json"]["connected_account_id"] == "CONN_GSC"

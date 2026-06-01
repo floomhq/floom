@@ -252,7 +252,20 @@ async function listTriggers(workerId?: string, app?: string): Promise<unknown> {
   }
   const worker = await request("GET", `/workers/${encodeURIComponent(workerId)}`) as JsonObject;
   const config = (worker.config && typeof worker.config === "object") ? worker.config as JsonObject : {};
-  const connections = Array.isArray(config.connections) ? config.connections.filter((item) => typeof item === "string") : [];
+  const connections = Array.isArray(config.connections)
+    ? config.connections.flatMap((item) => {
+        if (typeof item === "string") return [item];
+        if (item && typeof item === "object") {
+          const record = item as JsonObject;
+          const composio = record.composio;
+          if (composio && typeof composio === "object" && typeof (composio as JsonObject).app === "string") {
+            return [String((composio as JsonObject).app)];
+          }
+          if (typeof record.app === "string") return [String(record.app)];
+        }
+        return [];
+      })
+    : [];
   if (!connections.length) {
     return { items: [] };
   }

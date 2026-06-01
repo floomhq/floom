@@ -9,7 +9,8 @@ trigger:
 runtime:
   type: python
   entrypoint: run.py
-  runner: local
+  runner: e2b
+  command: python run.py
 
 inputs:
   - name: site_url
@@ -26,6 +27,17 @@ inputs:
     default: true
 
 secrets: []
+
+connections:
+  - app: google_search_console
+    allowed_tools:
+      - GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY
+      - GOOGLE_SEARCH_CONSOLE_LIST_SITEMAPS
+      - GOOGLE_SEARCH_CONSOLE_INSPECT_URL
+
+contexts:
+  - name: rocketlist-seo-reports
+    writeable: true
 
 outputs:
   - name: seo_report

@@ -289,7 +289,19 @@ trigger:
 - Composio connections (Gmail, Calendar, GitHub, etc.) are passed to the worker as objects on `context.connections[<provider>]`.
 - Required connections are declared in `connections:` for tool access and in `triggers` for Composio event-triggered workers.
 - The Connections UI and `connections__list` agent tool expose app slug, connected account label, status, scopes, and MCP allowed tools so the author can pick the right account.
-- For prompt-injection safety, restrict the worker's visible tool list in the runner/session and, for MCP servers, set `allowed_tools`. For true OAuth least privilege, use a separate Composio auth config with narrower scopes such as Gmail readonly; tool filtering does not shrink the underlying OAuth refresh token.
+- Legacy `connections: [gmail]` grants the worker access to any Gmail Composio tool that matches the app namespace.
+- Use structured connection declarations to scope a full OAuth connection down to specific tools for one worker:
+
+```yaml
+connections:
+  - app: gmail
+    allowed_tools:
+      - GMAIL_FETCH_EMAILS
+      - GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID
+```
+
+- The E2B Composio proxy rejects undeclared apps and rejects tool slugs outside `allowed_tools`. This is platform-level enforcement against prompt injection or worker bugs; it does not shrink the underlying OAuth refresh token. For true OAuth least privilege, create a separate Composio auth config with narrower scopes such as Gmail readonly.
+- E2B `run.py` workers call `POST /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}` through `WORKEROS_API_URL`; they do not shell out to `composio execute` or carry `COMPOSIO_API_KEY` in the sandbox.
 
 ### Triggers
 
