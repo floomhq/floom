@@ -5,6 +5,8 @@ Covers:
   POST /workers/{id}/rollback/{vid}   — rollback worker to a previous version
   GET  /contexts/{name}/versions      — list brain-pack version history
   POST /contexts/{name}/rollback/{vid} — rollback brain-pack to a previous version
+  GET  /workspace/versions            — list workspace instruction version history
+  POST /workspace/rollback/{vid}      — rollback workspace.md to a previous version
 
 Unit tests cover the SqliteVersionRepository directly (no fcntl needed).
 Integration tests boot the full FastAPI app (SQLite-backed) and run on
@@ -252,6 +254,33 @@ class TestSqliteVersionRepository:
         finally:
             self._cleanup(repo)
 
+    def test_workspace_instructions_versions(self):
+        conn = self._make_conn()
+        repo = self._make_repo(conn)
+        try:
+            repo.create(
+                asset_type="workspace_instructions",
+                asset_id="default",
+                user_id="u",
+                snapshot_json='{"content": "# v1"}',
+                change_source="user",
+            )
+            repo.create(
+                asset_type="workspace_instructions",
+                asset_id="default",
+                user_id="u",
+                snapshot_json='{"content": "# v2"}',
+                change_source="ai",
+            )
+            rows = repo.list(asset_type="workspace_instructions", asset_id="default")
+            assert len(rows) == 2
+            assert rows[0]["version_number"] == 2
+            assert rows[0]["change_source"] == "ai"
+            full = repo.get(version_id=rows[1]["id"])
+            assert json.loads(full["snapshot_json"])["content"] == "# v1"
+        finally:
+            self._cleanup(repo)
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: full FastAPI app (Linux/CI only)
@@ -404,3 +433,71 @@ class TestVersioningIntegration:
         headers = {"x-floom-secret": "test-secret"}
         r = client.post(f"/workers/{worker_id}/rollback/ver_does_not_exist", headers=headers)
         assert r.status_code == 404
+
+
+@_LINUX_ONLY
+class TestWorkspaceInstructionsVersioningIntegration:
+    @pytest.fixture(autouse=True)
+    def _clear_caches(self):
+        import db.factory as factory_mod
+        if hasattr(factory_mod.get_repositories, "cache_clear"):
+            factory_mod.get_repositories.cache_clear()
+        yield
+        if hasattr(factory_mod.get_repositories, "cache_clear"):
+            factory_mod.get_repositories.cache_clear()
+
+    @pytest.fixture
+    def client(self, tmp_path):
+        import sys
+        from fastapi.testclient import TestClient
+
+        workspace_md = tmp_path / "workspace.md"
+        workspace_md.write_text("# Workspace v0\n", encoding="utf-8")
+
+        env_patches = {
+            "WORKEROS_DB": str(tmp_path / "workeros.db"),
+            "FLOOM_DB": str(tmp_path / "workeros.db"),
+            "WORKEROS_DEPLOY": "local",
+            "FLOOM_SECRET": "test-secret",
+        }
+        with pytest.MonkeyPatch().context() as mp:
+            for k, v in env_patches.items():
+                mp.setenv(k, v)
+            import importlib
+            for mod in [
+                "db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",
+                "db.interface", "chat_service", "main",
+            ]:
+                sys.modules.pop(mod, None)
+            import chat_service as chat_mod
+            chat_mod.WORKSPACE_MD_PATH = workspace_md
+            import db as db_mod
+            db_mod.init_db()
+            db_mod.get_repositories.cache_clear()
+            import main as app_main
+            client = TestClient(app_main.app, raise_server_exceptions=False)
+            yield client, workspace_md
+
+    def test_workspace_version_on_save_and_rollback(self, client):
+        test_client, workspace_md = client
+        headers = {"x-floom-secret": "test-secret", "Content-Type": "text/markdown"}
+
+        r1 = test_client.put("/workspace", content="# Workspace v1\n", headers=headers)
+        assert r1.status_code == 204
+
+        r2 = test_client.put("/workspace", content="# Workspace v2\n", headers=headers)
+        assert r2.status_code == 204
+
+        versions = test_client.get("/workspace/versions", headers=headers).json()
+        assert len(versions) == 2
+        assert versions[0]["version_number"] == 2
+
+        v1_id = versions[1]["id"]
+        rb = test_client.post(f"/workspace/rollback/{v1_id}", headers=headers)
+        assert rb.status_code == 200
+        assert "# Workspace v1" in rb.text
+        assert workspace_md.read_text(encoding="utf-8") == "# Workspace v1\n"
+
+        versions_after = test_client.get("/workspace/versions", headers=headers).json()
+        assert len(versions_after) == 3
+        assert versions_after[0]["change_source"].startswith("rollback:")

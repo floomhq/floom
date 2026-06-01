@@ -19,6 +19,16 @@ Open `Agent -> Instructions` in the dashboard. Changes are saved to
 The resolved prompt is visible in `Agent -> Resolved prompt`. It is read-only
 because it includes generated runtime context.
 
+## Versions
+
+Open `Agent -> Versions` to list automatic snapshots of `workspace.md` (up to 50
+per workspace). Each save via `PUT /workspace` creates a version. Roll back with:
+
+- `GET /workspace/versions`
+- `POST /workspace/rollback/{version_id}`
+
+AI edits (sandbox run token) are tagged `ai`; operator saves are tagged `user`.
+
 ## Channels
 
 Slack and other channels use the same workspace instructions. Channel-specific
