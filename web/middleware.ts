@@ -38,6 +38,7 @@ function isPublicPath(pathname: string): boolean {
   // routing context. Handle both.
   const path = pathname.startsWith("/app") ? pathname.slice(4) || "/" : pathname;
   if (path === "/favicon.ico") return true;
+  if (path === "/privacy" || path === "/terms") return true;
   if (path.startsWith("/_next/")) return true;
   if (path.startsWith("/api/proxy/")) return true;
   if (path === "/api/me") return true;
