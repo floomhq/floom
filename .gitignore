@@ -43,3 +43,4 @@ CODEX_BRIEF.md
 # OS
 .DS_Store
 .vercel
+.gstack/
