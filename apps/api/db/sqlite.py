@@ -1754,6 +1754,20 @@ class SqliteApprovalRepository:
             ).fetchone()
         return _row_dict(row) if row else None
 
+    def get_public(self, *, approval_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT a.*, w.name AS worker_name
+                FROM approvals a
+                LEFT JOIN workers w ON w.id = a.worker_id
+                WHERE a.id = ?
+                LIMIT 1
+                """,
+                (approval_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
     def get_by_run_id(self, *, run_id: str) -> dict[str, Any] | None:
         with get_db() as conn:
             row = conn.execute(

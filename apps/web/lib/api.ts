@@ -264,6 +264,30 @@ export const api = {
           body: JSON.stringify({ reason }),
         }
       ),
+    publicGet: (approvalId: string, token: string) =>
+      fetchJson<import("./types").ApprovalRow>(
+        `/approvals/public/${encodeURIComponent(approvalId)}?token=${encodeURIComponent(token)}`
+      ),
+    publicApprove: (
+      approvalId: string,
+      token: string,
+      editedOutput?: Record<string, unknown>
+    ) =>
+      fetchJson<import("./types").ActionResponse>(
+        `/approvals/public/${encodeURIComponent(approvalId)}/approve?token=${encodeURIComponent(token)}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ edited_output: editedOutput ?? null }),
+        }
+      ),
+    publicReject: (approvalId: string, token: string, reason?: string) =>
+      fetchJson<import("./types").ActionResponse>(
+        `/approvals/public/${encodeURIComponent(approvalId)}/reject?token=${encodeURIComponent(token)}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: reason ?? null }),
+        }
+      ),
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),

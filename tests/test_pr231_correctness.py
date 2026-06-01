@@ -50,6 +50,13 @@ def _run_status(main, run_id: str) -> str:
     return row["status"] if row else ""
 
 
+def _approval_for_run(run_id: str):
+    from db import get_db
+
+    with get_db() as conn:
+        return conn.execute("SELECT * FROM approvals WHERE run_id = ?", (run_id,)).fetchone()
+
+
 # ---------------------------------------------------------------------------
 # 1.5.1 — zombie approvals
 # ---------------------------------------------------------------------------
@@ -99,6 +106,41 @@ def test_reject_transitions_original_run_off_pending_approval(monkeypatch, tmp_p
         arow = conn.execute("SELECT status, reason FROM approvals WHERE run_id = ?", (run_id,)).fetchone()
     assert arow["status"] == "rejected"
     assert arow["reason"] == "Not ready"
+
+
+def test_signed_standalone_approval_link_can_review_and_reject_without_secret(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers", headers=_headers(), json=_worker_payload("public-approval-probe", title="Public Approval Probe")
+    )
+    assert created.status_code == 200, created.text
+
+    run_id = _seed_pending_approval(main, worker_id="public-approval-probe")
+    approval = _approval_for_run(run_id)
+    token = main._approval_public_token(dict(approval))
+
+    denied = client.get(f"/approvals/public/{approval['id']}?token={'0' * 64}")
+    assert denied.status_code == 401
+
+    review = client.get(f"/approvals/public/{approval['id']}?token={token}")
+    assert review.status_code == 200, review.text
+    body = review.json()
+    assert body["id"] == approval["id"]
+    assert body["preview"] == "preview"
+    assert "owner_id" not in body
+
+    rejected = client.post(
+        f"/approvals/public/{approval['id']}/reject?token={token}",
+        json={"reason": "Needs changes"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert _run_status(main, run_id) == "completed"
+
+    recorded = _approval_for_run(run_id)
+    assert recorded["status"] == "rejected"
+    assert recorded["reason"] == "Needs changes"
 
 
 # ---------------------------------------------------------------------------

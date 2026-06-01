@@ -31,7 +31,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, TypedDict
 
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -862,7 +862,9 @@ async def auth_middleware(request: Request, call_next):
             path.startswith("/webhooks/")
             or path in {"/healthz", "/health"}
             or path == "/composio-events"
+            or path == "/slack/events"
             or path == "/connections/callback"
+            or path.startswith("/approvals/public/")
             or path == "/cli-auth/devices"
             or path.startswith("/cli-auth/poll/")
             or _RE_RUN_COMPOSIO_PROXY.match(path)
@@ -7675,6 +7677,115 @@ def _publish_approval_terminal_status(
     _sse_publish(run_id, event)
 
 
+def _approval_public_payload(approval: Dict[str, Any]) -> str:
+    return ".".join(
+        str(approval.get(key) or "")
+        for key in ("id", "run_id", "owner_id")
+    )
+
+
+def _approval_public_token(approval: Dict[str, Any]) -> str:
+    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    return hmac.new(
+        secret.encode("utf-8"),
+        _approval_public_payload(approval).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _load_public_approval(
+    approval_id: str,
+    token: str,
+    repos: Repositories,
+) -> Dict[str, Any]:
+    approval = repos.approvals.get_public(approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    expected = _approval_public_token(dict(approval))
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid approval link")
+    return dict(approval)
+
+
+def _public_approval_response(approval: Dict[str, Any]) -> Dict[str, Any]:
+    public = dict(approval)
+    public.pop("owner_id", None)
+    return public
+
+
+class PublicApprovalDecisionRequest(BaseModel):
+    reason: str | None = None
+    edited_output: Dict[str, Any] | None = None
+
+
+@app.get("/approvals/public/{approval_id}")
+def get_public_approval(
+    approval_id: str,
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+):
+    """Return one approval for a signed standalone review link."""
+    approval = _load_public_approval(approval_id, token, repos)
+    return _public_approval_response(approval)
+
+
+@app.post("/approvals/public/{approval_id}/approve", response_model=ActionResponse)
+def approve_public_approval(
+    approval_id: str,
+    body: PublicApprovalDecisionRequest = Body(default_factory=PublicApprovalDecisionRequest),
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Approve from a signed standalone link without requiring app navigation."""
+    approval = _load_public_approval(approval_id, token, repos)
+    auth = AuthContext(user_id=str(approval["owner_id"]), email=None, scopes=("approval",))
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") == "destructive_delete":
+        result = approve_destructive_action(approval_id, auth, repos)
+        return ActionResponse(status=str(result.get("status") or "approved"), run_id=str(approval["run_id"]))
+    return approve_run(
+        str(approval["run_id"]),
+        ApproveRequest(edited_output=body.edited_output),
+        auth,
+        repos,
+    )
+
+
+@app.post("/approvals/public/{approval_id}/reject", response_model=ActionResponse)
+def reject_public_approval(
+    approval_id: str,
+    body: PublicApprovalDecisionRequest = Body(default_factory=PublicApprovalDecisionRequest),
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Reject from a signed standalone link without requiring app navigation."""
+    approval = _load_public_approval(approval_id, token, repos)
+    auth = AuthContext(user_id=str(approval["owner_id"]), email=None, scopes=("approval",))
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") == "destructive_delete":
+        result = reject_destructive_action(
+            approval_id,
+            RejectRequest(reason=body.reason),
+            auth,
+            repos,
+        )
+        return ActionResponse(status=str(result.get("status") or "rejected"), run_id=str(approval["run_id"]))
+    return reject_run(
+        str(approval["run_id"]),
+        RejectRequest(reason=body.reason),
+        auth,
+        repos,
+    )
+
+
 @app.post("/runs/{run_id}/approve", response_model=ActionResponse)
 def approve_run(
     run_id: str,
@@ -10889,6 +11000,213 @@ async def composio_events(request: Request) -> ActionResponse:
 )
 async def composio_events_alias(request: Request) -> ActionResponse:
     return await composio_events(request)
+
+
+# ---------------------------------------------------------------------------
+# Slack Events API
+# ---------------------------------------------------------------------------
+
+def _slack_events_enabled() -> bool:
+    value = os.environ.get("SLACK_EVENTS_ENABLED", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _slack_signature_tolerance_seconds() -> int:
+    try:
+        return max(0, int(os.environ.get("SLACK_SIGNATURE_TOLERANCE_SECONDS", "300")))
+    except ValueError:
+        return 300
+
+
+def _verify_slack_signature(body: bytes, request: Request, signing_secret: str) -> bool:
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    signature = request.headers.get("X-Slack-Signature", "")
+    if not timestamp or not signature or not signing_secret:
+        return False
+    try:
+        ts = int(timestamp)
+    except ValueError:
+        return False
+    tolerance = _slack_signature_tolerance_seconds()
+    if tolerance > 0 and abs(time.time() - ts) > tolerance:
+        return False
+    base = b"v0:" + timestamp.encode("utf-8") + b":" + body
+    expected = "v0=" + hmac.new(signing_secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+def _slack_allowed_team_ids() -> set[str]:
+    raw = os.environ.get("SLACK_ALLOWED_TEAM_IDS", "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _clean_slack_agent_prompt(text: str, bot_user_id: Optional[str]) -> str:
+    cleaned = text.replace("@floom", "").replace("@Floom", "").replace("<!here>", "")
+    if bot_user_id:
+        cleaned = cleaned.replace(f"<@{bot_user_id}>", "")
+    cleaned = re.sub(r"<@[A-Z0-9]+>", "", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+async def _collect_workspace_agent_reply_for_slack(
+    *,
+    message: str,
+    user_id: str,
+    conversation_id: Optional[str],
+) -> str:
+    from chat_service import stream_chat
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
+    task = asyncio.create_task(
+        stream_chat(
+            message=message,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            part_queue=queue,
+        )
+    )
+    text_parts: list[str] = []
+    try:
+        while True:
+            part = await queue.get()
+            if part.get("type") == "text":
+                text_parts.append(str(part.get("text") or ""))
+            if part.get("type") == "error":
+                raise RuntimeError(str(part.get("error") or "workspace agent failed"))
+            if part.get("type") == "finish":
+                break
+        await task
+    finally:
+        if not task.done():
+            task.cancel()
+    return "".join(text_parts).strip()
+
+
+def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str) -> None:
+    bot_token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+    if not bot_token:
+        raise RuntimeError("SLACK_BOT_TOKEN is not configured")
+    response = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={
+            "Authorization": f"Bearer {bot_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        json={
+            "channel": channel,
+            "thread_ts": thread_ts,
+            "text": text or "(No reply)",
+            "unfurl_links": False,
+            "unfurl_media": False,
+        },
+        timeout=15,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"Slack post failed with HTTP {response.status_code}") from exc
+    if not response.ok or not payload.get("ok"):
+        error = str(payload.get("error") or f"HTTP {response.status_code}")
+        raise RuntimeError(f"Slack post failed: {error}")
+
+
+async def _handle_slack_app_mention(
+    *,
+    event: Dict[str, Any],
+    prompt: str,
+    user_id: str,
+) -> None:
+    channel = str(event.get("channel") or "")
+    thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
+    if not channel or not thread_ts:
+        logger.warning("Slack app_mention missing channel/thread timestamp")
+        return
+    conversation_id = f"slack:{channel}:{thread_ts}"
+    try:
+        reply = await _collect_workspace_agent_reply_for_slack(
+            message=prompt,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply)
+    except Exception:
+        logger.exception("Slack app_mention processing failed")
+        if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
+            try:
+                _post_slack_thread_reply(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    text="I could not complete that request. The failure was logged for the workspace operator.",
+                )
+            except Exception:
+                logger.exception("Slack error reply failed")
+
+
+@app.post("/slack/events")
+async def slack_events(request: Request, background_tasks: BackgroundTasks) -> Response:
+    """Receive native Slack Events API callbacks.
+
+    The route verifies Slack's HMAC signature, handles Slack URL verification,
+    deduplicates event callbacks by event_id, and forwards app mentions to the
+    workspace agent in the background so Slack receives a fast acknowledgement.
+    """
+    if not _slack_events_enabled():
+        raise HTTPException(status_code=503, detail="Slack Events API is disabled")
+    signing_secret = os.environ.get("SLACK_SIGNING_SECRET", "").strip()
+    if not signing_secret:
+        raise HTTPException(status_code=503, detail="SLACK_SIGNING_SECRET is not configured")
+
+    body = await request.body()
+    if not _verify_slack_signature(body, request, signing_secret):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    try:
+        payload: Dict[str, Any] = json.loads(body.decode("utf-8") or "{}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack JSON payload") from exc
+
+    payload_type = str(payload.get("type") or "")
+    if payload_type == "url_verification":
+        challenge = str(payload.get("challenge") or "")
+        return PlainTextResponse(challenge, media_type="text/plain")
+    if payload_type != "event_callback":
+        return JSONResponse({"ok": True, "ignored": payload_type or "unknown"})
+
+    team_id = str(payload.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+    event_type = str(event.get("type") or "")
+    if event_type != "app_mention":
+        return JSONResponse({"ok": True, "ignored": event_type or "unknown"})
+
+    if not os.environ.get("SLACK_BOT_TOKEN", "").strip():
+        raise HTTPException(status_code=503, detail="SLACK_BOT_TOKEN is not configured")
+
+    event_id = str(payload.get("event_id") or request.headers.get("X-Slack-Retry-Num") or "")
+    if event_id and not _claim_webhook_delivery("slack:events", event_id):
+        return JSONResponse({"ok": True, "duplicate": True})
+
+    authorizations = payload.get("authorizations")
+    bot_user_id = None
+    if isinstance(authorizations, list) and authorizations:
+        first_authorization = authorizations[0]
+        if isinstance(first_authorization, dict):
+            bot_user_id = str(first_authorization.get("user_id") or "") or None
+    prompt = _clean_slack_agent_prompt(str(event.get("text") or ""), bot_user_id)
+    if not prompt:
+        return JSONResponse({"ok": True, "ignored": "empty_prompt"})
+
+    user_id = (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
+    background_tasks.add_task(
+        _handle_slack_app_mention,
+        event=event,
+        prompt=prompt,
+        user_id=user_id,
+    )
+    return JSONResponse({"ok": True, "status": "queued"})
 
 
 # ---------------------------------------------------------------------------
