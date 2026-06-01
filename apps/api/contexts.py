@@ -280,6 +280,66 @@ def set_context_metadata(
     save_context_metadata(metadata)
 
 
+def set_context_file_metadata(
+    name: str,
+    file_path: str,
+    *,
+    tags: list[str] | None = None,
+    file_metadata: dict[str, Any] | None = None,
+    owner_id: str | None = None,
+) -> dict[str, Any]:
+    safe_name = validate_context_name(name)
+    rel = normalize_context_file_path(file_path)
+    metadata = load_context_metadata()
+    pack = metadata.get(safe_name, {})
+    if owner_id is not None:
+        owner_value = str(owner_id).strip()
+        if owner_value:
+            pack["owner_id"] = owner_value
+    files = pack.get("files")
+    if not isinstance(files, dict):
+        files = {}
+    file_entry = files.get(rel)
+    if not isinstance(file_entry, dict):
+        file_entry = {}
+    if tags is not None:
+        clean_tags = []
+        for tag in tags:
+            clean = str(tag).strip()
+            if clean and clean not in clean_tags:
+                clean_tags.append(clean[:64])
+            if len(clean_tags) >= 20:
+                break
+        if clean_tags:
+            file_entry["tags"] = clean_tags
+        else:
+            file_entry.pop("tags", None)
+    if file_metadata is not None:
+        clean_metadata: dict[str, Any] = {}
+        for raw_key, raw_value in file_metadata.items():
+            key = str(raw_key).strip()
+            if not key:
+                continue
+            if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+                clean_metadata[key[:64]] = raw_value
+        if clean_metadata:
+            file_entry["metadata"] = clean_metadata
+        else:
+            file_entry.pop("metadata", None)
+    if file_entry:
+        files[rel] = file_entry
+    else:
+        files.pop(rel, None)
+    if files:
+        pack["files"] = files
+    else:
+        pack.pop("files", None)
+    pack["updated_at"] = now_iso()
+    metadata[safe_name] = pack
+    save_context_metadata(metadata)
+    return pack
+
+
 def delete_context_metadata(name: str) -> None:
     safe_name = validate_context_name(name)
     metadata = load_context_metadata()
@@ -361,11 +421,11 @@ def context_file_display_type(path_str: str, mime_type: str) -> str:
     return "File"
 
 
-def context_file_metadata(root: Path, path: Path) -> dict[str, Any]:
+def context_file_metadata(root: Path, path: Path, pack_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     rel = path.relative_to(root).as_posix()
     stat = path.stat()
     mime_type = guess_mime_type(rel)
-    return {
+    result = {
         "path": rel,
         "size": stat.st_size,
         "mime_type": mime_type,
@@ -373,6 +433,20 @@ def context_file_metadata(root: Path, path: Path) -> dict[str, Any]:
         "is_binary": is_binary_file(rel, mime_type),
         "display_type": context_file_display_type(rel, mime_type),
     }
+    files = (pack_metadata or {}).get("files")
+    file_entry = files.get(rel) if isinstance(files, dict) else None
+    if isinstance(file_entry, dict):
+        tags = file_entry.get("tags")
+        if isinstance(tags, list):
+            result["tags"] = [str(tag) for tag in tags if str(tag).strip()]
+        extra_metadata = file_entry.get("metadata")
+        if isinstance(extra_metadata, dict):
+            result["metadata"] = {
+                str(key): value
+                for key, value in extra_metadata.items()
+                if isinstance(value, (str, int, float, bool)) or value is None
+            }
+    return result
 
 
 def context_total_size(root: Path) -> int:
