@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { AlertTriangle, CheckCircle2, RotateCcw, Save } from "lucide-react";
 
 import { api } from "@/lib/api";
-import type { VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
+import type { ConnectionItem, VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
 import { formatRelative } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -171,6 +171,7 @@ export default function AssistantPage() {
   const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
   const [instructions, setInstructions] = useState("");
   const [originalInstructions, setOriginalInstructions] = useState("");
+  const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,13 +183,15 @@ export default function AssistantPage() {
     setLoading(true);
     setError(null);
     try {
-      const [agentRes, instructionsRes] = await Promise.all([
+      const [agentRes, instructionsRes, connectionRes] = await Promise.all([
         api.system.workspaceAgent(),
         api.system.workspaceInstructions(),
+        api.connections.list(),
       ]);
       setAgent(agentRes);
       setInstructions(instructionsRes);
       setOriginalInstructions(instructionsRes);
+      setConnections(connectionRes);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspace agent");
     } finally {
@@ -240,6 +243,11 @@ export default function AssistantPage() {
     setVersionsKey((k) => k + 1);
   }
 
+  const slackConnections = connections.filter(
+    (connection) => connection.kind !== "mcp" && connection.app_name.toLowerCase() === "slack"
+  );
+  const activeSlackConnections = slackConnections.filter((connection) => connection.status === "active");
+
   return (
     <div className="space-y-6">
       <div>
@@ -261,7 +269,7 @@ export default function AssistantPage() {
         <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <TabsList>
             <TabsTrigger value="instructions">Instructions</TabsTrigger>
-            <TabsTrigger value="prompt">Resolved prompt</TabsTrigger>
+            <TabsTrigger value="prompt">Final prompt</TabsTrigger>
             <TabsTrigger value="tools">Tools</TabsTrigger>
             <TabsTrigger value="channels">Channels</TabsTrigger>
             <TabsTrigger value="versions">Versions</TabsTrigger>
@@ -304,10 +312,13 @@ export default function AssistantPage() {
           ) : (
             <>
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-medium">Resolved system prompt</h2>
-                <Badge variant="outline" className="text-xs">
-                  Read-only
-                </Badge>
+                <div>
+                  <h2 className="text-sm font-medium">Final system prompt</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Read-only preview of the base agent prompt plus your saved workspace instructions.
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs">Read-only</Badge>
               </div>
               <pre className="max-h-[42rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
                 {agent.system_prompt}
@@ -339,12 +350,22 @@ export default function AssistantPage() {
         <TabsContent value="channels" className="space-y-4">
           <section className="rounded-[var(--radius-card)] border border-line bg-card p-4">
             <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5 size-4 text-[var(--positive)]" />
+              {activeSlackConnections.length > 0 ? (
+                <CheckCircle2 className="mt-0.5 size-4 text-[var(--positive)]" />
+              ) : (
+                <AlertTriangle className="mt-0.5 size-4 text-[var(--warning)]" />
+              )}
               <div>
-                <h2 className="text-sm font-medium">Slack</h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-sm font-medium">Slack</h2>
+                  <Badge variant="outline" className="text-xs">
+                    {activeSlackConnections.length > 0 ? "Connected" : "Not connected"}
+                  </Badge>
+                </div>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Slack uses the same workspace instructions plus the Slack connection selected by
-                  the worker or listener.
+                  {activeSlackConnections.length > 0
+                    ? `${activeSlackConnections.length} Slack connection${activeSlackConnections.length === 1 ? "" : "s"} available. Channel binding still lives on the Slack listener worker.`
+                    : "Connect Slack before enabling Slack listener workers or channel routing."}
                 </p>
               </div>
             </div>

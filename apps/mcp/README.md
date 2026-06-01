@@ -4,14 +4,14 @@ Workeros lets agents create, update, run, watch, and delete production worker au
 
 Workeros ships as a single npm package that exposes:
 
-- **`workeros` / `floom` CLI** – `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue. These docs use `workeros`; `floom` is a compatible alias for older Floom operator workflows.
+- **`workeros` CLI** – `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue. `floom` remains a compatibility alias for older Floom operator workflows.
 - **`workeros-mcp` stdio server** – the production MCP surface (workers / runs / secrets / connections / triggers) used by agents.
 
 The CLI targets both deployments:
 
 | Mode | API base | Auth | Workspaces |
 |------|----------|------|------------|
-| **OSS** (default) | `https://workers-api.floom.dev` | per-CLI `x-floom-secret` minted by `floom login` | n/a |
+| **OSS** (default) | `https://workers-api.floom.dev` | per-CLI `x-floom-secret` minted by `workeros login` | n/a |
 | **Cloud** | `https://workeros-api.floom.dev` (workeros.floom.dev dashboard) | Supabase refresh token → JWT bearer, `X-Workeros-Workspace` header | multi-workspace |
 
 ## Cloud quickstart (workeros.floom.dev)
@@ -99,6 +99,22 @@ Continue (`~/.continue/.continuerc.json`, array shape):
 ```
 
 The server targets `https://workers-api.floom.dev` by default. For development, set `WORKEROS_API_BASE`.
+
+## Worker bundle CLI flow
+
+Use this path when a fresh agent has a local `workers/<id>/` folder and needs a repeatable create/edit/deploy loop:
+
+```bash
+workeros login
+workeros workers validate ./workers/<id>
+workeros workers push ./workers/<id>
+workeros run <id> --inputs-file docs/workers/inputs/<id>.json
+workeros workers info <id>
+```
+
+`workers validate` is offline. It checks that `worker.yml` parses, the entry file exists, the runtime is declared, and E2B Composio workers do not use the local `composio execute` CLI. For structured connection declarations it also verifies that referenced tool slugs are covered by `allowed_tools`.
+
+`workers push` uses `POST /workers` for new workers and `PUT /workers/{id}` for existing workers. If an older API returns 404/405 for source updates, upgrade the API before editing production workers in place.
 
 ## Tools
 

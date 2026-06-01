@@ -839,9 +839,9 @@ export default function WorkerDetailPage() {
       const newSnap: Record<string, string> = {};
       for (const f of updatedFiles) newSnap[f.path] = f.content;
       setEditFilesOriginal(newSnap);
-      toast.success(selected ? "Brain pack removed" : "Brain pack attached");
+      toast.success(selected ? "Brain resource removed" : "Brain resource attached");
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to update brain packs");
+      toast.error(e instanceof Error ? e.message : "Failed to update brain resources");
     } finally {
       setSavingBrain(null);
     }
@@ -2435,8 +2435,10 @@ function BrainSection({
   const selectedNames = new Set(selectedSpecs.map(contextSpecName));
   const knownPackNames = new Set(brainPacks.map((pack) => pack.name));
   const missingSelectedPacks = selectedSpecs
-    .map(contextSpecName)
-    .filter((name) => name && !knownPackNames.has(name));
+    .filter((spec) => {
+      const name = contextSpecName(spec);
+      return name && !knownPackNames.has(name);
+    });
 
   const sortedPacks = [...brainPacks].sort((a, b) => {
     const aSelected = selectedNames.has(a.name) ? 0 : 1;
@@ -2449,7 +2451,7 @@ function BrainSection({
     <div className="max-w-3xl space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Worker resources</h2>
+          <h2 className="text-base font-semibold text-foreground">Brain resources</h2>
           <p className="text-sm text-muted-foreground">
             {selectedNames.size} brain {selectedNames.size === 1 ? "resource" : "resources"} attached to this worker.
           </p>
@@ -2464,82 +2466,110 @@ function BrainSection({
       {missingSelectedPacks.length > 0 && (
         <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 px-3 py-2">
           <p className="text-xs text-amber-700 dark:text-amber-400">
-            Missing packs in worker.yml: {missingSelectedPacks.join(", ")}
+            Unavailable resources declared in worker.yml: {missingSelectedPacks.map(contextSpecName).join(", ")}
           </p>
         </div>
       )}
 
-      {sortedPacks.length === 0 ? (
+      {sortedPacks.length === 0 && missingSelectedPacks.length === 0 ? (
         <div className="rounded-[var(--radius-button)] border border-line bg-card p-4">
           <p className="text-sm text-muted-foreground">No brain resources available.</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-[var(--radius-button)] border border-line bg-card">
-          <div className="hidden grid-cols-[minmax(0,1fr)_120px_104px_88px] gap-3 border-b border-line px-4 py-2 text-[11px] font-medium uppercase text-muted-foreground sm:grid">
-            <span>Resource</span>
-            <span>Access</span>
-            <span>Status</span>
-            <span className="text-right">Action</span>
-          </div>
-          {sortedPacks.map((pack) => {
-            const attached = selectedNames.has(pack.name);
-            const selectedSpec = selectedSpecs.find((spec) => contextSpecName(spec) === pack.name);
-            const writableMount = selectedSpec ? contextSpecWritable(selectedSpec) : false;
-            const accessLabel = writableMount ? "Read/write" : "Read-only";
-            const statusLabel = attached ? "Attached" : "Available";
-            return (
-              <div
-                key={pack.name}
-                className="grid gap-3 border-b border-line px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_120px_104px_88px] sm:items-center"
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] border border-line bg-[var(--paper)]">
-                    <BrainIcon className="size-4 text-muted-foreground" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-medium text-foreground">{pack.name}</span>
-                      {pack.system ? (
-                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
-                          System
-                        </Badge>
-                      ) : null}
+        <div className="space-y-3">
+          {missingSelectedPacks.length > 0 && (
+            <div className="overflow-hidden rounded-[var(--radius-button)] border border-line bg-card">
+              {missingSelectedPacks.map((spec, index) => {
+                const name = contextSpecName(spec);
+                const writableMount = contextSpecWritable(spec);
+                return (
+                  <div
+                    key={`${name}-${index}`}
+                    className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 last:border-b-0"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] border border-line bg-[var(--paper)]">
+                        <BrainIcon className="size-4 text-muted-foreground" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-medium text-foreground">{name}</span>
+                          <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                            Declared in YAML
+                          </Badge>
+                          <Badge variant="outline" className="border-amber-300 bg-amber-50 text-xs text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
+                            Unavailable
+                          </Badge>
+                          <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                            {writableMount ? "Read/write" : "Read-only"}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Declared in worker.yml; not returned by the Brain API.
+                        </p>
+                      </div>
                     </div>
-                    {pack.description && (
-                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{pack.description}</p>
-                    )}
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {pack.file_count} {pack.file_count === 1 ? "file" : "files"}
-                      {pack.worker_count !== undefined ? ` · ${pack.worker_count} workers` : ""}
-                      {pack.updated_at ? ` · Updated ${formatRelative(pack.updated_at)}` : ""}
-                    </p>
                   </div>
-                </div>
-                <div className="flex items-center gap-2 sm:block">
-                  <span className="text-[11px] font-medium uppercase text-muted-foreground sm:hidden">Access</span>
-                  <Badge variant="outline" className="border-line text-xs text-muted-foreground">
-                    {accessLabel}
-                  </Badge>
-                </div>
-                <div className="flex items-center gap-2 sm:block">
-                  <span className="text-[11px] font-medium uppercase text-muted-foreground sm:hidden">Status</span>
-                  <Badge variant="outline" className="border-line text-xs text-muted-foreground">
-                    {statusLabel}
-                  </Badge>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={attached ? "outline" : "default"}
-                  onClick={() => onToggleBrainPack(pack.name)}
-                  disabled={Boolean(savingBrain)}
-                  className="w-fit shrink-0 justify-self-start sm:w-full"
-                >
-                  {savingBrain === pack.name ? "Saving…" : attached ? "Remove" : "Attach"}
-                </Button>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
+          {sortedPacks.length > 0 && (
+            <div className="overflow-hidden rounded-[var(--radius-button)] border border-line bg-card">
+              {sortedPacks.map((pack) => {
+                const attached = selectedNames.has(pack.name);
+                const selectedSpec = selectedSpecs.find((spec) => contextSpecName(spec) === pack.name);
+                const writableMount = selectedSpec ? contextSpecWritable(selectedSpec) : false;
+                const packWritable = pack.writeable && !pack.system && !pack.read_only;
+                return (
+                  <div
+                    key={pack.name}
+                    className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 last:border-b-0"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] border border-line bg-[var(--paper)]">
+                        <BrainIcon className="size-4 text-muted-foreground" />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-medium text-foreground">{pack.name}</span>
+                          {attached && (
+                            <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                              Attached
+                            </Badge>
+                          )}
+                          <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                            Ready
+                          </Badge>
+                          <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                            {attached ? (writableMount ? "Read/write" : "Read-only") : packWritable ? "Can write" : "Read-only"}
+                          </Badge>
+                        </div>
+                        {pack.description && (
+                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{pack.description}</p>
+                        )}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {pack.file_count} {pack.file_count === 1 ? "file" : "files"}
+                          {pack.worker_count !== undefined ? ` · ${pack.worker_count} workers` : ""}
+                          {pack.updated_at ? ` · Updated ${formatRelative(pack.updated_at)}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={attached ? "outline" : "default"}
+                      onClick={() => onToggleBrainPack(pack.name)}
+                      disabled={Boolean(savingBrain)}
+                      className="shrink-0"
+                    >
+                      {savingBrain === pack.name ? "Saving…" : attached ? "Remove" : "Attach"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

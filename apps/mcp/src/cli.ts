@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { runLoginCommand } from "./commands/login.js";
 import { runLogoutCommand } from "./commands/logout.js";
 import { runWhoamiCommand } from "./commands/whoami.js";
@@ -37,6 +37,11 @@ import { main as runServer } from "./server.js";
 
 type RunResult = Promise<number> | number;
 
+function inferCommandName(argv = process.argv): "workeros" | "floom" {
+  const invoked = argv[1] ? basename(argv[1]) : "";
+  return invoked === "floom" ? "floom" : "workeros";
+}
+
 export function getPackageVersion(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   const packageJsonPath = join(here, "..", "package.json");
@@ -51,10 +56,10 @@ async function runAction(result: RunResult): Promise<void> {
   }
 }
 
-export function buildCliProgram(): Command {
+export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"): Command {
   const program = new Command();
   program
-    .name("floom")
+    .name(commandName)
     .description("Workeros CLI")
     .version(getPackageVersion())
     .showHelpAfterError();
@@ -208,7 +213,8 @@ export function buildCliProgram(): Command {
 }
 
 export async function main(argv = process.argv): Promise<void> {
-  const program = buildCliProgram();
+  const commandName = inferCommandName(argv);
+  const program = buildCliProgram(commandName);
   const args = argv.slice(2);
   if (args.length === 0) {
     await runServer();
@@ -221,7 +227,7 @@ const executedPath = process.argv[1] ? resolve(process.argv[1]) : "";
 if (executedPath && fileURLToPath(import.meta.url) === executedPath) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`floom failed: ${message}`);
+    console.error(`${inferCommandName()} failed: ${message}`);
     process.exit(1);
   });
 }

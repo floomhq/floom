@@ -42,23 +42,6 @@ _OOM_MARKERS = (
 _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
 
-
-def _sandbox_api_url() -> str:
-    """API base URL used by code running inside E2B sandboxes."""
-    for name in (
-        "WORKEROS_SANDBOX_API_URL",
-        "WORKEROS_E2B_API_URL",
-        "WORKEROS_INTERNAL_API_URL",
-        "WORKEROS_API_URL",
-        "WORKEROS_API_BASE",
-        "WORKERS_API_URL",
-    ):
-        value = (os.environ.get(name) or "").strip()
-        if value:
-            return value.rstrip("/")
-    return "https://workers-api.floom.dev"
-
-
 def _register_sandbox(run_id: str, sandbox: Any) -> None:
     with _active_sandboxes_lock:
         _active_sandboxes[run_id] = sandbox
@@ -156,6 +139,7 @@ def _sandbox_api_url() -> str:
     for name in (
         "WORKEROS_SANDBOX_API_URL",
         "WORKEROS_E2B_API_URL",
+        "WORKEROS_INTERNAL_API_URL",
         "WORKEROS_API_URL",
         "WORKEROS_API_BASE",
         "WORKERS_API_URL",
