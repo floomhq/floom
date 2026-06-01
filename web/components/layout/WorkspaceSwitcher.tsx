@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, ChevronsUpDown, Plus } from "lucide-react";
+import { Check, ChevronsUpDown, Copy, Download, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,14 @@ function getActiveWorkspaceId(): string | null {
   return value || null;
 }
 
+function workspaceHeaders(workspaceId = getActiveWorkspaceId()): Headers {
+  const headers = new Headers();
+  if (workspaceId) {
+    headers.set("x-workeros-workspace", workspaceId);
+  }
+  return headers;
+}
+
 function setActiveWorkspaceId(workspaceId: string | null) {
   if (typeof window === "undefined") return;
   if (!workspaceId) {
@@ -59,12 +67,11 @@ function setActiveWorkspaceId(workspaceId: string | null) {
 }
 
 async function proxyJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  headers.set("Content-Type", "application/json");
-  const activeWorkspaceId = getActiveWorkspaceId();
-  if (activeWorkspaceId) {
-    headers.set("x-workeros-workspace", activeWorkspaceId);
+  const headers = workspaceHeaders();
+  for (const [key, value] of new Headers(init?.headers)) {
+    headers.set(key, value);
   }
+  headers.set("Content-Type", "application/json");
   const res = await fetch(`${PROXY_BASE}${path}`, {
     ...init,
     headers,
@@ -114,6 +121,8 @@ export function WorkspaceSwitcher() {
   const [createName, setCreateName] = useState("");
   const [creating, setCreating] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,6 +182,69 @@ export function WorkspaceSwitcher() {
     } catch (err) {
       setError((err as Error).message || "Failed to create workspace");
       setCreating(false);
+    }
+  }
+
+  async function handleExportWorkspace(workspace: Workspace) {
+    setExporting(true);
+    setError(null);
+    try {
+      const res = await fetch(`${PROXY_BASE}/workspace/export`, {
+        headers: workspaceHeaders(workspace.id),
+      });
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${workspace.name.trim() || "workspace"}-template.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch (err) {
+      setError((err as Error).message || "Failed to export workspace");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleDuplicateWorkspace(workspace: Workspace) {
+    setDuplicating(true);
+    setError(null);
+    try {
+      const exportRes = await fetch(`${PROXY_BASE}/workspace/export`, {
+        headers: workspaceHeaders(workspace.id),
+      });
+      if (!exportRes.ok) throw new Error(`Export failed (${exportRes.status})`);
+      const template = await exportRes.blob();
+      const created = await workspacesApi.create(`Copy of ${workspace.name}`);
+      const form = new FormData();
+      form.append(
+        "bundle",
+        new File([template], "workspace-template.zip", { type: "application/zip" })
+      );
+      const importRes = await fetch(`${PROXY_BASE}/workspace/import`, {
+        method: "POST",
+        headers: workspaceHeaders(created.id),
+        body: form,
+      });
+      if (!importRes.ok) {
+        let detail = "";
+        try {
+          const body = (await importRes.json()) as { detail?: string };
+          detail = body.detail || JSON.stringify(body);
+        } catch {
+          detail = importRes.statusText || `HTTP ${importRes.status}`;
+        }
+        throw new Error(detail);
+      }
+      await workspacesApi.select(created.id);
+      setActiveWorkspaceId(created.id);
+      window.location.reload();
+    } catch (err) {
+      setError((err as Error).message || "Failed to duplicate workspace");
+      setDuplicating(false);
     }
   }
 
@@ -253,6 +325,23 @@ export function WorkspaceSwitcher() {
               );
             })}
           </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => handleDuplicateWorkspace(active)}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            disabled={duplicating || exporting}
+          >
+            <Copy className="size-4" />
+            {duplicating ? "Duplicating…" : "Duplicate workspace"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => handleExportWorkspace(active)}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            disabled={duplicating || exporting}
+          >
+            <Download className="size-4" />
+            {exporting ? "Exporting…" : "Export template"}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
