@@ -28,6 +28,18 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
+const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
+
+function activeWorkspaceHeaders(headers?: HeadersInit): Headers {
+  const next = new Headers(headers);
+  if (typeof window === "undefined") return next;
+  const workspaceId = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  if (workspaceId && workspaceId !== "local-default") {
+    next.set("x-workeros-workspace", workspaceId);
+  }
+  return next;
+}
+
 function SidebarSettingsLink({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   const active = pathname === "/settings" || pathname.startsWith("/settings/");
   return (
@@ -157,10 +169,17 @@ function UserProfileFooter() {
           setEmail(d.user.email as string);
           // Ensure the user has at least one PAT (fire-and-forget).
           // bootstrap is idempotent — no-ops if a token already exists.
-          fetch("/app/api/proxy/auth/tokens/bootstrap", { method: "POST" }).catch(() => {});
+          fetch("/app/api/proxy/auth/tokens/bootstrap", {
+            method: "POST",
+            headers: activeWorkspaceHeaders(),
+          }).catch(() => {});
+        } else if (!cancelled) {
+          window.location.replace("/login?next=/app");
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) window.location.replace("/login?next=/app");
+      });
     return () => {
       cancelled = true;
     };

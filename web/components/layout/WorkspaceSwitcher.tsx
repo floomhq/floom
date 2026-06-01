@@ -126,6 +126,9 @@ export function WorkspaceSwitcher() {
           browserActiveId && data.workspaces?.some((workspace) => workspace.id === browserActiveId)
             ? browserActiveId
             : data.active_id ?? null;
+        if (activeId !== browserActiveId) {
+          setActiveWorkspaceId(activeId);
+        }
         setState({
           workspaces: data.workspaces ?? [],
           activeId,

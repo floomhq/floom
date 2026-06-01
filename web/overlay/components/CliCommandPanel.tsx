@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const CLOUD_API_BASE =
   process.env.NEXT_PUBLIC_WORKEROS_API_BASE || "https://workeros-api.floom.dev";
+const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
 
 type McpTarget = "claude" | "codex" | "cursor" | "vscode" | "windsurf" | "generic";
 
@@ -66,6 +67,16 @@ function buildMcpSnippet(target: McpTarget, token: string): string {
   return `${buildEnvPrefix(token)}\nnpm i -g @floomhq/workeros\n${command}${note}`;
 }
 
+function activeWorkspaceHeaders(headers?: HeadersInit): Headers {
+  const next = new Headers(headers);
+  if (typeof window === "undefined") return next;
+  const workspaceId = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  if (workspaceId && workspaceId !== "local-default") {
+    next.set("x-workeros-workspace", workspaceId);
+  }
+  return next;
+}
+
 export function CliCommandPanel() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [newTokenRaw, setNewTokenRaw] = useState<string | null>(null);
@@ -77,7 +88,7 @@ export function CliCommandPanel() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/auth/tokens`)
+    fetch(`${API_BASE}/auth/tokens`, { headers: activeWorkspaceHeaders() })
       .then((r) => r.json())
       .then((d) => {
         // API returns {value: [...], Count: N} or a plain array
@@ -92,7 +103,7 @@ export function CliCommandPanel() {
     const name = newTokenName.trim() || "default";
     const r = await fetch(`${API_BASE}/auth/tokens`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: activeWorkspaceHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ name }),
     });
     const data = await r.json() as Token & { token?: string };
@@ -104,7 +115,10 @@ export function CliCommandPanel() {
   }
 
   async function revokeToken(id: string) {
-    await fetch(`${API_BASE}/auth/tokens/${id}`, { method: "DELETE" });
+    await fetch(`${API_BASE}/auth/tokens/${id}`, {
+      method: "DELETE",
+      headers: activeWorkspaceHeaders(),
+    });
     setTokens((prev) => prev.filter((t) => t.id !== id));
     if (newTokenRaw && tokens.find((t) => t.id === id)) setNewTokenRaw(null);
   }
