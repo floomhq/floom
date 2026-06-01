@@ -57,13 +57,82 @@ async function highlightCode(code: string, language: string): Promise<string> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Synchronous YAML syntax highlighter
+// (react-simple-code-editor calls highlight() on every keystroke — async
+//  approaches silently break because they can't trigger a re-render)
+// ---------------------------------------------------------------------------
+
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function span(color: string, s: string, extra = ""): string {
+  return `<span style="color:${color}${extra}">${s}</span>`;
+}
+
+// Colors chosen to be legible on both the light (var(--bg-2)) and dark
+// (#1e1e2e) editor backgrounds used by FilesEditor.
+const YC = {
+  key:     "hsl(210 80% 55%)",   // blue — keys
+  colon:   "hsl(220 10% 55%)",   // muted — : separator
+  string:  "hsl(142 55% 42%)",   // green — quoted strings
+  number:  "hsl(25  90% 55%)",   // orange — numbers
+  bool:    "hsl(270 55% 62%)",   // purple — true/false/null
+  comment: "hsl(220 10% 58%)",   // grey — comments
+  dash:    "hsl(220 10% 55%)",   // muted — list dash
+  anchor:  "hsl(340 60% 58%)",   // pink — YAML anchors & tags
+};
+
+function colorYamlValue(raw: string): string {
+  const t = raw.trim();
+  if (!t) return esc(raw);
+  if (/^["']/.test(t))                            return span(YC.string, esc(raw));
+  if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t))  return span(YC.number, esc(raw));
+  if (/^(true|false|yes|no|null|~)$/i.test(t))    return span(YC.bool,   esc(raw));
+  if (/^[&*!]/.test(t))                           return span(YC.anchor, esc(raw));
+  return esc(raw);
+}
+
+function highlightYaml(code: string): string {
+  return code.split("\n").map((line) => {
+    // Comment lines
+    if (/^\s*#/.test(line)) {
+      return span(YC.comment, esc(line), ";font-style:italic");
+    }
+
+    // key: value  (optionally preceded by "- " for inline list)
+    const kv = line.match(/^(\s*(?:-\s+)?)([\w._-]+)(\s*:\s*)(.*)?$/);
+    if (kv) {
+      const [, indent, key, sep, value = ""] = kv;
+      return (
+        esc(indent) +
+        span(YC.key, esc(key)) +
+        span(YC.colon, esc(sep)) +
+        colorYamlValue(value)
+      );
+    }
+
+    // bare list item  "- value"
+    const li = line.match(/^(\s*-\s+)(.*)?$/);
+    if (li) {
+      return span(YC.dash, esc(li[1])) + colorYamlValue(li[2] ?? "");
+    }
+
+    return esc(line);
+  }).join("\n");
+}
+
+// For non-YAML files keep the async hljs approach (caches on second render,
+// acceptable for rarely-edited Python/shell helper files).
 const _hlCache = new Map<string, string>();
 
 function makeHighlighter(language: string) {
+  if (language === "yaml") return highlightYaml;
   return (code: string): string => {
     const key = `${language}:${code}`;
     if (_hlCache.has(key)) return _hlCache.get(key)!;
-    const plain = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const plain = esc(code);
     void highlightCode(code, language).then((html) => { _hlCache.set(key, html); });
     return plain;
   };
@@ -498,12 +567,12 @@ function FilesEditorEdit({
                 insertSpaces
                 style={{
                   fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 12,
+                  fontSize: 13,
                   minHeight: 640,
                   background: "transparent",
-                  color: "var(--ink)",
+                  color: "var(--foreground)",
                   outline: "none",
-                  lineHeight: "1.6",
+                  lineHeight: "1.75",
                 }}
                 textareaClassName="focus:outline-none"
               />
