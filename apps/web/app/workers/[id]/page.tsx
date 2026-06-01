@@ -1802,7 +1802,7 @@ export default function WorkerDetailPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <Label className="text-sm font-medium">Inputs</Label>
-                      <p className="text-xs text-muted-foreground mt-0.5">Defaults are used when the worker runs on a schedule or without manual input.</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Default values run on schedule or without manual input.</p>
                     </div>
                     <button
                       type="button"
@@ -1814,100 +1814,49 @@ export default function WorkerDetailPage() {
                         ])
                       }
                     >
-                      <Plus className="size-3" /> Add input
+                      <Plus className="size-3" /> Add
                     </button>
                   </div>
                   {formInputs.length > 0 && (
                     <div className="rounded-lg border border-border divide-y divide-border">
                       {formInputs.map((inp, idx) => (
-                        <div key={inp.name + idx} className="px-4 py-3 space-y-2.5">
-                          {/* Row 1: label, type, required, remove */}
-                          <div className="flex items-center gap-2">
-                            <Input
-                              className="h-7 text-xs flex-1 min-w-0"
-                              placeholder="Label"
-                              value={inp.label || ""}
-                              onChange={(e) =>
-                                setFormInputs((prev) =>
-                                  prev.map((p, i) => i === idx ? { ...p, label: e.target.value } : p)
-                                )
-                              }
-                            />
-                            <Select
-                              value={inp.type || "text"}
-                              onValueChange={(v) =>
-                                setFormInputs((prev) =>
-                                  prev.map((p, i) => i === idx ? { ...p, type: v || "text" } : p)
-                                )
-                              }
-                            >
-                              <SelectTrigger className="h-7 text-xs w-28 shrink-0">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {["text", "textarea", "number", "file", "select"].map((t) => (
-                                  <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <button
-                              type="button"
-                              role="switch"
-                              aria-checked={!!inp.required}
-                              title="Toggle required"
-                              onClick={() =>
-                                setFormInputs((prev) =>
-                                  prev.map((p, i) => i === idx ? { ...p, required: !p.required } : p)
-                                )
-                              }
-                              className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border transition-colors ${inp.required ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"}`}
-                            >
-                              required
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setFormInputs((prev) => prev.filter((_, i) => i !== idx))}
-                              className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                            >
-                              <X className="size-3.5" />
-                            </button>
-                          </div>
-                          {/* Row 2: key name (read-only) + placeholder */}
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-14 shrink-0">Key</span>
-                            <span className="text-xs font-mono text-muted-foreground bg-muted border border-border rounded px-2 h-7 flex items-center w-36 shrink-0 truncate">{inp.name}</span>
-                            <span className="text-xs text-muted-foreground w-20 shrink-0 text-right">Placeholder</span>
-                            <Input
-                              className="h-7 text-xs flex-1"
-                              placeholder="Hint shown to user"
-                              value={inp.placeholder || ""}
-                              onChange={(e) =>
-                                setFormInputs((prev) =>
-                                  prev.map((p, i) => i === idx ? { ...p, placeholder: e.target.value } : p)
-                                )
-                              }
-                            />
-                          </div>
-                          {/* Row 3: default */}
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-14 shrink-0">Default</span>
-                            <Input
-                              className="h-7 text-xs flex-1"
-                              placeholder="No default — user must provide at runtime"
-                              value={inp.default !== undefined && inp.default !== null ? String(inp.default) : ""}
-                              onChange={(e) =>
-                                setFormInputs((prev) =>
-                                  prev.map((p, i) => i === idx ? { ...p, default: e.target.value } : p)
-                                )
-                              }
-                            />
-                          </div>
+                        <div key={inp.name + idx} className="flex items-center gap-2 px-3 py-2">
+                          <span className="text-xs font-mono text-foreground shrink-0 w-44 truncate" title={inp.name}>{inp.name}</span>
+                          <Input
+                            className="h-7 text-xs flex-1"
+                            placeholder="default value…"
+                            value={inp.default !== undefined && inp.default !== null ? String(inp.default) : ""}
+                            onChange={(e) =>
+                              setFormInputs((prev) =>
+                                prev.map((p, i) => i === idx ? { ...p, default: e.target.value } : p)
+                              )
+                            }
+                          />
+                          <button
+                            type="button"
+                            title="Toggle required"
+                            onClick={() =>
+                              setFormInputs((prev) =>
+                                prev.map((p, i) => i === idx ? { ...p, required: !p.required } : p)
+                              )
+                            }
+                            className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border transition-colors ${inp.required ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"}`}
+                          >
+                            req
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFormInputs((prev) => prev.filter((_, i) => i !== idx))}
+                            className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                          >
+                            <X className="size-3" />
+                          </button>
                         </div>
                       ))}
                     </div>
                   )}
                   {formInputs.length === 0 && (
-                    <p className="text-xs text-muted-foreground italic">No inputs defined. Click &quot;Add input&quot; to add one.</p>
+                    <p className="text-xs text-muted-foreground italic">No inputs defined.</p>
                   )}
                 </div>
 
@@ -1932,30 +1881,21 @@ export default function WorkerDetailPage() {
                             ])
                           }
                         >
-                          <Plus className="size-3" /> Add output
+                          <Plus className="size-3" /> Add
                         </button>
                       </div>
                       {formOutputs.length > 0 ? (
                         <div className="rounded-lg border border-border divide-y divide-border">
                           {formOutputs.map((out, idx) => (
-                            <div key={out.name + idx} className="flex items-center gap-2 px-4 py-2.5">
-                              <Input
-                                className="h-7 text-xs flex-1"
-                                placeholder="Label"
-                                value={out.label || ""}
-                                onChange={(e) =>
+                            <div key={out.name + idx} className="flex items-center gap-2 px-3 py-2">
+                              <span className="text-xs font-mono text-foreground shrink-0 w-44 truncate" title={out.name}>{out.name}</span>
+                              <Select
+                                value={out.type || "text"}
+                                onValueChange={(v) =>
                                   setFormOutputs((prev) =>
-                                    prev.map((p, i) => i === idx ? { ...p, label: e.target.value } : p)
+                                    prev.map((p, i) => i === idx ? { ...p, type: v || "text" } : p)
                                   )
                                 }
-                              />
-                              <Select
-                              value={out.type || "text"}
-                              onValueChange={(v) =>
-                                setFormOutputs((prev) =>
-                                  prev.map((p, i) => i === idx ? { ...p, type: v || "text" } : p)
-                                )
-                              }
                               >
                                 <SelectTrigger className="h-7 text-xs w-28 shrink-0">
                                   <SelectValue />
@@ -1966,13 +1906,12 @@ export default function WorkerDetailPage() {
                                   ))}
                                 </SelectContent>
                               </Select>
-                              <span className="text-xs font-mono text-muted-foreground bg-muted border border-border rounded px-2 h-7 flex items-center w-32 shrink-0 truncate">{out.name}</span>
                               <button
                                 type="button"
                                 onClick={() => setFormOutputs((prev) => prev.filter((_, i) => i !== idx))}
-                                className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                                className="text-muted-foreground hover:text-foreground transition-colors shrink-0 ml-auto"
                               >
-                                <X className="size-3.5" />
+                                <X className="size-3" />
                               </button>
                             </div>
                           ))}
