@@ -1824,6 +1824,256 @@ def delete_worker_alert(
         raise HTTPException(status_code=404, detail="Alert not found")
 
 
+# ---------------------------------------------------------------------------
+# Versioning: GET /workers/{id}/versions, POST /workers/{id}/rollback/{vid}
+#             GET /contexts/{name}/versions, POST /contexts/{name}/rollback/{vid}
+# ---------------------------------------------------------------------------
+
+class VersionSummary(BaseModel):
+    id: str
+    asset_type: str
+    asset_id: str
+    version_number: int
+    change_source: str
+    created_at: str
+
+
+@app.get("/workers/{worker_id}/versions", response_model=List[VersionSummary])
+def list_worker_versions(
+    worker_id: str,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions of a worker (newest first)."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    rows = repos.versions.list(asset_type="worker", asset_id=worker_id, limit=min(limit, 100))
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.post("/workers/{worker_id}/rollback/{version_id}", response_model=WorkerDetail)
+def rollback_worker(
+    worker_id: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """Restore a worker to the state captured in the given version snapshot."""
+    import json as _json
+    import shutil as _shutil
+    from worker_registry import WORKERS_DIR
+
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    version = repos.versions.get(version_id=version_id)
+    if not version or version.get("asset_type") != "worker" or version.get("asset_id") != worker_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    files = snapshot.get("files") or []
+    if not files:
+        raise HTTPException(status_code=422, detail="Version snapshot contains no files")
+
+    target_dir = WORKERS_DIR / worker_id
+    if not target_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Worker directory not found")
+
+    # Write snapshot files atomically (same strategy as update_worker_files)
+    pid = os.getpid()
+    tmp_dir = WORKERS_DIR / f".{worker_id}.rollback.{pid}"
+    if tmp_dir.exists():
+        _shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True)
+    backed_up: List[tuple] = []
+    try:
+        for f in files:
+            dest = tmp_dir / f["path"]
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(f.get("content") or "", encoding="utf-8")
+
+        existing_files = list(target_dir.rglob("*"))
+        new_paths = {f["path"] for f in files}
+        for existing in existing_files:
+            if not existing.is_file():
+                continue
+            try:
+                rel = existing.relative_to(target_dir).as_posix()
+            except ValueError:
+                continue
+            if rel not in new_paths and not _should_ignore_worker_file(rel):
+                bak = existing.with_suffix(existing.suffix + f".bak{pid}")
+                existing.rename(bak)
+                backed_up.append((existing, bak))
+
+        for f in files:
+            dest = target_dir / f["path"]
+            if dest.exists():
+                bak = dest.with_suffix(dest.suffix + f".bak{pid}")
+                dest.rename(bak)
+                backed_up.append((dest, bak))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.copy2(tmp_dir / f["path"], dest)
+
+        invalidate_worker_cache()
+        workers = discover_workers()
+        this_worker_list = [w for w in workers if w["id"] == worker_id]
+        if not this_worker_list:
+            raise HTTPException(status_code=500, detail=f"Worker {worker_id!r} not found after rollback")
+        with get_db() as conn:
+            _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
+
+        for _orig, bak in backed_up:
+            bak.unlink(missing_ok=True)
+        backed_up.clear()
+
+        # Record the rollback as its own version
+        try:
+            import json as _json2
+            rollback_snapshot = {
+                "worker": repos.workers.get(user_id=auth.user_id, worker_id=worker_id),
+                "files": files,
+            }
+            repos.versions.create(
+                asset_type="worker",
+                asset_id=worker_id,
+                user_id=auth.user_id,
+                snapshot_json=_json2.dumps(rollback_snapshot),
+                change_source=f"rollback:{version_id}",
+            )
+            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=50)
+        except Exception as _ver_exc:
+            logger.warning("version snapshot after rollback failed for %s: %s", worker_id, _ver_exc)
+
+        return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+    except HTTPException:
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                bak.rename(orig)
+            except Exception:
+                pass
+        raise
+    except Exception as exc:
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                bak.rename(orig)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Rollback failed: {exc}") from exc
+    finally:
+        if tmp_dir.exists():
+            try:
+                _shutil.rmtree(tmp_dir)
+            except Exception:
+                pass
+
+
+@app.get("/contexts/{name}/versions", response_model=List[VersionSummary])
+def list_context_versions(
+    name: str,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions of a brain pack (newest first)."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    rows = repos.versions.list(asset_type="brain_pack", asset_id=safe_name, limit=min(limit, 100))
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.post("/contexts/{name}/rollback/{version_id}", response_model=ContextDetail)
+def rollback_context(
+    name: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextDetail:
+    """Restore a brain pack to the state captured in the given version snapshot."""
+    import base64
+    import json as _json
+
+    safe_name, metadata = _require_context_for_user(name, user_id=auth.user_id)
+    version = repos.versions.get(version_id=version_id)
+    if not version or version.get("asset_type") != "brain_pack" or version.get("asset_id") != safe_name:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    files = snapshot.get("files") or []
+
+    root = context_dir(safe_name)
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Context not found")
+
+    # Delete all existing files then restore from snapshot
+    existing = list(iter_context_files(root))
+    backed_up: List[tuple] = []
+    try:
+        for path in existing:
+            bak = path.with_suffix(path.suffix + f".bak{os.getpid()}")
+            path.rename(bak)
+            backed_up.append((path, bak))
+
+        for f in files:
+            dest = root / f["path"]
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            raw_content = f.get("content") or ""
+            if f.get("encoding") == "base64":
+                dest.write_bytes(base64.b64decode(raw_content))
+            else:
+                dest.write_text(raw_content, encoding="utf-8")
+
+        # Clean up backups
+        for _orig, bak in backed_up:
+            bak.unlink(missing_ok=True)
+        backed_up.clear()
+
+        set_context_metadata(safe_name, owner_id=auth.user_id)
+
+        # Snapshot the rollback
+        try:
+            rollback_snapshot = {"pack": snapshot.get("pack"), "files": files}
+            repos.versions.create(
+                asset_type="brain_pack",
+                asset_id=safe_name,
+                user_id=auth.user_id,
+                snapshot_json=_json.dumps(rollback_snapshot),
+                change_source=f"rollback:{version_id}",
+            )
+            repos.versions.prune(asset_type="brain_pack", asset_id=safe_name, keep=50)
+        except Exception as _exc:
+            logger.warning("version snapshot after context rollback failed: %s", _exc)
+
+        return _context_detail(safe_name, metadata, repos=repos, user_id=auth.user_id)
+
+    except HTTPException:
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                bak.rename(orig)
+            except Exception:
+                pass
+        raise
+    except Exception as exc:
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                bak.rename(orig)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Context rollback failed: {exc}") from exc
+
+
 def _normalize_trigger_type(value: Any) -> str:
     normalized = str(value or "manual").strip().lower()
     if normalized in {"cron", "scheduled"}:
@@ -3680,12 +3930,58 @@ def get_context_file(
     return Response(content=target.read_bytes(), media_type=mime_type, headers=headers)
 
 
+def _snapshot_brain_pack_version(
+    name: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+    change_source: str = "user",
+) -> None:
+    """Create a version snapshot of a brain pack's current files."""
+    import base64
+    import json as _json
+
+    try:
+        root = context_dir(name)
+        files_snapshot = []
+        for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix()):
+            rel = path.relative_to(root).as_posix()
+            try:
+                raw = path.read_bytes()
+                try:
+                    content = raw.decode("utf-8")
+                    encoding = "utf-8"
+                except UnicodeDecodeError:
+                    content = base64.b64encode(raw).decode("ascii")
+                    encoding = "base64"
+            except Exception:
+                continue
+            files_snapshot.append({"path": rel, "content": content, "encoding": encoding})
+        metadata = load_context_metadata()
+        pack_meta = metadata.get(name) or {}
+        snapshot = {
+            "pack": {"name": name, "description": pack_meta.get("description")},
+            "files": files_snapshot,
+        }
+        repos.versions.create(
+            asset_type="brain_pack",
+            asset_id=name,
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(asset_type="brain_pack", asset_id=name, keep=50)
+    except Exception as _exc:
+        logger.warning("version snapshot failed for brain_pack %s: %s", name, _exc)
+
+
 @app.put("/contexts/{name}/files/{file_path:path}", response_model=ContextFileItem)
 async def put_context_file(
     name: str,
     file_path: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextFileItem:
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
@@ -3698,7 +3994,9 @@ async def put_context_file(
         data = payload.content.encode("utf-8")
     else:
         data = await request.body()
-    return _write_context_file(safe_name, rel, data, user_id=auth.user_id)
+    result = _write_context_file(safe_name, rel, data, user_id=auth.user_id)
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+    return result
 
 
 @app.delete("/contexts/{name}/files/{file_path:path}", response_model=ContextDetail)
@@ -3706,6 +4004,7 @@ def delete_context_file(
     name: str,
     file_path: str,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
     safe_name, metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
@@ -3721,6 +4020,7 @@ def delete_context_file(
         except OSError:
             break
     set_context_metadata(safe_name, owner_id=auth.user_id)
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
     return _context_detail(safe_name, metadata)
 
 
@@ -3730,6 +4030,7 @@ async def upload_context_files(
     files: List[UploadFile] = File(...),
     path_prefix: str = Form(""),
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextUploadResponse:
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     raw_prefix = path_prefix.strip().strip("/")
@@ -3740,6 +4041,7 @@ async def upload_context_files(
         rel = f"{prefix}/{filename}" if prefix else filename
         data = await upload.read()
         written.append(_write_context_file(safe_name, rel, data, user_id=auth.user_id))
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
     return ContextUploadResponse(
         files=written,
         total_size_bytes=context_total_size(context_dir(safe_name)),
@@ -6776,6 +7078,24 @@ def update_worker_files(
         for _orig, bak in backed_up:
             bak.unlink(missing_ok=True)
         backed_up.clear()
+
+        # Snapshot for versioning (fire-and-forget; never block the save)
+        try:
+            import json as _json
+            snapshot = {
+                "worker": repos.workers.get(user_id=auth.user_id, worker_id=worker_id),
+                "files": [{"path": f.path, "content": f.content} for f in payload.files],
+            }
+            repos.versions.create(
+                asset_type="worker",
+                asset_id=worker_id,
+                user_id=auth.user_id,
+                snapshot_json=_json.dumps(snapshot),
+                change_source="user",
+            )
+            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=50)
+        except Exception as _ver_exc:
+            logger.warning("version snapshot failed for worker %s: %s", worker_id, _ver_exc)
 
         return _build_worker_detail(
             worker_id,

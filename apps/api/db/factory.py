@@ -11,6 +11,7 @@ from .interface import (
     ConnectionRepository,
     RunRepository,
     SecretRepository,
+    VersionRepository,
     WorkerRepository,
 )
 from .sqlite import (
@@ -20,6 +21,7 @@ from .sqlite import (
     SqliteConnectionRepository,
     SqliteRunRepository,
     SqliteSecretRepository,
+    SqliteVersionRepository,
     SqliteWorkerRepository,
 )
 
@@ -32,6 +34,7 @@ class Repositories(NamedTuple):
     cli_auth: CliAuthRepository
     approvals: ApprovalRepository
     alerts: AlertRepository
+    versions: VersionRepository
 
 
 def _local_repositories() -> Repositories:
@@ -43,6 +46,7 @@ def _local_repositories() -> Repositories:
         cli_auth=SqliteCliAuthRepository(),
         approvals=SqliteApprovalRepository(),
         alerts=SqliteAlertRepository(),
+        versions=SqliteVersionRepository(),
     )
 
 
