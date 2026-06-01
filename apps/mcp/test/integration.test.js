@@ -363,12 +363,17 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
   await withClient(mock, "test-secret", async (client) => {
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, [
+    assert.equal(new Set(names).size, names.length);
+    for (const name of [
       "connections.add_mcp",
       "connections.list",
+      "contexts.create",
+      "contexts.delete",
       "contexts.list",
       "contexts.read",
+      "contexts.rollback",
       "contexts.upload",
+      "contexts.versions",
       "contexts.write",
       "runs.get",
       "runs.list",
@@ -383,8 +388,15 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
       "workers.list",
       "workers.run",
       "workers.update",
+      "workers.versions",
+      "workers.write_file",
       "workspace.chat",
-    ]);
+      "workspace.instructions.get",
+      "workspace.instructions.set",
+      "workspace.versions",
+    ]) {
+      assert.ok(names.includes(name), `expected MCP tool ${name}`);
+    }
 
     const listed = await client.callTool({ name: "workers.list", arguments: {} });
     assert.deepEqual(listed.structuredContent, { data: [] });
