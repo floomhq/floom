@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import importlib
 from pathlib import Path
 from fastapi.testclient import TestClient
 
@@ -12,7 +13,11 @@ os.environ["WORKEROS_DEPLOY"] = "local"
 os.environ["WORKEROS_API_ENV_FILE"] = str(_TEST_DIR / "api.env")
 
 import main
-import runner_utils
+
+
+def _set_artifacts_dir(monkeypatch, artifact_root: Path) -> None:
+    runner_utils = importlib.import_module("runner_utils")
+    monkeypatch.setattr(runner_utils, "ARTIFACTS_DIR", artifact_root)
 
 
 class _RunsRepo:
@@ -92,7 +97,7 @@ def test_public_approval_artifact_download_uses_signed_link(monkeypatch, tmp_pat
     artifact_path = artifact_root / "run_1" / "out" / "report.csv"
     artifact_path.parent.mkdir(parents=True)
     artifact_path.write_text("name,value\nFloom,1\n")
-    monkeypatch.setattr(runner_utils, "ARTIFACTS_DIR", artifact_root)
+    _set_artifacts_dir(monkeypatch, artifact_root)
     main.app.dependency_overrides[main.get_repos] = lambda: _Repos()
     token = main._approval_public_token(_ApprovalsRepo().get_public(approval_id="apr_1"))
 
@@ -115,7 +120,7 @@ def test_public_approval_artifact_download_hides_sensitive_artifacts(monkeypatch
     transcript_path = artifact_root / "run_1" / "transcript.jsonl"
     transcript_path.parent.mkdir(parents=True)
     transcript_path.write_text('{"secret":true}\n')
-    monkeypatch.setattr(runner_utils, "ARTIFACTS_DIR", artifact_root)
+    _set_artifacts_dir(monkeypatch, artifact_root)
     main.app.dependency_overrides[main.get_repos] = lambda: _Repos()
     token = main._approval_public_token(_ApprovalsRepo().get_public(approval_id="apr_1"))
 

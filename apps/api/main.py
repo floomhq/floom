@@ -885,6 +885,12 @@ async def auth_middleware(request: Request, call_next):
             or path in {"/healthz", "/health"}
             or path == "/composio-events"
             or path == "/slack/events"
+            or path == "/mcp"
+            or path == "/api/mcp"
+            or path == "/langdock/mcp"
+            or path == "/workspace-agent/mcp"
+            or path == "/api/langdock/mcp"
+            or path == "/api/workspace-agent/mcp"
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
             or path == "/cli-auth/devices"
@@ -11398,6 +11404,278 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
         user_id=user_id,
     )
     return JSONResponse({"ok": True, "status": "queued"})
+
+
+# ---------------------------------------------------------------------------
+# Workspace Agent MCP API
+# ---------------------------------------------------------------------------
+
+_WORKSPACE_AGENT_MCP_TOOL_NAME = "ask_workeros_workspace_agent"
+_WORKSPACE_AGENT_MCP_PROTOCOL_VERSION = "2024-11-05"
+
+
+def _workspace_agent_mcp_enabled() -> bool:
+    value = os.environ.get("WORKSPACE_AGENT_MCP_ENABLED", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _workspace_agent_mcp_token() -> str:
+    return (
+        os.environ.get("WORKSPACE_AGENT_MCP_TOKEN")
+        or os.environ.get("LANGDOCK_WORKEROS_MCP_TOKEN")
+        or ""
+    ).strip()
+
+
+def _verify_workspace_agent_mcp_auth(request: Request) -> bool:
+    expected = _workspace_agent_mcp_token()
+    if not expected:
+        return False
+    authorization = request.headers.get("authorization", "").strip()
+    bearer = ""
+    if authorization.lower().startswith("bearer "):
+        bearer = authorization[7:].strip()
+    api_key = request.headers.get("x-api-key", "").strip()
+    return bool(
+        (bearer and hmac.compare_digest(bearer, expected))
+        or (api_key and hmac.compare_digest(api_key, expected))
+    )
+
+
+def _workspace_agent_mcp_user_id() -> str:
+    return (
+        os.environ.get("WORKSPACE_AGENT_MCP_USER_ID")
+        or os.environ.get("LANGDOCK_WORKEROS_USER_ID")
+        or _bootstrap_user_id()
+    ).strip() or _bootstrap_user_id()
+
+
+def _workspace_agent_mcp_conversation_id(raw: Any) -> str:
+    value = str(raw or "default").strip() or "default"
+    safe = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", value)[:160].strip("._:-")
+    return f"langdock:{safe or 'default'}"
+
+
+def _workspace_agent_mcp_discovery() -> Dict[str, Any]:
+    return {
+        "name": "workeros-workspace-agent",
+        "version": "0.1.0",
+        "protocol": _WORKSPACE_AGENT_MCP_PROTOCOL_VERSION,
+        "transport": "streamable-http",
+        "endpoint": "POST /api/mcp",
+        "tools": [_WORKSPACE_AGENT_MCP_TOOL_NAME],
+    }
+
+
+async def _collect_workspace_agent_reply_for_langdock(
+    *,
+    message: str,
+    user_id: str,
+    conversation_id: Optional[str],
+) -> str:
+    return await _collect_workspace_agent_reply_for_slack(
+        message=message,
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+
+
+def _mcp_result(request_id: Any, result: Dict[str, Any]) -> Dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def _mcp_error(request_id: Any, code: int, message: str) -> Dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {"code": code, "message": message},
+    }
+
+
+def _mcp_tool_error(message: str) -> Dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": message}],
+        "isError": True,
+    }
+
+
+def _workspace_agent_mcp_tool_definition() -> Dict[str, Any]:
+    return {
+        "name": _WORKSPACE_AGENT_MCP_TOOL_NAME,
+        "description": (
+            "Ask the Workeros workspace agent to inspect or operate the workspace: "
+            "workers, runs, approvals, brain packs, connections, and secret names."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The instruction or question for the Workeros workspace agent.",
+                },
+                "conversation_id": {
+                    "type": "string",
+                    "description": "Optional stable Langdock thread or chat id for continuity.",
+                },
+            },
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+    }
+
+
+async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    request_id = payload.get("id")
+    method = str(payload.get("method") or "")
+    if "id" not in payload and method.startswith("notifications/"):
+        return None
+    if method == "initialize":
+        return _mcp_result(
+            request_id,
+            {
+                "protocolVersion": _WORKSPACE_AGENT_MCP_PROTOCOL_VERSION,
+                "capabilities": {"tools": {}},
+                "serverInfo": {
+                    "name": "workeros-workspace-agent",
+                    "version": "0.1.0",
+                },
+            },
+        )
+    if method == "tools/list":
+        return _mcp_result(request_id, {"tools": [_workspace_agent_mcp_tool_definition()]})
+    if method != "tools/call":
+        return _mcp_error(request_id, -32601, f"Unsupported MCP method: {method or 'unknown'}")
+
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    tool_name = str(params.get("name") or "")
+    if tool_name != _WORKSPACE_AGENT_MCP_TOOL_NAME:
+        return _mcp_result(request_id, _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}"))
+    arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+    message = str(arguments.get("message") or "").strip()
+    if not message:
+        return _mcp_result(request_id, _mcp_tool_error("Tool argument 'message' is required"))
+    if len(message) > 20000:
+        return _mcp_result(request_id, _mcp_tool_error("Tool argument 'message' is too long"))
+
+    conversation_id = _workspace_agent_mcp_conversation_id(arguments.get("conversation_id"))
+    try:
+        reply = await _collect_workspace_agent_reply_for_langdock(
+            message=message,
+            user_id=_workspace_agent_mcp_user_id(),
+            conversation_id=conversation_id,
+        )
+    except Exception as exc:
+        return _mcp_error(request_id, -32603, f"Workspace agent call failed: {exc}")
+    text = reply or "(No reply)"
+    return _mcp_result(
+        request_id,
+        {
+            "content": [{"type": "text", "text": text}],
+            "structuredContent": {"conversation_id": conversation_id},
+            "isError": False,
+        },
+    )
+
+
+async def _workspace_agent_mcp_post(request: Request) -> Response:
+    if not _workspace_agent_mcp_enabled():
+        raise HTTPException(status_code=503, detail="Workspace Agent MCP is disabled")
+    if not _workspace_agent_mcp_token():
+        raise HTTPException(status_code=503, detail="WORKSPACE_AGENT_MCP_TOKEN is not configured")
+    if not _verify_workspace_agent_mcp_auth(request):
+        raise HTTPException(status_code=401, detail="Invalid Workspace Agent MCP token")
+
+    body = await request.body()
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid MCP JSON payload") from exc
+
+    if isinstance(payload, list):
+        responses = []
+        for item in payload:
+            if not isinstance(item, dict):
+                responses.append(_mcp_error(None, -32600, "Invalid JSON-RPC request"))
+                continue
+            try:
+                response = await _handle_workspace_agent_mcp_message(item)
+            except Exception as exc:
+                response = _mcp_error(item.get("id"), -32603, f"Internal error: {exc}")
+            if response is not None:
+                responses.append(response)
+        if not responses:
+            return Response(status_code=204)
+        return JSONResponse(responses)
+
+    if not isinstance(payload, dict):
+        return JSONResponse(_mcp_error(None, -32600, "Invalid JSON-RPC request"), status_code=400)
+    try:
+        response = await _handle_workspace_agent_mcp_message(payload)
+    except Exception as exc:
+        response = _mcp_error(payload.get("id"), -32603, f"Internal error: {exc}")
+    if response is None:
+        return Response(status_code=204)
+    return JSONResponse(response)
+
+
+@app.get("/api/mcp")
+async def workspace_agent_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/mcp")
+async def workspace_agent_mcp_mount_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/langdock/mcp")
+async def langdock_workspace_agent_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/workspace-agent/mcp")
+async def workspace_agent_named_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/api/langdock/mcp")
+async def api_langdock_workspace_agent_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/api/workspace-agent/mcp")
+async def api_workspace_agent_named_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.post("/api/mcp")
+async def api_workspace_agent_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/mcp")
+async def workspace_agent_mcp_mount(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/langdock/mcp")
+async def langdock_workspace_agent_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/workspace-agent/mcp")
+async def workspace_agent_named_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/api/langdock/mcp")
+async def api_langdock_workspace_agent_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/api/workspace-agent/mcp")
+async def api_workspace_agent_named_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
 
 
 # ---------------------------------------------------------------------------
