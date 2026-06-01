@@ -63,9 +63,9 @@ import { useRunStream } from "@/lib/useRunStream";
 // ABOVE the Run form on the Run tab. Danger zone moves to /edit only
 // (already exists there). Tech details + I/O chips dropped (redundant
 // with the form fields below + the Run/Source/Edit tabs).
-type Section = "about" | "run" | "configure" | "code" | "triggers" | "connections" | "runs";
+type Section = "about" | "run" | "configure" | "code" | "connections" | "runs";
 
-const VALID_SECTIONS: Section[] = ["about", "run", "configure", "code", "triggers", "connections", "runs"];
+const VALID_SECTIONS: Section[] = ["about", "run", "configure", "code", "connections", "runs"];
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
@@ -79,7 +79,6 @@ const SECTION_TO_HASH: Record<Section, string> = {
   about: "about",
   run: "run",
   configure: "configure",
-  triggers: "triggers",
   runs: "history",
   connections: "connections",
   code: "advanced",
@@ -88,7 +87,7 @@ const HASH_TO_SECTION: Record<string, Section> = {
   about: "about",
   run: "run",
   configure: "configure",
-  triggers: "triggers",
+  triggers: "configure", // legacy — triggers tab merged into configure
   history: "runs",
   apps: "connections",
   connection: "connections",
@@ -118,7 +117,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: "about", label: "About", icon: <BookOpen className="w-4 h-4" /> },
   { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
   { id: "configure", label: "Configure", icon: <Pencil className="w-4 h-4" /> },
-  { id: "triggers", label: "Triggers", icon: <Clock className="w-4 h-4" /> },
   { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
   { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
   { id: "code", label: "Advanced", icon: <Code2 className="w-4 h-4" /> },
@@ -191,7 +189,6 @@ export default function WorkerDetailPage() {
 
   // Triggers edit state (always editable regardless of edit mode)
   const [triggerRows, setTriggerRows] = useState<TriggerRow[]>([]);
-  const [savingTriggers, setSavingTriggers] = useState(false);
   const [triggersDirty, setTriggersDirty] = useState(false);
 
   // S42: edit mode — files editor state (Source tab in edit mode)
@@ -610,26 +607,25 @@ export default function WorkerDetailPage() {
     }
   }
 
-  async function handleSaveTriggers() {
+  async function handleSaveAdvanced() {
     if (!worker) return;
-    setSavingTriggers(true);
+    setSaving(true);
     try {
-      const triggerYaml = buildTriggersYaml(triggerRows);
-      const currentYaml =
-        deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
-        worker.manifest_yaml ||
-        "";
-      const newYaml = replaceTriggerBlock(currentYaml, triggerYaml);
-      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: newYaml }]);
-      toast.success("Triggers saved");
-      setTriggersDirty(false);
-      // Reload worker
+      await api.workers.updateFiles(worker.id, editFiles);
+      toast.success("Worker saved");
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
+      const updatedFiles = (updated.files || [])
+        .filter((f: WorkerFile) => !f.binary)
+        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to save triggers");
+      toast.error(e instanceof Error ? e.message : "Failed to save");
     } finally {
-      setSavingTriggers(false);
+      setSaving(false);
     }
   }
 
@@ -685,6 +681,12 @@ export default function WorkerDetailPage() {
         }
       }
 
+      // Patch trigger block if triggers are dirty
+      if (triggersDirty) {
+        const triggerYaml = buildTriggersYaml(triggerRows);
+        patched = replaceTriggerBlock(patched, triggerYaml);
+      }
+
       // Patch input defaults
       for (const [name, value] of Object.entries(configInputDefaults)) {
         patched = patchInputDefault(patched, name, value);
@@ -692,6 +694,7 @@ export default function WorkerDetailPage() {
 
       await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
       toast.success("Worker saved");
+      setTriggersDirty(false);
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
       setConfigDesc(updated.description || "");
@@ -1152,7 +1155,7 @@ export default function WorkerDetailPage() {
                     <p className="text-xs font-mono truncate">{s.suggested}</p>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground italic">Go to the Triggers or Advanced tab to apply the suggestion.</p>
+                <p className="text-xs text-muted-foreground italic">Apply the suggestion in the Configure or Advanced tab.</p>
               </div>
             ))}
           </div>
@@ -1222,7 +1225,7 @@ export default function WorkerDetailPage() {
               <TabsTrigger key={item.id} value={item.id}>
                 {item.icon}
                 <span>{item.label}</span>
-                {item.id === "triggers" && triggersCount > 1 && (
+                {item.id === "configure" && triggersCount > 1 && (
                   <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
                 )}
                 {item.id === "runs" && runsCount > 0 && (
@@ -1325,6 +1328,28 @@ export default function WorkerDetailPage() {
               />
             </div>
 
+            {/* Trigger */}
+            <TriggersEditor
+              rows={triggerRows}
+              onChange={(rows) => {
+                setTriggerRows(rows);
+                setTriggersDirty(true);
+              }}
+              connections={connections}
+              webhookUrl={worker.webhook_url}
+              dirty={false}
+              saving={false}
+              onDiscard={() => {
+                const specs: TriggerSpec[] = worker.triggers_spec || [];
+                if (specs.length > 0) {
+                  setTriggerRows(specs.map((s) => makeTriggerRow(s)));
+                } else if (worker.config.trigger) {
+                  setTriggerRows([makeTriggerRow(worker.config.trigger as TriggerSpec)]);
+                }
+                setTriggersDirty(false);
+              }}
+            />
+
             {/* Inputs */}
             {(worker.config.inputs || []).length > 0 && (
               <div className="space-y-3">
@@ -1352,23 +1377,6 @@ export default function WorkerDetailPage() {
                           setConfigInputDefaults((prev) => ({ ...prev, [inp.name]: e.target.value }))
                         }
                       />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Secrets (read-only) */}
-            {requiredSecrets.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Secrets</Label>
-                <div className="rounded-lg border border-border divide-y divide-border">
-                  {requiredSecrets.map((s) => (
-                    <div key={s} className="flex items-center justify-between px-4 py-2.5">
-                      <span className="text-sm font-mono">{s}</span>
-                      <Link href="/connections/secrets">
-                        <Button size="sm" variant="outline" className="h-6 text-xs border-line">Configure</Button>
-                      </Link>
                     </div>
                   ))}
                 </div>
@@ -1413,49 +1421,33 @@ export default function WorkerDetailPage() {
                 for guided editing.
               </p>
             </div>
-            {isEditMode ? (
-              <FilesEditor
-                mode="edit"
-                files={editFiles}
-                selectedPath={editSelectedPath}
-                onSelect={setEditSelectedPath}
-                onSelectedPathChange={setEditSelectedPath}
-                onChange={setEditFiles}
-              />
-            ) : (
-              <FilesEditor
-                mode="view"
-                files={deriveSourceFiles(worker)}
-                selectedPath={selectedFile}
-                onSelect={setSelectedFile}
-              />
-            )}
-          </div>
-        )}
-
-        {activeSection === "triggers" && (
-          <div className="max-w-2xl space-y-6">
-            <TriggersEditor
-              rows={triggerRows}
-              onChange={(rows) => {
-                setTriggerRows(rows);
-                setTriggersDirty(true);
-              }}
-              connections={connections}
-              webhookUrl={worker.webhook_url}
-              dirty={triggersDirty}
-              saving={savingTriggers}
-              onSave={handleSaveTriggers}
-              onDiscard={() => {
-                const specs: TriggerSpec[] = worker.triggers_spec || [];
-                if (specs.length > 0) {
-                  setTriggerRows(specs.map((s) => makeTriggerRow(s)));
-                } else if (worker.config.trigger) {
-                  setTriggerRows([makeTriggerRow(worker.config.trigger as TriggerSpec)]);
-                }
-                setTriggersDirty(false);
-              }}
+            <FilesEditor
+              mode="edit"
+              files={editFiles}
+              selectedPath={editSelectedPath}
+              onSelect={setEditSelectedPath}
+              onSelectedPathChange={setEditSelectedPath}
+              onChange={setEditFiles}
             />
+            {filesDirty && (
+              <div className="flex items-center gap-3 pt-1">
+                <Button size="sm" onClick={handleSaveAdvanced} disabled={saving}>
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditFiles(
+                      Object.entries(editFilesOriginal).map(([path, content]) => ({ path, content }))
+                    );
+                  }}
+                  disabled={saving}
+                >
+                  Discard
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
