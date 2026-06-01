@@ -11,6 +11,7 @@ from models import (  # noqa: E402
     WorkerConfig,
     WorkerRuntime,
     WorkerTrigger,
+    declared_composio_connections,
     parse_worker_manifest,
     worker_contract_to_worker_config,
 )
@@ -39,6 +40,10 @@ def test_mcp_connection_schema_preserves_legacy_composio_strings():
         "connections": [
             "gmail",
             {
+                "app": "google_search_console",
+                "allowed_tools": ["GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY"],
+            },
+            {
                 "mcp": {
                     "label": "github",
                     "url": "https://api.githubcopilot.com/mcp/",
@@ -54,10 +59,16 @@ def test_mcp_connection_schema_preserves_legacy_composio_strings():
     config = worker_contract_to_worker_config(contract, "mcp-test")
 
     assert config.connections[0] == "gmail"
-    assert config.connections[1].mcp.label == "github"
-    assert config.connections[1].mcp.allowed_tools == ["list_pull_requests", "get_repo"]
+    assert config.connections[1].composio.app == "google_search_console"
+    assert config.connections[1].composio.allowed_tools == ["GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY"]
+    assert config.connections[2].mcp.label == "github"
+    assert config.connections[2].mcp.allowed_tools == ["list_pull_requests", "get_repo"]
+    assert declared_composio_connections(config) == {
+        "gmail": None,
+        "google_search_console": ["GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY"],
+    }
     driver = AgentDriver()
-    assert driver._composio_connection_names(config) == ["gmail"]
+    assert driver._composio_connection_names(config) == ["gmail", "google_search_console"]
     assert [connection.label for connection in driver._mcp_connections(config)] == ["github"]
 
 

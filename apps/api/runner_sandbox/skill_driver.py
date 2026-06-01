@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, Iterable, Optional
 import requests
 
 from .base import SandboxDriver
-from models import WorkerConfig, WorkerResult
+from models import WorkerConfig, WorkerResult, declared_composio_connections
 from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.skill")
@@ -582,6 +582,13 @@ class SkillRuntimeDriver(SandboxDriver):
                 }
 
         # Fail fast if the required Composio connection is not active — mirrors runner_utils.py:224.
+        allowed_tools = declared_composio_connections(config).get(app_name)
+        if allowed_tools is not None and tool_slug.upper() not in allowed_tools:
+            return {
+                "ok": False,
+                "error": f"Tool {tool_slug} is not allowed for worker connection {app_name}",
+                "error_code": "tool_outside_connection_scope",
+            }
         connection_id = self._connection_id_for(app_name, worker_id, config)
         if connection_id is None:
             return {
@@ -658,9 +665,7 @@ class SkillRuntimeDriver(SandboxDriver):
         return None
 
     def _declared_connections(self, config: Optional[WorkerConfig]) -> list[str]:
-        if not config:
-            return []
-        return sorted({app.lower() for app in (config.connections or []) if app})
+        return sorted(declared_composio_connections(config).keys())
 
     def _filename_for_output(self, name: str, config: Optional[WorkerConfig]) -> str:
         output = self._declared_output(name, config)
