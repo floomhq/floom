@@ -1,0 +1,37 @@
+id: search_console_insights
+name: Search Console Insights
+description: Weekly SEO audit via Google Search Console. Pulls 28-day performance data, compares to the previous 28 days, surfaces CTR opportunities, page-2 pushes, content decay, new queries, and runs diagnostics on problematic URLs.
+
+trigger:
+  type: cron
+  cron: "0 9 * * 1"
+
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: local
+
+inputs:
+  - name: site_url
+    label: Site URL
+    type: text
+    required: true
+    default: "https://rocketlist.ai/"
+    placeholder: "https://example.com/"
+
+  - name: run_diagnostics
+    label: Run URL diagnostics
+    type: boolean
+    required: false
+    default: true
+
+secrets: []
+
+outputs:
+  - name: seo_report
+    label: SEO Action Report
+    type: markdown
+
+  - name: diagnostics
+    label: GSC Diagnostics
+    type: markdown
