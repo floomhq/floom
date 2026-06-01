@@ -636,3 +636,12 @@ export interface VersionSummary {
   change_source: string;
   created_at: string;
 }
+
+export interface VersionFile {
+  path: string;
+  content: string;
+}
+
+export interface VersionDetail {
+  files: VersionFile[];
+}
