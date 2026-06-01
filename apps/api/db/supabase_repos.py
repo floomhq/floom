@@ -2025,10 +2025,22 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
     and showing the raw value to the user exactly once.
     """
 
-    def create(self, *, user_id: str, name: str, token_hash: str) -> dict[str, Any]:
+    def create(
+        self,
+        *,
+        user_id: str,
+        name: str,
+        token_hash: str,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        resolved_workspace_id = _resolve_workspace_id_for_write(
+            user_id=user_id,
+            explicit_workspace_id=workspace_id,
+        )
         self._client.table("api_tokens").insert(
             {
                 "user_id": user_id,
+                "workspace_id": resolved_workspace_id,
                 "name": name,
                 "token_hash": token_hash,
             }
@@ -2041,7 +2053,7 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
     def get_by_hash(self, token_hash: str) -> dict[str, Any] | None:
         response = (
             self._client.table("api_tokens")
-            .select("id,user_id,name,created_at,last_used_at")
+            .select("id,user_id,workspace_id,name,created_at,last_used_at")
             .eq("token_hash", token_hash)
             .limit(1)
             .execute()
@@ -2049,23 +2061,27 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
         return _first_row(response)
 
     def list_for_user(self, *, user_id: str) -> list[dict[str, Any]]:
-        response = (
+        builder = (
             self._client.table("api_tokens")
-            .select("id,user_id,name,created_at,last_used_at")
+            .select("id,user_id,workspace_id,name,created_at,last_used_at")
             .eq("user_id", user_id)
-            .order("created_at")
-            .execute()
         )
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            builder = builder.eq("workspace_id", workspace_id)
+        response = builder.order("created_at").execute()
         return _response_rows(response)
 
     def has_any(self, *, user_id: str) -> bool:
-        response = (
+        builder = (
             self._client.table("api_tokens")
             .select("id", count="exact")
             .eq("user_id", user_id)
-            .limit(1)
-            .execute()
         )
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            builder = builder.eq("workspace_id", workspace_id)
+        response = builder.limit(1).execute()
         return int(getattr(response, "count", 0) or 0) > 0
 
     def touch(self, *, token_id: str) -> None:
@@ -2074,13 +2090,16 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
         ).eq("id", token_id).execute()
 
     def delete(self, *, token_id: str, user_id: str) -> bool:
-        response = (
+        builder = (
             self._client.table("api_tokens")
             .delete()
             .eq("id", token_id)
             .eq("user_id", user_id)
-            .execute()
         )
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            builder = builder.eq("workspace_id", workspace_id)
+        response = builder.execute()
         return bool(_response_rows(response))
 
 

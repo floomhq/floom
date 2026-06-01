@@ -4,7 +4,7 @@
  * Cloud overlay for CliCommandPanel.
  *
  * The engine's version stores the token in browser localStorage ("single-user
- * v0"). In cloud each user has their own per-user PATs stored server-side.
+ * v0"). In cloud each workspace has its own PATs stored server-side.
  * This overlay replaces localStorage reads with real API calls:
  *   GET  /app/api/proxy/auth/tokens        — list tokens (no raw values)
  *   POST /app/api/proxy/auth/tokens        — create token (raw value once)
@@ -33,6 +33,7 @@ const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
 
 type Token = {
   id: string;
+  workspace_id: string;
   name: string;
   created_at: string;
   last_used_at?: string | null;
@@ -131,14 +132,14 @@ export function CliCommandPanel() {
     <div className="space-y-8">
       <section className="space-y-3">
         <div>
-          <h2 className="text-base font-medium text-foreground">Cloud API tokens</h2>
+          <h2 className="text-base font-medium text-foreground">Workspace API tokens</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Personal Access Tokens for CLI, MCP, and direct API access on{" "}
+            Tokens for CLI, MCP, and direct API access for the active workspace on{" "}
             <code className="font-mono">workeros-api.floom.dev</code>. Use them
             as <code className="font-mono">x-floom-token</code>; OSS secrets use{" "}
             <code className="font-mono">x-floom-secret</code> on{" "}
             <code className="font-mono">workers-api.floom.dev</code>.
-            Raw values are shown only once.
+            Raw values are shown only once and cannot access other workspaces.
           </p>
         </div>
 
@@ -189,6 +190,7 @@ export function CliCommandPanel() {
                   <p className="text-[10px] text-muted-foreground">
                     Created {new Date(t.created_at).toLocaleDateString()}
                     {t.last_used_at ? ` · Last used ${new Date(t.last_used_at).toLocaleDateString()}` : " · Never used"}
+                    {t.workspace_id ? ` · ${t.workspace_id}` : ""}
                   </p>
                 </div>
                 <Button

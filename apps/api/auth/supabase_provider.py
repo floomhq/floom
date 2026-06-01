@@ -12,8 +12,10 @@ from urllib.parse import urljoin
 # Short-lived in-process caches to avoid a Supabase round-trip on every
 # authenticated request.
 #
-# PAT cache: hash → (user_id, cached_at). TTL 60 s — PAT revocation takes
-# effect within one minute, which is acceptable for an API token.
+# PAT cache: hash → (user_id, workspace_id, cached_at). TTL 60 s — PAT
+# revocation takes effect within one minute, which is acceptable for an API
+# token. workspace_id is part of the cached value because Cloud PATs are
+# workspace-scoped credentials, not user-wide credentials.
 #
 # Workspace cache: user_id → (workspace_id, cached_at). TTL 30 s — workspace
 # switches are infrequent; stale workspace selection for <30 s is fine.
@@ -22,7 +24,7 @@ from urllib.parse import urljoin
 # are safe under uvicorn's threaded worker model (default sync workers).
 # ---------------------------------------------------------------------------
 _cache_lock = Lock()
-_pat_cache: dict[str, tuple[str, float]] = {}   # hash → (user_id, ts)
+_pat_cache: dict[str, tuple[str, str | None, float]] = {}   # hash → (user_id, workspace_id, ts)
 _ws_cache:  dict[str, tuple[str, float]] = {}   # user_id → (workspace_id, ts)
 _PAT_TTL = 60.0
 _WS_TTL  = 30.0
@@ -203,10 +205,13 @@ class SupabaseAuthProvider:
         # Fast path: PAT already in cache and not expired.
         with _cache_lock:
             cached = _pat_cache.get(token_hash)
-        if cached and (now - cached[1]) < _PAT_TTL:
+        if cached and (now - cached[2]) < _PAT_TTL:
             user_id = cached[0]
-            return await self._resolve_workspace_and_build_context(
-                user_id=user_id, email=None, scopes=("api",), request=request
+            workspace_id = cached[1]
+            return await self._build_pat_context(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                request=request,
             )
 
         # Slow path: DB lookup (one round-trip to Supabase).
@@ -220,14 +225,46 @@ class SupabaseAuthProvider:
             raise HTTPException(status_code=401, detail="invalid token")
 
         user_id = str(row["user_id"])
+        workspace_id = str(row["workspace_id"]) if row.get("workspace_id") else None
         with _cache_lock:
-            _pat_cache[token_hash] = (user_id, now)
+            _pat_cache[token_hash] = (user_id, workspace_id, now)
 
         # Touch last_used_at at most once per cache TTL, not on every request.
         repo.touch(token_id=str(row["id"]))
 
+        return await self._build_pat_context(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            request=request,
+        )
+
+    async def _build_pat_context(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str | None,
+        request: Request,
+    ) -> AuthContext:
+        header_workspace_id = request.headers.get(ACTIVE_WORKSPACE_HEADER)
+        cookie_workspace_id = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
+        requested_workspace_id = (
+            (header_workspace_id or "").strip() or cookie_workspace_id
+        )
+
+        if workspace_id and requested_workspace_id and requested_workspace_id != workspace_id:
+            raise HTTPException(status_code=403, detail="token is not valid for this workspace")
+
+        if workspace_id:
+            set_active_workspace_id(workspace_id)
+            return AuthContext(user_id=user_id, email=None, scopes=("api",))
+
+        # Legacy safety path for rows created before the workspace_id
+        # migration is applied. Once migrated, all PAT rows have workspace_id.
         return await self._resolve_workspace_and_build_context(
-            user_id=user_id, email=None, scopes=("api",), request=request
+            user_id=user_id,
+            email=None,
+            scopes=("api",),
+            request=request,
         )
 
     async def _resolve_workspace_and_build_context(
