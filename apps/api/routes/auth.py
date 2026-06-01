@@ -124,16 +124,18 @@ def _cookie_domain() -> str | None:
 
 
 def _set_cookie(response: JSONResponse | RedirectResponse, name: str, value: str, *, max_age: int) -> None:
-    response.set_cookie(
-        key=name,
-        value=value,
-        max_age=max_age,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        path="/",
-        domain=_cookie_domain(),
-    )
+    parts = [
+        f"{name}={value}",
+        f"Max-Age={int(max_age)}",
+        "Path=/",
+        "HttpOnly",
+        "Secure",
+        "SameSite=lax",
+    ]
+    domain = _cookie_domain()
+    if domain:
+        parts.append(f"Domain={domain}")
+    response.headers.append("set-cookie", "; ".join(parts))
 
 
 def _clear_cookie(response: JSONResponse | RedirectResponse, name: str) -> None:
@@ -156,12 +158,15 @@ def _encode_session_cookie(session: Any) -> str:
     }
     return base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode()
-    ).decode()
+    ).decode().rstrip("=")
 
 
 def _decode_session_cookie(raw_value: str | None) -> dict[str, Any] | None:
     if not raw_value:
         return None
+    raw_value = raw_value.strip()
+    if len(raw_value) >= 2 and raw_value[0] == '"' and raw_value[-1] == '"':
+        raw_value = raw_value[1:-1]
     padded = raw_value + "=" * (-len(raw_value) % 4)
     try:
         decoded = base64.urlsafe_b64decode(padded.encode()).decode()

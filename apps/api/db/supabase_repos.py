@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timedelta, timezone
@@ -303,12 +304,24 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         ids = [item for item in dict.fromkeys(skill_version_ids) if item]
         if not ids:
             return {}
-        response = (
-            self._client.table("skill_versions")
-            .select("*")
-            .in_("id", ids)
-            .execute()
-        )
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                response = (
+                    self._client.table("skill_versions")
+                    .select("*")
+                    .in_("id", ids)
+                    .execute()
+                )
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0:
+                    time.sleep(0.2)
+                    continue
+                raise
+        else:
+            raise last_error or RuntimeError("failed to load skill versions")
         return {
             row["id"]: row
             for row in _response_rows(response)

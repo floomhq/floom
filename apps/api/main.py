@@ -26,6 +26,7 @@ from apps.api.cloud_webhooks import verify_webhook_token
 from apps.api._engine import import_engine_module
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.cli_auth_devices import router as cli_auth_devices_router
+from apps.api.routes.novasearch import router as novasearch_router
 from apps.api.routes.slack_events import router as slack_events_router
 from apps.api.routes.telemetry import router as telemetry_router
 from apps.api.routes.workspace_agent import router as workspace_agent_router
@@ -91,6 +92,7 @@ app.include_router(auth_router)
 app.include_router(workspaces_router, prefix="/api")
 app.include_router(cli_auth_devices_router, prefix="/api")
 app.include_router(telemetry_router, prefix="/api")
+app.include_router(novasearch_router, prefix="/api")
 app.include_router(workspace_agent_router, prefix="/api")
 app.include_router(slack_events_router, prefix="/api")
 
