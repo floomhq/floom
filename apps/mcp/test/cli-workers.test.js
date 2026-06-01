@@ -172,6 +172,39 @@ test("workers validate rejects missing runtime", async () => {
   assert.match(result.stderr, /runtime field/);
 });
 
+test("workers validate rejects Composio CLI subprocess in E2B worker", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: `${scriptWorkerYml}connections: [gmail]\n`,
+    run: `import subprocess\nsubprocess.run(["composio", "execute", "GMAIL_SEND_EMAIL"])\n`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /shells out to `composio execute`/);
+});
+
+test("workers validate enforces structured connection tool allowlists", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: `${scriptWorkerYml}connections:\n  - app: gmail\n    allowed_tools:\n      - GMAIL_FETCH_EMAILS\n`,
+    run: `import os\nTOOL = "GMAIL_SEND_EMAIL"\nAPI = os.environ["WORKEROS_API_URL"]\nRUN = os.environ["FLOOM_RUN_ID"]\nurl = f"{API}/runs/{RUN}/composio-execute/{TOOL}"\n`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /gmail.allowed_tools does not include it/);
+});
+
+test("workers validate accepts GSC proxy worker with long app prefix", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: `${scriptWorkerYml}connections:\n  - app: google_search_console\n    allowed_tools:\n      - GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY\n`,
+    run: `import os\nTOOL = "GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY"\nAPI = os.environ["WORKEROS_API_URL"]\nRUN = os.environ["FLOOM_RUN_ID"]\nurl = f"{API}/runs/{RUN}/composio-execute/{TOOL}"\n`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Validated cli-test-worker/);
+});
+
 test("workers push creates a new worker with POST /workers", async (t) => {
   const mock = await startMockApi({ existing: false });
   t.after(() => mock.server.close());

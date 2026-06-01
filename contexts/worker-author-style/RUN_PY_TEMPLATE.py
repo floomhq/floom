@@ -15,7 +15,8 @@
 #        value is the path, not a bare filename (that double-prepend is a top crash).
 #   2. Secrets are available in os.environ (the harness sets them) and ALSO in a
 #      `secrets.json` file. Read os.environ first, fall back to secrets.json.
-#      Connections (Composio) are in `connections.json` when present.
+#      Connections (Composio) are in `connections.json` when present. Call
+#      Composio through the Workeros proxy, never by shelling out to the CLI.
 #   3. The worker writes its output file(s) under `out/` (mkdir it).
 #   4. The worker writes `result.json` IN THE WORKING DIRECTORY (NOT under out/),
 #      with the EXACT schema below, on BOTH the success and the error path, then
@@ -59,12 +60,16 @@
 #     FILE output -> one out/ file -> one outputs entry (the path) + one artifact.
 #   - never open() a scalar input value; never hardcode a secret.
 #   - always write result.json, even when you bail out early on bad input.
+#   - never run `composio execute` with subprocess. E2B has no Composio CLI and
+#     COMPOSIO_API_KEY stays on the API host.
 #
 # Copy this skeleton and fill in `main()`. Keep it the smallest thing that works.
 
 import json
 import os
 from pathlib import Path
+from urllib import request as urlrequest
+from urllib.error import HTTPError, URLError
 
 
 def _load_secrets():
@@ -77,6 +82,44 @@ def _load_secrets():
 
     def get(name, default=None):
         return os.environ.get(name) or file_secrets.get(name) or default
+
+
+def _load_connections():
+    try:
+        with open("connections.json") as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def composio_execute(app, tool_slug, arguments):
+    """Execute a declared Composio tool through the Workeros API proxy."""
+    run_id = os.environ.get("FLOOM_RUN_ID", "")
+    api_url = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev").rstrip("/")
+    connection_id = str(_load_connections().get(app) or "").strip()
+    if not run_id:
+        raise RuntimeError("FLOOM_RUN_ID is not set")
+    if not connection_id:
+        raise RuntimeError(f"{app} connection is not active")
+
+    body = json.dumps({
+        "connected_account_id": connection_id,
+        "arguments": arguments,
+    }).encode("utf-8")
+    req = urlrequest.Request(
+        f"{api_url}/runs/{run_id}/composio-execute/{tool_slug}",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=120) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Composio proxy HTTP {exc.code}: {detail}") from exc
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Composio proxy failed: {exc}") from exc
 
     return get
 

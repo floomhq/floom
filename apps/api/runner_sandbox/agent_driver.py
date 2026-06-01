@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from models import WorkerConfig, WorkerResult
+from models import WorkerConfig, WorkerResult, declared_composio_connections
 from runner_utils import ARTIFACTS_DIR, _validate_output_schema
 from worker_registry import WORKERS_DIR
 
@@ -1024,11 +1024,7 @@ class AgentDriver(SandboxDriver):
         return sdk_tools
 
     def _composio_connection_names(self, config: WorkerConfig) -> list[str]:
-        names: list[str] = []
-        for connection in config.connections:
-            if isinstance(connection, str):
-                names.append(connection)
-        return names
+        return sorted(declared_composio_connections(config).keys())
 
     def _disabled_tool_names(self, config: WorkerConfig) -> set[str]:
         disabled = getattr(config.runtime, "disable_tools", None) or []
@@ -1092,7 +1088,7 @@ class AgentDriver(SandboxDriver):
                 log_fn(str(args.get("message") or ""), level)
                 return {"ok": True}
             if name.startswith("composio__") or name.startswith("composio."):
-                return self._composio_execute(name, args, worker_id, log_fn)
+                return self._composio_execute(name, args, worker_id, log_fn, config)
             return {"ok": False, "error": f"Unknown tool: {name}"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -1428,6 +1424,7 @@ class AgentDriver(SandboxDriver):
         args: Dict[str, Any],
         worker_id: str,
         log_fn: Callable[[str, str], None],
+        config: WorkerConfig,
     ) -> Dict[str, Any]:
         tool = str(args.get("tool") or "")
         arguments = args.get("arguments") or {}
@@ -1445,6 +1442,12 @@ class AgentDriver(SandboxDriver):
         elif name.startswith("composio."):
             parts = name.split(".")
             app_name = parts[1] if len(parts) >= 3 else ""
+        declared = declared_composio_connections(config)
+        if app_name.lower() not in declared:
+            return {"ok": False, "error": f"Worker did not declare connection to {app_name}", "error_code": "tool_outside_declared_connections"}
+        allowed_tools = declared.get(app_name.lower())
+        if allowed_tools is not None and tool.upper() not in allowed_tools:
+            return {"ok": False, "error": f"Tool {tool} is not allowed for worker connection {app_name}", "error_code": "tool_outside_connection_scope"}
         with get_db() as conn:
             row = conn.execute(
                 "SELECT composio_connection_id FROM composio_connections WHERE app_name = ? AND status = 'active'",

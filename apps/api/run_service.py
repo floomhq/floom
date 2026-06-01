@@ -2275,7 +2275,7 @@ def execute_run(
         if config.connections:
             log_fn("Resolving connections", level="debug")
             from runner_utils import _resolve_connections
-            connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config)
+            connection_ids, conn_err = _resolve_connections(worker_id, log_fn, config, user_id=owner_id)
             if conn_err:
                 update_run_status(run_id, RunStatus.FAILED.value, error=conn_err, error_code="missing_connection", user_id=owner_id, repos=repos_obj)
                 publish_run_part(run_id, {"type": "finish", "status": "failed", "error": conn_err})

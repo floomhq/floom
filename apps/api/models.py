@@ -173,10 +173,106 @@ class WorkerMCPConnection(BaseModel):
 
 
 class WorkerConnection(BaseModel):
-    mcp: WorkerMCPConnection
+    mcp: Optional[WorkerMCPConnection] = None
+    composio: Optional["WorkerComposioConnection"] = None
+    # Shorthand for:
+    #   connections:
+    #     - app: gmail
+    #       allowed_tools: [GMAIL_FETCH_EMAILS]
+    app: Optional[str] = None
+    allowed_tools: Optional[List[str]] = None
+
+    @model_validator(mode="after")
+    def validate_connection_kind(self) -> "WorkerConnection":
+        composio_shorthand = self.app is not None
+        kind_count = int(self.mcp is not None) + int(self.composio is not None or composio_shorthand)
+        if kind_count != 1:
+            raise ValueError("connection entries must declare exactly one of: mcp, composio, or app")
+        if composio_shorthand:
+            self.composio = WorkerComposioConnection(
+                app=self.app or "",
+                allowed_tools=self.allowed_tools,
+            )
+        return self
+
+
+class WorkerComposioConnection(BaseModel):
+    app: str
+    allowed_tools: Optional[List[str]] = None
+
+    @field_validator("app")
+    @classmethod
+    def validate_app(cls, value: str) -> str:
+        stripped = value.strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", stripped):
+            raise ValueError("composio app must be 1-64 lowercase letters, digits, underscores, or hyphens")
+        return stripped
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def validate_composio_allowed_tools(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        cleaned = [item.strip().upper() for item in value if item and item.strip()]
+        if len(cleaned) != len(value):
+            raise ValueError("composio allowed_tools entries must be non-empty")
+        return cleaned
 
 
 WorkerConnectionSpec = Union[str, WorkerConnection]
+
+
+def composio_connection_app_name(connection: WorkerConnectionSpec) -> Optional[str]:
+    if isinstance(connection, str):
+        return connection.strip().lower() or None
+    composio = getattr(connection, "composio", None)
+    if composio is not None:
+        return composio.app
+    return None
+
+
+def composio_connection_allowed_tools(connection: WorkerConnectionSpec) -> Optional[List[str]]:
+    if isinstance(connection, str):
+        return None
+    composio = getattr(connection, "composio", None)
+    if composio is None:
+        return None
+    return composio.allowed_tools
+
+
+def declared_composio_connections(config: Optional["WorkerConfig"]) -> Dict[str, Optional[List[str]]]:
+    declared: Dict[str, Optional[List[str]]] = {}
+    if not config:
+        return declared
+    for connection in config.connections or []:
+        app = composio_connection_app_name(connection)
+        if not app:
+            continue
+        allowed_tools = composio_connection_allowed_tools(connection)
+        if app not in declared:
+            declared[app] = allowed_tools
+            continue
+        existing = declared.get(app)
+        if existing is None:
+            # A legacy string declaration means full app access for this worker;
+            # a later structured declaration must not accidentally narrow it.
+            continue
+        elif allowed_tools is None:
+            declared[app] = None
+        else:
+            declared[app] = sorted(set(existing) | set(allowed_tools))
+    return declared
+
+
+def composio_app_for_tool_slug(tool_slug: str, declared_apps: List[str]) -> Optional[str]:
+    normalized_tool = tool_slug.upper()
+    matches = [
+        app for app in declared_apps
+        if normalized_tool.startswith(app.upper().replace("-", "_") + "_")
+    ]
+    if not matches:
+        return None
+    return max(matches, key=len)
 
 
 class WorkerContextMount(BaseModel):
