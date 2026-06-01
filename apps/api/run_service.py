@@ -61,7 +61,100 @@ from models import (
     RunStatus,
 )
 
+import hashlib
+import hmac
+import urllib.request
+import urllib.error
+
 logger = logging.getLogger("floom.run_service")
+
+
+def _fire_alert_webhooks(
+    *,
+    run_id: str,
+    worker_id: str,
+    status: str,
+    error: str | None,
+    repos: "Repositories",
+) -> None:
+    """Fire registered webhook alerts matching the run's terminal status.
+
+    Runs in a daemon thread so it never blocks run finalisation.
+    Errors are logged but never re-raised.
+    """
+    try:
+        alert_rows = repos.alerts.list(worker_id=worker_id)
+    except Exception as exc:
+        logger.warning("Could not load alerts for worker %s: %s", worker_id, exc)
+        return
+
+    payload = json.dumps({
+        "run_id": run_id,
+        "worker_id": worker_id,
+        "status": status,
+        "error": error,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }).encode()
+
+    for row in alert_rows:
+        events = [e.strip() for e in (row.get("events") or "").split(",") if e.strip()]
+        if status not in events and "all" not in events:
+            continue
+        url = row.get("url", "")
+        secret = row.get("secret")
+        headers = {"Content-Type": "application/json", "X-Workeros-Run-Id": run_id}
+        if secret:
+            sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()  # type: ignore[attr-defined]
+            headers["X-Workeros-Signature"] = f"sha256={sig}"
+        try:
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=10):
+                pass
+            logger.debug("Alert webhook delivered to %s for run %s (%s)", url, run_id, status)
+        except Exception as exc:
+            logger.warning("Alert webhook delivery failed for %s: %s", url, exc)
+
+
+def _schedule_retry(
+    *,
+    original_run_id: str,
+    worker_id: str,
+    inputs: Dict[str, Any],
+    attempt: int,
+    delay_seconds: int,
+    user_id: str | None,
+    repos: "Repositories",
+) -> None:
+    """Enqueue a retry run after *delay_seconds* in a daemon thread."""
+
+    def _do_retry() -> None:
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+        try:
+            retry_run_id = f"run_{uuid.uuid4().hex[:12]}"
+            if user_id:
+                repos.runs.create(
+                    user_id=user_id,
+                    run_id=retry_run_id,
+                    worker_id=worker_id,
+                    trigger_source="retry",
+                    retry_of_run_id=original_run_id,
+                    retry_attempt=attempt,
+                )
+                start_run(retry_run_id, worker_id, inputs, user_id=user_id, repos=repos)
+                logger.info(
+                    "Retry #%d enqueued as run %s for worker %s (original: %s)",
+                    attempt, retry_run_id, worker_id, original_run_id,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to schedule retry #%d for run %s: %s",
+                attempt, original_run_id, exc,
+            )
+
+    t = threading.Thread(target=_do_retry, daemon=True, name=f"retry-{original_run_id}")
+    t.start()
+
 
 API_ENV_PATH = Path("/root/.config/workeros/api.env")
 LOCAL_ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -2184,6 +2277,41 @@ def execute_run(
             except Exception:
                 _log_failure_line = "Run failed."
             log_fn(_log_failure_line, level="error")
+
+            # Fire webhook alerts for failed runs
+            threading.Thread(
+                target=_fire_alert_webhooks,
+                kwargs={
+                    "run_id": run_id,
+                    "worker_id": worker_id,
+                    "status": "failed",
+                    "error": result_error,
+                    "repos": repos_obj,
+                },
+                daemon=True,
+                name=f"alert-{run_id}",
+            ).start()
+
+            # Auto-retry if configured on the worker manifest
+            retry_cfg = getattr(config, "retry", None) if config else None
+            if retry_cfg and owner_id:
+                current_run_row = repos_obj.runs.get_any(run_id=run_id)
+                current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
+                if current_attempt < retry_cfg.max_attempts - 1:
+                    log_fn(
+                        f"Scheduling retry {current_attempt + 1}/{retry_cfg.max_attempts - 1} "
+                        f"in {retry_cfg.delay_seconds}s",
+                        level="info",
+                    )
+                    _schedule_retry(
+                        original_run_id=run_id,
+                        worker_id=worker_id,
+                        inputs=effective_inputs,
+                        attempt=current_attempt + 1,
+                        delay_seconds=retry_cfg.delay_seconds,
+                        user_id=owner_id,
+                        repos=repos_obj,
+                    )
             return
 
         # S47 HITL: if the worker emitted decision_required AND the worker declares
@@ -2333,6 +2461,20 @@ def execute_run(
         publish_run_part(run_id, {"type": "finish", "status": "completed"})
         log_fn("Output generated")
         log_fn("Run completed")
+
+        # Fire webhook alerts for completed runs
+        threading.Thread(
+            target=_fire_alert_webhooks,
+            kwargs={
+                "run_id": run_id,
+                "worker_id": worker_id,
+                "status": "completed",
+                "error": None,
+                "repos": repos_obj,
+            },
+            daemon=True,
+            name=f"alert-{run_id}",
+        ).start()
     except Exception as exc:
         logger.exception("Run %s crashed for worker %s", run_id, worker_id)
         error_message = str(exc) or exc.__class__.__name__
@@ -2358,6 +2500,21 @@ def execute_run(
             log_fn(f"Run crashed: {error_message}", level="error")
         except Exception:
             logger.exception("Failed to persist crash log for run %s", run_id)
+        try:
+            threading.Thread(
+                target=_fire_alert_webhooks,
+                kwargs={
+                    "run_id": run_id,
+                    "worker_id": worker_id,
+                    "status": "failed",
+                    "error": error_message,
+                    "repos": repos_obj,
+                },
+                daemon=True,
+                name=f"alert-{run_id}",
+            ).start()
+        except Exception:
+            pass
         return
 
 

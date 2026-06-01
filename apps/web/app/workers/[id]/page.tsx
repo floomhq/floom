@@ -130,7 +130,7 @@ const NAV_ITEMS: NavItem[] = [
 // dir isn't on disk in that deploy layout), but the source IS present in the
 // dedicated content fields (run_py_content / skill_md_content / manifest_yaml).
 // Build a WorkerFile[] from those fields so the Source tab actually renders.
-import { patchInputDefault } from "@/lib/yaml-utils";
+import { patchInputDefault, patchRetryBlock, patchNotifyBlock } from "@/lib/yaml-utils";
 
 function deriveSourceFiles(worker: WorkerDetail | null): WorkerFile[] {
   if (!worker) return [];
@@ -224,6 +224,14 @@ export default function WorkerDetailPage() {
   const [conflictSuggestions, setConflictSuggestions] = useState<import("@/lib/types").WorkerSuggestion[]>([]);
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
   const [pendingSaveAfterConflict, setPendingSaveAfterConflict] = useState(false);
+
+  // Configure tab — retry & notify state
+  const [retryEnabled, setRetryEnabled] = useState(false);
+  const [retryMaxAttempts, setRetryMaxAttempts] = useState(3);
+  const [retryDelaySeconds, setRetryDelaySeconds] = useState(60);
+  const [notifyUrl, setNotifyUrl] = useState("");
+  const [notifyOnFailed, setNotifyOnFailed] = useState(true);
+  const [notifyOnCompleted, setNotifyOnCompleted] = useState(false);
 
   // P1-C (prove100 2026-05-30): worker actions — Archive (reversible) and
   // Delete (destructive, confirm-gated). The API exposed both DELETE and a
@@ -362,6 +370,15 @@ export default function WorkerDetailPage() {
           inputDefs[inp.name] = inp.default !== undefined && inp.default !== null ? String(inp.default) : "";
         });
         setConfigInputDefaults(inputDefs);
+        // Init retry/notify from config
+        const retryCfg = (w.config as { retry?: { max_attempts?: number; delay_seconds?: number } }).retry;
+        setRetryEnabled(!!retryCfg);
+        setRetryMaxAttempts(retryCfg?.max_attempts ?? 3);
+        setRetryDelaySeconds(retryCfg?.delay_seconds ?? 60);
+        const notifyCfg = (w.config as { notify?: { url?: string; on?: string[] } }).notify;
+        setNotifyUrl(notifyCfg?.url ?? "");
+        setNotifyOnFailed(notifyCfg ? (notifyCfg.on ?? ["failed"]).includes("failed") : true);
+        setNotifyOnCompleted(notifyCfg ? (notifyCfg.on ?? []).includes("completed") : false);
       } catch (e: unknown) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
@@ -707,6 +724,26 @@ export default function WorkerDetailPage() {
       for (const [name, value] of Object.entries(configInputDefaults)) {
         patched = patchInputDefault(patched, name, value);
       }
+
+      // Patch retry block
+      patched = patchRetryBlock(
+        patched,
+        retryEnabled
+          ? { max_attempts: retryMaxAttempts, delay_seconds: retryDelaySeconds }
+          : null
+      );
+
+      // Patch notify block
+      const notifyEvents = [
+        ...(notifyOnFailed ? ["failed"] : []),
+        ...(notifyOnCompleted ? ["completed"] : []),
+      ];
+      patched = patchNotifyBlock(
+        patched,
+        notifyUrl.trim()
+          ? { url: notifyUrl.trim(), on: notifyEvents.length ? notifyEvents : ["failed"] }
+          : null
+      );
 
       await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
       toast.success("Worker saved");
@@ -1398,6 +1435,94 @@ export default function WorkerDetailPage() {
                 </div>
               </div>
             )}
+
+            {/* Retry on failure */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm font-medium">Retry on failure</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Automatically re-run this worker if a run fails.</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={retryEnabled}
+                  onClick={() => setRetryEnabled(!retryEnabled)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${retryEnabled ? "bg-foreground" : "bg-muted-foreground/30"}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform shadow ${retryEnabled ? "translate-x-4.5" : "translate-x-0.5"}`} />
+                </button>
+              </div>
+              {retryEnabled && (
+                <div className="rounded-lg border border-border divide-y divide-border">
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium">Max attempts</span>
+                      <p className="text-xs text-muted-foreground">Total tries including the first (1–10)</p>
+                    </div>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={10}
+                      className="h-7 text-xs w-20 shrink-0"
+                      value={retryMaxAttempts}
+                      onChange={(e) => setRetryMaxAttempts(Math.min(10, Math.max(1, parseInt(e.target.value) || 3)))}
+                    />
+                  </div>
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium">Delay between retries (seconds)</span>
+                      <p className="text-xs text-muted-foreground">Wait time before the next attempt (0–3600)</p>
+                    </div>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={3600}
+                      className="h-7 text-xs w-20 shrink-0"
+                      value={retryDelaySeconds}
+                      onChange={(e) => setRetryDelaySeconds(Math.min(3600, Math.max(0, parseInt(e.target.value) || 60)))}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Failure notifications */}
+            <div className="space-y-3">
+              <div>
+                <Label className="text-sm font-medium">Notifications</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">Send a webhook POST when runs complete or fail.</p>
+              </div>
+              <Input
+                type="url"
+                className="text-sm"
+                placeholder="https://hooks.example.com/run-events"
+                value={notifyUrl}
+                onChange={(e) => setNotifyUrl(e.target.value)}
+              />
+              {notifyUrl.trim() && (
+                <div className="flex items-center gap-4 text-sm">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={notifyOnFailed}
+                      onChange={(e) => setNotifyOnFailed(e.target.checked)}
+                    />
+                    <span>On failure</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={notifyOnCompleted}
+                      onChange={(e) => setNotifyOnCompleted(e.target.checked)}
+                    />
+                    <span>On success</span>
+                  </label>
+                </div>
+              )}
+            </div>
 
             {/* Save button */}
             <div className="flex items-center gap-3">
