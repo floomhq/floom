@@ -1420,8 +1420,7 @@ class NotifyConfig(BaseModel):
     """Notification channels fired on run completion events.
 
     Supports webhook (url) and/or email (email_to) — at least one required.
-    SMTP credentials are configured server-side via SMTP_HOST / SMTP_PORT /
-    SMTP_USER / SMTP_PASSWORD environment variables.
+    Email delivery uses Resend via server-side RESEND_API_KEY.
     """
 
     # Webhook channel
@@ -1455,7 +1454,7 @@ class WorkerAlert(BaseModel):
 class WorkerAlertCreate(BaseModel):
     # Webhook channel (optional — provide url for webhook delivery)
     url: Optional[str] = None
-    # Email channel (optional — provide email_to for SMTP delivery)
+    # Email channel (optional — provide email_to for Resend delivery)
     email_to: Optional[List[str]] = None
     on: List[str] = Field(default_factory=lambda: ["failed"])
     description: Optional[str] = None
