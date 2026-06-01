@@ -29,6 +29,8 @@ function formatRelative(iso: string): string {
 function ReviewContent() {
   const searchParams = useSearchParams();
   const targetId = searchParams.get("id");
+  const token = searchParams.get("token");
+  const isSignedLink = Boolean(targetId && token);
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -39,6 +41,12 @@ function ReviewContent() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      if (targetId && token) {
+        const approval = await api.approvals.publicGet(targetId, token);
+        setRows([approval]);
+        setIndex(0);
+        return;
+      }
       const pending = await api.approvals.list("pending");
       const nextRows = targetId
         ? pending.filter((row) => row.id === targetId || row.run_id === targetId)
@@ -50,7 +58,7 @@ function ReviewContent() {
     } finally {
       setLoading(false);
     }
-  }, [targetId]);
+  }, [targetId, token]);
 
   useEffect(() => {
     void load();
@@ -75,7 +83,9 @@ function ReviewContent() {
     if (!approval) return;
     setBusy("approve");
     try {
-      if (isDestructiveDelete) {
+      if (isSignedLink && token) {
+        await api.approvals.publicApprove(approval.id, token);
+      } else if (isDestructiveDelete) {
         await api.approvals.approveAction(approval.id);
       } else {
         await api.runs.approve(approval.run_id);
@@ -87,13 +97,15 @@ function ReviewContent() {
     } finally {
       setBusy(null);
     }
-  }, [approval, isDestructiveDelete, removeCurrent]);
+  }, [approval, isDestructiveDelete, isSignedLink, removeCurrent, token]);
 
   const reject = useCallback(async () => {
     if (!approval) return;
     setBusy("reject");
     try {
-      if (isDestructiveDelete) {
+      if (isSignedLink && token) {
+        await api.approvals.publicReject(approval.id, token, reason || undefined);
+      } else if (isDestructiveDelete) {
         await api.approvals.rejectAction(approval.id, reason || undefined);
       } else {
         await api.runs.reject(approval.run_id, reason || undefined);
@@ -107,18 +119,22 @@ function ReviewContent() {
     } finally {
       setBusy(null);
     }
-  }, [approval, isDestructiveDelete, reason, removeCurrent]);
+  }, [approval, isDestructiveDelete, isSignedLink, reason, removeCurrent, token]);
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-6 sm:px-6 sm:py-10">
       <div className="mb-6 flex items-center justify-between gap-4">
-        <Link
-          href="/approvals"
-          className="inline-flex items-center gap-1.5 text-sm text-[var(--ink-soft)] hover:text-[var(--ink)]"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          All approvals
-        </Link>
+        {isSignedLink ? (
+          <span className="text-sm text-[var(--ink-soft)]">Approval review</span>
+        ) : (
+          <Link
+            href="/approvals"
+            className="inline-flex items-center gap-1.5 text-sm text-[var(--ink-soft)] hover:text-[var(--ink)]"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            All approvals
+          </Link>
+        )}
         {rows.length > 0 && (
           <span className="text-sm text-[var(--ink-soft)]">
             {index + 1} of {rows.length}
