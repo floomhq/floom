@@ -280,6 +280,7 @@ export default function WorkerDetailPage() {
   const [retryMaxAttempts, setRetryMaxAttempts] = useState(3);
   const [retryDelaySeconds, setRetryDelaySeconds] = useState(60);
   const [notifyUrl, setNotifyUrl] = useState("");
+  const [notifyEmailTo, setNotifyEmailTo] = useState("");
   const [notifyOnFailed, setNotifyOnFailed] = useState(true);
   const [notifyOnCompleted, setNotifyOnCompleted] = useState(false);
 
@@ -427,8 +428,9 @@ export default function WorkerDetailPage() {
         setRetryEnabled(!!retryCfg);
         setRetryMaxAttempts(retryCfg?.max_attempts ?? 3);
         setRetryDelaySeconds(retryCfg?.delay_seconds ?? 60);
-        const notifyCfg = (w.config as { notify?: { url?: string; on?: string[] } }).notify;
+        const notifyCfg = (w.config as { notify?: { url?: string; email_to?: string[]; on?: string[] } }).notify;
         setNotifyUrl(notifyCfg?.url ?? "");
+        setNotifyEmailTo((notifyCfg?.email_to ?? []).join(", "));
         setNotifyOnFailed(notifyCfg ? (notifyCfg.on ?? ["failed"]).includes("failed") : true);
         setNotifyOnCompleted(notifyCfg ? (notifyCfg.on ?? []).includes("completed") : false);
       } catch (e: unknown) {
@@ -840,10 +842,12 @@ export default function WorkerDetailPage() {
         ...(notifyOnFailed ? ["failed"] : []),
         ...(notifyOnCompleted ? ["completed"] : []),
       ];
+      const notifyEmailList = notifyEmailTo.split(",").map((e) => e.trim()).filter(Boolean);
+      const hasNotify = notifyUrl.trim() || notifyEmailList.length > 0;
       patched = patchNotifyBlock(
         patched,
-        notifyUrl.trim()
-          ? { url: notifyUrl.trim(), on: notifyEvents.length ? notifyEvents : ["failed"] }
+        hasNotify
+          ? { url: notifyUrl.trim() || undefined, email_to: notifyEmailList.length ? notifyEmailList : undefined, on: notifyEvents.length ? notifyEvents : ["failed"] }
           : null
       );
 
@@ -1593,17 +1597,32 @@ export default function WorkerDetailPage() {
             <div className="space-y-3">
               <div>
                 <Label className="text-sm font-medium">Notifications</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">Send a webhook POST when runs complete or fail.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Get notified when runs complete or fail — via webhook, email, or both.</p>
               </div>
-              <Input
-                type="url"
-                className="text-sm"
-                placeholder="https://hooks.example.com/run-events"
-                value={notifyUrl}
-                onChange={(e) => setNotifyUrl(e.target.value)}
-              />
-              {notifyUrl.trim() && (
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Webhook</Label>
+                <Input
+                  type="url"
+                  className="text-sm"
+                  placeholder="https://hooks.example.com/run-events (Slack, Discord, Zapier…)"
+                  value={notifyUrl}
+                  onChange={(e) => setNotifyUrl(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Email</Label>
+                <Input
+                  type="text"
+                  className="text-sm"
+                  placeholder="alice@example.com, bob@example.com"
+                  value={notifyEmailTo}
+                  onChange={(e) => setNotifyEmailTo(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Requires SMTP_HOST configured on the server. Comma-separated addresses.</p>
+              </div>
+              {(notifyUrl.trim() || notifyEmailTo.trim()) && (
                 <div className="flex items-center gap-4 text-sm">
+                  <span className="text-xs text-muted-foreground">Notify on:</span>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input
                       type="checkbox"
@@ -1611,7 +1630,7 @@ export default function WorkerDetailPage() {
                       checked={notifyOnFailed}
                       onChange={(e) => setNotifyOnFailed(e.target.checked)}
                     />
-                    <span>On failure</span>
+                    <span>Failure</span>
                   </label>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none">
                     <input
@@ -1620,7 +1639,7 @@ export default function WorkerDetailPage() {
                       checked={notifyOnCompleted}
                       onChange={(e) => setNotifyOnCompleted(e.target.checked)}
                     />
-                    <span>On success</span>
+                    <span>Success</span>
                   </label>
                 </div>
               )}
