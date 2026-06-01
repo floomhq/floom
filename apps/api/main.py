@@ -7818,6 +7818,47 @@ def _public_approval_response(approval: Dict[str, Any], repos: Repositories) -> 
     return public
 
 
+def _artifact_file_response(row: Any) -> StreamingResponse:
+    if _is_sensitive_artifact_row(row):
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    art = row_to_dict(row)
+    path_str = str(art.get("path") or "")
+
+    from runner_utils import ARTIFACTS_DIR
+
+    try:
+        artifacts_dir = ARTIFACTS_DIR.resolve()
+        stored_path = Path(path_str)
+        resolved = (
+            stored_path.resolve()
+            if stored_path.is_absolute()
+            else (artifacts_dir / stored_path).resolve()
+        )
+        resolved.relative_to(artifacts_dir)
+    except Exception:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    name = str(art.get("name") or resolved.name)
+    content_type, _ = mimetypes.guess_type(name)
+    content_type = content_type or "application/octet-stream"
+    filename = _sanitize_download_name(name)
+
+    def iter_file():
+        with open(resolved, "rb") as f:
+            while chunk := f.read(65536):
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 class PublicApprovalDecisionRequest(BaseModel):
     reason: str | None = None
     edited_output: Dict[str, Any] | None = None
@@ -7832,6 +7873,30 @@ def get_public_approval(
     """Return one approval for a signed standalone review link."""
     approval = _load_public_approval(approval_id, token, repos)
     return _public_approval_response(approval, repos)
+
+
+@app.get("/approvals/public/{approval_id}/artifacts/{artifact_id}/download")
+def download_public_approval_artifact(
+    approval_id: str,
+    artifact_id: str,
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+):
+    """Download a non-sensitive run artifact from a signed standalone approval link."""
+    approval = _load_public_approval(approval_id, token, repos)
+    owner_id = str(approval.get("owner_id") or "")
+    run_id = str(approval.get("run_id") or "")
+    row = next(
+        (
+            artifact
+            for artifact in repos.runs.list_artifacts(user_id=owner_id, run_id=run_id)
+            if artifact["id"] == artifact_id
+        ),
+        None,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return _artifact_file_response(row)
 
 
 @app.post("/approvals/public/{approval_id}/approve", response_model=ActionResponse)
@@ -8300,48 +8365,7 @@ def download_artifact(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Artifact not found")
-    if _is_sensitive_artifact_row(row):
-        raise HTTPException(status_code=404, detail="Artifact not found")
-
-    art = row_to_dict(row)
-    path_str = art["path"]
-
-    from runner_utils import ARTIFACTS_DIR
-    from pathlib import Path
-    try:
-        artifacts_dir = ARTIFACTS_DIR.resolve()
-        resolved = Path(path_str).resolve()
-    except Exception:
-        raise HTTPException(status_code=403, detail="Invalid path")
-
-    try:
-        resolved.relative_to(artifacts_dir)
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    if not resolved.is_file():
-        raise HTTPException(status_code=404, detail="File not found on disk")
-
-    content_type, _ = mimetypes.guess_type(art["name"])
-    content_type = content_type or "application/octet-stream"
-    filename = (
-        str(art["name"])
-        .replace("\\", "_")
-        .replace('"', "_")
-        .replace("\r", "_")
-        .replace("\n", "_")
-    )
-
-    def iter_file():
-        with open(resolved, "rb") as f:
-            while chunk := f.read(65536):
-                yield chunk
-
-    return StreamingResponse(
-        iter_file(),
-        media_type=content_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return _artifact_file_response(row)
 
 
 @app.get("/runs/{run_id}", response_model=RunDetail, response_model_exclude_none=True)
