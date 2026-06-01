@@ -206,15 +206,38 @@ function useOverview(initialData: SystemOverview | null) {
   return { data, loading, reload: load };
 }
 
+function useOverviewVisibleRows() {
+  const [rows, setRows] = useState(6);
 
+  useEffect(() => {
+    function updateRows() {
+      const height = window.innerHeight;
+      if (height < 820) {
+        setRows(4);
+      } else if (height < 940) {
+        setRows(6);
+      } else {
+        setRows(8);
+      }
+    }
+    updateRows();
+    window.addEventListener("resize", updateRows);
+    return () => window.removeEventListener("resize", updateRows);
+  }, []);
+
+  return rows;
+}
 
 function WorkerActivity({
   runs,
   loading,
+  visibleRows,
 }: {
   runs: SystemOverviewRunItem[];
   loading: boolean;
+  visibleRows: number;
 }) {
+  const visibleRuns = runs.slice(0, visibleRows);
   return (
     <section className={cn(cardClass, "flex flex-col p-4 lg:col-span-2")}>
       <div className="mb-2 flex items-center justify-between shrink-0">
@@ -233,7 +256,7 @@ function WorkerActivity({
         <p className="flex flex-1 items-center justify-center py-8 text-center text-sm text-[var(--text-muted)]">No runs yet.</p>
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-[var(--border-soft)]">
-          {runs.slice(0, 8).map((run) => {
+          {visibleRuns.map((run) => {
             const meta = statusMeta(run.status);
             return (
               <Link
@@ -274,10 +297,13 @@ function WorkerActivity({
 function ComingUp({
   items,
   loading,
+  visibleRows,
 }: {
   items: SystemOverviewScheduledItem[];
   loading: boolean;
+  visibleRows: number;
 }) {
+  const visibleItems = items.slice(0, Math.max(3, visibleRows - 1));
   return (
     <section className={cn(cardClass, "flex flex-col p-4")}>
       <h2 className="mb-2 text-sm font-semibold text-[var(--text-primary)] shrink-0">Coming up today</h2>
@@ -302,7 +328,7 @@ function ComingUp({
         </div>
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
-          {items.slice(0, 6).map((item) => (
+          {visibleItems.map((item) => (
             <Link
               key={`${item.worker_id}-${item.next_fire_at}`}
               href={`/workers/${item.worker_id}`}
@@ -357,6 +383,7 @@ export function OverviewDashboard({
   onReloadRef?: React.MutableRefObject<(() => void) | null>;
 }) {
   const { data, loading, reload } = useOverview(initialData);
+  const visibleRows = useOverviewVisibleRows();
   const workerNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const run of data?.recent_runs ?? []) {
@@ -483,8 +510,8 @@ export function OverviewDashboard({
       {/* Activity + Coming up — 2-col; grows to fill remaining viewport height
           so the page doesn't leave a whitespace band at the bottom. */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3 lg:flex-1 lg:min-h-0">
-        <WorkerActivity runs={data?.recent_runs ?? []} loading={loading} />
-        <ComingUp items={data?.scheduled_today ?? []} loading={loading} />
+        <WorkerActivity runs={data?.recent_runs ?? []} loading={loading} visibleRows={visibleRows} />
+        <ComingUp items={data?.scheduled_today ?? []} loading={loading} visibleRows={visibleRows} />
       </div>
     </div>
   );
