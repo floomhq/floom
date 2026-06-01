@@ -14,9 +14,16 @@ async function handler(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path } = await params;
-  // Next decodes catch-all route segments before handing them to us. Re-encode
-  // each segment so literal percent-encoded filenames survive proxying.
-  const upstreamPath = "/" + path.map(encodeURIComponent).join("/");
+  // Preserve the raw encoded pathname. `params.path` can differ between local
+  // Next and Vercel for filenames that intentionally contain percent-encoded
+  // text (for example a stored literal `%20`), while nextUrl.pathname keeps the
+  // request path shape the browser sent.
+  const proxyMarker = "/api/proxy";
+  const markerIndex = req.nextUrl.pathname.indexOf(proxyMarker);
+  const upstreamPath =
+    markerIndex >= 0
+      ? req.nextUrl.pathname.slice(markerIndex + proxyMarker.length) || "/"
+      : "/" + path.map(encodeURIComponent).join("/");
 
   // Preserve query string
   const search = req.nextUrl.search;
