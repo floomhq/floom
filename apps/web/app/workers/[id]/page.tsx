@@ -60,7 +60,11 @@ import { FileInputUpload } from "@/components/FileInputUpload";
 import { FilesEditor, TriggersEditor, WorkerMetadataForm, makeTriggerRow, buildTriggersYaml, replaceTriggerBlock } from "@/components/worker-form";
 import type { TriggerRow } from "@/components/worker-form";
 import type { WorkerMetadataValues } from "@/components/worker-form";
-import { formatRelativeTime } from "@/components/connections/connection-data";
+import {
+  formatRelativeTime,
+  formatScope,
+  getSupportedApp,
+} from "@/components/connections/connection-data";
 import { formatRelative, formatDuration } from "@/lib/formatters";
 import { humanizeRunError } from "@/lib/run-format";
 import { RunStatusBadge } from "@/components/RunStatus";
@@ -207,6 +211,17 @@ function connectionSpecApp(spec: WorkerConnectionSpec): string | null {
   if (typeof spec === "string") return spec;
   if ("composio" in spec && spec.composio?.app) return spec.composio.app;
   if ("app" in spec && spec.app) return spec.app;
+  return null;
+}
+
+function connectionSpecAllowedTools(spec: WorkerConnectionSpec): string[] | null {
+  if (typeof spec === "string") return null;
+  if ("composio" in spec && spec.composio?.allowed_tools?.length) {
+    return spec.composio.allowed_tools;
+  }
+  if ("app" in spec && spec.allowed_tools?.length) {
+    return spec.allowed_tools;
+  }
   return null;
 }
 
@@ -2608,16 +2623,43 @@ function ConnectionsSection({
   activeConnectionSlugs: Set<string>;
   requiredSecrets: string[];
 }) {
+  const composioRequirements = (worker.config.connections ?? [])
+    .map((spec) => {
+      const slug = connectionSpecApp(spec);
+      if (!slug) return null;
+      return {
+        slug,
+        allowedTools: connectionSpecAllowedTools(spec),
+      };
+    })
+    .filter((item): item is { slug: string; allowedTools: string[] | null } => Boolean(item));
+  const uniqueComposioRequirements = Array.from(
+    new Map(composioRequirements.map((item) => [item.slug.toLowerCase(), item])).values()
+  );
+
   // S29m (ChatGPT-audit P-3): drop Card wrappers; render as flat sections
   // matching Overview tab rhythm.
   return (
-    <div className="max-w-xl space-y-8">
+    <div className="max-w-3xl space-y-8">
       {requiredConnections.length > 0 ? (
         <section className="space-y-3">
-          <h2 className="text-base font-semibold text-foreground">Required connections</h2>
-          <ul className="space-y-2">
-            {requiredConnections.map((slug) => {
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">Connection permissions</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Worker-level allowlists limit tool execution even when an account grants broader OAuth scopes.
+              </p>
+            </div>
+            <Link href="/connections">
+              <Button size="sm" variant="outline" className="h-8 border-line">
+                Manage
+              </Button>
+            </Link>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-line bg-card">
+            {uniqueComposioRequirements.map(({ slug, allowedTools }) => {
               const slugKey = slug.toLowerCase();
+              const app = getSupportedApp(slug);
               const appConnections = connections.filter(
                 (connection) =>
                   connection.kind !== "mcp" &&
@@ -2626,42 +2668,104 @@ function ConnectionsSection({
               const activeConnections = appConnections.filter(
                 (connection) => connection.status === "active",
               );
+              const activeConnection = activeConnections[0];
               const isActive = activeConnectionSlugs.has(slugKey);
-              const connectionLabel = activeConnections
-                .map((connection) => connection.display_name || connection.account_label)
-                .filter(Boolean)
-                .join(", ");
+              const displayName = activeConnection?.display_name?.trim();
+              const accountLabel = activeConnection?.account_label?.trim();
+              const connectionLabel =
+                accountLabel ||
+                (displayName && displayName.toLowerCase() !== app.displayName.toLowerCase()
+                  ? displayName
+                  : "");
               const latestStatus = appConnections[0]?.status;
+              const grantedScopes = activeConnection?.scopes ?? [];
+              const visibleScopes = grantedScopes.slice(0, 4);
+              const hiddenScopes = Math.max(grantedScopes.length - visibleScopes.length, 0);
+              const visibleTools = (allowedTools ?? []).slice(0, 5);
+              const hiddenTools = Math.max((allowedTools?.length ?? 0) - visibleTools.length, 0);
               return (
-                <li key={slug} className="flex items-center justify-between py-2 border-b border-line last:border-0">
-                  <div className="min-w-0">
-                    <span className="block text-sm capitalize font-medium">{slug}</span>
+                <div key={slug} className="grid gap-4 border-b border-line p-4 last:border-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+                  <div className="min-w-0 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-foreground">{app.displayName}</span>
+                      {isActive ? (
+                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                          Active
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-amber-200 bg-amber-50 text-xs text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
+                          Missing
+                        </Badge>
+                      )}
+                      {allowedTools?.length ? (
+                        <Badge variant="outline" className="border-line bg-muted text-xs">
+                          {allowedTools.length} allowed tools
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-line bg-muted text-xs">
+                          Full app tool access
+                        </Badge>
+                      )}
+                    </div>
                     {connectionLabel ? (
-                      <span className="block truncate text-xs text-muted-foreground">{connectionLabel}</span>
+                      <p className="truncate text-xs text-muted-foreground">{connectionLabel}</p>
                     ) : latestStatus ? (
-                      <span className="block truncate text-xs text-muted-foreground">Status: {latestStatus}</span>
+                      <p className="truncate text-xs text-muted-foreground">Status: {latestStatus}</p>
                     ) : null}
-                  </div>
-                  {isActive ? (
-                    <Badge variant="outline" className="text-xs border-line text-muted-foreground">
-                      Active
-                    </Badge>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-xs text-amber-600 border-amber-200 bg-amber-50">
-                        Missing
-                      </Badge>
+                    {!isActive && (
                       <Link href="/connections">
-                        <Button size="sm" variant="outline" className="h-6 text-xs border-line">
+                        <Button size="sm" variant="outline" className="h-7 border-line text-xs">
                           Connect
                         </Button>
                       </Link>
+                    )}
+                  </div>
+
+                  <div className="min-w-0 space-y-3">
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-foreground">Worker allowlist</p>
+                      {allowedTools?.length ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {visibleTools.map((tool) => (
+                            <Badge key={tool} variant="outline" className="max-w-full border-line bg-muted px-2 font-mono text-[0.68rem]">
+                              <span className="max-w-[220px] truncate">{tool}</span>
+                            </Badge>
+                          ))}
+                          {hiddenTools > 0 && (
+                            <Badge variant="outline" className="border-line bg-muted px-2 text-[0.68rem] text-muted-foreground">
+                              +{hiddenTools} more
+                            </Badge>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">No worker-level tool allowlist declared.</p>
+                      )}
                     </div>
-                  )}
-                </li>
+
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-foreground">Granted OAuth scopes</p>
+                      {visibleScopes.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {visibleScopes.map((scope) => (
+                            <Badge key={scope} variant="outline" className="max-w-full border-line bg-paper px-2 font-mono text-[0.68rem] text-muted-foreground">
+                              <span className="max-w-[220px] truncate">{formatScope(scope)}</span>
+                            </Badge>
+                          ))}
+                          {hiddenScopes > 0 && (
+                            <Badge variant="outline" className="border-line bg-paper px-2 text-[0.68rem] text-muted-foreground">
+                              +{hiddenScopes} more
+                            </Badge>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Scopes not loaded yet.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
               );
             })}
-          </ul>
+          </div>
         </section>
       ) : (
         <p className="text-sm text-muted-foreground">This worker requires no connections.</p>
@@ -2670,24 +2774,65 @@ function ConnectionsSection({
       {configuredMcpConnections.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-base font-semibold text-foreground">MCP servers</h2>
-          <ul className="space-y-2">
+          <div className="overflow-hidden rounded-lg border border-line bg-card">
             {configuredMcpConnections.map((connection) => {
               const summary = connection.transport === "stdio"
                 ? [connection.command, ...(connection.args ?? [])].filter(Boolean).join(" ")
                 : connection.url;
+              const connected = connections.find(
+                (item) =>
+                  item.kind === "mcp" &&
+                  ((item.mcp_label || item.app_name.replace(/^mcp:/, "")) === connection.label)
+              );
+              const allowedTools = connection.allowed_tools ?? connected?.mcp_allowed_tools ?? [];
+              const visibleTools = allowedTools.slice(0, 6);
+              const hiddenTools = Math.max(allowedTools.length - visibleTools.length, 0);
               return (
-              <li key={`${connection.label}:${summary ?? ""}`} className="py-2 border-b border-line last:border-0">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium">{connection.label}</span>
+              <div key={`${connection.label}:${summary ?? ""}`} className="space-y-3 border-b border-line p-4 last:border-0">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium">{connection.label}</span>
+                      <Badge variant="outline" className="border-line bg-muted text-xs">
+                        {connection.transport || "streamable_http"}
+                      </Badge>
+                      {connected ? (
+                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                          {connected.status}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{summary}</p>
+                  </div>
                   {connection.auth ? (
-                    <span className="text-xs text-muted-foreground">{connection.auth}</span>
+                    <span className="shrink-0 rounded border border-line bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+                      {connection.auth}
+                    </span>
                   ) : null}
                 </div>
-                <p className="mt-1 truncate text-xs text-muted-foreground">{summary}</p>
-              </li>
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-foreground">Allowed MCP tools</p>
+                  {visibleTools.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {visibleTools.map((tool) => (
+                        <Badge key={tool} variant="outline" className="max-w-full border-line bg-muted px-2 font-mono text-[0.68rem]">
+                          <span className="max-w-[220px] truncate">{tool}</span>
+                        </Badge>
+                      ))}
+                      {hiddenTools > 0 && (
+                        <Badge variant="outline" className="border-line bg-muted px-2 text-[0.68rem] text-muted-foreground">
+                          +{hiddenTools} more
+                        </Badge>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No MCP tool allowlist declared.</p>
+                  )}
+                </div>
+              </div>
               );
             })}
-          </ul>
+          </div>
         </section>
       )}
 
