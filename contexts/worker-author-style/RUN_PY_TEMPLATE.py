@@ -96,11 +96,16 @@ def composio_execute(app, tool_slug, arguments):
     """Execute a declared Composio tool through the Workeros API proxy."""
     run_id = os.environ.get("FLOOM_RUN_ID", "")
     api_url = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev").rstrip("/")
+    run_token = os.environ.get("WORKEROS_RUN_TOKEN", "")
     connection_id = str(_load_connections().get(app) or "").strip()
     if not run_id:
         raise RuntimeError("FLOOM_RUN_ID is not set")
     if not connection_id:
         raise RuntimeError(f"{app} connection is not active")
+
+    headers = {"Content-Type": "application/json"}
+    if run_token:
+        headers["X-Workeros-Run-Token"] = run_token
 
     body = json.dumps({
         "connected_account_id": connection_id,
@@ -109,7 +114,7 @@ def composio_execute(app, tool_slug, arguments):
     req = urlrequest.Request(
         f"{api_url}/runs/{run_id}/composio-execute/{tool_slug}",
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:

@@ -23,6 +23,7 @@ except ImportError:
 
 _WORKEROS_API = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev")
 _RUN_ID = os.environ.get("FLOOM_RUN_ID", "")
+_RUN_TOKEN = os.environ.get("WORKEROS_RUN_TOKEN", "")
 
 
 def _write_error(error: str) -> None:
@@ -96,7 +97,8 @@ def _fetch_emails_via_proxy(conn_id: str, query: str, max_results: int) -> list:
         },
     }
     try:
-        r = requests.post(url, json=body, timeout=30)
+        run_headers = {"X-Workeros-Run-Token": _RUN_TOKEN} if _RUN_TOKEN else {}
+        r = requests.post(url, json=body, headers=run_headers, timeout=30)
         r.raise_for_status()
         payload = r.json()
         messages = (payload.get("data") or {}).get("messages") or []
