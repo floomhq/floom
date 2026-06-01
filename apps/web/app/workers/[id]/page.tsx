@@ -615,6 +615,7 @@ export default function WorkerDetailPage() {
       toast.success("Worker saved");
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
+      // Sync editFiles
       const updatedFiles = (updated.files || [])
         .filter((f: WorkerFile) => !f.binary)
         .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
@@ -622,6 +623,21 @@ export default function WorkerDetailPage() {
       const newSnap: Record<string, string> = {};
       for (const f of updatedFiles) newSnap[f.path] = f.content;
       setEditFilesOriginal(newSnap);
+      // Sync Configure form state so it reflects YAML changes
+      const desc = updated.description || "";
+      setConfigDesc(desc);
+      setConfigDescOriginal(desc);
+      const inputDefs: Record<string, string> = {};
+      (updated.config.inputs || []).forEach((inp: WorkerInput) => {
+        inputDefs[inp.name] = inp.default !== undefined && inp.default !== null ? String(inp.default) : "";
+      });
+      setConfigInputDefaults(inputDefs);
+      const specs: TriggerSpec[] = updated.triggers_spec || [];
+      if (specs.length > 0) {
+        setTriggerRows(specs.map((s) => makeTriggerRow(s)));
+      } else if (updated.config.trigger) {
+        setTriggerRows([makeTriggerRow(updated.config.trigger as TriggerSpec)]);
+      }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to save");
     } finally {
