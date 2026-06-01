@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Eye, EyeOff, Plus, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -20,6 +21,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const CLOUD_API_BASE =
   process.env.NEXT_PUBLIC_WORKEROS_API_BASE || "https://workeros-api.floom.dev";
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
+const API_WORKERS_PATH = "/workers";
 
 type McpTarget = "claude" | "codex" | "cursor" | "vscode" | "windsurf" | "generic";
 
@@ -77,6 +79,23 @@ function activeWorkspaceHeaders(headers?: HeadersInit): Headers {
   return next;
 }
 
+async function readJsonOrThrow<T>(response: Response): Promise<T> {
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    // keep the original HTTP status as the fallback message below
+  }
+  if (!response.ok) {
+    const detail =
+      body && typeof body === "object" && "detail" in body
+        ? String((body as { detail?: unknown }).detail)
+        : response.statusText || `HTTP ${response.status}`;
+    throw new Error(detail);
+  }
+  return body as T;
+}
+
 export function CliCommandPanel() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [newTokenRaw, setNewTokenRaw] = useState<string | null>(null);
@@ -86,41 +105,56 @@ export function CliCommandPanel() {
   const [newTokenName, setNewTokenName] = useState("");
   const [mcpTarget, setMcpTarget] = useState<McpTarget>("claude");
   const [loading, setLoading] = useState(true);
+  const [tokenError, setTokenError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
+    setTokenError(null);
     fetch(`${API_BASE}/auth/tokens`, { headers: activeWorkspaceHeaders() })
-      .then((r) => r.json())
+      .then((r) => readJsonOrThrow<Token[] | { value?: Token[] }>(r))
       .then((d) => {
         // API returns {value: [...], Count: N} or a plain array
         const list = Array.isArray(d) ? d : Array.isArray(d?.value) ? d.value : [];
         setTokens(list as Token[]);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch((err: Error) => {
+        setTokenError(err.message || "Failed to load workspace tokens");
+        setLoading(false);
+      });
   }, []);
 
   async function createToken() {
     const name = newTokenName.trim() || "default";
-    const r = await fetch(`${API_BASE}/auth/tokens`, {
-      method: "POST",
-      headers: activeWorkspaceHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ name }),
-    });
-    const data = await r.json() as Token & { token?: string };
-    setNewTokenRaw(data.token ?? null);
-    setRevealed(true);
-    setNewTokenName("");
-    setCreating(false);
-    setTokens((prev) => [data, ...prev]);
+    try {
+      const r = await fetch(`${API_BASE}/auth/tokens`, {
+        method: "POST",
+        headers: activeWorkspaceHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ name }),
+      });
+      const data = await readJsonOrThrow<Token & { token?: string }>(r);
+      setNewTokenRaw(data.token ?? null);
+      setRevealed(true);
+      setNewTokenName("");
+      setCreating(false);
+      setTokens((prev) => [data, ...prev]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create workspace token");
+    }
   }
 
   async function revokeToken(id: string) {
-    await fetch(`${API_BASE}/auth/tokens/${id}`, {
-      method: "DELETE",
-      headers: activeWorkspaceHeaders(),
-    });
-    setTokens((prev) => prev.filter((t) => t.id !== id));
-    if (newTokenRaw && tokens.find((t) => t.id === id)) setNewTokenRaw(null);
+    try {
+      const response = await fetch(`${API_BASE}/auth/tokens/${id}`, {
+        method: "DELETE",
+        headers: activeWorkspaceHeaders(),
+      });
+      if (!response.ok) await readJsonOrThrow(response);
+      setTokens((prev) => prev.filter((t) => t.id !== id));
+      if (newTokenRaw && tokens.find((t) => t.id === id)) setNewTokenRaw(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to revoke workspace token");
+    }
   }
 
   async function copy(text: string, key: string) {
@@ -137,7 +171,7 @@ export function CliCommandPanel() {
   const snippets = useMemo(() => ({
     cli: `${buildEnvPrefix(tokenForSnippet)}\nnpm i -g @floomhq/workeros\nworkeros whoami\nworkeros workers list`,
     mcp: buildMcpSnippet(mcpTarget, tokenForSnippet),
-    api: `curl -sS ${CLOUD_API_BASE}/api/workers \\\n  -H "x-floom-token: ${tokenForSnippet}"`,
+    api: `curl -sS ${CLOUD_API_BASE}${API_WORKERS_PATH} \\\n  -H "x-floom-token: ${tokenForSnippet}"`,
   }), [mcpTarget, tokenForSnippet]);
 
   const activeMcpTarget = MCP_TARGETS.find((t) => t.value === mcpTarget)!;
@@ -193,6 +227,10 @@ export function CliCommandPanel() {
         {/* Token list */}
         {loading ? (
           <div className="text-xs text-muted-foreground">Loading tokens…</div>
+        ) : tokenError ? (
+          <div className="rounded-[var(--radius-button)] border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {tokenError}
+          </div>
         ) : tokens.length === 0 ? (
           <div className="text-xs text-muted-foreground">No tokens yet. Create one below.</div>
         ) : (
