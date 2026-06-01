@@ -1506,15 +1506,30 @@ function FileContent({
 
   if (kind === "pdf") {
     return (
-      <ContextFileObjectUrl packName={packName} file={file}>
-        {(src) => (
-          <iframe
-            title={file.path}
-            src={src}
-            className="w-full h-full min-h-[600px] border-0"
-          />
-        )}
-      </ContextFileObjectUrl>
+      <div className="h-full min-h-[600px] bg-muted/20">
+        <object
+          data={fileUrl}
+          type="application/pdf"
+          className="h-full min-h-[600px] w-full border-0 bg-white"
+          aria-label={`${file.path} PDF preview`}
+        >
+          <div className="flex h-full min-h-[300px] items-center justify-center p-6">
+            <div className="max-w-lg rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
+              <p className="font-medium text-foreground">PDF preview unavailable</p>
+              <p className="mt-2 leading-6 text-muted-foreground">
+                This browser could not render the PDF inline. The file is still available for download.
+              </p>
+              <a
+                href={fileUrl}
+                className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] px-3 text-sm hover:bg-muted"
+              >
+                <Download className="size-3.5" />
+                Download
+              </a>
+            </div>
+          </div>
+        </object>
+      </div>
     );
   }
 
