@@ -3,10 +3,10 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle, ChevronLeft, ChevronRight, ExternalLink, XCircle } from "lucide-react";
+import { CheckCircle, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, ImageIcon, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ApprovalRow } from "@/lib/types";
+import type { ApprovalRow, Artifact } from "@/lib/types";
 
 function parseDecisionInput(raw?: string | null): Record<string, unknown> {
   if (!raw) return {};
@@ -24,6 +24,157 @@ function formatRelative(iso: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+function formatBytes(bytes?: number): string | null {
+  if (bytes == null) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function safePreviewHref(value: unknown): string | null {
+  const href = stringValue(value);
+  if (!href) return null;
+  try {
+    const parsed = new URL(href, "http://localhost");
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") return href;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+type PreviewFile = {
+  title: string;
+  detail?: string;
+  mimeType?: string;
+  text?: string;
+  href?: string;
+  artifact?: Artifact;
+};
+
+function previewFileFromRecord(record: Record<string, unknown>): PreviewFile | null {
+  const title =
+    stringValue(record.name) ||
+    stringValue(record.filename) ||
+    stringValue(record.label) ||
+    stringValue(record.path) ||
+    "Attached file";
+  const mimeType = stringValue(record.type) || stringValue(record.mime_type) || stringValue(record.content_type) || undefined;
+  const text = stringValue(record.preview) || stringValue(record.text) || stringValue(record.content) || undefined;
+  const href = safePreviewHref(record.url) || safePreviewHref(record.href) || safePreviewHref(record.download_url) || undefined;
+  const detail = stringValue(record.path) || stringValue(record.relative_path) || undefined;
+  return { title, detail, mimeType, text, href };
+}
+
+function artifactPreview(artifact: Artifact): PreviewFile {
+  return {
+    title: artifact.name || artifact.path || "Artifact",
+    detail: artifact.relative_path || artifact.path,
+    mimeType: artifact.type,
+    artifact,
+  };
+}
+
+function approvalPreviewFile(
+  approval: ApprovalRow,
+  decisionInput: Record<string, unknown>,
+): PreviewFile | null {
+  for (const key of ["preview_file", "previewFile", "file", "artifact"]) {
+    const direct = objectValue(decisionInput[key]);
+    if (direct) return previewFileFromRecord(direct);
+  }
+  for (const key of ["artifacts", "files"]) {
+    const values = Array.isArray(decisionInput[key]) ? decisionInput[key] : [];
+    const first = values.map(objectValue).find(Boolean);
+    if (first) return previewFileFromRecord(first);
+  }
+  const url =
+    safePreviewHref(decisionInput.preview_url) ||
+    safePreviewHref(decisionInput.file_url) ||
+    safePreviewHref(decisionInput.artifact_url);
+  if (url) {
+    return {
+      title: stringValue(decisionInput.preview_name) || stringValue(decisionInput.filename) || "Preview file",
+      href: url,
+      mimeType: stringValue(decisionInput.preview_type) || stringValue(decisionInput.type) || undefined,
+    };
+  }
+  const firstArtifact = approval.artifacts?.[0];
+  return firstArtifact ? artifactPreview(firstArtifact) : null;
+}
+
+function ApprovalFilePreview({
+  file,
+  approval,
+  isSignedLink,
+}: {
+  file: PreviewFile;
+  approval: ApprovalRow;
+  isSignedLink: boolean;
+}) {
+  const artifactHref = file.artifact && !isSignedLink ? api.runs.artifactUrl(approval.run_id, file.artifact.id) : null;
+  const href = file.href || artifactHref;
+  const isImage = Boolean(file.href && file.mimeType?.startsWith("image/"));
+  const meta = [file.mimeType || (file.artifact ? "artifact" : "file"), file.artifact ? formatBytes(file.artifact.size_bytes) : null]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div>
+      <h2 className="text-sm font-medium text-[var(--ink)]">File preview</h2>
+      <div className="mt-2 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)]">
+        <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--border-soft)] px-4 py-3">
+          <span className="flex min-w-0 items-center gap-2">
+            {isImage ? <ImageIcon className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" /> : <FileText className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" />}
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium text-[var(--ink)]">{file.title}</span>
+              <span className="block truncate text-xs text-[var(--ink-soft)]">{[file.detail, meta].filter(Boolean).join(" · ")}</span>
+            </span>
+          </span>
+          {href && (
+            <a
+              href={href}
+              download
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-2.5 text-xs font-medium text-[var(--ink)] hover:bg-[var(--paper)]"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download
+            </a>
+          )}
+        </div>
+        {isImage ? (
+          <div className="max-h-[46vh] overflow-auto p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={file.href} alt={file.title} className="max-h-[42vh] max-w-full rounded-[var(--radius-button)] object-contain" />
+          </div>
+        ) : file.text ? (
+          <pre className="max-h-[46vh] overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-[var(--ink)]">{file.text}</pre>
+        ) : (
+          <div className="p-4 text-sm text-[var(--ink-soft)]">
+            {isSignedLink && file.artifact
+              ? "This approval includes a run artifact, but the backend does not expose a signed public artifact download endpoint for standalone approval links."
+              : "This approval includes a file artifact. Open the run to inspect the file contents."}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ReviewContent() {
@@ -68,6 +219,10 @@ function ReviewContent() {
   const decisionInput = useMemo(
     () => parseDecisionInput(approval?.decision_input_json),
     [approval?.decision_input_json]
+  );
+  const previewFile = useMemo(
+    () => (approval ? approvalPreviewFile(approval, decisionInput) : null),
+    [approval, decisionInput]
   );
   const isDestructiveDelete = decisionInput.kind === "destructive_delete";
 
@@ -195,6 +350,14 @@ function ReviewContent() {
               <div className="rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] p-4 text-sm text-[var(--ink-soft)]">
                 This approval does not include a rendered preview.
               </div>
+            )}
+
+            {previewFile && (
+              <ApprovalFilePreview
+                file={previewFile}
+                approval={approval}
+                isSignedLink={isSignedLink}
+              />
             )}
 
             {Object.keys(decisionInput).length > 0 && (
