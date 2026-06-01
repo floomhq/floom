@@ -613,6 +613,32 @@ test("install subcommand patches agent config idempotently", async () => {
   }
 });
 
+test("mcp add patches agent config", async () => {
+  const home = await mkdtemp(join(tmpdir(), "workeros-mcp-add-home-"));
+  try {
+    const cursorDir = join(home, ".cursor");
+    const configPath = join(cursorDir, "mcp.json");
+    await mkdir(cursorDir, { recursive: true });
+    await writeFile(configPath, JSON.stringify({ mcpServers: {} }, null, 2));
+
+    const result = await runCli(["mcp", "add", "--target", "cursor"], {
+      HOME: home,
+      WORKEROS_API_SECRET: "test-secret",
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /Installed Workeros MCP config for Cursor/);
+    assert.doesNotMatch(result.stdout, /test-secret/);
+
+    const config = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(config.mcpServers.workeros.command, "npx");
+    assert.deepEqual(config.mcpServers.workeros.args, ["-y", "@floomhq/workeros"]);
+    assert.equal(config.mcpServers.workeros.env.WORKEROS_API_SECRET, "test-secret");
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test("install subcommand prints manual snippets when no agent config file exists", async () => {
   const home = await mkdtemp(join(tmpdir(), "workeros-mcp-home-"));
   try {
