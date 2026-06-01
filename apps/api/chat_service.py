@@ -14,6 +14,8 @@ to conversation_messages.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -895,6 +897,12 @@ def _tool_contexts_write(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 _APPROVALS_BASE_URL = os.environ.get("WORKEROS_PUBLIC_URL", "https://workers.floom.dev")
 
 
+def _approval_public_token(row: Any) -> str:
+    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    payload = ".".join(str(row[key] or "") for key in ("id", "run_id", "owner_id"))
+    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
 def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """Return pending approvals with direct links the operator can open."""
     from db import get_db as _get_db
@@ -902,7 +910,7 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
         with _get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT a.id, a.run_id, a.worker_id, a.label, a.preview, a.created_at,
+                SELECT a.id, a.run_id, a.worker_id, a.owner_id, a.label, a.preview, a.created_at,
                        w.name AS worker_name
                 FROM approvals a
                 LEFT JOIN workers w ON w.id = a.worker_id
@@ -915,6 +923,7 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
         result = []
         for row in rows:
             approval_id = row["id"]
+            token = _approval_public_token(row)
             result.append({
                 "id": approval_id,
                 "worker_id": row["worker_id"],
@@ -923,7 +932,7 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
                 "label": row["label"],
                 "preview": (row["preview"] or "")[:200] or None,
                 "created_at": row["created_at"],
-                "link": f"{base}/approvals/review?id={approval_id}",
+                "link": f"{base}/approvals/review?id={approval_id}&token={token}",
             })
         return {"ok": True, "approvals": result, "count": len(result)}
     except Exception as exc:
