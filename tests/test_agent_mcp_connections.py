@@ -52,6 +52,15 @@ def test_mcp_connection_schema_preserves_legacy_composio_strings():
                     "require_approval": "never",
                 }
             },
+            {
+                "mcp": {
+                    "label": "filesystem",
+                    "transport": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+                    "env": {"GITHUB_TOKEN": "secret:GITHUB_PAT"},
+                }
+            },
         ],
     }
 
@@ -63,13 +72,16 @@ def test_mcp_connection_schema_preserves_legacy_composio_strings():
     assert config.connections[1].composio.allowed_tools == ["GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY"]
     assert config.connections[2].mcp.label == "github"
     assert config.connections[2].mcp.allowed_tools == ["list_pull_requests", "get_repo"]
+    assert config.connections[3].mcp.label == "filesystem"
+    assert config.connections[3].mcp.transport == "stdio"
+    assert config.connections[3].mcp.command == "npx"
     assert declared_composio_connections(config) == {
         "gmail": None,
         "google_search_console": ["GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY"],
     }
     driver = AgentDriver()
     assert driver._composio_connection_names(config) == ["gmail", "google_search_console"]
-    assert [connection.label for connection in driver._mcp_connections(config)] == ["github"]
+    assert [connection.label for connection in driver._mcp_connections(config)] == ["github", "filesystem"]
 
 
 def test_mcp_server_compilation_uses_bearer_secret_and_tool_filter():
@@ -106,6 +118,31 @@ def test_mcp_server_missing_secret_is_a_connect_failure():
 
     with pytest.raises(_MCPConnectionError, match="missing secret GITHUB_PAT"):
         AgentDriver()._make_mcp_server(config.connections[0].mcp, {})
+
+
+def test_stdio_mcp_server_compilation_uses_secret_env():
+    config = _config([
+        {
+            "mcp": {
+                "label": "filesystem",
+                "transport": "stdio",
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+                "env": {"GITHUB_TOKEN": "secret:GITHUB_PAT", "MODE": "readonly"},
+                "cwd": "/workspace",
+                "allowed_tools": ["read_file"],
+            }
+        }
+    ])
+
+    server = AgentDriver()._make_mcp_server(config.connections[0].mcp, {"GITHUB_PAT": "token-123"})
+
+    assert server.name == "filesystem"
+    assert server.params.command == "npx"
+    assert server.params.args == ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+    assert server.params.env == {"GITHUB_TOKEN": "token-123", "MODE": "readonly"}
+    assert server.params.cwd == "/workspace"
+    assert server.tool_filter == {"allowed_tool_names": ["read_file"]}
 
 
 def test_mcp_connect_and_cleanup_lifecycle():

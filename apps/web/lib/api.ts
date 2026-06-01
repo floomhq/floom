@@ -379,7 +379,12 @@ export const api = {
       }),
     createMcp: (payload: {
       label: string;
-      url: string;
+      transport?: "streamable_http" | "sse" | "stdio";
+      url?: string | null;
+      command?: string | null;
+      args?: string[];
+      env?: Record<string, string>;
+      cwd?: string | null;
       auth_secret?: string | null;
       allowed_tools?: string[];
     }) =>

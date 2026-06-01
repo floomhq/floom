@@ -9,7 +9,6 @@ import type { ConnectionItem } from "@/lib/types";
 type McpConnection = ConnectionItem & {
   kind: "mcp";
   mcp_label: string;
-  mcp_url: string;
 };
 
 export function McpConnectionsEditor({
@@ -67,7 +66,9 @@ export function McpConnectionsEditor({
                 </span>
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-foreground">{connection.mcp_label}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{connection.mcp_url}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {connectionSummary(connection)}
+                  </span>
                   {connection.mcp_auth_secret ? (
                     <span className="mt-1 block truncate text-xs text-muted-foreground">
                       bearer:{connection.mcp_auth_secret}
@@ -86,8 +87,7 @@ export function McpConnectionsEditor({
 function isMcpConnection(connection: ConnectionItem): connection is McpConnection {
   return (
     connection.kind === "mcp" &&
-    Boolean(connection.mcp_label?.trim()) &&
-    Boolean(connection.mcp_url?.trim())
+    Boolean(connection.mcp_label?.trim())
   );
 }
 
@@ -134,15 +134,31 @@ function readMcpLabel(value: unknown) {
 function toWorkerMcpSpec(connection: McpConnection) {
   const mcp: {
     label: string;
-    url: string;
+    transport?: "streamable_http" | "sse" | "stdio";
+    url?: string;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    cwd?: string;
     auth?: string;
     allowed_tools?: string[];
     require_approval: "never";
   } = {
     label: connection.mcp_label,
-    url: connection.mcp_url,
     require_approval: "never",
   };
+  const transport = connection.mcp_transport ?? "streamable_http";
+  if (transport !== "streamable_http") {
+    mcp.transport = transport;
+  }
+  if (transport === "stdio") {
+    if (connection.mcp_command) mcp.command = connection.mcp_command;
+    if (connection.mcp_args?.length) mcp.args = connection.mcp_args;
+    if (connection.mcp_env && Object.keys(connection.mcp_env).length > 0) mcp.env = connection.mcp_env;
+    if (connection.mcp_cwd) mcp.cwd = connection.mcp_cwd;
+  } else if (connection.mcp_url) {
+    mcp.url = connection.mcp_url;
+  }
   if (connection.mcp_auth_secret) {
     mcp.auth = `bearer:${connection.mcp_auth_secret}`;
   }
@@ -150,6 +166,13 @@ function toWorkerMcpSpec(connection: McpConnection) {
     mcp.allowed_tools = connection.mcp_allowed_tools;
   }
   return { mcp };
+}
+
+function connectionSummary(connection: McpConnection): string {
+  if ((connection.mcp_transport ?? "streamable_http") === "stdio") {
+    return [connection.mcp_command, ...(connection.mcp_args ?? [])].filter(Boolean).join(" ");
+  }
+  return connection.mcp_url ?? "";
 }
 
 function replaceTopLevelBlock(yaml: string, key: string, replacement: string): string {

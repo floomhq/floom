@@ -29,7 +29,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Dict, Iterable, List, Optional, TypedDict
+from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, TypedDict
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -9531,7 +9531,12 @@ class ConnectionInitRequest(BaseModel):
 
 class MCPConnectionCreateRequest(BaseModel):
     label: str
-    url: str
+    transport: Literal["streamable_http", "sse", "stdio"] = "streamable_http"
+    url: Optional[str] = None
+    command: Optional[str] = None
+    args: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
+    cwd: Optional[str] = None
     auth_secret: Optional[str] = None
     allowed_tools: List[str] = Field(default_factory=list)
 
@@ -9551,6 +9556,11 @@ class ConnectionItem(BaseModel):
     last_check_status: Optional[str] = None
     mcp_label: Optional[str] = None
     mcp_url: Optional[str] = None
+    mcp_transport: str = "streamable_http"
+    mcp_command: Optional[str] = None
+    mcp_args: List[str] = []
+    mcp_env: Dict[str, str] = {}
+    mcp_cwd: Optional[str] = None
     mcp_auth_secret: Optional[str] = None
     mcp_allowed_tools: List[str] = []
 
@@ -9808,6 +9818,13 @@ def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
     item["account_label"] = normalized
     item["display_name"] = normalized
     item["mcp_allowed_tools"] = _parse_json_string_list(item.pop("mcp_allowed_tools_json", None))
+    item["mcp_args"] = _parse_json_string_list(item.pop("mcp_args_json", None))
+    try:
+        raw_env = json.loads(item.pop("mcp_env_json", None) or "{}")
+        item["mcp_env"] = raw_env if isinstance(raw_env, dict) else {}
+    except Exception:
+        item["mcp_env"] = {}
+    item["mcp_transport"] = item.get("mcp_transport") or "streamable_http"
     return ConnectionItem(**item)
 
 
@@ -9819,21 +9836,53 @@ def _normalize_mcp_connection_payload(payload: MCPConnectionCreateRequest) -> Di
             detail="MCP label must be 1-64 letters, digits, underscores, or hyphens",
         )
 
-    url = payload.url.strip()
-    if not url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="MCP URL must start with http:// or https://")
+    transport = payload.transport or "streamable_http"
+    if transport not in {"streamable_http", "sse", "stdio"}:
+        raise HTTPException(status_code=400, detail="MCP transport must be streamable_http, sse, or stdio")
+
+    url = (payload.url or "").strip() or None
+    command = (payload.command or "").strip() or None
+    cwd = (payload.cwd or "").strip() or None
+    if transport in {"streamable_http", "sse"}:
+        if not url:
+            raise HTTPException(status_code=400, detail="MCP URL is required for HTTP/SSE transports")
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="MCP URL must start with http:// or https://")
+        if command:
+            raise HTTPException(status_code=400, detail="MCP command is only valid for stdio transport")
+    if transport == "stdio":
+        if not command:
+            raise HTTPException(status_code=400, detail="MCP command is required for stdio transport")
+        if url:
+            raise HTTPException(status_code=400, detail="MCP URL is not valid for stdio transport")
 
     auth_secret = (payload.auth_secret or "").strip() or None
     if auth_secret and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", auth_secret):
         raise HTTPException(status_code=400, detail="MCP auth secret must be a valid secret name")
+    if auth_secret and transport == "stdio":
+        raise HTTPException(status_code=400, detail="MCP auth secret is only valid for HTTP/SSE transports")
 
     allowed_tools = [tool.strip() for tool in payload.allowed_tools if tool and tool.strip()]
     if len(allowed_tools) != len(payload.allowed_tools):
         raise HTTPException(status_code=400, detail="MCP allowed tools must be non-empty")
+    args = [str(arg).strip() for arg in payload.args if str(arg).strip()]
+    env: Dict[str, str] = {}
+    for key, raw in payload.env.items():
+        name = str(key).strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise HTTPException(status_code=400, detail="MCP env keys must be valid environment variable names")
+        value = str(raw).strip()
+        if value:
+            env[name] = value
 
     return {
         "label": label,
+        "transport": transport,
         "url": url,
+        "command": command,
+        "args": args,
+        "env": env,
+        "cwd": cwd,
         "auth_secret": auth_secret,
         "allowed_tools": allowed_tools,
     }
@@ -10088,6 +10137,9 @@ def create_mcp_connection(
     conn_id = str(_uuid_mod.uuid4())
     now = now_iso()
     app_name = f"mcp:{label.lower()}"
+    account_label = normalized["url"] or " ".join(
+        [normalized["command"] or "", *normalized["args"]]
+    ).strip()
     row = repos.connections.upsert(
         user_id=auth.user_id,
         id=conn_id,
@@ -10097,9 +10149,14 @@ def create_mcp_connection(
         created_at=now,
         updated_at=now,
         kind="mcp",
-        account_label=normalized["url"],
+        account_label=account_label,
         mcp_label=label,
         mcp_url=normalized["url"],
+        mcp_transport=normalized["transport"],
+        mcp_command=normalized["command"],
+        mcp_args_json=normalized["args"],
+        mcp_env_json=normalized["env"],
+        mcp_cwd=normalized["cwd"],
         mcp_auth_secret=normalized["auth_secret"],
         mcp_allowed_tools_json=normalized["allowed_tools"],
     )
