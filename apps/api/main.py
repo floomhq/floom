@@ -839,25 +839,13 @@ async def auth_middleware(request: Request, call_next):
                 status_code=401,
                 content={"detail": "Invalid or expired run token"},
             )
-        # Valid run token — ONLY allow composio-execute on the matching run.
-        if not _RE_RUN_COMPOSIO_PROXY.match(path):
+        # DELETE is the only permanently irreversible operation — block it.
+        # Everything else (GET, POST, PATCH, PUT) is safe: versioning + rollback
+        # means any AI-induced change can be undone by an operator.
+        if request.method == "DELETE":
             return _JSONResponse(
                 status_code=403,
-                content={
-                    "detail": (
-                        "Run-scoped tokens may only call "
-                        "/runs/{run_id}/composio-execute/* endpoints. "
-                        "Destructive API operations are not available to sandboxed workers."
-                    )
-                },
-            )
-        # The run_id in the path must match the token — belt-and-suspenders.
-        # (The composio-execute handler also validates this, but defence-in-depth.)
-        path_run_id = path.split("/")[2] if len(path.split("/")) > 2 else ""
-        if path_run_id != run_id_from_token:
-            return _JSONResponse(
-                status_code=403,
-                content={"detail": "Run token run_id does not match request path"},
+                content={"detail": "Workers cannot delete resources. Use the operator dashboard to delete workers or brain packs."},
             )
         return await call_next(request)
 
