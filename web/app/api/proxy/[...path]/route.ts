@@ -41,6 +41,7 @@ async function handler(
   // current consumer) reads the session cookie directly on the backend, so
   // we skip the JWT-required guard for those paths.
   const isAuthPath = path[0] === "auth";
+  const isSignedApprovalPath = path[0] === "approvals" && path[1] === "public";
   // Preserve the raw encoded pathname for file routes. `params.path` can
   // normalize already-encoded filenames differently between local Next and
   // Vercel, which breaks files that intentionally contain `%20`.
@@ -58,7 +59,7 @@ async function handler(
   // If the cookie is missing, return 401 so the frontend can route to
   // /login (the marketing project handles that).
   const accessToken = await getAccessToken();
-  if (!isAuthPath && !accessToken) {
+  if (!isAuthPath && !isSignedApprovalPath && !accessToken) {
     return NextResponse.json({ detail: "unauthorized" }, { status: 401 });
   }
 
