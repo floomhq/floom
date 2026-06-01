@@ -1,4 +1,38 @@
 /**
+ * Replaces or inserts a top-level `retry:` block in a worker.yml string.
+ * Pass null to remove the block entirely.
+ */
+export function patchRetryBlock(
+  yaml: string,
+  retry: { max_attempts: number; delay_seconds: number } | null
+): string {
+  // Remove existing retry block (top-level key + its indented children)
+  const withoutRetry = yaml.replace(/^retry:(?:\n(?:[ \t]+.*)?)*\n?/m, "");
+  if (retry === null) return withoutRetry.trimEnd() + "\n";
+  const block = [
+    "retry:",
+    `  max_attempts: ${retry.max_attempts}`,
+    `  delay_seconds: ${retry.delay_seconds}`,
+  ].join("\n");
+  return withoutRetry.trimEnd() + "\n" + block + "\n";
+}
+
+/**
+ * Replaces or inserts a top-level `notify:` block in a worker.yml string.
+ * Pass null to remove the block entirely.
+ */
+export function patchNotifyBlock(
+  yaml: string,
+  notify: { url: string; on: string[] } | null
+): string {
+  const withoutNotify = yaml.replace(/^notify:(?:\n(?:[ \t]+.*)?)*\n?/m, "");
+  if (notify === null) return withoutNotify.trimEnd() + "\n";
+  const onLines = notify.on.map((e) => `  - ${e}`).join("\n");
+  const block = [`notify:`, `  url: ${JSON.stringify(notify.url)}`, `  on:`, onLines].join("\n");
+  return withoutNotify.trimEnd() + "\n" + block + "\n";
+}
+
+/**
  * Patches or inserts a `default:` field for a named input inside a worker.yml string.
  *
  * Finds the input block by `- name: "<inputName>"` and either replaces an

@@ -104,6 +104,10 @@ from models import (
     RecentStats,
     TriggerSpec,
     TimeseriesDay,
+    WorkerAlert,
+    WorkerAlertCreate,
+    WorkerStats,
+    WorkspaceStats,
 )
 from worker_registry import (
     WORKERS_DIR,
@@ -1563,6 +1567,247 @@ def get_worker_timeseries(
         days=days,
     )
     return batch.get(worker_id, [])
+
+
+# ---------------------------------------------------------------------------
+# Monitoring: GET /workers/{id}/stats
+# ---------------------------------------------------------------------------
+
+@app.get("/workers/{worker_id}/stats", response_model=WorkerStats)
+def get_worker_stats(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerStats:
+    """Extended health and run statistics for a single worker."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    stats_7d = repos.workers.stats_batch(
+        user_id=auth.user_id, worker_ids=[worker_id], days=7
+    ).get(worker_id)
+    stats_30d = repos.workers.stats_batch(
+        user_id=auth.user_id, worker_ids=[worker_id], days=30
+    ).get(worker_id)
+
+    # Aggregate duration and last failure from raw run rows
+    runs_30d_rows, _ = repos.runs.list(
+        user_id=auth.user_id,
+        worker_id=worker_id,
+        limit=200,
+    )
+    durations = [
+        r["duration_ms"]
+        for r in runs_30d_rows
+        if r.get("duration_ms") is not None
+    ]
+    avg_duration_ms: Optional[float] = (
+        sum(durations) / len(durations) if durations else None
+    )
+    p95_duration_ms: Optional[float] = None
+    if durations:
+        sorted_d = sorted(durations)
+        idx = max(0, int(len(sorted_d) * 0.95) - 1)
+        p95_duration_ms = float(sorted_d[idx])
+
+    failed_rows = [
+        r for r in runs_30d_rows if r.get("status") == RunStatus.FAILED.value
+    ]
+    last_failure = failed_rows[0] if failed_rows else None
+
+    return WorkerStats(
+        worker_id=worker_id,
+        last_run_at=stats_7d.last_run_at if stats_7d else None,
+        runs_7d=stats_7d.runs_7d if stats_7d else 0,
+        success_rate_7d=stats_7d.success_rate_7d if stats_7d else None,
+        success_rate_change_7d=stats_7d.success_rate_change_7d if stats_7d else None,
+        runs_30d=stats_30d.runs_7d if stats_30d else 0,
+        success_rate_30d=stats_30d.success_rate_7d if stats_30d else None,
+        avg_duration_ms=avg_duration_ms,
+        p95_duration_ms=p95_duration_ms,
+        total_failures=len(failed_rows),
+        last_error=last_failure.get("error") if last_failure else None,
+        last_error_at=last_failure.get("completed_at") or last_failure.get("created_at") if last_failure else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Monitoring: GET /stats (workspace-level aggregate)
+# ---------------------------------------------------------------------------
+
+@app.get("/stats", response_model=WorkspaceStats)
+def get_workspace_stats(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceStats:
+    """Aggregate health and run statistics across the entire workspace."""
+    workers = repos.workers.list(user_id=auth.user_id)
+    worker_ids = [w["id"] for w in workers if not w.get("archived")]
+    total_workers = len(worker_ids)
+
+    if not worker_ids:
+        return WorkspaceStats(total_workers=total_workers)
+
+    stats_map = repos.workers.stats_batch(
+        user_id=auth.user_id, worker_ids=worker_ids, days=7
+    )
+
+    total_runs_7d = sum(s.runs_7d for s in stats_map.values())
+    active_workers = sum(1 for s in stats_map.values() if s.runs_7d > 0)
+
+    all_completions = sum(
+        int((s.success_rate_7d or 0) * s.runs_7d)
+        for s in stats_map.values()
+        if s.success_rate_7d is not None
+    )
+    success_rate_7d: Optional[float] = (
+        all_completions / total_runs_7d if total_runs_7d > 0 else None
+    )
+
+    most_active = max(stats_map.items(), key=lambda kv: kv[1].runs_7d, default=None)
+    most_active_worker_id = most_active[0] if most_active and most_active[1].runs_7d > 0 else None
+    most_active_worker_name: Optional[str] = None
+    if most_active_worker_id:
+        w_row = next((w for w in workers if w["id"] == most_active_worker_id), None)
+        most_active_worker_name = w_row.get("name") if w_row else None
+
+    # Avg duration across recent runs
+    runs_rows, _ = repos.runs.list(
+        user_id=auth.user_id, limit=200
+    )
+    durations = [r["duration_ms"] for r in runs_rows if r.get("duration_ms") is not None]
+    avg_duration_ms: Optional[float] = sum(durations) / len(durations) if durations else None
+
+    return WorkspaceStats(
+        total_workers=total_workers,
+        active_workers=active_workers,
+        total_runs_7d=total_runs_7d,
+        success_rate_7d=success_rate_7d,
+        avg_duration_ms=avg_duration_ms,
+        most_active_worker_id=most_active_worker_id,
+        most_active_worker_name=most_active_worker_name,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Monitoring: GET /workers/{id}/logs (cross-run logs)
+# ---------------------------------------------------------------------------
+
+@app.get("/workers/{worker_id}/logs", response_model=List[Dict[str, Any]])
+def get_worker_logs(
+    worker_id: str,
+    level: Optional[str] = Query(None, description="Filter by log level (info, warning, error, debug)"),
+    since: Optional[str] = Query(None, description="ISO 8601 timestamp lower bound"),
+    limit: int = Query(200, ge=1, le=1000),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[Dict[str, Any]]:
+    """Cross-run logs for a worker, optionally filtered by level and start time."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    since_dt = _parse_iso8601(since) if since else None
+    if since and since_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid since value")
+    rows = repos.runs.list_logs_for_worker(
+        user_id=auth.user_id,
+        worker_id=worker_id,
+        level=level,
+        since=since_dt.isoformat() if since_dt else None,
+        limit=limit,
+    )
+    return [
+        {
+            "run_id": r.get("run_id"),
+            "level": r.get("level"),
+            "message": _redact_public_log_message(r.get("message", "")),
+            "timestamp": r.get("timestamp"),
+            "trace_id": r.get("trace_id"),
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Alerts: POST/GET/DELETE /workers/{id}/alerts
+# ---------------------------------------------------------------------------
+
+@app.post("/workers/{worker_id}/alerts", response_model=WorkerAlert, status_code=201)
+def create_worker_alert(
+    worker_id: str,
+    body: WorkerAlertCreate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerAlert:
+    """Register a webhook endpoint to be called when this worker's runs terminate."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    valid_events = {"failed", "completed"}
+    invalid = [e for e in body.on if e not in valid_events]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid events: {invalid}. Allowed: {sorted(valid_events)}",
+        )
+    alert_id = f"alrt_{uuid.uuid4().hex[:12]}"
+    row = repos.alerts.add(
+        alert_id=alert_id,
+        worker_id=worker_id,
+        url=body.url,
+        events=",".join(body.on),
+        description=body.description,
+        created_at=now_iso(),
+    )
+    return WorkerAlert(
+        id=row["id"],
+        worker_id=row["worker_id"],
+        url=row["url"],
+        on=row["events"].split(","),
+        description=row.get("description"),
+        created_at=row["created_at"],
+    )
+
+
+@app.get("/workers/{worker_id}/alerts", response_model=List[WorkerAlert])
+def list_worker_alerts(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[WorkerAlert]:
+    """List all registered webhook alerts for a worker."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    rows = repos.alerts.list(worker_id=worker_id)
+    return [
+        WorkerAlert(
+            id=r["id"],
+            worker_id=r["worker_id"],
+            url=r["url"],
+            on=r["events"].split(","),
+            description=r.get("description"),
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
+@app.delete("/workers/{worker_id}/alerts/{alert_id}", status_code=204)
+def delete_worker_alert(
+    worker_id: str,
+    alert_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    """Remove a registered webhook alert."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    deleted = repos.alerts.delete(alert_id=alert_id, worker_id=worker_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Alert not found")
 
 
 def _normalize_trigger_type(value: Any) -> str:
@@ -8157,6 +8402,7 @@ def _public_run_part(part: Dict[str, Any]) -> Dict[str, Any]:
 @app.get("/runs/{run_id}/logs")
 def get_run_logs(
     run_id: str,
+    level: Optional[str] = Query(None, description="Filter by log level (info, warning, error, debug)"),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[Dict[str, Any]]:
@@ -8169,13 +8415,16 @@ def get_run_logs(
         {"level": r["level"], "message": r["message"], "timestamp": r["timestamp"]}
         for r in rows
     ]
+    collapsed = _collapse_stderr_code_echo_rows(raw)
+    if level:
+        collapsed = [row for row in collapsed if row.get("level") == level]
     return [
         {
             "level": row["level"],
             "message": _redact_public_log_message(row["message"]),
             "timestamp": row["timestamp"],
         }
-        for row in _collapse_stderr_code_echo_rows(raw)
+        for row in collapsed
     ]
 
 

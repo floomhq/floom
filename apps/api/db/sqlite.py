@@ -1084,6 +1084,42 @@ class SqliteRunRepository:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
+    def list_logs_for_worker(
+        self,
+        *,
+        user_id: str,
+        worker_id: str,
+        level: str | None = None,
+        since: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Cross-run logs for a worker, scoped to user_id, optionally filtered by level/since."""
+        params: list[Any] = [user_id, worker_id]
+        level_clause = ""
+        since_clause = ""
+        if level:
+            level_clause = "AND l.level = ?"
+            params.append(level)
+        if since:
+            since_clause = "AND l.timestamp >= ?"
+            params.append(since)
+        params.append(limit)
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT l.level, l.message, l.timestamp, l.trace_id, l.run_id
+                FROM logs l
+                JOIN runs r ON r.id = l.run_id
+                JOIN workers w ON w.id = r.worker_id
+                WHERE w.owner_id = ? AND r.worker_id = ?
+                  {level_clause} {since_clause}
+                ORDER BY l.timestamp DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
     def add_artifact(
         self,
         *,
@@ -1761,3 +1797,51 @@ class SqliteApprovalRepository:
                 (decided_at, reason, run_id, owner_id),
             )
         return self.get_by_run_id(run_id=run_id)
+
+
+class SqliteAlertRepository:
+    """SQLite implementation of AlertRepository for webhook alert registrations."""
+
+    def add(
+        self,
+        *,
+        alert_id: str,
+        worker_id: str,
+        url: str,
+        events: str,
+        description: str | None,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO worker_alerts (id, worker_id, url, events, description, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (alert_id, worker_id, url, events, description, created_at),
+            )
+        return self.get(alert_id=alert_id) or {}
+
+    def list(self, *, worker_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, worker_id, url, events, description, created_at FROM worker_alerts WHERE worker_id = ? ORDER BY created_at",
+                (worker_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def get(self, *, alert_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, worker_id, url, events, description, created_at FROM worker_alerts WHERE id = ?",
+                (alert_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def delete(self, *, alert_id: str, worker_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM worker_alerts WHERE id = ? AND worker_id = ?",
+                (alert_id, worker_id),
+            )
+        return cursor.rowcount > 0
