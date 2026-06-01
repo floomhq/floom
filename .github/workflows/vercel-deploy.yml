@@ -19,6 +19,7 @@ jobs:
   deploy-landing:
     name: Deploy workeros.floom.dev
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -49,11 +50,12 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
+          timeout 12m npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
 
   deploy-dashboard:
     name: Deploy app dashboard
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -119,4 +121,4 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
+          timeout 12m npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
