@@ -12,6 +12,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   deploy-landing:
     name: Deploy workeros.floom.dev
@@ -28,15 +31,25 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Stamp CLI deploy commit
+        run: |
+          git config user.name "Federico De Ponte"
+          git config user.email "depontefede@gmail.com"
+          git commit --allow-empty -m "ci: vercel deploy source for ${GITHUB_SHA}"
+
       - name: Pull Vercel project settings
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: npx --yes vercel@50.22.1 pull --yes --environment=production --token "$VERCEL_TOKEN"
+        run: |
+          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          npx --yes vercel@50.22.1 pull --yes --environment=production --token "$VERCEL_TOKEN"
 
       - name: Deploy production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
+        run: |
+          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
 
   deploy-dashboard:
     name: Deploy app dashboard
@@ -53,12 +66,22 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Stamp CLI deploy commit
+        run: |
+          git config user.name "Federico De Ponte"
+          git config user.email "depontefede@gmail.com"
+          git commit --allow-empty -m "ci: vercel deploy source for ${GITHUB_SHA}"
+
       - name: Pull Vercel project settings
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: npx --yes vercel@50.22.1 pull --yes --environment=production --token "$VERCEL_TOKEN"
+        run: |
+          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          npx --yes vercel@50.22.1 pull --yes --environment=production --token "$VERCEL_TOKEN"
 
       - name: Deploy production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
+        run: |
+          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
