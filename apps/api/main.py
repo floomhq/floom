@@ -8553,12 +8553,16 @@ def composio_execute_proxy(
             detail=f"No active Composio connection found for app {tool_prefix}",
         )
 
+    if body.user_id and body.user_id != owner_id:
+        raise HTTPException(status_code=403, detail="Proxy user_id must match the run owner")
+
     # 5. Build and forward the Composio request
     proxy_body: Dict[str, Any] = {}
     if connected_account_id:
         proxy_body["connected_account_id"] = connected_account_id
-    if body.user_id:
-        proxy_body["user_id"] = body.user_id
+        # Composio v3 requires the owner entity alongside a connected account.
+        # The sandbox cannot pick this safely; the server derives it from the run.
+        proxy_body["entity_id"] = owner_id
     if body.arguments is not None:
         proxy_body["arguments"] = body.arguments
     else:
