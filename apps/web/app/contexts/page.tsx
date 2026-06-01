@@ -1505,32 +1505,7 @@ function FileContent({
   }
 
   if (kind === "pdf") {
-    return (
-      <div className="h-full min-h-[600px] bg-muted/20">
-        <object
-          data={fileUrl}
-          type="application/pdf"
-          className="h-full min-h-[600px] w-full border-0 bg-white"
-          aria-label={`${file.path} PDF preview`}
-        >
-          <div className="flex h-full min-h-[300px] items-center justify-center p-6">
-            <div className="max-w-lg rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
-              <p className="font-medium text-foreground">PDF preview unavailable</p>
-              <p className="mt-2 leading-6 text-muted-foreground">
-                This browser could not render the PDF inline. The file is still available for download.
-              </p>
-              <a
-                href={fileUrl}
-                className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] px-3 text-sm hover:bg-muted"
-              >
-                <Download className="size-3.5" />
-                Download
-              </a>
-            </div>
-          </div>
-        </object>
-      </div>
-    );
+    return <PdfPreview packName={packName} file={file} fileUrl={fileUrl} />;
   }
 
   if (kind === "video") {
@@ -1632,6 +1607,115 @@ function ContextFileObjectUrl({
   }
 
   return <>{children(src)}</>;
+}
+
+function PdfPreview({
+  packName,
+  file,
+  fileUrl,
+}: {
+  packName: string;
+  file: ContextFileItem;
+  fileUrl: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState<number | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setPageCount(null);
+
+    async function renderFirstPage() {
+      try {
+        const [pdfjs, blob] = await Promise.all([
+          import("pdfjs-dist/legacy/build/pdf.mjs"),
+          api.contexts.fetchFileBlob(packName, file.path),
+        ]);
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+          "pdfjs-dist/legacy/build/pdf.worker.mjs",
+          import.meta.url,
+        ).toString();
+        const pdf = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+        const cleanupPdf = async () => {
+          const destroy = (pdf as unknown as { destroy?: () => Promise<void> | void }).destroy;
+          if (destroy) await destroy.call(pdf);
+        };
+        if (cancelled) {
+          await cleanupPdf();
+          return;
+        }
+
+        setPageCount(pdf.numPages);
+        const page = await pdf.getPage(1);
+        if (cancelled) {
+          await cleanupPdf();
+          return;
+        }
+
+        const viewport = page.getViewport({ scale: 1.35 });
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext("2d");
+        if (!canvas || !context) throw new Error("Canvas is unavailable.");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        canvas.style.width = `${Math.ceil(viewport.width)}px`;
+        canvas.style.height = `${Math.ceil(viewport.height)}px`;
+        await page.render({ canvas, canvasContext: context, viewport }).promise;
+        await cleanupPdf();
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not render PDF preview.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void renderFirstPage();
+    return () => {
+      cancelled = true;
+    };
+  }, [packName, file.path, reloadKey]);
+
+  if (error) {
+    return (
+      <PreviewUnavailable
+        title="PDF preview unavailable"
+        detail={`The PDF could not be fetched or rendered inline: ${error}. The file is still available for download.`}
+        fileUrl={fileUrl}
+        onRetry={() => setReloadKey((value) => value + 1)}
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-[600px] flex-col bg-muted/20">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-2 text-xs text-muted-foreground">
+        <span>{pageCount ? `Page 1 of ${pageCount}` : "Rendering PDF preview"}</span>
+        <a
+          href={fileUrl}
+          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] px-2.5 text-xs hover:bg-muted"
+        >
+          <Download className="size-3.5" />
+          Download
+        </a>
+      </div>
+      <div className="flex-1 overflow-auto p-6">
+        {loading && (
+          <div className="space-y-2">
+            {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-button)]" />)}
+          </div>
+        )}
+        <canvas
+          ref={canvasRef}
+          className={`mx-auto max-w-full rounded-[var(--radius-button)] bg-white shadow-[var(--shadow-sm)] ${loading ? "invisible" : ""}`}
+        />
+      </div>
+    </div>
+  );
 }
 
 function SpreadsheetPreview({ packName, file }: { packName: string; file: ContextFileItem }) {
