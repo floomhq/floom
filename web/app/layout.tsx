@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { Toaster } from "@/components/ui/sonner";
 import { IconSprite } from "@/components/IconSprite";
+import { TelemetryProvider } from "@/components/TelemetryProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -44,6 +45,7 @@ export default function RootLayout({
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
         </main>
         <CommandPalette />
+        <TelemetryProvider />
         <Toaster position="bottom-right" />
       </body>
     </html>
