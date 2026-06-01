@@ -4,8 +4,8 @@ Covers:
   - make_run_token / verify_run_token round-trip
   - Expired token rejection
   - Tampered token rejection
-  - Middleware: run token accepted only on /runs/{id}/composio-execute/*
-  - Middleware: run token blocked on DELETE /workers/{id} (and other destructive paths)
+  - Middleware: run token accepted only on its own /runs/{id}/composio-execute/* path
+  - Middleware: run token blocked everywhere else
   - Middleware: run_id in path must match token's run_id
 """
 
@@ -130,11 +130,11 @@ class TestRunTokenMiddleware:
                 run_id = verify_run_token(run_token_header, secret=secret)
                 if run_id is None:
                     return JSONResponse(status_code=401, content={"detail": "Invalid or expired run token"})
-                # DELETE is the only permanently irreversible operation — block it.
-                if request.method == "DELETE":
+                path = request.url.path
+                if not path.startswith(f"/runs/{run_id}/composio-execute/"):
                     return JSONResponse(
                         status_code=403,
-                        content={"detail": "Workers cannot delete resources."},
+                        content={"detail": "Run tokens are only valid for Composio proxy calls"},
                     )
                 return await call_next(request)
             # No run token — require operator secret
@@ -177,8 +177,8 @@ class TestRunTokenMiddleware:
         )
         assert r.status_code == 200
 
-    def test_run_token_allowed_on_get_workers(self):
-        """Workers can read the workers list — it's reversible/read-only."""
+    def test_run_token_blocked_on_get_workers(self):
+        """Sandbox run tokens are not operator API credentials."""
         from run_token import make_run_token
         from fastapi.testclient import TestClient
 
@@ -186,10 +186,9 @@ class TestRunTokenMiddleware:
         client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
         r = client.get("/workers", headers={"X-Workeros-Run-Token": token})
-        assert r.status_code == 200
+        assert r.status_code == 403
 
-    def test_run_token_allowed_on_patch_worker(self):
-        """Workers can patch a worker — versioning covers rollback."""
+    def test_run_token_blocked_on_patch_worker(self):
         from run_token import make_run_token
         from fastapi.testclient import TestClient
 
@@ -197,10 +196,9 @@ class TestRunTokenMiddleware:
         client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
         r = client.patch("/workers/some-worker", headers={"X-Workeros-Run-Token": token})
-        assert r.status_code == 200
+        assert r.status_code == 403
 
-    def test_run_token_allowed_on_create_worker(self):
-        """Workers can create new workers — e.g. orchestrator spawning sub-workers."""
+    def test_run_token_blocked_on_create_worker(self):
         from run_token import make_run_token
         from fastapi.testclient import TestClient
 
@@ -208,10 +206,10 @@ class TestRunTokenMiddleware:
         client = TestClient(self._make_app(secret), raise_server_exceptions=False)
         token = make_run_token("run-abc", secret=secret)
         r = client.post("/workers", headers={"X-Workeros-Run-Token": token})
-        assert r.status_code == 200
+        assert r.status_code == 403
 
     def test_run_token_blocked_on_delete_worker(self):
-        """DELETE is the only permanently irreversible op — always blocked."""
+        """DELETE is not available through a sandbox run token."""
         from run_token import make_run_token
         from fastapi.testclient import TestClient
 
@@ -220,7 +218,7 @@ class TestRunTokenMiddleware:
         token = make_run_token("run-abc", secret=secret)
         r = client.delete("/workers/some-worker", headers={"X-Workeros-Run-Token": token})
         assert r.status_code == 403
-        assert "delete" in r.json()["detail"].lower()
+        assert "composio proxy" in r.json()["detail"].lower()
 
     def test_invalid_run_token_rejected(self):
         from fastapi.testclient import TestClient

@@ -213,6 +213,30 @@ Items added since the ledger was first written, confirmed shipped to main:
 | R7 | /contexts crash (TypeError duplicate kwargs) | ✅ | PR #221 |
 | R8 | Worker reliability batch (file outputs, Composio proxy, KeyError guard) | ✅ | PRs #220-#225 |
 
+## S. 2026-06-01 Reconcile — Federico Follow-Ups Still Open
+
+Current audit document: `docs/audits/security-product-audit-2026-06-01.md`.
+
+| # | Callout | Status | Evidence / next action |
+|---|---|---|---|
+| S1 | "Document previous issues, don't just fix them." | ✅ | This section plus the 2026-06-01 audit doc are the current ledger. |
+| S2 | Security checklist: privacy, data storage, headers, OWASP, SQLi/XSS/auth, env leakage, sensitive API responses, logs, frontend keys, server-side keys, rate limits. | 🚧 | Audit completed; S-1..S-4 fixed, P0/P1 items remain listed in the audit doc. |
+| S3 | Workers need Brain connections/brain tab/icon and connected brain packs on worker detail. | ❌ | Still open; worker source can parse contexts but UI is not a first-class guided Brain surface everywhere. |
+| S4 | Source tab: every file needs raw and rendered view; YAML rendered UX is questionable; HTML/CSV/XLSX/PDF/video previews missing. | ❌ | Still open. |
+| S5 | Worker card top bar has extra whitespace and does not show the same connection icons as detail pages. | ❌ | Still open; Federico screenshots captured. |
+| S6 | Brain page three-column layout alignment: top section borders must line up. | ❌ | Still open; Federico screenshot captured. |
+| S7 | Connections rows must show app + account name, not cryptic account fragments; loading state needs more than a long spinner. | ❌ | Still open. |
+| S8 | Supabase connection flow/card status looked fake/confusing after auth. | ❌ | Still open; needs Composio callback and status verification. |
+| S9 | CLI/MCP setup must include easy token auth, Codex target, and chips matching the UI system. | 🚧 | Cloud token copy updated separately; broader UI polish remains open. |
+| S10 | Agent page needs clearer IA: workspace agent as own nav tab with subtabs; instructions vs resolved prompt hard to understand; settings can move lower/secondary. | 🚧 | Agent nav exists; IA/copy polish remains open. |
+| S11 | Slack channel integration is not proven. | ❌ | Still open; no verified Slack event-to-agent E2E receipt in this audit. |
+| S12 | Overview must fit first viewport; queued vs coming-up counts must be coherent. | ❌ | Still open. |
+| S13 | Workspace switcher hover black bug; newly created workspace cannot be selected reliably. | ❌ | Still open. |
+| S14 | Workspace fork/duplicate/share-by-link and transfer including secrets. | ❌ | Product/security design still open. |
+| S15 | Standalone approval page for one/several approvals without entering app. | ❌ | Still open; only in-app approvals verified. |
+| S16 | Worker/agent model declaration visible in UI. | ❌ | Still open unless confirmed in a later UI pass. |
+| S17 | Naming pass: apps -> connections, contexts -> brain. | 🚧 | Partially shipped; remaining old labels still need UI sweep. |
+
 ## P. Long-standing Federico standing instructions (verified observed)
 
 | # | Standing rule | Status |
