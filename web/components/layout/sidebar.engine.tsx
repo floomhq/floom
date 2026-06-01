@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Bot, Box, CheckCircle, Clock, Folder, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
+import { Activity, Bot, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -41,7 +41,7 @@ const nav = [
   { href: "/overview", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box },
   { href: "/assistant", label: "Agent", icon: Bot },
-  { href: "/brain", label: "Brain", icon: Folder },
+  { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
   { href: "/connections", label: "Connections", icon: Plug },

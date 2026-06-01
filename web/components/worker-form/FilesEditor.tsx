@@ -13,7 +13,6 @@ import Editor from "react-simple-code-editor";
 import { load as parseYaml } from "js-yaml";
 import "highlight.js/styles/github.css";
 import type { WorkerFile } from "@/lib/types";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ---------------------------------------------------------------------------
 // Language detection helpers
@@ -26,6 +25,10 @@ function detectLanguage(path: string): string {
   if (path.endsWith(".md") || path.endsWith(".txt")) return "markdown";
   if (path.endsWith(".sh")) return "bash";
   return "plaintext";
+}
+
+function supportsRenderedPreview(path: string, language: string): boolean {
+  return language === "markdown" || (language === "yaml" && path.endsWith("worker.yml"));
 }
 
 // ---------------------------------------------------------------------------
@@ -225,6 +228,14 @@ export function FilesEditor(props: FilesEditorProps) {
 
 function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps) {
   const selected = files.find((f) => f.path === selectedPath) || null;
+  const canPreviewSelected = selected
+    ? !selected.binary && supportsRenderedPreview(selected.path, selected.language)
+    : false;
+  const [viewMode, setViewMode] = useState<"raw" | "preview">("raw");
+
+  useEffect(() => {
+    setViewMode(canPreviewSelected ? "preview" : "raw");
+  }, [canPreviewSelected, selected?.path]);
 
   if (files.length === 0) {
     return <p className="text-sm text-muted-foreground">No files found for this worker.</p>;
@@ -238,11 +249,11 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
       {/* FIX 2 (Federico 2026-05-29): the file rail must stay visible while a
           long file (e.g. a big run.py) scrolls. Sticky to the viewport with a
           top offset that clears the sticky mobile header (h-14 ≈ 56px); on
-          desktop there is no top header over <main>, so it simply pins 72px
-          from the top while the document scrolls. self-start lets the sticky
+          desktop there is no top header over <main>, so it pins close to the
+          viewport top while the document scrolls. self-start lets the sticky
           element detach from the flex stretch.
           Mobile (< lg): full-width rail, no sticky (stacks above the code pane). */}
-      <div className="w-full lg:w-64 shrink-0 lg:self-start lg:sticky lg:top-[4.5rem] border border-line rounded-[var(--radius-card)] overflow-hidden">
+      <div className="w-full lg:w-64 shrink-0 lg:self-start lg:sticky lg:top-3 border border-line rounded-[var(--radius-card)] overflow-hidden">
         <div className="px-3 py-2 border-b border-line">
           <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
             <FolderOpen className="w-3.5 h-3.5" />
@@ -272,16 +283,46 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
       <div className="flex-1 min-w-0">
         {selected ? (
           <div className="border border-line rounded-[var(--radius-card)] overflow-hidden">
-            <div className="py-2 px-4 border-b border-line">
+            <div className="flex items-center justify-between gap-3 py-2 px-4 border-b border-line">
               <p className="text-xs font-mono text-muted-foreground">{selected.path}</p>
+              {!selected.binary && (
+                <div className="flex items-center gap-0 rounded-md border border-border overflow-hidden shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("raw")}
+                    className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
+                      viewMode === "raw"
+                        ? "bg-muted text-foreground font-medium"
+                        : "text-muted-foreground hover:bg-muted/40"
+                    }`}
+                  >
+                    <Code2 className="w-3 h-3" />
+                    Raw
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => canPreviewSelected && setViewMode("preview")}
+                    disabled={!canPreviewSelected}
+                    title={canPreviewSelected ? `${selected.path} preview` : "No rendered preview for this file type"}
+                    className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                      viewMode === "preview"
+                        ? "bg-muted text-foreground font-medium"
+                        : "text-muted-foreground hover:bg-muted/40"
+                    }`}
+                  >
+                    <AlignLeft className="w-3 h-3" />
+                    Preview
+                  </button>
+                </div>
+              )}
             </div>
             {selected.binary ? (
               <div className="p-4 text-sm text-muted-foreground">Binary file -- cannot display.</div>
-            ) : selected.language === "markdown" ? (
+            ) : viewMode === "preview" && selected.language === "markdown" ? (
               <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px]">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content || ""}</ReactMarkdown>
               </div>
-            ) : selected.language === "yaml" && selected.path.endsWith("worker.yml") ? (
+            ) : viewMode === "preview" && selected.language === "yaml" && selected.path.endsWith("worker.yml") ? (
               <WorkerYamlView content={selected.content || ""} />
             ) : (
               <SyntaxHighlightedCode content={selected.content || ""} language={selected.language} />
@@ -313,18 +354,14 @@ function WorkerYamlView({ content }: { content: string }) {
   ].filter(([, value]) => value);
 
   return (
-    <Tabs defaultValue="preview" className="bg-muted/20">
-      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
+    <div className="bg-muted/20">
+      <div className="border-b border-line px-4 py-2">
         <div>
           <p className="text-xs font-medium text-foreground">Worker manifest</p>
-          <p className="text-[11px] text-muted-foreground">Readable preview with raw YAML one tab away.</p>
+          <p className="text-[11px] text-muted-foreground">Readable manifest preview. Raw YAML is available from the file toolbar.</p>
         </div>
-        <TabsList>
-          <TabsTrigger value="preview">Preview</TabsTrigger>
-          <TabsTrigger value="raw">Raw</TabsTrigger>
-        </TabsList>
       </div>
-      <TabsContent value="preview" className="m-0 max-h-[640px] overflow-auto p-4">
+      <div className="max-h-[640px] overflow-auto p-4">
         <div className="space-y-4">
           <div>
             <h3 className="text-base font-semibold text-foreground">{parsed.title || parsed.name || "Untitled worker"}</h3>
@@ -344,11 +381,8 @@ function WorkerYamlView({ content }: { content: string }) {
           <YamlList title="Connections" items={parsed.connections} getLabel={(item) => itemLabel(item)} />
           <YamlList title="Brain packs" items={parsed.contexts} getLabel={(item) => itemLabel(item)} />
         </div>
-      </TabsContent>
-      <TabsContent value="raw" className="m-0">
-        <SyntaxHighlightedCode content={content} language="yaml" />
-      </TabsContent>
-    </Tabs>
+      </div>
+    </div>
   );
 }
 
@@ -457,7 +491,7 @@ function FilesEditorEdit({
 
   // Per-file preview toggle — default to preview for worker.yml and .md files
   const fileSupportsPreview = (path: string) =>
-    path === "worker.yml" ? Boolean(renderYamlPreview) : detectLanguage(path) === "markdown";
+    path === "worker.yml" ? Boolean(renderYamlPreview) : supportsRenderedPreview(path, detectLanguage(path));
   const [previewActive, setPreviewActive] = useState(() => fileSupportsPreview(effectiveSelected));
   useEffect(() => {
     setPreviewActive(fileSupportsPreview(effectiveSelected));
@@ -498,9 +532,9 @@ function FilesEditorEdit({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6 items-start">
       {/* FIX 2 (Federico 2026-05-29): keep the file rail pinned while editing a
-          long file. items-start on the grid lets this track sticky; top offset
-          clears the sticky mobile header. */}
-      <Card className="border-border shadow-none bg-card self-start sticky top-[4.5rem]">
+          long file. items-start on the grid lets this track sticky; the small
+          top offset keeps the rail close to the editor pane on initial render. */}
+      <Card className="border-border shadow-none bg-card self-start lg:sticky lg:top-3 !py-0">
         <CardHeader className="py-2 px-3 flex flex-row items-center justify-between">
           <CardTitle className="text-xs font-medium text-muted-foreground">Files</CardTitle>
           <button
@@ -558,13 +592,13 @@ function FilesEditorEdit({
         </CardContent>
       </Card>
 
-      <Card className="border-border shadow-none bg-card">
+      <Card className="border-border shadow-none bg-card !py-0">
         <CardHeader className="py-2 px-4 border-b border-border">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-xs font-medium font-mono text-muted-foreground">
               {selectedFile ? selectedFile.path : "Select a file"}
             </CardTitle>
-            {selectedFile && fileSupportsPreview(selectedFile.path) && (
+            {selectedFile && (
               <div className="flex items-center gap-0 rounded-md border border-border overflow-hidden shrink-0">
                 <button
                   type="button"
@@ -576,12 +610,14 @@ function FilesEditorEdit({
                   }`}
                 >
                   <Code2 className="w-3 h-3" />
-                  Code
+                  Raw
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPreviewActive(true)}
-                  className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
+                  onClick={() => fileSupportsPreview(selectedFile.path) && setPreviewActive(true)}
+                  disabled={!fileSupportsPreview(selectedFile.path)}
+                  title={fileSupportsPreview(selectedFile.path) ? `${selectedFile.path} preview` : "No rendered preview for this file type"}
+                  className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
                     previewActive
                       ? "bg-muted text-foreground font-medium"
                       : "text-muted-foreground hover:bg-muted/40"

@@ -61,10 +61,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.ENGINE_SUBMODULE_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+
+      - name: Sync dashboard from engine
+        working-directory: web
+        run: npm run sync -- --quiet
 
       - name: Stamp CLI deploy commit
         run: |
@@ -75,6 +82,7 @@ jobs:
       - name: Pull Vercel project settings
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        working-directory: web
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
           npx --yes vercel@50.22.1 pull --yes --environment=production --token "$VERCEL_TOKEN"
@@ -82,6 +90,7 @@ jobs:
       - name: Deploy production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        working-directory: web
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
           npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"

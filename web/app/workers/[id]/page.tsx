@@ -21,7 +21,7 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight,
   Copy, Code2, Clock, Plug2, ListChecks,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, Plus,
+  Brain as BrainIcon, Settings2, Plus, GitFork, RotateCcw,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -52,6 +52,7 @@ import type {
   ContextSummary,
   WorkerConnectionSpec,
   WorkerContextSpec,
+  VersionSummary,
 } from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { FileInputUpload } from "@/components/FileInputUpload";
@@ -76,9 +77,9 @@ import { useRunStream } from "@/lib/useRunStream";
 // ABOVE the Run form on the Run tab. Danger zone moves to /edit only
 // (already exists there). Tech details + I/O chips dropped (redundant
 // with the form fields below + the Run/Source/Edit tabs).
-type Section = "about" | "run" | "settings" | "brain" | "code" | "connections" | "runs";
+type Section = "about" | "run" | "settings" | "brain" | "code" | "connections" | "runs" | "versions";
 
-const VALID_SECTIONS: Section[] = ["about", "run", "settings", "brain", "code", "connections", "runs"];
+const VALID_SECTIONS: Section[] = ["about", "run", "settings", "brain", "code", "connections", "runs", "versions"];
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
@@ -96,6 +97,7 @@ const SECTION_TO_HASH: Record<Section, string> = {
   runs: "history",
   connections: "connections",
   code: "source",
+  versions: "versions",
 };
 const HASH_TO_SECTION: Record<string, Section> = {
   about: "about",
@@ -115,6 +117,7 @@ const HASH_TO_SECTION: Record<string, Section> = {
   overview: "about",
   runs: "runs",
   connections: "connections",
+  versions: "versions",
 };
 
 function hashToSection(h: string): Section | null {
@@ -138,6 +141,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
   { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
   { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
+  { id: "versions", label: "Versions", icon: <GitFork className="w-4 h-4" /> },
 ];
 
 // ---------------------------------------------------------------------------
@@ -2082,6 +2086,9 @@ export default function WorkerDetailPage() {
         {activeSection === "runs" && (
           <RunsSection worker={worker} />
         )}
+        {activeSection === "versions" && (
+          <VersionsSection worker={worker} onRollback={(updated) => setWorker(updated)} />
+        )}
       </div>
     </div>
   );
@@ -2439,12 +2446,12 @@ function BrainSection({
   });
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-3xl space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Brain packs</h2>
+          <h2 className="text-base font-semibold text-foreground">Worker resources</h2>
           <p className="text-sm text-muted-foreground">
-            {selectedNames.size} attached to this worker.
+            {selectedNames.size} brain {selectedNames.size === 1 ? "resource" : "resources"} attached to this worker.
           </p>
         </div>
         <Link href="/brain">
@@ -2464,18 +2471,26 @@ function BrainSection({
 
       {sortedPacks.length === 0 ? (
         <div className="rounded-[var(--radius-button)] border border-line bg-card p-4">
-          <p className="text-sm text-muted-foreground">No brain packs available.</p>
+          <p className="text-sm text-muted-foreground">No brain resources available.</p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-[var(--radius-button)] border border-line bg-card">
+          <div className="hidden grid-cols-[minmax(0,1fr)_120px_104px_88px] gap-3 border-b border-line px-4 py-2 text-[11px] font-medium uppercase text-muted-foreground sm:grid">
+            <span>Resource</span>
+            <span>Access</span>
+            <span>Status</span>
+            <span className="text-right">Action</span>
+          </div>
           {sortedPacks.map((pack) => {
             const attached = selectedNames.has(pack.name);
             const selectedSpec = selectedSpecs.find((spec) => contextSpecName(spec) === pack.name);
             const writableMount = selectedSpec ? contextSpecWritable(selectedSpec) : false;
+            const accessLabel = writableMount ? "Read/write" : "Read-only";
+            const statusLabel = attached ? "Attached" : "Available";
             return (
               <div
                 key={pack.name}
-                className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 last:border-b-0"
+                className="grid gap-3 border-b border-line px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_120px_104px_88px] sm:items-center"
               >
                 <div className="flex min-w-0 items-start gap-3">
                   <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] border border-line bg-[var(--paper)]">
@@ -2484,21 +2499,11 @@ function BrainSection({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-medium text-foreground">{pack.name}</span>
-                      {attached && (
+                      {pack.system ? (
                         <Badge variant="outline" className="border-line text-xs text-muted-foreground">
-                          Attached
-                        </Badge>
-                      )}
-                      {pack.system || pack.read_only ? (
-                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
-                          Read-only
+                          System
                         </Badge>
                       ) : null}
-                      {writableMount && (
-                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
-                          Writable mount
-                        </Badge>
-                      )}
                     </div>
                     {pack.description && (
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{pack.description}</p>
@@ -2510,13 +2515,25 @@ function BrainSection({
                     </p>
                   </div>
                 </div>
+                <div className="flex items-center gap-2 sm:block">
+                  <span className="text-[11px] font-medium uppercase text-muted-foreground sm:hidden">Access</span>
+                  <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                    {accessLabel}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2 sm:block">
+                  <span className="text-[11px] font-medium uppercase text-muted-foreground sm:hidden">Status</span>
+                  <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                    {statusLabel}
+                  </Badge>
+                </div>
                 <Button
                   type="button"
                   size="sm"
                   variant={attached ? "outline" : "default"}
                   onClick={() => onToggleBrainPack(pack.name)}
                   disabled={Boolean(savingBrain)}
-                  className="shrink-0"
+                  className="w-fit shrink-0 justify-self-start sm:w-full"
                 >
                   {savingBrain === pack.name ? "Saving…" : attached ? "Remove" : "Attach"}
                 </Button>
@@ -2749,5 +2766,145 @@ function StatusPill({ status }: { status: string }) {
       <span className="size-1.5 rounded-full bg-current opacity-70" aria-hidden="true" />
       {label}
     </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Versions section
+// ---------------------------------------------------------------------------
+
+function VersionsSection({
+  worker,
+  onRollback,
+}: {
+  worker: WorkerDetail;
+  onRollback: (updated: WorkerDetail) => void;
+}) {
+  const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    api.workers
+      .listVersions(worker.id)
+      .then(setVersions)
+      .catch(() => setVersions([]))
+      .finally(() => setLoading(false));
+  }, [worker.id]);
+
+  async function handleRollback(v: VersionSummary) {
+    if (
+      !confirm(
+        `Restore worker to version ${v.version_number} (saved ${formatRelative(v.created_at)})?\n\nThis will overwrite current source files.`
+      )
+    )
+      return;
+    setRollingBack(v.id);
+    try {
+      const updated = await api.workers.rollback(worker.id, v.id);
+      onRollback(updated);
+      // Refresh versions list
+      const fresh = await api.workers.listVersions(worker.id);
+      setVersions(fresh);
+      toast.success(`Rolled back to version ${v.version_number}`);
+    } catch (e: unknown) {
+      toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
+    } finally {
+      setRollingBack(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-2">
+        {[...Array(3)].map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+
+  if (versions.length === 0) {
+    return (
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 space-y-2">
+        <p className="text-sm font-medium text-foreground">No versions yet</p>
+        <p className="text-xs text-muted-foreground">
+          Versions are saved automatically each time you update the worker&apos;s source files. Save the worker to create the first version.
+        </p>
+      </div>
+    );
+  }
+
+  function changeSourceLabel(src: string): string {
+    if (src === "user") return "Manual save";
+    if (src === "ai") return "AI edit";
+    if (src === "api") return "API";
+    if (src.startsWith("rollback:")) return "Rollback";
+    return src;
+  }
+
+  function changeSourceBadge(src: string) {
+    const label = changeSourceLabel(src);
+    const isRollback = src.startsWith("rollback:");
+    const isAi = src === "ai";
+    return (
+      <span
+        className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border ${
+          isRollback
+            ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+            : isAi
+            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
+            : "border-border bg-muted text-muted-foreground"
+        }`}
+      >
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        {versions.length} version{versions.length !== 1 ? "s" : ""} · newest first
+      </p>
+      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden divide-y divide-[var(--border-default)]">
+        {versions.map((v, idx) => (
+          <div
+            key={v.id}
+            className="flex items-center justify-between gap-3 px-4 py-3"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 text-right">
+                v{v.version_number}
+              </span>
+              <div className="min-w-0 flex flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  {changeSourceBadge(v.change_source)}
+                  {idx === 0 && (
+                    <span className="text-[10px] text-muted-foreground font-medium">(current)</span>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {formatRelative(v.created_at)}
+                </span>
+              </div>
+            </div>
+            {idx !== 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 h-7 text-xs gap-1.5"
+                disabled={rollingBack === v.id}
+                onClick={() => handleRollback(v)}
+              >
+                <RotateCcw className="size-3" />
+                {rollingBack === v.id ? "Restoring…" : "Restore"}
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
