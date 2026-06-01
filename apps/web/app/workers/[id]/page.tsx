@@ -21,7 +21,7 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon,
+  Brain as BrainIcon, Settings2, AlignLeft,
 } from "lucide-react";
 import { dump as dumpYaml } from "js-yaml";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -74,9 +74,9 @@ import { useRunStream } from "@/lib/useRunStream";
 // ABOVE the Run form on the Run tab. Danger zone moves to /edit only
 // (already exists there). Tech details + I/O chips dropped (redundant
 // with the form fields below + the Run/Source/Edit tabs).
-type Section = "about" | "run" | "configure" | "brain" | "code" | "connections" | "runs";
+type Section = "about" | "run" | "settings" | "brain" | "code" | "connections" | "runs";
 
-const VALID_SECTIONS: Section[] = ["about", "run", "configure", "brain", "code", "connections", "runs"];
+const VALID_SECTIONS: Section[] = ["about", "run", "settings", "brain", "code", "connections", "runs"];
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
@@ -89,30 +89,30 @@ function isValidSection(s: string): s is Section {
 const SECTION_TO_HASH: Record<Section, string> = {
   about: "about",
   run: "run",
-  configure: "configure",
+  settings: "settings",
   brain: "brain",
   runs: "history",
   connections: "connections",
-  code: "advanced",
+  code: "source",
 };
 const HASH_TO_SECTION: Record<string, Section> = {
   about: "about",
   run: "run",
-  configure: "configure",
+  configure: "code",      // legacy — configure now lives in Source (form view)
+  settings: "settings",
   brain: "brain",
   contexts: "brain",
   context: "brain",
-  triggers: "configure", // legacy — triggers tab merged into configure
+  triggers: "settings",   // legacy — triggers live in Settings
   history: "runs",
   apps: "connections",
   connection: "connections",
-  advanced: "code",
+  advanced: "code",       // legacy deep-link still works
   source: "code",
-  // legacy hashes still resolve so old deep-links keep working
-  runs: "runs",
-  connections: "connections",
   code: "code",
   overview: "about",
+  runs: "runs",
+  connections: "connections",
 };
 
 function hashToSection(h: string): Section | null {
@@ -131,11 +131,11 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: "about", label: "About", icon: <BookOpen className="w-4 h-4" /> },
   { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
-  { id: "configure", label: "Configure", icon: <Pencil className="w-4 h-4" /> },
+  { id: "settings", label: "Settings", icon: <Settings2 className="w-4 h-4" /> },
   { id: "brain", label: "Brain", icon: <BrainIcon className="w-4 h-4" /> },
   { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
   { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
-  { id: "code", label: "Advanced", icon: <Code2 className="w-4 h-4" /> },
+  { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
 ];
 
 // ---------------------------------------------------------------------------
@@ -283,6 +283,9 @@ export default function WorkerDetailPage() {
   const [notifyEmailTo, setNotifyEmailTo] = useState("");
   const [notifyOnFailed, setNotifyOnFailed] = useState(true);
   const [notifyOnCompleted, setNotifyOnCompleted] = useState(false);
+
+  // Source tab — yaml/form toggle (both are editable)
+  const [sourceMode, setSourceMode] = useState<"yaml" | "form">("yaml");
 
   // P1-C (prove100 2026-05-30): worker actions — Archive (reversible) and
   // Delete (destructive, confirm-gated). The API exposed both DELETE and a
@@ -806,8 +809,9 @@ export default function WorkerDetailPage() {
         deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
         worker.manifest_yaml || "";
 
-      // Patch description into worker.yml
       let patched = currentYml;
+
+      // Patch description
       if (configDesc !== configDescOriginal) {
         patched = patched.replace(
           /^description:\s*.*/m,
@@ -818,42 +822,13 @@ export default function WorkerDetailPage() {
         }
       }
 
-      // Patch trigger block if triggers are dirty
-      if (triggersDirty) {
-        const triggerYaml = buildTriggersYaml(triggerRows);
-        patched = replaceTriggerBlock(patched, triggerYaml);
-      }
-
       // Patch input defaults
       for (const [name, value] of Object.entries(configInputDefaults)) {
         patched = patchInputDefault(patched, name, value);
       }
 
-      // Patch retry block
-      patched = patchRetryBlock(
-        patched,
-        retryEnabled
-          ? { max_attempts: retryMaxAttempts, delay_seconds: retryDelaySeconds }
-          : null
-      );
-
-      // Patch notify block
-      const notifyEvents = [
-        ...(notifyOnFailed ? ["failed"] : []),
-        ...(notifyOnCompleted ? ["completed"] : []),
-      ];
-      const notifyEmailList = notifyEmailTo.split(",").map((e) => e.trim()).filter(Boolean);
-      const hasNotify = notifyUrl.trim() || notifyEmailList.length > 0;
-      patched = patchNotifyBlock(
-        patched,
-        hasNotify
-          ? { url: notifyUrl.trim() || undefined, email_to: notifyEmailList.length ? notifyEmailList : undefined, on: notifyEvents.length ? notifyEvents : ["failed"] }
-          : null
-      );
-
       await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
       toast.success("Worker saved");
-      setTriggersDirty(false);
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
       setConfigDesc(updated.description || "");
@@ -879,6 +854,63 @@ export default function WorkerDetailPage() {
     }
   }
 
+  async function commitSettingsSave() {
+    if (!worker) return;
+    setConfigSaving(true);
+    try {
+      const currentYml =
+        deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
+        worker.manifest_yaml || "";
+
+      let patched = currentYml;
+
+      // Patch trigger block if dirty
+      if (triggersDirty) {
+        const triggerYaml = buildTriggersYaml(triggerRows);
+        patched = replaceTriggerBlock(patched, triggerYaml);
+      }
+
+      // Patch retry block
+      patched = patchRetryBlock(
+        patched,
+        retryEnabled
+          ? { max_attempts: retryMaxAttempts, delay_seconds: retryDelaySeconds }
+          : null
+      );
+
+      // Patch notify block
+      const notifyEvents = [
+        ...(notifyOnFailed ? ["failed"] : []),
+        ...(notifyOnCompleted ? ["completed"] : []),
+      ];
+      const notifyEmailList = notifyEmailTo.split(",").map((e) => e.trim()).filter(Boolean);
+      const hasNotify = notifyUrl.trim() || notifyEmailList.length > 0;
+      patched = patchNotifyBlock(
+        patched,
+        hasNotify
+          ? { url: notifyUrl.trim() || undefined, email_to: notifyEmailList.length ? notifyEmailList : undefined, on: notifyEvents.length ? notifyEvents : ["failed"] }
+          : null
+      );
+
+      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      toast.success("Settings saved");
+      setTriggersDirty(false);
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      const updatedFiles = (updated.files || [])
+        .filter((f: WorkerFile) => !f.binary)
+        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to save settings");
+    } finally {
+      setConfigSaving(false);
+    }
+  }
+
   async function handleSaveConfigure() {
     if (!worker) return;
     const descChanged = configDesc.trim() !== configDescOriginal.trim();
@@ -899,6 +931,10 @@ export default function WorkerDetailPage() {
       }
     }
     await commitConfigureSave();
+  }
+
+  async function handleSaveSettings() {
+    await commitSettingsSave();
   }
 
   // P1-C: archive this worker (reversible). On success route back to the list:
@@ -1314,7 +1350,7 @@ export default function WorkerDetailPage() {
                     <p className="text-xs font-mono truncate">{s.suggested}</p>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground italic">Apply the suggestion in the Configure or Advanced tab.</p>
+                <p className="text-xs text-muted-foreground italic">Apply the suggestion in the Source tab (Form view) or edit the YAML directly.</p>
               </div>
             ))}
           </div>
@@ -1384,7 +1420,7 @@ export default function WorkerDetailPage() {
               <TabsTrigger key={item.id} value={item.id}>
                 {item.icon}
                 <span>{item.label}</span>
-                {item.id === "configure" && triggersCount > 1 && (
+                {item.id === "settings" && triggersCount > 1 && (
                   <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
                 )}
                 {item.id === "runs" && runsCount > 0 && (
@@ -1472,22 +1508,9 @@ export default function WorkerDetailPage() {
           )
         )}
 
-        {activeSection === "configure" && (
+        {activeSection === "settings" && (
           <div className="max-w-2xl space-y-6">
-            {/* Description */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Description</Label>
-              <p className="text-xs text-muted-foreground">Describe what this worker does. If you change this, we&apos;ll check for any conflicts with your current configuration.</p>
-              <Textarea
-                rows={3}
-                value={configDesc}
-                onChange={(e) => setConfigDesc(e.target.value)}
-                placeholder="Describe what this worker does…"
-                className="text-sm resize-none"
-              />
-            </div>
-
-            {/* Trigger */}
+            {/* Triggers */}
             <TriggersEditor
               rows={triggerRows}
               onChange={(rows) => {
@@ -1508,39 +1531,6 @@ export default function WorkerDetailPage() {
                 setTriggersDirty(false);
               }}
             />
-
-            {/* Inputs */}
-            {(worker.config.inputs || []).length > 0 && (
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-sm font-medium">Inputs</Label>
-                  <p className="text-xs text-muted-foreground mt-0.5">Default values are used when the worker runs on a schedule or without manual input.</p>
-                </div>
-                <div className="rounded-lg border border-border divide-y divide-border">
-                  {(worker.config.inputs || []).map((inp) => (
-                    <div key={inp.name} className="flex items-center gap-3 px-4 py-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium truncate">{inp.label || inp.name}</span>
-                          {inp.required && (
-                            <span className="text-[10px] text-muted-foreground border border-border rounded px-1 shrink-0">required</span>
-                          )}
-                        </div>
-                        <span className="text-xs text-muted-foreground font-mono">{inp.name}</span>
-                      </div>
-                      <Input
-                        className="h-7 text-xs w-48 shrink-0"
-                        placeholder={inp.placeholder || "Default value…"}
-                        value={configInputDefaults[inp.name] ?? ""}
-                        onChange={(e) =>
-                          setConfigInputDefaults((prev) => ({ ...prev, [inp.name]: e.target.value }))
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Retry on failure */}
             <div className="space-y-3">
@@ -1593,7 +1583,7 @@ export default function WorkerDetailPage() {
               )}
             </div>
 
-            {/* Failure notifications */}
+            {/* Notifications */}
             <div className="space-y-3">
               <div>
                 <Label className="text-sm font-medium">Notifications</Label>
@@ -1645,74 +1635,140 @@ export default function WorkerDetailPage() {
               )}
             </div>
 
-            {/* Save button */}
+            {/* Save */}
             <div className="flex items-center gap-3">
-              <Button
-                size="sm"
-                onClick={handleSaveConfigure}
-                disabled={configSaving || checkingConflicts}
-              >
-                {checkingConflicts ? "Checking…" : configSaving ? "Saving…" : "Save"}
+              <Button size="sm" onClick={handleSaveSettings} disabled={configSaving}>
+                {configSaving ? "Saving…" : "Save settings"}
               </Button>
-              {(configDesc !== configDescOriginal) && (
-                <span className="text-xs text-muted-foreground">Description changed — will check for conflicts on save</span>
-              )}
-            </div>
-
-            {/* Advanced YAML link */}
-            <div className="border-t border-border pt-4">
-              <button
-                type="button"
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-                onClick={() => setSection("code")}
-              >
-                <Code2 className="size-3" />
-                View or edit raw YAML (Advanced)
-              </button>
             </div>
           </div>
         )}
 
         {activeSection === "code" && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 px-3 py-2">
-              <Info className="size-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                Editing YAML directly. Changes here override the Configure form. Use the{" "}
-                <button type="button" className="underline" onClick={() => setSection("configure")}>Configure tab</button>{" "}
-                for guided editing.
+            {/* YAML / Form toggle */}
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                {sourceMode === "yaml" ? "Edit the raw worker manifest directly." : "Edit worker settings as a form."}
               </p>
-            </div>
-            <FilesEditor
-              mode="edit"
-              files={editFiles}
-              selectedPath={editSelectedPath}
-              onSelect={setEditSelectedPath}
-              onSelectedPathChange={setEditSelectedPath}
-              onChange={setEditFiles}
-            />
-            <div className="flex items-center gap-3 pt-1">
-              <Button size="sm" onClick={handleSaveAdvanced} disabled={saving || !filesDirty}>
-                {saving ? "Saving…" : "Save"}
-              </Button>
-              {filesDirty && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setEditFiles(
-                      Object.entries(editFilesOriginal).map(([path, content]) => ({ path, content }))
-                    );
-                  }}
-                  disabled={saving}
+              <div className="flex items-center rounded-md border border-border overflow-hidden text-xs">
+                <button
+                  type="button"
+                  onClick={() => setSourceMode("yaml")}
+                  className={`flex items-center gap-1 px-2.5 py-1 transition-colors ${sourceMode === "yaml" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
                 >
-                  Discard
-                </Button>
-              )}
-              {filesDirty && (
-                <span className="text-xs text-muted-foreground">Unsaved changes</span>
-              )}
+                  <Code2 className="size-3" />
+                  YAML
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceMode("form")}
+                  className={`flex items-center gap-1 px-2.5 py-1 transition-colors ${sourceMode === "form" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  <AlignLeft className="size-3" />
+                  Form
+                </button>
+              </div>
             </div>
+
+            {sourceMode === "yaml" && (
+              <>
+                <FilesEditor
+                  mode="edit"
+                  files={editFiles}
+                  selectedPath={editSelectedPath}
+                  onSelect={setEditSelectedPath}
+                  onSelectedPathChange={setEditSelectedPath}
+                  onChange={setEditFiles}
+                />
+                <div className="flex items-center gap-3 pt-1">
+                  <Button size="sm" onClick={handleSaveAdvanced} disabled={saving || !filesDirty}>
+                    {saving ? "Saving…" : "Save"}
+                  </Button>
+                  {filesDirty && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setEditFiles(
+                          Object.entries(editFilesOriginal).map(([path, content]) => ({ path, content }))
+                        );
+                      }}
+                      disabled={saving}
+                    >
+                      Discard
+                    </Button>
+                  )}
+                  {filesDirty && (
+                    <span className="text-xs text-muted-foreground">Unsaved changes</span>
+                  )}
+                </div>
+              </>
+            )}
+
+            {sourceMode === "form" && (
+              <div className="max-w-2xl space-y-6 pt-1">
+                {/* Description */}
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Description</Label>
+                  <p className="text-xs text-muted-foreground">Describe what this worker does. If you change this, we&apos;ll check for any conflicts with your current configuration.</p>
+                  <Textarea
+                    rows={3}
+                    value={configDesc}
+                    onChange={(e) => setConfigDesc(e.target.value)}
+                    placeholder="Describe what this worker does…"
+                    className="text-sm resize-none"
+                  />
+                </div>
+
+                {/* Inputs */}
+                {(worker.config.inputs || []).length > 0 && (
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-sm font-medium">Inputs</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Default values are used when the worker runs on a schedule or without manual input.</p>
+                    </div>
+                    <div className="rounded-lg border border-border divide-y divide-border">
+                      {(worker.config.inputs || []).map((inp) => (
+                        <div key={inp.name} className="flex items-center gap-3 px-4 py-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium truncate">{inp.label || inp.name}</span>
+                              {inp.required && (
+                                <span className="text-[10px] text-muted-foreground border border-border rounded px-1 shrink-0">required</span>
+                              )}
+                            </div>
+                            <span className="text-xs text-muted-foreground font-mono">{inp.name}</span>
+                          </div>
+                          <Input
+                            className="h-7 text-xs w-48 shrink-0"
+                            placeholder={inp.placeholder || "Default value…"}
+                            value={configInputDefaults[inp.name] ?? ""}
+                            onChange={(e) =>
+                              setConfigInputDefaults((prev) => ({ ...prev, [inp.name]: e.target.value }))
+                            }
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Save */}
+                <div className="flex items-center gap-3">
+                  <Button
+                    size="sm"
+                    onClick={handleSaveConfigure}
+                    disabled={configSaving || checkingConflicts}
+                  >
+                    {checkingConflicts ? "Checking…" : configSaving ? "Saving…" : "Save"}
+                  </Button>
+                  {configDesc !== configDescOriginal && (
+                    <span className="text-xs text-muted-foreground">Description changed — will check for conflicts on save</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
