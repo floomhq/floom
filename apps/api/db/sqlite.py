@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-import fcntl
+try:
+    import fcntl as _fcntl_mod
+    _LOCK_EX = _fcntl_mod.LOCK_EX
+    _LOCK_UN = _fcntl_mod.LOCK_UN
+except ImportError:
+    class _fcntl_mod:  # type: ignore[no-redef]
+        LOCK_EX = 1; LOCK_UN = 8
+        @staticmethod
+        def flock(fd, op): pass
+    _LOCK_EX = 1
+    _LOCK_UN = 8
 import json
 import os
 import re
@@ -69,11 +79,11 @@ def _write_env_lines(lines: list[str]) -> None:
     env_path = _env_path()
     env_path.parent.mkdir(parents=True, exist_ok=True)
     with env_path.open("a+") as lock_fd:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        _fcntl_mod.flock(lock_fd, _LOCK_EX)
         try:
             env_path.write_text("".join(lines))
         finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            _fcntl_mod.flock(lock_fd, _LOCK_UN)
 
 
 def _upsert_env_var(name: str, value: str) -> None:
