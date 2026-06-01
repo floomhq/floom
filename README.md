@@ -6,7 +6,7 @@ The open-source, self-hosted runtime for AI workers. Sandboxed by default.
 
 ## Worker execution model
 
-Every worker runs in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. The local in-process runner (`runner: local`) remains available as an explicit opt-out for trusted bundles where you want zero cold-start latency.
+Every worker runs in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. The local in-process runner (`runner: local`) is available as an explicit opt-out for trusted bundles where you want zero cold-start latency.
 
 **Cost comparison at typical use (100 runs/day × 30s average):**
 
@@ -19,7 +19,7 @@ Every worker runs in an **E2B sandbox by default** — isolated dependencies, no
 | n8n Cloud Business | $200 | 25,000 executions |
 | Make.com Pro | $16 | 10,000 operations |
 
-For workers that fire every few seconds OR that need offline operation, switch to `runner: local` in `worker.yml`. The stock workers shipped with this repo are pinned to `local` because they're trusted bundles authored by Floom.
+For workers that fire every few seconds or need offline operation, switch to `runner: local` in `worker.yml`.
 
 ---
 
@@ -27,10 +27,19 @@ For workers that fire every few seconds OR that need offline operation, switch t
 
 ### 1. Install backend dependencies
 
+**Linux / macOS**
 ```bash
 cd apps/api
 python3.11 -m venv venv
 source venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Windows**
+```powershell
+cd apps/api
+python -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -41,16 +50,23 @@ cp .env.example .env
 # Edit .env and add your OPENAI_API_KEY
 ```
 
-For Composio-triggered workers, also set:
-
-- `COMPOSIO_API_KEY` — Composio v3 API key used to enable/disable triggers.
-- `COMPOSIO_WEBHOOK_SIGNING_KEY` — HMAC key used to verify `POST /composio-events` (`webhook-id`, `webhook-timestamp`, `webhook-signature`). The endpoint returns 503 when this is missing.
+Optional — only needed for Composio-triggered workers:
+- `COMPOSIO_API_KEY` — enables/disables Composio triggers
+- `COMPOSIO_WEBHOOK_SIGNING_KEY` — verifies signed Composio webhook payloads
 
 ### 3. Start the backend
 
+**Linux / macOS**
 ```bash
 cd apps/api
 source venv/bin/activate
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**Windows**
+```powershell
+cd apps/api
+venv\Scripts\activate
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -71,9 +87,12 @@ Open [http://localhost:3000](http://localhost:3000).
 ```
 apps/web      Next.js + TypeScript + Tailwind + shadcn/ui
 apps/api      FastAPI + SQLite + Pydantic
-workers/      Worker folders (worker.yml + run.py)
-data/         SQLite DB + artifacts
+apps/mcp      MCP server + CLI  (@floomhq/workeros)
+workers/      Worker folders (worker.yml + run.py or SKILL.md)
+data/         SQLite DB + run artifacts
 ```
+
+**Platform support:** Linux, macOS, Windows (Python 3.11+, Node 18+).
 
 ---
 
@@ -81,14 +100,14 @@ data/         SQLite DB + artifacts
 
 Workers live in `workers/<name>/` and contain:
 
-- `worker.yml` — configuration (inputs, outputs, secrets, trigger, runtime)
+- `worker.yml` — manifest (inputs, outputs, secrets, trigger, runtime)
 - `run.py` — worker code exposing a `run(inputs, context)` function (script mode)
 - `SKILL.md` — agent prompt (agent mode); mutually exclusive with `run.py`
 - `requirements.txt` — Python dependencies
 
-**Agents (Claude Code / Cursor) — start at [docs/AGENT-COOKBOOK.md](docs/AGENT-COOKBOOK.md).** End-to-end recipes for writing + deploying workers via the MCP, including porting Claude skill bundles.
+**Writing workers with an AI agent (Claude Code / Cursor):** see [docs/AGENT-COOKBOOK.md](docs/AGENT-COOKBOOK.md) for end-to-end recipes including porting Claude skill bundles.
 
-**Humans authoring workers by hand — see [docs/AUTHORING.md](docs/AUTHORING.md)** for the full `worker.yml` schema, both execution modes, secrets/connections/triggers, and the agent-side draft contract.
+**Writing workers by hand:** see [docs/AUTHORING.md](docs/AUTHORING.md) for the full `worker.yml` schema, execution modes, secrets, connections, and triggers.
 
 ### CLI deploy loop
 
@@ -97,16 +116,15 @@ npm i -g @floomhq/workeros
 workeros login
 workeros workers validate ./workers/<id>
 workeros workers push ./workers/<id>
-workeros run <id> --inputs-file docs/workers/inputs/<id>.json
+workeros run <id> --inputs-file inputs.json
 ```
-
-`workeros` is the preferred binary. The package also exposes a `floom` compatibility alias for older scripts.
 
 ### Included workers
 
-- **weekly_update** — Turns raw notes into a polished weekly company update (AI-powered, requires approval)
-- **csv_enricher** — Enriches CSV rows using custom instructions (AI-powered)
-- **research_brief** — Generates markdown research briefs on any topic (AI-powered, requires approval)
+- **weekly_update** — Turns raw notes into a polished weekly update (AI, requires approval)
+- **csv_enricher** — Enriches CSV rows using custom instructions (AI)
+- **research_brief** — Generates markdown research briefs on any topic (AI, requires approval)
+- **search_console_insights** — Pulls Google Search Console data and summarises performance
 
 ---
 
@@ -114,37 +132,19 @@ workeros run <id> --inputs-file docs/workers/inputs/<id>.json
 
 Base URL: `http://localhost:8000`
 
+All endpoints require `x-floom-secret` header (set `FLOOM_SECRET` in `.env`). Omit `FLOOM_SECRET` entirely to run in unauthenticated local dev mode.
+
 | Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/workers` | GET | List all workers |
+|---|---|---|
+| `/workers` | GET | List workers |
 | `/workers/{id}` | GET | Worker detail |
 | `/workers/reload` | POST | Reload workers from disk |
-| `/workers/{id}/runs` | POST | Create a run |
-| `/integrations/triggers` | GET | Cached Composio trigger catalog |
-| `/composio-events` | POST | Signed Composio trigger webhook receiver |
+| `/workers/{id}/runs` | POST | Trigger a run |
 | `/runs` | GET | List runs |
 | `/runs/{id}` | GET | Run detail |
-| `/runs/{id}/approve` | POST | Approve a run |
-| `/runs/{id}/reject` | POST | Reject a run |
+| `/runs/{id}/approve` | POST | Approve a pending run |
+| `/runs/{id}/reject` | POST | Reject a pending run |
 | `/approvals` | GET | List pending approvals |
 | `/secrets` | GET | List secret metadata |
-
----
-
-## Design
-
-- **Frontend**: shadcn/ui components, warm off-white background, calm operational aesthetic
-- **Backend**: SQLite for V0, local Python subprocess runner, optional E2B sandbox runner
-
----
-
-## V0 Checklist
-
-- [x] Worker discovery from `/workers` directory
-- [x] UI generates run forms from `worker.yml`
-- [x] Manual trigger execution
-- [x] Log streaming and storage
-- [x] Output display
-- [x] Approval workflow (approve/reject)
-- [x] Secret availability detection from `.env`
-- [x] 3 real example workers with OpenAI integration
+| `/composio-events` | POST | Signed Composio webhook receiver |
+| `/health` | GET | Health check |

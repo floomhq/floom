@@ -11,7 +11,28 @@ import hmac
 import base64
 import io
 import shutil
-import fcntl
+try:
+    import fcntl as _fcntl_mod
+    def _flock(fd, op): _fcntl_mod.flock(fd, op)
+    _LOCK_EX = _fcntl_mod.LOCK_EX
+    _LOCK_UN = _fcntl_mod.LOCK_UN
+except ImportError:
+    # Windows: no fcntl — use msvcrt or fall back to no-op for single-process dev
+    try:
+        import msvcrt as _msvcrt
+        def _flock(fd, op):
+            if op == 1:  # LOCK_EX
+                _msvcrt.locking(fd.fileno(), _msvcrt.LK_NBLCK, 1)
+            else:
+                _msvcrt.locking(fd.fileno(), _msvcrt.LK_UNLCK, 1)
+    except Exception:
+        def _flock(fd, op): pass
+    class _fcntl_mod:  # type: ignore[no-redef]
+        LOCK_EX = 1; LOCK_SH = 0; LOCK_UN = 8; LOCK_NB = 4
+        @staticmethod
+        def flock(fd, op): _flock(fd, op)
+    _LOCK_EX = 1
+    _LOCK_UN = 8
 import re
 import sys
 import time
@@ -9476,16 +9497,16 @@ def _read_env_lines() -> list[str]:
 
 
 def _write_env_lines(lines: list[str]) -> None:
-    """Atomically write .env lines with fcntl lock."""
+    """Atomically write .env lines with file lock."""
     env_path = _env_file_path()
     env_path.parent.mkdir(parents=True, exist_ok=True)
     with open(env_path, "a+") as lock_fd:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        _fcntl_mod.flock(lock_fd, _LOCK_EX)
         try:
             with open(env_path, "w") as f:
                 f.writelines(lines)
         finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            _fcntl_mod.flock(lock_fd, _LOCK_UN)
 
 
 def _upsert_env_var(name: str, value: str) -> None:
