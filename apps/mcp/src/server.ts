@@ -655,17 +655,22 @@ export function createServer(): McpServer {
     "workers.create",
     {
       title: "Create Worker",
-      description: "Create a Workeros worker from WorkerContract YAML and Python source. Capabilities are optional documentation and are not enforced by this MCP server.",
+      description: "Create a Workeros worker from WorkerContract YAML. For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md (the agent system prompt) and a minimal run_py stub.",
       inputSchema: {
         worker_yml: z.string().min(1).describe("WorkerContract YAML content."),
-        run_py: z.string().min(1).describe("Python source for run.py."),
+        run_py: z.string().min(1).describe("Python source for run.py. For skill workers use a minimal stub: 'def run(inputs, context): pass'"),
+        skill_md: z.string().optional().describe("Agent system prompt (SKILL.md) for skill/agent-mode workers. Omit for script-mode workers."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ worker_yml, run_py }) =>
+    async ({ worker_yml, run_py, skill_md }) =>
       callTool(async () =>
         jsonResult(
-          await request("POST", "/workers", { worker_yml: autoFillCapabilities(worker_yml, run_py), run_py }),
+          await request("POST", "/workers", {
+            worker_yml: autoFillCapabilities(worker_yml, run_py),
+            run_py,
+            ...(skill_md ? { skill_md } : {}),
+          }),
           "Worker created.",
         ),
       ),
@@ -958,6 +963,31 @@ export function createServer(): McpServer {
         const parts = await consumeChatStream(message, conversation_id, timeout_ms);
         return jsonResult(parts);
       }),
+  );
+
+  server.registerTool(
+    "workers.write_file",
+    {
+      title: "Write Worker File",
+      description: "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Atomically replaces all provided files. You must include worker.yml in every call.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        files: z.array(
+          z.object({
+            path: z.string().min(1).describe("File path relative to worker root, e.g. 'SKILL.md' or 'run.py'."),
+            content: z.string().describe("UTF-8 file content."),
+          }),
+        ).min(1).describe("Files to write. Must include worker.yml."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ id, files }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("PUT", `/workers/${encodeURIComponent(id)}/files`, { files }),
+          "Worker files updated.",
+        ),
+      ),
   );
 
   // ---------------------------------------------------------------------------
