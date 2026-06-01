@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  cloud-tests:
+    name: Cloud tests (pytest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Initialise engine submodule (skip cleanly if no PAT)
+        id: engine
+        env:
+          ENGINE_SUBMODULE_TOKEN: ${{ secrets.ENGINE_SUBMODULE_TOKEN }}
+        run: |
+          if [ -z "${ENGINE_SUBMODULE_TOKEN:-}" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ENGINE_SUBMODULE_TOKEN not set — cloud tests skipped (engine submodule needed for requirements)."
+            exit 0
+          fi
+          git config --global \
+            url."https://x-access-token:${ENGINE_SUBMODULE_TOKEN}@github.com/".insteadOf \
+            "https://github.com/"
+          git submodule update --init --recursive
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        if: steps.engine.outputs.available == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install dependencies
+        if: steps.engine.outputs.available == 'true'
+        run: pip install -r apps/api/requirements.txt pytest pytest-asyncio
+
+      - name: Run cloud tests
+        if: steps.engine.outputs.available == 'true'
+        env:
+          WORKEROS_DEPLOY: cloud
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_ANON_KEY: placeholder
+          SUPABASE_SERVICE_ROLE_KEY: placeholder
+          WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY: ci-test-key-32-bytes-padded-here
+        run: pytest tests/ -v --tb=short
