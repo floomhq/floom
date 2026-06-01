@@ -1744,6 +1744,11 @@ def create_worker_alert(
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    if not body.url and not body.email_to:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of url (webhook) or email_to (email recipients) is required.",
+        )
     valid_events = {"failed", "completed"}
     invalid = [e for e in body.on if e not in valid_events]
     if invalid:
@@ -1751,19 +1756,24 @@ def create_worker_alert(
             status_code=400,
             detail=f"Invalid events: {invalid}. Allowed: {sorted(valid_events)}",
         )
+    import json as _json
     alert_id = f"alrt_{uuid.uuid4().hex[:12]}"
+    email_to_json = _json.dumps(body.email_to) if body.email_to else None
     row = repos.alerts.add(
         alert_id=alert_id,
         worker_id=worker_id,
         url=body.url,
+        email_to=email_to_json,
         events=",".join(body.on),
         description=body.description,
         created_at=now_iso(),
     )
+    _et = row.get("email_to")
     return WorkerAlert(
         id=row["id"],
         worker_id=row["worker_id"],
-        url=row["url"],
+        url=row.get("url"),
+        email_to=_json.loads(_et) if _et else None,
         on=row["events"].split(","),
         description=row.get("description"),
         created_at=row["created_at"],
@@ -1780,12 +1790,14 @@ def list_worker_alerts(
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    import json as _json
     rows = repos.alerts.list(worker_id=worker_id)
     return [
         WorkerAlert(
             id=r["id"],
             worker_id=r["worker_id"],
-            url=r["url"],
+            url=r.get("url"),
+            email_to=_json.loads(r["email_to"]) if r.get("email_to") else None,
             on=r["events"].split(","),
             description=r.get("description"),
             created_at=r["created_at"],

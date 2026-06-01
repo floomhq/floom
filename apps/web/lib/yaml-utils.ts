@@ -23,13 +23,19 @@ export function patchRetryBlock(
  */
 export function patchNotifyBlock(
   yaml: string,
-  notify: { url: string; on: string[] } | null
+  notify: { url?: string; email_to?: string[]; on: string[] } | null
 ): string {
   const withoutNotify = yaml.replace(/^notify:(?:\n(?:[ \t]+.*)?)*\n?/m, "");
   if (notify === null) return withoutNotify.trimEnd() + "\n";
-  const onLines = notify.on.map((e) => `  - ${e}`).join("\n");
-  const block = [`notify:`, `  url: ${JSON.stringify(notify.url)}`, `  on:`, onLines].join("\n");
-  return withoutNotify.trimEnd() + "\n" + block + "\n";
+  const lines = ["notify:"];
+  if (notify.url) lines.push(`  url: ${JSON.stringify(notify.url)}`);
+  if (notify.email_to && notify.email_to.length > 0) {
+    lines.push("  email_to:");
+    notify.email_to.forEach((addr) => lines.push(`    - ${JSON.stringify(addr)}`));
+  }
+  lines.push("  on:");
+  notify.on.forEach((e) => lines.push(`  - ${e}`));
+  return withoutNotify.trimEnd() + "\n" + lines.join("\n") + "\n";
 }
 
 /**

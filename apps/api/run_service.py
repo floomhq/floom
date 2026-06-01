@@ -63,10 +63,77 @@ from models import (
 
 import hashlib
 import hmac
+import smtplib
 import urllib.request
 import urllib.error
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 logger = logging.getLogger("floom.run_service")
+
+
+def _smtp_config() -> dict[str, Any] | None:
+    """Return SMTP config from env vars, or None if not configured."""
+    host = os.environ.get("SMTP_HOST", "").strip()
+    if not host:
+        return None
+    return {
+        "host": host,
+        "port": int(os.environ.get("SMTP_PORT", "587")),
+        "user": os.environ.get("SMTP_USER", "").strip(),
+        "password": os.environ.get("SMTP_PASSWORD", "").strip(),
+        "from_addr": os.environ.get("SMTP_FROM", os.environ.get("SMTP_USER", "")).strip(),
+    }
+
+
+def _send_email_notification(
+    *,
+    to_addrs: list[str],
+    worker_name: str,
+    run_id: str,
+    worker_id: str,
+    status: str,
+    error: str | None,
+    subject_template: str | None = None,
+) -> None:
+    """Send a run-notification email via SMTP (configured by SMTP_* env vars)."""
+    cfg = _smtp_config()
+    if not cfg:
+        logger.debug("SMTP not configured — skipping email notification for run %s", run_id)
+        return
+    if not to_addrs:
+        return
+
+    status_label = "failed" if status == "failed" else "completed"
+    subject = (subject_template or "Worker {worker_name} run {status}").format(
+        worker_name=worker_name, status=status_label, run_id=run_id
+    )
+
+    body_lines = [
+        f"Worker: {worker_name} ({worker_id})",
+        f"Run ID: {run_id}",
+        f"Status: {status_label}",
+        f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+    ]
+    if error:
+        body_lines += ["", f"Error: {error}"]
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = cfg["from_addr"] or cfg["user"]
+    msg["To"] = ", ".join(to_addrs)
+    msg.attach(MIMEText("\n".join(body_lines), "plain"))
+
+    try:
+        with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            if cfg["user"] and cfg["password"]:
+                smtp.login(cfg["user"], cfg["password"])
+            smtp.sendmail(cfg["from_addr"] or cfg["user"], to_addrs, msg.as_string())
+        logger.debug("Email notification sent to %s for run %s (%s)", to_addrs, run_id, status)
+    except Exception as exc:
+        logger.warning("Email notification failed for run %s: %s", run_id, exc)
 
 
 def _fire_alert_webhooks(
@@ -77,7 +144,7 @@ def _fire_alert_webhooks(
     error: str | None,
     repos: "Repositories",
 ) -> None:
-    """Fire registered webhook alerts matching the run's terminal status.
+    """Fire registered webhook and email alerts matching the run's terminal status.
 
     Runs in a daemon thread so it never blocks run finalisation.
     Errors are logged but never re-raised.
@@ -88,9 +155,17 @@ def _fire_alert_webhooks(
         logger.warning("Could not load alerts for worker %s: %s", worker_id, exc)
         return
 
+    # Resolve worker name for email subjects
+    try:
+        w_row = repos.workers.get_any(worker_id=worker_id)
+        worker_name = (w_row or {}).get("name", worker_id)
+    except Exception:
+        worker_name = worker_id
+
     payload = json.dumps({
         "run_id": run_id,
         "worker_id": worker_id,
+        "worker_name": worker_name,
         "status": status,
         "error": error,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -100,19 +175,38 @@ def _fire_alert_webhooks(
         events = [e.strip() for e in (row.get("events") or "").split(",") if e.strip()]
         if status not in events and "all" not in events:
             continue
-        url = row.get("url", "")
-        secret = row.get("secret")
-        headers = {"Content-Type": "application/json", "X-Workeros-Run-Id": run_id}
-        if secret:
-            sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()  # type: ignore[attr-defined]
-            headers["X-Workeros-Signature"] = f"sha256={sig}"
-        try:
-            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=10):
-                pass
-            logger.debug("Alert webhook delivered to %s for run %s (%s)", url, run_id, status)
-        except Exception as exc:
-            logger.warning("Alert webhook delivery failed for %s: %s", url, exc)
+
+        # --- Webhook delivery ---
+        url = (row.get("url") or "").strip()
+        if url:
+            secret = row.get("secret")
+            headers = {"Content-Type": "application/json", "X-Workeros-Run-Id": run_id}
+            if secret:
+                sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()  # type: ignore[attr-defined]
+                headers["X-Workeros-Signature"] = f"sha256={sig}"
+            try:
+                req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=10):
+                    pass
+                logger.debug("Alert webhook delivered to %s for run %s (%s)", url, run_id, status)
+            except Exception as exc:
+                logger.warning("Alert webhook delivery failed for %s: %s", url, exc)
+
+        # --- Email delivery ---
+        email_to_raw = (row.get("email_to") or "").strip()
+        if email_to_raw:
+            try:
+                to_addrs = json.loads(email_to_raw)
+            except Exception:
+                to_addrs = [e.strip() for e in email_to_raw.split(",") if e.strip()]
+            _send_email_notification(
+                to_addrs=to_addrs,
+                worker_name=worker_name,
+                run_id=run_id,
+                worker_id=worker_id,
+                status=status,
+                error=error,
+            )
 
 
 def _schedule_retry(
