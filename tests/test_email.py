@@ -97,6 +97,27 @@ def test_email_enabled_calls_resend_with_server_side_key(monkeypatch):
     ]
 
 
+def test_email_provider_exception_returns_failed(monkeypatch):
+    def fail_send(_payload):
+        raise RuntimeError("provider unavailable")
+
+    fake_resend = SimpleNamespace(
+        api_key=None,
+        Emails=SimpleNamespace(send=fail_send),
+    )
+    monkeypatch.setitem(sys.modules, "resend", fake_resend)
+    monkeypatch.setenv("WORKEROS_EMAIL_ENABLED", "1")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("WORKEROS_EMAIL_FROM", "Floom <hello@floom.dev>")
+    monkeypatch.delenv("WORKEROS_EMAIL_DRY_RUN", raising=False)
+
+    result = email.send_transactional_email(_message())
+
+    assert result.status == "failed"
+    assert result.provider == "resend"
+    assert "RuntimeError" in (result.reason or "")
+
+
 def test_invalid_recipient_rejected_before_provider(monkeypatch):
     monkeypatch.setenv("WORKEROS_EMAIL_ENABLED", "1")
 

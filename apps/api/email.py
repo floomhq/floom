@@ -122,6 +122,13 @@ def send_transactional_email(message: TransactionalEmail) -> EmailSendResult:
     if message.tags:
         params["tags"] = [{"name": key, "value": value} for key, value in message.tags.items()]
 
-    response = resend.Emails.send(params)
+    try:
+        response = resend.Emails.send(params)
+    except Exception as exc:
+        return EmailSendResult(
+            status="failed",
+            provider="resend",
+            reason=f"{type(exc).__name__}: {str(exc)[:240]}",
+        )
     message_id = response.get("id") if isinstance(response, dict) else None
     return EmailSendResult(status="sent", provider="resend", message_id=message_id)
