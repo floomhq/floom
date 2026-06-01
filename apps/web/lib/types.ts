@@ -131,6 +131,7 @@ export interface Artifact {
   name: string;
   type?: string;
   path: string;
+  relative_path?: string;
   size_bytes?: number;
   created_at: string;
 }
@@ -342,6 +343,7 @@ export interface ApprovalRow {
   edited_output_json?: string;
   follow_up_run_id?: string;
   owner_id?: string;
+  artifacts?: Artifact[];
 }
 
 export interface SystemInfo {
