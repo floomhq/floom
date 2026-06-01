@@ -73,6 +73,7 @@ export const OVERLAY_FILES = [
   "app/connections/connected-accounts/[id]/route.ts",
   "app/page.tsx",
   "app/privacy/page.tsx",
+  "app/settings/page.tsx",
   "components/TelemetryProvider.tsx",
   "components/layout/WorkspaceSwitcher.tsx",
   "components/layout/sidebar.tsx",
