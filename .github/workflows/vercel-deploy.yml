@@ -105,10 +105,11 @@ jobs:
           git config user.email "depontefede@gmail.com"
           git commit --allow-empty -m "ci: vercel deploy source for ${GITHUB_SHA}"
 
+      # Vercel project root is already configured as "web" in the dashboard project
+      # settings — run the CLI from the repo root so paths resolve to web/, not web/web.
       - name: Pull Vercel project settings
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        working-directory: web
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
           npx --yes vercel@50.22.1 pull --yes --environment=production --token "$VERCEL_TOKEN"
@@ -116,7 +117,6 @@ jobs:
       - name: Deploy production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        working-directory: web
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
           npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
