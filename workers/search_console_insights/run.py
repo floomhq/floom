@@ -6,7 +6,7 @@ import os
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
 
@@ -79,7 +79,21 @@ def composio_execute(slug: str, payload: Dict[str, Any]) -> Optional[Dict[str, A
     return output
 
 
-def pull_gsc_data(site_url: str, start_date: date, end_date: date) -> List[Dict[str, Any]]:
+def _composio_error(result: Optional[Dict[str, Any]]) -> str:
+    if not result:
+        return "No response from Workeros Composio proxy"
+    error = result.get("error") or result.get("message") or result.get("detail")
+    if error:
+        return str(error)
+    data = result.get("data")
+    if isinstance(data, dict):
+        nested_error = data.get("error") or data.get("message") or data.get("detail")
+        if nested_error:
+            return str(nested_error)
+    return json.dumps(result, default=str)[:1000]
+
+
+def pull_gsc_data(site_url: str, start_date: date, end_date: date) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     result = composio_execute(
         "GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY",
         {
@@ -87,15 +101,20 @@ def pull_gsc_data(site_url: str, start_date: date, end_date: date) -> List[Dict[
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "dimensions": ["query", "page"],
-            "row_limit": 25000,
+            "row_limit": 5000,
         },
     )
     if not result or not result.get("successful"):
-        return []
+        return [], _composio_error(result)
     data = result.get("data", {})
     if isinstance(data, dict):
-        return data.get("rows", [])
-    return []
+        response_data = data.get("response_data")
+        if isinstance(response_data, dict):
+            rows = response_data.get("rows", [])
+        else:
+            rows = data.get("rows", [])
+        return rows if isinstance(rows, list) else [], None
+    return [], f"Unexpected GSC response shape: {type(data).__name__}"
 
 
 def build_dataset(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -537,14 +556,30 @@ def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     log(f"Current period: {current_start} → {current_end}")
     log(f"Previous period: {previous_start} → {previous_end}")
 
-    current_rows = pull_gsc_data(site_url, current_start, current_end)
-    previous_rows = pull_gsc_data(site_url, previous_start, previous_end)
+    current_rows, current_error = pull_gsc_data(site_url, current_start, current_end)
+    previous_rows, previous_error = pull_gsc_data(site_url, previous_start, previous_end)
 
     log(f"Current rows: {len(current_rows)}")
     log(f"Previous rows: {len(previous_rows)}")
 
+    if current_error:
+        log(f"GSC current-period fetch failed: {current_error}")
+        return {
+            "status": "error",
+            "error": f"GSC current-period fetch failed: {current_error}",
+            "outputs": {},
+            "artifacts": [],
+        }
+    if previous_error:
+        log(f"GSC previous-period fetch failed: {previous_error}")
+
     if not current_rows:
-        return {"status": "error", "message": "No GSC data returned for current period"}
+        return {
+            "status": "error",
+            "error": f"No GSC rows returned for {site_url} between {current_start} and {current_end}",
+            "outputs": {},
+            "artifacts": [],
+        }
 
     current_ds = build_dataset(current_rows)
     previous_ds = build_dataset(previous_rows)
@@ -554,7 +589,7 @@ def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     seo_report = generate_seo_report(
         comparison, site_url, current_start, current_end, previous_start, previous_end
     )
-    seo_file = artifact_dir / f"seo-report-{today.isoformat()}.md"
+    seo_file = artifact_dir / "seo_report.md"
     seo_file.write_text(seo_report)
     log(f"SEO report saved: {seo_file}")
 
@@ -576,9 +611,18 @@ def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
                 decayed_paths.append(parsed)
 
         diagnostics = run_diagnostics(site_url, decayed_paths)
-        diag_file = artifact_dir / f"diagnostics-{today.isoformat()}.md"
+        diag_file = artifact_dir / "diagnostics.md"
         diag_file.write_text(diagnostics)
         log(f"Diagnostics saved: {diag_file}")
+        outputs["diagnostics"] = diagnostics
+        artifacts.append({"name": str(diag_file.name), "path": str(diag_file), "relative_path": str(diag_file), "type": "markdown"})
+    else:
+        diagnostics = (
+            f"# GSC Diagnostics — {site_url} — {today.isoformat()}\n\n"
+            "Diagnostics were skipped for this run because `run_diagnostics` was false.\n"
+        )
+        diag_file = artifact_dir / "diagnostics.md"
+        diag_file.write_text(diagnostics)
         outputs["diagnostics"] = diagnostics
         artifacts.append({"name": str(diag_file.name), "path": str(diag_file), "relative_path": str(diag_file), "type": "markdown"})
 
