@@ -1807,7 +1807,8 @@ class SqliteAlertRepository:
         *,
         alert_id: str,
         worker_id: str,
-        url: str,
+        url: str | None,
+        email_to: str | None,
         events: str,
         description: str | None,
         created_at: str,
@@ -1815,17 +1816,17 @@ class SqliteAlertRepository:
         with get_db() as conn:
             conn.execute(
                 """
-                INSERT INTO worker_alerts (id, worker_id, url, events, description, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO worker_alerts (id, worker_id, url, email_to, events, description, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (alert_id, worker_id, url, events, description, created_at),
+                (alert_id, worker_id, url, email_to, events, description, created_at),
             )
         return self.get(alert_id=alert_id) or {}
 
     def list(self, *, worker_id: str) -> list[dict[str, Any]]:
         with get_db() as conn:
             rows = conn.execute(
-                "SELECT id, worker_id, url, events, description, created_at FROM worker_alerts WHERE worker_id = ? ORDER BY created_at",
+                "SELECT id, worker_id, url, email_to, events, description, created_at FROM worker_alerts WHERE worker_id = ? ORDER BY created_at",
                 (worker_id,),
             ).fetchall()
         return [_row_dict(row) for row in rows]
@@ -1833,7 +1834,7 @@ class SqliteAlertRepository:
     def get(self, *, alert_id: str) -> dict[str, Any] | None:
         with get_db() as conn:
             row = conn.execute(
-                "SELECT id, worker_id, url, events, description, created_at FROM worker_alerts WHERE id = ?",
+                "SELECT id, worker_id, url, email_to, events, description, created_at FROM worker_alerts WHERE id = ?",
                 (alert_id,),
             ).fetchone()
         return _row_dict(row) if row else None
