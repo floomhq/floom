@@ -1321,13 +1321,23 @@ class RetryConfig(BaseModel):
 
 
 class NotifyConfig(BaseModel):
-    """Webhook notification sent on run completion events."""
+    """Notification channels fired on run completion events.
 
-    url: str
+    Supports webhook (url) and/or email (email_to) — at least one required.
+    SMTP credentials are configured server-side via SMTP_HOST / SMTP_PORT /
+    SMTP_USER / SMTP_PASSWORD environment variables.
+    """
+
+    # Webhook channel
+    url: Optional[str] = None
+    # Email channel — list of recipient addresses
+    email_to: Optional[List[str]] = None
     # Events to fire on: "failed", "completed", or both
     on: List[str] = Field(default_factory=lambda: ["failed"])
-    # Optional HMAC secret — sent as X-Workeros-Signature header
+    # Optional HMAC secret for webhook — sent as X-Workeros-Signature header
     secret: Optional[str] = None
+    # Optional custom email subject (supports {worker_name} and {status} placeholders)
+    email_subject: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -1335,18 +1345,22 @@ class NotifyConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 class WorkerAlert(BaseModel):
-    """A registered webhook alert for a worker."""
+    """A registered alert for a worker (webhook and/or email)."""
 
     id: str
     worker_id: str
-    url: str
+    url: Optional[str] = None
+    email_to: Optional[List[str]] = None
     on: List[str]  # events: ["failed"], ["completed"], ["failed","completed"]
     description: Optional[str] = None
     created_at: str
 
 
 class WorkerAlertCreate(BaseModel):
-    url: str
+    # Webhook channel (optional — provide url for webhook delivery)
+    url: Optional[str] = None
+    # Email channel (optional — provide email_to for SMTP delivery)
+    email_to: Optional[List[str]] = None
     on: List[str] = Field(default_factory=lambda: ["failed"])
     description: Optional[str] = None
 

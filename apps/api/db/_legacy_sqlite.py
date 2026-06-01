@@ -975,6 +975,12 @@ MIGRATIONS: list[Migration] = [
     ALTER TABLE runs ADD COLUMN retry_of_run_id TEXT;
     ALTER TABLE runs ADD COLUMN retry_attempt INTEGER DEFAULT 0;
     """,
+    # -- migration 42: email channel on worker_alerts ------------------------
+    # email_to: JSON list of recipient email addresses for email notifications.
+    # url is now nullable — an alert can be webhook-only, email-only, or both.
+    """
+    ALTER TABLE worker_alerts ADD COLUMN email_to TEXT;
+    """,
 ]
 
 
@@ -1002,7 +1008,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
