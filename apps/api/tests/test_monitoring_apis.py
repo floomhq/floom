@@ -572,7 +572,7 @@ class TestAlertWebhookFiring:
 
 class TestEmailNotifications:
     """Tests for _send_email_notification. These are pure-unit — they mock
-    smtplib entirely and do NOT import db (so they pass on Windows too)."""
+    Resend entirely and do NOT import db (so they pass on Windows too)."""
 
     def _import_send_email(self):
         """Import _send_email_notification by loading run_service with fcntl mocked."""
@@ -592,41 +592,51 @@ class TestEmailNotifications:
         run_svc = importlib.import_module("run_service")
         return run_svc
 
-    def test_send_email_skips_when_smtp_not_configured(self, monkeypatch):
-        """When SMTP_HOST is absent, no SMTP connection is attempted."""
-        monkeypatch.delenv("SMTP_HOST", raising=False)
-        # Test _smtp_config directly — it is pure and importable without db
-        # We extract the logic by verifying it returns None when SMTP_HOST is unset
-        import os
-        assert os.environ.get("SMTP_HOST", "").strip() == ""
+    def test_send_email_skips_when_resend_not_configured(self, monkeypatch):
+        """When RESEND_API_KEY is absent, no Resend call is attempted."""
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        fake_resend = MagicMock()
+        monkeypatch.setitem(sys.modules, "resend", fake_resend)
+        run_svc = self._import_send_email()
 
-        # The function must not call smtplib.SMTP when host is empty.
-        # We test it indirectly via a minimal inline reimplementation matching
-        # the same contract to keep the test cross-platform.
-        smtp_host = os.environ.get("SMTP_HOST", "").strip()
-        assert smtp_host == "", "SMTP_HOST should be unset for this test"
+        run_svc._send_email_notification(
+            to_addrs=["ops@example.com"],
+            worker_name="Worker",
+            run_id="run_123",
+            worker_id="worker_123",
+            status="failed",
+            error=None,
+        )
 
-    def test_smtp_config_returns_none_when_host_missing(self, monkeypatch):
-        """_smtp_config() returns None when SMTP_HOST env var is not set."""
-        monkeypatch.delenv("SMTP_HOST", raising=False)
-        import os
-        host = os.environ.get("SMTP_HOST", "").strip()
-        # Contract: no host → no config
-        assert not host
+        fake_resend.Emails.send.assert_not_called()
 
-    def test_smtp_config_returns_dict_when_configured(self, monkeypatch):
-        """_smtp_config() returns a populated dict when SMTP_HOST is set."""
-        monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
-        monkeypatch.setenv("SMTP_PORT", "587")
-        monkeypatch.setenv("SMTP_USER", "sender@example.com")
-        monkeypatch.setenv("SMTP_PASSWORD", "secret")
-        import os
-        host = os.environ.get("SMTP_HOST", "").strip()
-        port = int(os.environ.get("SMTP_PORT", "587"))
-        user = os.environ.get("SMTP_USER", "").strip()
-        assert host == "smtp.example.com"
-        assert port == 587
-        assert user == "sender@example.com"
+    def test_send_email_uses_resend_payload_and_escapes_html(self, monkeypatch):
+        """Configured email notifications call Resend with safe HTML and plain text."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test")
+        monkeypatch.setenv("NOTIFY_FROM_EMAIL", "notifications@example.com")
+        fake_resend = MagicMock()
+        monkeypatch.setitem(sys.modules, "resend", fake_resend)
+        run_svc = self._import_send_email()
+
+        run_svc._send_email_notification(
+            to_addrs=["ops@example.com"],
+            worker_name="Weekly <Digest>",
+            run_id="run_<123>",
+            worker_id="worker_<123>",
+            status="failed",
+            error="Boom <script>",
+        )
+
+        fake_resend.Emails.send.assert_called_once()
+        payload = fake_resend.Emails.send.call_args.args[0]
+        assert fake_resend.api_key == "re_test"
+        assert payload["from"] == "notifications@example.com"
+        assert payload["to"] == ["ops@example.com"]
+        assert payload["subject"] == "Worker Weekly <Digest> failed"
+        assert "Weekly &lt;Digest&gt;" in payload["html"]
+        assert "run_&lt;123&gt;" in payload["html"]
+        assert "Boom &lt;script&gt;" in payload["html"]
+        assert "Weekly <Digest>" in payload["text"]
 
     def test_notify_config_model_accepts_email_to(self):
         """NotifyConfig Pydantic model accepts email_to list."""
@@ -678,10 +688,7 @@ class TestEmailNotifications:
 class TestAlertEmailFiring:
     def test_email_alert_fired_via_fire_alert_webhooks(self, client_and_repos, monkeypatch):
         """POST /alerts with email_to triggers _send_email_notification."""
-        monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
-        monkeypatch.setenv("SMTP_PORT", "587")
-        monkeypatch.setenv("SMTP_USER", "x@example.com")
-        monkeypatch.setenv("SMTP_PASSWORD", "pass")
+        monkeypatch.setenv("RESEND_API_KEY", "re_test")
 
         client, repos = client_and_repos
         client.post(
