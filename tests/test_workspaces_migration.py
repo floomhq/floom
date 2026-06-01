@@ -18,6 +18,7 @@ from pathlib import Path
 
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+SUPABASE_MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "supabase" / "migrations"
 
 
 def _migration_text() -> str:
@@ -95,3 +96,11 @@ def test_secrets_pk_is_repaired_to_workspace_name():
     # so the PK must move to (workspace_id, name).
     assert "secrets_workspace_name_pkey" in text
     assert "primary key (workspace_id, name)" in text
+
+
+def test_canonical_supabase_migrations_enable_workspace_rls():
+    path = SUPABASE_MIGRATIONS_DIR / "0019_workspaces_enable_rls.sql"
+    assert path.is_file(), f"canonical Supabase migration missing: {path}"
+    text = path.read_text(encoding="utf-8").lower()
+    assert "alter table public.workspaces enable row level security" in text
+    assert "alter table public.workspaces force row level security" in text
