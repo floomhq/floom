@@ -5,7 +5,7 @@ Workeros lets agents create, update, run, watch, and delete production worker au
 Workeros ships as a single npm package that exposes:
 
 - **`workeros` CLI** – `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue. `floom` remains a compatibility alias for older Floom operator workflows.
-- **`workeros-mcp` stdio server** – the production MCP surface (workers / runs / secrets / connections / triggers) used by agents.
+- **`workeros-mcp` stdio server** – the production MCP surface (workers / runs / approvals / secrets / connections / contexts / triggers / system) used by agents.
 
 The CLI targets both deployments:
 
@@ -120,20 +120,102 @@ workeros workers info <id>
 
 > **For full worked examples per tool, end-to-end recipes (deploy a worker from prompt, port a Claude skill, schedule + webhook + composio triggers), and the agent draft contract, see [docs/AGENT-COOKBOOK.md](../../docs/AGENT-COOKBOOK.md).**
 
+### Workers
 | Tool | Description |
 | --- | --- |
 | `workers.list` | List available Workeros workers. |
 | `workers.get` | Read one worker, including config and recent run metadata. |
-| `workers.create` | Create a script-mode worker from `worker_yml` and `run_py`. Use CLI `workeros workers push <dir>` for `SKILL.md` bundles. |
-| `workers.update` | Patch trigger, cron, default inputs, documented capabilities, or rotate a webhook secret. |
+| `workers.create` | Create a script-mode worker from `worker_yml` and `run_py`. |
+| `workers.update` | Patch trigger, cron, default inputs, capabilities, or rotate webhook secret. |
 | `workers.delete` | Delete a worker and dependent run data. |
 | `workers.run` | Start a manual worker run with input values. |
+| `workers.logs` | Fetch cross-run log history, filterable by level and time. |
+| `workers.stats` | 7-day run statistics for a specific worker. |
+| `workers.timeseries` | Daily run counts and success/failure trend over N days. |
+| `workers.sample_input` | Get example input values for a worker's fields. |
+| `workers.archive` | Archive a worker (reversible). |
+| `workers.restore` | Restore an archived worker to active status. |
+| `workers.reload` | Reload all workers from disk (OSS self-hosted). |
+| `workers.versions` | List saved versions of a worker. |
+| `workers.rollback` | Restore a worker to a previous version. |
+| `workers.alerts.list` | List configured alerts for a worker. |
+| `workers.alerts.create` | Add a failure/approval/success alert via webhook or email. |
+| `workers.alerts.delete` | Remove a worker alert. |
+
+### Runs
+| Tool | Description |
+| --- | --- |
 | `runs.list` | List runs, optionally filtered by worker id or status. |
 | `runs.get` | Read one run with logs, outputs, artifacts, and approval state. |
-| `runs.watch` | Stream SSE run events (text / tool-call / tool-result / reasoning / step-start / finish) until a terminal state. |
-| `secrets.list` / `secrets.set` / `secrets.delete` | Manage env-var secrets the worker can read. |
-| `connections.list` | List configured Composio app connections. |
-| `triggers.list` | List configured Composio triggers, globally or per worker/app. |
+| `runs.watch` | Stream SSE run events until a terminal state. |
+| `runs.cancel` | Cancel an in-progress run. |
+| `runs.replay` | Replay a completed or failed run with the same inputs. |
+
+### Approvals
+| Tool | Description |
+| --- | --- |
+| `approvals.list` | List pending approval requests across all workers. |
+| `approvals.approve` | Approve a pending run so it continues executing. |
+| `approvals.reject` | Reject a pending run, stopping it. |
+
+### Secrets
+| Tool | Description |
+| --- | --- |
+| `secrets.list` | List secret names and status. |
+| `secrets.set` | Create or update a secret value. |
+| `secrets.delete` | Delete a secret. |
+| `secrets.test` | Verify a secret exists without revealing its value. |
+
+### Connections
+| Tool | Description |
+| --- | --- |
+| `connections.list` | List configured app connections. |
+| `connections.add_mcp` | Add an MCP server connection. |
+| `connections.delete` | Remove a connection. |
+| `connections.status` | Check connection health and auth status. |
+| `connections.test` | Run a live connectivity check on a connection. |
+
+### Contexts (Brain Packs)
+| Tool | Description |
+| --- | --- |
+| `contexts.list` | List context folders. |
+| `contexts.create` | Create a new brain pack context. |
+| `contexts.delete` | Delete a brain pack and all its files. |
+| `contexts.read` | Read a file from a context. |
+| `contexts.write` | Create or update a file in a context. |
+| `contexts.upload` | Upload a binary file to a context. |
+| `contexts.delete_file` | Delete a specific file from a context. |
+| `contexts.versions` | List saved versions of a brain pack. |
+| `contexts.rollback` | Restore a brain pack to a previous version. |
+
+### Triggers & Integrations
+| Tool | Description |
+| --- | --- |
+| `triggers.list` | List integration triggers, globally or per worker/app. |
+| `integrations.catalog` | Browse all available integrations. |
+
+### Workspace
+| Tool | Description |
+| --- | --- |
+| `workspace.chat` | Send a message to the workspace agent and get a reply. |
+| `workspace.instructions.get` | Read current workspace agent system prompt. |
+| `workspace.instructions.set` | Update workspace agent system prompt. |
+| `workspace.versions` | List version history of workspace instructions. |
+| `workspace.rollback` | Restore workspace instructions to a previous version. |
+
+### Conversations
+| Tool | Description |
+| --- | --- |
+| `conversations.list` | List past workspace agent conversations. |
+| `conversations.get` | Retrieve a full conversation by ID. |
+
+### System
+| Tool | Description |
+| --- | --- |
+| `system.overview` | Full workspace dashboard — health, runs, pending approvals, alerts. |
+| `system.stats` | 7-day aggregate run statistics across the whole workspace. |
+| `system.info` | Platform version and configuration flags. |
+| `system.alerts` | Active system-wide alerts. |
 
 ## Quick example — write + deploy + verify a worker in one MCP session
 
