@@ -4,7 +4,7 @@ Workeros lets agents create, update, run, watch, and delete production worker au
 
 Workeros ships as a single npm package that exposes:
 
-- **`floom` / `workeros` CLI** – `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue.
+- **`workeros` / `floom` CLI** – `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue. These docs use `workeros`; `floom` is a compatible alias for older Floom operator workflows.
 - **`workeros-mcp` stdio server** – the production MCP surface (workers / runs / secrets / connections / triggers) used by agents.
 
 The CLI targets both deployments:
@@ -18,32 +18,32 @@ The CLI targets both deployments:
 
 ```bash
 npm i -g @floomhq/workeros@latest
-floom login --cloud           # opens workeros.floom.dev/app/cli-auth
-floom workspaces list
-floom workspaces use <name>   # persists to ~/.config/workeros/credentials.json
-floom workers list
-floom run <worker-id> --input key=value
+workeros login --cloud           # opens workeros.floom.dev/app/cli-auth
+workeros workspaces list
+workeros workspaces use <name>   # persists to ~/.config/workeros/credentials.json
+workeros workers list
+workeros run <worker-id> --input key=value
 ```
 
-`floom login` auto-detects cloud when the verification URL the API returns is `workeros.floom.dev` or contains `/app/`, so `--cloud` is only needed if you also set `WORKEROS_API_BASE` to a non-default host. `WORKEROS_CLOUD=1` is equivalent to `--cloud`.
+`workeros login` auto-detects cloud when the verification URL the API returns is `workeros.floom.dev` or contains `/app/`, so `--cloud` is only needed if you also set `WORKEROS_API_BASE` to a non-default host. `WORKEROS_CLOUD=1` is equivalent to `--cloud`.
 
-Credentials live at `~/.config/workeros/credentials.json` (mode 0600). `floom logout` clears them.
+Credentials live at `~/.config/workeros/credentials.json` (mode 0600). `workeros logout` clears them.
 
 ## OSS quickstart (workers.floom.dev)
 
 ```bash
-npx @floomhq/workeros install
+npx -y @floomhq/workeros mcp install
 ```
 
 Auto-detects the first existing config file. To target a specific harness:
 
 ```bash
-floom mcp install --target claude     # ~/.claude/settings.json
-floom mcp install --target cursor     # ~/.cursor/mcp.json
-floom mcp install --target vscode     # .vscode/mcp.json  (workspace-local)
-floom mcp install --target windsurf   # ~/.codeium/windsurf/mcp_config.json
-floom mcp install --target continue   # ~/.continue/.continuerc.json
-floom mcp install --target generic    # prints JSON snippet for manual paste
+workeros mcp install --target claude     # ~/.claude/settings.json
+workeros mcp install --target cursor     # ~/.cursor/mcp.json
+workeros mcp install --target vscode     # .vscode/mcp.json  (workspace-local)
+workeros mcp install --target windsurf   # ~/.codeium/windsurf/mcp_config.json
+workeros mcp install --target continue   # ~/.continue/.continuerc.json
+workeros mcp install --target generic    # prints JSON snippet for manual paste
 ```
 
 Re-running the installer updates the existing `workeros` entry instead of duplicating it.
@@ -108,7 +108,7 @@ The server targets `https://workers-api.floom.dev` by default. For development, 
 | --- | --- |
 | `workers.list` | List available Workeros workers. |
 | `workers.get` | Read one worker, including config and recent run metadata. |
-| `workers.create` | Create a worker from `worker_yml` and either `run_py` (script mode) or `skill_md` (agent mode). |
+| `workers.create` | Create a script-mode worker from `worker_yml` and `run_py`. Use CLI `workeros workers push <dir>` for `SKILL.md` bundles. |
 | `workers.update` | Patch trigger, cron, default inputs, documented capabilities, or rotate a webhook secret. |
 | `workers.delete` | Delete a worker and dependent run data. |
 | `workers.run` | Start a manual worker run with input values. |
@@ -124,7 +124,6 @@ The server targets `https://workers-api.floom.dev` by default. For development, 
 ```js
 // 1. Create
 await workers.create({
-  name: "text-summarizer",
   worker_yml: `
 schema_version: "0.3"
 name: text-summarizer
@@ -164,20 +163,18 @@ def run(inputs, context):
 
 // 2. Run
 const { run_id } = await workers.run({
-  worker_id: "text-summarizer",
+  id: "text-summarizer",
   inputs: { text: "Lorem ipsum dolor sit amet..." },
 });
 
 // 3. Watch until terminal
-for await (const part of runs.watch({ run_id })) {
-  if (part.type === "tool-call") console.log("tool:", part.name);
-  if (part.type === "finish") break;
-}
+const watched = await runs.watch({ id: run_id });
+console.log(watched.status);
 
 // 4. Verify
 const { run } = await runs.get({ id: run_id });
 console.log(run.status); // "succeeded"
-console.log(run.outputs.summary);
+console.log(run.output?.summary);
 ```
 
 See [docs/AGENT-COOKBOOK.md §1](../../docs/AGENT-COOKBOOK.md) for the full annotated walkthrough plus six more recipes (agent mode, Gmail trigger, cron schedule, webhook, approval gate, claude-skill port).
