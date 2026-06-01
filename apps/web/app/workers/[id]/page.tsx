@@ -735,6 +735,25 @@ export default function WorkerDetailPage() {
       } else if (updated.config.trigger) {
         setTriggerRows([makeTriggerRow(updated.config.trigger as TriggerSpec)]);
       }
+      // Sync retry state
+      const retryCfg = (updated.config as { retry?: { max_attempts?: number; delay_seconds?: number } }).retry;
+      setRetryEnabled(!!retryCfg);
+      setRetryMaxAttempts(retryCfg?.max_attempts ?? 3);
+      setRetryDelaySeconds(retryCfg?.delay_seconds ?? 60);
+      // Sync notify state
+      const notifyCfg = (updated.config as { notify?: { url?: string; email_to?: string[]; on?: string[] } }).notify;
+      setNotifyUrl(notifyCfg?.url ?? "");
+      setNotifyEmailTo((notifyCfg?.email_to ?? []).join(", "));
+      setNotifyOnFailed(notifyCfg ? (notifyCfg.on ?? ["failed"]).includes("failed") : true);
+      setNotifyOnCompleted(notifyCfg ? (notifyCfg.on ?? []).includes("completed") : false);
+      // Sync form state (Source tab Form view)
+      setFormName(updated.name || "");
+      setFormInputs(updated.config.inputs || []);
+      setFormOutputs(updated.config.outputs || []);
+      setFormSecrets(updated.config.secrets || []);
+      setFormConnections(
+        (updated.config.connections || []).filter((c: unknown) => typeof c === "string") as string[]
+      );
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to save");
     } finally {
