@@ -194,6 +194,10 @@ export const api = {
       }),
     delete: (id: string) =>
       fetchJson<{ status: string }>(`/workers/${id}`, { method: "DELETE" }),
+    listVersions: (id: string, limit = 50) =>
+      fetchJson<import("./types").VersionSummary[]>(`/workers/${id}/versions?limit=${limit}`),
+    rollback: (id: string, versionId: string) =>
+      fetchJson<import("./types").WorkerDetail>(`/workers/${id}/rollback/${versionId}`, { method: "POST" }),
   },
   runs: {
     list: (params?: {
