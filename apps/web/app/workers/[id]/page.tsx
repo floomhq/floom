@@ -18,8 +18,8 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
-  Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
-  File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
+  Play, Plug, Pencil, ClipboardCheck, ChevronRight,
+  Copy, Code2, Clock, Plug2, ListChecks,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
   Brain as BrainIcon, Settings2, AlignLeft, Plus,
 } from "lucide-react";
@@ -243,7 +243,7 @@ export default function WorkerDetailPage() {
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [brainPacks, setBrainPacks] = useState<ContextSummary[]>([]);
   const [savingBrain, setSavingBrain] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [_selectedFile, setSelectedFile] = useState<string | null>(null);
   const activeRunStream = useRunStream(activeRunId);
 
   // Triggers edit state (always editable regardless of edit mode)
@@ -935,27 +935,7 @@ export default function WorkerDetailPage() {
     }
   }
 
-  async function handleSaveConfigure() {
-    if (!worker) return;
-    const descChanged = configDesc.trim() !== configDescOriginal.trim();
-    if (descChanged) {
-      setCheckingConflicts(true);
-      try {
-        const result = await api.workers.suggest(worker.id, configDesc.trim());
-        if (result.has_conflicts && result.suggestions.length > 0) {
-          setConflictSuggestions(result.suggestions);
-          setConflictModalOpen(true);
-          setPendingSaveAfterConflict(true);
-          return;
-        }
-      } catch {
-        // If suggest fails, proceed with save
-      } finally {
-        setCheckingConflicts(false);
-      }
-    }
-    await commitConfigureSave();
-  }
+  // handleSaveConfigure removed — form view uses handleSaveForm; configure tab no longer exists
 
   async function handleSaveSettings() {
     await commitSettingsSave();
@@ -1249,7 +1229,7 @@ export default function WorkerDetailPage() {
   const runsCount = worker.recent_runs?.length ?? 0;
   const triggersCount = (worker.triggers_spec || []).length || 1;
   const lastRunAt = worker.recent_runs?.[0]?.created_at;
-  const triggerSummary = worker.trigger_type || "manual";
+  const _triggerSummary = worker.trigger_type || "manual";
 
   // ---------------------------------------------------------------------------
   // Layout: page header + HORIZONTAL TABS at the top (Federico 2026-05-27 round 2:
