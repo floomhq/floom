@@ -75,7 +75,9 @@ async function handler(
   // back to the user's default workspace — i.e. the workspace switcher did
   // nothing in the deployed dashboard. Backend validates ownership, so this
   // cannot be used to scope into another user's workspace.
-  const activeWorkspace = req.cookies.get("workeros_active_workspace")?.value;
+  const activeWorkspace =
+    req.headers.get("x-workeros-workspace")?.trim() ||
+    req.cookies.get("workeros_active_workspace")?.value;
   if (activeWorkspace) forwardHeaders["x-workeros-workspace"] = activeWorkspace;
   const contentType = req.headers.get("content-type");
   if (contentType) forwardHeaders["content-type"] = contentType;

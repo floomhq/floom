@@ -19,6 +19,7 @@ if sys.platform == "win32":
 from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.supabase_provider import SupabaseAuthProvider
 from apps.api.auth.workspace_context import get_active_workspace_id
+from apps.api.cloud_workspace_agent import apply_cloud_workspace_agent_overrides
 from apps.api.cloud_webhooks import apply_engine_overrides
 from apps.api.config import get_cloud_settings
 from apps.api.db._secret_crypto import ensure_secret_crypto_ready
@@ -165,6 +166,7 @@ def register_cloud_components() -> None:
     register_auth_provider("cloud", lambda: SupabaseAuthProvider())
     register_repositories("cloud", _cloud_repositories)
     apply_engine_overrides()
+    apply_cloud_workspace_agent_overrides()
     _register_contexts_scope_resolver()
     # Run the real init_db() once so the engine's local SQLite DB has the
     # full schema. Several engine endpoints (draft_and_create_worker,

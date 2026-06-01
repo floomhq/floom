@@ -20,10 +20,11 @@ const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const CLOUD_API_BASE =
   process.env.NEXT_PUBLIC_WORKEROS_API_BASE || "https://workeros-api.floom.dev";
 
-type McpTarget = "claude" | "cursor" | "vscode" | "windsurf" | "generic";
+type McpTarget = "claude" | "codex" | "cursor" | "vscode" | "windsurf" | "generic";
 
 const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
   { value: "claude",   label: "Claude",   hint: "~/.claude/settings.json" },
+  { value: "codex",    label: "Codex",    hint: "paste generic snippet into Codex MCP config" },
   { value: "cursor",   label: "Cursor",   hint: "~/.cursor/mcp.json" },
   { value: "vscode",   label: "VS Code",  hint: ".vscode/mcp.json" },
   { value: "windsurf", label: "Windsurf", hint: "~/.codeium/windsurf/mcp_config.json" },
@@ -43,8 +44,25 @@ function maskToken(raw: string): string {
   return `${raw.slice(0, 12)}${"•".repeat(20)}${raw.slice(-4)}`;
 }
 
-function buildMcpSnippet(target: McpTarget): string {
-  return `npx @floomhq/workeros install --target ${target}`;
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildEnvPrefix(token: string): string {
+  return [
+    `export WORKEROS_API_BASE=${shellQuote(CLOUD_API_BASE)}`,
+    `export WORKEROS_API_TOKEN=${shellQuote(token)}`,
+  ].join("\n");
+}
+
+function buildMcpSnippet(target: McpTarget, token: string): string {
+  const command = target === "codex"
+    ? "workeros mcp install --target generic"
+    : `workeros mcp install --target ${target}`;
+  const note = target === "codex"
+    ? "\n# Codex uses a manual MCP config paste today; the command prints the server snippet."
+    : "";
+  return `${buildEnvPrefix(token)}\nnpm i -g @floomhq/workeros\n${command}${note}`;
 }
 
 export function CliCommandPanel() {
@@ -100,11 +118,12 @@ export function CliCommandPanel() {
     ? (revealed ? newTokenRaw : maskToken(newTokenRaw))
     : null;
 
+  const tokenForSnippet = newTokenRaw ?? "<YOUR_CLOUD_PAT>";
   const snippets = useMemo(() => ({
-    cli: "npm i -g @floomhq/workeros\nworkeros login",
-    mcp: buildMcpSnippet(mcpTarget),
-    api: `curl -sS ${CLOUD_API_BASE}/api/workers \\\n  -H "x-floom-token: <YOUR_CLOUD_PAT>"`,
-  }), [mcpTarget]);
+    cli: `${buildEnvPrefix(tokenForSnippet)}\nnpm i -g @floomhq/workeros\nworkeros whoami\nworkeros workers list`,
+    mcp: buildMcpSnippet(mcpTarget, tokenForSnippet),
+    api: `curl -sS ${CLOUD_API_BASE}/api/workers \\\n  -H "x-floom-token: ${tokenForSnippet}"`,
+  }), [mcpTarget, tokenForSnippet]);
 
   const activeMcpTarget = MCP_TARGETS.find((t) => t.value === mcpTarget)!;
 
@@ -232,10 +251,10 @@ export function CliCommandPanel() {
                   type="button"
                   onClick={() => setMcpTarget(t.value)}
                   className={
-                    `h-7 px-2.5 text-xs rounded-[var(--radius-button)] border transition-colors ` +
+                    `inline-flex h-8 items-center rounded-[var(--radius-button)] border px-3 text-xs font-medium transition-colors ` +
                     (mcpTarget === t.value
-                      ? "border-blue-500 bg-blue-500 text-white"
-                      : "border-line bg-card text-muted-foreground hover:text-foreground hover:bg-muted")
+                      ? "border-[var(--foreground)] bg-[var(--foreground)] text-[var(--background)]"
+                      : "border-line bg-[var(--bg-2)] text-muted-foreground hover:text-foreground hover:bg-muted")
                   }
                 >
                   {t.label}

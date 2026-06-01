@@ -18,25 +18,25 @@ floomhq/workeros-cloud      (private, hosted)         Supabase auth, RLS multi-t
 - Both expose the **same MCP tool surface** (`workers.list/get/create/update/delete/run` + `runs.list/get/watch`)
 - The cloud version's `@floomhq/workeros` MCP package switches `WORKEROS_API_BASE` and uses Supabase JWT instead of `x-floom-secret`
 
-## Architecture (target shape, not yet implemented)
+## Architecture (current shape)
 
 ```
 ┌───────────────────────────────────────────────────────────┐
 │  workeros.floom.dev   (Next.js, Vercel)                   │
 │  - Supabase auth (Google OAuth + email)                   │
-│  - Per-user dashboard                                     │
-│  - Billing (Stripe)                                       │
+│  - Per-user dashboard at /app                             │
+│  - Workspace switcher + cloud shell overlay               │
 └──────────────┬────────────────────────────────────────────┘
                │
                │ Supabase JWT
                │
 ┌──────────────▼────────────────────────────────────────────┐
-│  api.workeros.floom.dev   (FastAPI, hosted)               │
+│  workeros-api.floom.dev   (FastAPI, hosted)               │
 │  - Auth = Supabase JWT verification (auth.uid())          │
-│  - RLS on every table (worker, run, skill_version, etc.)  │
-│  - Multi-tenant cron scheduler (per-user croniter)        │
-│  - Quotas + billing meters                                │
-│  - Webhook receivers use HMAC + tenant routing            │
+│  - Supabase repositories for workers/runs/secrets/etc.    │
+│  - Workspace-scoped data via x-workeros-workspace/cookie  │
+│  - Cloud scheduler guarded by Postgres advisory lock      │
+│  - Cloud webhook wrapper at /api/webhooks/{worker_id}     │
 └──────────────┬────────────────────────────────────────────┘
                │
                │ delegates execution to
@@ -61,7 +61,7 @@ npx @floomhq/workeros@latest login
 
 After login, the MCP package detects credentials and uses Supabase JWT for API calls. `WORKEROS_API_SECRET` env var continues to work for self-hosted users.
 
-## Stack (target)
+## Stack
 
 | Layer | Choice |
 |---|---|
@@ -72,9 +72,9 @@ After login, the MCP package detects credentials and uses Supabase JWT for API c
 | Sandbox | E2B (per-user, sandboxed by default for hosted) — no local subprocess |
 | LLM | OpenAI (default model `gpt-5-mini`, user-configurable) |
 | Integrations | Composio v3 (per-user accounts) |
-| Billing | Stripe (usage-metered) |
-| Email | Resend or Postmark |
-| Observability | PostHog + Sentry |
+| Billing | Planned |
+| Email | Planned |
+| Observability | Runtime health endpoints + planned product telemetry |
 
 ## Scheduler Lock
 
@@ -99,49 +99,48 @@ Team: $99/mo, multi-seat, shared workers.
 
 ## Status
 
-**Pre-implementation.** This repo currently only contains the architecture spec. Implementation queued after the open-source `workeros` reaches launch readiness and dogfooding stabilizes Federico's own use case.
+Implemented cloud wrapper pieces in this repo include:
 
-## Roadmap
+- FastAPI cloud wrapper mounted at `/api` with Supabase auth, workspace routes, CLI auth routes, and the vendored engine API.
+- Next.js app shell under `/app` with dashboard routes including `/app/assistant`, `/app/connections`, `/app/workers`, and `/app/settings`.
+- Workspace switching via `GET/POST /api/workspaces` and `POST /api/workspaces/{id}/select`.
+- Workspace Agent instruction storage via `workspace_agent_settings`, with cloud overrides for the engine's `/workspace`, `/chat`, and `/system/workspace-agent` paths.
+- Cloud webhook entrypoint at `POST /api/webhooks/{worker_id}`.
 
-Phase 0 — spec (this README)
+Open product gaps are tracked in dated status notes under `docs/`.
+
+## Roadmap Snapshot
+
+Phase 0 — spec (this README) - complete
 
 Phase 1 — Supabase setup
-- New Supabase project
-- Schema migration (workers, skill_versions, runs, artifacts, logs, secrets, composio_connections — all with owner_id + RLS)
-- Auth providers: Google OAuth, email magic link
-- Storage bucket for artifacts per owner
+- Supabase schema and repositories exist for the active cloud path.
+- Auth providers are wired through Supabase.
 
 Phase 2 — API auth layer
-- Vendor workeros runtime as a submodule or pip install from git
-- Wrap with FastAPI middleware that verifies Supabase JWT and injects auth.uid() into every request
-- Replace x-floom-secret middleware with JWT middleware
-- Adapt run_service + worker_registry to take owner_id
+- Engine is vendored as the `engine` submodule.
+- SupabaseAuthProvider is registered during cloud startup.
+- Repository calls are scoped by user/workspace.
 
 Phase 3 — Frontend
-- Port workeros UI from open-source repo
-- Add login / signup
-- Per-user dashboard
+- The Workeros UI is mirrored under `web/app` and cloud overlay routes.
+- Login routes and per-user dashboard shell are present.
 
 Phase 4 — CLI login flow
-- Update @floomhq/workeros to detect hosted vs self-hosted at runtime
-- Add `workeros login` subcommand
-- Browser-based OAuth dance to mint a CLI JWT
+- `@floomhq/workeros` supports `workeros login`, cloud credentials, workspace selection, and `workeros workers push`.
 
 Phase 5 — Billing + quotas
-- Stripe subscription
-- Usage meters (run counts, agent tokens)
-- Quota enforcement at run_service level
+- Billing remains planned.
 
 Phase 6 — Multi-tenant cron + webhooks
-- Per-user cron scheduler
-- Webhook URLs include tenant slug
-- Composio events routed by connection_id → owner_id
+- Cloud scheduler and cloud webhook wrapper exist.
+- Slack-specific event, slash command, and interactivity endpoints are not present in this repo.
 
 ## Notes
 
 - Federico standing 2026-05-26: "the hosted version should be a separate git project as well" — this repo is that project.
 - Same primitive logic as the open-source workeros + skills-neo, per `[[workeros-skills-neo-relationship]]` memory.
-- This README is the source of truth until implementation starts; do not delete or shrink without an explicit replacement.
+- Current implementation status is split between this README and dated notes under `docs/`.
 
 ## License
 

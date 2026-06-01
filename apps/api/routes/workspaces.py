@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from apps.api._engine import ensure_engine_api_path
-from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE
+from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, ACTIVE_WORKSPACE_HEADER
 from apps.api.config import get_cloud_settings
 from apps.api.db import workspaces as workspace_repo
 
@@ -104,7 +104,10 @@ async def list_workspaces(
                 requested_id=None,
             )
         ]
-    requested = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
+    requested = (
+        (request.headers.get(ACTIVE_WORKSPACE_HEADER) or "").strip()
+        or request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
+    )
     active_id: str | None = None
     for row in rows:
         if requested and str(row["id"]) == requested:

@@ -64,6 +64,7 @@ const COPY_ROOT_FILES = [
 // the "must equal engine" check. Keep in sync with overlay/ contents.
 export const OVERLAY_FILES = [
   "app/api/proxy/[...path]/route.ts",
+  "app/assistant/page.tsx",
   "app/cloud-shell.css",
   "app/layout.tsx",
   "app/api/me/route.ts",

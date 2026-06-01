@@ -41,11 +41,33 @@ interface Workspace {
 }
 
 const PROXY_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
+const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
+
+function getActiveWorkspaceId(): string | null {
+  if (typeof window === "undefined") return null;
+  const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  return value || null;
+}
+
+function setActiveWorkspaceId(workspaceId: string | null) {
+  if (typeof window === "undefined") return;
+  if (!workspaceId) {
+    window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  } else {
+    window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
+  }
+}
 
 async function proxyJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+  const activeWorkspaceId = getActiveWorkspaceId();
+  if (activeWorkspaceId) {
+    headers.set("x-workeros-workspace", activeWorkspaceId);
+  }
   const res = await fetch(`${PROXY_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
     ...init,
+    headers,
   });
   if (!res.ok) {
     let detail = "";
@@ -99,9 +121,14 @@ export function WorkspaceSwitcher() {
       .list()
       .then((data) => {
         if (cancelled) return;
+        const browserActiveId = getActiveWorkspaceId();
+        const activeId =
+          browserActiveId && data.workspaces?.some((workspace) => workspace.id === browserActiveId)
+            ? browserActiveId
+            : data.active_id ?? null;
         setState({
           workspaces: data.workspaces ?? [],
-          activeId: data.active_id ?? null,
+          activeId,
         });
       })
       .catch((err: Error) => {
@@ -120,6 +147,7 @@ export function WorkspaceSwitcher() {
     setSwitchingTo(workspaceId);
     try {
       await workspacesApi.select(workspaceId);
+      setActiveWorkspaceId(workspaceId);
       // Everything in the dashboard is workspace-scoped, so the simplest
       // correct UX is a full reload — no chance of stale React state
       // (workers/runs/connections/secrets) leaking across workspaces.
@@ -137,6 +165,7 @@ export function WorkspaceSwitcher() {
     try {
       const created = await workspacesApi.create(name);
       await workspacesApi.select(created.id);
+      setActiveWorkspaceId(created.id);
       window.location.reload();
     } catch (err) {
       setError((err as Error).message || "Failed to create workspace");
@@ -209,7 +238,7 @@ export function WorkspaceSwitcher() {
                   // was the Radix API). The previous onSelect prop was
                   // silently dropped, so clicking a workspace did nothing.
                   onClick={() => handleSwitch(w.id)}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 focus:bg-[var(--active-nav-bg)] focus:text-ink"
                   disabled={isLoading}
                 >
                   <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
@@ -227,7 +256,7 @@ export function WorkspaceSwitcher() {
               setCreateName("");
               setCreateOpen(true);
             }}
-            className="flex items-center gap-2 text-[var(--ink-soft)]"
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
           >
             <Plus className="size-4" />
             New workspace
