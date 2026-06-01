@@ -171,3 +171,11 @@ app.mount("/api", engine_main.app)
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok", "deploy": "cloud"}
+
+
+# Compatibility alias: OSS Workeros exposes engine routes at the domain root
+# (`/workers`, `/contexts`, `/workspace`, ...), while Cloud historically mounted
+# the engine under `/api`. Mounting the same engine at `/` after all cloud-owned
+# routes lets API clients use the same path shape on both backends without
+# breaking existing `/api/*` callers.
+app.mount("/", engine_main.app)
