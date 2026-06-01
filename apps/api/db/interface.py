@@ -281,14 +281,15 @@ class CliAuthRepository(Protocol):
 
 
 class AlertRepository(Protocol):
-    """Webhook alert endpoints registered per-worker."""
+    """Webhook and email alert registrations per-worker."""
 
     def add(
         self,
         *,
         alert_id: str,
         worker_id: str,
-        url: str,
+        url: str | None,
+        email_to: str | None,
         events: str,
         description: str | None,
         created_at: str,
