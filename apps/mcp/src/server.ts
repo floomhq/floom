@@ -1366,6 +1366,274 @@ export function createServer(): McpServer {
       ),
   );
 
+  // ---------------------------------------------------------------------------
+  // MEDIUM: Workers — sample input, timeseries, reload
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "workers.sample_input",
+    {
+      title: "Get Worker Sample Input",
+      description: "Get example input values for a worker's input fields. Useful for showing a user what to fill in before running.",
+      inputSchema: workerIdSchema.shape,
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ id }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", `/workers/${encodeURIComponent(id)}/sample-input`)),
+      ),
+  );
+
+  server.registerTool(
+    "workers.timeseries",
+    {
+      title: "Get Worker Run Timeseries",
+      description: "Get daily run counts and success/failure breakdown for a worker over the last N days. Useful for trend reporting.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        days: z.number().int().min(1).max(90).default(30).describe("Number of days of history."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ id, days }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", `/workers/${encodeURIComponent(id)}/runs/timeseries`, undefined, { days })),
+      ),
+  );
+
+  server.registerTool(
+    "workers.reload",
+    {
+      title: "Reload Workers",
+      description: "Reload all workers from disk. Use after manually editing worker files on an OSS self-hosted deployment.",
+      inputSchema: {},
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async () =>
+      callTool(async () =>
+        jsonResult(await request("POST", "/workers/reload"), "Workers reloaded from disk."),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // MEDIUM: Secrets — test
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "secrets.test",
+    {
+      title: "Test Secret",
+      description: "Verify a secret exists and is reachable. Returns status without revealing the value.",
+      inputSchema: {
+        key: z.string().min(1).describe("Secret name to test."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ key }) =>
+      callTool(async () =>
+        jsonResult(await request("POST", `/secrets/${encodeURIComponent(key)}/test`)),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // MEDIUM: Connections — delete, status, test
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "connections.delete",
+    {
+      title: "Delete Connection",
+      description: "Remove a configured app connection.",
+      inputSchema: {
+        connection_id: z.string().min(1).describe("Connection ID to delete."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ connection_id }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("DELETE", `/connections/${encodeURIComponent(connection_id)}`),
+          "Connection deleted.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "connections.status",
+    {
+      title: "Get Connection Status",
+      description: "Check the health and auth status of a configured connection.",
+      inputSchema: {
+        connection_id: z.string().min(1).describe("Connection ID."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ connection_id }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", `/connections/${encodeURIComponent(connection_id)}/status`)),
+      ),
+  );
+
+  server.registerTool(
+    "connections.test",
+    {
+      title: "Test Connection",
+      description: "Run a live connectivity check on a configured connection to verify the auth token is still valid.",
+      inputSchema: {
+        connection_id: z.string().min(1).describe("Connection ID."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ connection_id }) =>
+      callTool(async () =>
+        jsonResult(await request("POST", `/connections/${encodeURIComponent(connection_id)}/test`)),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // MEDIUM: Integrations catalog
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "integrations.catalog",
+    {
+      title: "List Integrations Catalog",
+      description: "Browse available integrations (apps, triggers, actions) supported by Workeros.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => callTool(async () => jsonResult(await request("GET", "/integrations/catalog"))),
+  );
+
+  // ---------------------------------------------------------------------------
+  // MEDIUM: Conversations
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "conversations.list",
+    {
+      title: "List Conversations",
+      description: "List past workspace agent conversations.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(100).default(20).describe("Maximum conversations to return."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ limit }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", "/conversations", undefined, { limit })),
+      ),
+  );
+
+  server.registerTool(
+    "conversations.get",
+    {
+      title: "Get Conversation",
+      description: "Retrieve a full conversation history by ID.",
+      inputSchema: {
+        id: z.string().min(1).describe("Conversation ID."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ id }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", `/conversations/${encodeURIComponent(id)}`)),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // MEDIUM: Workspace instructions
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "workspace.instructions.get",
+    {
+      title: "Get Workspace Instructions",
+      description: "Read the current workspace agent instructions (the system prompt that governs the workspace agent's behaviour).",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => callTool(async () => jsonResult(await request("GET", "/workspace"))),
+  );
+
+  server.registerTool(
+    "workspace.instructions.set",
+    {
+      title: "Set Workspace Instructions",
+      description: "Update the workspace agent instructions. Overwrites the current content — read first with workspace.instructions.get if you want to append.",
+      inputSchema: {
+        content: z.string().describe("New workspace instructions markdown content."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ content }) =>
+      callTool(async () => {
+        await request("PUT", "/workspace", { content });
+        return jsonResult({ ok: true }, "Workspace instructions updated.");
+      }),
+  );
+
+  server.registerTool(
+    "workspace.versions",
+    {
+      title: "List Workspace Instruction Versions",
+      description: "List saved versions of the workspace agent instructions.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(100).default(20).describe("Maximum versions to return."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ limit }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", "/workspace/versions", undefined, { limit })),
+      ),
+  );
+
+  server.registerTool(
+    "workspace.rollback",
+    {
+      title: "Rollback Workspace Instructions",
+      description: "Restore workspace agent instructions to a previous version. Use workspace.versions to find the version_id.",
+      inputSchema: {
+        version_id: z.string().min(1).describe("Version ID to restore."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ version_id }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/workspace/rollback/${encodeURIComponent(version_id)}`),
+          "Workspace instructions rolled back.",
+        ),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // MEDIUM: System info and alerts
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "system.info",
+    {
+      title: "System Info",
+      description: "Get platform version, deployment mode, and configuration flags.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => callTool(async () => jsonResult(await request("GET", "/system/info"))),
+  );
+
+  server.registerTool(
+    "system.alerts",
+    {
+      title: "System Alerts",
+      description: "Get system-wide active alerts — worker failures, scheduler issues, connection errors.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => callTool(async () => jsonResult(await request("GET", "/system/alerts"))),
+  );
+
   return server;
 }
 
