@@ -21,7 +21,9 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   File, FolderOpen, Copy, Play as PlayIcon, Code2, Clock, Plug2, ListChecks, Info,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
+  Brain as BrainIcon,
 } from "lucide-react";
+import { dump as dumpYaml } from "js-yaml";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -39,7 +41,16 @@ import {
 } from "@/components/ui/dialog";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
-import type { WorkerDetail, WorkerInput, WorkerFile, ConnectionItem, TriggerSpec, RunDetail } from "@/lib/types";
+import type {
+  WorkerDetail,
+  WorkerInput,
+  WorkerFile,
+  ConnectionItem,
+  TriggerSpec,
+  RunDetail,
+  ContextSummary,
+  WorkerContextSpec,
+} from "@/lib/types";
 import { CsvColumnMapper } from "@/components/csv-column-mapper";
 import { FileInputUpload } from "@/components/FileInputUpload";
 import { FilesEditor, TriggersEditor, WorkerMetadataForm, makeTriggerRow, buildTriggersYaml, replaceTriggerBlock } from "@/components/worker-form";
@@ -63,9 +74,9 @@ import { useRunStream } from "@/lib/useRunStream";
 // ABOVE the Run form on the Run tab. Danger zone moves to /edit only
 // (already exists there). Tech details + I/O chips dropped (redundant
 // with the form fields below + the Run/Source/Edit tabs).
-type Section = "about" | "run" | "configure" | "code" | "connections" | "runs";
+type Section = "about" | "run" | "configure" | "brain" | "code" | "connections" | "runs";
 
-const VALID_SECTIONS: Section[] = ["about", "run", "configure", "code", "connections", "runs"];
+const VALID_SECTIONS: Section[] = ["about", "run", "configure", "brain", "code", "connections", "runs"];
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
@@ -79,6 +90,7 @@ const SECTION_TO_HASH: Record<Section, string> = {
   about: "about",
   run: "run",
   configure: "configure",
+  brain: "brain",
   runs: "history",
   connections: "connections",
   code: "advanced",
@@ -87,6 +99,9 @@ const HASH_TO_SECTION: Record<string, Section> = {
   about: "about",
   run: "run",
   configure: "configure",
+  brain: "brain",
+  contexts: "brain",
+  context: "brain",
   triggers: "configure", // legacy — triggers tab merged into configure
   history: "runs",
   apps: "connections",
@@ -117,6 +132,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "about", label: "About", icon: <BookOpen className="w-4 h-4" /> },
   { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
   { id: "configure", label: "Configure", icon: <Pencil className="w-4 h-4" /> },
+  { id: "brain", label: "Brain", icon: <BrainIcon className="w-4 h-4" /> },
   { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
   { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
   { id: "code", label: "Advanced", icon: <Code2 className="w-4 h-4" /> },
@@ -130,7 +146,7 @@ const NAV_ITEMS: NavItem[] = [
 // dir isn't on disk in that deploy layout), but the source IS present in the
 // dedicated content fields (run_py_content / skill_md_content / manifest_yaml).
 // Build a WorkerFile[] from those fields so the Source tab actually renders.
-import { patchInputDefault } from "@/lib/yaml-utils";
+import { patchInputDefault, patchRetryBlock, patchNotifyBlock } from "@/lib/yaml-utils";
 
 function deriveSourceFiles(worker: WorkerDetail | null): WorkerFile[] {
   if (!worker) return [];
@@ -145,6 +161,38 @@ function deriveSourceFiles(worker: WorkerDetail | null): WorkerFile[] {
   push("SKILL.md", "markdown", worker.skill_md_content);
   push("run.py", "python", worker.run_py_content ?? worker.run_py);
   return derived;
+}
+
+function contextSpecName(spec: WorkerContextSpec): string {
+  if (typeof spec === "string") return spec;
+  return spec.name;
+}
+
+function contextSpecWritable(spec: WorkerContextSpec): boolean {
+  return typeof spec === "object" && spec.writeable === true;
+}
+
+function replaceTopLevelYamlBlock(yaml: string, key: string, replacement: string): string {
+  const lines = yaml.split("\n");
+  const start = lines.findIndex((line) => new RegExp(`^${key}:\\s*(?:$|\\[)`).test(line));
+  if (start === -1) return `${yaml.trimEnd()}\n\n${replacement}\n`;
+
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^[A-Za-z_][\w_-]*:\s*/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return [...lines.slice(0, start), ...replacement.split("\n"), ...lines.slice(end)].join("\n");
+}
+
+function patchBrainContexts(yaml: string, contexts: WorkerContextSpec[]): string {
+  const block = dumpYaml(
+    { contexts: contexts.length > 0 ? contexts : [] },
+    { noRefs: true, lineWidth: -1, sortKeys: false },
+  ).trimEnd();
+  return replaceTopLevelYamlBlock(yaml, "contexts", block);
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +232,8 @@ export default function WorkerDetailPage() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [activeRun, setActiveRun] = useState<RunDetail | null>(null);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
+  const [brainPacks, setBrainPacks] = useState<ContextSummary[]>([]);
+  const [savingBrain, setSavingBrain] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const activeRunStream = useRunStream(activeRunId);
 
@@ -224,6 +274,14 @@ export default function WorkerDetailPage() {
   const [conflictSuggestions, setConflictSuggestions] = useState<import("@/lib/types").WorkerSuggestion[]>([]);
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
   const [pendingSaveAfterConflict, setPendingSaveAfterConflict] = useState(false);
+
+  // Configure tab — retry & notify state
+  const [retryEnabled, setRetryEnabled] = useState(false);
+  const [retryMaxAttempts, setRetryMaxAttempts] = useState(3);
+  const [retryDelaySeconds, setRetryDelaySeconds] = useState(60);
+  const [notifyUrl, setNotifyUrl] = useState("");
+  const [notifyOnFailed, setNotifyOnFailed] = useState(true);
+  const [notifyOnCompleted, setNotifyOnCompleted] = useState(false);
 
   // P1-C (prove100 2026-05-30): worker actions — Archive (reversible) and
   // Delete (destructive, confirm-gated). The API exposed both DELETE and a
@@ -313,13 +371,15 @@ export default function WorkerDetailPage() {
     async function load() {
       setNotFound(false);
       try {
-        const [w, conns] = await Promise.all([
+        const [w, conns, packs] = await Promise.all([
           fetchWorkerWithRetry(id as string),
           api.connections.list().catch(() => [] as ConnectionItem[]),
+          api.contexts.list().catch(() => [] as ContextSummary[]),
         ]);
         if (cancelled) return;
         setWorker(w);
         setConnections(conns);
+        setBrainPacks(packs);
         const defaults: Record<string, unknown> = {};
         w.config.inputs.forEach((inp: WorkerInput) => {
           if (inp.default !== undefined) defaults[inp.name] = inp.default;
@@ -362,6 +422,15 @@ export default function WorkerDetailPage() {
           inputDefs[inp.name] = inp.default !== undefined && inp.default !== null ? String(inp.default) : "";
         });
         setConfigInputDefaults(inputDefs);
+        // Init retry/notify from config
+        const retryCfg = (w.config as { retry?: { max_attempts?: number; delay_seconds?: number } }).retry;
+        setRetryEnabled(!!retryCfg);
+        setRetryMaxAttempts(retryCfg?.max_attempts ?? 3);
+        setRetryDelaySeconds(retryCfg?.delay_seconds ?? 60);
+        const notifyCfg = (w.config as { notify?: { url?: string; on?: string[] } }).notify;
+        setNotifyUrl(notifyCfg?.url ?? "");
+        setNotifyOnFailed(notifyCfg ? (notifyCfg.on ?? ["failed"]).includes("failed") : true);
+        setNotifyOnCompleted(notifyCfg ? (notifyCfg.on ?? []).includes("completed") : false);
       } catch (e: unknown) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
@@ -677,6 +746,56 @@ export default function WorkerDetailPage() {
     }
   }
 
+  async function handleToggleBrainPack(packName: string) {
+    if (!worker || savingBrain) return;
+    const currentContexts = worker.config.contexts ?? [];
+    const selected = currentContexts.some((spec) => contextSpecName(spec) === packName);
+    const nextContexts = selected
+      ? currentContexts.filter((spec) => contextSpecName(spec) !== packName)
+      : [...currentContexts, packName];
+
+    const currentYml =
+      editFiles.find((f) => f.path === "worker.yml")?.content ||
+      deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
+      worker.manifest_yaml ||
+      "";
+
+    if (!currentYml.trim()) {
+      toast.error("worker.yml is unavailable for this worker");
+      return;
+    }
+
+    setSavingBrain(packName);
+    try {
+      const patched = patchBrainContexts(currentYml, nextContexts);
+      const sourceFiles =
+        editFiles.length > 0
+          ? editFiles
+          : deriveSourceFiles(worker)
+              .filter((f) => !f.binary)
+              .map((f) => ({ path: f.path, content: f.content || "" }));
+      const nextFiles = sourceFiles.some((f) => f.path === "worker.yml")
+        ? sourceFiles.map((f) => (f.path === "worker.yml" ? { ...f, content: patched } : f))
+        : [{ path: "worker.yml", content: patched }, ...sourceFiles];
+
+      await api.workers.updateFiles(worker.id, nextFiles);
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      const updatedFiles = deriveSourceFiles(updated)
+        .filter((f: WorkerFile) => !f.binary)
+        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+      toast.success(selected ? "Brain pack removed" : "Brain pack attached");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to update brain packs");
+    } finally {
+      setSavingBrain(null);
+    }
+  }
+
   async function commitConfigureSave() {
     if (!worker) return;
     setConfigSaving(true);
@@ -707,6 +826,26 @@ export default function WorkerDetailPage() {
       for (const [name, value] of Object.entries(configInputDefaults)) {
         patched = patchInputDefault(patched, name, value);
       }
+
+      // Patch retry block
+      patched = patchRetryBlock(
+        patched,
+        retryEnabled
+          ? { max_attempts: retryMaxAttempts, delay_seconds: retryDelaySeconds }
+          : null
+      );
+
+      // Patch notify block
+      const notifyEvents = [
+        ...(notifyOnFailed ? ["failed"] : []),
+        ...(notifyOnCompleted ? ["completed"] : []),
+      ];
+      patched = patchNotifyBlock(
+        patched,
+        notifyUrl.trim()
+          ? { url: notifyUrl.trim(), on: notifyEvents.length ? notifyEvents : ["failed"] }
+          : null
+      );
 
       await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
       toast.success("Worker saved");
@@ -1399,6 +1538,94 @@ export default function WorkerDetailPage() {
               </div>
             )}
 
+            {/* Retry on failure */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm font-medium">Retry on failure</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Automatically re-run this worker if a run fails.</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={retryEnabled}
+                  onClick={() => setRetryEnabled(!retryEnabled)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${retryEnabled ? "bg-foreground" : "bg-muted-foreground/30"}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform shadow ${retryEnabled ? "translate-x-4.5" : "translate-x-0.5"}`} />
+                </button>
+              </div>
+              {retryEnabled && (
+                <div className="rounded-lg border border-border divide-y divide-border">
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium">Max attempts</span>
+                      <p className="text-xs text-muted-foreground">Total tries including the first (1–10)</p>
+                    </div>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={10}
+                      className="h-7 text-xs w-20 shrink-0"
+                      value={retryMaxAttempts}
+                      onChange={(e) => setRetryMaxAttempts(Math.min(10, Math.max(1, parseInt(e.target.value) || 3)))}
+                    />
+                  </div>
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium">Delay between retries (seconds)</span>
+                      <p className="text-xs text-muted-foreground">Wait time before the next attempt (0–3600)</p>
+                    </div>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={3600}
+                      className="h-7 text-xs w-20 shrink-0"
+                      value={retryDelaySeconds}
+                      onChange={(e) => setRetryDelaySeconds(Math.min(3600, Math.max(0, parseInt(e.target.value) || 60)))}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Failure notifications */}
+            <div className="space-y-3">
+              <div>
+                <Label className="text-sm font-medium">Notifications</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">Send a webhook POST when runs complete or fail.</p>
+              </div>
+              <Input
+                type="url"
+                className="text-sm"
+                placeholder="https://hooks.example.com/run-events"
+                value={notifyUrl}
+                onChange={(e) => setNotifyUrl(e.target.value)}
+              />
+              {notifyUrl.trim() && (
+                <div className="flex items-center gap-4 text-sm">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={notifyOnFailed}
+                      onChange={(e) => setNotifyOnFailed(e.target.checked)}
+                    />
+                    <span>On failure</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={notifyOnCompleted}
+                      onChange={(e) => setNotifyOnCompleted(e.target.checked)}
+                    />
+                    <span>On success</span>
+                  </label>
+                </div>
+              )}
+            </div>
+
             {/* Save button */}
             <div className="flex items-center gap-3">
               <Button
@@ -1478,6 +1705,15 @@ export default function WorkerDetailPage() {
             configuredMcpConnections={configuredMcpConnections}
             activeConnectionSlugs={activeConnectionSlugs}
             requiredSecrets={requiredSecrets}
+          />
+        )}
+
+        {activeSection === "brain" && (
+          <BrainSection
+            worker={worker}
+            brainPacks={brainPacks}
+            savingBrain={savingBrain}
+            onToggleBrainPack={handleToggleBrainPack}
           />
         )}
 
@@ -1806,6 +2042,126 @@ function RunSection({
             </pre>
           </div>
         </section>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Brain section
+// ---------------------------------------------------------------------------
+
+function BrainSection({
+  worker,
+  brainPacks,
+  savingBrain,
+  onToggleBrainPack,
+}: {
+  worker: WorkerDetail;
+  brainPacks: ContextSummary[];
+  savingBrain: string | null;
+  onToggleBrainPack: (name: string) => void;
+}) {
+  const selectedSpecs = worker.config.contexts ?? [];
+  const selectedNames = new Set(selectedSpecs.map(contextSpecName));
+  const knownPackNames = new Set(brainPacks.map((pack) => pack.name));
+  const missingSelectedPacks = selectedSpecs
+    .map(contextSpecName)
+    .filter((name) => name && !knownPackNames.has(name));
+
+  const sortedPacks = [...brainPacks].sort((a, b) => {
+    const aSelected = selectedNames.has(a.name) ? 0 : 1;
+    const bSelected = selectedNames.has(b.name) ? 0 : 1;
+    if (aSelected !== bSelected) return aSelected - bSelected;
+    return a.name.localeCompare(b.name);
+  });
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">Brain packs</h2>
+          <p className="text-sm text-muted-foreground">
+            {selectedNames.size} attached to this worker.
+          </p>
+        </div>
+        <Link href="/brain">
+          <Button size="sm" variant="outline">
+            Open Brain
+          </Button>
+        </Link>
+      </div>
+
+      {missingSelectedPacks.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 px-3 py-2">
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Missing packs in worker.yml: {missingSelectedPacks.join(", ")}
+          </p>
+        </div>
+      )}
+
+      {sortedPacks.length === 0 ? (
+        <div className="rounded-[var(--radius-button)] border border-line bg-card p-4">
+          <p className="text-sm text-muted-foreground">No brain packs available.</p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-[var(--radius-button)] border border-line bg-card">
+          {sortedPacks.map((pack) => {
+            const attached = selectedNames.has(pack.name);
+            const selectedSpec = selectedSpecs.find((spec) => contextSpecName(spec) === pack.name);
+            const writableMount = selectedSpec ? contextSpecWritable(selectedSpec) : false;
+            return (
+              <div
+                key={pack.name}
+                className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 last:border-b-0"
+              >
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] border border-line bg-[var(--paper)]">
+                    <BrainIcon className="size-4 text-muted-foreground" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium text-foreground">{pack.name}</span>
+                      {attached && (
+                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                          Attached
+                        </Badge>
+                      )}
+                      {pack.system || pack.read_only ? (
+                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                          Read-only
+                        </Badge>
+                      ) : null}
+                      {writableMount && (
+                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                          Writable mount
+                        </Badge>
+                      )}
+                    </div>
+                    {pack.description && (
+                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{pack.description}</p>
+                    )}
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {pack.file_count} {pack.file_count === 1 ? "file" : "files"}
+                      {pack.worker_count !== undefined ? ` · ${pack.worker_count} workers` : ""}
+                      {pack.updated_at ? ` · Updated ${formatRelative(pack.updated_at)}` : ""}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={attached ? "outline" : "default"}
+                  onClick={() => onToggleBrainPack(pack.name)}
+                  disabled={Boolean(savingBrain)}
+                  className="shrink-0"
+                >
+                  {savingBrain === pack.name ? "Saving…" : attached ? "Remove" : "Attach"}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
