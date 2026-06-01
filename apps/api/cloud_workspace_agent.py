@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from pathlib import Path
+from typing import Any
 
 from apps.api._engine import import_engine_module
 from apps.api.auth.workspace_context import get_active_workspace_id
 from apps.api.config import get_supabase_service_client
+from apps.api.db import workspaces as workspace_repo
 
 logger = logging.getLogger("workeros.cloud.workspace_agent")
 
@@ -15,6 +18,7 @@ worker_registry = import_engine_module("worker_registry")
 
 _DEFAULT_WORKSPACE_MD = "# Workspace\n\nNo workspace.md configured yet. PUT /workspace to set one."
 _WORKSPACE_AGENT_ID = "workspace-agent"
+_original_workspace_agent_info = getattr(chat_service, "workspace_agent_info", None)
 
 
 def _template_workspace_md() -> str:
@@ -86,6 +90,119 @@ def set_workspace_md(content: str) -> None:
         path.write_text(content, encoding="utf-8")
 
 
+def _binding_rows(response: Any) -> list[dict[str, Any]]:
+    data = getattr(response, "data", None) or []
+    if isinstance(data, list):
+        return [dict(row) for row in data if isinstance(row, dict)]
+    if isinstance(data, dict):
+        return [dict(data)]
+    return []
+
+
+def _clean_binding_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "workspace_id": str(row["workspace_id"]),
+        "channel_type": str(row["channel_type"]),
+        "external_team_id": row.get("external_team_id"),
+        "external_channel_id": str(row["external_channel_id"]),
+        "external_channel_name": row.get("external_channel_name"),
+        "enabled": bool(row.get("enabled")),
+        "updated_at": str(row.get("updated_at") or ""),
+    }
+
+
+def get_slack_binding(*, workspace_id: str | None = None) -> dict[str, Any] | None:
+    workspace_id = workspace_id or get_active_workspace_id()
+    if not workspace_id:
+        return None
+    response = (
+        get_supabase_service_client()
+        .table("workspace_agent_channel_bindings")
+        .select(
+            "id,workspace_id,channel_type,external_team_id,external_channel_id,"
+            "external_channel_name,enabled,updated_at"
+        )
+        .eq("workspace_id", workspace_id)
+        .eq("channel_type", "slack")
+        .limit(1)
+        .execute()
+    )
+    rows = _binding_rows(response)
+    return _clean_binding_row(rows[0]) if rows else None
+
+
+def upsert_slack_binding(
+    *,
+    workspace_id: str,
+    external_channel_id: str,
+    external_channel_name: str | None,
+    external_team_id: str | None,
+    enabled: bool,
+) -> dict[str, Any]:
+    payload = {
+        "id": f"wacb_{uuid.uuid4().hex[:18]}",
+        "workspace_id": workspace_id,
+        "channel_type": "slack",
+        "external_team_id": (external_team_id or "").strip() or None,
+        "external_channel_id": external_channel_id.strip(),
+        "external_channel_name": (external_channel_name or "").strip() or None,
+        "enabled": bool(enabled),
+    }
+    response = (
+        get_supabase_service_client()
+        .table("workspace_agent_channel_bindings")
+        .upsert(payload, on_conflict="workspace_id,channel_type")
+        .execute()
+    )
+    rows = _binding_rows(response)
+    return _clean_binding_row(rows[0]) if rows else get_slack_binding(workspace_id=workspace_id) or payload
+
+
+def delete_slack_binding(*, workspace_id: str) -> int:
+    response = (
+        get_supabase_service_client()
+        .table("workspace_agent_channel_bindings")
+        .delete()
+        .eq("workspace_id", workspace_id)
+        .eq("channel_type", "slack")
+        .execute()
+    )
+    return len(_binding_rows(response))
+
+
+def resolve_slack_event_binding(*, team_id: str, channel_id: str) -> dict[str, Any] | None:
+    if not channel_id:
+        return None
+    query = (
+        get_supabase_service_client()
+        .table("workspace_agent_channel_bindings")
+        .select("id,workspace_id,external_team_id,external_channel_id,enabled")
+        .eq("channel_type", "slack")
+        .eq("external_channel_id", channel_id)
+        .eq("enabled", True)
+    )
+    rows = _binding_rows(query.limit(10).execute())
+    if team_id:
+        rows = [
+            row
+            for row in rows
+            if row.get("external_team_id") in {None, "", team_id}
+        ]
+    if not rows:
+        return None
+    rows.sort(key=lambda row: 0 if row.get("external_team_id") == team_id else 1)
+    row = rows[0]
+    workspace = workspace_repo.get(workspace_id=str(row["workspace_id"]))
+    if not workspace:
+        return None
+    return {
+        "workspace_id": str(row["workspace_id"]),
+        "owner_user_id": str(workspace["owner_user_id"]),
+        "binding_id": str(row["id"]),
+    }
+
+
 def _engine_workspace_agent_skill_path() -> Path:
     engine_root = Path(chat_service.__file__).resolve().parents[2]
     return engine_root / "workers" / _WORKSPACE_AGENT_ID / "SKILL.md"
@@ -111,7 +228,32 @@ def build_system_prompt(user_id: str) -> str:
     return "\n\n".join(part for part in [workspace_content, skill_md] if part)
 
 
+def workspace_agent_info(user_id: str) -> dict[str, Any]:
+    if callable(_original_workspace_agent_info):
+        info = dict(_original_workspace_agent_info(user_id))
+    else:
+        info = {
+            "agent_id": _WORKSPACE_AGENT_ID,
+            "model": os.environ.get("WORKEROS_CHAT_MODEL") or "gpt-4.1-mini",
+            "system_prompt": build_system_prompt(user_id),
+            "tools": [],
+            "channels": {},
+        }
+
+    channels = dict(info.get("channels") or {})
+    slack = dict(channels.get("slack") or {})
+    try:
+        slack["binding"] = get_slack_binding()
+    except Exception as exc:
+        logger.warning("workspace_agent_channel_bindings read failed: %s", exc)
+        slack["binding"] = None
+    channels["slack"] = slack
+    info["channels"] = channels
+    return info
+
+
 def apply_cloud_workspace_agent_overrides() -> None:
     chat_service.get_workspace_md = get_workspace_md
     chat_service.set_workspace_md = set_workspace_md
     chat_service._build_system_prompt = build_system_prompt
+    chat_service.workspace_agent_info = workspace_agent_info

@@ -4,22 +4,45 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Edit3, RotateCcw, Save, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Edit3, RotateCcw, Save, Trash2, X } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, getActiveWorkspaceId } from "@/lib/api";
 import type { ConnectionItem, VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
 import { formatRelative } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 type TabKey = "instructions" | "prompt" | "tools" | "channels" | "versions";
 
 const TABS: TabKey[] = ["instructions", "prompt", "tools", "channels", "versions"];
+const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
+
+interface SlackBinding {
+  id: string;
+  workspace_id: string;
+  channel_type: "slack";
+  external_team_id?: string | null;
+  external_channel_id: string;
+  external_channel_name?: string | null;
+  enabled: boolean;
+  updated_at?: string;
+}
+
+interface WorkspaceAgentInfoWithSlackBinding extends WorkspaceAgentInfo {
+  channels?: WorkspaceAgentInfo["channels"] & {
+    slack?: NonNullable<NonNullable<WorkspaceAgentInfo["channels"]>["slack"]> & {
+      binding?: SlackBinding | null;
+    };
+  };
+}
 
 function validTab(value: string): value is TabKey {
   return TABS.includes(value as TabKey);
@@ -50,6 +73,54 @@ function changeSourceBadge(src: string) {
       {label}
     </span>
   );
+}
+
+function workspaceHeaders(): Headers {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const activeWorkspaceId = getActiveWorkspaceId();
+  if (activeWorkspaceId) headers.set("x-workeros-workspace", activeWorkspaceId);
+  return headers;
+}
+
+async function fetchAgentJson<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: workspaceHeaders(),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = body.detail || JSON.stringify(body);
+    } catch {
+      detail = res.statusText || `HTTP ${res.status}`;
+    }
+    throw new Error(detail);
+  }
+  if (res.status === 204) return null as T;
+  const text = await res.text();
+  return text ? (JSON.parse(text) as T) : (null as T);
+}
+
+async function saveSlackBinding(payload: {
+  external_channel_id: string;
+  external_channel_name?: string | null;
+  external_team_id?: string | null;
+  enabled: boolean;
+}): Promise<SlackBinding | null> {
+  const response = await fetchAgentJson<{ binding: SlackBinding | null }>(
+    "/system/workspace-agent/channels/slack",
+    { method: "PUT", body: JSON.stringify(payload) }
+  );
+  return response.binding;
+}
+
+async function deleteSlackBinding(): Promise<number> {
+  const response = await fetchAgentJson<{ deleted: number }>(
+    "/system/workspace-agent/channels/slack",
+    { method: "DELETE" }
+  );
+  return response.deleted;
 }
 
 function WorkspaceInstructionsVersionsSection({
@@ -168,7 +239,7 @@ export default function AssistantPage() {
       ? (window.location.hash.replace(/^#/, "") as TabKey)
       : "instructions";
   const [tab, setTab] = useState<TabKey>(initial);
-  const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
+  const [agent, setAgent] = useState<WorkspaceAgentInfoWithSlackBinding | null>(null);
   const [instructions, setInstructions] = useState("");
   const [originalInstructions, setOriginalInstructions] = useState("");
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
@@ -177,6 +248,11 @@ export default function AssistantPage() {
   const [editingInstructions, setEditingInstructions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [versionsKey, setVersionsKey] = useState(0);
+  const [slackChannelId, setSlackChannelId] = useState("");
+  const [slackChannelName, setSlackChannelName] = useState("");
+  const [slackTeamId, setSlackTeamId] = useState("");
+  const [slackBindingEnabled, setSlackBindingEnabled] = useState(true);
+  const [savingSlack, setSavingSlack] = useState(false);
 
   const dirty = instructions !== originalInstructions;
 
@@ -189,7 +265,13 @@ export default function AssistantPage() {
         api.system.workspaceInstructions(),
         api.connections.list(),
       ]);
-      setAgent(agentRes);
+      const typedAgent = agentRes as WorkspaceAgentInfoWithSlackBinding;
+      const binding = typedAgent.channels?.slack?.binding;
+      setAgent(typedAgent);
+      setSlackChannelId(binding?.external_channel_id ?? "");
+      setSlackChannelName(binding?.external_channel_name ?? "");
+      setSlackTeamId(binding?.external_team_id ?? "");
+      setSlackBindingEnabled(binding?.enabled ?? true);
       setInstructions(instructionsRes);
       setOriginalInstructions(instructionsRes);
       setConnections(connectionRes);
@@ -252,7 +334,45 @@ export default function AssistantPage() {
   const activeSlackConnections = slackConnections.filter((connection) => connection.status === "active");
   const slackEventsConfigured = Boolean(agent?.channels?.slack?.events_configured);
   const slackBotConfigured = Boolean(agent?.channels?.slack?.bot_configured);
-  const slackReady = activeSlackConnections.length > 0 && slackEventsConfigured && slackBotConfigured;
+  const slackBinding = agent?.channels?.slack?.binding ?? null;
+  const slackBound = Boolean(slackBinding?.enabled && slackBinding.external_channel_id);
+  const slackReady =
+    activeSlackConnections.length > 0 && slackEventsConfigured && slackBotConfigured && slackBound;
+
+  async function handleSaveSlackBinding() {
+    if (!slackChannelId.trim()) {
+      toast.error("Slack channel ID is required");
+      return;
+    }
+    setSavingSlack(true);
+    try {
+      await saveSlackBinding({
+        external_channel_id: slackChannelId.trim(),
+        external_channel_name: slackChannelName.trim() || null,
+        external_team_id: slackTeamId.trim() || null,
+        enabled: slackBindingEnabled,
+      });
+      toast.success("Slack channel saved");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save Slack channel");
+    } finally {
+      setSavingSlack(false);
+    }
+  }
+
+  async function handleDeleteSlackBinding() {
+    setSavingSlack(true);
+    try {
+      await deleteSlackBinding();
+      toast.success("Slack channel removed");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove Slack channel");
+    } finally {
+      setSavingSlack(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -403,24 +523,123 @@ export default function AssistantPage() {
                         : "Not connected"}
                   </Badge>
                 </div>
-                <div className="mt-2 grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
+                <div className="mt-2 grid gap-2 text-sm text-muted-foreground sm:grid-cols-4">
                   <ReadinessPill label="OAuth connection" ready={activeSlackConnections.length > 0} />
                   <ReadinessPill label="Events secret" ready={slackEventsConfigured} />
                   <ReadinessPill label="Bot token" ready={slackBotConfigured} />
+                  <ReadinessPill label="Channel binding" ready={slackBound} />
                 </div>
                 <p className="mt-2 text-sm text-muted-foreground">
                   {slackReady
-                    ? "Slack mentions can be routed to the workspace agent."
-                    : "Slack is only ready after OAuth, Events API signing, and bot reply credentials are all configured."}
+                    ? "Slack mentions route to this workspace agent."
+                    : "Slack needs OAuth, Events API signing, bot reply credentials, and a channel binding."}
                 </p>
               </div>
             </div>
           </section>
+          <section className="rounded-[var(--radius-card)] border border-line bg-card p-4 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-medium">Slack channel</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Bind one Slack channel to this workspace agent.
+                </p>
+              </div>
+              {slackBinding ? (
+                <Badge variant={slackBinding.enabled ? "default" : "outline"} className="text-xs">
+                  {slackBinding.enabled ? "Enabled" : "Paused"}
+                </Badge>
+              ) : null}
+            </div>
+            <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+              <div className="space-y-1.5">
+                <Label htmlFor="slack-channel-id">Channel ID</Label>
+                <Input
+                  id="slack-channel-id"
+                  value={slackChannelId}
+                  onChange={(event) => setSlackChannelId(event.target.value)}
+                  placeholder="C0123456789"
+                  className="font-mono"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="slack-channel-name">Channel name</Label>
+                <Input
+                  id="slack-channel-name"
+                  value={slackChannelName}
+                  onChange={(event) => setSlackChannelName(event.target.value)}
+                  placeholder="product"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="slack-enabled">Enabled</Label>
+                <div className="flex h-10 items-center gap-2">
+                  <Switch
+                    id="slack-enabled"
+                    checked={slackBindingEnabled}
+                    onCheckedChange={setSlackBindingEnabled}
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    {slackBindingEnabled ? "On" : "Off"}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+              <div className="space-y-1.5">
+                <Label htmlFor="slack-team-id">Team ID</Label>
+                <Input
+                  id="slack-team-id"
+                  value={slackTeamId}
+                  onChange={(event) => setSlackTeamId(event.target.value)}
+                  placeholder="T0123456789"
+                  className="font-mono"
+                />
+              </div>
+              <div className="flex items-end gap-2">
+                {slackBinding ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void handleDeleteSlackBinding()}
+                    disabled={savingSlack}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Remove
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  onClick={() => void handleSaveSlackBinding()}
+                  disabled={savingSlack || !slackChannelId.trim()}
+                >
+                  <Save className="size-3.5" />
+                  {savingSlack ? "Saving" : "Save"}
+                </Button>
+              </div>
+            </div>
+          </section>
           <section className="rounded-[var(--radius-card)] border border-line bg-card p-4">
-            <h2 className="text-sm font-medium">Connections</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              OAuth and MCP credentials are managed on the Connections page.
-            </p>
+            <h2 className="text-sm font-medium">Connection inventory</h2>
+            <div className="mt-3 divide-y divide-[var(--border-default)] rounded-[var(--radius-button)] border border-[var(--border-default)]">
+              {activeSlackConnections.length > 0 ? (
+                activeSlackConnections.map((connection) => (
+                  <div key={connection.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {connection.account_label || connection.display_name || connection.app_name}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">{connection.app_name}</p>
+                    </div>
+                    <Badge variant="outline" className="text-xs">Active</Badge>
+                  </div>
+                ))
+              ) : (
+                <div className="px-3 py-2.5 text-sm text-muted-foreground">
+                  No active Slack OAuth connection.
+                </div>
+              )}
+            </div>
           </section>
         </TabsContent>
 

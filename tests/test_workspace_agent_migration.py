@@ -27,3 +27,17 @@ def test_workspace_agent_settings_migration_is_idempotent_and_rls_scoped():
     assert "owner_user_id = auth.uid()" in text
     assert not re.search(r"create\s+table\s+(?!if\s+not\s+exists)", text)
 
+
+def test_workspace_agent_channel_bindings_migration_is_workspace_scoped():
+    text = (MIGRATIONS_DIR / "0022_workspace_agent_channel_bindings.sql").read_text(
+        encoding="utf-8"
+    ).lower()
+
+    assert "create table if not exists public.workspace_agent_channel_bindings" in text
+    assert "external_channel_id" in text
+    assert "external_team_id" in text
+    assert "channel_type in ('slack')" in text
+    assert "workspace_agent_channel_bindings_lookup_idx" in text
+    assert "alter table public.workspace_agent_channel_bindings enable row level security" in text
+    assert "owner_user_id = auth.uid()" in text
+    assert not re.search(r"create\s+table\s+(?!if\s+not\s+exists)", text)

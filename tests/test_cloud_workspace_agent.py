@@ -14,6 +14,7 @@ class _Table:
         self.rows = rows or []
         self.error = error
         self.upserts: list[dict] = []
+        self.deleted = False
 
     def select(self, *_args):
         return self
@@ -31,6 +32,14 @@ class _Table:
 
     def upsert(self, payload, **_kwargs):
         self.upserts.append(payload)
+        self.rows = [payload]
+        return self
+
+    def delete(self):
+        self.deleted = True
+        rows = self.rows
+        self.rows = []
+        self.deleted_rows = rows
         return self
 
 
@@ -39,7 +48,7 @@ class _Client:
         self._table = table
 
     def table(self, name: str):
-        assert name == "workspace_agent_settings"
+        assert name in {"workspace_agent_settings", "workspace_agent_channel_bindings"}
         return self._table
 
 
@@ -72,6 +81,77 @@ def test_workspace_agent_writes_supabase_instructions(monkeypatch):
     assert table.upserts == [
         {"workspace_id": "ws_test", "instructions_md": "# Workspace\n\nSaved"}
     ]
+
+
+def test_slack_binding_round_trip(monkeypatch):
+    table = _Table(
+        rows=[
+            {
+                "id": "wacb_1",
+                "workspace_id": "ws_test",
+                "channel_type": "slack",
+                "external_team_id": "T1",
+                "external_channel_id": "C1",
+                "external_channel_name": "product",
+                "enabled": True,
+                "updated_at": "2026-06-01T00:00:00Z",
+            }
+        ]
+    )
+    monkeypatch.setattr(cloud_agent, "get_supabase_service_client", lambda: _Client(table))
+
+    binding = cloud_agent.get_slack_binding(workspace_id="ws_test")
+
+    assert binding == {
+        "id": "wacb_1",
+        "workspace_id": "ws_test",
+        "channel_type": "slack",
+        "external_team_id": "T1",
+        "external_channel_id": "C1",
+        "external_channel_name": "product",
+        "enabled": True,
+        "updated_at": "2026-06-01T00:00:00Z",
+    }
+
+
+def test_workspace_agent_info_includes_slack_binding(monkeypatch):
+    table = _Table(
+        rows=[
+            {
+                "id": "wacb_1",
+                "workspace_id": "ws_test",
+                "channel_type": "slack",
+                "external_team_id": None,
+                "external_channel_id": "C1",
+                "external_channel_name": None,
+                "enabled": True,
+                "updated_at": "2026-06-01T00:00:00Z",
+            }
+        ]
+    )
+    monkeypatch.setattr(cloud_agent, "get_supabase_service_client", lambda: _Client(table))
+    monkeypatch.setattr(
+        cloud_agent,
+        "_original_workspace_agent_info",
+        lambda _user_id: {
+            "agent_id": "workspace-agent",
+            "model": "gpt-test",
+            "system_prompt": "prompt",
+            "tools": [],
+            "channels": {
+                "slack": {
+                    "events_configured": True,
+                    "bot_configured": True,
+                }
+            },
+        },
+    )
+
+    with active_workspace("ws_test"):
+        info = cloud_agent.workspace_agent_info("user-1")
+
+    assert info["channels"]["slack"]["binding"]["external_channel_id"] == "C1"
+    assert info["channels"]["slack"]["events_configured"] is True
 
 
 def test_workspace_agent_requires_active_workspace_for_save():
