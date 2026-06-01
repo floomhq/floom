@@ -183,6 +183,44 @@ test("workers validate rejects Composio CLI subprocess in E2B worker", async () 
   assert.match(result.stderr, /shells out to `composio execute`/);
 });
 
+test("workers validate does not treat declared secrets as Composio tools", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: `schema_version: "0.3"
+name: cli-test-worker
+title: CLI Test Worker
+description: Worker used by CLI validation tests.
+entrypoint: run.py
+exec:
+  runtime: python311
+  command: python run.py
+  entry: run.py
+  secrets:
+    - OPENAI_API_KEY
+capabilities:
+  secrets:
+    - OPENAI_API_KEY
+`,
+    run: `import os\nkey = os.environ["OPENAI_API_KEY"]\n`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Validated cli-test-worker/);
+});
+
+test("workers validate ignores inactive run.py when entrypoint is SKILL.md", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: skillWorkerYml,
+    run: `import os\nkey = os.environ["OPENAI_API_KEY"]\n`,
+    skill: skillMd,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Validated cli-test-worker/);
+  assert.match(result.stdout, /Source\s+SKILL.md/);
+});
+
 test("workers validate enforces structured connection tool allowlists", async () => {
   const dir = await makeWorkerDir({
     workerYml: `${scriptWorkerYml}connections:\n  - app: gmail\n    allowed_tools:\n      - GMAIL_FETCH_EMAILS\n`,

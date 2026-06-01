@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, ChevronsUpDown, Plus } from "lucide-react";
 
-import { api, setActiveWorkspaceId } from "@/lib/api";
+import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -52,9 +52,14 @@ export function WorkspaceSwitcher() {
       .list()
       .then((data) => {
         if (cancelled) return;
+        const browserActiveId = getActiveWorkspaceId();
+        const activeId =
+          browserActiveId && data.workspaces?.some((workspace) => workspace.id === browserActiveId)
+            ? browserActiveId
+            : data.active_id || "local-default";
         setState({
           workspaces: data.workspaces ?? [],
-          activeId: data.active_id || "local-default",
+          activeId,
         });
       })
       .catch((err: Error) => {
@@ -154,7 +159,7 @@ export function WorkspaceSwitcher() {
                 <DropdownMenuItem
                   key={w.id}
                   onClick={() => handleSwitch(w.id)}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 focus:bg-[var(--active-nav-bg)] focus:text-ink"
                   disabled={isLoading}
                 >
                   <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
@@ -172,7 +177,7 @@ export function WorkspaceSwitcher() {
               setCreateName("");
               setCreateOpen(true);
             }}
-            className="flex items-center gap-2 text-[var(--ink-soft)]"
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
           >
             <Plus className="size-4" />
             New workspace

@@ -41,34 +41,34 @@ async function writeJson(path: string, value: JsonObject): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function serverConfig(secret: string, apiBase: string): JsonObject {
+function serverConfig(secret: string, apiBase: string, credentialEnv = "WORKEROS_API_SECRET"): JsonObject {
   return {
     command: "npx",
     args: ["-y", PACKAGE_NAME],
     env: {
-      WORKEROS_API_SECRET: secret,
       WORKEROS_API_BASE: apiBase,
+      [credentialEnv]: secret,
     },
   };
 }
 
-function patchObjectConfig(config: JsonObject, secret: string, apiBase: string): JsonObject {
+function patchObjectConfig(config: JsonObject, secret: string, apiBase: string, credentialEnv?: string): JsonObject {
   const next = { ...config };
   const mcpServers =
     typeof next.mcpServers === "object" && next.mcpServers && !Array.isArray(next.mcpServers)
       ? { ...(next.mcpServers as JsonObject) }
       : {};
-  mcpServers.workeros = serverConfig(secret, apiBase);
+  mcpServers.workeros = serverConfig(secret, apiBase, credentialEnv);
   next.mcpServers = mcpServers;
   return next;
 }
 
-function patchContinueConfig(config: JsonObject, secret: string, apiBase: string): JsonObject {
+function patchContinueConfig(config: JsonObject, secret: string, apiBase: string, credentialEnv?: string): JsonObject {
   const next = { ...config };
   const servers = Array.isArray(next.mcpServers) ? [...next.mcpServers] : [];
   const entry = {
     name: "workeros",
-    ...serverConfig(secret, apiBase),
+    ...serverConfig(secret, apiBase, credentialEnv),
   };
   const existing = servers.findIndex((server) => (
     typeof server === "object" && server !== null && (server as JsonObject).name === "workeros"
@@ -102,10 +102,10 @@ function removeContinueConfig(config: JsonObject): JsonObject {
 }
 
 /** Build the JSON snippet for a generic / manual install. */
-function genericSnippet(secret: string, apiBase: string): string {
+function genericSnippet(secret: string, apiBase: string, credentialEnv = "WORKEROS_API_SECRET"): string {
   return JSON.stringify({
     mcpServers: {
-      workeros: serverConfig(secret, apiBase),
+      workeros: serverConfig(secret, apiBase, credentialEnv),
     },
   }, null, 2);
 }
@@ -137,7 +137,11 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
 
   const credentials = await readCredentials();
   const fallbackSecret = process.env.WORKEROS_API_SECRET?.trim();
-  const resolvedSecret = credentials?.api_secret || fallbackSecret;
+  const fallbackToken = process.env.WORKEROS_API_TOKEN?.trim();
+  const resolvedSecret = credentials?.api_secret || credentials?.api_token || fallbackSecret || fallbackToken;
+  const credentialEnv = (credentials?.api_token || (!credentials?.api_secret && fallbackToken))
+    ? "WORKEROS_API_TOKEN"
+    : "WORKEROS_API_SECRET";
   const resolvedBase = credentials?.api_base || process.env.WORKEROS_API_BASE || DEFAULT_API_BASE;
 
   if (!resolvedSecret) {
@@ -148,7 +152,7 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
 
   // "generic" — print snippet for manual paste, no file written.
   if (options.target === "generic") {
-    process.stdout.write(genericSnippet(resolvedSecret, resolvedBase) + "\n");
+    process.stdout.write(genericSnippet(resolvedSecret, resolvedBase, credentialEnv) + "\n");
     return 0;
   }
 
@@ -167,8 +171,8 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
       : join(home, client.path);
     const config = readJson(configPath);
     const patched = client.kind === "array"
-      ? patchContinueConfig(config, resolvedSecret, resolvedBase)
-      : patchObjectConfig(config, resolvedSecret, resolvedBase);
+      ? patchContinueConfig(config, resolvedSecret, resolvedBase, credentialEnv)
+      : patchObjectConfig(config, resolvedSecret, resolvedBase, credentialEnv);
     await writeJson(configPath, patched);
     const displayPath = client.target === "vscode"
       ? client.path
@@ -186,8 +190,8 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
     if (!existsSync(configPath)) continue;
     const config = readJson(configPath);
     const patched = client.kind === "array"
-      ? patchContinueConfig(config, resolvedSecret, resolvedBase)
-      : patchObjectConfig(config, resolvedSecret, resolvedBase);
+      ? patchContinueConfig(config, resolvedSecret, resolvedBase, credentialEnv)
+      : patchObjectConfig(config, resolvedSecret, resolvedBase, credentialEnv);
     await writeJson(configPath, patched);
     const displayPath = client.target === "vscode"
       ? client.path

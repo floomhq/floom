@@ -149,6 +149,15 @@ export class WorkerosApiClient {
       throw new Error("Not logged in. Run floom login first.");
     }
     if (this.credentials.mode === "cloud") {
+      if (this.credentials.api_token) {
+        const headers: Record<string, string> = {
+          "x-floom-token": this.credentials.api_token,
+        };
+        if (this.credentials.workspace_id) {
+          headers["x-workeros-workspace"] = this.credentials.workspace_id;
+        }
+        return headers;
+      }
       const jwt = await getCloudJwt(this.credentials);
       const headers: Record<string, string> = {
         authorization: `Bearer ${jwt}`,
