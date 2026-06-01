@@ -246,6 +246,8 @@ class WorkerConfig(BaseModel):
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
+    retry: Optional["RetryConfig"] = None
+    notify: Optional["NotifyConfig"] = None
 
     @model_validator(mode="after")
     def validate_webhook_secret(self) -> "WorkerConfig":
@@ -1303,3 +1305,80 @@ class StructuredLog(BaseModel):
     timestamp: str
     duration_ms: Optional[int] = None
     attributes: Optional[Dict[str, Any]] = None
+
+
+# ---------------------------------------------------------------------------
+# Retry / notify config (added to WorkerConfig as optional fields)
+# ---------------------------------------------------------------------------
+
+class RetryConfig(BaseModel):
+    """Automatic retry policy when a run fails."""
+
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    delay_seconds: int = Field(default=60, ge=0, le=3600)
+    # "all" retries every error; list specific error_codes to be selective
+    on: List[str] = Field(default_factory=lambda: ["all"])
+
+
+class NotifyConfig(BaseModel):
+    """Webhook notification sent on run completion events."""
+
+    url: str
+    # Events to fire on: "failed", "completed", or both
+    on: List[str] = Field(default_factory=lambda: ["failed"])
+    # Optional HMAC secret — sent as X-Workeros-Signature header
+    secret: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Alert (webhook) response shapes
+# ---------------------------------------------------------------------------
+
+class WorkerAlert(BaseModel):
+    """A registered webhook alert for a worker."""
+
+    id: str
+    worker_id: str
+    url: str
+    on: List[str]  # events: ["failed"], ["completed"], ["failed","completed"]
+    description: Optional[str] = None
+    created_at: str
+
+
+class WorkerAlertCreate(BaseModel):
+    url: str
+    on: List[str] = Field(default_factory=lambda: ["failed"])
+    description: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Stats response shapes
+# ---------------------------------------------------------------------------
+
+class WorkerStats(BaseModel):
+    """Extended health and run statistics for a single worker."""
+
+    worker_id: str
+    last_run_at: Optional[str] = None
+    runs_7d: int = 0
+    success_rate_7d: Optional[float] = None
+    success_rate_change_7d: Optional[float] = None
+    runs_30d: int = 0
+    success_rate_30d: Optional[float] = None
+    avg_duration_ms: Optional[float] = None
+    p95_duration_ms: Optional[float] = None
+    total_failures: int = 0
+    last_error: Optional[str] = None
+    last_error_at: Optional[str] = None
+
+
+class WorkspaceStats(BaseModel):
+    """Aggregate stats across the entire workspace."""
+
+    total_workers: int = 0
+    active_workers: int = 0  # ran at least once in the last 7 days
+    total_runs_7d: int = 0
+    success_rate_7d: Optional[float] = None
+    avg_duration_ms: Optional[float] = None
+    most_active_worker_id: Optional[str] = None
+    most_active_worker_name: Optional[str] = None
