@@ -960,6 +960,151 @@ export function createServer(): McpServer {
       }),
   );
 
+  // ---------------------------------------------------------------------------
+  // CRITICAL: Approvals
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "approvals.list",
+    {
+      title: "List Approvals",
+      description: "List pending approval requests. Returns runs waiting for human approval before execution continues. Check this to see what needs a decision.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(200).default(50).describe("Maximum approvals to return."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ limit }) =>
+      callTool(async () => jsonResult(await request("GET", "/approvals", undefined, { limit }))),
+  );
+
+  server.registerTool(
+    "approvals.approve",
+    {
+      title: "Approve Run",
+      description: "Approve a pending run so it continues executing. Use runs.get to inspect the run and its approval details before approving.",
+      inputSchema: {
+        run_id: z.string().min(1).describe("ID of the run to approve."),
+        comment: z.string().optional().describe("Optional comment explaining the approval decision."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ run_id, comment }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/runs/${encodeURIComponent(run_id)}/approve`, { comment }),
+          "Run approved.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "approvals.reject",
+    {
+      title: "Reject Run",
+      description: "Reject a pending run, stopping it from continuing. Use runs.get to inspect before rejecting.",
+      inputSchema: {
+        run_id: z.string().min(1).describe("ID of the run to reject."),
+        comment: z.string().optional().describe("Optional reason for rejection."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ run_id, comment }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/runs/${encodeURIComponent(run_id)}/reject`, { comment }),
+          "Run rejected.",
+        ),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // CRITICAL: Run control
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "runs.cancel",
+    {
+      title: "Cancel Run",
+      description: "Cancel an in-progress run. Use when a run is stuck, taking too long, or was triggered by mistake.",
+      inputSchema: runIdSchema.shape,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ id }) =>
+      callTool(async () =>
+        jsonResult(await request("POST", `/runs/${encodeURIComponent(id)}/cancel`), "Run cancelled."),
+      ),
+  );
+
+  server.registerTool(
+    "runs.replay",
+    {
+      title: "Replay Run",
+      description: "Replay a completed or failed run with the same inputs. Useful for retrying after a transient error.",
+      inputSchema: {
+        worker_id: z.string().min(1).describe("Worker ID the run belongs to."),
+        run_id: z.string().min(1).describe("ID of the run to replay."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ worker_id, run_id }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/workers/${encodeURIComponent(worker_id)}/runs/${encodeURIComponent(run_id)}/replay`),
+          "Run replayed.",
+        ),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // CRITICAL: Logging
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "workers.logs",
+    {
+      title: "Get Worker Logs",
+      description: "Fetch cross-run logs for a worker, optionally filtered by level or time. Use to debug persistent failures without knowing a specific run ID.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        level: z.enum(["info", "warning", "error", "debug"]).optional().describe("Filter by log level."),
+        since: z.string().optional().describe("ISO 8601 timestamp lower bound, e.g. 2026-06-01T00:00:00Z."),
+        limit: z.number().int().min(1).max(1000).default(200).describe("Maximum log entries to return."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ id, level, since, limit }) =>
+      callTool(async () =>
+        jsonResult(await request("GET", `/workers/${encodeURIComponent(id)}/logs`, undefined, { level, since, limit })),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
+  // CRITICAL: System health
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "system.overview",
+    {
+      title: "System Overview",
+      description: "Full workspace dashboard — worker health, recent run counts, pending approvals, system alerts, and scheduler status. Use for morning briefings or health checks.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => callTool(async () => jsonResult(await request("GET", "/system/overview"))),
+  );
+
+  server.registerTool(
+    "system.stats",
+    {
+      title: "Workspace Stats",
+      description: "Aggregate run statistics across the workspace for the last 7 days — total runs, success rate, error rate, worker health breakdown.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async () => callTool(async () => jsonResult(await request("GET", "/stats"))),
+  );
+
   return server;
 }
 
