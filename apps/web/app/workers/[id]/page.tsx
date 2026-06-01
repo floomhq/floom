@@ -998,7 +998,7 @@ export default function WorkerDetailPage() {
         worker.manifest_yaml || "";
       const parsed = ((loadYaml(yamlContent) || {}) as Record<string, unknown>);
 
-      if (formName.trim()) parsed.name = formName.trim();
+      if (formName.trim()) parsed.title = formName.trim();
       parsed.description = configDesc;
 
       if (formInputs.length > 0) {
