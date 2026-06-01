@@ -943,24 +943,48 @@ class AgentDriver(SandboxDriver):
                 log_fn(f"MCP cleanup failed for {getattr(server, 'name', 'unknown')}: {exc}", "warning")
 
     def _make_mcp_server(self, connection: Any, secrets: Dict[str, str]) -> Any:
-        from agents.mcp import MCPServerStreamableHttp
+        from agents.mcp import MCPServerSse, MCPServerStdio, MCPServerStreamableHttp
 
-        params: Dict[str, Any] = {"url": connection.url}
-        headers = self._mcp_auth_headers(connection, secrets)
-        if headers:
-            params["headers"] = headers
+        transport = getattr(connection, "transport", None) or "streamable_http"
 
         tool_filter = None
         if connection.allowed_tools:
             tool_filter = {"allowed_tool_names": list(connection.allowed_tools)}
 
-        return MCPServerStreamableHttp(
-            name=connection.label,
-            params=params,
-            cache_tools_list=True,
-            tool_filter=tool_filter,
-            require_approval=connection.require_approval,
-        )
+        common = {
+            "name": connection.label,
+            "cache_tools_list": True,
+            "tool_filter": tool_filter,
+            "require_approval": connection.require_approval,
+        }
+
+        if transport == "stdio":
+            env: Dict[str, str] = {}
+            for key, value in (getattr(connection, "env", None) or {}).items():
+                if value.startswith("secret:"):
+                    secret_name = value.split(":", 1)[1]
+                    secret_value = secrets.get(secret_name)
+                    if not secret_value:
+                        raise _MCPConnectionError(f"MCP connection {connection.label} is missing secret {secret_name}")
+                    env[key] = secret_value
+                else:
+                    env[key] = value
+            params: Dict[str, Any] = {
+                "command": connection.command,
+                "args": list(getattr(connection, "args", None) or []),
+                "env": env,
+            }
+            if getattr(connection, "cwd", None):
+                params["cwd"] = connection.cwd
+            return MCPServerStdio(params=params, **common)
+
+        params = {"url": connection.url}
+        headers = self._mcp_auth_headers(connection, secrets)
+        if headers:
+            params["headers"] = headers
+        if transport == "sse":
+            return MCPServerSse(params=params, **common)
+        return MCPServerStreamableHttp(params=params, **common)
 
     def _mcp_auth_headers(self, connection: Any, secrets: Dict[str, str]) -> Dict[str, str]:
         auth = getattr(connection, "auth", None)

@@ -24,7 +24,6 @@ import type { ConnectionItem, SecretItem } from "@/lib/types";
 type McpConnection = ConnectionItem & {
   kind: "mcp";
   mcp_label: string;
-  mcp_url: string;
 };
 
 // Subset of Claude Desktop / VS Code / Cursor mcpServers shape
@@ -32,8 +31,12 @@ interface ParsedMcpServer {
   key: string;
   label: string;
   url: string | null;
+  transport: "streamable_http" | "sse" | "stdio";
+  command: string | null;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string | null;
   headers: Record<string, string>;
-  isStdio: boolean;
   selected: boolean;
 }
 
@@ -54,18 +57,41 @@ function parseMcpClientConfig(raw: string): ParsedMcpServer[] {
 
   return Object.entries(servers).map(([key, value]) => {
     const entry = (value ?? {}) as Record<string, unknown>;
-    const isStdio = !!entry.command || !!entry.args;
+    const command = typeof entry.command === "string" ? entry.command : null;
+    const args = Array.isArray(entry.args) ? entry.args.filter((item): item is string => typeof item === "string") : [];
+    const isStdio = !!command || args.length > 0;
     const url =
       typeof entry.url === "string" ? entry.url :
       typeof entry.endpoint === "string" ? entry.endpoint :
       null;
+    const transport = isStdio ? "stdio" : (String(entry.transport || "").toLowerCase() === "sse" ? "sse" : "streamable_http");
+    const rawEnv = (entry.env ?? {}) as Record<string, unknown>;
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(rawEnv)) {
+      if (typeof v === "string") env[k] = v;
+    }
     const rawHeaders = (entry.headers ?? {}) as Record<string, unknown>;
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(rawHeaders)) {
       if (typeof v === "string") headers[k] = v;
     }
-    return { key, label: key, url, headers, isStdio, selected: !isStdio && !!url };
+    const cwd = typeof entry.cwd === "string" ? entry.cwd : null;
+    return { key, label: key, url, transport, command, args, env, cwd, headers, selected: isStdio ? !!command : !!url };
   });
+}
+
+function serverSummary(item: ParsedMcpServer): string {
+  if (item.transport === "stdio") {
+    return [item.command, ...item.args].filter(Boolean).join(" ");
+  }
+  return item.url ?? "";
+}
+
+function connectionSummary(conn: McpConnection): string {
+  if ((conn.mcp_transport ?? "streamable_http") === "stdio") {
+    return [conn.mcp_command, ...(conn.mcp_args ?? [])].filter(Boolean).join(" ");
+  }
+  return conn.mcp_url ?? "";
 }
 
 function truncateUrl(url: string, max = 48): string {
@@ -92,7 +118,12 @@ export default function McpConnectionsPage() {
   // Add-form state
   const [formOpen, setFormOpen] = useState(false);
   const [label, setLabel] = useState("");
+  const [transport, setTransport] = useState<"streamable_http" | "sse" | "stdio">("streamable_http");
   const [url, setUrl] = useState("");
+  const [command, setCommand] = useState("");
+  const [args, setArgs] = useState("");
+  const [env, setEnv] = useState("");
+  const [cwd, setCwd] = useState("");
   const [authSecret, setAuthSecret] = useState("");
   const [allowedTools, setAllowedTools] = useState("");
   const [saving, setSaving] = useState(false);
@@ -121,20 +152,33 @@ export default function McpConnectionsPage() {
   }, [load]);
 
   async function handleCreate() {
-    if (!label.trim() || !url.trim()) {
-      toast.error("Label and URL are required");
+    if (!label.trim()) {
+      toast.error("Label is required");
+      return;
+    }
+    if (transport === "stdio" && !command.trim()) {
+      toast.error("Command is required for stdio MCP servers");
+      return;
+    }
+    if (transport !== "stdio" && !url.trim()) {
+      toast.error("URL is required for HTTP/SSE MCP servers");
       return;
     }
     setSaving(true);
     try {
       await api.connections.createMcp({
         label: label.trim(),
-        url: url.trim(),
-        auth_secret: authSecret || null,
+        transport,
+        url: transport === "stdio" ? null : url.trim(),
+        command: transport === "stdio" ? command.trim() : null,
+        args: transport === "stdio" ? parseArgs(args) : [],
+        env: transport === "stdio" ? parseEnv(env) : {},
+        cwd: transport === "stdio" ? cwd.trim() || null : null,
+        auth_secret: transport === "stdio" ? null : authSecret || null,
         allowed_tools: parseTools(allowedTools),
       });
       toast.success(`MCP server "${label.trim()}" saved`);
-      setLabel(""); setUrl(""); setAuthSecret(""); setAllowedTools("");
+      setLabel(""); setTransport("streamable_http"); setUrl(""); setCommand(""); setArgs(""); setEnv(""); setCwd(""); setAuthSecret(""); setAllowedTools("");
       setFormOpen(false);
       await load();
     } catch (err: unknown) {
@@ -196,7 +240,7 @@ export default function McpConnectionsPage() {
 
   async function handleImport() {
     if (!importParsed) return;
-    const toImport = importParsed.filter((item) => item.selected && !item.isStdio && item.url);
+    const toImport = importParsed.filter((item) => item.selected && (item.transport === "stdio" ? item.command : item.url));
     if (toImport.length === 0) {
       toast.error("No importable servers selected");
       return;
@@ -211,7 +255,12 @@ export default function McpConnectionsPage() {
         const secretName = bearerMatch ? null : null; // We can't create secrets automatically — user must pick
         await api.connections.createMcp({
           label: item.label,
-          url: item.url!,
+          transport: item.transport,
+          url: item.transport === "stdio" ? null : item.url!,
+          command: item.transport === "stdio" ? item.command : null,
+          args: item.args,
+          env: normalizeImportedEnv(item.env),
+          cwd: item.cwd,
           auth_secret: secretName,
           allowed_tools: [],
         });
@@ -286,6 +335,20 @@ export default function McpConnectionsPage() {
                 />
               </div>
               <div className="space-y-1.5">
+                <Label htmlFor="mcp-transport" className="text-xs text-muted-foreground">Transport</Label>
+                <select
+                  id="mcp-transport"
+                  value={transport}
+                  onChange={(e) => setTransport(e.target.value as "streamable_http" | "sse" | "stdio")}
+                  className="flex h-9 w-full rounded-lg border border-line-strong bg-paper px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+                >
+                  <option value="streamable_http">HTTP command</option>
+                  <option value="sse">SSE URL</option>
+                  <option value="stdio">Stdio command</option>
+                </select>
+              </div>
+              {transport !== "stdio" && (
+              <div className="space-y-1.5">
                 <Label htmlFor="mcp-auth-secret" className="text-xs text-muted-foreground">Auth secret (bearer token)</Label>
                 <select
                   id="mcp-auth-secret"
@@ -299,6 +362,8 @@ export default function McpConnectionsPage() {
                   ))}
                 </select>
               </div>
+              )}
+              {transport !== "stdio" ? (
               <div className="space-y-1.5 md:col-span-2">
                 <Label htmlFor="mcp-url" className="text-xs text-muted-foreground">URL</Label>
                 <Input
@@ -308,6 +373,52 @@ export default function McpConnectionsPage() {
                   placeholder="https://example.com/mcp"
                 />
               </div>
+              ) : (
+                <>
+                  <div className="space-y-1.5 md:col-span-2">
+                    <Label htmlFor="mcp-command" className="text-xs text-muted-foreground">Command</Label>
+                    <Input
+                      id="mcp-command"
+                      value={command}
+                      onChange={(e) => setCommand(e.target.value)}
+                      placeholder="npx"
+                    />
+                  </div>
+                  <div className="space-y-1.5 md:col-span-2">
+                    <Label htmlFor="mcp-args" className="text-xs text-muted-foreground">
+                      Arguments <span className="text-muted-foreground/60">(one per line)</span>
+                    </Label>
+                    <Textarea
+                      id="mcp-args"
+                      value={args}
+                      onChange={(e) => setArgs(e.target.value)}
+                      placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/workspace"
+                      className="min-h-20 font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5 md:col-span-2">
+                    <Label htmlFor="mcp-env" className="text-xs text-muted-foreground">
+                      Environment <span className="text-muted-foreground/60">(KEY=secret:SECRET_NAME, one per line)</span>
+                    </Label>
+                    <Textarea
+                      id="mcp-env"
+                      value={env}
+                      onChange={(e) => setEnv(e.target.value)}
+                      placeholder="GITHUB_TOKEN=secret:GITHUB_PAT"
+                      className="min-h-16 font-mono text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1.5 md:col-span-2">
+                    <Label htmlFor="mcp-cwd" className="text-xs text-muted-foreground">Working directory</Label>
+                    <Input
+                      id="mcp-cwd"
+                      value={cwd}
+                      onChange={(e) => setCwd(e.target.value)}
+                      placeholder="/workspace"
+                    />
+                  </div>
+                </>
+              )}
               <div className="space-y-1.5 md:col-span-2">
                 <Label htmlFor="mcp-tools" className="text-xs text-muted-foreground">
                   Allowed tools{" "}
@@ -323,7 +434,12 @@ export default function McpConnectionsPage() {
               </div>
             </div>
             <div className="mt-4 flex items-center gap-2">
-              <Button type="button" size="sm" onClick={handleCreate} disabled={saving || !label.trim() || !url.trim()}>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleCreate}
+                disabled={saving || !label.trim() || (transport === "stdio" ? !command.trim() : !url.trim())}
+              >
                 {saving ? <><Loader2 className="size-3.5 animate-spin" /> Saving...</> : "Save MCP server"}
               </Button>
               <Button type="button" size="sm" variant="ghost" onClick={() => setFormOpen(false)} disabled={saving}>
@@ -341,8 +457,7 @@ export default function McpConnectionsPage() {
               <p className="text-xs text-muted-foreground mt-0.5">
                 Paste a Claude Desktop, Cursor, or VS Code{" "}
                 <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">mcpServers</code>{" "}
-                JSON. Only HTTP/SSE servers with a <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">url</code> field can be imported —
-                stdio-only servers need an HTTP endpoint first.
+                JSON. URL and stdio command servers can both be imported. Env literals are converted to secret references.
               </p>
             </div>
             <Textarea
@@ -369,11 +484,11 @@ export default function McpConnectionsPage() {
                     <div
                       key={item.key}
                       className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                        item.isStdio || !item.url
+                        item.transport !== "stdio" && !item.url
                           ? "border-[var(--border-default)] bg-muted/30 opacity-60 cursor-not-allowed"
                           : "border-[var(--border-default)] bg-[var(--bg-app)] cursor-pointer hover:bg-muted/40"
                       }`}
-                      onClick={() => { if (!item.isStdio && item.url) toggleImportItem(item.key); }}
+                      onClick={() => { if (item.transport === "stdio" || item.url) toggleImportItem(item.key); }}
                     >
                       <div className={`size-4 rounded border flex items-center justify-center shrink-0 ${
                         item.selected ? "bg-[var(--accent)] border-[var(--accent)]" : "border-[var(--border-default)]"
@@ -382,15 +497,10 @@ export default function McpConnectionsPage() {
                       </div>
                       <div className="min-w-0 flex-1">
                         <span className="font-medium truncate block">{item.label}</span>
-                        {item.url && (
-                          <span className="text-xs text-muted-foreground truncate block">{truncateUrl(item.url)}</span>
-                        )}
-                        {item.isStdio && (
-                          <span className="text-xs text-muted-foreground italic">
-                            stdio server — needs an HTTP/SSE endpoint to be imported
-                          </span>
-                        )}
-                        {!item.isStdio && !item.url && (
+                        <span className="text-xs text-muted-foreground truncate block">
+                          {item.transport === "stdio" ? serverSummary(item) : truncateUrl(item.url ?? "")}
+                        </span>
+                        {item.transport !== "stdio" && !item.url && (
                           <span className="text-xs text-muted-foreground italic">no url field — cannot import</span>
                         )}
                       </div>
@@ -402,9 +512,9 @@ export default function McpConnectionsPage() {
                     type="button"
                     size="sm"
                     onClick={handleImport}
-                    disabled={importing || !importParsed.some((i) => i.selected && !i.isStdio && i.url)}
+                    disabled={importing || !importParsed.some((i) => i.selected && (i.transport === "stdio" ? i.command : i.url))}
                   >
-                    {importing ? <><Loader2 className="size-3.5 animate-spin" /> Importing...</> : `Import ${importParsed.filter((i) => i.selected && !i.isStdio && i.url).length} server(s)`}
+                    {importing ? <><Loader2 className="size-3.5 animate-spin" /> Importing...</> : `Import ${importParsed.filter((i) => i.selected && (i.transport === "stdio" ? i.command : i.url)).length} server(s)`}
                   </Button>
                   <Button
                     type="button"
@@ -435,7 +545,7 @@ export default function McpConnectionsPage() {
           <div className="hidden md:grid grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 px-3 py-2 border-b border-[var(--border-default)] bg-[var(--bg-2)] text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
             <span />
             <span>Label</span>
-            <span>URL</span>
+            <span>Endpoint</span>
             <span>Auth</span>
             <span>Tools</span>
             <span className="text-right pr-1">Actions</span>
@@ -501,8 +611,9 @@ function McpRow({
   const [copied, setCopied] = useState(false);
 
   function copyUrl() {
-    if (!conn.mcp_url) return;
-    navigator.clipboard.writeText(conn.mcp_url).then(() => {
+    const value = connectionSummary(conn);
+    if (!value) return;
+    navigator.clipboard.writeText(value).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -518,12 +629,16 @@ function McpRow({
       {/* Label */}
       <div className="min-w-0">
         <p className="text-sm font-medium truncate">{conn.mcp_label}</p>
-        <p className="md:hidden text-xs text-muted-foreground truncate">{conn.mcp_url}</p>
+        <p className="md:hidden text-xs text-muted-foreground truncate">{connectionSummary(conn)}</p>
       </div>
 
       {/* URL */}
       <div className="hidden md:flex items-center gap-1.5 min-w-0">
-        <span className="text-xs text-muted-foreground truncate flex-1">{truncateUrl(conn.mcp_url ?? "", 52)}</span>
+        <span className="text-xs text-muted-foreground truncate flex-1">
+          {(conn.mcp_transport ?? "streamable_http") === "stdio"
+            ? connectionSummary(conn)
+            : truncateUrl(conn.mcp_url ?? "", 52)}
+        </span>
         <button
           type="button"
           onClick={copyUrl}
@@ -578,4 +693,35 @@ function McpRow({
 
 function parseTools(value: string): string[] {
   return value.split(/[,\n]/g).map((t) => t.trim()).filter(Boolean);
+}
+
+function parseArgs(value: string): string[] {
+  return value.split(/\n/g).map((item) => item.trim()).filter(Boolean);
+}
+
+function parseEnv(value: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of value.split(/\n/g)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const index = trimmed.indexOf("=");
+    if (index <= 0) throw new Error("Environment entries must use KEY=secret:SECRET_NAME");
+    const key = trimmed.slice(0, index).trim();
+    const val = trimmed.slice(index + 1).trim();
+    result[key] = val;
+  }
+  return result;
+}
+
+function normalizeImportedEnv(env: Record<string, string>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    const placeholder = value.match(/^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/);
+    result[key] = value.startsWith("secret:")
+      ? value
+      : placeholder
+        ? `secret:${placeholder[1]}`
+        : `secret:${key}`;
+  }
+  return result;
 }
