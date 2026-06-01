@@ -128,9 +128,12 @@ from run_service import (
 from run_service import register_sse_publisher, register_part_publisher
 
 load_dotenv()
-api_env_path = Path("/root/.config/workeros/api.env")
-if api_env_path.is_file():
-    load_dotenv(api_env_path, override=False)
+try:
+    api_env_path = Path.home() / ".config" / "workeros" / "api.env"
+    if api_env_path.is_file():
+        load_dotenv(api_env_path, override=False)
+except OSError:
+    pass
 init_db()
 
 # ---------------------------------------------------------------------------
