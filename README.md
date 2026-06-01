@@ -90,6 +90,18 @@ Workers live in `workers/<name>/` and contain:
 
 **Humans authoring workers by hand — see [docs/AUTHORING.md](docs/AUTHORING.md)** for the full `worker.yml` schema, both execution modes, secrets/connections/triggers, and the agent-side draft contract.
 
+### CLI deploy loop
+
+```bash
+npm i -g @floomhq/workeros
+workeros login
+workeros workers validate ./workers/<id>
+workeros workers push ./workers/<id>
+workeros run <id> --inputs-file docs/workers/inputs/<id>.json
+```
+
+`workeros` is the preferred binary. The package also exposes a `floom` compatibility alias for older scripts.
+
 ### Included workers
 
 - **weekly_update** — Turns raw notes into a polished weekly company update (AI-powered, requires approval)

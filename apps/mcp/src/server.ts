@@ -34,12 +34,28 @@ function apiBase(): string {
   return (process.env.WORKEROS_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, "");
 }
 
-function apiSecret(): string {
-  const secret = process.env.WORKEROS_API_SECRET;
-  if (!secret) {
-    throw new Error("WORKEROS_API_SECRET is required");
+function isCloudApi(): boolean {
+  return /workeros-api\.floom\.dev/i.test(apiBase()) || Boolean(process.env.WORKEROS_API_TOKEN);
+}
+
+function resolvePath(path: string): string {
+  if (!isCloudApi()) return path;
+  if (path.startsWith("/api/")) return path;
+  if (path.startsWith("/auth/")) return path;
+  if (path === "/healthz") return path;
+  return `/api${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+function authHeader(): Record<string, string> {
+  const token = process.env.WORKEROS_API_TOKEN?.trim();
+  if (token) {
+    return { "x-floom-token": token };
   }
-  return secret;
+  const secret = process.env.WORKEROS_API_SECRET?.trim();
+  if (!secret) {
+    throw new Error("WORKEROS_API_TOKEN or WORKEROS_API_SECRET is required");
+  }
+  return { "x-floom-secret": secret };
 }
 
 function jsonResult(data: unknown, summary?: string): CallToolResult {
@@ -125,7 +141,7 @@ async function parseResponse(response: Response): Promise<unknown> {
 }
 
 function buildUrl(path: string, query?: Record<string, string | number | undefined>): string {
-  const url = new URL(`${apiBase()}${path}`);
+  const url = new URL(`${apiBase()}${resolvePath(path)}`);
   for (const [key, value] of Object.entries(query || {})) {
     if (value !== undefined) {
       url.searchParams.set(key, String(value));
@@ -145,7 +161,7 @@ async function request(
     headers: {
       "accept": "application/json, text/event-stream",
       "content-type": "application/json",
-      "x-floom-secret": apiSecret(),
+      ...authHeader(),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -177,7 +193,7 @@ async function requestBytes(
     headers: {
       "accept": "application/json",
       "content-type": contentType,
-      "x-floom-secret": apiSecret(),
+      ...authHeader(),
     },
     body: Buffer.from(body),
   });
@@ -222,7 +238,7 @@ async function readContextFile(name: string, path: string): Promise<unknown> {
     method: "GET",
     headers: {
       "accept": "text/plain, application/json, text/*",
-      "x-floom-secret": apiSecret(),
+      ...authHeader(),
     },
   });
   if (!response.ok) {
@@ -303,7 +319,7 @@ async function watchRunEvents(runId: string, timeoutMs: number): Promise<JsonObj
       method: "GET",
       headers: {
         "accept": "text/event-stream",
-        "x-floom-secret": apiSecret(),
+        ...authHeader(),
       },
       signal: controller.signal,
     });
@@ -522,7 +538,7 @@ async function consumeChatStream(
       headers: {
         "accept": "text/event-stream",
         "content-type": "application/json",
-        "x-floom-secret": apiSecret(),
+        ...authHeader(),
       },
       body: JSON.stringify(body),
       signal: controller.signal,

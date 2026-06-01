@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 
 // AuthMode determines how the CLI hits the API:
 // - "oss" -> single-tenant OSS engine, x-floom-secret header, no workspaces
-// - "cloud" -> workeros-cloud, Supabase refresh token + JWT bearer, workspace header
+// - "cloud" -> workeros-cloud, Supabase refresh token + JWT bearer OR PAT, workspace header
 export type AuthMode = "oss" | "cloud";
 
 export type StoredCredentials = {
@@ -12,6 +12,8 @@ export type StoredCredentials = {
   mode: AuthMode;
   // OSS mode: per-CLI shared secret minted by /cli-auth/devices.
   api_secret?: string;
+  // Cloud mode: Personal Access Token sent as x-floom-token.
+  api_token?: string;
   // Cloud mode: Supabase refresh token (returned by /auth/cli-exchange).
   refresh_token?: string;
   // Cloud mode: Supabase project URL (so the CLI can refresh JWTs).
@@ -26,6 +28,7 @@ export type StoredCredentials = {
 };
 
 const DEFAULT_OSS_API_BASE = "https://workers-api.floom.dev";
+const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 
 function resolveHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "";
@@ -40,6 +43,28 @@ export function credentialsPath(): string {
 }
 
 export async function readCredentials(): Promise<StoredCredentials | null> {
+  const envCloudToken = process.env.WORKEROS_API_TOKEN?.trim();
+  if (envCloudToken) {
+    return {
+      api_base: (process.env.WORKEROS_API_BASE || DEFAULT_CLOUD_API_BASE).replace(/\/+$/, ""),
+      mode: "cloud",
+      api_token: envCloudToken,
+      workspace_id: process.env.WORKEROS_WORKSPACE_ID?.trim() || undefined,
+      workspace_name: process.env.WORKEROS_WORKSPACE_NAME?.trim() || undefined,
+      authed_at: new Date().toISOString(),
+    };
+  }
+
+  const envOssSecret = process.env.WORKEROS_API_SECRET?.trim();
+  if (envOssSecret) {
+    return {
+      api_base: (process.env.WORKEROS_API_BASE || DEFAULT_OSS_API_BASE).replace(/\/+$/, ""),
+      mode: "oss",
+      api_secret: envOssSecret,
+      authed_at: new Date().toISOString(),
+    };
+  }
+
   const path = credentialsPath();
   if (!existsSync(path)) {
     return null;
@@ -55,13 +80,14 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
   if (mode === "oss" && !parsed.api_secret) {
     return null;
   }
-  if (mode === "cloud" && (!parsed.refresh_token || !parsed.supabase_url)) {
+  if (mode === "cloud" && !parsed.api_token && (!parsed.refresh_token || !parsed.supabase_url)) {
     return null;
   }
   return {
     api_base: (parsed.api_base || DEFAULT_OSS_API_BASE).replace(/\/+$/, ""),
     mode,
     api_secret: parsed.api_secret,
+    api_token: parsed.api_token,
     refresh_token: parsed.refresh_token,
     supabase_url: parsed.supabase_url ? parsed.supabase_url.replace(/\/+$/, "") : undefined,
     supabase_anon_key: parsed.supabase_anon_key,
