@@ -7631,7 +7631,7 @@ def list_approvals(
                     (auth.user_id, status_filter),
                 ).fetchall()
             ]
-    return rows
+    return [_approval_response(dict(row), repos) for row in rows]
 
 
 @app.get("/approvals/count")
@@ -7642,6 +7642,48 @@ def count_pending_approvals(
     """Return count of pending approvals for the authenticated user."""
     count = repos.approvals.count_pending(owner_id=auth.user_id)
     return {"pending": count}
+
+
+def _approval_artifacts_for_response(
+    approval: Dict[str, Any],
+    repos: Repositories,
+) -> list[Dict[str, Any]]:
+    owner_id = str(approval.get("owner_id") or "")
+    run_id = str(approval.get("run_id") or "")
+    if not owner_id or not run_id:
+        return []
+    try:
+        rows = repos.runs.list_artifacts(user_id=owner_id, run_id=run_id)
+    except Exception:
+        logger.exception("Failed to load approval artifacts for run %s", run_id)
+        return []
+    artifacts: list[Dict[str, Any]] = []
+    for row in rows:
+        if _is_sensitive_artifact_row(row):
+            continue
+        art = row_to_dict(row)
+        artifacts.append(
+            {
+                "id": art.get("id"),
+                "run_id": art.get("run_id"),
+                "name": art.get("name"),
+                "type": art.get("type"),
+                "path": art.get("path"),
+                "relative_path": art.get("relative_path"),
+                "size_bytes": art.get("size_bytes"),
+                "created_at": art.get("created_at"),
+            }
+        )
+    return artifacts
+
+
+def _approval_response(
+    approval: Dict[str, Any],
+    repos: Repositories,
+) -> Dict[str, Any]:
+    response = dict(approval)
+    response["artifacts"] = _approval_artifacts_for_response(response, repos)
+    return response
 
 
 def _publish_approval_terminal_status(
@@ -7707,8 +7749,8 @@ def _load_public_approval(
     return dict(approval)
 
 
-def _public_approval_response(approval: Dict[str, Any]) -> Dict[str, Any]:
-    public = dict(approval)
+def _public_approval_response(approval: Dict[str, Any], repos: Repositories) -> Dict[str, Any]:
+    public = _approval_response(approval, repos)
     public.pop("owner_id", None)
     return public
 
@@ -7726,7 +7768,7 @@ def get_public_approval(
 ):
     """Return one approval for a signed standalone review link."""
     approval = _load_public_approval(approval_id, token, repos)
-    return _public_approval_response(approval)
+    return _public_approval_response(approval, repos)
 
 
 @app.post("/approvals/public/{approval_id}/approve", response_model=ActionResponse)
