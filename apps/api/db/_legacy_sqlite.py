@@ -532,6 +532,38 @@ def _migrate_file_owners(conn: sqlite3.Connection) -> None:
     )
 
 
+def _make_worker_alerts_url_nullable(conn: sqlite3.Connection) -> None:
+    """Allow email-only worker alerts in SQLite databases created before email alerts."""
+    if not _table_exists(conn, "worker_alerts"):
+        return
+    columns = list(conn.execute("PRAGMA table_info(worker_alerts)"))
+    url_col = next((row for row in columns if row["name"] == "url"), None)
+    if url_col is None or int(url_col["notnull"] or 0) == 0:
+        return
+
+    conn.executescript(
+        """
+        CREATE TABLE worker_alerts_new (
+            id          TEXT PRIMARY KEY,
+            worker_id   TEXT NOT NULL,
+            url         TEXT,
+            events      TEXT NOT NULL DEFAULT 'failed',
+            description TEXT,
+            created_at  TEXT NOT NULL,
+            email_to    TEXT,
+            FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+        );
+        INSERT INTO worker_alerts_new (id, worker_id, url, events, description, created_at, email_to)
+        SELECT id, worker_id, url, events, description, created_at, email_to
+        FROM worker_alerts;
+        DROP TABLE worker_alerts;
+        ALTER TABLE worker_alerts_new RENAME TO worker_alerts;
+        CREATE INDEX IF NOT EXISTS idx_worker_alerts_worker_id
+            ON worker_alerts(worker_id);
+        """
+    )
+
+
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
@@ -959,7 +991,7 @@ MIGRATIONS: list[Migration] = [
     CREATE TABLE IF NOT EXISTS worker_alerts (
         id          TEXT PRIMARY KEY,
         worker_id   TEXT NOT NULL,
-        url         TEXT NOT NULL,
+        url         TEXT,
         events      TEXT NOT NULL DEFAULT 'failed',
         description TEXT,
         created_at  TEXT NOT NULL,
@@ -981,6 +1013,10 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE worker_alerts ADD COLUMN email_to TEXT;
     """,
+    # -- migration 43: make worker_alerts.url nullable -----------------------
+    # Migration 42 introduced email-only alerts, but SQLite cannot alter an
+    # existing NOT NULL column in place. Rebuild the table for older DB files.
+    _make_worker_alerts_url_nullable,
 ]
 
 
