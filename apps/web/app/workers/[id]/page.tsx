@@ -607,6 +607,28 @@ export default function WorkerDetailPage() {
     }
   }
 
+  async function handleSaveAdvanced() {
+    if (!worker) return;
+    setSaving(true);
+    try {
+      await api.workers.updateFiles(worker.id, editFiles);
+      toast.success("Worker saved");
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      const updatedFiles = (updated.files || [])
+        .filter((f: WorkerFile) => !f.binary)
+        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSaveDefaults() {
     if (!worker) return;
     setSavingDefaults(true);
@@ -1361,23 +1383,6 @@ export default function WorkerDetailPage() {
               </div>
             )}
 
-            {/* Secrets (read-only) */}
-            {requiredSecrets.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Secrets</Label>
-                <div className="rounded-lg border border-border divide-y divide-border">
-                  {requiredSecrets.map((s) => (
-                    <div key={s} className="flex items-center justify-between px-4 py-2.5">
-                      <span className="text-sm font-mono">{s}</span>
-                      <Link href="/connections/secrets">
-                        <Button size="sm" variant="outline" className="h-6 text-xs border-line">Configure</Button>
-                      </Link>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Save button */}
             <div className="flex items-center gap-3">
               <Button
@@ -1416,22 +1421,32 @@ export default function WorkerDetailPage() {
                 for guided editing.
               </p>
             </div>
-            {isEditMode ? (
-              <FilesEditor
-                mode="edit"
-                files={editFiles}
-                selectedPath={editSelectedPath}
-                onSelect={setEditSelectedPath}
-                onSelectedPathChange={setEditSelectedPath}
-                onChange={setEditFiles}
-              />
-            ) : (
-              <FilesEditor
-                mode="view"
-                files={deriveSourceFiles(worker)}
-                selectedPath={selectedFile}
-                onSelect={setSelectedFile}
-              />
+            <FilesEditor
+              mode="edit"
+              files={editFiles}
+              selectedPath={editSelectedPath}
+              onSelect={setEditSelectedPath}
+              onSelectedPathChange={setEditSelectedPath}
+              onChange={setEditFiles}
+            />
+            {filesDirty && (
+              <div className="flex items-center gap-3 pt-1">
+                <Button size="sm" onClick={handleSaveAdvanced} disabled={saving}>
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditFiles(
+                      Object.entries(editFilesOriginal).map(([path, content]) => ({ path, content }))
+                    );
+                  }}
+                  disabled={saving}
+                >
+                  Discard
+                </Button>
+              </div>
             )}
           </div>
         )}
