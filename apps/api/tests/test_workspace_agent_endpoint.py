@@ -77,6 +77,12 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["agent_id"] == "workspace-agent"
+    assert body["model"] == "gpt-4.1-mini"
+    assert body["channels"]["slack"] == {
+        "events_configured": False,
+        "bot_configured": False,
+        "allowed_team_ids_configured": False,
+    }
     # System prompt is the resolved SKILL.md (placeholder expanded).
     assert "You manage the workspace." in body["system_prompt"]
     assert "{{WORKSPACE_PREAMBLE}}" not in body["system_prompt"]
@@ -99,6 +105,23 @@ def test_endpoint_does_not_leak_secret_values(client_and_main):
     body = client.get("/system/workspace-agent").json()
     blob = body["system_prompt"] + str(body["tools"])
     assert "sk-super-secret-value" not in blob
+
+
+def test_endpoint_reports_model_and_slack_readiness(client_and_main, monkeypatch):
+    client, _main = client_and_main
+    monkeypatch.setenv("WORKEROS_CHAT_MODEL", "gpt-test-model")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "test-signing-secret")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+    monkeypatch.setenv("SLACK_ALLOWED_TEAM_IDS", "T123")
+
+    body = client.get("/system/workspace-agent").json()
+
+    assert body["model"] == "gpt-test-model"
+    assert body["channels"]["slack"] == {
+        "events_configured": True,
+        "bot_configured": True,
+        "allowed_team_ids_configured": True,
+    }
 
 
 def test_endpoint_requires_auth(client_and_main):

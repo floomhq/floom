@@ -28,6 +28,7 @@ from db import get_db, now_iso
 logger = logging.getLogger("floom.chat")
 
 WORKSPACE_AGENT_ID = "workspace-agent"
+DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-4.1-mini"
 TOOL_RESULT_MAX_BYTES = 2048
 CONVERSATION_WINDOW = 50       # summarise after this many messages
 CONVERSATION_KEEP_VERBATIM = 20  # keep this many after summarisation
@@ -1063,8 +1064,16 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
     """
     return {
         "agent_id": WORKSPACE_AGENT_ID,
+        "model": os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
         "system_prompt": _build_system_prompt(user_id),
         "tools": workspace_agent_tool_metadata(user_id),
+        "channels": {
+            "slack": {
+                "events_configured": bool((os.environ.get("SLACK_SIGNING_SECRET") or "").strip()),
+                "bot_configured": bool((os.environ.get("SLACK_BOT_TOKEN") or "").strip()),
+                "allowed_team_ids_configured": bool((os.environ.get("SLACK_ALLOWED_TEAM_IDS") or "").strip()),
+            }
+        },
     }
 
 
@@ -1157,7 +1166,7 @@ async def stream_chat(
         name=WORKSPACE_AGENT_ID,
         instructions=system_prompt,
         tools=all_tools,
-        model=os.environ.get("WORKEROS_CHAT_MODEL") or "gpt-4.1-mini",
+        model=os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
         model_settings=ModelSettings(
             max_tokens=4096,
             include_usage=True,

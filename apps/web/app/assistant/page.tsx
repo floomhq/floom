@@ -250,11 +250,21 @@ export default function AssistantPage() {
     (connection) => connection.kind !== "mcp" && connection.app_name.toLowerCase() === "slack"
   );
   const activeSlackConnections = slackConnections.filter((connection) => connection.status === "active");
+  const slackEventsConfigured = Boolean(agent?.channels?.slack?.events_configured);
+  const slackBotConfigured = Boolean(agent?.channels?.slack?.bot_configured);
+  const slackReady = activeSlackConnections.length > 0 && slackEventsConfigured && slackBotConfigured;
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Agent</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight">Agent</h1>
+          {agent?.model ? (
+            <Badge variant="outline" className="font-mono text-xs">
+              {agent.model}
+            </Badge>
+          ) : null}
+        </div>
         <p className="mt-1 text-sm text-muted-foreground">
           Workspace instructions, tools, and channel wiring.
         </p>
@@ -377,7 +387,7 @@ export default function AssistantPage() {
         <TabsContent value="channels" className="space-y-4">
           <section className="rounded-[var(--radius-card)] border border-line bg-card p-4">
             <div className="flex items-start gap-3">
-              {activeSlackConnections.length > 0 ? (
+              {slackReady ? (
                 <CheckCircle2 className="mt-0.5 size-4 text-[var(--positive)]" />
               ) : (
                 <AlertTriangle className="mt-0.5 size-4 text-[var(--warning)]" />
@@ -386,13 +396,22 @@ export default function AssistantPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-sm font-medium">Slack</h2>
                   <Badge variant="outline" className="text-xs">
-                    {activeSlackConnections.length > 0 ? "Connected" : "Not connected"}
+                    {slackReady
+                      ? "Ready"
+                      : activeSlackConnections.length > 0
+                        ? "OAuth only"
+                        : "Not connected"}
                   </Badge>
                 </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {activeSlackConnections.length > 0
-                    ? `${activeSlackConnections.length} Slack connection${activeSlackConnections.length === 1 ? "" : "s"} available. Channel binding still lives on the Slack listener worker.`
-                    : "Connect Slack before enabling Slack listener workers or channel routing."}
+                <div className="mt-2 grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
+                  <ReadinessPill label="OAuth connection" ready={activeSlackConnections.length > 0} />
+                  <ReadinessPill label="Events secret" ready={slackEventsConfigured} />
+                  <ReadinessPill label="Bot token" ready={slackBotConfigured} />
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {slackReady
+                    ? "Slack mentions can be routed to the workspace agent."
+                    : "Slack is only ready after OAuth, Events API signing, and bot reply credentials are all configured."}
                 </p>
               </div>
             </div>
@@ -419,5 +438,18 @@ export default function AssistantPage() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function ReadinessPill({ label, ready }: { label: string; ready: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border-default)] bg-muted/30 px-2 py-1 text-xs">
+      {ready ? (
+        <CheckCircle2 className="size-3 text-[var(--positive)]" />
+      ) : (
+        <AlertTriangle className="size-3 text-[var(--warning)]" />
+      )}
+      {label}
+    </span>
   );
 }

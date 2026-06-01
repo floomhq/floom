@@ -11809,8 +11809,10 @@ def system_workspace_agent(auth: AuthContext = Depends(get_auth_context)):
     info = workspace_agent_info(auth.user_id)
     return {
         "agent_id": info["agent_id"],
+        "model": info["model"],
         "system_prompt": info["system_prompt"],
         "tools": info["tools"],
+        "channels": info["channels"],
     }
 
 
