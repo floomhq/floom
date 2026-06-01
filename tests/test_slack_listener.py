@@ -104,4 +104,3 @@ def test_thread_has_bot_reply_reads_slack_thread(monkeypatch):
             {"channel": "C123", "ts": "1710000000.000001", "limit": 20},
         )
     ]
-
