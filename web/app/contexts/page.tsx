@@ -1,8 +1,8 @@
 "use client";
 
 import "highlight.js/styles/github.css";
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -14,14 +14,15 @@ import {
   Edit3,
   File as FileIcon,
   FileCode,
-  FilePlus,
   FileText,
   Film,
   Folder,
+  GitFork,
   Image as ImageIcon,
   Link as LinkIcon,
   Lock,
   Plus,
+  RotateCcw,
   Save,
   Search,
   Table,
@@ -31,14 +32,14 @@ import {
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ContextDetail, ContextFileItem, ContextSummary } from "@/lib/types";
+import type { ContextDetail, ContextFileItem, ContextSummary, VersionSummary } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-const TEXT_PREVIEW_LIMIT = 256 * 1024;
+const TEXT_PREVIEW_LIMIT = 512 * 1024;
 const TABLE_PREVIEW_ROWS = 100;
 const TABLE_PREVIEW_COLS = 12;
 const APP_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
@@ -154,7 +155,6 @@ export default function ContextsPageShell() {
 }
 
 function ContextsPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -178,6 +178,8 @@ function ContextsPage() {
   const [loadingText, setLoadingText] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versionsKey, setVersionsKey] = useState(0);
 
   const [search, setSearch] = useState("");
   const [newContextName, setNewContextName] = useState("");
@@ -305,6 +307,7 @@ function ContextsPage() {
     setSelectedName(name);
     setFolderPath([]);
     setSelectedFile(null);
+    setVersionsOpen(false);
     setMobilePane("files");
     try {
       setDetail(await api.contexts.get(name));
@@ -319,10 +322,12 @@ function ContextsPage() {
     const parts = folderPathStr.split("/").filter(Boolean);
     setFolderPath(parts);
     setSelectedFile(null);
+    setVersionsOpen(false);
   }
 
   function openFile(path: string) {
     setSelectedFile(path);
+    setVersionsOpen(false);
     setMobilePane("file");
     // Drill folderPath to the file's parent so the column stack stays coherent
     // (so the parent folder column is visible alongside the file pane).
@@ -445,6 +450,7 @@ function ContextsPage() {
       setEditing(false);
       const refreshed = await api.contexts.get(selectedName);
       setDetail(refreshed);
+      setVersionsKey((k) => k + 1);
       toast.success("File saved");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to save file");
@@ -479,10 +485,25 @@ function ContextsPage() {
             Reusable knowledge packs your workers can read before they act.
           </p>
         </div>
-        <Button size="sm" onClick={() => setShowNewContext(true)}>
-          <Plus className="size-4" />
-          New pack
-        </Button>
+        <div className="flex items-center gap-2">
+          {selectedName && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSelectedFile(null);
+                setVersionsOpen((value) => !value);
+              }}
+            >
+              <GitFork className="size-4" />
+              Versions
+            </Button>
+          )}
+          <Button size="sm" onClick={() => setShowNewContext(true)}>
+            <Plus className="size-4" />
+            New pack
+          </Button>
+        </div>
       </div>
 
       {/* New brain-pack inline form */}
@@ -615,6 +636,18 @@ function ContextsPage() {
           <section className="flex-1 overflow-hidden flex items-center justify-center">
             <Skeleton className="h-10 w-48 rounded-[var(--radius-button)]" />
           </section>
+        ) : versionsOpen ? (
+          <BrainPackVersionsPane
+            key={`${selectedName}:${versionsKey}`}
+            packName={selectedName}
+            onRollback={(updated) => {
+              setDetail(updated);
+              setSelectedFile(null);
+              setFolderPath([]);
+              setVersionsKey((k) => k + 1);
+              void loadContexts(selectedName);
+            }}
+          />
         ) : !fileOpen ? (
           /* DEFAULT: 70% pack-detail with the file/folder tree + metadata.
              Folder drill happens via miller columns inside this pane. */
@@ -662,7 +695,6 @@ function ContextsPage() {
                 file={fileObj}
                 kind={kind}
                 packName={selectedName}
-                folderPath={folderPath}
                 text={fileText}
                 fileUrl={fileUrl}
                 loadingText={loadingText}
@@ -952,7 +984,6 @@ function PackDetailPane({
               activeChildFolder={folderPath[level] ? folderColumns[level + 1]?.folder ?? null : null}
               selectedFile={null}
               readOnly={readOnly}
-              packName={detail.name}
               onOpenFolder={onOpenFolder}
               onOpenFile={onOpenFile}
               onDeleteFile={onDeleteFile}
@@ -1023,7 +1054,6 @@ function FolderColumns({
             activeChildFolder={folderPath[level] ? folderColumns[level + 1]?.folder ?? null : null}
             selectedFile={selectedFile}
             readOnly
-            packName={detail.name}
             compact={compact}
             onOpenFolder={onOpenFolder}
             onOpenFile={onOpenFile}
@@ -1045,7 +1075,6 @@ function FolderColumn({
   activeChildFolder,
   selectedFile,
   readOnly,
-  packName,
   compact,
   onOpenFolder,
   onOpenFile,
@@ -1057,7 +1086,6 @@ function FolderColumn({
   activeChildFolder: string | null;
   selectedFile: string | null;
   readOnly: boolean;
-  packName: string;
   compact?: boolean;
   onOpenFolder: (levelIndex: number, folderPath: string) => void;
   onOpenFile: (path: string) => void;
@@ -1141,7 +1169,6 @@ function FilePane({
   file,
   kind,
   packName,
-  folderPath,
   text,
   fileUrl,
   loadingText,
@@ -1158,7 +1185,6 @@ function FilePane({
   file: ContextFileItem | null;
   kind: FileKind | null;
   packName: string;
-  folderPath: string[];
   text: string;
   fileUrl: string;
   loadingText: boolean;
@@ -1259,7 +1285,7 @@ function FilePane({
             className="w-full h-full min-h-[400px] resize-none border-0 rounded-none font-mono text-xs leading-6 outline-none focus-visible:ring-0 focus-visible:ring-offset-0 p-4"
           />
         ) : (
-          <FileContent file={file} kind={kind} text={text} fileUrl={fileUrl} />
+          <FileContent file={file} packName={packName} kind={kind} text={text} fileUrl={fileUrl} />
         )}
       </div>
     </>
@@ -1268,18 +1294,22 @@ function FilePane({
 
 function FileContent({
   file,
+  packName,
   kind,
   text,
   fileUrl,
 }: {
   file: ContextFileItem;
+  packName: string;
   kind: FileKind | null;
   text: string;
   fileUrl: string;
 }) {
   if (!kind) return null;
 
-  if (file.size > TEXT_PREVIEW_LIMIT && kind !== "image" && kind !== "pdf") {
+  const canPreviewLargeFile =
+    kind === "image" || kind === "pdf" || kind === "video" || kind === "spreadsheet";
+  if (file.size > TEXT_PREVIEW_LIMIT && !canPreviewLargeFile) {
     return (
       <div className="p-4 space-y-3 text-sm">
         <p className="text-muted-foreground">File is too large to preview inline ({formatBytes(file.size)}).</p>
@@ -1376,29 +1406,47 @@ function FileContent({
   }
 
   if (kind === "spreadsheet") {
-    return <SpreadsheetPreview fileUrl={fileUrl} />;
+    return <SpreadsheetPreview packName={packName} file={file} />;
   }
 
   if (kind === "image") {
     return (
-      <div className="flex items-center justify-center p-6 min-h-[300px] bg-muted/20">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={fileUrl} alt={file.path} className="max-h-[600px] max-w-full object-contain rounded-[var(--radius-button)]" />
-      </div>
+      <ContextFileObjectUrl packName={packName} file={file}>
+        {(src) => (
+          <div className="flex items-center justify-center p-6 min-h-[300px] bg-muted/20">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt={file.path} className="max-h-[600px] max-w-full object-contain rounded-[var(--radius-button)]" />
+          </div>
+        )}
+      </ContextFileObjectUrl>
     );
   }
 
   if (kind === "pdf") {
-    return <embed src={fileUrl} type="application/pdf" className="w-full h-full min-h-[600px]" />;
+    return (
+      <ContextFileObjectUrl packName={packName} file={file}>
+        {(src) => (
+          <iframe
+            title={file.path}
+            src={src}
+            className="w-full h-full min-h-[600px] border-0"
+          />
+        )}
+      </ContextFileObjectUrl>
+    );
   }
 
   if (kind === "video") {
     return (
-      <div className="flex h-full min-h-[420px] items-center justify-center bg-muted/20 p-6">
-        <video src={fileUrl} controls className="max-h-[650px] max-w-full rounded-[var(--radius-button)] border border-[var(--border-default)] bg-black">
-          <a href={fileUrl}>Download video</a>
-        </video>
-      </div>
+      <ContextFileObjectUrl packName={packName} file={file}>
+        {(src) => (
+          <div className="flex h-full min-h-[420px] items-center justify-center bg-muted/20 p-6">
+            <video src={src} controls className="max-h-[650px] max-w-full rounded-[var(--radius-button)] border border-[var(--border-default)] bg-black">
+              <a href={fileUrl}>Download video</a>
+            </video>
+          </div>
+        )}
+      </ContextFileObjectUrl>
     );
   }
 
@@ -1429,7 +1477,58 @@ function DelimitedTablePreview({ text, path }: { text: string; path: string }) {
   return <TablePreview rows={parsed} />;
 }
 
-function SpreadsheetPreview({ fileUrl }: { fileUrl: string }) {
+function ContextFileObjectUrl({
+  packName,
+  file,
+  children,
+}: {
+  packName: string;
+  file: ContextFileItem;
+  children: (src: string) => ReactNode;
+}) {
+  const [src, setSrc] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = "";
+    setSrc("");
+    setError(null);
+    api.contexts.fetchFileBlob(packName, file.path)
+      .then((blob) => {
+        const nextUrl = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(nextUrl);
+          return;
+        }
+        objectUrl = nextUrl;
+        setSrc(nextUrl);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Download failed");
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [packName, file.path]);
+
+  if (error) {
+    return <p className="p-4 text-sm text-muted-foreground">Preview unavailable: {error}</p>;
+  }
+
+  if (!src) {
+    return (
+      <div className="p-4 space-y-2">
+        {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-button)]" />)}
+      </div>
+    );
+  }
+
+  return <>{children(src)}</>;
+}
+
+function SpreadsheetPreview({ packName, file }: { packName: string; file: ContextFileItem }) {
   const [rows, setRows] = useState<string[][]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1441,12 +1540,11 @@ function SpreadsheetPreview({ fileUrl }: { fileUrl: string }) {
 
     async function load() {
       try {
-        const [{ default: JSZip }, response] = await Promise.all([
+        const [{ default: JSZip }, blob] = await Promise.all([
           import("jszip"),
-          fetch(fileUrl),
+          api.contexts.fetchFileBlob(packName, file.path),
         ]);
-        if (!response.ok) throw new Error(`Download failed (${response.status})`);
-        const zip = await JSZip.loadAsync(await response.arrayBuffer());
+        const zip = await JSZip.loadAsync(await blob.arrayBuffer());
         const sheetName = Object.keys(zip.files)
           .filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))
           .sort()[0];
@@ -1468,7 +1566,7 @@ function SpreadsheetPreview({ fileUrl }: { fileUrl: string }) {
 
     void load();
     return () => { cancelled = true; };
-  }, [fileUrl]);
+  }, [packName, file.path]);
 
   if (loading) {
     return (
@@ -1483,6 +1581,107 @@ function SpreadsheetPreview({ fileUrl }: { fileUrl: string }) {
   }
 
   return <TablePreview rows={rows} />;
+}
+
+function BrainPackVersionsPane({
+  packName,
+  onRollback,
+}: {
+  packName: string;
+  onRollback: (updated: ContextDetail) => void;
+}) {
+  const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+
+  const loadVersions = useCallback(async () => {
+    setLoading(true);
+    try {
+      setVersions(await api.contexts.listVersions(packName));
+    } catch {
+      setVersions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [packName]);
+
+  useEffect(() => {
+    void loadVersions();
+  }, [loadVersions]);
+
+  async function handleRollback(v: VersionSummary) {
+    if (
+      !confirm(
+        `Restore ${packName} to version ${v.version_number}?\n\nThis will overwrite the current files in this brain pack.`
+      )
+    ) {
+      return;
+    }
+    setRollingBack(v.id);
+    try {
+      const updated = await api.contexts.rollback(packName, v.id);
+      onRollback(updated);
+      await loadVersions();
+      toast.success(`Rolled back to version ${v.version_number}`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Rollback failed");
+    } finally {
+      setRollingBack(null);
+    }
+  }
+
+  return (
+    <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="min-h-[82px] shrink-0 border-b border-[var(--border-default)] px-5 py-4">
+        <h2 className="text-base font-semibold">Versions</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Automatic snapshots for {packName}, newest first.
+        </p>
+      </div>
+      <div className="flex-1 overflow-auto p-5">
+        {loading ? (
+          <div className="space-y-2">
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
+          </div>
+        ) : versions.length === 0 ? (
+          <div className="rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-6">
+            <p className="text-sm font-medium">No versions yet</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Versions are saved automatically when files are added, edited, deleted, or restored.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)]">
+            {versions.map((v, idx) => (
+              <div key={v.id} className="flex items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-3 last:border-b-0">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-muted-foreground">v{v.version_number}</span>
+                    {idx === 0 && <span className="text-[10px] font-medium text-muted-foreground">(current)</span>}
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {v.change_source} · {formatDate(v.created_at)}
+                  </p>
+                </div>
+                {idx !== 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    disabled={rollingBack === v.id}
+                    onClick={() => void handleRollback(v)}
+                  >
+                    <RotateCcw className="size-3.5" />
+                    {rollingBack === v.id ? "Restoring" : "Rollback"}
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function TablePreview({ rows }: { rows: string[][] }) {

@@ -7,6 +7,9 @@ import type { NextConfig } from "next";
 //   - 'unsafe-inline' on style-src + script-src for Next inline bootstrap
 //   - https: on script/style/connect/img/font for CDN-hosted assets if any
 //   - blob: on worker-src + img-src for streaming + uploaded preview blobs
+//   - blob: on frame-src for authenticated PDF previews fetched through the
+//     app proxy and rendered from object URLs
+//   - blob: on media-src for authenticated video previews
 // Verify with: `curl -I https://workers.floom.dev/` and a browser console
 // CSP-violation check after deploy.
 //
@@ -29,6 +32,8 @@ const CSP_DIRECTIVES = [
   "object-src 'none'",
   "form-action 'self'",
   "img-src 'self' data: blob: https:",
+  "media-src 'self' blob:",
+  "frame-src 'self' blob:",
   "font-src 'self' data: https:",
   "style-src 'self' 'unsafe-inline' https:",
   "script-src 'self' 'unsafe-inline' https:",
