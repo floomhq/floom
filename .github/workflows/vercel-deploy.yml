@@ -16,10 +16,6 @@ jobs:
   deploy-web:
     name: Deploy workers.floom.dev
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/web
-
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_WORKEROS_PROJECT_ID }}
