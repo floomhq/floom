@@ -26,6 +26,7 @@ from apps.api.cloud_webhooks import verify_webhook_token
 from apps.api._engine import import_engine_module
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.cli_auth_devices import router as cli_auth_devices_router
+from apps.api.routes.telemetry import router as telemetry_router
 from apps.api.routes.workspaces import router as workspaces_router
 
 import apps.api.startup  # noqa: F401
@@ -87,6 +88,7 @@ app.include_router(auth_router)
 # the row with user_id=NULL and lets /auth/cli-approve claim it later.
 app.include_router(workspaces_router, prefix="/api")
 app.include_router(cli_auth_devices_router, prefix="/api")
+app.include_router(telemetry_router, prefix="/api")
 
 
 @app.post("/api/webhooks/{worker_id}", response_model=engine_main.ActionResponse)

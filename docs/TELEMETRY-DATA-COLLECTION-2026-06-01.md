@@ -29,8 +29,19 @@ Workeros Cloud needs a first-party telemetry system that records enough product,
 
 ## Implementation Notes
 
-- Start with a typed event schema and an ingestion endpoint under the Cloud API.
-- Store events with `user_id`, `workspace_id`, `session_id`, `event_name`, `event_version`, `properties`, `created_at`.
-- Keep sensitive payloads out of `properties`; use allowlisted property keys per event.
-- Add a privacy export endpoint that can stream telemetry by workspace.
-- Add a deletion/anonymization job for workspace and user deletion.
+- Typed Cloud API endpoints are now defined under `/api/telemetry/*`.
+- Storage migration: `supabase/migrations/0017_telemetry_events.sql`.
+- Events are stored with `user_id`, `workspace_id`, hashed `session_id`, `event_name`, `event_version`, `source`, sanitized `properties`, `occurred_at`, and `created_at`.
+- Sensitive payload handling is server-side: property keys containing token/secret/password/session/etc. are redacted, emails and token-shaped strings are redacted, and oversized values are truncated.
+- Privacy controls exist at:
+  - `GET /api/telemetry/preferences`
+  - `PUT /api/telemetry/preferences`
+  - `GET /api/telemetry/export`
+  - `DELETE /api/telemetry/workspace`
+
+## Still Required
+
+- Wire frontend and backend product events into the ingestion endpoint.
+- Add privacy-policy copy for telemetry categories and retention.
+- Add retention jobs once usage volume is known.
+- Add product analytics dashboards on top of exported events.
