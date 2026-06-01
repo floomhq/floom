@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, ChevronsUpDown, Copy, Download, Plus } from "lucide-react";
+import { Check, ChevronsUpDown, Copy, Download, Link, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -123,6 +123,8 @@ export function WorkspaceSwitcher() {
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -248,6 +250,29 @@ export function WorkspaceSwitcher() {
     }
   }
 
+  async function handleCreateShareLink(workspace: Workspace) {
+    setSharing(true);
+    setShareCopied(false);
+    setError(null);
+    try {
+      const share = await proxyJson<{ url?: string }>(
+        `/workspaces/${encodeURIComponent(workspace.id)}/share-links`,
+        {
+          method: "POST",
+          body: JSON.stringify({ expires_in_days: 7 }),
+        }
+      );
+      if (!share.url) throw new Error("Share link missing from response");
+      await navigator.clipboard.writeText(share.url);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 3_000);
+    } catch (err) {
+      setError((err as Error).message || "Failed to create share link");
+    } finally {
+      setSharing(false);
+    }
+  }
+
   // Render-state guards: while loading we show a placeholder so the
   // sidebar doesn't jump when data arrives.
   if (!state) {
@@ -327,9 +352,17 @@ export function WorkspaceSwitcher() {
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem
+            onClick={() => handleCreateShareLink(active)}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            disabled={duplicating || exporting || sharing}
+          >
+            <Link className="size-4" />
+            {sharing ? "Creating link…" : shareCopied ? "Link copied" : "Share template link"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
             onClick={() => handleDuplicateWorkspace(active)}
             className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-            disabled={duplicating || exporting}
+            disabled={duplicating || exporting || sharing}
           >
             <Copy className="size-4" />
             {duplicating ? "Duplicating…" : "Duplicate workspace"}
@@ -337,7 +370,7 @@ export function WorkspaceSwitcher() {
           <DropdownMenuItem
             onClick={() => handleExportWorkspace(active)}
             className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-            disabled={duplicating || exporting}
+            disabled={duplicating || exporting || sharing}
           >
             <Download className="size-4" />
             {exporting ? "Exporting…" : "Export template"}

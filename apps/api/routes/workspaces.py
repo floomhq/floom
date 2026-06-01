@@ -11,13 +11,17 @@ v1 is intentionally minimal: no invites, no roles, no rename, no delete.
 
 from __future__ import annotations
 
+import io
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.datastructures import UploadFile
 
 from apps.api._engine import ensure_engine_api_path
+from apps.api.auth.workspace_context import active_workspace, get_active_workspace_id
 from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, ACTIVE_WORKSPACE_HEADER
 from apps.api.config import get_cloud_settings
 from apps.api.db import workspaces as workspace_repo
@@ -48,6 +52,46 @@ class WorkspaceOut(BaseModel):
 class WorkspaceListResponse(BaseModel):
     workspaces: list[WorkspaceOut]
     active_id: str | None
+
+
+class CreateShareLinkRequest(BaseModel):
+    expires_in_days: int = Field(default=7, ge=1, le=30)
+    max_uses: int | None = Field(default=None, ge=1, le=100)
+
+
+class WorkspaceShareLinkOut(BaseModel):
+    id: str
+    workspace_id: str
+    created_at: str
+    expires_at: str | None = None
+    revoked_at: str | None = None
+    max_uses: int | None = None
+    use_count: int = 0
+    token: str | None = None
+    url: str | None = None
+
+
+class WorkspaceSharePreviewOut(BaseModel):
+    id: str
+    workspace_id: str
+    workspace_name: str
+    created_at: str
+    expires_at: str | None = None
+    max_uses: int | None = None
+    use_count: int = 0
+
+
+class WorkspaceShareImportResponse(BaseModel):
+    source_workspace_id: str
+    source_workspace_name: str
+    target_workspace_id: str
+    workers_imported: list[str] = Field(default_factory=list)
+    contexts_imported: list[str] = Field(default_factory=list)
+    skipped: list[dict] = Field(default_factory=list)
+    id_remaps: dict[str, str] = Field(default_factory=dict)
+    required_secrets: list[str] = Field(default_factory=list)
+    required_connections: list[str] = Field(default_factory=list)
+    workspace_md_present: bool = False
 
 
 def _cookie_domain() -> str | None:
@@ -85,6 +129,46 @@ def _to_out(row: dict) -> WorkspaceOut:
         owner_user_id=str(row["owner_user_id"]),
         created_at=str(row["created_at"]),
     )
+
+
+def _share_url(token: str) -> str:
+    settings = get_cloud_settings()
+    return f"{settings.frontend_url.rstrip('/')}/workspace/share/{token}"
+
+
+def _public_link(row: dict, *, token: str | None = None) -> WorkspaceShareLinkOut:
+    return WorkspaceShareLinkOut(
+        id=str(row["id"]),
+        workspace_id=str(row["workspace_id"]),
+        created_at=str(row["created_at"]),
+        expires_at=str(row.get("expires_at")) if row.get("expires_at") else None,
+        revoked_at=str(row.get("revoked_at")) if row.get("revoked_at") else None,
+        max_uses=row.get("max_uses"),
+        use_count=int(row.get("use_count") or 0),
+        token=token,
+        url=_share_url(token) if token else None,
+    )
+
+
+def _validated_share(token: str) -> dict:
+    link = workspace_repo.resolve_share_token(token=token)
+    if not link:
+        raise HTTPException(status_code=404, detail="share link not found")
+    if link.get("revoked_at"):
+        raise HTTPException(status_code=410, detail="share link revoked")
+    expires_at = link.get("expires_at")
+    if expires_at:
+        try:
+            parsed = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed and parsed < datetime.now(timezone.utc):
+            raise HTTPException(status_code=410, detail="share link expired")
+    max_uses = link.get("max_uses")
+    use_count = int(link.get("use_count") or 0)
+    if max_uses is not None and use_count >= int(max_uses):
+        raise HTTPException(status_code=410, detail="share link exhausted")
+    return link
 
 
 @router.get("", response_model=WorkspaceListResponse)
@@ -142,3 +226,104 @@ async def select_workspace(
     response = JSONResponse(_to_out(workspace).model_dump())
     _set_active_cookie(response, workspace_id)
     return response
+
+
+@router.post("/{workspace_id}/share-links", response_model=WorkspaceShareLinkOut)
+async def create_share_link(
+    workspace_id: str,
+    payload: CreateShareLinkRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> WorkspaceShareLinkOut:
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=payload.expires_in_days)).isoformat()
+    try:
+        row, token = workspace_repo.create_share_link(
+            owner_user_id=auth.user_id,
+            workspace_id=workspace_id,
+            expires_at=expires_at,
+            max_uses=payload.max_uses,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    return _public_link(row, token=token)
+
+
+@router.delete("/{workspace_id}/share-links/{link_id}")
+async def revoke_share_link(
+    workspace_id: str,
+    link_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict[str, bool]:
+    try:
+        revoked = workspace_repo.revoke_share_link(
+            owner_user_id=auth.user_id,
+            workspace_id=workspace_id,
+            link_id=link_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+    if not revoked:
+        raise HTTPException(status_code=404, detail="share link not found")
+    return {"ok": True}
+
+
+@router.get("/shares/{token}", response_model=WorkspaceSharePreviewOut)
+async def preview_share(token: str) -> WorkspaceSharePreviewOut:
+    link = _validated_share(token)
+    workspace = link["workspace"]
+    return WorkspaceSharePreviewOut(
+        id=str(link["id"]),
+        workspace_id=str(link["workspace_id"]),
+        workspace_name=str(workspace["name"]),
+        created_at=str(link["created_at"]),
+        expires_at=str(link.get("expires_at")) if link.get("expires_at") else None,
+        max_uses=link.get("max_uses"),
+        use_count=int(link.get("use_count") or 0),
+    )
+
+
+@router.post("/shares/{token}/import", response_model=WorkspaceShareImportResponse)
+async def import_share(
+    token: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> WorkspaceShareImportResponse:
+    target_workspace_id = get_active_workspace_id()
+    if not target_workspace_id:
+        raise HTTPException(status_code=400, detail="active workspace required")
+    link = _validated_share(token)
+    source_workspace = link["workspace"]
+    source_workspace_id = str(source_workspace["id"])
+    source_owner_id = str(source_workspace["owner_user_id"])
+    if source_workspace_id == target_workspace_id:
+        raise HTTPException(status_code=400, detail="cannot import a workspace into itself")
+
+    import_engine = __import__("main")
+    with active_workspace(source_workspace_id):
+        export_response = import_engine.export_workspace(
+            auth=AuthContext(user_id=source_owner_id, email=None, scopes=()),
+            repos=import_engine.get_repositories(),
+        )
+    payload = bytes(getattr(export_response, "body", b""))
+    if not payload:
+        raise HTTPException(status_code=500, detail="workspace export failed")
+
+    with active_workspace(target_workspace_id):
+        upload = UploadFile(filename="workspace-template.zip", file=io.BytesIO(payload))
+        result = await import_engine.import_workspace(
+            bundle=upload,
+            request=None,
+            auth=auth,
+            repos=import_engine.get_repositories(),
+        )
+    workspace_repo.increment_share_use(link_id=str(link["id"]), use_count=int(link.get("use_count") or 0))
+    return WorkspaceShareImportResponse(
+        source_workspace_id=source_workspace_id,
+        source_workspace_name=str(source_workspace["name"]),
+        target_workspace_id=target_workspace_id,
+        workers_imported=list(result.workers_imported),
+        contexts_imported=list(result.contexts_imported),
+        skipped=list(result.skipped),
+        id_remaps=dict(result.id_remaps),
+        required_secrets=list(result.required_secrets),
+        required_connections=list(result.required_connections),
+        workspace_md_present=bool(result.workspace_md_present),
+    )

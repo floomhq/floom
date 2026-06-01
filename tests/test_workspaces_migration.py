@@ -104,3 +104,17 @@ def test_canonical_supabase_migrations_enable_workspace_rls():
     text = path.read_text(encoding="utf-8").lower()
     assert "alter table public.workspaces enable row level security" in text
     assert "alter table public.workspaces force row level security" in text
+
+
+def test_workspace_share_links_migration_hashes_tokens_and_enforces_rls():
+    path = SUPABASE_MIGRATIONS_DIR / "0020_workspace_share_links.sql"
+    assert path.is_file(), f"canonical Supabase migration missing: {path}"
+    text = path.read_text(encoding="utf-8").lower()
+    assert "create table if not exists public.workspace_share_links" in text
+    assert "token_hash text not null unique" in text
+    assert "raw_token" not in text
+    assert "token text" not in text
+    assert "references public.workspaces (id) on delete cascade" in text
+    assert "alter table public.workspace_share_links enable row level security" in text
+    assert "alter table public.workspace_share_links force row level security" in text
+    assert "workspaces.owner_user_id = auth.uid()" in text

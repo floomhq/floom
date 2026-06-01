@@ -10,6 +10,8 @@ authenticated request.
 from __future__ import annotations
 
 import uuid
+import hashlib
+import secrets
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -48,6 +50,18 @@ def _new_workspace_id() -> str:
     so backfilled and runtime-created ids look identical.
     """
     return "ws_" + uuid.uuid4().hex[:14]
+
+
+def _new_share_link_id() -> str:
+    return "wsl_" + uuid.uuid4().hex[:18]
+
+
+def new_share_token() -> str:
+    return "wst_" + secrets.token_urlsafe(32)
+
+
+def share_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def _email_prefix(email: str | None) -> str:
@@ -120,6 +134,74 @@ def create(*, owner_user_id: str, name: str) -> dict[str, Any]:
     if created is None:
         raise RuntimeError(f"failed to create workspace {workspace_id}")
     return created
+
+
+def create_share_link(
+    *,
+    owner_user_id: str,
+    workspace_id: str,
+    expires_at: str | None,
+    max_uses: int | None,
+) -> tuple[dict[str, Any], str]:
+    workspace = get(workspace_id=workspace_id)
+    if workspace is None or str(workspace.get("owner_user_id")) != str(owner_user_id):
+        raise PermissionError("workspace not found")
+    raw_token = new_share_token()
+    row = {
+        "id": _new_share_link_id(),
+        "workspace_id": workspace_id,
+        "token_hash": share_token_hash(raw_token),
+        "created_by_user_id": owner_user_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": expires_at,
+        "max_uses": max_uses,
+        "use_count": 0,
+    }
+    client = get_supabase_service_client()
+    client.table("workspace_share_links").insert(row).execute()
+    return {key: value for key, value in row.items() if key != "token_hash"}, raw_token
+
+
+def revoke_share_link(*, owner_user_id: str, workspace_id: str, link_id: str) -> bool:
+    workspace = get(workspace_id=workspace_id)
+    if workspace is None or str(workspace.get("owner_user_id")) != str(owner_user_id):
+        raise PermissionError("workspace not found")
+    response = (
+        get_supabase_service_client()
+        .table("workspace_share_links")
+        .update({"revoked_at": datetime.now(timezone.utc).isoformat()})
+        .eq("id", link_id)
+        .eq("workspace_id", workspace_id)
+        .execute()
+    )
+    return bool(_rows(response))
+
+
+def resolve_share_token(*, token: str) -> dict[str, Any] | None:
+    token_hash = share_token_hash(token)
+    response = (
+        get_supabase_service_client()
+        .table("workspace_share_links")
+        .select("id,workspace_id,created_by_user_id,created_at,expires_at,revoked_at,max_uses,use_count")
+        .eq("token_hash", token_hash)
+        .limit(1)
+        .execute()
+    )
+    row = _row(response)
+    if not row:
+        return None
+    link = dict(row)
+    workspace = get(workspace_id=str(link["workspace_id"]))
+    if workspace is None:
+        return None
+    link["workspace"] = workspace
+    return link
+
+
+def increment_share_use(*, link_id: str, use_count: int) -> None:
+    get_supabase_service_client().table("workspace_share_links").update(
+        {"use_count": int(use_count) + 1}
+    ).eq("id", link_id).execute()
 
 
 def resolve_active_workspace(*, user_id: str, email: str | None, requested_id: str | None) -> dict[str, Any]:

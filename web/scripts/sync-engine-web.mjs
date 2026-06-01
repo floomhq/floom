@@ -74,6 +74,7 @@ export const OVERLAY_FILES = [
   "app/page.tsx",
   "app/privacy/page.tsx",
   "app/settings/page.tsx",
+  "app/workspace/share/[token]/page.tsx",
   "components/TelemetryProvider.tsx",
   "components/layout/WorkspaceSwitcher.tsx",
   "components/layout/sidebar.tsx",
