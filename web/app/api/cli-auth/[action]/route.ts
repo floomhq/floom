@@ -7,7 +7,6 @@ import { cookies } from "next/headers";
 // FLOOM_SECRET into the page localStorage.
 
 const API_BASE =
-  process.env.FLOOM_API_BASE ||
   process.env.WORKEROS_API_BASE ||
   "https://workeros-api.floom.dev";
 

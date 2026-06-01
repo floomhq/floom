@@ -5,7 +5,6 @@ const SESSION_COOKIE = "workeros_cloud_session";
 // The backend API base — available server-side in both middleware and
 // route handlers. Falls back to the production cloud API if not set.
 const API_BASE =
-  process.env.FLOOM_API_BASE ||
   process.env.WORKEROS_API_BASE ||
   "https://workeros-api.floom.dev";
 

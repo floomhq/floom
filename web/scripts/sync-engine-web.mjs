@@ -69,11 +69,13 @@ export const OVERLAY_FILES = [
   "app/api/me/route.ts",
   "app/api/cli-auth/[action]/route.ts",
   "app/cli-auth/page.tsx",
+  "app/connections/connected-accounts/[id]/route.ts",
   "app/page.tsx",
   "components/layout/WorkspaceSwitcher.tsx",
   "components/layout/sidebar.tsx",
   "components/CliCommandPanel.tsx",
   "middleware.ts",
+  "lib/server-api.ts",
   "lib/useRunStream.ts",
 ];
 
