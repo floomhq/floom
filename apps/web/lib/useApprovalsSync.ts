@@ -76,7 +76,7 @@ export function useApprovalsCount(): number {
  * change signal). Returns nothing; the caller passes its own `load` callback.
  */
 export function useApprovalsListSync(load: () => void): void {
-  const stableLoad = useCallback(load, [load]);
+  const stableLoad = useCallback(() => load(), [load]);
   useEffect(() => {
     const onFocus = () => stableLoad();
     const onVisible = () => {
