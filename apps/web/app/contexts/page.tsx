@@ -69,6 +69,43 @@ function displayTypeIcon(displayType: string) {
   return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
 }
 
+function visibleMetadataEntries(file: ContextFileItem): [string, string][] {
+  return Object.entries(file.metadata ?? {})
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => [key, String(value)]);
+}
+
+function FileTagChips({ file, compact = false }: { file: ContextFileItem; compact?: boolean }) {
+  const tags = file.tags ?? [];
+  const metadata = visibleMetadataEntries(file);
+  if (tags.length === 0 && metadata.length === 0) return null;
+
+  return (
+    <div className={`flex flex-wrap items-center gap-1 ${compact ? "mt-1" : "mt-2"}`}>
+      {tags.map((tag) => (
+        <span
+          key={`tag:${tag}`}
+          className="inline-flex max-w-full items-center rounded-[var(--radius-pill)] border border-[var(--border-default)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+          title={`Tag: ${tag}`}
+        >
+          <span className="truncate">{tag}</span>
+        </span>
+      ))}
+      {metadata.map(([key, value]) => (
+        <span
+          key={`meta:${key}`}
+          className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border-default)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+          title={`${key}: ${value}`}
+        >
+          <span className="truncate">{key}</span>
+          <span className="text-foreground/70">:</span>
+          <span className="truncate">{value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // File-kind helpers (ported from the old file viewer route).
 // ---------------------------------------------------------------------------
@@ -731,6 +768,10 @@ function ContextsPage() {
                 onSave={saveFile}
                 onClose={closeFile}
                 onBackMobile={() => setMobilePane("files")}
+                onOpenVersions={() => {
+                  setVersionsOpen(true);
+                  setMobilePane("files");
+                }}
               />
               {dragActive && !readOnly && (
                 <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-[var(--primary)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
@@ -1054,7 +1095,7 @@ function FolderColumns({
 }) {
   return (
     <div className="flex flex-col w-full min-w-0">
-      <div className="flex min-h-[82px] shrink-0 items-center gap-1.5 border-b border-[var(--border-default)] px-3 py-2.5">
+      <div className="flex h-[82px] shrink-0 items-center gap-1.5 border-b border-[var(--border-default)] px-3 py-2.5">
         <button
           type="button"
           onClick={onBackMobile}
@@ -1161,9 +1202,12 @@ function FolderColumn({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-mono">{entry.name}</span>
                   {!compact && (
-                    <span className="block text-xs text-muted-foreground truncate">
-                      {formatBytes(entry.file.size)} · {fileDisplayType(entry.file)}
-                    </span>
+                    <>
+                      <span className="block text-xs text-muted-foreground truncate">
+                        {formatBytes(entry.file.size)} · {fileDisplayType(entry.file)}
+                      </span>
+                      <FileTagChips file={entry.file} compact />
+                    </>
                   )}
                 </span>
                 {!compact && !readOnly && onDeleteFile && (
@@ -1205,6 +1249,7 @@ function FilePane({
   onSave,
   onClose,
   onBackMobile,
+  onOpenVersions,
 }: {
   file: ContextFileItem | null;
   kind: FileKind | null;
@@ -1221,6 +1266,7 @@ function FilePane({
   onSave: () => void;
   onClose: () => void;
   onBackMobile: () => void;
+  onOpenVersions: () => void;
 }) {
   const [fileLinkCopied, setFileLinkCopied] = useState(false);
   if (!file) return null;
@@ -1240,22 +1286,25 @@ function FilePane({
   return (
     <>
       {/* Breadcrumb + actions */}
-      <div className="flex min-h-[82px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-2.5">
-        <div className="flex items-center gap-2 text-sm min-w-0">
-          <button
-            type="button"
-            onClick={onBackMobile}
-            className="lg:hidden p-1 -ml-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground shrink-0"
-            title="Back to files"
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          {displayTypeIcon(displayType)}
-          <span className="font-mono text-sm font-medium truncate">{file.path.split("/").pop()}</span>
-          <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-            · {displayType} · {formatBytes(file.size)}
-            {file.updated_at && ` · ${formatDate(file.updated_at)}`}
-          </span>
+      <div className="flex h-[82px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-2.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm min-w-0">
+            <button
+              type="button"
+              onClick={onBackMobile}
+              className="lg:hidden p-1 -ml-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground shrink-0"
+              title="Back to files"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            {displayTypeIcon(displayType)}
+            <span className="font-mono text-sm font-medium truncate">{file.path.split("/").pop()}</span>
+            <span className="text-xs text-muted-foreground truncate hidden sm:inline">
+              · {displayType} · {formatBytes(file.size)}
+              {file.updated_at && ` · ${formatDate(file.updated_at)}`}
+            </span>
+          </div>
+          <FileTagChips file={file} compact />
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {canEdit && !editing && (
@@ -1275,6 +1324,12 @@ function FilePane({
                 Save
               </Button>
             </>
+          )}
+          {!editing && (
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={onOpenVersions}>
+              <GitFork className="size-3.5" />
+              Versions
+            </Button>
           )}
           <button
             type="button"
