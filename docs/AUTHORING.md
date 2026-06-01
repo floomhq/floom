@@ -427,8 +427,15 @@ If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the pa
    trigger:
      type: manual
    ```
-3. `POST /workers/reload` (or restart the API) so the worker registry picks it up.
-4. Run from the UI to smoke-test.
+3. Validate and deploy the local bundle:
+   ```bash
+   workeros workers validate workers/my-skill
+   workeros workers push workers/my-skill
+   ```
+4. Run from the UI, CLI, or MCP to smoke-test:
+   ```bash
+   workeros run my-skill --input topic="Smoke test"
+   ```
 
 **Gotchas:**
 
@@ -436,7 +443,11 @@ If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the pa
 - Skills that depend on Claude-Code-only tools (Read, Edit, Bash that hits the host filesystem) won't work — the runner exposes a different tool set. Audit the skill's tool calls before porting.
 - Heavy Python deps (torch, transformers) won't fit in the E2B template. Either trim the deps or use `runner: local` and accept the bigger trust surface.
 
-The CLI sync target (`floom workeros sync ~/.claude/skills/<name>`) is the long-term path here; not yet built. For now, copy + edit `worker.yml`.
+`workeros workers push` creates a new worker id with `POST /workers` and updates
+an existing worker id with `PUT /workers/<id>` when the target API supports
+in-place source updates. If the API returns "does not support in-place worker
+source updates", keep the validated bundle and deploy it under a new worker id
+or upgrade the API.
 
 ---
 
@@ -446,19 +457,32 @@ The CLI sync target (`floom workeros sync ~/.claude/skills/<name>`) is the long-
 
 ```bash
 npm i -g @floomhq/workeros
-floom login                                  # paste WORKEROS_API_SECRET when prompted
-floom workers list
-floom workers run <id> --input topic="AI tools"
-floom workers create --prompt "make me a worker that ..."   # async-draft path
+workeros login                              # browser/device auth flow
+workeros doctor
+workeros workers list
+workeros workers validate ./workers/<id>
+workeros workers push ./workers/<id>
+workeros run <id> --input topic="AI tools"
 ```
+
+The package also installs `floom` as a compatible alias. Use `workeros` when a
+separate Floom CLI is already present on the machine.
 
 ### MCP (for Claude Code / Cursor agents)
 
 ```bash
-npx @floomhq/workeros install --target claude
+npx -y @floomhq/workeros mcp install --target claude
 ```
 
-Exposes tools the agent can call to create, update, run, watch, and delete workers without leaving the chat. Use `WORKEROS_API_SECRET` env var to skip the install-time prompt.
+Exposes tools the agent can call to create, update settings, run, watch, and
+delete workers without leaving the chat. Use `WORKEROS_API_SECRET` env var to
+skip the install-time prompt.
+
+Current MCP source creation accepts `worker_yml` plus `run_py`. Use CLI
+`workeros workers push <dir>` for local `SKILL.md` agent-mode bundles and for
+source edits after the first deploy. MCP `workers.update` is for trigger,
+cron, saved input defaults, documented capabilities, and webhook secret
+rotation.
 
 ### API direct (for scripts / CI)
 

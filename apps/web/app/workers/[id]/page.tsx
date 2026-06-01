@@ -2446,12 +2446,12 @@ function BrainSection({
   });
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-3xl space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Brain packs</h2>
+          <h2 className="text-base font-semibold text-foreground">Worker resources</h2>
           <p className="text-sm text-muted-foreground">
-            {selectedNames.size} attached to this worker.
+            {selectedNames.size} brain {selectedNames.size === 1 ? "resource" : "resources"} attached to this worker.
           </p>
         </div>
         <Link href="/brain">
@@ -2471,18 +2471,26 @@ function BrainSection({
 
       {sortedPacks.length === 0 ? (
         <div className="rounded-[var(--radius-button)] border border-line bg-card p-4">
-          <p className="text-sm text-muted-foreground">No brain packs available.</p>
+          <p className="text-sm text-muted-foreground">No brain resources available.</p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-[var(--radius-button)] border border-line bg-card">
+          <div className="hidden grid-cols-[minmax(0,1fr)_120px_104px_88px] gap-3 border-b border-line px-4 py-2 text-[11px] font-medium uppercase text-muted-foreground sm:grid">
+            <span>Resource</span>
+            <span>Access</span>
+            <span>Status</span>
+            <span className="text-right">Action</span>
+          </div>
           {sortedPacks.map((pack) => {
             const attached = selectedNames.has(pack.name);
             const selectedSpec = selectedSpecs.find((spec) => contextSpecName(spec) === pack.name);
             const writableMount = selectedSpec ? contextSpecWritable(selectedSpec) : false;
+            const accessLabel = writableMount ? "Read/write" : "Read-only";
+            const statusLabel = attached ? "Attached" : "Available";
             return (
               <div
                 key={pack.name}
-                className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 last:border-b-0"
+                className="grid gap-3 border-b border-line px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_120px_104px_88px] sm:items-center"
               >
                 <div className="flex min-w-0 items-start gap-3">
                   <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] border border-line bg-[var(--paper)]">
@@ -2491,21 +2499,11 @@ function BrainSection({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-medium text-foreground">{pack.name}</span>
-                      {attached && (
+                      {pack.system ? (
                         <Badge variant="outline" className="border-line text-xs text-muted-foreground">
-                          Attached
-                        </Badge>
-                      )}
-                      {pack.system || pack.read_only ? (
-                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
-                          Read-only
+                          System
                         </Badge>
                       ) : null}
-                      {writableMount && (
-                        <Badge variant="outline" className="border-line text-xs text-muted-foreground">
-                          Writable mount
-                        </Badge>
-                      )}
                     </div>
                     {pack.description && (
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{pack.description}</p>
@@ -2517,13 +2515,25 @@ function BrainSection({
                     </p>
                   </div>
                 </div>
+                <div className="flex items-center gap-2 sm:block">
+                  <span className="text-[11px] font-medium uppercase text-muted-foreground sm:hidden">Access</span>
+                  <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                    {accessLabel}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2 sm:block">
+                  <span className="text-[11px] font-medium uppercase text-muted-foreground sm:hidden">Status</span>
+                  <Badge variant="outline" className="border-line text-xs text-muted-foreground">
+                    {statusLabel}
+                  </Badge>
+                </div>
                 <Button
                   type="button"
                   size="sm"
                   variant={attached ? "outline" : "default"}
                   onClick={() => onToggleBrainPack(pack.name)}
                   disabled={Boolean(savingBrain)}
-                  className="shrink-0"
+                  className="w-fit shrink-0 justify-self-start sm:w-full"
                 >
                   {savingBrain === pack.name ? "Saving…" : attached ? "Remove" : "Attach"}
                 </Button>

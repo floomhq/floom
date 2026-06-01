@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -31,6 +32,48 @@ def slack_get(path: str, params: dict | None = None) -> dict:
     if not data.get("ok"):
         raise RuntimeError(f"Slack API error: {data.get('error')}")
     return data
+
+
+def get_bot_user_id() -> str | None:
+    try:
+        data = slack_get("auth.test")
+    except Exception as exc:
+        print(f"[warn] Could not resolve Slack bot user id: {exc}", file=sys.stderr)
+        return None
+    return data.get("user_id") or data.get("bot_id")
+
+
+def is_addressed_to_bot(text: str, bot_user_id: str | None) -> bool:
+    lowered = text.lower()
+    if "@floom" in lowered or "<!here>" in text:
+        return True
+    return bool(bot_user_id and f"<@{bot_user_id}>" in text)
+
+
+def clean_user_question(text: str, bot_user_id: str | None) -> str:
+    cleaned = text.replace("@floom", "").replace("@Floom", "").replace("<!here>", "")
+    if bot_user_id:
+        cleaned = cleaned.replace(f"<@{bot_user_id}>", "")
+    return cleaned.strip()
+
+
+def thread_has_bot_reply(channel: str, thread_ts: str, bot_user_id: str | None) -> bool:
+    if not bot_user_id:
+        return False
+    try:
+        data = slack_get(
+            "conversations.replies",
+            {"channel": channel, "ts": thread_ts, "limit": 20},
+        )
+    except Exception as exc:
+        print(f"[warn] Could not inspect Slack thread {thread_ts}: {exc}", file=sys.stderr)
+        return False
+    for reply in data.get("messages") or []:
+        if reply.get("ts") == thread_ts:
+            continue
+        if reply.get("user") == bot_user_id or reply.get("bot_id") == bot_user_id:
+            return True
+    return False
 
 
 def slack_post(channel: str, thread_ts: str, text: str) -> None:
@@ -87,9 +130,37 @@ def workspace_chat(message: str, conversation_id: str | None = None) -> dict:
     return {"reply": "".join(text_parts), "conversation_id": new_conv_id}
 
 
-def main() -> None:
-    import urllib.parse
+def process_messages(messages: list[dict], channel: str, bot_user_id: str | None) -> list[dict]:
+    processed = []
+    for msg in messages:
+        text = msg.get("text") or ""
+        if msg.get("user") == bot_user_id:
+            continue
+        if not is_addressed_to_bot(text, bot_user_id):
+            continue
+        thread_ts = msg.get("thread_ts") or msg.get("ts")
+        if not thread_ts:
+            continue
+        if thread_has_bot_reply(channel, thread_ts, bot_user_id):
+            processed.append({"ts": thread_ts, "question": text[:60], "replied": False, "skipped": "already_replied"})
+            continue
+        user_question = clean_user_question(text, bot_user_id)
+        if not user_question:
+            continue
 
+        print(f"Processing Slack mention: {user_question[:80]}")
+        try:
+            result = workspace_chat(user_question, conversation_id=None)
+            reply = result["reply"] or "(No reply)"
+            slack_post(channel, thread_ts, reply)
+            processed.append({"ts": thread_ts, "question": user_question[:60], "replied": True})
+        except Exception as exc:
+            print(f"[error] Failed to process mention: {exc}", file=sys.stderr)
+            processed.append({"ts": thread_ts, "question": user_question[:60], "replied": False, "error": str(exc)})
+    return processed
+
+
+def main() -> None:
     inputs_path = os.path.join(os.environ.get("FLOOM_INPUT_DIR", "."), "inputs.json")
     with open(inputs_path) as f:
         inputs = json.load(f)
@@ -103,26 +174,8 @@ def main() -> None:
     oldest = time.time() - lookback_minutes * 60
     data = slack_get("conversations.history", {"channel": channel, "oldest": str(oldest), "limit": 50})
     messages = data.get("messages") or []
-
-    processed = []
-    for msg in messages:
-        text = msg.get("text") or ""
-        if "@floom" not in text.lower() and "<!here>" not in text:
-            continue
-        thread_ts = msg.get("thread_ts") or msg.get("ts")
-        user_question = text.replace("@floom", "").replace("<!here>", "").strip()
-        if not user_question:
-            continue
-
-        print(f"Processing Slack mention: {user_question[:80]}")
-        try:
-            result = workspace_chat(user_question, conversation_id=None)
-            reply = result["reply"] or "(No reply)"
-            slack_post(channel, thread_ts, reply)
-            processed.append({"ts": thread_ts, "question": user_question[:60], "replied": True})
-        except Exception as exc:
-            print(f"[error] Failed to process mention: {exc}", file=sys.stderr)
-            processed.append({"ts": thread_ts, "question": user_question[:60], "replied": False, "error": str(exc)})
+    bot_user_id = get_bot_user_id()
+    processed = process_messages(messages, channel, bot_user_id)
 
     output_dir = os.environ.get("FLOOM_OUTPUT_DIR", ".")
     out = {
@@ -131,7 +184,7 @@ def main() -> None:
     }
     summary_md = f"# Slack Listener Run\n\n- Channel: {channel}\n- Mentions processed: {len(processed)}\n"
     for item in processed:
-        status = "replied" if item.get("replied") else f"FAILED: {item.get('error')}"
+        status = item.get("skipped") or ("replied" if item.get("replied") else f"FAILED: {item.get('error')}")
         summary_md += f"  - `{item['question']}` → {status}\n"
 
     os.makedirs(output_dir, exist_ok=True)

@@ -43,6 +43,22 @@ _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
 
 
+def _sandbox_api_url() -> str:
+    """API base URL used by code running inside E2B sandboxes."""
+    for name in (
+        "WORKEROS_SANDBOX_API_URL",
+        "WORKEROS_E2B_API_URL",
+        "WORKEROS_INTERNAL_API_URL",
+        "WORKEROS_API_URL",
+        "WORKEROS_API_BASE",
+        "WORKERS_API_URL",
+    ):
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value.rstrip("/")
+    return "https://workers-api.floom.dev"
+
+
 def _register_sandbox(run_id: str, sandbox: Any) -> None:
     with _active_sandboxes_lock:
         _active_sandboxes[run_id] = sandbox
@@ -133,6 +149,21 @@ def _sandbox_lifetime_timeout(timeout_seconds: int, install_timeout: int) -> int
     """Sandbox lifetime must cover dependency install plus worker execution."""
     requested_timeout = max(int(timeout_seconds) + int(install_timeout) + 60, 180)
     return min(requested_timeout, MAX_E2B_SANDBOX_LIFETIME_SECONDS)
+
+
+def _sandbox_api_url() -> str:
+    """API base URL used by code running inside E2B sandboxes."""
+    for name in (
+        "WORKEROS_SANDBOX_API_URL",
+        "WORKEROS_E2B_API_URL",
+        "WORKEROS_API_URL",
+        "WORKEROS_API_BASE",
+        "WORKERS_API_URL",
+    ):
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value.rstrip("/")
+    return "https://workers-api.floom.dev"
 
 
 def _normalize_sandbox_relative_path(raw_path: str) -> str:
@@ -387,12 +418,7 @@ class E2BSandboxDriver(SandboxDriver):
         _sandbox_envs = {
             "FLOOM_RUN_ID": run_id,
             "FLOOM_TRACE_ID": trace_id,
-            "WORKEROS_API_URL": (
-                os.environ.get("WORKEROS_API_URL")
-                or os.environ.get("WORKEROS_API_BASE")
-                or os.environ.get("WORKERS_API_URL")
-                or "https://workers-api.floom.dev"
-            ).rstrip("/"),
+            "WORKEROS_API_URL": _sandbox_api_url(),
             # Scoped capability token — valid only for /runs/{run_id}/composio-execute/*
             # Never inject the full FLOOM_SECRET into sandboxes (it grants full API access).
             "WORKEROS_RUN_TOKEN": make_run_token(run_id),
