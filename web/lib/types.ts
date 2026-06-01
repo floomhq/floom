@@ -311,6 +311,8 @@ export interface ContextFileItem {
   is_binary: boolean;
   description?: string | null;
   display_type?: string;
+  tags?: string[];
+  metadata?: Record<string, string | number | boolean | null | undefined>;
 }
 
 export interface ContextDetail extends ContextSummary {

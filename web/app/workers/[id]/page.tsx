@@ -170,6 +170,30 @@ function deriveSourceFiles(worker: WorkerDetail | null): WorkerFile[] {
   return derived;
 }
 
+type EditableSourceFile = {
+  path: string;
+  content: string;
+  binary?: boolean;
+  language?: string;
+  size?: number;
+};
+
+function toEditableSourceFiles(files: WorkerFile[]): EditableSourceFile[] {
+  return files.map((f) => ({
+    path: f.path,
+    content: f.content || "",
+    binary: f.binary,
+    language: f.language,
+    size: f.size,
+  }));
+}
+
+function textSourceFiles(files: EditableSourceFile[]): { path: string; content: string }[] {
+  return files
+    .filter((f) => !f.binary)
+    .map((f) => ({ path: f.path, content: f.content }));
+}
+
 function contextSpecName(spec: WorkerContextSpec): string {
   if (typeof spec === "string") return spec;
   return spec.name;
@@ -256,7 +280,7 @@ export default function WorkerDetailPage() {
   const [triggersDirty, setTriggersDirty] = useState(false);
 
   // S42: edit mode — files editor state (Source tab in edit mode)
-  const [editFiles, setEditFiles] = useState<{ path: string; content: string }[]>([]);
+  const [editFiles, setEditFiles] = useState<EditableSourceFile[]>([]);
   const [editFilesOriginal, setEditFilesOriginal] = useState<Record<string, string>>({});
   const [editSelectedPath, setEditSelectedPath] = useState<string>("worker.yml");
 
@@ -318,7 +342,7 @@ export default function WorkerDetailPage() {
   const [deleting, setDeleting] = useState(false);
 
   // Derived dirty flags
-  const filesDirty = editFiles.some((f) => f.content !== (editFilesOriginal[f.path] ?? ""));
+  const filesDirty = editFiles.some((f) => !f.binary && f.content !== (editFilesOriginal[f.path] ?? ""));
   const metaDirty =
     metaValues.name !== metaOriginal.name ||
     metaValues.description !== metaOriginal.description;
@@ -416,9 +440,7 @@ export default function WorkerDetailPage() {
         const defaultFile = files.find((f) => f.path === "worker.yml") || files.find((f) => f.path === "SKILL.md") || files[0];
         if (defaultFile) setSelectedFile(defaultFile.path);
         // S42: init edit-mode file state
-        const editableFiles = files
-          .filter((f: WorkerFile) => !f.binary)
-          .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+        const editableFiles = toEditableSourceFiles(files);
         setEditFiles(editableFiles);
         const snap: Record<string, string> = {};
         for (const f of editableFiles) snap[f.path] = f.content;
@@ -660,7 +682,7 @@ export default function WorkerDetailPage() {
     }
     setSaving(true);
     try {
-      const patchedFiles: { path: string; content: string }[] = [...editFiles];
+      const patchedFiles = textSourceFiles(editFiles);
 
       // Patch metadata into worker.yml if name/description changed
       if (metaDirty) {
@@ -684,9 +706,7 @@ export default function WorkerDetailPage() {
       // Reload worker and reset dirty state
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
-      const updatedFiles = (updated.files || [])
-        .filter((f: WorkerFile) => !f.binary)
-        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
       setEditFiles(updatedFiles);
       const newSnap: Record<string, string> = {};
       for (const f of updatedFiles) newSnap[f.path] = f.content;
@@ -713,14 +733,12 @@ export default function WorkerDetailPage() {
     if (!worker) return;
     setSaving(true);
     try {
-      await api.workers.updateFiles(worker.id, editFiles);
+      await api.workers.updateFiles(worker.id, textSourceFiles(editFiles));
       toast.success("Worker saved");
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
       // Sync editFiles
-      const updatedFiles = (updated.files || [])
-        .filter((f: WorkerFile) => !f.binary)
-        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
       setEditFiles(updatedFiles);
       const newSnap: Record<string, string> = {};
       for (const f of updatedFiles) newSnap[f.path] = f.content;
@@ -784,9 +802,7 @@ export default function WorkerDetailPage() {
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
       setSetupDefaults({});
-      const updatedFiles = (updated.files || [])
-        .filter((f: WorkerFile) => !f.binary)
-        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
       setEditFiles(updatedFiles);
       const newSnap: Record<string, string> = {};
       for (const f of updatedFiles) newSnap[f.path] = f.content;
@@ -822,7 +838,7 @@ export default function WorkerDetailPage() {
       const patched = patchBrainContexts(currentYml, nextContexts);
       const sourceFiles =
         editFiles.length > 0
-          ? editFiles
+          ? textSourceFiles(editFiles)
           : deriveSourceFiles(worker)
               .filter((f) => !f.binary)
               .map((f) => ({ path: f.path, content: f.content || "" }));
@@ -833,9 +849,7 @@ export default function WorkerDetailPage() {
       await api.workers.updateFiles(worker.id, nextFiles);
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
-      const updatedFiles = deriveSourceFiles(updated)
-        .filter((f: WorkerFile) => !f.binary)
-        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
       setEditFiles(updatedFiles);
       const newSnap: Record<string, string> = {};
       for (const f of updatedFiles) newSnap[f.path] = f.content;
@@ -885,9 +899,7 @@ export default function WorkerDetailPage() {
         inputDefs[inp.name] = inp.default !== undefined && inp.default !== null ? String(inp.default) : "";
       });
       setConfigInputDefaults(inputDefs);
-      const updatedFiles = (updated.files || [])
-        .filter((f: WorkerFile) => !f.binary)
-        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
       setEditFiles(updatedFiles);
       const newSnap: Record<string, string> = {};
       for (const f of updatedFiles) newSnap[f.path] = f.content;
@@ -944,9 +956,7 @@ export default function WorkerDetailPage() {
       setTriggersDirty(false);
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
-      const updatedFiles = (updated.files || [])
-        .filter((f: WorkerFile) => !f.binary)
-        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
       setEditFiles(updatedFiles);
       const newSnap: Record<string, string> = {};
       for (const f of updatedFiles) newSnap[f.path] = f.content;
@@ -1033,9 +1043,7 @@ export default function WorkerDetailPage() {
       setFormConnections(
         (updated.config.connections || []).filter((c) => typeof c === "string") as string[]
       );
-      const updatedFiles = deriveSourceFiles(updated)
-        .filter((f: WorkerFile) => !f.binary)
-        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
       setEditFiles(updatedFiles);
       const newSnap: Record<string, string> = {};
       for (const f of updatedFiles) newSnap[f.path] = f.content;
@@ -2049,7 +2057,11 @@ export default function WorkerDetailPage() {
                   variant="ghost"
                   onClick={() =>
                     setEditFiles(
-                      Object.entries(editFilesOriginal).map(([path, content]) => ({ path, content }))
+                      editFiles.map((file) =>
+                        file.binary
+                          ? file
+                          : { ...file, content: editFilesOriginal[file.path] ?? file.content }
+                      )
                     )
                   }
                   disabled={saving}
