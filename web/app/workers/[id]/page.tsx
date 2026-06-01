@@ -24,6 +24,7 @@ import {
   Brain as BrainIcon, Settings2, Plus, GitFork, RotateCcw,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
+import { VersionDiffPanel } from "@/components/VersionDiffPanel";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -998,7 +999,7 @@ export default function WorkerDetailPage() {
         worker.manifest_yaml || "";
       const parsed = ((loadYaml(yamlContent) || {}) as Record<string, unknown>);
 
-      if (formName.trim()) parsed.name = formName.trim();
+      if (formName.trim()) parsed.title = formName.trim();
       parsed.description = configDesc;
 
       if (formInputs.length > 0) {
@@ -2970,7 +2971,12 @@ function VersionsSection({
 }) {
   const [versions, setVersions] = useState<VersionSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedFiles, setExpandedFiles] = useState<{ path: string; content: string }[] | null>(null);
+  const [loadingExpand, setLoadingExpand] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
+
+  const currentFiles = worker.files?.map((f) => ({ path: f.path, content: f.content ?? "" })) ?? [];
 
   useEffect(() => {
     setLoading(true);
@@ -2981,20 +2987,33 @@ function VersionsSection({
       .finally(() => setLoading(false));
   }, [worker.id]);
 
-  async function handleRollback(v: VersionSummary) {
-    if (
-      !confirm(
-        `Restore worker to version ${v.version_number} (saved ${formatRelative(v.created_at)})?\n\nThis will overwrite current source files.`
-      )
-    )
+  async function handleExpand(v: VersionSummary) {
+    if (expandedId === v.id) {
+      setExpandedId(null);
+      setExpandedFiles(null);
       return;
+    }
+    setLoadingExpand(v.id);
+    try {
+      const detail = await api.workers.getVersion(worker.id, v.id);
+      setExpandedFiles(detail.files);
+      setExpandedId(v.id);
+    } catch {
+      toast.error("Failed to load version");
+    } finally {
+      setLoadingExpand(null);
+    }
+  }
+
+  async function handleRollback(v: VersionSummary) {
     setRollingBack(v.id);
     try {
       const updated = await api.workers.rollback(worker.id, v.id);
       onRollback(updated);
-      // Refresh versions list
       const fresh = await api.workers.listVersions(worker.id);
       setVersions(fresh);
+      setExpandedId(null);
+      setExpandedFiles(null);
       toast.success(`Rolled back to version ${v.version_number}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
@@ -3054,41 +3073,45 @@ function VersionsSection({
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {versions.length} version{versions.length !== 1 ? "s" : ""} · newest first
+        {versions.length} version{versions.length !== 1 ? "s" : ""} · newest first · click a version to preview
       </p>
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden divide-y divide-[var(--border-default)]">
         {versions.map((v, idx) => (
-          <div
-            key={v.id}
-            className="flex items-center justify-between gap-3 px-4 py-3"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 text-right">
-                v{v.version_number}
-              </span>
-              <div className="min-w-0 flex flex-col gap-0.5">
-                <div className="flex items-center gap-2">
-                  {changeSourceBadge(v.change_source)}
-                  {idx === 0 && (
-                    <span className="text-[10px] text-muted-foreground font-medium">(current)</span>
-                  )}
-                </div>
-                <span className="text-xs text-muted-foreground">
-                  {formatRelative(v.created_at)}
+          <div key={v.id}>
+            <div
+              className={`flex items-center justify-between gap-3 px-4 py-3 ${idx !== 0 ? "cursor-pointer hover:bg-muted/40" : ""}`}
+              onClick={() => { if (idx !== 0) void handleExpand(v); }}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 text-right">
+                  v{v.version_number}
                 </span>
+                <div className="min-w-0 flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    {changeSourceBadge(v.change_source)}
+                    {idx === 0 && (
+                      <span className="text-[10px] text-muted-foreground font-medium">(current)</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {formatRelative(v.created_at)}
+                  </span>
+                </div>
               </div>
+              {idx !== 0 && (
+                loadingExpand === v.id
+                  ? <Skeleton className="h-4 w-4 rounded-full" />
+                  : <ChevronRight className={`size-4 text-muted-foreground transition-transform ${expandedId === v.id ? "rotate-90" : ""}`} />
+              )}
             </div>
-            {idx !== 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 h-7 text-xs gap-1.5"
-                disabled={rollingBack === v.id}
-                onClick={() => handleRollback(v)}
-              >
-                <RotateCcw className="size-3" />
-                {rollingBack === v.id ? "Restoring…" : "Restore"}
-              </Button>
+            {expandedId === v.id && expandedFiles && (
+              <VersionDiffPanel
+                versionNumber={v.version_number}
+                versionFiles={expandedFiles}
+                currentFiles={currentFiles}
+                isRestoring={rollingBack === v.id}
+                onRestore={() => void handleRollback(v)}
+              />
             )}
           </div>
         ))}

@@ -196,6 +196,8 @@ export const api = {
       fetchJson<{ status: string }>(`/workers/${id}`, { method: "DELETE" }),
     listVersions: (id: string, limit = 50) =>
       fetchJson<import("./types").VersionSummary[]>(`/workers/${id}/versions?limit=${limit}`),
+    getVersion: (id: string, versionId: string) =>
+      fetchJson<import("./types").VersionDetail>(`/workers/${id}/versions/${versionId}`),
     rollback: (id: string, versionId: string) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}/rollback/${versionId}`, { method: "POST" }),
   },
@@ -370,6 +372,8 @@ export const api = {
       `${API_BASE}${withWorkspaceQuery(`/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`)}`,
     listVersions: (name: string, limit = 50) =>
       fetchJson<import("./types").VersionSummary[]>(`/contexts/${encodeURIComponent(name)}/versions?limit=${limit}`),
+    getVersion: (name: string, versionId: string) =>
+      fetchJson<import("./types").VersionDetail>(`/contexts/${encodeURIComponent(name)}/versions/${versionId}`),
     rollback: (name: string, versionId: string) =>
       fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}/rollback/${versionId}`, {
         method: "POST",

@@ -33,6 +33,7 @@ import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ContextDetail, ContextFileItem, ContextSummary, VersionSummary } from "@/lib/types";
+import { VersionDiffPanel } from "@/components/VersionDiffPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -701,6 +702,7 @@ function ContextsPage() {
           <BrainPackVersionsPane
             key={`${selectedName}:${versionsKey}`}
             packName={selectedName}
+            detail={detail}
             onRollback={(updated) => {
               setDetail(updated);
               setSelectedFile(null);
@@ -1717,13 +1719,19 @@ function PreviewUnavailable({
 
 function BrainPackVersionsPane({
   packName,
+  detail,
   onRollback,
 }: {
   packName: string;
+  detail: ContextDetail | null;
   onRollback: (updated: ContextDetail) => void;
 }) {
   const [versions, setVersions] = useState<VersionSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedFiles, setExpandedFiles] = useState<{ path: string; content: string }[] | null>(null);
+  const [currentFiles, setCurrentFiles] = useState<{ path: string; content: string }[]>([]);
+  const [loadingExpand, setLoadingExpand] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
 
   const loadVersions = useCallback(async () => {
@@ -1737,23 +1745,41 @@ function BrainPackVersionsPane({
     }
   }, [packName]);
 
-  useEffect(() => {
-    void loadVersions();
-  }, [loadVersions]);
+  useEffect(() => { void loadVersions(); }, [loadVersions]);
 
-  async function handleRollback(v: VersionSummary) {
-    if (
-      !confirm(
-        `Restore ${packName} to version ${v.version_number}?\n\nThis will overwrite the current files in this brain pack.`
-      )
-    ) {
+  async function handleExpand(v: VersionSummary) {
+    if (expandedId === v.id) {
+      setExpandedId(null);
+      setExpandedFiles(null);
       return;
     }
+    setLoadingExpand(v.id);
+    try {
+      const textFiles = (detail?.files ?? []).filter((f) => !f.is_binary);
+      const [versionDetail, ...fileContents] = await Promise.all([
+        api.contexts.getVersion(packName, v.id),
+        ...textFiles.map((f) =>
+          api.contexts.readTextFile(packName, f.path).catch(() => "")
+        ),
+      ]);
+      setCurrentFiles(textFiles.map((f, i) => ({ path: f.path, content: fileContents[i] as string })));
+      setExpandedFiles(versionDetail.files);
+      setExpandedId(v.id);
+    } catch {
+      toast.error("Failed to load version");
+    } finally {
+      setLoadingExpand(null);
+    }
+  }
+
+  async function handleRollback(v: VersionSummary) {
     setRollingBack(v.id);
     try {
       const updated = await api.contexts.rollback(packName, v.id);
       onRollback(updated);
       await loadVersions();
+      setExpandedId(null);
+      setExpandedFiles(null);
       toast.success(`Rolled back to version ${v.version_number}`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Rollback failed");
@@ -1767,7 +1793,7 @@ function BrainPackVersionsPane({
       <div className="min-h-[82px] shrink-0 border-b border-[var(--border-default)] px-5 py-4">
         <h2 className="text-base font-semibold">Versions</h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Automatic snapshots for {packName}, newest first.
+          Automatic snapshots for {packName}, newest first. Click a version to preview changes.
         </p>
       </div>
       <div className="flex-1 overflow-auto p-5">
@@ -1785,27 +1811,34 @@ function BrainPackVersionsPane({
         ) : (
           <div className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)]">
             {versions.map((v, idx) => (
-              <div key={v.id} className="flex items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-3 last:border-b-0">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs text-muted-foreground">v{v.version_number}</span>
-                    {idx === 0 && <span className="text-[10px] font-medium text-muted-foreground">(current)</span>}
+              <div key={v.id} className="border-b border-[var(--border-default)] last:border-b-0">
+                <div
+                  className={`flex items-center justify-between gap-3 px-4 py-3 ${idx !== 0 ? "cursor-pointer hover:bg-muted/40" : ""}`}
+                  onClick={() => { if (idx !== 0) void handleExpand(v); }}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs text-muted-foreground">v{v.version_number}</span>
+                      {idx === 0 && <span className="text-[10px] font-medium text-muted-foreground">(current)</span>}
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {v.change_source} · {formatDate(v.created_at)}
+                    </p>
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {v.change_source} · {formatDate(v.created_at)}
-                  </p>
+                  {idx !== 0 && (
+                    loadingExpand === v.id
+                      ? <Skeleton className="size-4 rounded-full" />
+                      : <svg className={`size-4 text-muted-foreground transition-transform ${expandedId === v.id ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  )}
                 </div>
-                {idx !== 0 && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs"
-                    disabled={rollingBack === v.id}
-                    onClick={() => void handleRollback(v)}
-                  >
-                    <RotateCcw className="size-3.5" />
-                    {rollingBack === v.id ? "Restoring" : "Rollback"}
-                  </Button>
+                {expandedId === v.id && expandedFiles && (
+                  <VersionDiffPanel
+                    versionNumber={v.version_number}
+                    versionFiles={expandedFiles}
+                    currentFiles={currentFiles}
+                    isRestoring={rollingBack === v.id}
+                    onRestore={() => void handleRollback(v)}
+                  />
                 )}
               </div>
             ))}
