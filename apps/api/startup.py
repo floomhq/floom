@@ -28,6 +28,7 @@ from apps.api.db.supabase_repos import (
     SupabaseConnectionRepository,
     SupabaseRunRepository,
     SupabaseSecretRepository,
+    SupabaseVersionRepository,
     SupabaseWorkerRepository,
 )
 
@@ -133,6 +134,7 @@ def _cloud_repositories() -> Repositories:
         cli_auth=SupabaseCliAuthRepository(),
         approvals=SupabaseApprovalRepository(),
         alerts=SqliteAlertRepository(),
+        versions=SupabaseVersionRepository(),
     )
 
 

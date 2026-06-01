@@ -2082,3 +2082,101 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
             .execute()
         )
         return bool(_response_rows(response))
+
+
+# ---------------------------------------------------------------------------
+# Version repository
+# ---------------------------------------------------------------------------
+
+class SupabaseVersionRepository:
+    """Supabase implementation of VersionRepository."""
+
+    @property
+    def _client(self) -> Client:
+        return get_supabase_service_client()
+
+    def create(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        user_id: str,
+        snapshot_json: str,
+        change_source: str,
+    ) -> dict[str, Any]:
+        import uuid as _uuid
+        version_id = f"ver_{_uuid.uuid4().hex[:12]}"
+        # Next version number
+        response = (
+            self._client.table("asset_versions")
+            .select("version_number")
+            .eq("asset_type", asset_type)
+            .eq("asset_id", asset_id)
+            .order("version_number", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = _response_rows(response)
+        next_version = (rows[0]["version_number"] + 1) if rows else 1
+        self._client.table("asset_versions").insert({
+            "id": version_id,
+            "asset_type": asset_type,
+            "asset_id": asset_id,
+            "user_id": user_id,
+            "version_number": next_version,
+            "snapshot_json": snapshot_json,
+            "change_source": change_source,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        return self.get(version_id=version_id) or {}
+
+    def list(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        response = (
+            self._client.table("asset_versions")
+            .select("id, asset_type, asset_id, user_id, version_number, change_source, created_at")
+            .eq("asset_type", asset_type)
+            .eq("asset_id", asset_id)
+            .order("version_number", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return _response_rows(response)
+
+    def get(self, *, version_id: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("asset_versions")
+            .select("*")
+            .eq("id", version_id)
+            .limit(1)
+            .execute()
+        )
+        return _first_row(response)
+
+    def prune(self, *, asset_type: str, asset_id: str, keep: int = 50) -> int:
+        response = (
+            self._client.table("asset_versions")
+            .select("id")
+            .eq("asset_type", asset_type)
+            .eq("asset_id", asset_id)
+            .order("version_number", desc=True)
+            .limit(keep)
+            .execute()
+        )
+        keep_ids = [r["id"] for r in _response_rows(response)]
+        if not keep_ids:
+            return 0
+        delete_resp = (
+            self._client.table("asset_versions")
+            .delete()
+            .eq("asset_type", asset_type)
+            .eq("asset_id", asset_id)
+            .not_.in_("id", keep_ids)
+            .execute()
+        )
+        return len(_response_rows(delete_resp))
