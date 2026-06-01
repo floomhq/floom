@@ -10,7 +10,7 @@ _floom_completion() {
   local runs_sub="list show logs download"
   local secrets_sub="list set delete"
   local connections_sub="list import-mcp-config"
-  local mcp_sub="install uninstall"
+  local mcp_sub="add install uninstall"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
@@ -57,7 +57,7 @@ complete -c floom -n "__fish_seen_subcommand_from workers" -a "list show"
 complete -c floom -n "__fish_seen_subcommand_from runs" -a "list show logs download"
 complete -c floom -n "__fish_seen_subcommand_from secrets" -a "list set delete"
 complete -c floom -n "__fish_seen_subcommand_from connections" -a "list import-mcp-config"
-complete -c floom -n "__fish_seen_subcommand_from mcp" -a "install uninstall"
+complete -c floom -n "__fish_seen_subcommand_from mcp" -a "add install uninstall"
 `;
 }
 

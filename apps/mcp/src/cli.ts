@@ -195,6 +195,11 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
       runAction(connectionsImportMcpConfigCommand(path, options)));
 
   const mcp = program.command("mcp").description("Manage MCP client config");
+  mcp.command("add")
+    .description("Add Workeros to an MCP client config")
+    .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
+    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
+      runAction(mcpInstallCommand(options)));
   mcp.command("install")
     .description("Install MCP config for a client")
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
