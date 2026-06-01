@@ -285,7 +285,7 @@ export default function WorkerDetailPage() {
   const [notifyOnCompleted, setNotifyOnCompleted] = useState(false);
 
   // Source tab — yaml/form toggle (both are editable)
-  const [sourceMode, setSourceMode] = useState<"yaml" | "form">("yaml");
+  const [sourceMode, setSourceMode] = useState<"yaml" | "form">("form");
 
   // P1-C (prove100 2026-05-30): worker actions — Archive (reversible) and
   // Delete (destructive, confirm-gated). The API exposed both DELETE and a
