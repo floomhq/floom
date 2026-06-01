@@ -147,6 +147,16 @@ class RunRepository(Protocol):
 
     def list_logs(self, *, user_id: str, run_id: str) -> list[RowDict]: ...
 
+    def list_logs_for_worker(
+        self,
+        *,
+        user_id: str,
+        worker_id: str,
+        level: str | None = None,
+        since: str | None = None,
+        limit: int = 200,
+    ) -> list[RowDict]: ...
+
     def add_artifact(
         self,
         *,
@@ -268,3 +278,24 @@ class CliAuthRepository(Protocol):
     def delete(self, *, device_code: str) -> bool: ...
 
     def prune_expired(self, *, now_ts: float) -> list[str]: ...
+
+
+class AlertRepository(Protocol):
+    """Webhook alert endpoints registered per-worker."""
+
+    def add(
+        self,
+        *,
+        alert_id: str,
+        worker_id: str,
+        url: str,
+        events: str,
+        description: str | None,
+        created_at: str,
+    ) -> RowDict: ...
+
+    def list(self, *, worker_id: str) -> list[RowDict]: ...
+
+    def get(self, *, alert_id: str) -> RowDict | None: ...
+
+    def delete(self, *, alert_id: str, worker_id: str) -> bool: ...

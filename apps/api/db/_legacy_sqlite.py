@@ -951,6 +951,30 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_local_workspaces_owner_created
         ON local_workspaces(owner_user_id, created_at);
     """,
+    # -- migration 40: worker_alerts (webhook alert registrations) -----------
+    # Stores webhook endpoints registered per-worker. When a run terminates
+    # the engine fires a POST to each matching URL. Events: "failed",
+    # "completed". Optional HMAC secret for request signing.
+    """
+    CREATE TABLE IF NOT EXISTS worker_alerts (
+        id          TEXT PRIMARY KEY,
+        worker_id   TEXT NOT NULL,
+        url         TEXT NOT NULL,
+        events      TEXT NOT NULL DEFAULT 'failed',
+        description TEXT,
+        created_at  TEXT NOT NULL,
+        FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_alerts_worker_id
+        ON worker_alerts(worker_id);
+    """,
+    # -- migration 41: retry tracking on runs --------------------------------
+    # retry_of_run_id: the original run this is a retry of (NULL for originals)
+    # retry_attempt:   1-based attempt number (0 for the original run)
+    """
+    ALTER TABLE runs ADD COLUMN retry_of_run_id TEXT;
+    ALTER TABLE runs ADD COLUMN retry_attempt INTEGER DEFAULT 0;
+    """,
 ]
 
 
@@ -978,7 +1002,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
