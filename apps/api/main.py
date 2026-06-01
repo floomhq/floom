@@ -1868,6 +1868,59 @@ class VersionSummary(BaseModel):
     created_at: str
 
 
+class ContextWorkerRef(BaseModel):
+    worker_id: str
+    worker_name: str
+
+
+class ContextSummary(BaseModel):
+    name: str
+    file_count: int
+    total_size_bytes: int
+    updated_at: Optional[str] = None
+    writeable: bool = False
+    worker_count: int = 0
+    description: Optional[str] = None
+    # Engine/system knowledge packs (e.g. worker-author-style) are surfaced
+    # read-only so operators can SEE what shapes worker generation, but cannot
+    # edit or delete them. Operator-created packs have system=False.
+    system: bool = False
+    read_only: bool = False
+
+
+class ContextFileItem(BaseModel):
+    path: str
+    size: int
+    mime_type: str
+    updated_at: str
+    is_binary: bool
+    description: Optional[str] = None
+    display_type: str = "File"
+
+
+class ContextDetail(ContextSummary):
+    files: List[ContextFileItem] = Field(default_factory=list)
+    used_by: List[ContextWorkerRef] = Field(default_factory=list)
+
+
+class ContextCreateRequest(BaseModel):
+    writeable: bool = False
+
+
+class ContextTextWriteRequest(BaseModel):
+    content: str
+
+
+class ContextDeleteResponse(BaseModel):
+    status: str
+    referenced_by: List[str] = Field(default_factory=list)
+
+
+class ContextUploadResponse(BaseModel):
+    files: List[ContextFileItem]
+    total_size_bytes: int
+
+
 @app.get("/workers/{worker_id}/versions", response_model=List[VersionSummary])
 def list_worker_versions(
     worker_id: str,
@@ -3558,58 +3611,6 @@ def download_upload(
 # ---------------------------------------------------------------------------
 # Contexts — filesystem-backed worker knowledge/state folders
 # ---------------------------------------------------------------------------
-
-class ContextWorkerRef(BaseModel):
-    worker_id: str
-    worker_name: str
-
-
-class ContextSummary(BaseModel):
-    name: str
-    file_count: int
-    total_size_bytes: int
-    updated_at: Optional[str] = None
-    writeable: bool = False
-    worker_count: int = 0
-    description: Optional[str] = None
-    # Engine/system knowledge packs (e.g. worker-author-style) are surfaced
-    # read-only so operators can SEE what shapes worker generation, but cannot
-    # edit or delete them. Operator-created packs have system=False.
-    system: bool = False
-    read_only: bool = False
-
-
-class ContextFileItem(BaseModel):
-    path: str
-    size: int
-    mime_type: str
-    updated_at: str
-    is_binary: bool
-    description: Optional[str] = None
-    display_type: str = "File"
-
-
-class ContextDetail(ContextSummary):
-    files: List[ContextFileItem] = Field(default_factory=list)
-    used_by: List[ContextWorkerRef] = Field(default_factory=list)
-
-
-class ContextCreateRequest(BaseModel):
-    writeable: bool = False
-
-
-class ContextTextWriteRequest(BaseModel):
-    content: str
-
-
-class ContextDeleteResponse(BaseModel):
-    status: str
-    referenced_by: List[str] = Field(default_factory=list)
-
-
-class ContextUploadResponse(BaseModel):
-    files: List[ContextFileItem]
-    total_size_bytes: int
 
 
 def _context_name_or_400(name: str) -> str:
