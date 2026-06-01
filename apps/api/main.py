@@ -2020,13 +2020,13 @@ def list_context_versions(
     return [VersionSummary(**r) for r in rows]
 
 
-@app.post("/contexts/{name}/rollback/{version_id}", response_model=ContextDetail)
+@app.post("/contexts/{name}/rollback/{version_id}")
 def rollback_context(
     name: str,
     version_id: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> ContextDetail:
+):
     """Restore a brain pack to the state captured in the given version snapshot."""
     import base64
     import json as _json
