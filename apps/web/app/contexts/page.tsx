@@ -64,6 +64,7 @@ function displayTypeIcon(displayType: string) {
     return <FileCode className="size-4 shrink-0 text-muted-foreground" />;
   if (displayType === "Image") return <ImageIcon className="size-4 shrink-0 text-muted-foreground" />;
   if (displayType === "CSV" || displayType === "Spreadsheet") return <Table className="size-4 shrink-0 text-muted-foreground" />;
+  if (displayType === "PDF") return <FileText className="size-4 shrink-0 text-muted-foreground" />;
   if (displayType === "Video") return <Film className="size-4 shrink-0 text-muted-foreground" />;
   return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
 }
@@ -97,6 +98,29 @@ function fileKind(file: ContextFileItem): FileKind {
   if (mime.startsWith("image/")) return "image";
   if (isKnownTextFile(file)) return "code";
   return "binary";
+}
+
+function fileDisplayType(file: ContextFileItem): string {
+  switch (fileKind(file)) {
+    case "markdown":
+      return "Markdown";
+    case "code":
+      return file.display_type ?? "Code";
+    case "html":
+      return "HTML";
+    case "table":
+      return file.path.toLowerCase().endsWith(".tsv") ? "TSV" : "CSV";
+    case "spreadsheet":
+      return "Spreadsheet";
+    case "image":
+      return "Image";
+    case "pdf":
+      return "PDF";
+    case "video":
+      return "Video";
+    default:
+      return file.display_type ?? "File";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,12 +1157,12 @@ function FolderColumn({
                   selectedFile === entry.file.path ? "bg-[var(--active-nav-bg)]" : "hover:bg-muted/40"
                 }`}
               >
-                {displayTypeIcon(entry.file.display_type ?? "File")}
+                {displayTypeIcon(fileDisplayType(entry.file))}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-mono">{entry.name}</span>
                   {!compact && (
                     <span className="block text-xs text-muted-foreground truncate">
-                      {formatBytes(entry.file.size)} · {entry.file.display_type ?? "File"}
+                      {formatBytes(entry.file.size)} · {fileDisplayType(entry.file)}
                     </span>
                   )}
                 </span>
@@ -1211,6 +1235,7 @@ function FilePane({
   }
 
   const canEdit = isKnownTextFile(file) && !readOnly;
+  const displayType = fileDisplayType(file);
 
   return (
     <>
@@ -1225,10 +1250,10 @@ function FilePane({
           >
             <ChevronLeft className="size-4" />
           </button>
-          {displayTypeIcon(file.display_type ?? "File")}
+          {displayTypeIcon(displayType)}
           <span className="font-mono text-sm font-medium truncate">{file.path.split("/").pop()}</span>
           <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-            · {file.display_type ?? "File"} · {formatBytes(file.size)}
+            · {displayType} · {formatBytes(file.size)}
             {file.updated_at && ` · ${formatDate(file.updated_at)}`}
           </span>
         </div>
@@ -1452,7 +1477,7 @@ function FileContent({
 
   return (
     <div className="p-4 space-y-3 text-sm">
-      <p className="text-muted-foreground">{file.display_type ?? "File"} file · {formatBytes(file.size)}</p>
+      <p className="text-muted-foreground">{fileDisplayType(file)} file · {formatBytes(file.size)}</p>
       <a href={fileUrl} className="inline-flex items-center gap-2 rounded-[var(--radius-button)] border border-[var(--border-default)] px-3 py-1.5 text-sm hover:bg-muted">
         <Download className="size-4" />
         Download
@@ -1488,6 +1513,8 @@ function ContextFileObjectUrl({
 }) {
   const [src, setSrc] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const fileUrl = api.contexts.fileUrl(packName, file.path);
 
   useEffect(() => {
     let cancelled = false;
@@ -1511,10 +1538,17 @@ function ContextFileObjectUrl({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [packName, file.path]);
+  }, [packName, file.path, reloadKey]);
 
   if (error) {
-    return <p className="p-4 text-sm text-muted-foreground">Preview unavailable: {error}</p>;
+    return (
+      <PreviewUnavailable
+        title={`${fileDisplayType(file)} preview unavailable`}
+        detail={`The file is listed in this Brain pack, but the file endpoint returned: ${error}. This usually means the file bytes are missing, the selected workspace changed, or the file was deleted after the list loaded.`}
+        fileUrl={fileUrl}
+        onRetry={() => setReloadKey((value) => value + 1)}
+      />
+    );
   }
 
   if (!src) {
@@ -1532,6 +1566,8 @@ function SpreadsheetPreview({ packName, file }: { packName: string; file: Contex
   const [rows, setRows] = useState<string[][]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const fileUrl = api.contexts.fileUrl(packName, file.path);
 
   useEffect(() => {
     let cancelled = false;
@@ -1566,7 +1602,7 @@ function SpreadsheetPreview({ packName, file }: { packName: string; file: Contex
 
     void load();
     return () => { cancelled = true; };
-  }, [packName, file.path]);
+  }, [packName, file.path, reloadKey]);
 
   if (loading) {
     return (
@@ -1577,10 +1613,51 @@ function SpreadsheetPreview({ packName, file }: { packName: string; file: Contex
   }
 
   if (error) {
-    return <p className="p-4 text-sm text-muted-foreground">Spreadsheet preview unavailable: {error}</p>;
+    return (
+      <PreviewUnavailable
+        title="Spreadsheet preview unavailable"
+        detail={`The workbook could not be fetched or parsed: ${error}. XLSX files still remain downloadable from this Brain pack.`}
+        fileUrl={fileUrl}
+        onRetry={() => setReloadKey((value) => value + 1)}
+      />
+    );
   }
 
   return <TablePreview rows={rows} />;
+}
+
+function PreviewUnavailable({
+  title,
+  detail,
+  fileUrl,
+  onRetry,
+}: {
+  title: string;
+  detail: string;
+  fileUrl: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-[260px] items-center justify-center p-6">
+      <div className="max-w-lg rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
+        <p className="font-medium text-foreground">{title}</p>
+        <p className="mt-2 leading-6 text-muted-foreground">{detail}</p>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={onRetry}>
+            <RotateCcw className="size-3.5" />
+            Retry
+          </Button>
+          <a
+            href={fileUrl}
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] px-3 text-sm hover:bg-muted"
+          >
+            <Download className="size-3.5" />
+            Download
+          </a>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function BrainPackVersionsPane({
