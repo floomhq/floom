@@ -23,6 +23,7 @@ def _fake_repos() -> Repositories:
         secrets=_FakeWorkerRepo(),  # type: ignore[arg-type]
         cli_auth=_FakeWorkerRepo(),  # type: ignore[arg-type]
         approvals=_FakeWorkerRepo(),  # type: ignore[arg-type]
+        alerts=_FakeWorkerRepo(),  # type: ignore[arg-type]
     )
 
 
