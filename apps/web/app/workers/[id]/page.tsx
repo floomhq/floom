@@ -1445,11 +1445,11 @@ export default function WorkerDetailPage() {
               onSelectedPathChange={setEditSelectedPath}
               onChange={setEditFiles}
             />
-            {filesDirty && (
-              <div className="flex items-center gap-3 pt-1">
-                <Button size="sm" onClick={handleSaveAdvanced} disabled={saving}>
-                  {saving ? "Saving…" : "Save"}
-                </Button>
+            <div className="flex items-center gap-3 pt-1">
+              <Button size="sm" onClick={handleSaveAdvanced} disabled={saving || !filesDirty}>
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              {filesDirty && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -1462,8 +1462,11 @@ export default function WorkerDetailPage() {
                 >
                   Discard
                 </Button>
-              </div>
-            )}
+              )}
+              {filesDirty && (
+                <span className="text-xs text-muted-foreground">Unsaved changes</span>
+              )}
+            </div>
           </div>
         )}
 
