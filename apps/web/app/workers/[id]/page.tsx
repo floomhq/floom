@@ -21,7 +21,7 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight,
   Copy, Code2, Clock, Plug2, ListChecks,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, AlignLeft, Plus,
+  Brain as BrainIcon, Settings2, Plus,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -294,7 +294,6 @@ export default function WorkerDetailPage() {
   const [notifyOnCompleted, setNotifyOnCompleted] = useState(false);
 
   // Source tab — yaml/form toggle (both are editable)
-  const [sourceMode, setSourceMode] = useState<"yaml" | "form">("form");
 
   // Source Form — full editable worker manifest state
   const [formName, setFormName] = useState("");
@@ -1469,7 +1468,7 @@ export default function WorkerDetailPage() {
             <Button variant="outline" size="sm" onClick={() => { setConflictModalOpen(false); setPendingSaveAfterConflict(false); }}>
               Cancel — I&apos;ll fix it
             </Button>
-            <Button size="sm" onClick={() => { if (pendingSaveAfterConflict) { if (sourceMode === "form") commitFormSave(); else commitConfigureSave(); } }}>
+            <Button size="sm" onClick={() => { if (pendingSaveAfterConflict) commitFormSave(); }}>
               Save anyway
             </Button>
           </DialogFooter>
@@ -1743,68 +1742,15 @@ export default function WorkerDetailPage() {
 
         {activeSection === "code" && (
           <div className="space-y-3">
-            {/* YAML / Form toggle */}
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {sourceMode === "yaml" ? "Edit the raw worker manifest directly." : "Edit worker settings as a form."}
-              </p>
-              <div className="flex items-center rounded-md border border-border overflow-hidden text-xs">
-                <button
-                  type="button"
-                  onClick={() => setSourceMode("yaml")}
-                  className={`flex items-center gap-1 px-2.5 py-1 transition-colors ${sourceMode === "yaml" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <Code2 className="size-3" />
-                  YAML
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSourceMode("form")}
-                  className={`flex items-center gap-1 px-2.5 py-1 transition-colors ${sourceMode === "form" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  <AlignLeft className="size-3" />
-                  Form
-                </button>
-              </div>
-            </div>
-
-            {sourceMode === "yaml" && (
-              <>
-                <FilesEditor
-                  mode="edit"
-                  files={editFiles}
-                  selectedPath={editSelectedPath}
-                  onSelect={setEditSelectedPath}
-                  onSelectedPathChange={setEditSelectedPath}
-                  onChange={setEditFiles}
-                />
-                <div className="flex items-center gap-3 pt-1">
-                  <Button size="sm" onClick={handleSaveAdvanced} disabled={saving || !filesDirty}>
-                    {saving ? "Saving…" : "Save"}
-                  </Button>
-                  {filesDirty && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setEditFiles(
-                          Object.entries(editFilesOriginal).map(([path, content]) => ({ path, content }))
-                        );
-                      }}
-                      disabled={saving}
-                    >
-                      Discard
-                    </Button>
-                  )}
-                  {filesDirty && (
-                    <span className="text-xs text-muted-foreground">Unsaved changes</span>
-                  )}
-                </div>
-              </>
-            )}
-
-            {sourceMode === "form" && (
-              <div className="max-w-2xl space-y-6 pt-1">
+            <FilesEditor
+              mode="edit"
+              files={editFiles}
+              selectedPath={editSelectedPath}
+              onSelect={setEditSelectedPath}
+              onSelectedPathChange={setEditSelectedPath}
+              onChange={setEditFiles}
+              renderYamlPreview={(
+                <div className="max-w-2xl space-y-6">
                 {/* Name */}
                 <div className="space-y-1.5">
                   <Label className="text-sm font-medium">Name</Label>
@@ -2114,6 +2060,30 @@ export default function WorkerDetailPage() {
                 </div>
               </div>
             )}
+            />
+            {/* YAML code save — only visible when code has been edited */}
+            <div className="flex items-center gap-3 pt-1">
+              <Button size="sm" onClick={handleSaveAdvanced} disabled={saving || !filesDirty}>
+                {saving ? "Saving…" : "Save"}
+              </Button>
+              {filesDirty && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    setEditFiles(
+                      Object.entries(editFilesOriginal).map(([path, content]) => ({ path, content }))
+                    )
+                  }
+                  disabled={saving}
+                >
+                  Discard
+                </Button>
+              )}
+              {filesDirty && (
+                <span className="text-xs text-muted-foreground">Unsaved changes in code</span>
+              )}
+            </div>
           </div>
         )}
 
