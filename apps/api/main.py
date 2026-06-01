@@ -71,6 +71,7 @@ from contexts import (
     normalize_context_file_path,
     safe_context_file_path,
     set_context_scope_resolver,
+    set_context_file_metadata,
     set_context_metadata,
     use_context_scope,
     validate_context_name,
@@ -1950,6 +1951,8 @@ class ContextFileItem(BaseModel):
     is_binary: bool
     description: Optional[str] = None
     display_type: str = "File"
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ContextDetail(ContextSummary):
@@ -1963,6 +1966,8 @@ class ContextCreateRequest(BaseModel):
 
 class ContextTextWriteRequest(BaseModel):
     content: str
+    tags: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class ContextDeleteResponse(BaseModel):
@@ -2138,7 +2143,7 @@ def rollback_context(
     import base64
     import json as _json
 
-    safe_name, metadata = _require_context_for_user(name, user_id=auth.user_id)
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     version = repos.versions.get(version_id=version_id)
     if not version or version.get("asset_type") != "brain_pack" or version.get("asset_id") != safe_name:
         raise HTTPException(status_code=404, detail="Version not found")
@@ -3840,7 +3845,7 @@ def _context_detail(
         raise HTTPException(status_code=404, detail="Context not found")
     meta = metadata if metadata is not None else load_context_metadata()
     files = [
-        ContextFileItem(**context_file_metadata(root, path))
+        ContextFileItem(**context_file_metadata(root, path, pack_metadata=meta.get(name) or {}))
         for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
     ]
     summary = _context_summary(name, meta)
@@ -3881,7 +3886,15 @@ def _raise_context_quota_if_needed(name: str) -> None:
         )
 
 
-def _write_context_file(name: str, file_path: str, data: bytes, *, user_id: str) -> ContextFileItem:
+def _write_context_file(
+    name: str,
+    file_path: str,
+    data: bytes,
+    *,
+    user_id: str,
+    tags: List[str] | None = None,
+    file_metadata: Dict[str, Any] | None = None,
+) -> ContextFileItem:
     root = context_dir(name)
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="Context not found")
@@ -3897,8 +3910,18 @@ def _write_context_file(name: str, file_path: str, data: bytes, *, user_id: str)
         else:
             destination.write_bytes(previous)
         raise
-    set_context_metadata(name, owner_id=user_id)
-    return ContextFileItem(**context_file_metadata(root, destination))
+    if tags is not None or file_metadata is not None:
+        pack_meta = set_context_file_metadata(
+            name,
+            file_path,
+            tags=tags,
+            file_metadata=file_metadata,
+            owner_id=user_id,
+        )
+    else:
+        set_context_metadata(name, owner_id=user_id)
+        pack_meta = load_context_metadata().get(name) or {}
+    return ContextFileItem(**context_file_metadata(root, destination, pack_metadata=pack_meta))
 
 
 def _workers_referencing_context(name: str, *, user_id: str, repos: Repositories) -> List[str]:
@@ -4077,9 +4100,20 @@ async def put_context_file(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}") from exc
         data = payload.content.encode("utf-8")
+        tags = payload.tags
+        file_metadata = payload.metadata
     else:
         data = await request.body()
-    result = _write_context_file(safe_name, rel, data, user_id=auth.user_id)
+        tags = None
+        file_metadata = None
+    result = _write_context_file(
+        safe_name,
+        rel,
+        data,
+        user_id=auth.user_id,
+        tags=tags,
+        file_metadata=file_metadata,
+    )
     _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
     return result
 
@@ -4104,9 +4138,9 @@ def delete_context_file(
             parent.rmdir()
         except OSError:
             break
-    set_context_metadata(safe_name, owner_id=auth.user_id)
+    set_context_file_metadata(safe_name, rel, tags=[], file_metadata={}, owner_id=auth.user_id)
     _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
-    return _context_detail(safe_name, metadata)
+    return _context_detail(safe_name)
 
 
 @app.post("/contexts/{name}/upload", response_model=ContextUploadResponse)
@@ -4114,18 +4148,47 @@ async def upload_context_files(
     name: str,
     files: List[UploadFile] = File(...),
     path_prefix: str = Form(""),
+    tags_json: str = Form(""),
+    metadata_json: str = Form(""),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextUploadResponse:
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     raw_prefix = path_prefix.strip().strip("/")
     prefix = _context_file_path_or_400(raw_prefix) if raw_prefix else ""
+    upload_tags: List[str] | None = None
+    upload_metadata: Dict[str, Any] | None = None
+    if tags_json.strip():
+        try:
+            parsed_tags = json.loads(tags_json)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid tags_json: {exc}") from exc
+        if not isinstance(parsed_tags, list):
+            raise HTTPException(status_code=400, detail="tags_json must be a JSON array")
+        upload_tags = [str(tag) for tag in parsed_tags]
+    if metadata_json.strip():
+        try:
+            parsed_metadata = json.loads(metadata_json)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid metadata_json: {exc}") from exc
+        if not isinstance(parsed_metadata, dict):
+            raise HTTPException(status_code=400, detail="metadata_json must be a JSON object")
+        upload_metadata = dict(parsed_metadata)
     written: List[ContextFileItem] = []
     for upload in files:
         filename = _context_file_path_or_400(upload.filename or "upload.bin")
         rel = f"{prefix}/{filename}" if prefix else filename
         data = await upload.read()
-        written.append(_write_context_file(safe_name, rel, data, user_id=auth.user_id))
+        written.append(
+            _write_context_file(
+                safe_name,
+                rel,
+                data,
+                user_id=auth.user_id,
+                tags=upload_tags,
+                file_metadata=upload_metadata,
+            )
+        )
     _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
     return ContextUploadResponse(
         files=written,

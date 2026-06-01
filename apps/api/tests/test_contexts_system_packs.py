@@ -143,6 +143,39 @@ def test_operator_create_and_upload_roundtrip(client_and_main):
     assert any(f["path"] == "icp.md" for f in detail["files"])
 
 
+def test_context_file_metadata_tags_roundtrip(client_and_main):
+    client, _main = client_and_main
+    assert client.post("/contexts/my-company").status_code == 200
+
+    written = client.put(
+        "/contexts/my-company/files/research/gsc.md",
+        json={
+            "content": "# GSC\nClicks and queries.\n",
+            "tags": ["seo", "gsc", "seo"],
+            "metadata": {"source": "Search Console", "quarter": "Q2", "reviewed": True},
+        },
+    )
+    assert written.status_code == 200, written.text
+    written_body = written.json()
+    assert written_body["tags"] == ["seo", "gsc"]
+    assert written_body["metadata"] == {
+        "source": "Search Console",
+        "quarter": "Q2",
+        "reviewed": True,
+    }
+
+    detail = client.get("/contexts/my-company").json()
+    file_item = next(f for f in detail["files"] if f["path"] == "research/gsc.md")
+    assert file_item["tags"] == ["seo", "gsc"]
+    assert file_item["metadata"]["source"] == "Search Console"
+    assert file_item["metadata"]["reviewed"] is True
+
+    deleted = client.delete("/contexts/my-company/files/research/gsc.md")
+    assert deleted.status_code == 200, deleted.text
+    assert all(f["path"] != "research/gsc.md" for f in deleted.json()["files"])
+    assert "research/gsc.md" not in (_main.load_context_metadata()["my-company"].get("files") or {})
+
+
 _CTX_WORKER_YML = """schema_version: "0.3"
 name: "ctx-consumer"
 title: "Context Consumer"
