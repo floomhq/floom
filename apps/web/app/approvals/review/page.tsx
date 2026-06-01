@@ -1,12 +1,17 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, ImageIcon, XCircle } from "lucide-react";
+import { CheckCircle, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, Film, ImageIcon, RotateCcw, Table, XCircle } from "lucide-react";
+import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ApprovalRow, Artifact } from "@/lib/types";
+
+const TABLE_PREVIEW_ROWS = 100;
+const TABLE_PREVIEW_COLS = 12;
+const TEXT_PREVIEW_LIMIT = 512 * 1024;
 
 function parseDecisionInput(raw?: string | null): Record<string, unknown> {
   if (!raw) return {};
@@ -57,6 +62,80 @@ function safePreviewHref(value: unknown): string | null {
     return null;
   }
   return null;
+}
+
+type ApprovalFileKind = "text" | "html" | "table" | "spreadsheet" | "image" | "pdf" | "video" | "binary";
+
+function approvalFileKind(file: PreviewFile): ApprovalFileKind {
+  const mime = (file.mimeType || "").toLowerCase();
+  const name = `${file.title || ""} ${file.detail || ""}`.toLowerCase();
+  if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/.test(name)) return "image";
+  if (mime === "application/pdf" || /\.pdf$/.test(name)) return "pdf";
+  if (mime.startsWith("video/") || /\.(mp4|webm|mov|m4v|ogv)$/.test(name)) return "video";
+  if (
+    mime.includes("spreadsheet") ||
+    mime.includes("excel") ||
+    /\.(xlsx|xlsm)$/.test(name)
+  ) {
+    return "spreadsheet";
+  }
+  if (mime === "text/csv" || mime === "text/tab-separated-values" || /\.(csv|tsv)$/.test(name)) return "table";
+  if (mime === "text/html" || /\.html?$/.test(name)) return "html";
+  if (
+    mime.startsWith("text/") ||
+    /\.(md|mdx|txt|log|json|ya?ml|toml|xml|sql|py|js|jsx|ts|tsx|css|scss|sh)$/.test(name)
+  ) {
+    return "text";
+  }
+  return "binary";
+}
+
+function fileKindIcon(kind: ApprovalFileKind) {
+  if (kind === "image") return <ImageIcon className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" />;
+  if (kind === "video") return <Film className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" />;
+  if (kind === "table" || kind === "spreadsheet") return <Table className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" />;
+  return <FileText className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" />;
+}
+
+function parseXlsxSheet(sheetXml: string, sharedXml: string): string[][] {
+  const parser = new DOMParser();
+  const sharedDoc = sharedXml ? parser.parseFromString(sharedXml, "application/xml") : null;
+  const sharedStrings = sharedDoc
+    ? Array.from(sharedDoc.querySelectorAll("si")).map((node) =>
+        Array.from(node.querySelectorAll("t")).map((part) => part.textContent ?? "").join("")
+      )
+    : [];
+  const sheetDoc = parser.parseFromString(sheetXml, "application/xml");
+  const rows: string[][] = [];
+
+  for (const row of Array.from(sheetDoc.querySelectorAll("sheetData row")).slice(0, TABLE_PREVIEW_ROWS)) {
+    const cells: string[] = [];
+    for (const cell of Array.from(row.querySelectorAll("c")).slice(0, TABLE_PREVIEW_COLS)) {
+      const ref = cell.getAttribute("r") ?? "";
+      const colIndex = Math.min(columnIndexFromCellRef(ref), TABLE_PREVIEW_COLS - 1);
+      const type = cell.getAttribute("t");
+      const valueNode = cell.querySelector("v");
+      let value = valueNode?.textContent ?? "";
+      if (type === "s") {
+        value = sharedStrings[Number(value)] ?? value;
+      } else if (type === "inlineStr") {
+        value = Array.from(cell.querySelectorAll("is t")).map((part) => part.textContent ?? "").join("");
+      }
+      cells[colIndex] = value;
+    }
+    rows.push(cells);
+  }
+
+  return rows;
+}
+
+function columnIndexFromCellRef(ref: string): number {
+  const letters = (ref.match(/[A-Z]+/i)?.[0] ?? "A").toUpperCase();
+  let index = 0;
+  for (const char of letters) {
+    index = index * 26 + char.charCodeAt(0) - 64;
+  }
+  return Math.max(index - 1, 0);
 }
 
 type PreviewFile = {
@@ -119,6 +198,424 @@ function approvalPreviewFile(
   return firstArtifact ? artifactPreview(firstArtifact) : null;
 }
 
+function PreviewUnavailable({
+  title,
+  detail,
+  href,
+  onRetry,
+}: {
+  title: string;
+  detail: string;
+  href: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex min-h-[220px] items-center justify-center p-5">
+      <div className="max-w-lg rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] p-5 text-sm">
+        <p className="font-medium text-[var(--ink)]">{title}</p>
+        <p className="mt-2 leading-6 text-[var(--ink-soft)]">{detail}</p>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-3 text-sm hover:bg-[var(--bg-2)]"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Retry
+          </button>
+          <a
+            href={href}
+            download
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-3 text-sm hover:bg-[var(--bg-2)]"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoadingPreview() {
+  return (
+    <div className="space-y-2 p-4">
+      {[1, 2, 3, 4].map((index) => (
+        <div key={index} className="h-4 animate-pulse rounded-[var(--radius-button)] bg-[var(--border-soft)]" />
+      ))}
+    </div>
+  );
+}
+
+function TablePreview({ rows }: { rows: string[][] }) {
+  const visibleRows = rows.slice(0, TABLE_PREVIEW_ROWS);
+  const colCount = Math.min(
+    TABLE_PREVIEW_COLS,
+    Math.max(...visibleRows.map((row) => row.length), 1)
+  );
+  if (visibleRows.length === 0) {
+    return <p className="p-4 text-sm text-[var(--ink-soft)]">No rows found.</p>;
+  }
+
+  return (
+    <div className="max-h-[48vh] overflow-auto">
+      <table className="min-w-full border-collapse text-left text-xs">
+        <tbody>
+          {visibleRows.map((row, rowIndex) => (
+            <tr key={rowIndex} className={rowIndex === 0 ? "bg-[var(--bg-2)] font-medium" : "odd:bg-[var(--bg-2)]/45"}>
+              {Array.from({ length: colCount }).map((_, colIndex) => (
+                <td key={colIndex} className="max-w-[260px] border border-[var(--border-soft)] px-2.5 py-1.5 align-top">
+                  <span className="block truncate" title={row[colIndex] ?? ""}>
+                    {row[colIndex] ?? ""}
+                  </span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {(rows.length > TABLE_PREVIEW_ROWS || rows.some((row) => row.length > TABLE_PREVIEW_COLS)) && (
+        <p className="border-t border-[var(--border-soft)] px-3 py-2 text-xs text-[var(--ink-soft)]">
+          Showing first {Math.min(rows.length, TABLE_PREVIEW_ROWS)} rows and {colCount} columns.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ArtifactObjectUrlPreview({
+  href,
+  file,
+  kind,
+}: {
+  href: string;
+  file: PreviewFile;
+  kind: ApprovalFileKind;
+}) {
+  const [src, setSrc] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl = "";
+    setSrc("");
+    setError(null);
+    fetch(href)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Download failed (${response.status})`);
+        return response.blob();
+      })
+      .then((blob) => {
+        const nextUrl = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(nextUrl);
+          return;
+        }
+        objectUrl = nextUrl;
+        setSrc(nextUrl);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Download failed");
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [href, reloadKey]);
+
+  if (error) {
+    return (
+      <PreviewUnavailable
+        title={`${kind === "video" ? "Video" : "Image"} preview unavailable`}
+        detail={`The artifact could not be fetched inline: ${error}. It remains available for download.`}
+        href={href}
+        onRetry={() => setReloadKey((value) => value + 1)}
+      />
+    );
+  }
+  if (!src) return <LoadingPreview />;
+
+  if (kind === "video") {
+    return (
+      <div className="flex min-h-[360px] items-center justify-center bg-[var(--bg-2)] p-4">
+        <video src={src} controls className="max-h-[52vh] max-w-full rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-black">
+          <a href={href}>Download video</a>
+        </video>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex max-h-[52vh] items-center justify-center overflow-auto bg-[var(--bg-2)] p-4">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={file.title} className="max-h-[48vh] max-w-full rounded-[var(--radius-button)] object-contain" />
+    </div>
+  );
+}
+
+function TextArtifactPreview({
+  href,
+  file,
+  kind,
+}: {
+  href: string;
+  file: PreviewFile;
+  kind: ApprovalFileKind;
+}) {
+  const [text, setText] = useState(file.text || "");
+  const [loading, setLoading] = useState(Boolean(!file.text));
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    if (file.text) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch(href)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Download failed (${response.status})`);
+        const length = Number(response.headers.get("content-length") || 0);
+        if (length > TEXT_PREVIEW_LIMIT) throw new Error("File is too large to preview inline");
+        return response.text();
+      })
+      .then((value) => {
+        if (!cancelled) setText(value);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Download failed");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [file.text, href, reloadKey]);
+
+  if (loading) return <LoadingPreview />;
+  if (error) {
+    return (
+      <PreviewUnavailable
+        title="Text preview unavailable"
+        detail={`The artifact could not be fetched inline: ${error}. It remains available for download.`}
+        href={href}
+        onRetry={() => setReloadKey((value) => value + 1)}
+      />
+    );
+  }
+
+  if (kind === "html") {
+    return (
+      <div className="max-h-[52vh] overflow-auto bg-white">
+        <iframe
+          title={file.title}
+          srcDoc={text}
+          sandbox=""
+          referrerPolicy="no-referrer"
+          className="h-[52vh] min-h-[420px] w-full border-0 bg-white"
+        />
+      </div>
+    );
+  }
+
+  if (kind === "table") {
+    const delimiter = file.title.toLowerCase().endsWith(".tsv") || (file.detail || "").toLowerCase().endsWith(".tsv") ? "\t" : undefined;
+    const rows = Papa.parse<string[]>(text, { delimiter, skipEmptyLines: true }).data;
+    return <TablePreview rows={rows} />;
+  }
+
+  return (
+    <pre className="max-h-[52vh] overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-[var(--ink)]">
+      {text}
+    </pre>
+  );
+}
+
+function PdfArtifactPreview({ href, file }: { href: string; file: PreviewFile }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState<number | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setPageCount(null);
+
+    async function renderFirstPage() {
+      try {
+        const [pdfjs, response] = await Promise.all([
+          import("pdfjs-dist/legacy/build/pdf.mjs"),
+          fetch(href),
+        ]);
+        if (!response.ok) throw new Error(`Download failed (${response.status})`);
+        pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+          "pdfjs-dist/legacy/build/pdf.worker.mjs",
+          import.meta.url,
+        ).toString();
+        const pdf = await pdfjs.getDocument({ data: new Uint8Array(await response.arrayBuffer()) }).promise;
+        const cleanupPdf = async () => {
+          const destroy = (pdf as unknown as { destroy?: () => Promise<void> | void }).destroy;
+          if (destroy) await destroy.call(pdf);
+        };
+        if (cancelled) {
+          await cleanupPdf();
+          return;
+        }
+
+        setPageCount(pdf.numPages);
+        const page = await pdf.getPage(1);
+        if (cancelled) {
+          await cleanupPdf();
+          return;
+        }
+
+        const viewport = page.getViewport({ scale: 1.25 });
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext("2d");
+        if (!canvas || !context) throw new Error("Canvas is unavailable.");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        canvas.style.width = `${Math.ceil(viewport.width)}px`;
+        canvas.style.height = `${Math.ceil(viewport.height)}px`;
+        await page.render({ canvas, canvasContext: context, viewport }).promise;
+        await cleanupPdf();
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not render PDF preview");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void renderFirstPage();
+    return () => {
+      cancelled = true;
+    };
+  }, [href, reloadKey]);
+
+  if (error) {
+    return (
+      <PreviewUnavailable
+        title="PDF preview unavailable"
+        detail={`The PDF could not be fetched or rendered inline: ${error}. It remains available for download.`}
+        href={href}
+        onRetry={() => setReloadKey((value) => value + 1)}
+      />
+    );
+  }
+
+  return (
+    <div className="flex max-h-[56vh] min-h-[420px] flex-col bg-[var(--bg-2)]">
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--paper)] px-4 py-2 text-xs text-[var(--ink-soft)]">
+        <span>{pageCount ? `Page 1 of ${pageCount}` : `Rendering ${file.title}`}</span>
+        <a href={href} download className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-2.5 hover:bg-[var(--bg-2)]">
+          <Download className="h-3.5 w-3.5" />
+          Download
+        </a>
+      </div>
+      <div className="flex-1 overflow-auto p-4">
+        {loading && <LoadingPreview />}
+        <canvas
+          ref={canvasRef}
+          className={`mx-auto max-w-full rounded-[var(--radius-button)] bg-white shadow-[var(--shadow-card)] ${loading ? "invisible" : ""}`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SpreadsheetArtifactPreview({ href }: { href: string }) {
+  const [rows, setRows] = useState<string[][]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    async function load() {
+      try {
+        const [{ default: JSZip }, response] = await Promise.all([
+          import("jszip"),
+          fetch(href),
+        ]);
+        if (!response.ok) throw new Error(`Download failed (${response.status})`);
+        const zip = await JSZip.loadAsync(await response.arrayBuffer());
+        const sheetName = Object.keys(zip.files)
+          .filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))
+          .sort()[0];
+        if (!sheetName) throw new Error("Workbook has no visible worksheet XML.");
+
+        const [sheetXml, sharedXml] = await Promise.all([
+          zip.file(sheetName)?.async("text"),
+          zip.file("xl/sharedStrings.xml")?.async("text"),
+        ]);
+        if (!sheetXml) throw new Error("Worksheet data is empty.");
+        const nextRows = parseXlsxSheet(sheetXml, sharedXml ?? "");
+        if (!cancelled) setRows(nextRows);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not preview spreadsheet");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [href, reloadKey]);
+
+  if (loading) return <LoadingPreview />;
+  if (error) {
+    return (
+      <PreviewUnavailable
+        title="Spreadsheet preview unavailable"
+        detail={`The workbook could not be fetched or parsed: ${error}. It remains available for download.`}
+        href={href}
+        onRetry={() => setReloadKey((value) => value + 1)}
+      />
+    );
+  }
+  return <TablePreview rows={rows} />;
+}
+
+function ApprovalArtifactPreviewBody({
+  file,
+  href,
+  kind,
+}: {
+  file: PreviewFile;
+  href: string | null;
+  kind: ApprovalFileKind;
+}) {
+  if (file.text && (kind === "text" || kind === "html" || kind === "table")) {
+    return <TextArtifactPreview href={href || "#"} file={file} kind={kind} />;
+  }
+  if (!href) {
+    return (
+      <div className="p-4 text-sm text-[var(--ink-soft)]">
+        This approval includes a file artifact, but no download URL is available on this review link.
+      </div>
+    );
+  }
+  if (kind === "image" || kind === "video") return <ArtifactObjectUrlPreview href={href} file={file} kind={kind} />;
+  if (kind === "pdf") return <PdfArtifactPreview href={href} file={file} />;
+  if (kind === "spreadsheet") return <SpreadsheetArtifactPreview href={href} />;
+  if (kind === "html" || kind === "table" || kind === "text") return <TextArtifactPreview href={href} file={file} kind={kind} />;
+  return (
+    <div className="p-4 text-sm text-[var(--ink-soft)]">
+      This artifact type is not previewable inline yet. Use Download to inspect it.
+    </div>
+  );
+}
+
 function ApprovalFilePreview({
   file,
   approval,
@@ -136,7 +633,7 @@ function ApprovalFilePreview({
       : api.runs.artifactUrl(approval.run_id, file.artifact.id)
     : null;
   const href = file.href || artifactHref;
-  const isImage = Boolean(href && file.mimeType?.startsWith("image/"));
+  const kind = approvalFileKind(file);
   const meta = [file.mimeType || (file.artifact ? "artifact" : "file"), file.artifact ? formatBytes(file.artifact.size_bytes) : null]
     .filter(Boolean)
     .join(" · ");
@@ -147,7 +644,7 @@ function ApprovalFilePreview({
       <div className="mt-2 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)]">
         <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--border-soft)] px-4 py-3">
           <span className="flex min-w-0 items-center gap-2">
-            {isImage ? <ImageIcon className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" /> : <FileText className="h-4 w-4 shrink-0 text-[var(--ink-soft)]" />}
+            {fileKindIcon(kind)}
             <span className="min-w-0">
               <span className="block truncate text-sm font-medium text-[var(--ink)]">{file.title}</span>
               <span className="block truncate text-xs text-[var(--ink-soft)]">{[file.detail, meta].filter(Boolean).join(" · ")}</span>
@@ -164,20 +661,7 @@ function ApprovalFilePreview({
             </a>
           )}
         </div>
-        {isImage ? (
-          <div className="max-h-[46vh] overflow-auto p-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={href ?? undefined} alt={file.title} className="max-h-[42vh] max-w-full rounded-[var(--radius-button)] object-contain" />
-          </div>
-        ) : file.text ? (
-          <pre className="max-h-[46vh] overflow-auto whitespace-pre-wrap p-4 text-sm leading-6 text-[var(--ink)]">{file.text}</pre>
-        ) : (
-          <div className="p-4 text-sm text-[var(--ink-soft)]">
-            {href
-              ? "This approval includes a file artifact. Download it to inspect the contents."
-              : "This approval includes a file artifact. Open the run to inspect the file contents."}
-          </div>
-        )}
+        <ApprovalArtifactPreviewBody file={file} href={href} kind={kind} />
       </div>
     </div>
   );
