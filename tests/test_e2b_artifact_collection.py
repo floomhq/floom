@@ -16,6 +16,7 @@ from runner_sandbox.e2b_driver import (
     _extract_context_tar,
     _install_timeout_for_run,
     _register_sandbox,
+    _sandbox_api_url,
     _sandbox_lifetime_timeout,
     active_sandbox_count,
     cancel_sandbox,
@@ -76,6 +77,7 @@ class FakeCommandRunner:
 
 class FakeFullSandbox:
     instances = []
+    last_create_kwargs = {}
 
     def __init__(self):
         self.files = FakeWritableFiles({})
@@ -84,7 +86,8 @@ class FakeFullSandbox:
         FakeFullSandbox.instances.append(self)
 
     @classmethod
-    def create(cls, **_kwargs):
+    def create(cls, **kwargs):
+        cls.last_create_kwargs = kwargs
         return cls()
 
     def kill(self):
@@ -250,11 +253,13 @@ def test_skips_path_traversal_artifact(tmp_path, monkeypatch):
 
 def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
+    monkeypatch.setenv("WORKEROS_SANDBOX_API_URL", "https://origin-api.internal/")
     monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeFullSandbox))
     # Pin WORKERS_DIR so the bundle_path traversal guard (_worker_dir_for_run
     # rejects bundles outside WORKERS_DIR.parent) accepts the tmp worker dir.
     monkeypatch.setattr(e2b_driver, "WORKERS_DIR", tmp_path / "workers")
     FakeFullSandbox.instances = []
+    FakeFullSandbox.last_create_kwargs = {}
     worker_dir = tmp_path / "worker"
     worker_dir.mkdir()
     (worker_dir / "run.py").write_text("print('unused')\n")
@@ -287,13 +292,46 @@ def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
     assert result.status == "success"
     assert result.outputs == {"ok": True}
     sandbox = FakeFullSandbox.instances[-1]
+    assert FakeFullSandbox.last_create_kwargs["envs"]["WORKEROS_API_URL"] == "https://origin-api.internal"
     command, kwargs = sandbox.commands.run_calls[-1]
     assert command == "python run.py"
+    assert kwargs["envs"]["WORKEROS_API_URL"] == "https://origin-api.internal"
     assert callable(kwargs["on_stdout"])
     assert callable(kwargs["on_stderr"])
     assert logs.count(("info", "[e2b] live stdout")) == 1
     assert logs.count(("warning", "[e2b] stderr: live stderr")) == 1
     assert not any("stdout after exit" in message for _level, message in logs)
+
+
+def test_sandbox_api_url_prefers_e2b_specific_origin(monkeypatch):
+    for name in (
+        "WORKEROS_SANDBOX_API_URL",
+        "WORKEROS_E2B_API_URL",
+        "WORKEROS_API_URL",
+        "WORKEROS_API_BASE",
+        "WORKERS_API_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    monkeypatch.setenv("WORKEROS_API_URL", "https://workers-api.floom.dev")
+    monkeypatch.setenv("WORKEROS_SANDBOX_API_URL", "https://origin-api.internal/")
+
+    assert _sandbox_api_url() == "https://origin-api.internal"
+
+
+def test_sandbox_api_url_keeps_existing_public_fallbacks(monkeypatch):
+    for name in (
+        "WORKEROS_SANDBOX_API_URL",
+        "WORKEROS_E2B_API_URL",
+        "WORKEROS_API_URL",
+        "WORKEROS_API_BASE",
+        "WORKERS_API_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    monkeypatch.setenv("WORKERS_API_URL", "https://legacy-api.example.test/")
+
+    assert _sandbox_api_url() == "https://legacy-api.example.test"
 
 
 def test_uploads_declared_context_files_as_bytes(tmp_path, monkeypatch):
