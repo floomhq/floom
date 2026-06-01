@@ -455,7 +455,7 @@ export function OverviewDashboard({
   );
 
   return (
-    <div className="flex flex-col space-y-3 pb-3 pt-4 lg:h-[calc(100dvh-4rem)] lg:min-h-0 lg:overflow-hidden">
+    <div className="flex flex-col space-y-3 pb-3 pt-4 lg:h-[calc(100dvh-8rem)] lg:min-h-[620px] lg:overflow-hidden">
       {/* Hero — compact */}
       <section>
         <h1 className="text-xl font-semibold tracking-normal text-[var(--text-primary)]">Work done</h1>
@@ -465,7 +465,7 @@ export function OverviewDashboard({
       </section>
 
       {/* Metric tiles with sparklines — S45 */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 xl:[&>*]:min-h-[118px]">
         {metrics.map((metric) => (
           <MetricCard key={metric.label} {...metric} loading={loading} />
         ))}
