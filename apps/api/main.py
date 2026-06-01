@@ -7078,7 +7078,7 @@ def update_worker(
 
     _raise_if_protected_worker_mutation(worker_id)
     parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
-    if parsed_worker_id != worker_id:
+    if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
             detail=f"worker_yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
@@ -7207,7 +7207,7 @@ def update_worker_files(
     # Validate worker.yml is parseable
     yml_item = next(f for f in payload.files if f.path == "worker.yml")
     parsed_worker_id, _config = _parse_worker_payload(yml_item.content, user_id=auth.user_id)
-    if parsed_worker_id != worker_id:
+    if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
             detail=f"worker.yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
