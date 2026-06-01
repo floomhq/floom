@@ -839,13 +839,59 @@ async def auth_middleware(request: Request, call_next):
                 status_code=401,
                 content={"detail": "Invalid or expired run token"},
             )
-        # DELETE is the only permanently irreversible operation — block it.
-        # Everything else (GET, POST, PATCH, PUT) is safe: versioning + rollback
-        # means any AI-induced change can be undone by an operator.
+        # DELETE is irreversible — route through HITL approval instead of executing directly.
+        # The worker receives 202 with an approval_id; an operator can approve/reject in
+        # the Approvals tab, and approval execution calls the same delete logic as a human.
         if request.method == "DELETE":
+            import json as _json
+            import uuid as _uuid
+            from datetime import datetime, timezone
+            try:
+                with get_db() as _conn:
+                    _run_row = _conn.execute(
+                        "SELECT owner_id, worker_id FROM runs WHERE id = ? LIMIT 1",
+                        (run_id_from_token,),
+                    ).fetchone()
+            except Exception:
+                _run_row = None
+            if _run_row is None:
+                return _JSONResponse(
+                    status_code=403,
+                    content={"detail": "Delete requires operator approval but run context was not found. Use the dashboard to delete resources."},
+                )
+            _owner_id = _run_row[0]
+            _worker_id = _run_row[1]
+            _approval_id = f"apr_{_uuid.uuid4().hex[:12]}"
+            _now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            _label = f"Worker requests DELETE {path}"
+            _decision_input = _json.dumps({
+                "kind": "destructive_delete",
+                "method": "DELETE",
+                "path": path,
+                "requested_by_run_id": run_id_from_token,
+            })
+            try:
+                with get_db() as _conn:
+                    _conn.execute(
+                        """INSERT INTO approvals
+                           (id, run_id, worker_id, status, label, preview, created_at, decision_input_json, owner_id)
+                           VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
+                        (_approval_id, run_id_from_token, _worker_id,
+                         _label, path, _now, _decision_input, _owner_id),
+                    )
+            except Exception as _exc:
+                logger.warning("Could not create destructive-delete approval: %s", _exc)
+                return _JSONResponse(
+                    status_code=403,
+                    content={"detail": "Delete requires operator approval. Failed to queue approval — use the dashboard to delete resources."},
+                )
             return _JSONResponse(
-                status_code=403,
-                content={"detail": "Workers cannot delete resources. Use the operator dashboard to delete workers or brain packs."},
+                status_code=202,
+                content={
+                    "status": "pending_approval",
+                    "approval_id": _approval_id,
+                    "detail": f"DELETE {path} requires operator approval. Approval {_approval_id} created — check the Approvals tab.",
+                },
             )
         return await call_next(request)
 
@@ -4759,22 +4805,10 @@ def update_worker(
 # DELETE /workers/{worker_id}
 # ---------------------------------------------------------------------------
 
-@app.delete("/workers/{worker_id}", status_code=204)
-def delete_worker(
-    worker_id: str,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-):
-    """Delete a worker and all dependent rows (runs, artifacts, logs).
-
-    - Dependent run, artifact, log, and webhook rows are removed with the worker.
-    - Cancels any in-progress run gracefully (marks failed).
-    - Cleans up webhook secret.
-    - Removes scheduler slot (next_run_at cleared before delete).
-    - skill_version is preserved if other workers share it.
-    """
+def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> None:
+    """Core delete-worker logic, shared by the DELETE endpoint and approval execution."""
     _raise_if_protected_worker_mutation(worker_id)
-    worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_id)
+    worker = repos.workers.get(user_id=owner_id, worker_id=worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     skill_version_id = worker.get("skill_version_id")
@@ -4796,7 +4830,7 @@ def delete_worker(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Cancel any in-progress runs gracefully before deletion
-    active_runs = repos.workers.list_active_run_ids(user_id=auth.user_id, worker_id=worker_id)
+    active_runs = repos.workers.list_active_run_ids(user_id=owner_id, worker_id=worker_id)
 
     for run_id in active_runs:
         try:
@@ -4804,7 +4838,7 @@ def delete_worker(
                 run_id,
                 RunStatus.FAILED.value,
                 error="Worker deleted",
-                user_id=auth.user_id,
+                user_id=owner_id,
                 repos=repos,
             )
             logger.info("Cancelled active run %s before worker deletion", run_id)
@@ -4819,11 +4853,9 @@ def delete_worker(
         logger.warning("Could not delete webhook secret for %s: %s", worker_id, exc)
 
     # Delete the worker (FK CASCADE removes runs/artifacts/logs/webhooks)
-    repos.workers.delete(user_id=auth.user_id, worker_id=worker_id)
+    repos.workers.delete(user_id=owner_id, worker_id=worker_id)
 
     # Check if skill_version is still referenced by other workers; preserve if so.
-    # If unreferenced, also delete the skill_versions row so name+version can
-    # be reused when the user recreates a worker with the same ID (N5 fix).
     ref_count = repos.workers.get_skill_version_ref_count(skill_version_id=skill_version_id)
     if ref_count == 0 and skill_version_id:
         repos.workers.delete_skill_version(skill_version_id=skill_version_id)
@@ -4843,6 +4875,23 @@ def delete_worker(
         logger.info("skill_version %s still referenced by %d workers, bundle preserved", skill_version_id, ref_count)
 
     invalidate_worker_cache()
+
+
+@app.delete("/workers/{worker_id}", status_code=204)
+def delete_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Delete a worker and all dependent rows (runs, artifacts, logs).
+
+    - Dependent run, artifact, log, and webhook rows are removed with the worker.
+    - Cancels any in-progress run gracefully (marks failed).
+    - Cleans up webhook secret.
+    - Removes scheduler slot (next_run_at cleared before delete).
+    - skill_version is preserved if other workers share it.
+    """
+    _delete_worker_impl(worker_id, auth.user_id, repos)
     # 204 No Content — FastAPI returns empty body automatically for status_code=204
     return None
 
@@ -7775,6 +7824,141 @@ def reject_run(
     _publish_approval_terminal_status(run_id, "rejected", auth.user_id, repos)
 
     return ActionResponse(status="rejected", run_id=run_id)
+
+
+# ---------------------------------------------------------------------------
+# Destructive-action approvals (kind=destructive_delete)
+# ---------------------------------------------------------------------------
+# When a sandboxed worker issues DELETE, the middleware queues an approval
+# instead of executing immediately. The operator decides here.
+
+import re as _re_action
+
+_RE_DELETE_WORKER = _re_action.compile(r"^/workers/([^/]+)$")
+_RE_DELETE_CONTEXT = _re_action.compile(r"^/contexts/([^/]+)$")
+_RE_DELETE_CONTEXT_FILE = _re_action.compile(r"^/contexts/([^/]+)/files/(.+)$")
+
+
+def _execute_destructive_delete(path: str, owner_id: str, repos: Repositories) -> str:
+    """Execute a pre-approved destructive delete and return a description."""
+    m = _RE_DELETE_WORKER.match(path)
+    if m:
+        worker_id = m.group(1)
+        _delete_worker_impl(worker_id, owner_id, repos)
+        return f"Worker '{worker_id}' deleted"
+
+    m = _RE_DELETE_CONTEXT.match(path)
+    if m:
+        name = m.group(1)
+        ctx = repos.contexts.get(owner_id=owner_id, name=name) if hasattr(repos, "contexts") else None
+        if ctx is None:
+            raise HTTPException(status_code=404, detail=f"Brain pack '{name}' not found")
+        repos.contexts.delete(owner_id=owner_id, name=name)
+        return f"Brain pack '{name}' deleted"
+
+    m = _RE_DELETE_CONTEXT_FILE.match(path)
+    if m:
+        name, file_path = m.group(1), m.group(2)
+        from worker_registry import WORKERS_DIR  # noqa: PLC0415
+        context_dir = WORKERS_DIR.parent / "contexts" / name
+        target = context_dir / file_path
+        if not target.exists():
+            raise HTTPException(status_code=404, detail=f"File '{file_path}' not found in brain pack '{name}'")
+        target.unlink()
+        return f"File '{file_path}' deleted from brain pack '{name}'"
+
+    raise HTTPException(
+        status_code=422,
+        detail=f"Approved delete path '{path}' could not be matched to a known resource type.",
+    )
+
+
+@app.post("/approvals/{approval_id}/approve-action")
+def approve_destructive_action(
+    approval_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Approve and execute a sandboxed-worker DELETE request.
+
+    Only works for approvals created by the run-token middleware (kind=destructive_delete).
+    """
+    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") != "destructive_delete":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval is not a destructive-action request. Use POST /runs/{run_id}/approve instead.",
+        )
+
+    path = decision_input.get("path", "")
+    description = _execute_destructive_delete(path, auth.user_id, repos)
+
+    repos.approvals.approve(
+        owner_id=auth.user_id,
+        run_id=approval["run_id"],
+        decided_at=now_iso(),
+    )
+
+    _sse_publish(approval["run_id"], {
+        "type": "approval_decided",
+        "run_id": approval["run_id"],
+        "decision": "approved",
+        "detail": description,
+    })
+
+    return {"status": "approved", "executed": path, "detail": description}
+
+
+@app.post("/approvals/{approval_id}/reject-action")
+def reject_destructive_action(
+    approval_id: str,
+    body: RejectRequest = Body(default_factory=RejectRequest),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Reject a sandboxed-worker DELETE request without executing it."""
+    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") != "destructive_delete":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval is not a destructive-action request. Use POST /runs/{run_id}/reject instead.",
+        )
+
+    repos.approvals.reject(
+        owner_id=auth.user_id,
+        run_id=approval["run_id"],
+        decided_at=now_iso(),
+        reason=body.reason,
+    )
+
+    _sse_publish(approval["run_id"], {
+        "type": "approval_decided",
+        "run_id": approval["run_id"],
+        "decision": "rejected",
+        "reason": body.reason,
+    })
+
+    return {"status": "rejected", "path": decision_input.get("path", ""), "reason": body.reason}
 
 
 @app.get("/runs/{run_id}/download")
