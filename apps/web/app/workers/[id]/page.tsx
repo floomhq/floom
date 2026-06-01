@@ -1203,7 +1203,7 @@ export default function WorkerDetailPage() {
               <TabsTrigger key={item.id} value={item.id}>
                 {item.icon}
                 <span>{item.label}</span>
-                {item.id === "triggers" && triggersCount > 1 && (
+                {item.id === "configure" && triggersCount > 1 && (
                   <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
                 )}
                 {item.id === "runs" && runsCount > 0 && (
