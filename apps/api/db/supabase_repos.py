@@ -1148,6 +1148,43 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         )
         return _response_rows(response)
 
+    def list_logs_for_worker(
+        self,
+        *,
+        user_id: str,
+        worker_id: str,
+        level: str | None = None,
+        since: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Cross-run logs for a worker via Supabase run_logs join."""
+        q = (
+            self._client.table("run_logs")
+            .select("level,message,timestamp,trace_id,run_id")
+            .eq("user_id", user_id)
+        )
+        if level:
+            q = q.eq("level", level)
+        if since:
+            q = q.gte("timestamp", since)
+        # Filter by worker via runs table join isn't directly possible in supabase-py,
+        # so fetch recent logs and filter by runs that belong to this worker.
+        runs_resp = (
+            self._client.table("runs")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("worker_id", worker_id)
+            .order("created_at", desc=True)
+            .limit(100)
+            .execute()
+        )
+        run_ids = [r["id"] for r in _response_rows(runs_resp)]
+        if not run_ids:
+            return []
+        q = q.in_("run_id", run_ids).order("timestamp", desc=True).limit(limit)
+        response = q.execute()
+        return _response_rows(response)
+
     def add_artifact(
         self,
         *,

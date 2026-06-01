@@ -124,6 +124,7 @@ def _disable_postgrest_http2() -> None:
 
 
 def _cloud_repositories() -> Repositories:
+    from db.sqlite import SqliteAlertRepository  # noqa: PLC0415
     return Repositories(
         workers=SupabaseWorkerRepository(),
         runs=SupabaseRunRepository(),
@@ -131,6 +132,7 @@ def _cloud_repositories() -> Repositories:
         secrets=SupabaseSecretRepository(),
         cli_auth=SupabaseCliAuthRepository(),
         approvals=SupabaseApprovalRepository(),
+        alerts=SqliteAlertRepository(),
     )
 
 
