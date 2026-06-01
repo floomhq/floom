@@ -41,7 +41,16 @@ async function handler(
   // current consumer) reads the session cookie directly on the backend, so
   // we skip the JWT-required guard for those paths.
   const isAuthPath = path[0] === "auth";
-  const upstreamPath = (isAuthPath ? "/" : "/api/") + path.join("/");
+  // Preserve the raw encoded pathname for file routes. `params.path` can
+  // normalize already-encoded filenames differently between local Next and
+  // Vercel, which breaks files that intentionally contain `%20`.
+  const proxyMarker = "/api/proxy";
+  const markerIndex = req.nextUrl.pathname.indexOf(proxyMarker);
+  const rawProxyPath =
+    markerIndex >= 0
+      ? req.nextUrl.pathname.slice(markerIndex + proxyMarker.length) || "/"
+      : "/" + path.map(encodeURIComponent).join("/");
+  const upstreamPath = isAuthPath ? rawProxyPath : `/api${rawProxyPath}`;
 
   // workeros-cloud auth swap: replace shared-secret x-floom-secret with
   // a Supabase JWT extracted from the workeros_cloud_session cookie that
