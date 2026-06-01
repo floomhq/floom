@@ -365,8 +365,16 @@ export interface WorkspaceAgentTool {
 
 export interface WorkspaceAgentInfo {
   agent_id: string;
+  model: string;
   system_prompt: string;
   tools: WorkspaceAgentTool[];
+  channels?: {
+    slack?: {
+      events_configured: boolean;
+      bot_configured: boolean;
+      allowed_team_ids_configured?: boolean;
+    };
+  };
 }
 
 export interface WorkspaceImportResult {
