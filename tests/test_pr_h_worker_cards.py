@@ -287,6 +287,32 @@ class TestGetStatsBatch:
 
 
 # ---------------------------------------------------------------------------
+# Worker card connection slugs
+# ---------------------------------------------------------------------------
+
+class TestWorkerCardConnectionSlugs:
+    """Unit tests for card connection projection used by /workers."""
+
+    def test_accepts_legacy_string_connection(self):
+        from main import _connection_slug_for_worker_card
+        assert _connection_slug_for_worker_card("gmail") == "gmail"
+
+    def test_accepts_typed_app_connection(self):
+        from main import _connection_slug_for_worker_card
+        assert _connection_slug_for_worker_card({"app": "google_search_console"}) == "google_search_console"
+
+    def test_accepts_mcp_connection_label(self):
+        from main import _connection_slug_for_worker_card
+        assert _connection_slug_for_worker_card({"mcp": {"label": "github"}}) == "github"
+
+    def test_ignores_null_and_empty_connection_shapes(self):
+        from main import _connection_slug_for_worker_card
+        assert _connection_slug_for_worker_card(None) is None
+        assert _connection_slug_for_worker_card({"mcp": None}) is None
+        assert _connection_slug_for_worker_card({}) is None
+
+
+# ---------------------------------------------------------------------------
 # WorkerSummary model field presence
 # ---------------------------------------------------------------------------
 
