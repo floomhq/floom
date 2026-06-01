@@ -251,6 +251,19 @@ export const api = {
       return fetchJson<import("./types").ApprovalRow[]>(`/approvals${qs}`);
     },
     count: () => fetchJson<{ pending: number }>("/approvals/count"),
+    approveAction: (approvalId: string) =>
+      fetchJson<{ status: string; executed: string; detail: string }>(
+        `/approvals/${approvalId}/approve-action`,
+        { method: "POST" }
+      ),
+    rejectAction: (approvalId: string, reason?: string) =>
+      fetchJson<{ status: string; path: string; reason?: string }>(
+        `/approvals/${approvalId}/reject-action`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        }
+      ),
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),
