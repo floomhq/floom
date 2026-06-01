@@ -44,6 +44,12 @@ def _load_app(monkeypatch, tmp_path):
     return db, main
 
 
+def _run_headers(run_id: str) -> dict[str, str]:
+    from run_token import make_run_token
+
+    return {"X-Workeros-Run-Token": make_run_token(run_id, secret="test-secret")}
+
+
 def test_composio_proxy_derives_entity_id_from_run_owner(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     repos = db.get_repositories()
@@ -103,6 +109,7 @@ def test_composio_proxy_derives_entity_id_from_run_owner(monkeypatch, tmp_path):
     client = TestClient(main.app)
     resp = client.post(
         "/runs/run-gsc/composio-execute/GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY",
+        headers=_run_headers("run-gsc"),
         json={
             "connected_account_id": "ca_test",
             "arguments": {"site_url": "https://rocketlist.ai/"},
@@ -153,6 +160,7 @@ def test_composio_proxy_rejects_sandbox_user_id_override(monkeypatch, tmp_path):
     client = TestClient(main.app)
     resp = client.post(
         "/runs/run-gsc/composio-execute/GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY",
+        headers=_run_headers("run-gsc"),
         json={"connected_account_id": "ca_test", "user_id": "other-user"},
     )
 
