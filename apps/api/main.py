@@ -259,6 +259,7 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "outbound-approval-demo",
         "research_brief",
         "reverse_match_crm",
+        "search_console_insights",
         "slack-listener",
         "weekly_update",
         "whatsapp-listener",
@@ -281,6 +282,7 @@ PUBLIC_STOCK_WORKER_IDS = frozenset(
         "outbound-approval-demo",
         "research_brief",
         "reverse_match_crm",
+        "search_console_insights",
         "weekly_update",
     }
 )
@@ -10594,7 +10596,10 @@ def _trigger_item_app_slug(item: Dict[str, Any]) -> str:
 
 
 @app.get("/integrations/triggers")
-def list_integration_triggers(app: Optional[str] = Query(None, description="Filter by app slug (e.g. 'gmail')")):
+def list_integration_triggers(
+    app: Optional[str] = Query(None, description="Filter by app slug (e.g. 'gmail')"),
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Proxy Composio's trigger catalog, cached for one hour.
 
     Pass ?app=<slug> to return only triggers for that integration.
@@ -11387,7 +11392,7 @@ def system_overview(
 
 
 @app.get("/system/platform-config", response_model=PlatformConfig)
-def platform_config():
+def platform_config(auth: AuthContext = Depends(get_auth_context)):
     """Return a redacted platform-config summary.
 
     PR S13: keep this minimal shape stable. The old settings page and the S12
@@ -11406,7 +11411,7 @@ def platform_config():
 
 
 @app.get("/system/info")
-def system_info():
+def system_info(auth: AuthContext = Depends(get_auth_context)):
     return {
         "version": app.version,
         "started_at": _PROCESS_STARTED_AT,
