@@ -332,8 +332,22 @@ export const api = {
       }
       return res.json() as Promise<{ files: import("./types").ContextFileItem[]; total_size_bytes: number }>;
     },
+    fetchFileBlob: async (name: string, path: string) => {
+      const res = await fetch(
+        `${API_BASE}/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+        { headers: withWorkspaceHeaders() }
+      );
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      return res.blob();
+    },
     fileUrl: (name: string, path: string) =>
       `${API_BASE}${withWorkspaceQuery(`/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`)}`,
+    listVersions: (name: string, limit = 50) =>
+      fetchJson<import("./types").VersionSummary[]>(`/contexts/${encodeURIComponent(name)}/versions?limit=${limit}`),
+    rollback: (name: string, versionId: string) =>
+      fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}/rollback/${versionId}`, {
+        method: "POST",
+      }),
   },
   system: {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),

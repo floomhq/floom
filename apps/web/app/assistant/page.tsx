@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, RotateCcw, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Edit3, RotateCcw, Save, X } from "lucide-react";
 
 import { api } from "@/lib/api";
 import type { ConnectionItem, VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
@@ -174,6 +174,7 @@ export default function AssistantPage() {
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [editingInstructions, setEditingInstructions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [versionsKey, setVersionsKey] = useState(0);
 
@@ -227,6 +228,7 @@ export default function AssistantPage() {
     try {
       await api.system.updateWorkspaceInstructions(instructions);
       setOriginalInstructions(instructions);
+      setEditingInstructions(false);
       toast.success("Instructions saved");
       setVersionsKey((k) => k + 1);
       await load();
@@ -240,6 +242,7 @@ export default function AssistantPage() {
   function handleInstructionsRollback(content: string) {
     setInstructions(content);
     setOriginalInstructions(content);
+    setEditingInstructions(false);
     setVersionsKey((k) => k + 1);
   }
 
@@ -291,15 +294,39 @@ export default function AssistantPage() {
                     Saved in workspace.md and prepended to the agent prompt.
                   </p>
                 </div>
-                <Button size="sm" onClick={saveInstructions} disabled={!dirty || saving}>
-                  <Save className="size-3.5" />
-                  {saving ? "Saving" : "Save"}
-                </Button>
+                {editingInstructions ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setInstructions(originalInstructions);
+                        setEditingInstructions(false);
+                      }}
+                      disabled={saving}
+                    >
+                      <X className="size-3.5" />
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={saveInstructions} disabled={!dirty || saving}>
+                      <Save className="size-3.5" />
+                      {saving ? "Saving" : "Save"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
+                    <Edit3 className="size-3.5" />
+                    Edit
+                  </Button>
+                )}
               </div>
               <Textarea
                 value={instructions}
-                onChange={(event) => setInstructions(event.target.value)}
-                className="min-h-[28rem] font-mono text-xs leading-relaxed"
+                onChange={(event) => {
+                  if (editingInstructions) setInstructions(event.target.value);
+                }}
+                readOnly={!editingInstructions}
+                className="min-h-[28rem] font-mono text-xs leading-relaxed read-only:bg-muted/40"
                 spellCheck={false}
               />
             </>
