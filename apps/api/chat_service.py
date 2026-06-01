@@ -923,7 +923,7 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
                 "label": row["label"],
                 "preview": (row["preview"] or "")[:200] or None,
                 "created_at": row["created_at"],
-                "link": f"{base}/approvals?id={approval_id}",
+                "link": f"{base}/approvals/review?id={approval_id}",
             })
         return {"ok": True, "approvals": result, "count": len(result)}
     except Exception as exc:
