@@ -9,6 +9,7 @@ import pytest
 from apps.api.config import new_supabase_anon_client, new_supabase_service_client
 from apps.api.db._secret_crypto import encrypt_secret
 from apps.api.db.supabase_repos import (
+    SupabaseApprovalRepository,
     SupabaseCliAuthRepository,
     SupabaseConnectionRepository,
     SupabaseRunRepository,
@@ -16,6 +17,64 @@ from apps.api.db.supabase_repos import (
     SupabaseWorkerRepository,
     _bytea_literal,
 )
+
+
+class _FakeResponse:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakeTable:
+    def __init__(self, rows):
+        self.rows = rows
+        self.table_name = None
+        self.filters: list[tuple[str, str]] = []
+        self.limit_value = None
+        self.selected = None
+
+    def select(self, value, **_kwargs):
+        self.selected = value
+        return self
+
+    def eq(self, key, value):
+        self.filters.append((key, value))
+        return self
+
+    def limit(self, value):
+        self.limit_value = value
+        return self
+
+    def execute(self):
+        rows = self.rows
+        for key, value in self.filters:
+            rows = [row for row in rows if row.get(key) == value]
+        if self.limit_value is not None:
+            rows = rows[: self.limit_value]
+        return _FakeResponse(rows)
+
+
+class _FakeClient:
+    def __init__(self, rows):
+        self.table_ref = _FakeTable(rows)
+
+    def table(self, name):
+        self.table_ref.table_name = name
+        return self.table_ref
+
+
+def test_approval_repository_get_public_loads_by_id_without_owner_scope():
+    approval = {
+        "id": "apr_test",
+        "run_id": "run_test",
+        "owner_id": "user_test",
+        "status": "pending",
+    }
+    client = _FakeClient([approval])
+    repo = SupabaseApprovalRepository(client=client)
+
+    assert repo.get_public(approval_id="apr_test") == approval
+    assert client.table_ref.table_name == "approvals"
+    assert ("id", "apr_test") in client.table_ref.filters
 
 
 def _now_iso() -> str:

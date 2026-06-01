@@ -1955,6 +1955,26 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
                 return None
             raise
 
+    def get_public(self, *, approval_id: str) -> dict[str, Any] | None:
+        """Fetch one approval for signed public review links.
+
+        The caller validates the HMAC token against id, run_id, and owner_id
+        before returning any approval fields to the browser.
+        """
+        try:
+            response = (
+                self._client.table(self._TABLE)
+                .select("*")
+                .eq("id", approval_id)
+                .limit(1)
+                .execute()
+            )
+            return _first_row(response)
+        except Exception as exc:
+            if _is_table_not_found(exc):
+                return None
+            raise
+
     def get_by_run_id(self, *, run_id: str) -> dict[str, Any] | None:
         try:
             response = (
