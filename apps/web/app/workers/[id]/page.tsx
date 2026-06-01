@@ -1716,16 +1716,30 @@ export default function WorkerDetailPage() {
             <div className="space-y-3">
               <div>
                 <Label className="text-sm font-medium">Notifications</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">Post to a webhook when runs complete or fail. Works with Slack, Discord, Zapier, and any HTTP endpoint.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Get notified when runs complete or fail.</p>
               </div>
-              <Input
-                type="url"
-                className="text-sm"
-                placeholder="https://hooks.example.com/run-events"
-                value={notifyUrl}
-                onChange={(e) => setNotifyUrl(e.target.value)}
-              />
-              {notifyUrl.trim() && (
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Webhook URL</Label>
+                <Input
+                  type="url"
+                  className="text-sm"
+                  placeholder="https://hooks.example.com/run-events"
+                  value={notifyUrl}
+                  onChange={(e) => setNotifyUrl(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Email recipients</Label>
+                <Input
+                  type="text"
+                  className="text-sm"
+                  placeholder="alice@example.com, bob@example.com"
+                  value={notifyEmailTo}
+                  onChange={(e) => setNotifyEmailTo(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">Comma-separated. Sent via Resend.</p>
+              </div>
+              {(notifyUrl.trim() || notifyEmailTo.trim()) && (
                 <div className="flex items-center gap-4">
                   <span className="text-xs text-muted-foreground">Notify on:</span>
                   <label className="flex items-center gap-1.5 cursor-pointer select-none text-sm">
