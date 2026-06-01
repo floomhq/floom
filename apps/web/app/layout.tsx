@@ -1,11 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Ambient } from "@/components/Ambient";
-import { Sidebar } from "@/components/layout/sidebar";
-import { CommandPalette } from "@/components/CommandPalette";
-import { Toaster } from "@/components/ui/sonner";
-import { IconSprite } from "@/components/IconSprite";
+import { AppShell } from "@/components/layout/AppShell";
 
 // PR S20 polish: Geist Sans + Geist Mono (openchat-v2). Replaces the previous
 // Google-Fonts @import of Inter; loaded via next/font for proper inlining
@@ -36,17 +32,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="flex min-h-full flex-col bg-transparent text-foreground md:flex-row">
-        {/* Global brand/icon SVG sprite — registers #brand-* and #icon-* symbols
-            so BrandLogo <use> references resolve on every route (not just
-            /connections). Fixes empty tool-logo boxes on worker cards. */}
-        <IconSprite />
-        <Ambient />
-        <Sidebar />
-        <main className="relative z-10 flex-1 min-w-0">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
-        </main>
-        <CommandPalette />
-        <Toaster position="bottom-right" />
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
