@@ -48,3 +48,4 @@ CODEX_BRIEF.md
 .phase-state.json
 .codex-*.md
 .codex-*.log
+.gstack/
