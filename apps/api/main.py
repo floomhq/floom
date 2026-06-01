@@ -1397,6 +1397,9 @@ def _is_sensitive_artifact_row(row: Any) -> bool:
 
 
 def _raise_if_protected_worker_mutation(worker_id: str) -> None:
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local":
+        return
     if worker_id in PROTECTED_STOCK_WORKER_IDS:
         raise HTTPException(status_code=403, detail="Stock workers cannot be modified through the API")
 
