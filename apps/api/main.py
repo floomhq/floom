@@ -830,7 +830,10 @@ async def auth_middleware(request: Request, call_next):
 
     path = request.url.path
 
-    # Run-scoped token check — always evaluated, even in dev mode.
+    # Run-scoped token check — always evaluated, even in dev mode. A run token
+    # is a narrow sandbox capability: it can only call its own Composio proxy
+    # path. Worker-to-worker orchestration and destructive actions use the
+    # authenticated operator/server paths, never this sandbox token.
     run_token_header = request.headers.get("x-workeros-run-token", "")
     if run_token_header:
         run_id_from_token = verify_run_token(run_token_header, secret=secret)
@@ -839,59 +842,16 @@ async def auth_middleware(request: Request, call_next):
                 status_code=401,
                 content={"detail": "Invalid or expired run token"},
             )
-        # DELETE is irreversible — route through HITL approval instead of executing directly.
-        # The worker receives 202 with an approval_id; an operator can approve/reject in
-        # the Approvals tab, and approval execution calls the same delete logic as a human.
-        if request.method == "DELETE":
-            import json as _json
-            import uuid as _uuid
-            from datetime import datetime, timezone
-            try:
-                with get_db() as _conn:
-                    _run_row = _conn.execute(
-                        "SELECT owner_id, worker_id FROM runs WHERE id = ? LIMIT 1",
-                        (run_id_from_token,),
-                    ).fetchone()
-            except Exception:
-                _run_row = None
-            if _run_row is None:
-                return _JSONResponse(
-                    status_code=403,
-                    content={"detail": "Delete requires operator approval but run context was not found. Use the dashboard to delete resources."},
-                )
-            _owner_id = _run_row[0]
-            _worker_id = _run_row[1]
-            _approval_id = f"apr_{_uuid.uuid4().hex[:12]}"
-            _now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            _label = f"Worker requests DELETE {path}"
-            _decision_input = _json.dumps({
-                "kind": "destructive_delete",
-                "method": "DELETE",
-                "path": path,
-                "requested_by_run_id": run_id_from_token,
-            })
-            try:
-                with get_db() as _conn:
-                    _conn.execute(
-                        """INSERT INTO approvals
-                           (id, run_id, worker_id, status, label, preview, created_at, decision_input_json, owner_id)
-                           VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
-                        (_approval_id, run_id_from_token, _worker_id,
-                         _label, path, _now, _decision_input, _owner_id),
-                    )
-            except Exception as _exc:
-                logger.warning("Could not create destructive-delete approval: %s", _exc)
-                return _JSONResponse(
-                    status_code=403,
-                    content={"detail": "Delete requires operator approval. Failed to queue approval — use the dashboard to delete resources."},
-                )
+        if not _RE_RUN_COMPOSIO_PROXY.match(path):
             return _JSONResponse(
-                status_code=202,
-                content={
-                    "status": "pending_approval",
-                    "approval_id": _approval_id,
-                    "detail": f"DELETE {path} requires operator approval. Approval {_approval_id} created — check the Approvals tab.",
-                },
+                status_code=403,
+                content={"detail": "Run tokens are only valid for Composio proxy calls"},
+            )
+        path_run_id = path.split("/", 3)[2] if path.startswith("/runs/") else ""
+        if path_run_id != run_id_from_token:
+            return _JSONResponse(
+                status_code=403,
+                content={"detail": "Run token does not match request run_id"},
             )
         return await call_next(request)
 
@@ -914,7 +874,7 @@ async def auth_middleware(request: Request, call_next):
 logger = logging.getLogger("floom.api")
 
 # Regex for run-authenticated Composio proxy (no x-floom-secret required;
-# auth is by run_id which the sandbox knows as FLOOM_RUN_ID).
+# auth is by X-Workeros-Run-Token, scoped to the run_id in the path).
 import re as _re
 _RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
 
@@ -9090,12 +9050,12 @@ def get_run_logs(
 # ---------------------------------------------------------------------------
 # Workers inside E2B sandboxes cannot hold COMPOSIO_API_KEY (platform secret).
 # Instead, they call POST /runs/{run_id}/composio-execute/{tool_slug} using
-# their own FLOOM_RUN_ID as the auth token.  The API validates the run_id is
-# in RUNNING status, looks up the connection for the requested app, and proxies
-# the Composio v3 tool-execute call server-side.
+# their own WORKEROS_RUN_TOKEN header.  The API validates the signed run token,
+# validates the run_id is in RUNNING status, looks up the connection for the
+# requested app, and proxies the Composio v3 tool-execute call server-side.
 #
-# Auth: no x-floom-secret (the path is middleware-exempt). The run_id itself
-# acts as a short-lived bearer token — it's valid only while the run is active.
+# Auth: no x-floom-secret (the path is middleware-exempt). The signed run token
+# is a short-lived bearer credential and is valid only for this endpoint.
 
 class _ComposioProxyRequest(BaseModel):
     # Composio tool-execute body fields (all optional; forwarded as-is)
@@ -9106,6 +9066,7 @@ class _ComposioProxyRequest(BaseModel):
 
 @app.post("/runs/{run_id}/composio-execute/{tool_slug}")
 def composio_execute_proxy(
+    request: Request,
     run_id: str,
     tool_slug: str,
     body: _ComposioProxyRequest,
@@ -9122,6 +9083,13 @@ def composio_execute_proxy(
       4. Returns Composio's JSON response verbatim.
     """
     import requests as _req_lib
+    from run_token import verify_run_token as _verify_run_token
+
+    token_run_id = _verify_run_token(request.headers.get("x-workeros-run-token", ""))
+    if token_run_id is None:
+        raise HTTPException(status_code=401, detail="Missing or invalid run token")
+    if token_run_id != run_id:
+        raise HTTPException(status_code=403, detail="Run token does not match request run_id")
 
     # 1. Validate run_id — must exist in DB and be RUNNING.
     #    NOTE: get_any() is the UNSCOPED run lookup. That is correct *here* and
