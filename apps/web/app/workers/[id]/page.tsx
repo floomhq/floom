@@ -23,7 +23,7 @@ import {
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
   Brain as BrainIcon, Settings2, AlignLeft,
 } from "lucide-react";
-import { dump as dumpYaml } from "js-yaml";
+import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -287,6 +287,15 @@ export default function WorkerDetailPage() {
   // Source tab — yaml/form toggle (both are editable)
   const [sourceMode, setSourceMode] = useState<"yaml" | "form">("form");
 
+  // Source Form — full editable worker manifest state
+  const [formName, setFormName] = useState("");
+  const [formInputs, setFormInputs] = useState<WorkerInput[]>([]);
+  const [formOutputs, setFormOutputs] = useState<WorkerOutput[]>([]);
+  const [formSecrets, setFormSecrets] = useState<string[]>([]);
+  const [formConnections, setFormConnections] = useState<string[]>([]);
+  const [formAddSecret, setFormAddSecret] = useState("");
+  const [formAddConnection, setFormAddConnection] = useState("");
+
   // P1-C (prove100 2026-05-30): worker actions — Archive (reversible) and
   // Delete (destructive, confirm-gated). The API exposed both DELETE and a
   // /restore counterpart but no UI surfaced either, so generated/test workers
@@ -426,6 +435,12 @@ export default function WorkerDetailPage() {
           inputDefs[inp.name] = inp.default !== undefined && inp.default !== null ? String(inp.default) : "";
         });
         setConfigInputDefaults(inputDefs);
+        // Init form view state
+        setFormName(w.name || "");
+        setFormInputs(w.config.inputs || []);
+        setFormOutputs(w.config.outputs || []);
+        setFormSecrets(w.config.secrets || []);
+        setFormConnections((w.config.connections || []).filter((c: unknown) => typeof c === "string") as string[]);
         // Init retry/notify from config
         const retryCfg = (w.config as { retry?: { max_attempts?: number; delay_seconds?: number } }).retry;
         setRetryEnabled(!!retryCfg);
@@ -937,6 +952,113 @@ export default function WorkerDetailPage() {
     await commitSettingsSave();
   }
 
+  async function commitFormSave() {
+    if (!worker) return;
+    setConfigSaving(true);
+    try {
+      const yamlContent =
+        editFiles.find((f) => f.path === "worker.yml")?.content ||
+        worker.manifest_yaml || "";
+      const parsed = ((loadYaml(yamlContent) || {}) as Record<string, unknown>);
+
+      if (formName.trim()) parsed.name = formName.trim();
+      parsed.description = configDesc;
+
+      if (formInputs.length > 0) {
+        parsed.inputs = formInputs.map((inp) => {
+          const obj: Record<string, unknown> = { name: inp.name };
+          if (inp.label) obj.label = inp.label;
+          if (inp.type) obj.type = inp.type;
+          if (inp.required) obj.required = true;
+          if (inp.placeholder) obj.placeholder = inp.placeholder;
+          if (inp.description) obj.description = inp.description;
+          // Use the current default from the input object itself (user may have edited it inline)
+          if (inp.default !== undefined && inp.default !== null && inp.default !== "") {
+            obj.default = inp.default;
+          }
+          return obj;
+        });
+      }
+
+      if (formOutputs.length > 0) {
+        parsed.outputs = formOutputs.map((out) => {
+          const obj: Record<string, unknown> = { name: out.name };
+          if (out.label) obj.label = out.label;
+          if (out.type) obj.type = out.type;
+          return obj;
+        });
+      } else {
+        delete parsed.outputs;
+      }
+
+      if (formSecrets.length > 0) {
+        parsed.secrets = formSecrets;
+      } else {
+        delete parsed.secrets;
+      }
+
+      const nonStringConns = (worker.config.connections || []).filter(
+        (c) => typeof c !== "string"
+      );
+      const allConns = [...formConnections, ...nonStringConns];
+      if (allConns.length > 0) {
+        parsed.connections = allConns;
+      } else {
+        delete parsed.connections;
+      }
+
+      const newYaml = dumpYaml(parsed, { lineWidth: 120 });
+      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: newYaml }]);
+      toast.success("Worker saved");
+      setConfigDescOriginal(configDesc);
+
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      setFormName(updated.name || "");
+      setFormInputs(updated.config.inputs || []);
+      setFormOutputs(updated.config.outputs || []);
+      setFormSecrets(updated.config.secrets || []);
+      setFormConnections(
+        (updated.config.connections || []).filter((c) => typeof c === "string") as string[]
+      );
+      const updatedFiles = deriveSourceFiles(updated)
+        .filter((f: WorkerFile) => !f.binary)
+        .map((f: WorkerFile) => ({ path: f.path, content: f.content || "" }));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setConfigSaving(false);
+      setConflictModalOpen(false);
+      setPendingSaveAfterConflict(false);
+    }
+  }
+
+  async function handleSaveForm() {
+    if (!worker) return;
+    const descChanged = configDesc.trim() !== configDescOriginal.trim();
+    if (descChanged) {
+      setCheckingConflicts(true);
+      try {
+        const result = await api.workers.suggest(worker.id, configDesc.trim());
+        if (result.has_conflicts && result.suggestions.length > 0) {
+          setConflictSuggestions(result.suggestions);
+          setConflictModalOpen(true);
+          setPendingSaveAfterConflict(true);
+          return;
+        }
+      } catch {
+        // proceed
+      } finally {
+        setCheckingConflicts(false);
+      }
+    }
+    await commitFormSave();
+  }
+
   // P1-C: archive this worker (reversible). On success route back to the list:
   // the archived worker correctly drops out of the default view and surfaces in
   // the Archived view (which offers Restore). Redirecting avoids relying on the
@@ -1358,7 +1480,7 @@ export default function WorkerDetailPage() {
             <Button variant="outline" size="sm" onClick={() => { setConflictModalOpen(false); setPendingSaveAfterConflict(false); }}>
               Cancel — I&apos;ll fix it
             </Button>
-            <Button size="sm" onClick={() => { if (pendingSaveAfterConflict) commitConfigureSave(); }}>
+            <Button size="sm" onClick={() => { if (pendingSaveAfterConflict) { if (sourceMode === "form") commitFormSave(); else commitConfigureSave(); } }}>
               Save anyway
             </Button>
           </DialogFooter>
@@ -1694,19 +1816,24 @@ export default function WorkerDetailPage() {
 
             {sourceMode === "form" && (
               <div className="max-w-2xl space-y-6 pt-1">
-                {/* Name — read-only identity field */}
+                {/* Name */}
                 <div className="space-y-1.5">
                   <Label className="text-sm font-medium">Name</Label>
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-muted/40">
-                    <span className="text-sm text-foreground">{worker.name}</span>
-                    <span className="text-xs text-muted-foreground font-mono ml-auto">{worker.id}</span>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      className="text-sm flex-1"
+                      value={formName}
+                      onChange={(e) => setFormName(e.target.value)}
+                      placeholder="Worker name"
+                    />
+                    <span className="text-xs text-muted-foreground font-mono shrink-0">{worker.id}</span>
                   </div>
                 </div>
 
-                {/* Description — editable */}
+                {/* Description */}
                 <div className="space-y-1.5">
                   <Label className="text-sm font-medium">Description</Label>
-                  <p className="text-xs text-muted-foreground">Changing this will check for conflicts with the worker&apos;s configuration.</p>
+                  <p className="text-xs text-muted-foreground">Changing this checks for conflicts with the worker&apos;s configuration.</p>
                   <Textarea
                     rows={3}
                     value={configDesc}
@@ -1716,89 +1843,288 @@ export default function WorkerDetailPage() {
                   />
                 </div>
 
-                {/* Inputs — full definition shown, default editable */}
-                {(worker.config.inputs || []).length > 0 && (
-                  <div className="space-y-2">
+                {/* Inputs */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
                     <div>
                       <Label className="text-sm font-medium">Inputs</Label>
-                      <p className="text-xs text-muted-foreground mt-0.5">Default values run when triggered on a schedule or without manual input.</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Defaults are used when the worker runs on a schedule or without manual input.</p>
                     </div>
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                      onClick={() =>
+                        setFormInputs((prev) => [
+                          ...prev,
+                          { name: `input_${prev.length + 1}`, label: "", type: "text", required: false },
+                        ])
+                      }
+                    >
+                      <Plus className="size-3" /> Add input
+                    </button>
+                  </div>
+                  {formInputs.length > 0 && (
                     <div className="rounded-lg border border-border divide-y divide-border">
-                      {(worker.config.inputs || []).map((inp) => (
-                        <div key={inp.name} className="px-4 py-3 space-y-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-sm font-medium truncate">{inp.label || inp.name}</span>
-                            <span className="text-[10px] font-mono bg-muted text-muted-foreground rounded px-1.5 py-0.5 shrink-0">{inp.type || "text"}</span>
-                            {inp.required && (
-                              <span className="text-[10px] border border-border rounded px-1 shrink-0 text-muted-foreground">required</span>
-                            )}
-                            <span className="text-xs text-muted-foreground font-mono ml-auto shrink-0">{inp.name}</span>
-                          </div>
-                          {inp.description && (
-                            <p className="text-xs text-muted-foreground">{inp.description}</p>
-                          )}
+                      {formInputs.map((inp, idx) => (
+                        <div key={inp.name + idx} className="px-4 py-3 space-y-2.5">
+                          {/* Row 1: label, type, required, remove */}
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-16 shrink-0">Default</span>
+                            <Input
+                              className="h-7 text-xs flex-1 min-w-0"
+                              placeholder="Label"
+                              value={inp.label || ""}
+                              onChange={(e) =>
+                                setFormInputs((prev) =>
+                                  prev.map((p, i) => i === idx ? { ...p, label: e.target.value } : p)
+                                )
+                              }
+                            />
+                            <select
+                              className="h-7 text-xs border border-border rounded-md px-1.5 bg-background text-foreground shrink-0"
+                              value={inp.type || "text"}
+                              onChange={(e) =>
+                                setFormInputs((prev) =>
+                                  prev.map((p, i) => i === idx ? { ...p, type: e.target.value } : p)
+                                )
+                              }
+                            >
+                              {["text", "textarea", "number", "file", "select"].map((t) => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={!!inp.required}
+                              title="Required"
+                              onClick={() =>
+                                setFormInputs((prev) =>
+                                  prev.map((p, i) => i === idx ? { ...p, required: !p.required } : p)
+                                )
+                              }
+                              className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border transition-colors ${inp.required ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"}`}
+                            >
+                              required
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setFormInputs((prev) => prev.filter((_, i) => i !== idx))}
+                              className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          </div>
+                          {/* Row 2: key name, placeholder */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-14 shrink-0">Key</span>
+                            <Input
+                              className="h-7 text-xs font-mono w-36 shrink-0"
+                              placeholder="field_name"
+                              value={inp.name}
+                              onChange={(e) =>
+                                setFormInputs((prev) =>
+                                  prev.map((p, i) => i === idx ? { ...p, name: e.target.value } : p)
+                                )
+                              }
+                            />
+                            <span className="text-xs text-muted-foreground w-20 shrink-0 text-right">Placeholder</span>
                             <Input
                               className="h-7 text-xs flex-1"
-                              placeholder={inp.placeholder || "No default — user must provide at runtime"}
-                              value={configInputDefaults[inp.name] ?? ""}
+                              placeholder="Hint shown to user"
+                              value={inp.placeholder || ""}
                               onChange={(e) =>
-                                setConfigInputDefaults((prev) => ({ ...prev, [inp.name]: e.target.value }))
+                                setFormInputs((prev) =>
+                                  prev.map((p, i) => i === idx ? { ...p, placeholder: e.target.value } : p)
+                                )
+                              }
+                            />
+                          </div>
+                          {/* Row 3: default */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-14 shrink-0">Default</span>
+                            <Input
+                              className="h-7 text-xs flex-1"
+                              placeholder="No default — user must provide at runtime"
+                              value={inp.default !== undefined && inp.default !== null ? String(inp.default) : ""}
+                              onChange={(e) =>
+                                setFormInputs((prev) =>
+                                  prev.map((p, i) => i === idx ? { ...p, default: e.target.value } : p)
+                                )
                               }
                             />
                           </div>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
+                  {formInputs.length === 0 && (
+                    <p className="text-xs text-muted-foreground italic">No inputs defined. Click &quot;Add input&quot; to add one.</p>
+                  )}
+                </div>
 
-                {/* Outputs — read-only */}
-                {(worker.config.outputs || []).length > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">Outputs</Label>
-                    <div className="rounded-lg border border-border divide-y divide-border">
-                      {(worker.config.outputs || []).map((out) => (
-                        <div key={out.name} className="flex items-center gap-2 px-4 py-2.5">
-                          <span className="text-sm truncate">{out.label || out.name}</span>
-                          <span className="text-[10px] font-mono bg-muted text-muted-foreground rounded px-1.5 py-0.5 shrink-0">{out.type || "text"}</span>
-                          <span className="text-xs text-muted-foreground font-mono ml-auto shrink-0">{out.name}</span>
+                {/* Advanced collapsible — outputs, connections, secrets */}
+                <Collapsible>
+                  <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors select-none">
+                    <ChevronRight className="size-3 transition-transform [[data-state=open]_&]:rotate-90" />
+                    Advanced
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-6 pt-4">
+                    {/* Outputs */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-medium">Outputs</Label>
+                        <button
+                          type="button"
+                          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                          onClick={() =>
+                            setFormOutputs((prev) => [
+                              ...prev,
+                              { name: `output_${prev.length + 1}`, label: "", type: "text" },
+                            ])
+                          }
+                        >
+                          <Plus className="size-3" /> Add output
+                        </button>
+                      </div>
+                      {formOutputs.length > 0 ? (
+                        <div className="rounded-lg border border-border divide-y divide-border">
+                          {formOutputs.map((out, idx) => (
+                            <div key={out.name + idx} className="flex items-center gap-2 px-4 py-2.5">
+                              <Input
+                                className="h-7 text-xs flex-1"
+                                placeholder="Label"
+                                value={out.label || ""}
+                                onChange={(e) =>
+                                  setFormOutputs((prev) =>
+                                    prev.map((p, i) => i === idx ? { ...p, label: e.target.value } : p)
+                                  )
+                                }
+                              />
+                              <select
+                                className="h-7 text-xs border border-border rounded-md px-1.5 bg-background text-foreground shrink-0"
+                                value={out.type || "text"}
+                                onChange={(e) =>
+                                  setFormOutputs((prev) =>
+                                    prev.map((p, i) => i === idx ? { ...p, type: e.target.value } : p)
+                                  )
+                                }
+                              >
+                                {["text", "json", "file", "markdown", "number"].map((t) => (
+                                  <option key={t} value={t}>{t}</option>
+                                ))}
+                              </select>
+                              <Input
+                                className="h-7 text-xs font-mono w-32 shrink-0"
+                                placeholder="key_name"
+                                value={out.name}
+                                onChange={(e) =>
+                                  setFormOutputs((prev) =>
+                                    prev.map((p, i) => i === idx ? { ...p, name: e.target.value } : p)
+                                  )
+                                }
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setFormOutputs((prev) => prev.filter((_, i) => i !== idx))}
+                                className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                              >
+                                <X className="size-3.5" />
+                              </button>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      ) : (
+                        <p className="text-xs text-muted-foreground italic">No outputs defined.</p>
+                      )}
                     </div>
-                  </div>
-                )}
 
-                {/* Connections required — read-only */}
-                {(worker.config.connections || []).filter((c): c is string => typeof c === "string").length > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">Connections required</Label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(worker.config.connections as string[]).map((slug) => (
-                        <span key={slug} className="inline-flex items-center gap-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1">{slug}</span>
-                      ))}
+                    {/* Connections */}
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Connections required</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Composio app slugs this worker needs (e.g. <code className="font-mono">slack</code>, <code className="font-mono">gmail</code>).</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {formConnections.map((slug, idx) => (
+                          <span key={slug + idx} className="inline-flex items-center gap-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1">
+                            {slug}
+                            <button type="button" onClick={() => setFormConnections((prev) => prev.filter((_, i) => i !== idx))} className="text-muted-foreground hover:text-foreground ml-0.5"><X className="size-2.5" /></button>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          className="h-7 text-xs font-mono w-40"
+                          placeholder="slack"
+                          value={formAddConnection}
+                          onChange={(e) => setFormAddConnection(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && formAddConnection.trim()) {
+                              setFormConnections((prev) => [...prev, formAddConnection.trim()]);
+                              setFormAddConnection("");
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={() => {
+                            if (formAddConnection.trim()) {
+                              setFormConnections((prev) => [...prev, formAddConnection.trim()]);
+                              setFormAddConnection("");
+                            }
+                          }}
+                        >
+                          Add
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
 
-                {/* Secrets required — read-only */}
-                {(worker.config.secrets || []).length > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium">Secrets required</Label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(worker.config.secrets || []).map((s) => (
-                        <span key={s} className="inline-flex items-center gap-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1">{s}</span>
-                      ))}
+                    {/* Secrets */}
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Secrets required</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Environment variable names this worker reads (e.g. <code className="font-mono">API_KEY</code>).</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {formSecrets.map((s, idx) => (
+                          <span key={s + idx} className="inline-flex items-center gap-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1">
+                            {s}
+                            <button type="button" onClick={() => setFormSecrets((prev) => prev.filter((_, i) => i !== idx))} className="text-muted-foreground hover:text-foreground ml-0.5"><X className="size-2.5" /></button>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          className="h-7 text-xs font-mono w-40"
+                          placeholder="API_KEY"
+                          value={formAddSecret}
+                          onChange={(e) => setFormAddSecret(e.target.value.toUpperCase())}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && formAddSecret.trim()) {
+                              setFormSecrets((prev) => [...prev, formAddSecret.trim()]);
+                              setFormAddSecret("");
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={() => {
+                            if (formAddSecret.trim()) {
+                              setFormSecrets((prev) => [...prev, formAddSecret.trim()]);
+                              setFormAddSecret("");
+                            }
+                          }}
+                        >
+                          Add
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  </CollapsibleContent>
+                </Collapsible>
 
                 {/* Save */}
                 <div className="flex items-center gap-3 pt-1">
                   <Button
                     size="sm"
-                    onClick={handleSaveConfigure}
+                    onClick={handleSaveForm}
                     disabled={configSaving || checkingConflicts}
                   >
                     {checkingConflicts ? "Checking…" : configSaving ? "Saving…" : "Save"}
