@@ -1587,49 +1587,35 @@ export default function WorkerDetailPage() {
             <div className="space-y-3">
               <div>
                 <Label className="text-sm font-medium">Notifications</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">Get notified when runs complete or fail — via webhook, email, or both.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Post to a webhook when runs complete or fail. Works with Slack, Discord, Zapier, and any HTTP endpoint.</p>
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Webhook</Label>
-                <Input
-                  type="url"
-                  className="text-sm"
-                  placeholder="https://hooks.example.com/run-events (Slack, Discord, Zapier…)"
-                  value={notifyUrl}
-                  onChange={(e) => setNotifyUrl(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Email</Label>
-                <Input
-                  type="text"
-                  className="text-sm"
-                  placeholder="alice@example.com, bob@example.com"
-                  value={notifyEmailTo}
-                  onChange={(e) => setNotifyEmailTo(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">Requires SMTP_HOST configured on the server. Comma-separated addresses.</p>
-              </div>
-              {(notifyUrl.trim() || notifyEmailTo.trim()) && (
-                <div className="flex items-center gap-4 text-sm">
+              <Input
+                type="url"
+                className="text-sm"
+                placeholder="https://hooks.example.com/run-events"
+                value={notifyUrl}
+                onChange={(e) => setNotifyUrl(e.target.value)}
+              />
+              {notifyUrl.trim() && (
+                <div className="flex items-center gap-4">
                   <span className="text-xs text-muted-foreground">Notify on:</span>
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none text-sm">
                     <input
                       type="checkbox"
                       className="rounded"
                       checked={notifyOnFailed}
                       onChange={(e) => setNotifyOnFailed(e.target.checked)}
                     />
-                    <span>Failure</span>
+                    <span className="text-sm">Failure</span>
                   </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none text-sm">
                     <input
                       type="checkbox"
                       className="rounded"
                       checked={notifyOnCompleted}
                       onChange={(e) => setNotifyOnCompleted(e.target.checked)}
                     />
-                    <span>Success</span>
+                    <span className="text-sm">Success</span>
                   </label>
                 </div>
               )}
@@ -1708,10 +1694,19 @@ export default function WorkerDetailPage() {
 
             {sourceMode === "form" && (
               <div className="max-w-2xl space-y-6 pt-1">
-                {/* Description */}
-                <div className="space-y-2">
+                {/* Name — read-only identity field */}
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">Name</Label>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-md border border-border bg-muted/40">
+                    <span className="text-sm text-foreground">{worker.name}</span>
+                    <span className="text-xs text-muted-foreground font-mono ml-auto">{worker.id}</span>
+                  </div>
+                </div>
+
+                {/* Description — editable */}
+                <div className="space-y-1.5">
                   <Label className="text-sm font-medium">Description</Label>
-                  <p className="text-xs text-muted-foreground">Describe what this worker does. If you change this, we&apos;ll check for any conflicts with your current configuration.</p>
+                  <p className="text-xs text-muted-foreground">Changing this will check for conflicts with the worker&apos;s configuration.</p>
                   <Textarea
                     rows={3}
                     value={configDesc}
@@ -1721,41 +1716,86 @@ export default function WorkerDetailPage() {
                   />
                 </div>
 
-                {/* Inputs */}
+                {/* Inputs — full definition shown, default editable */}
                 {(worker.config.inputs || []).length > 0 && (
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     <div>
                       <Label className="text-sm font-medium">Inputs</Label>
-                      <p className="text-xs text-muted-foreground mt-0.5">Default values are used when the worker runs on a schedule or without manual input.</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Default values run when triggered on a schedule or without manual input.</p>
                     </div>
                     <div className="rounded-lg border border-border divide-y divide-border">
                       {(worker.config.inputs || []).map((inp) => (
-                        <div key={inp.name} className="flex items-center gap-3 px-4 py-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium truncate">{inp.label || inp.name}</span>
-                              {inp.required && (
-                                <span className="text-[10px] text-muted-foreground border border-border rounded px-1 shrink-0">required</span>
-                              )}
-                            </div>
-                            <span className="text-xs text-muted-foreground font-mono">{inp.name}</span>
+                        <div key={inp.name} className="px-4 py-3 space-y-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-sm font-medium truncate">{inp.label || inp.name}</span>
+                            <span className="text-[10px] font-mono bg-muted text-muted-foreground rounded px-1.5 py-0.5 shrink-0">{inp.type || "text"}</span>
+                            {inp.required && (
+                              <span className="text-[10px] border border-border rounded px-1 shrink-0 text-muted-foreground">required</span>
+                            )}
+                            <span className="text-xs text-muted-foreground font-mono ml-auto shrink-0">{inp.name}</span>
                           </div>
-                          <Input
-                            className="h-7 text-xs w-48 shrink-0"
-                            placeholder={inp.placeholder || "Default value…"}
-                            value={configInputDefaults[inp.name] ?? ""}
-                            onChange={(e) =>
-                              setConfigInputDefaults((prev) => ({ ...prev, [inp.name]: e.target.value }))
-                            }
-                          />
+                          {inp.description && (
+                            <p className="text-xs text-muted-foreground">{inp.description}</p>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground w-16 shrink-0">Default</span>
+                            <Input
+                              className="h-7 text-xs flex-1"
+                              placeholder={inp.placeholder || "No default — user must provide at runtime"}
+                              value={configInputDefaults[inp.name] ?? ""}
+                              onChange={(e) =>
+                                setConfigInputDefaults((prev) => ({ ...prev, [inp.name]: e.target.value }))
+                              }
+                            />
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
+                {/* Outputs — read-only */}
+                {(worker.config.outputs || []).length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Outputs</Label>
+                    <div className="rounded-lg border border-border divide-y divide-border">
+                      {(worker.config.outputs || []).map((out) => (
+                        <div key={out.name} className="flex items-center gap-2 px-4 py-2.5">
+                          <span className="text-sm truncate">{out.label || out.name}</span>
+                          <span className="text-[10px] font-mono bg-muted text-muted-foreground rounded px-1.5 py-0.5 shrink-0">{out.type || "text"}</span>
+                          <span className="text-xs text-muted-foreground font-mono ml-auto shrink-0">{out.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Connections required — read-only */}
+                {(worker.config.connections || []).filter((c): c is string => typeof c === "string").length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Connections required</Label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(worker.config.connections as string[]).map((slug) => (
+                        <span key={slug} className="inline-flex items-center gap-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1">{slug}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Secrets required — read-only */}
+                {(worker.config.secrets || []).length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium">Secrets required</Label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(worker.config.secrets || []).map((s) => (
+                        <span key={s} className="inline-flex items-center gap-1 text-xs font-mono bg-muted border border-border rounded px-2 py-1">{s}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Save */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 pt-1">
                   <Button
                     size="sm"
                     onClick={handleSaveConfigure}
@@ -1764,7 +1804,7 @@ export default function WorkerDetailPage() {
                     {checkingConflicts ? "Checking…" : configSaving ? "Saving…" : "Save"}
                   </Button>
                   {configDesc !== configDescOriginal && (
-                    <span className="text-xs text-muted-foreground">Description changed — will check for conflicts on save</span>
+                    <span className="text-xs text-muted-foreground">Description changed — conflicts will be checked on save</span>
                   )}
                 </div>
               </div>
