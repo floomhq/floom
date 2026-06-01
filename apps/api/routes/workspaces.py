@@ -5,6 +5,7 @@ Mounted under /api by main.py:
   GET  /api/workspaces            -> list user's workspaces + active
   POST /api/workspaces            -> create a new workspace
   POST /api/workspaces/{id}/select-> set active workspace cookie
+  POST /api/workspaces/{id}/transfer -> transfer ownership
 
 v1 is intentionally minimal: no invites, no roles, no rename, no delete.
 """
@@ -59,6 +60,12 @@ class CreateShareLinkRequest(BaseModel):
     max_uses: int | None = Field(default=None, ge=1, le=100)
 
 
+class TransferWorkspaceRequest(BaseModel):
+    recipient_user_id: str | None = Field(default=None, min_length=1)
+    recipient_email: str | None = Field(default=None, min_length=3, max_length=320)
+    confirmation: str = Field(..., min_length=1, max_length=160)
+
+
 class WorkspaceShareLinkOut(BaseModel):
     id: str
     workspace_id: str
@@ -92,6 +99,25 @@ class WorkspaceShareImportResponse(BaseModel):
     required_secrets: list[str] = Field(default_factory=list)
     required_connections: list[str] = Field(default_factory=list)
     workspace_md_present: bool = False
+
+
+class WorkspaceTransferResponse(BaseModel):
+    workspace: WorkspaceOut
+    previous_owner_user_id: str
+    new_owner_user_id: str
+    revoked_api_tokens: int
+    revoked_share_links: int = 0
+    retained_authority: list[str] = Field(default_factory=list)
+    audit_event_id: str
+
+
+_TRANSFER_RETAINED_AUTHORITY = [
+    "workers",
+    "runs",
+    "connections",
+    "secrets",
+    "workspace_share_links",
+]
 
 
 def _cookie_domain() -> str | None:
@@ -226,6 +252,64 @@ async def select_workspace(
     response = JSONResponse(_to_out(workspace).model_dump())
     _set_active_cookie(response, workspace_id)
     return response
+
+
+@router.post("/{workspace_id}/transfer", response_model=WorkspaceTransferResponse)
+async def transfer_workspace(
+    workspace_id: str,
+    payload: TransferWorkspaceRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> WorkspaceTransferResponse:
+    workspace = workspace_repo.get(workspace_id=workspace_id)
+    if workspace is None or str(workspace["owner_user_id"]) != auth.user_id:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    recipient_fields = [
+        bool((payload.recipient_user_id or "").strip()),
+        bool((payload.recipient_email or "").strip()),
+    ]
+    if recipient_fields.count(True) != 1:
+        raise HTTPException(status_code=400, detail="provide exactly one recipient")
+
+    required_confirmation = f"TRANSFER {workspace['name']}"
+    if payload.confirmation != required_confirmation:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "confirmation text mismatch",
+                "required": required_confirmation,
+            },
+        )
+
+    recipient = workspace_repo.resolve_transfer_recipient(
+        recipient_user_id=(payload.recipient_user_id or "").strip() or None,
+        recipient_email=(payload.recipient_email or "").strip().lower() or None,
+    )
+    if recipient is None:
+        raise HTTPException(status_code=404, detail="recipient not found")
+    recipient_user_id = str(recipient["id"])
+    if recipient_user_id == auth.user_id:
+        raise HTTPException(status_code=400, detail="recipient already owns workspace")
+
+    try:
+        result = workspace_repo.transfer_ownership(
+            owner_user_id=auth.user_id,
+            workspace_id=workspace_id,
+            recipient_user_id=recipient_user_id,
+            retained_authority=list(_TRANSFER_RETAINED_AUTHORITY),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail="workspace not found") from exc
+
+    return WorkspaceTransferResponse(
+        workspace=_to_out(result["workspace"]),
+        previous_owner_user_id=str(result["previous_owner_user_id"]),
+        new_owner_user_id=str(result["new_owner_user_id"]),
+        revoked_api_tokens=int(result["revoked_api_tokens"]),
+        revoked_share_links=int(result.get("revoked_share_links") or 0),
+        retained_authority=list(result["retained_authority"]),
+        audit_event_id=str(result["audit_event_id"]),
+    )
 
 
 @router.post("/{workspace_id}/share-links", response_model=WorkspaceShareLinkOut)

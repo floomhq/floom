@@ -118,3 +118,28 @@ def test_workspace_share_links_migration_hashes_tokens_and_enforces_rls():
     assert "alter table public.workspace_share_links enable row level security" in text
     assert "alter table public.workspace_share_links force row level security" in text
     assert "workspaces.owner_user_id = auth.uid()" in text
+
+
+def test_workspace_transfer_events_migration_audits_transfers_and_enforces_rls():
+    path = SUPABASE_MIGRATIONS_DIR / "0021_workspace_transfer_events.sql"
+    assert path.is_file(), f"canonical Supabase migration missing: {path}"
+    text = path.read_text(encoding="utf-8").lower()
+    assert "create table if not exists public.workspace_transfer_events" in text
+    assert "previous_owner_user_id uuid not null references public.users" in text
+    assert "new_owner_user_id uuid not null references public.users" in text
+    assert "revoked_api_tokens integer not null default 0" in text
+    assert "retained_authority text[] not null" in text
+    assert "alter table public.workspace_transfer_events enable row level security" in text
+    assert "alter table public.workspace_transfer_events force row level security" in text
+    assert "workspace owners can read transfer events" in text
+    assert "workspaces.owner_user_id = auth.uid()" in text
+    assert "alter constraint workers_skill_version_fkey deferrable initially immediate" in text
+    assert "create or replace function public.transfer_workspace_ownership" in text
+    assert "set constraints workers_skill_version_fkey deferred" in text
+    assert "delete from public.api_tokens" in text
+    assert "workspace_share_links_revoked" in text
+    assert "update public.workers" in text
+    assert "update public.runs" in text
+    assert "update public.connections" in text
+    assert "update public.secrets" in text
+    assert "update public.approvals" in text

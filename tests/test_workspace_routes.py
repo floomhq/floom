@@ -11,6 +11,7 @@ from starlette.requests import Request
 import apps.api.routes.workspaces as workspace_routes
 from apps.api.auth.workspace_context import active_workspace
 from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, ACTIVE_WORKSPACE_HEADER
+from apps.api.db import workspaces as workspace_repo
 from auth.context import AuthContext
 
 
@@ -128,6 +129,163 @@ def test_create_share_link_hides_non_owner_workspace(monkeypatch):
     assert exc_info.value.status_code == 404
 
 
+def test_transfer_workspace_hides_non_owner_workspace(monkeypatch):
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "get",
+        lambda workspace_id: {
+            "id": workspace_id,
+            "name": "Team",
+            "owner_user_id": "owner-2",
+            "created_at": "2026-01-01",
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.transfer_workspace(
+                "ws_a",
+                workspace_routes.TransferWorkspaceRequest(
+                    recipient_email="new@example.com",
+                    confirmation="TRANSFER Team",
+                ),
+                AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+
+
+def test_transfer_workspace_requires_existing_recipient(monkeypatch):
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "get",
+        lambda workspace_id: {
+            "id": workspace_id,
+            "name": "Team",
+            "owner_user_id": "owner-1",
+            "created_at": "2026-01-01",
+        },
+    )
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "resolve_transfer_recipient",
+        lambda **_kwargs: None,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.transfer_workspace(
+                "ws_a",
+                workspace_routes.TransferWorkspaceRequest(
+                    recipient_email="missing@example.com",
+                    confirmation="TRANSFER Team",
+                ),
+                AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "recipient not found"
+
+
+def test_transfer_workspace_requires_exact_confirmation(monkeypatch):
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "get",
+        lambda workspace_id: {
+            "id": workspace_id,
+            "name": "Team Alpha",
+            "owner_user_id": "owner-1",
+            "created_at": "2026-01-01",
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.transfer_workspace(
+                "ws_a",
+                workspace_routes.TransferWorkspaceRequest(
+                    recipient_user_id="owner-2",
+                    confirmation="TRANSFER Team",
+                ),
+                AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["required"] == "TRANSFER Team Alpha"
+
+
+def test_transfer_workspace_flips_owner_access_and_reports_revoked_pats(monkeypatch):
+    state = {
+        "workspace": {
+            "id": "ws_a",
+            "name": "Team",
+            "owner_user_id": "owner-1",
+            "created_at": "2026-01-01",
+        }
+    }
+
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "get",
+        lambda workspace_id: dict(state["workspace"]) if workspace_id == "ws_a" else None,
+    )
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "resolve_transfer_recipient",
+        lambda **_kwargs: {"id": "owner-2", "email": "new@example.com"},
+    )
+
+    def transfer_ownership(**kwargs):
+        assert kwargs["owner_user_id"] == "owner-1"
+        assert kwargs["workspace_id"] == "ws_a"
+        assert kwargs["recipient_user_id"] == "owner-2"
+        state["workspace"]["owner_user_id"] = "owner-2"
+        return {
+            "workspace": dict(state["workspace"]),
+            "previous_owner_user_id": "owner-1",
+            "new_owner_user_id": "owner-2",
+            "revoked_api_tokens": 2,
+            "retained_authority": list(kwargs["retained_authority"]),
+            "audit_event_id": "wte_1",
+        }
+
+    monkeypatch.setattr(workspace_routes.workspace_repo, "transfer_ownership", transfer_ownership)
+
+    result = asyncio.run(
+        workspace_routes.transfer_workspace(
+            "ws_a",
+            workspace_routes.TransferWorkspaceRequest(
+                recipient_email="new@example.com",
+                confirmation="TRANSFER Team",
+            ),
+            AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+        )
+    )
+
+    assert result.workspace.owner_user_id == "owner-2"
+    assert result.revoked_api_tokens == 2
+    assert "secrets" in result.retained_authority
+    with pytest.raises(HTTPException) as old_owner_exc:
+        asyncio.run(
+            workspace_routes.select_workspace(
+                "ws_a",
+                AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+            )
+        )
+    assert old_owner_exc.value.status_code == 404
+
+    response = asyncio.run(
+        workspace_routes.select_workspace(
+            "ws_a",
+            AuthContext(user_id="owner-2", email="new@example.com", scopes=()),
+        )
+    )
+    assert response.status_code == 200
+
+
 def test_preview_share_rejects_revoked_link(monkeypatch):
     monkeypatch.setattr(
         workspace_routes.workspace_repo,
@@ -220,3 +378,183 @@ def test_import_share_uses_existing_engine_template_pipeline(monkeypatch):
     assert result.target_workspace_id == "ws_target"
     assert result.workers_imported == ["worker-a"]
     assert result.required_connections == ["gmail"]
+
+
+class _FakeResponse:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakeTable:
+    def __init__(self, client, table_name: str):
+        self.client = client
+        self.table_name = table_name
+        self.filters = []
+        self.operation = "select"
+        self.payload = None
+        self.limit_count = None
+
+    def select(self, *_args, **_kwargs):
+        self.operation = "select"
+        return self
+
+    def eq(self, key, value):
+        self.filters.append((key, value))
+        return self
+
+    def limit(self, count):
+        self.limit_count = count
+        return self
+
+    def update(self, payload):
+        self.operation = "update"
+        self.payload = payload
+        return self
+
+    def delete(self):
+        self.operation = "delete"
+        return self
+
+    def insert(self, payload):
+        self.operation = "insert"
+        self.payload = payload
+        return self
+
+    def _matches(self, row):
+        return all(str(row.get(key)) == str(value) for key, value in self.filters)
+
+    def execute(self):
+        rows = self.client.rows[self.table_name]
+        if self.operation == "insert":
+            inserted = dict(self.payload)
+            rows.append(inserted)
+            return _FakeResponse([dict(inserted)])
+
+        matched = [row for row in rows if self._matches(row)]
+        if self.limit_count is not None:
+            matched = matched[: self.limit_count]
+
+        if self.operation == "select":
+            return _FakeResponse([dict(row) for row in matched])
+        if self.operation == "update":
+            for row in matched:
+                row.update(self.payload)
+            return _FakeResponse([dict(row) for row in matched])
+        if self.operation == "delete":
+            deleted = [dict(row) for row in rows if self._matches(row)]
+            self.client.rows[self.table_name] = [row for row in rows if not self._matches(row)]
+            return _FakeResponse(deleted)
+        raise AssertionError(f"unsupported operation: {self.operation}")
+
+
+class _FakeSupabaseClient:
+    def __init__(self):
+        self.rows = {
+            "users": [
+                {"id": "owner-1", "email": "owner@example.com"},
+                {"id": "owner-2", "email": "new@example.com"},
+            ],
+            "workspaces": [
+                {
+                    "id": "ws_a",
+                    "name": "Team",
+                    "owner_user_id": "owner-1",
+                    "created_at": "2026-01-01",
+                }
+            ],
+            "api_tokens": [
+                {"id": "tok_1", "workspace_id": "ws_a"},
+                {"id": "tok_2", "workspace_id": "ws_a"},
+                {"id": "tok_other", "workspace_id": "ws_other"},
+            ],
+            "workspace_share_links": [
+                {"id": "wsl_1", "workspace_id": "ws_a", "revoked_at": None},
+                {"id": "wsl_other", "workspace_id": "ws_other", "revoked_at": None},
+            ],
+            "workspace_transfer_events": [],
+        }
+
+    def table(self, table_name: str):
+        return _FakeTable(self, table_name)
+
+    def rpc(self, fn_name: str, params: dict):
+        assert fn_name == "transfer_workspace_ownership"
+        return _FakeTransferRpc(self, params)
+
+
+class _FakeTransferRpc:
+    def __init__(self, client: _FakeSupabaseClient, params: dict):
+        self.client = client
+        self.params = params
+
+    def execute(self):
+        workspace_id = self.params["p_workspace_id"]
+        current_owner = self.params["p_current_owner"]
+        new_owner = self.params["p_new_owner"]
+        workspace = next(
+            row
+            for row in self.client.rows["workspaces"]
+            if row["id"] == workspace_id and row["owner_user_id"] == current_owner
+        )
+        revoked_api_tokens = len(
+            [row for row in self.client.rows["api_tokens"] if row["workspace_id"] == workspace_id]
+        )
+        self.client.rows["api_tokens"] = [
+            row for row in self.client.rows["api_tokens"] if row["workspace_id"] != workspace_id
+        ]
+        revoked_share_links = 0
+        for row in self.client.rows["workspace_share_links"]:
+            if row["workspace_id"] == workspace_id and row["revoked_at"] is None:
+                row["revoked_at"] = "2026-01-01T00:00:00+00:00"
+                revoked_share_links += 1
+        workspace["owner_user_id"] = new_owner
+        event = {
+            "id": self.params["p_event_id"],
+            "workspace_id": workspace_id,
+            "previous_owner_user_id": current_owner,
+            "new_owner_user_id": new_owner,
+            "actor_user_id": self.params["p_actor_user_id"],
+            "revoked_api_tokens": revoked_api_tokens,
+            "retained_authority": list(self.params["p_retained_authority"]),
+        }
+        self.client.rows["workspace_transfer_events"].append(event)
+        return _FakeResponse(
+            {
+                "workspace": dict(workspace),
+                "previous_owner_user_id": current_owner,
+                "new_owner_user_id": new_owner,
+                "revoked_api_tokens": revoked_api_tokens,
+                "revoked_share_links": revoked_share_links,
+                "retained_authority": list(self.params["p_retained_authority"]),
+                "audit_event_id": event["id"],
+            }
+        )
+
+
+def test_transfer_ownership_revokes_workspace_pats_and_records_audit(monkeypatch):
+    fake_client = _FakeSupabaseClient()
+    monkeypatch.setattr(workspace_repo, "get_supabase_service_client", lambda: fake_client)
+
+    recipient = workspace_repo.resolve_transfer_recipient(
+        recipient_user_id=None,
+        recipient_email="new@example.com",
+    )
+    result = workspace_repo.transfer_ownership(
+        owner_user_id="owner-1",
+        workspace_id="ws_a",
+        recipient_user_id=str(recipient["id"]),
+        retained_authority=["connections", "secrets"],
+    )
+
+    assert result["workspace"]["owner_user_id"] == "owner-2"
+    assert result["revoked_api_tokens"] == 2
+    assert result["revoked_share_links"] == 1
+    assert [row["id"] for row in fake_client.rows["api_tokens"]] == ["tok_other"]
+    assert fake_client.rows["workspace_share_links"][0]["revoked_at"] is not None
+    assert fake_client.rows["workspace_share_links"][1]["revoked_at"] is None
+    assert fake_client.rows["workspace_transfer_events"][0]["previous_owner_user_id"] == "owner-1"
+    assert fake_client.rows["workspace_transfer_events"][0]["new_owner_user_id"] == "owner-2"
+    assert fake_client.rows["workspace_transfer_events"][0]["retained_authority"] == [
+        "connections",
+        "secrets",
+    ]

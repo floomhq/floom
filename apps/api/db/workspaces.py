@@ -56,6 +56,10 @@ def _new_share_link_id() -> str:
     return "wsl_" + uuid.uuid4().hex[:18]
 
 
+def _new_transfer_event_id() -> str:
+    return "wte_" + uuid.uuid4().hex[:18]
+
+
 def new_share_token() -> str:
     return "wst_" + secrets.token_urlsafe(32)
 
@@ -115,6 +119,24 @@ def get(*, workspace_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def resolve_transfer_recipient(
+    *,
+    recipient_user_id: str | None,
+    recipient_email: str | None,
+) -> dict[str, Any] | None:
+    """Resolve an existing public.users row for a workspace transfer."""
+    client = get_supabase_service_client()
+    builder = client.table("users").select("id,email")
+    if recipient_user_id:
+        builder = builder.eq("id", recipient_user_id)
+    elif recipient_email:
+        builder = builder.eq("email", recipient_email.strip().lower())
+    else:
+        return None
+    row = _row(builder.limit(1).execute())
+    return dict(row) if row else None
+
+
 def create(*, owner_user_id: str, name: str) -> dict[str, Any]:
     """Create a workspace owned by this user.
 
@@ -134,6 +156,55 @@ def create(*, owner_user_id: str, name: str) -> dict[str, Any]:
     if created is None:
         raise RuntimeError(f"failed to create workspace {workspace_id}")
     return created
+
+
+def revoke_workspace_api_tokens(*, workspace_id: str) -> int:
+    """Delete all PATs scoped to a workspace and return the number found."""
+    client = get_supabase_service_client()
+    existing = (
+        client.table("api_tokens")
+        .select("id")
+        .eq("workspace_id", workspace_id)
+        .execute()
+    )
+    count = len(_rows(existing))
+    if count:
+        client.table("api_tokens").delete().eq("workspace_id", workspace_id).execute()
+    return count
+
+
+def transfer_ownership(
+    *,
+    owner_user_id: str,
+    workspace_id: str,
+    recipient_user_id: str,
+    retained_authority: list[str],
+) -> dict[str, Any]:
+    """Transfer workspace ownership and all workspace-scoped owner columns."""
+    workspace = get(workspace_id=workspace_id)
+    if workspace is None or str(workspace.get("owner_user_id")) != str(owner_user_id):
+        raise PermissionError("workspace not found")
+
+    event_id = _new_transfer_event_id()
+    response = get_supabase_service_client().rpc(
+        "transfer_workspace_ownership",
+        {
+            "p_workspace_id": workspace_id,
+            "p_current_owner": owner_user_id,
+            "p_new_owner": recipient_user_id,
+            "p_actor_user_id": owner_user_id,
+            "p_event_id": event_id,
+            "p_retained_authority": retained_authority,
+        },
+    ).execute()
+    result = response.data
+    if isinstance(result, list):
+        result = result[0] if result else None
+    if not isinstance(result, dict):
+        raise RuntimeError(f"failed to transfer workspace {workspace_id}")
+    if not result.get("audit_event_id"):
+        result["audit_event_id"] = event_id
+    return dict(result)
 
 
 def create_share_link(
