@@ -1030,6 +1030,8 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 "cancel_requested": bool(fields.get("cancel_requested", False)),
                 "cancelled_at": fields.get("cancelled_at"),
                 "bundle_snapshot_path": fields.get("bundle_snapshot_path"),
+                "retry_of_run_id": fields.get("retry_of_run_id"),
+                "retry_attempt": int(fields.get("retry_attempt") or 0),
             }
         ).execute()
         created = self.get(user_id=user_id, run_id=run_id)
