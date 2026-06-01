@@ -806,19 +806,62 @@ async def auth_middleware(request: Request, call_next):
     """Require x-floom-secret on ALL requests except exempt paths.
 
     Exempt paths (no internal secret needed):
-      - /webhooks/*       — HMAC-authed by per-worker secret
-      - /healthz          — liveness probe, no secret
-      - /composio-events  — Composio webhook receiver
+      - /webhooks/*         — HMAC-authed by per-worker secret
+      - /healthz            — liveness probe, no secret
+      - /composio-events    — Composio webhook receiver
       - /connections/callback — OAuth browser redirect validates connection state
-      - OPTIONS           — CORS preflight
+      - OPTIONS             — CORS preflight
+
+    Run-scoped tokens (X-Workeros-Run-Token header):
+      Sandbox workers receive a WORKEROS_RUN_TOKEN env var — a short-lived
+      HMAC-signed token that permits ONLY /runs/{id}/composio-execute/* calls.
+      Presenting a run token on ANY other endpoint returns 403, making it
+      cryptographically impossible for sandboxed worker code to delete workers,
+      modify other workers, or access the operator API.
 
     When FLOOM_SECRET is not set (localhost dev mode), all requests pass.
-    Previously GET/HEAD were exempt; this was a security hole — MCP read
-    tools were effectively unauthenticated.
     """
+    from fastapi.responses import JSONResponse as _JSONResponse  # noqa: PLC0415
+    from run_token import verify_run_token  # noqa: PLC0415
+
     secret = os.environ.get("FLOOM_SECRET", "")
-    if secret and request.method != "OPTIONS":
-        path = request.url.path
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    path = request.url.path
+
+    # Run-scoped token check — always evaluated, even in dev mode.
+    run_token_header = request.headers.get("x-workeros-run-token", "")
+    if run_token_header:
+        run_id_from_token = verify_run_token(run_token_header, secret=secret)
+        if run_id_from_token is None:
+            return _JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or expired run token"},
+            )
+        # Valid run token — ONLY allow composio-execute on the matching run.
+        if not _RE_RUN_COMPOSIO_PROXY.match(path):
+            return _JSONResponse(
+                status_code=403,
+                content={
+                    "detail": (
+                        "Run-scoped tokens may only call "
+                        "/runs/{run_id}/composio-execute/* endpoints. "
+                        "Destructive API operations are not available to sandboxed workers."
+                    )
+                },
+            )
+        # The run_id in the path must match the token — belt-and-suspenders.
+        # (The composio-execute handler also validates this, but defence-in-depth.)
+        path_run_id = path.split("/")[2] if len(path.split("/")) > 2 else ""
+        if path_run_id != run_id_from_token:
+            return _JSONResponse(
+                status_code=403,
+                content={"detail": "Run token run_id does not match request path"},
+            )
+        return await call_next(request)
+
+    if secret:
         if (
             path.startswith("/webhooks/")
             or path in {"/healthz", "/health"}
@@ -831,7 +874,6 @@ async def auth_middleware(request: Request, call_next):
             return await call_next(request)
         header = request.headers.get("x-floom-secret", "")
         if header != secret:
-            from fastapi.responses import JSONResponse as _JSONResponse
             return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     return await call_next(request)
 
