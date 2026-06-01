@@ -4684,6 +4684,43 @@ def update_worker(
     detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
     if new_raw_secret is not None:
         detail.new_webhook_secret = new_raw_secret
+
+    # Snapshot metadata changes for versioning (fire-and-forget)
+    if updates:
+        try:
+            import json as _json
+            from worker_registry import WORKERS_DIR
+            files_snapshot = []
+            worker_dir = WORKERS_DIR / worker_id
+            if worker_dir.is_dir():
+                for fp in sorted(worker_dir.rglob("*")):
+                    if not fp.is_file():
+                        continue
+                    try:
+                        rel = fp.relative_to(worker_dir).as_posix()
+                    except ValueError:
+                        continue
+                    if _should_ignore_worker_file(rel):
+                        continue
+                    try:
+                        files_snapshot.append({"path": rel, "content": fp.read_text(encoding="utf-8")})
+                    except Exception:
+                        pass
+            snapshot = {
+                "worker": repos.workers.get(user_id=auth.user_id, worker_id=worker_id),
+                "files": files_snapshot,
+            }
+            repos.versions.create(
+                asset_type="worker",
+                asset_id=worker_id,
+                user_id=auth.user_id,
+                snapshot_json=_json.dumps(snapshot),
+                change_source="user",
+            )
+            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=50)
+        except Exception as _ver_exc:
+            logger.warning("version snapshot on PATCH failed for %s: %s", worker_id, _ver_exc)
+
     return detail
 
 
