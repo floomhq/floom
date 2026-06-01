@@ -287,15 +287,8 @@ class TestVersioningIntegration:
 
     @pytest.fixture(autouse=True)
     def _clear_caches(self):
-        """Clear auth provider and repos caches before each test."""
-        import importlib
+        """Clear repos cache before/after each test."""
         import db.factory as factory_mod
-        try:
-            from auth.factory import get_auth_provider
-            if hasattr(get_auth_provider, "cache_clear"):
-                get_auth_provider.cache_clear()
-        except Exception:
-            pass
         if hasattr(factory_mod.get_repositories, "cache_clear"):
             factory_mod.get_repositories.cache_clear()
         yield
@@ -317,24 +310,30 @@ class TestVersioningIntegration:
         (w_dir / "run.py").write_text(_RUN_PY)
 
         env_patches = {
-            "WORKEROS_WORKERS_DIR": str(workers_dir),
-            "WORKEROS_DB_PATH": str(tmp_path / "workeros.db"),
+            "FLOOM_WORKERS_DIR": str(workers_dir),
+            "WORKEROS_DB": str(tmp_path / "workeros.db"),
+            "FLOOM_DB": str(tmp_path / "workeros.db"),
             "WORKEROS_DEPLOY": "local",
-            "WORKEROS_AUTH_MODE": "env",
             "FLOOM_SECRET": "test-secret",
-            "WORKEROS_OWNER_ID": "owner-1",
         }
         with pytest.MonkeyPatch().context() as mp:
             for k, v in env_patches.items():
                 mp.setenv(k, v)
-            # Re-import fresh module
+
             import importlib
-            import db.factory as fac
-            if hasattr(fac.get_repositories, "cache_clear"):
-                fac.get_repositories.cache_clear()
+            import sys
+            for mod in [
+                "db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",
+                "db.interface", "models", "worker_registry", "runner_utils",
+                "run_service", "main",
+            ]:
+                sys.modules.pop(mod, None)
+
+            import db as db_mod
+            db_mod.init_db()
+            db_mod.get_repositories.cache_clear()
 
             import main as app_main
-            importlib.reload(app_main)
             app = app_main.app
             client = TestClient(app, raise_server_exceptions=False)
             yield client, "version-test-worker"
