@@ -1903,7 +1903,51 @@ def delete_worker_alert(
 # ---------------------------------------------------------------------------
 # Versioning: GET /workers/{id}/versions, POST /workers/{id}/rollback/{vid}
 #             GET /contexts/{name}/versions, POST /contexts/{name}/rollback/{vid}
+#             GET /workspace/versions, POST /workspace/rollback/{vid}
 # ---------------------------------------------------------------------------
+
+_WORKSPACE_INSTRUCTIONS_ASSET_TYPE = "workspace_instructions"
+
+
+def _workspace_instructions_asset_id(request: Request | None = None) -> str:
+    """Scope version history per cloud workspace when x-workeros-workspace is set."""
+    if request is not None:
+        workspace_id = (request.headers.get("x-workeros-workspace") or "").strip()
+        if workspace_id and workspace_id != "local-default":
+            return workspace_id
+    return "default"
+
+
+def _snapshot_workspace_instructions(
+    *,
+    user_id: str,
+    repos: Repositories,
+    asset_id: str,
+    content: str | None = None,
+    change_source: str = "user",
+) -> None:
+    """Create a version snapshot of workspace.md (Agent → Instructions)."""
+    import json as _json
+
+    from chat_service import get_workspace_md
+
+    try:
+        md = content if content is not None else get_workspace_md()
+        snapshot = {"content": md}
+        repos.versions.create(
+            asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
+            asset_id=asset_id,
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(
+            asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
+            asset_id=asset_id,
+            keep=50,
+        )
+    except Exception as _exc:
+        logger.warning("version snapshot failed for workspace instructions: %s", _exc)
 
 class VersionSummary(BaseModel):
     id: str
@@ -11993,18 +12037,82 @@ async def get_workspace(auth: AuthContext = Depends(get_auth_context)) -> PlainT
     return PlainTextResponse(get_workspace_md(), media_type="text/markdown")
 
 
+@app.get("/workspace/versions", response_model=List[VersionSummary])
+def list_workspace_versions(
+    request: Request,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions of workspace instructions (newest first)."""
+    asset_id = _workspace_instructions_asset_id(request)
+    rows = repos.versions.list(
+        asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
+        asset_id=asset_id,
+        limit=min(limit, 100),
+    )
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.post("/workspace/rollback/{version_id}")
+async def rollback_workspace_instructions(
+    version_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> PlainTextResponse:
+    """Restore workspace.md to a previous version snapshot."""
+    import json as _json
+
+    from chat_service import set_workspace_md
+
+    asset_id = _workspace_instructions_asset_id(request)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != _WORKSPACE_INSTRUCTIONS_ASSET_TYPE
+        or version.get("asset_id") != asset_id
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    content = snapshot.get("content")
+    if content is None or not str(content).strip():
+        raise HTTPException(status_code=422, detail="Version snapshot contains no content")
+
+    set_workspace_md(str(content))
+    _snapshot_workspace_instructions(
+        user_id=auth.user_id,
+        repos=repos,
+        asset_id=asset_id,
+        content=str(content),
+        change_source=f"rollback:{version_id}",
+    )
+    return PlainTextResponse(str(content), media_type="text/markdown")
+
+
 @app.put("/workspace", status_code=204)
 async def put_workspace(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> Response:
     """Update workspace.md (replaces entire content)."""
     from chat_service import set_workspace_md
+
     body = await request.body()
     content = body.decode("utf-8", errors="replace")
     if not content.strip():
         raise HTTPException(status_code=400, detail="workspace.md content cannot be empty")
     set_workspace_md(content)
+    change_source = "ai" if request.headers.get("x-workeros-run-token") else "user"
+    _snapshot_workspace_instructions(
+        user_id=auth.user_id,
+        repos=repos,
+        asset_id=_workspace_instructions_asset_id(request),
+        content=content,
+        change_source=change_source,
+    )
     return Response(status_code=204)
 
 

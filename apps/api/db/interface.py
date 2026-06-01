@@ -281,7 +281,7 @@ class CliAuthRepository(Protocol):
 
 
 class VersionRepository(Protocol):
-    """Immutable snapshots of worker and brain-pack state for rollback."""
+    """Immutable snapshots of worker, brain-pack, and workspace-instruction state for rollback."""
 
     def create(
         self,

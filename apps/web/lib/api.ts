@@ -351,6 +351,10 @@ export const api = {
         headers: { "Content-Type": "text/markdown" },
         body: content,
       }),
+    listWorkspaceVersions: (limit = 50) =>
+      fetchJson<import("./types").VersionSummary[]>(`/workspace/versions?limit=${limit}`),
+    rollbackWorkspaceInstructions: (versionId: string) =>
+      fetchText(`/workspace/rollback/${versionId}`, { method: "POST" }),
   },
   connections: {
     list: () => fetchJson<import("./types").ConnectionItem[]>("/connections"),
