@@ -176,11 +176,7 @@ function UserProfileFooter() {
     try {
       await fetch("/app/api/proxy/auth/logout", { method: "POST" });
     } finally {
-      // Redirect to /app — the middleware runs server-side and has access to
-      // WORKEROS_API_BASE, so it will immediately redirect unauthenticated
-      // visitors to the backend's /auth/login?provider=google OAuth URL.
-      // This avoids needing a NEXT_PUBLIC_ env var here.
-      window.location.href = "/app";
+      window.location.replace("/login?next=/app");
     }
   };
   return (

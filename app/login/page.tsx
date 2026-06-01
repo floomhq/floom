@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { OAUTH_LOGIN_URL, OAUTH_LOGIN_URL_GITHUB } from "@/lib/api";
+import { LoginEmailPanel } from "@/components/LoginEmailPanel";
 
 export const metadata = {
   title: "Sign in · Workeros",
@@ -45,6 +46,14 @@ export default async function LoginPage({
                 <span>Continue with GitHub</span>
               </a>
             </div>
+
+            <div className="my-5 flex items-center gap-3">
+              <span className="h-px flex-1 bg-[var(--line)]" />
+              <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--ink-mute)]">or</span>
+              <span className="h-px flex-1 bg-[var(--line)]" />
+            </div>
+
+            <LoginEmailPanel next={next} />
 
             <p className="mt-6 text-[11.5px] leading-[1.6] text-[var(--ink-mute)] text-center">
               By signing in you agree to the{" "}

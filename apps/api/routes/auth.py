@@ -61,6 +61,12 @@ class CliDenyRequest(BaseModel):
     user_code: str
 
 
+class PasswordLoginRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=1)
+    next: str = "/app"
+
+
 def _safe_next(value: str | None) -> str:
     """Allow only same-origin relative redirect targets.
 
@@ -317,6 +323,36 @@ def login(
         )
 
     raise HTTPException(status_code=400, detail="provider must be google, github, or email")
+
+
+@router.post("/password-login")
+def password_login(payload: PasswordLoginRequest):
+    normalized_email = payload.email.strip().lower()
+    if not normalized_email or "@" not in normalized_email:
+        raise HTTPException(status_code=400, detail="valid email is required")
+    client = new_supabase_anon_client()
+    try:
+        auth_response = client.auth.sign_in_with_password(
+            {"email": normalized_email, "password": payload.password}
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid email or password") from exc
+
+    session = getattr(auth_response, "session", None)
+    user = getattr(auth_response, "user", None) or getattr(session, "user", None)
+    if session is None or user is None or not getattr(user, "id", None):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    _upsert_user_row(user)
+    response = JSONResponse({"ok": True, "next": _safe_next(payload.next)})
+    _set_cookie(
+        response,
+        _SESSION_COOKIE_NAME,
+        _encode_session_cookie(session),
+        max_age=max(int(getattr(session, "expires_in", 3600) or 3600), 60),
+    )
+    _clear_cookie(response, _OAUTH_VERIFIER_COOKIE_NAME)
+    return response
 
 
 @router.get("/callback")
