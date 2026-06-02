@@ -13,11 +13,13 @@ const oauthLoginUrl = (provider: "google" | "github", next = "/app") =>
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string }>;
+  searchParams?: Promise<{ next?: string; mode?: string }>;
 }) {
   // Next 16: searchParams is always a Promise in server components.
   const sp = (await searchParams) ?? {};
   const next = sp.next ?? "/app";
+  const initialMode = sp.mode === "signup" || sp.mode === "signin" ? sp.mode : "magic";
+  const signupHref = `/login?mode=signup&next=${encodeURIComponent(next)}`;
 
   return (
     <main className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--ink)] font-sans antialiased">
@@ -57,7 +59,7 @@ export default async function LoginPage({
               <span className="h-px flex-1 bg-[var(--line)]" />
             </div>
 
-            <LoginEmailPanel next={next} />
+            <LoginEmailPanel next={next} initialMode={initialMode} />
 
             <p className="mt-6 text-[11.5px] leading-[1.6] text-[var(--ink-mute)] text-center">
               By signing in you agree to the{" "}
@@ -74,8 +76,8 @@ export default async function LoginPage({
 
           <p className="mt-5 text-center text-[12px] text-[var(--ink-mute)]">
             New here?{" "}
-            <Link href="/" className="text-[var(--ink-soft)] hover:text-[var(--ink)] underline underline-offset-2 transition-colors">
-              See what Workeros does
+            <Link href={signupHref} className="text-[var(--ink-soft)] hover:text-[var(--ink)] underline underline-offset-2 transition-colors">
+              Create an account
             </Link>
           </p>
         </div>

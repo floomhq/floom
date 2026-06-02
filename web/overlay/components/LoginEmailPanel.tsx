@@ -37,10 +37,12 @@ function normalizeNextPath(value: string): string {
   return "/app";
 }
 
-export function LoginEmailPanel({ next }: { next: string }) {
+type AuthMode = "magic" | "signin" | "signup";
+
+export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string; initialMode?: AuthMode }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"magic" | "signin" | "signup">("magic");
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
