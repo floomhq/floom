@@ -176,6 +176,35 @@ def test_context_file_metadata_tags_roundtrip(client_and_main):
     assert "research/gsc.md" not in (_main.load_context_metadata()["my-company"].get("files") or {})
 
 
+def test_brain_file_versions_are_per_file_and_workspace_versions_queryable(client_and_main):
+    client, _main = client_and_main
+    assert client.post("/contexts/my-company").status_code == 200
+    first = client.put(
+        "/contexts/my-company/files/research/gsc.md",
+        json={"content": "first version"},
+    )
+    second = client.put(
+        "/contexts/my-company/files/research/gsc.md",
+        json={"content": "second version"},
+    )
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+
+    versions = client.get("/contexts/my-company/files/research/gsc.md/versions")
+    assert versions.status_code == 200, versions.text
+    body = versions.json()
+    assert len(body) == 2
+    assert all(item["asset_type"] == "brain_file" for item in body)
+    assert all(item["asset_id"] == "my-company:research/gsc.md" for item in body)
+
+    older = client.get(f"/contexts/my-company/files/research/gsc.md/versions/{body[1]['id']}")
+    assert older.status_code == 200, older.text
+    assert older.json()["file"]["content"] == "first version"
+
+    workspace_versions = client.get("/workspace/versions")
+    assert workspace_versions.status_code == 200, workspace_versions.text
+
+
 _CTX_WORKER_YML = """schema_version: "0.3"
 name: "ctx-consumer"
 title: "Context Consumer"
@@ -194,6 +223,46 @@ trigger:
 connections: []
 contexts:
   - name: "my-company"
+    writeable: false
+"""
+
+_CTX_WORKER_NO_CONTEXT_YML = """schema_version: "0.3"
+name: "ctx-consumer"
+title: "Context Consumer"
+description: "mounts packs"
+version: "0.1.0"
+targets: [generic]
+exec:
+  entry: "run.py"
+  runtime: "python311"
+  runner: "e2b"
+  command: "python run.py"
+  inputs: []
+  outputs: []
+trigger:
+  type: manual
+connections: []
+contexts: []
+"""
+
+_CTX_WORKER_SYSTEM_CONTEXT_YML = """schema_version: "0.3"
+name: "ctx-consumer"
+title: "Context Consumer"
+description: "mounts system style"
+version: "0.1.0"
+targets: [generic]
+exec:
+  entry: "run.py"
+  runtime: "python311"
+  runner: "e2b"
+  command: "python run.py"
+  inputs: []
+  outputs: []
+trigger:
+  type: manual
+connections: []
+contexts:
+  - name: "worker-author-style"
     writeable: false
 """
 
@@ -235,3 +304,61 @@ def test_list_worker_count_matches_detail(client_and_main):
     assert (
         list_after["my-company"]["worker_count"] == detail_after["worker_count"]
     )
+
+
+def test_system_pack_can_be_mounted_by_worker_creation(client_and_main):
+    client, _main = client_and_main
+    created = client.post(
+        "/workers",
+        json={"worker_yml": _CTX_WORKER_SYSTEM_CONTEXT_YML, "run_py": _CTX_WORKER_RUN_PY},
+    )
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["config"]["contexts"][0]["name"] == "worker-author-style"
+
+
+def test_brain_attach_materializes_missing_db_worker_dir(client_and_main):
+    client, main = client_and_main
+    assert client.post("/contexts/my-company").status_code == 200
+    created = client.post(
+        "/workers",
+        json={"worker_yml": _CTX_WORKER_NO_CONTEXT_YML, "run_py": _CTX_WORKER_RUN_PY},
+    )
+    assert created.status_code == 200, created.text
+
+    worker_dir = main.WORKERS_DIR / "ctx-consumer"
+    assert worker_dir.is_dir()
+    import shutil
+    shutil.rmtree(worker_dir)
+    assert not worker_dir.exists()
+
+    detail = client.get("/workers/ctx-consumer")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["files"][0]["path"] == "worker.yml"
+
+    patched_yml = _CTX_WORKER_YML
+    saved = client.put(
+        "/workers/ctx-consumer/files",
+        json={
+            "files": [
+                {"path": "worker.yml", "content": patched_yml},
+                {"path": "run.py", "content": _CTX_WORKER_RUN_PY},
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    saved_body = saved.json()
+    assert saved_body["config"]["contexts"][0]["name"] == "my-company"
+    assert (worker_dir / "worker.yml").is_file()
+    assert "my-company" in (worker_dir / "worker.yml").read_text(encoding="utf-8")
+
+    main.create_run(
+        "ctx-consumer",
+        {},
+        status="completed",
+        user_id="federico",
+        repos=main.get_repositories(),
+    )
+    refreshed = client.get("/workers/ctx-consumer")
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["recent_stats"] is not None

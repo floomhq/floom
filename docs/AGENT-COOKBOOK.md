@@ -119,7 +119,7 @@ def run(inputs, context):
     text = inputs["text"]
     client = context.openai()
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-5-mini",
         messages=[
             {"role": "system", "content": "Summarize the user's text in 3 bullets."},
             {"role": "user", "content": text},
@@ -149,7 +149,7 @@ example_output: |
   - Second key point.
   - Third key point.
 how_it_works: |
-  Text -> OpenAI gpt-4.1-mini chat completion -> 3-bullet summary.
+  Text -> OpenAI gpt-5-mini chat completion -> 3-bullet summary.
 folder: Productivity
 tags: [summarize, text, openai]
 version: 0.1.0
@@ -565,7 +565,7 @@ When an agent is asked "build me a worker that does X", produce:
 5. **`approvals.required: true`** for any worker that sends, deletes, or pays.
 6. **Default `trigger: manual`** unless the prompt explicitly says "every X" or "when Y arrives".
 7. **Pin dep versions** exactly (`openai==1.51.0`, not `openai`).
-8. **Use `gpt-4.1-mini` or `gpt-4o-mini` by default**; reserve larger models for prompts that explicitly need them.
+8. **Use `gpt-5-mini` by default**; reserve larger models for prompts that explicitly need them.
 
 After writing, ALWAYS:
 

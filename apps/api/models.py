@@ -240,6 +240,8 @@ class WorkerConnection(BaseModel):
     #       allowed_tools: [GMAIL_FETCH_EMAILS]
     app: Optional[str] = None
     allowed_tools: Optional[List[str]] = None
+    scope: Optional[str] = None
+    scopes: Optional[List[str]] = None
 
     @model_validator(mode="after")
     def validate_connection_kind(self) -> "WorkerConnection":
@@ -251,6 +253,8 @@ class WorkerConnection(BaseModel):
             self.composio = WorkerComposioConnection(
                 app=self.app or "",
                 allowed_tools=self.allowed_tools,
+                scope=self.scope,
+                scopes=self.scopes,
             )
         return self
 
@@ -258,6 +262,8 @@ class WorkerConnection(BaseModel):
 class WorkerComposioConnection(BaseModel):
     app: str
     allowed_tools: Optional[List[str]] = None
+    scope: Optional[str] = None
+    scopes: Optional[List[str]] = None
 
     @field_validator("app")
     @classmethod
@@ -276,6 +282,34 @@ class WorkerComposioConnection(BaseModel):
         if len(cleaned) != len(value):
             raise ValueError("composio allowed_tools entries must be non-empty")
         return cleaned
+
+    @field_validator("scope")
+    @classmethod
+    def validate_composio_scope(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip().lower().replace("-", "_")
+        if not cleaned:
+            return None
+        if cleaned not in {"full", "read_only"}:
+            raise ValueError("composio scope must be 'full' or 'read_only'")
+        return cleaned
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_composio_scopes(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return None
+        cleaned: List[str] = []
+        for raw in value:
+            scope = str(raw).strip().lower().replace("-", "_")
+            if not scope:
+                continue
+            if scope not in {"full", "read_only"}:
+                raise ValueError("composio scopes entries must be 'full' or 'read_only'")
+            if scope not in cleaned:
+                cleaned.append(scope)
+        return cleaned or None
 
 
 WorkerConnectionSpec = Union[str, WorkerConnection]
@@ -297,6 +331,18 @@ def composio_connection_allowed_tools(connection: WorkerConnectionSpec) -> Optio
     if composio is None:
         return None
     return composio.allowed_tools
+
+
+def composio_connection_scopes(connection: WorkerConnectionSpec) -> List[str]:
+    if isinstance(connection, str):
+        return ["full"]
+    composio = getattr(connection, "composio", None)
+    if composio is None:
+        return []
+    scopes = list(composio.scopes or [])
+    if composio.scope and composio.scope not in scopes:
+        scopes.append(composio.scope)
+    return scopes or ["full"]
 
 
 def declared_composio_connections(config: Optional["WorkerConfig"]) -> Dict[str, Optional[List[str]]]:
@@ -321,6 +367,43 @@ def declared_composio_connections(config: Optional["WorkerConfig"]) -> Dict[str,
         else:
             declared[app] = sorted(set(existing) | set(allowed_tools))
     return declared
+
+
+def declared_composio_connection_scopes(config: Optional["WorkerConfig"]) -> Dict[str, List[str]]:
+    declared: Dict[str, List[str]] = {}
+    if not config:
+        return declared
+    for connection in config.connections or []:
+        app = composio_connection_app_name(connection)
+        if not app:
+            continue
+        scopes = composio_connection_scopes(connection)
+        existing = declared.get(app, [])
+        merged = sorted(set(existing) | set(scopes))
+        declared[app] = ["full"] if "full" in merged else merged
+    return declared
+
+
+def composio_tool_allowed_by_scope(app: str, tool_slug: str, scopes: List[str] | None) -> bool:
+    normalized_scopes = {scope.strip().lower().replace("-", "_") for scope in (scopes or ["full"])}
+    if "full" in normalized_scopes or not normalized_scopes:
+        return True
+    normalized_tool = tool_slug.upper()
+    app_prefix = app.upper().replace("-", "_")
+    if normalized_tool.startswith(app_prefix + "_"):
+        action = normalized_tool[len(app_prefix) + 1:]
+    else:
+        action = normalized_tool
+    if "read_only" in normalized_scopes:
+        deny_prefixes = (
+            "SEND", "CREATE", "UPDATE", "DELETE", "MODIFY", "PATCH", "POST",
+            "REPLY", "FORWARD", "MOVE", "MARK", "ARCHIVE", "TRASH", "DRAFT",
+        )
+        if action.startswith(deny_prefixes):
+            return False
+        allow_prefixes = ("GET", "LIST", "SEARCH", "FETCH", "READ", "QUERY", "RETRIEVE")
+        return action.startswith(allow_prefixes)
+    return False
 
 
 def composio_app_for_tool_slug(tool_slug: str, declared_apps: List[str]) -> Optional[str]:
@@ -1313,6 +1396,7 @@ class WorkerDetail(BaseModel):
     trigger_type: str
     runner: str
     config: WorkerConfig
+    recent_stats: Optional[RecentStats] = None
     recent_runs: List[RunSummary] = Field(default_factory=list)
     manifest_yaml: Optional[str] = None  # Raw worker.yml content for manifest viewer
     run_py: Optional[str] = None

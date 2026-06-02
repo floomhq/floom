@@ -28,7 +28,7 @@ from db import get_db, now_iso
 logger = logging.getLogger("floom.chat")
 
 WORKSPACE_AGENT_ID = "workspace-agent"
-DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-4.1-mini"
+DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-5-mini"
 TOOL_RESULT_MAX_BYTES = 2048
 CONVERSATION_WINDOW = 50       # summarise after this many messages
 CONVERSATION_KEEP_VERBATIM = 20  # keep this many after summarisation
