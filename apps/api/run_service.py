@@ -1360,6 +1360,22 @@ def _merge_instance_inputs(instance: Optional[Dict[str, Any]], inputs: Dict[str,
     return {**defaults, **inputs}
 
 
+def _apply_config_input_defaults(
+    config: Optional[WorkerConfig],
+    inputs: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply worker.yml input defaults after instance defaults and run inputs."""
+    if not config:
+        return dict(inputs)
+    effective = dict(inputs)
+    for inp in config.inputs:
+        if inp.default is None:
+            continue
+        if inp.name not in effective:
+            effective[inp.name] = inp.default
+    return effective
+
+
 def _runner_key(config: Optional[WorkerConfig]) -> str:
     if config and config.runtime:
         runtime_type = (config.runtime.type or "").strip().lower()
@@ -1424,7 +1440,10 @@ def create_run(
     instance = loaded[2] if loaded else None
     if instance and not instance.get("enabled", True):
         raise ValueError(f"Worker {worker_id} is disabled")
-    effective_inputs = _merge_instance_inputs(instance, inputs)
+    effective_inputs = _apply_config_input_defaults(
+        config,
+        _merge_instance_inputs(instance, inputs),
+    )
     # Determine runner from config (default to "local" for backward compat)
     runner = _runner_key(config)
     repos_obj.runs.create(
@@ -2213,7 +2232,10 @@ def execute_run(
     loaded = _load_worker_recipe(worker_id, repos_obj)
     config = loaded[1] if loaded else None
     instance = loaded[2] if loaded else None
-    effective_inputs = _merge_instance_inputs(instance, inputs)
+    effective_inputs = _apply_config_input_defaults(
+        config,
+        _merge_instance_inputs(instance, inputs),
+    )
 
     def log_fn(msg: str, level: str = "info") -> None:
         secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
