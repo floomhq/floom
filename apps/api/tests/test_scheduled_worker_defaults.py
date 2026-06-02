@@ -170,6 +170,34 @@ def _incomplete_scheduled_inputs(worker: dict) -> list[dict]:
     ]
 
 
+def test_list_shape_includes_lightweight_input_descriptors(client_and_main):
+    client, _, _ = client_and_main
+    resp = client.get("/workers?shape=list")
+    assert resp.status_code == 200, resp.text
+
+    workers = {worker["id"]: worker for worker in resp.json()}
+    inputs = workers["scheduled-no-defaults"]["inputs"]
+
+    assert inputs == [
+        {"name": "channel_id", "type": "text"},
+        {"name": "max_items", "type": "number"},
+    ]
+
+
+def test_full_shape_keeps_full_input_descriptors(client_and_main):
+    client, _, _ = client_and_main
+    resp = client.get("/workers?shape=full")
+    assert resp.status_code == 200, resp.text
+
+    workers = {worker["id"]: worker for worker in resp.json()}
+    inputs = workers["scheduled-no-defaults"]["inputs"]
+
+    assert inputs[0]["name"] == "channel_id"
+    assert inputs[0]["type"] == "text"
+    assert inputs[0]["label"] == "Channel ID"
+    assert inputs[0]["required"] is True
+
+
 def test_scheduled_worker_with_missing_defaults_is_flagged(client_and_main):
     client, _, _ = client_and_main
     worker = _get_worker(client, "scheduled-no-defaults")
