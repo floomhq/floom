@@ -431,6 +431,24 @@ export const api = {
         method: "POST",
       }),
   },
+  slack: {
+    setupStatus: () => fetchJson<import("./types").SlackSetupStatus>("/slack/setup/status"),
+    updateSetupConfig: (payload: {
+      client_id?: string;
+      client_secret?: string;
+      signing_secret?: string;
+      events_enabled?: boolean;
+    }) =>
+      fetchJson<import("./types").SlackSetupConfigResponse>("/slack/setup/config", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    installUrl: (return_to = "/connections/slack") =>
+      fetchJson<import("./types").SlackInstallUrlResponse>("/slack/oauth/install", {
+        method: "POST",
+        body: JSON.stringify({ return_to }),
+      }),
+  },
   workspace: {
     // Download the whole workspace as a .zip template. Returns the Blob so the
     // caller can trigger a browser download. The proxy streams the binary body
