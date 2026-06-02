@@ -139,7 +139,9 @@ from models import (
     WorkerStats,
     WorkspaceStats,
     composio_app_for_tool_slug,
+    composio_tool_allowed_by_scope,
     declared_composio_connections,
+    declared_composio_connection_scopes,
 )
 from worker_registry import (
     WORKERS_DIR,
@@ -2247,6 +2249,99 @@ def get_context_version(
     return {"files": snapshot.get("files") or []}
 
 
+def _brain_file_asset_id(name: str, rel: str) -> str:
+    return f"{name}:{rel}"
+
+
+def _encode_context_file_snapshot(root: Path, path: Path, rel: str) -> Dict[str, Any]:
+    import base64
+
+    raw = path.read_bytes()
+    try:
+        content = raw.decode("utf-8")
+        encoding = "utf-8"
+    except UnicodeDecodeError:
+        content = base64.b64encode(raw).decode("ascii")
+        encoding = "base64"
+    return {"path": rel, "content": content, "encoding": encoding}
+
+
+def _snapshot_brain_file_version(
+    name: str,
+    rel: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+    change_source: str = "user",
+    deleted: bool = False,
+) -> None:
+    """Create a version snapshot for one brain-pack file."""
+    import json as _json
+
+    try:
+        root = context_dir(name)
+        target = safe_context_file_path(name, rel)
+        file_snapshot: Dict[str, Any]
+        if deleted or not target.is_file():
+            file_snapshot = {"path": rel, "deleted": True}
+        else:
+            file_snapshot = _encode_context_file_snapshot(root, target, rel)
+        snapshot = {"pack": {"name": name}, "file": file_snapshot}
+        repos.versions.create(
+            asset_type="brain_file",
+            asset_id=_brain_file_asset_id(name, rel),
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(asset_type="brain_file", asset_id=_brain_file_asset_id(name, rel), keep=50)
+    except Exception as _exc:
+        logger.warning("version snapshot failed for brain_file %s/%s: %s", name, rel, _exc)
+
+
+@app.get("/contexts/{name}/files/{file_path:path}/versions", response_model=List[VersionSummary])
+def list_context_file_versions(
+    name: str,
+    file_path: str,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions for one brain-pack file (newest first)."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    rel = _context_file_path_or_400(file_path)
+    rows = repos.versions.list(
+        asset_type="brain_file",
+        asset_id=_brain_file_asset_id(safe_name, rel),
+        limit=min(limit, 100),
+    )
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.get("/contexts/{name}/files/{file_path:path}/versions/{version_id}")
+def get_context_file_version(
+    name: str,
+    file_path: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the saved snapshot for one brain-pack file version."""
+    import json as _json
+
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    rel = _context_file_path_or_400(file_path)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != "brain_file"
+        or version.get("asset_id") != _brain_file_asset_id(safe_name, rel)
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"file": snapshot.get("file") or {}}
+
+
 @app.post("/contexts/{name}/rollback/{version_id}")
 def rollback_context(
     name: str,
@@ -3178,6 +3273,53 @@ def _read_worker_files(worker_dir: Path) -> List[WorkerFile]:
 
     raw_files.sort(key=_sort_key)
     return raw_files
+
+
+def _worker_files_from_manifest(worker: Dict[str, Any]) -> List[WorkerFile]:
+    """Build the minimal editable source view for DB-backed workers without a bundle dir."""
+    import yaml as pyyaml
+
+    files: List[WorkerFile] = []
+    manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+    if manifest:
+        try:
+            manifest_yaml = pyyaml.safe_dump(manifest, sort_keys=False)
+            files.append(
+                WorkerFile(
+                    path="worker.yml",
+                    language=_language_for_path("worker.yml"),
+                    content=manifest_yaml,
+                    binary=False,
+                    size=len(manifest_yaml.encode("utf-8")),
+                )
+            )
+        except Exception:
+            pass
+
+    config = worker.get("config") or {}
+    runtime = config.get("runtime") if isinstance(config, dict) else {}
+    entrypoint = ""
+    if isinstance(runtime, dict):
+        entrypoint = str(runtime.get("entrypoint") or "")
+    for rel in ("SKILL.md", "run.py"):
+        content = ""
+        if isinstance(manifest, dict):
+            files_section = manifest.get("files")
+            if isinstance(files_section, dict) and isinstance(files_section.get(rel), str):
+                content = files_section[rel]
+        if not content and rel == "run.py" and entrypoint == "run.py":
+            content = _DEFAULT_RUN_PY_STUB
+        if content:
+            files.append(
+                WorkerFile(
+                    path=rel,
+                    language=_language_for_path(rel),
+                    content=content,
+                    binary=False,
+                    size=len(content.encode("utf-8")),
+                )
+            )
+    return files
 
 
 def _worker_bundle_dir(worker_id: str, config: WorkerConfig) -> Path:
@@ -4231,6 +4373,7 @@ async def put_context_file(
         tags=tags,
         file_metadata=file_metadata,
     )
+    _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos)
     _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
     return result
 
@@ -4256,6 +4399,7 @@ def delete_context_file(
         except OSError:
             break
     set_context_file_metadata(safe_name, rel, tags=[], file_metadata={}, owner_id=auth.user_id)
+    _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos, deleted=True)
     _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
     return _context_detail(safe_name)
 
@@ -4292,6 +4436,7 @@ async def upload_context_files(
             raise HTTPException(status_code=400, detail="metadata_json must be a JSON object")
         upload_metadata = dict(parsed_metadata)
     written: List[ContextFileItem] = []
+    written_paths: List[str] = []
     for upload in files:
         filename = _context_file_path_or_400(upload.filename or "upload.bin")
         rel = f"{prefix}/{filename}" if prefix else filename
@@ -4306,6 +4451,9 @@ async def upload_context_files(
                 file_metadata=upload_metadata,
             )
         )
+        written_paths.append(rel)
+    for rel in written_paths:
+        _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos)
     _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
     return ContextUploadResponse(
         files=written,
@@ -4492,8 +4640,7 @@ def _build_worker_detail(
     worker_files: List[WorkerFile] = []
     if _worker_source_visible_to_api(worker_id):
         try:
-            from worker_registry import WORKERS_DIR
-            worker_dir = WORKERS_DIR / worker_id
+            worker_dir = _worker_bundle_dir(worker_id, config)
             yml_path = worker_dir / "worker.yml"
             run_path = worker_dir / "run.py"
             skill_path = worker_dir / "SKILL.md"
@@ -4508,8 +4655,10 @@ def _build_worker_detail(
             if skill_path.is_file():
                 skill_md_content = skill_path.read_text()
             worker_files = _read_worker_files(worker_dir)
+            if not worker_files:
+                worker_files = _worker_files_from_manifest(worker)
         except Exception:
-            pass
+            worker_files = _worker_files_from_manifest(worker)
 
     # Build webhook URL if this worker has a webhook trigger
     from webhook_service import build_webhook_url as _build_webhook_url
@@ -4553,6 +4702,7 @@ def _build_worker_detail(
         runner=worker["runner"],
         config=config,
         recent_runs=recent_runs,
+        recent_stats=_get_stats_batch([worker_id], user_id=user_id, repos=repos).get(worker_id),
         manifest_yaml=manifest_yaml,
         run_py=run_py,
         skill_md_content=skill_md_content,
@@ -6536,11 +6686,15 @@ def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tup
                 if context["source"] != "local":
                     continue
                 context_name = context["name"]
-                if not context_dir(context_name).is_dir() or not _context_visible_to_user(
+                context_is_mountable = _is_system_context_pack(
+                    context_name,
+                    metadata,
+                ) or _context_visible_to_user(
                     context_name,
                     user_id=user_id,
                     metadata=metadata,
-                ):
+                )
+                if not context_dir(context_name).is_dir() or not context_is_mountable:
                     raise HTTPException(status_code=400, detail=f"Context not found: {context_name}")
     _raise_if_protected_worker_mutation(worker_id)
     return worker_id, config
@@ -7286,9 +7440,21 @@ def update_worker_files(
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
+    config_dict = worker.get("config") or {}
+    try:
+        existing_config = WorkerConfig(**config_dict)
+    except Exception:
+        existing_config = None
     target_dir = WORKERS_DIR / worker_id
-    if not target_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Worker directory not found")
+    if existing_config is not None:
+        try:
+            configured_dir = _worker_bundle_dir(worker_id, existing_config)
+            if configured_dir.is_dir():
+                target_dir = configured_dir
+        except HTTPException:
+            raise
+        except Exception:
+            target_dir = WORKERS_DIR / worker_id
 
     if not payload.files:
         raise HTTPException(status_code=400, detail="files list must not be empty")
@@ -7313,6 +7479,7 @@ def update_worker_files(
             status_code=400,
             detail=f"worker.yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
         )
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     # Atomic write strategy:
     #   1. Write all new file contents to a temp staging dir (same filesystem).
@@ -9075,7 +9242,7 @@ _OPERATOR_ERROR_RULES: List[tuple[re.Pattern[str], str]] = [
 _WORKER_CODE_TRACEBACK_RE = re.compile(
     r"\b(?:"
     r"NameError|FileNotFoundError|AttributeError|TypeError|ValueError|KeyError"
-    r"|UnboundLocalError|IndexError|ZeroDivisionError|NotImplementedError"
+    r"|UnboundLocalError|IndexError|ZeroDivisionError|NotImplementedError|RuntimeError"
     r"|SyntaxError|IndentationError|TabError|RecursionError|AssertionError"
     r"|ModuleNotFoundError|ImportError|OSError|IOError|JSONDecodeError"
     r"|UnicodeDecodeError|UnicodeEncodeError"
@@ -9120,7 +9287,7 @@ _BARE_PYTHON_EXC_MSG_RE = re.compile(
 # Error codes whose raw text can legitimately carry a worker-code traceback
 # (the worker's run.py crashed). For these, a code-class traceback in the raw
 # string outranks the generic headline so the operator sees "code has an error".
-_WORKER_CODE_ERROR_CODES = frozenset({"execution_error", "e2b_sandbox_error"})
+_WORKER_CODE_ERROR_CODES = frozenset({"execution_error", "e2b_sandbox_error", "timeout"})
 
 
 def _looks_like_worker_code_error(text: str) -> bool:
@@ -9180,9 +9347,7 @@ def _operator_error_message(
     # execution (execution_error / e2b_sandbox_error) or is absent, route to the
     # code headline before the generic taxonomy. Setup codes (missing_secret,
     # missing_connection, etc.) are unaffected — they never carry a traceback.
-    if (not code or code in _WORKER_CODE_ERROR_CODES) and _looks_like_worker_code_error(
-        str(raw_error or "")
-    ):
+    if (not code or code in _WORKER_CODE_ERROR_CODES) and _looks_like_worker_code_error(str(raw_error or "")):
         return _CODE_HEADLINE
 
     if code and code in _OPERATOR_ERROR_CODE_HEADLINES:
@@ -9496,6 +9661,7 @@ def composio_execute_proxy(
 
     config = get_worker_config_for_run(worker_id)
     declared_connections = declared_composio_connections(config)
+    declared_scopes = declared_composio_connection_scopes(config)
     tool_prefix = composio_app_for_tool_slug(tool_slug, list(declared_connections.keys()))
     if not tool_prefix:
         raise HTTPException(
@@ -9507,6 +9673,11 @@ def composio_execute_proxy(
         raise HTTPException(
             status_code=403,
             detail=f"Tool {tool_slug} is not allowed for worker connection {tool_prefix}",
+        )
+    if not composio_tool_allowed_by_scope(tool_prefix, tool_slug, declared_scopes.get(tool_prefix)):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tool {tool_slug} is outside the worker connection scope for {tool_prefix}",
         )
 
     # 4. Resolve connected_account_id. If the worker supplies one from
