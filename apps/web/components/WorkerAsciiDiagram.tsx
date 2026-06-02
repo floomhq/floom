@@ -58,11 +58,17 @@ import { cn } from "@/lib/utils";
 // workers still render a clean diagram (trigger → worker → result).
 // ---------------------------------------------------------------------------
 
+// M3 (Federico 2026-06-02 mobile audit): de-date the flow diagram by ROUNDING
+// every inner node box. Federico's design rule forbids fully-square boxes. The
+// rounded box-drawing corners (╭ ╮ ╰ ╯) are single monospace cells with the
+// EXACT same advance width as the square corners (┌ ┐ └ ┘), so the character
+// grid, connectors, and the `ch`-positioned glyph overlay stay pixel-aligned —
+// only the corner silhouette softens. No diagram logic changes.
 const B = {
-  tl: "┌",
-  tr: "┐",
-  bl: "└",
-  br: "┘",
+  tl: "╭",
+  tr: "╮",
+  bl: "╰",
+  br: "╯",
   h: "─",
   v: "│",
   teeL: "┤",

@@ -1570,9 +1570,15 @@ export default function WorkerDetailPage() {
           stays inside the strip (it scrolls horizontally within itself) and
           never drives page width. `-mx-4 px-4` lets the scroll area run
           edge-to-edge on mobile; on desktop the list is narrower than the
-          container so nothing scrolls and it looks identical. */}
-      <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
-        <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
+          container so nothing scrolls and it looks identical.
+          M1 (2026-06-02): the scroll <div> now sits INSIDE <Tabs> and wraps
+          <TabsList> directly, matching the proven /settings pattern. Previously
+          the scroll <div> was OUTSIDE <Tabs>, so its direct child was the
+          flex-column <Tabs> root (not the `w-fit` list) — the overflow chain
+          didn't reliably reach the list and the last tab (History) clipped with
+          no scroll. Wrapping the `w-fit` list directly restores the swipe. */}
+      <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
+        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
           <TabsList>
             {NAV_ITEMS.map((item) => (
               <TabsTrigger key={item.id} value={item.id}>
@@ -1587,8 +1593,8 @@ export default function WorkerDetailPage() {
               </TabsTrigger>
             ))}
           </TabsList>
-        </Tabs>
-      </div>
+        </div>
+      </Tabs>
 
       {/* Section content */}
       <div>
