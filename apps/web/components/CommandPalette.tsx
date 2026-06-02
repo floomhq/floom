@@ -101,7 +101,7 @@ export function CommandPalette() {
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Search workers, runs, settings... or type a command" autoFocus />
+      <CommandInput placeholder="Search or run a command…" autoFocus />
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
 
