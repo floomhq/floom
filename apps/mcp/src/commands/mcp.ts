@@ -1,24 +1,23 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { WorkerosApiClient } from "../lib/api.js";
 import { readCredentials } from "../lib/credentials.js";
 import { log } from "../lib/output.js";
 
 type JsonObject = Record<string, unknown>;
 
-const PACKAGE_NAME = "@floomhq/workeros";
-const DEFAULT_API_BASE = "https://workers-api.floom.dev";
+const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
+const DEFAULT_OSS_API_BASE = "https://workers-api.floom.dev";
 
 // Targets that write a file (kind = "object" or "array" for config shape).
 const FILE_CLIENTS = [
-  { target: "claude",   name: "Claude Code", path: ".claude/settings.json",                      kind: "object" },
-  { target: "cursor",   name: "Cursor",      path: ".cursor/mcp.json",                            kind: "object" },
-  { target: "windsurf", name: "Windsurf",    path: ".codeium/windsurf/mcp_config.json",            kind: "object" },
+  { target: "claude",   name: "Claude Code", path: ".claude/settings.json",                     kind: "object" },
+  { target: "cursor",   name: "Cursor",      path: ".cursor/mcp.json",                           kind: "object" },
+  { target: "windsurf", name: "Windsurf",    path: ".codeium/windsurf/mcp_config.json",           kind: "object" },
   // VS Code: project-local first; fall back to user settings via --target vscode.
-  // The VS Code MCP extension stores servers under the same mcpServers key as
-  // Claude/Cursor when using the .vscode/mcp.json workspace file.
-  { target: "vscode",   name: "VS Code",     path: ".vscode/mcp.json",                            kind: "object" },
-  { target: "continue", name: "Continue",    path: ".continue/.continuerc.json",                  kind: "array"  },
+  { target: "vscode",   name: "VS Code",     path: ".vscode/mcp.json",                           kind: "object" },
+  { target: "continue", name: "Continue",    path: ".continue/.continuerc.json",                 kind: "array"  },
 ] as const;
 
 type FileTarget = (typeof FILE_CLIENTS)[number]["target"];
@@ -41,34 +40,28 @@ async function writeJson(path: string, value: JsonObject): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function serverConfig(secret: string, apiBase: string, credentialEnv = "WORKEROS_API_SECRET"): JsonObject {
-  return {
-    command: "npx",
-    args: ["-y", PACKAGE_NAME],
-    env: {
-      WORKEROS_API_BASE: apiBase,
-      [credentialEnv]: secret,
-    },
-  };
+// HTTP MCP config — url + headers, no subprocess needed.
+function serverConfig(mcpUrl: string, headers: Record<string, string>): JsonObject {
+  return { url: mcpUrl, headers };
 }
 
-function patchObjectConfig(config: JsonObject, secret: string, apiBase: string, credentialEnv?: string): JsonObject {
+function patchObjectConfig(config: JsonObject, mcpUrl: string, headers: Record<string, string>): JsonObject {
   const next = { ...config };
   const mcpServers =
     typeof next.mcpServers === "object" && next.mcpServers && !Array.isArray(next.mcpServers)
       ? { ...(next.mcpServers as JsonObject) }
       : {};
-  mcpServers.workeros = serverConfig(secret, apiBase, credentialEnv);
+  mcpServers.workeros = serverConfig(mcpUrl, headers);
   next.mcpServers = mcpServers;
   return next;
 }
 
-function patchContinueConfig(config: JsonObject, secret: string, apiBase: string, credentialEnv?: string): JsonObject {
+function patchContinueConfig(config: JsonObject, mcpUrl: string, headers: Record<string, string>): JsonObject {
   const next = { ...config };
   const servers = Array.isArray(next.mcpServers) ? [...next.mcpServers] : [];
   const entry = {
     name: "workeros",
-    ...serverConfig(secret, apiBase, credentialEnv),
+    ...serverConfig(mcpUrl, headers),
   };
   const existing = servers.findIndex((server) => (
     typeof server === "object" && server !== null && (server as JsonObject).name === "workeros"
@@ -101,18 +94,16 @@ function removeContinueConfig(config: JsonObject): JsonObject {
   return next;
 }
 
-/** Build the JSON snippet for a generic / manual install. */
-function genericSnippet(secret: string, apiBase: string, credentialEnv = "WORKEROS_API_SECRET"): string {
+function genericSnippet(mcpUrl: string, headers: Record<string, string>): string {
   return JSON.stringify({
     mcpServers: {
-      workeros: serverConfig(secret, apiBase, credentialEnv),
+      workeros: serverConfig(mcpUrl, headers),
     },
   }, null, 2);
 }
 
-function manualSnippets(): string {
-  const placeholder = "<WORKEROS_API_SECRET>";
-  const objectSnippet = genericSnippet(placeholder, DEFAULT_API_BASE);
+function manualSnippets(mcpUrl: string, headers: Record<string, string>): string {
+  const snippet = genericSnippet(mcpUrl, headers);
   return [
     "No supported MCP client config was found.",
     "Create one of these files and add the snippet below:",
@@ -123,7 +114,7 @@ function manualSnippets(): string {
     "- ~/.continue/.continuerc.json    (--target continue)",
     "Or run with --target generic to print this snippet and paste it manually.",
     "",
-    objectSnippet,
+    snippet,
   ].join("\n");
 }
 
@@ -131,28 +122,87 @@ function selectFileClients(target: FileTarget): Array<(typeof FILE_CLIENTS)[numb
   return FILE_CLIENTS.filter((c) => c.target === target);
 }
 
+type McpConfig = { mcpUrl: string; headers: Record<string, string> };
+
+async function resolveMcpConfig(
+  credentials: NonNullable<Awaited<ReturnType<typeof readCredentials>>>,
+  apiBase: string,
+): Promise<McpConfig> {
+  if (credentials.mode === "oss") {
+    if (!credentials.api_secret) {
+      throw new Error("OSS credentials missing api_secret. Run: floom login");
+    }
+    return {
+      mcpUrl: `${apiBase}/mcp-tools/serve`,
+      headers: { "x-floom-secret": credentials.api_secret },
+    };
+  }
+
+  // Cloud mode requires a PAT — JWTs expire hourly and cannot be embedded in
+  // a static MCP config. PATs do not expire.
+  const pat = credentials.api_token;
+  if (!pat) {
+    throw new Error(
+      "Cloud MCP install requires a Personal Access Token (PAT).\n" +
+      "Generate one at https://floom.ai/settings/tokens, then run:\n" +
+      "  floom login --pat <your-token>",
+    );
+  }
+
+  // Resolve the workspace_id: stored in credentials, set via env var, or fetched from API.
+  let workspaceId = credentials.workspace_id || process.env.WORKEROS_WORKSPACE_ID?.trim();
+  if (!workspaceId) {
+    const client = new WorkerosApiClient(apiBase, credentials);
+    try {
+      const workspaces = await client.requestJson("GET", "/api/workspaces") as Array<{ id: string; name?: string }>;
+      if (!Array.isArray(workspaces) || workspaces.length === 0) {
+        throw new Error("No workspaces found. Create a workspace first at https://floom.ai");
+      }
+      workspaceId = workspaces[0].id;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Could not resolve workspace ID. Set WORKEROS_WORKSPACE_ID or run: floom login\nDetails: ${msg}`,
+      );
+    }
+  }
+
+  return {
+    mcpUrl: `${apiBase}/mcp/${workspaceId}`,
+    headers: { Authorization: `Bearer ${pat}` },
+  };
+}
+
 export async function mcpInstallCommand(options: { target?: ClientTarget }): Promise<number> {
   const home = resolveHomeDir();
   if (!home) throw new Error("HOME is required");
 
   const credentials = await readCredentials();
-  const fallbackSecret = process.env.WORKEROS_API_SECRET?.trim();
-  const fallbackToken = process.env.WORKEROS_API_TOKEN?.trim();
-  const resolvedSecret = credentials?.api_secret || credentials?.api_token || fallbackSecret || fallbackToken;
-  const credentialEnv = (credentials?.api_token || (!credentials?.api_secret && fallbackToken))
-    ? "WORKEROS_API_TOKEN"
-    : "WORKEROS_API_SECRET";
-  const resolvedBase = credentials?.api_base || process.env.WORKEROS_API_BASE || DEFAULT_API_BASE;
-
-  if (!resolvedSecret) {
+  if (!credentials) {
     log.err("Not logged in. Cannot install MCP config without credentials.");
     log.info("Run: floom login");
     return 1;
   }
 
+  const resolvedBase = (
+    credentials.api_base ||
+    process.env.WORKEROS_API_BASE ||
+    (credentials.mode === "cloud" ? DEFAULT_CLOUD_API_BASE : DEFAULT_OSS_API_BASE)
+  ).replace(/\/+$/, "");
+
+  let mcpConfig: McpConfig;
+  try {
+    mcpConfig = await resolveMcpConfig(credentials, resolvedBase);
+  } catch (err) {
+    log.err(err instanceof Error ? err.message : String(err));
+    return 1;
+  }
+
+  const { mcpUrl, headers } = mcpConfig;
+
   // "generic" — print snippet for manual paste, no file written.
   if (options.target === "generic") {
-    process.stdout.write(genericSnippet(resolvedSecret, resolvedBase, credentialEnv) + "\n");
+    process.stdout.write(genericSnippet(mcpUrl, headers) + "\n");
     return 0;
   }
 
@@ -171,14 +221,13 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
       : join(home, client.path);
     const config = readJson(configPath);
     const patched = client.kind === "array"
-      ? patchContinueConfig(config, resolvedSecret, resolvedBase, credentialEnv)
-      : patchObjectConfig(config, resolvedSecret, resolvedBase, credentialEnv);
+      ? patchContinueConfig(config, mcpUrl, headers)
+      : patchObjectConfig(config, mcpUrl, headers);
     await writeJson(configPath, patched);
-    const displayPath = client.target === "vscode"
-      ? client.path
-      : `~/${client.path}`;
+    const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
     log.ok(`Installed Workeros MCP config for ${client.name}`);
     log.kv("Config path", displayPath);
+    log.kv("MCP URL", mcpUrl);
     return 0;
   }
 
@@ -190,18 +239,17 @@ export async function mcpInstallCommand(options: { target?: ClientTarget }): Pro
     if (!existsSync(configPath)) continue;
     const config = readJson(configPath);
     const patched = client.kind === "array"
-      ? patchContinueConfig(config, resolvedSecret, resolvedBase, credentialEnv)
-      : patchObjectConfig(config, resolvedSecret, resolvedBase, credentialEnv);
+      ? patchContinueConfig(config, mcpUrl, headers)
+      : patchObjectConfig(config, mcpUrl, headers);
     await writeJson(configPath, patched);
-    const displayPath = client.target === "vscode"
-      ? client.path
-      : `~/${client.path}`;
+    const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
     log.ok(`Installed Workeros MCP config for ${client.name} (auto-detected)`);
     log.kv("Config path", displayPath);
+    log.kv("MCP URL", mcpUrl);
     return 0;
   }
 
-  process.stdout.write(manualSnippets() + "\n");
+  process.stdout.write(manualSnippets(mcpUrl, headers) + "\n");
   return 0;
 }
 
@@ -226,9 +274,7 @@ export async function mcpUninstallCommand(options: { target?: ClientTarget }): P
     const config = readJson(configPath);
     const patched = client.kind === "array" ? removeContinueConfig(config) : removeObjectConfig(config);
     await writeJson(configPath, patched);
-    const displayPath = client.target === "vscode"
-      ? client.path
-      : `~/${client.path}`;
+    const displayPath = client.target === "vscode" ? client.path : `~/${client.path}`;
     log.ok(`Removed Workeros MCP config from ${client.name}`);
     log.kv("Config path", displayPath);
     return 0;
