@@ -132,6 +132,13 @@ def test_success_rate_excludes_paused_worker_runs(client_and_main):
     # The 24h/7d run COUNTS remain unscoped (activity volume, not quality):
     # all 6 seeded runs are still reflected in the activity totals.
     assert stats["runs_today"] >= 6, stats
+    # IA-fix 2026-06-02: the OUTCOME tiles (work_shipped_7d / completed_today /
+    # failed_today) are now scoped to active, real workers — the paused worker's
+    # 4 failures must NOT pollute them. Only active-probe's 1 completed + 1
+    # failed count toward the headline outcome tiles.
+    assert stats["work_shipped_7d"] == 1, stats
+    assert stats["completed_today"] == 1, stats
+    assert stats["failed_today"] == 1, stats
 
 
 def test_success_rate_none_when_no_active_worker_runs(client_and_main):
