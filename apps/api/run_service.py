@@ -72,6 +72,28 @@ import urllib.error
 logger = logging.getLogger("floom.run_service")
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse to auto-follow 30x redirects.
+
+    The alert-webhook POST pre-validates its target against the SSRF deny-list,
+    but the default urllib opener follows 30x redirects WITHOUT re-validating the
+    new target. A hostile public endpoint could answer
+    ``302 Location: http://169.254.169.254/...`` and the blind POST would chase
+    it straight into the metadata/internal target — a redirect-driven SSRF
+    bypass. For a fire-and-forget alert webhook, NOT following redirects is the
+    correct, safe behaviour: a 30x is just a non-2xx response that the caller
+    logs and drops.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D401
+        return None
+
+
+# Opener used for all outbound alert-webhook POSTs. It does not follow
+# redirects, so a 30x can never escape the pre-flight SSRF validation.
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+
+
 def _send_email_notification(
     *,
     to_addrs: list[str],
@@ -198,8 +220,10 @@ def _fire_alert_webhooks(
             try:
                 req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
                 # Bounded timeout — a hostile/slow endpoint must not hang the
-                # alert daemon thread.
-                with urllib.request.urlopen(req, timeout=5):
+                # alert daemon thread. Use the no-redirect opener so a 30x
+                # response can't bounce the POST to an internal/metadata target
+                # that bypasses the pre-flight SSRF validation above.
+                with _NO_REDIRECT_OPENER.open(req, timeout=5):
                     pass
                 logger.debug("Alert webhook delivered to %s for run %s (%s)", url, run_id, status)
             except Exception as exc:
