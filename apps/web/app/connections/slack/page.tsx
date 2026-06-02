@@ -48,6 +48,7 @@ function shortDate(value?: string | null) {
 export default function SlackConnectionsPage() {
   const [status, setStatus] = useState<SlackSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -61,6 +62,7 @@ export default function SlackConnectionsPage() {
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const next = await api.slack.setupStatus();
       setStatus(next);
@@ -71,7 +73,9 @@ export default function SlackConnectionsPage() {
         events_enabled: next.events_enabled,
       }));
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to load Slack setup");
+      const message = error instanceof Error ? error.message : "Failed to load Slack setup";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -197,33 +201,40 @@ export default function SlackConnectionsPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-6">
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-normal text-ink">Slack Agent</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Connect a Slack workspace to Workeros.</p>
-          </div>
-          <Button variant="outline" onClick={() => void loadStatus()} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Refresh
-          </Button>
+    <div className="space-y-6">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">Connect a Slack workspace to Workeros.</p>
         </div>
-        <ConnectionsTabs />
-      </div>
+        <Button data-testid="slack-refresh" variant="outline" size="sm" onClick={() => void loadStatus()} disabled={loading}>
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </header>
+      <ConnectionsTabs />
 
       {loading && !status ? (
         <div className="space-y-3">
           <Skeleton className="h-28 w-full" />
           <Skeleton className="h-44 w-full" />
         </div>
+      ) : loadError && !status ? (
+        <div className="rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-12 text-center">
+          <p className="text-sm font-medium text-ink">Could not load Slack setup</p>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">{loadError}</p>
+          <Button className="mt-4" variant="outline" size="sm" onClick={() => void loadStatus()}>
+            <RefreshCw className="h-4 w-4" />
+            Try again
+          </Button>
+        </div>
       ) : status ? (
         <>
-          <section className="rounded-md border border-line bg-[var(--paper)] p-4 shadow-sm">
+          <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-base font-semibold text-ink">
+                  <h2 className="text-base font-medium text-ink">
                     {workspaceReady ? "Slack is connected" : status.configured ? "Ready to connect Slack" : "Finish Slack app setup"}
                   </h2>
                   {readinessBadge(credentialsReady, "App credentials")}
@@ -256,7 +267,7 @@ export default function SlackConnectionsPage() {
           <div className="space-y-2">
             {!visibleSetup ? (
               <Collapsible open={setupOpen} onOpenChange={setSetupOpen}>
-                <div className="rounded-md border border-line">
+                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)]">
                   <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
                     <span className="flex items-center gap-2 text-sm font-medium text-ink">
                       <Settings2 className="h-4 w-4 text-muted-foreground" />
@@ -280,7 +291,7 @@ export default function SlackConnectionsPage() {
             ) : null}
 
             <Collapsible open={urlsOpen} onOpenChange={setUrlsOpen}>
-              <div className="rounded-md border border-line">
+              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)]">
                 <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
                   <span className="flex items-center gap-2 text-sm font-medium text-ink">
                     <ExternalLink className="h-4 w-4 text-muted-foreground" />
@@ -326,11 +337,11 @@ export default function SlackConnectionsPage() {
           <section className="space-y-3">
             <h2 className="text-base font-semibold text-ink">Installed workspaces</h2>
             {status.installed_teams.length === 0 ? (
-              <div className="rounded-md border border-dashed border-line px-4 py-6 text-sm text-muted-foreground">
+              <div className="rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-6 text-sm text-muted-foreground">
                 No Slack workspace is installed yet.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-md border border-line">
+              <div className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)]">
                 {status.installed_teams.map((team) => (
                   <div key={team.team_id} className="grid gap-2 border-b border-line px-4 py-3 last:border-b-0 sm:grid-cols-[1fr_auto] sm:items-center">
                     <div className="min-w-0">
@@ -352,6 +363,6 @@ export default function SlackConnectionsPage() {
           </section>
         </>
       ) : null}
-    </main>
+    </div>
   );
 }
