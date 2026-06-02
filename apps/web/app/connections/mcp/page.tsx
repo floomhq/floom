@@ -816,6 +816,12 @@ function parseEnv(value: string): Record<string, string> {
     if (index <= 0) throw new Error("Environment entries must use KEY=secret:SECRET_NAME");
     const key = trimmed.slice(0, index).trim();
     const val = trimmed.slice(index + 1).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      throw new Error("Environment keys must be valid environment variable names");
+    }
+    if (!/^secret:[A-Za-z_][A-Za-z0-9_]*$/.test(val)) {
+      throw new Error("Environment values must use secret:SECRET_NAME references");
+    }
     result[key] = val;
   }
   return result;

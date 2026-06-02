@@ -407,6 +407,31 @@ class TestMCPConnections:
         )
         assert bad_stdio.status_code == 400
 
+        raw_env = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={
+                "label": "filesystem",
+                "transport": "stdio",
+                "command": "npx",
+                "env": {"GITHUB_TOKEN": "raw-token-value"},
+            },
+        )
+        assert raw_env.status_code == 400
+        assert "secret:SECRET_NAME" in raw_env.text
+
+        bad_env_secret = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={
+                "label": "filesystem",
+                "transport": "stdio",
+                "command": "npx",
+                "env": {"GITHUB_TOKEN": "secret:bad-secret"},
+            },
+        )
+        assert bad_env_secret.status_code == 400
+
     def test_create_stdio_mcp_connection(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)

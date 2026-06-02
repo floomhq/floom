@@ -10225,6 +10225,17 @@ def _normalize_mcp_connection_payload(payload: MCPConnectionCreateRequest) -> Di
             raise HTTPException(status_code=400, detail="MCP env keys must be valid environment variable names")
         value = str(raw).strip()
         if value:
+            if not value.startswith("secret:"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="MCP env values must reference secrets as secret:SECRET_NAME",
+                )
+            secret_name = value.split(":", 1)[1]
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", secret_name):
+                raise HTTPException(
+                    status_code=400,
+                    detail="MCP env secret references must use valid secret names",
+                )
             env[name] = value
 
     return {
