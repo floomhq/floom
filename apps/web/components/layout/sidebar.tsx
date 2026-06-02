@@ -245,7 +245,7 @@ export function UserProfileFooter() {
         </div>
         <div className="min-w-0 leading-tight">
           <p className="text-xs font-medium text-foreground truncate">Local user</p>
-          <p className="text-[10px] text-muted-foreground truncate">Workeros v0</p>
+          <p className="text-[10px] text-muted-foreground truncate">Floom Workers v0</p>
         </div>
       </div>
       <ThemeModeButton />
