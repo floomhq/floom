@@ -473,7 +473,7 @@ function RenderedFilePreview({
 
   if (detected === "markdown") {
     return (
-      <div className="prose prose-sm max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px]">
+      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px] prose-pre:bg-muted prose-pre:text-foreground prose-code:text-foreground">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
       </div>
     );

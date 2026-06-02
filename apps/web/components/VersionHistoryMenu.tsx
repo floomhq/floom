@@ -118,9 +118,11 @@ export function VersionHistoryMenu({
                         </span>
                       )}
                     </span>
-                    <span className="text-xs text-muted-foreground">
-                      {formatRelative(v.created_at)}
-                    </span>
+                    {!isCurrent && (
+                      <span className="text-xs text-muted-foreground">
+                        {formatRelative(v.created_at)}
+                      </span>
+                    )}
                   </span>
                   {!isCurrent && canRestore && (
                     <span className="inline-flex shrink-0 items-center gap-1 text-xs text-foreground">

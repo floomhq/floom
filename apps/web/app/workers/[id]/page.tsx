@@ -2207,7 +2207,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
         <div className="space-y-2">
           <h2 className="text-base font-semibold text-foreground">How it works</h2>
           <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
-            {worker.how_it_works}
+            {worker.how_it_works.replace(/(^|\s)->(\s)/g, "$1→$2")}
           </p>
         </div>
       )}
