@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, Plus } from "lucide-react";
 import type { ConnectionItem, ComposioTriggerItem } from "@/lib/types";
 import { getSupportedApp } from "@/components/connections/connection-data";
+import { BrandLogo } from "@/components/connections/BrandLogo";
 
 function triggerEventId(item: ComposioTriggerItem): string {
   return item.event || item.slug || item.id || item.name || "";
@@ -130,6 +131,10 @@ export function ConnectionEventPicker({
     return getSupportedApp(slug).displayName;
   }
 
+  function appIcon(slug: string): string {
+    return getSupportedApp(slug).icon;
+  }
+
   function connectionAccountLabel(conn: ConnectionItem): string {
     const app = appDisplayName(conn.app_name.toLowerCase());
     const account = conn.display_name || conn.account_label;
@@ -182,7 +187,12 @@ export function ConnectionEventPicker({
         <Select value={selectedApp} onValueChange={handleAppChange}>
           <SelectTrigger className="w-full border-border">
             <SelectValue placeholder="Pick a connected integration">
-              {selectedApp ? appOptionLabel(selectedApp) : null}
+              {selectedApp ? (
+                <span className="flex items-center gap-2">
+                  <BrandLogo icon={appIcon(selectedApp)} className="size-4 shrink-0" />
+                  <span className="truncate">{appOptionLabel(selectedApp)}</span>
+                </span>
+              ) : null}
             </SelectValue>
           </SelectTrigger>
           <SelectContent className="z-50">
@@ -190,7 +200,10 @@ export function ConnectionEventPicker({
               const slug = c.app_name.toLowerCase();
               return (
                 <SelectItem key={slug} value={slug}>
-                  {appOptionLabel(slug)}
+                  <span className="flex items-center gap-2">
+                    <BrandLogo icon={appIcon(slug)} className="size-4 shrink-0" />
+                    <span className="truncate">{appOptionLabel(slug)}</span>
+                  </span>
                 </SelectItem>
               );
             })}
