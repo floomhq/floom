@@ -207,6 +207,10 @@ export interface WorkerSummary {
   example_output?: string;
   how_it_works?: string;
   is_example?: boolean;
+  /** Engine/system worker (manifest system_worker:true, e.g. worker-author).
+   *  Hidden from the default Workers list — it's the engine behind /workers/new,
+   *  not an employee. */
+  system?: boolean;
   archived?: boolean;
   archive_reason?: string;
   tags: string[];

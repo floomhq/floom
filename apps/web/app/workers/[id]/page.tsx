@@ -1515,7 +1515,7 @@ export default function WorkerDetailPage() {
 
       {/* Versions dialog. Hosts the full config-version history (list +
           per-version diff + rollback) that used to be a dedicated tab. Opened
-          from the header "Versions" trigger so the affordance matches Agent
+          from the header "Versions" trigger so the affordance matches Assistant
           (/assistant) and Brain (/contexts) and the tab bar stays compact. */}
       <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
