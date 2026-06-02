@@ -231,7 +231,14 @@ def _run_alerting_check() -> None:
         # Fetch all non-archived workers with their owner
         workers = conn.execute(
             """
-            SELECT w.id, w.name, w.owner_id, w.enabled, w.trigger_type, w.config_json
+            SELECT
+                w.id,
+                w.name,
+                w.owner_id,
+                w.enabled,
+                w.trigger_type,
+                w.triggers_json,
+                sv.manifest_json
             FROM workers w
             LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
             WHERE w.enabled = 1
@@ -301,7 +308,11 @@ def _run_alerting_check() -> None:
             # Skip system/test workers
             if _is_system_worker(worker_name):
                 continue
-            if _is_manual_only_worker(worker["trigger_type"], worker["config_json"]):
+            if _is_manual_only_worker(
+                worker["trigger_type"],
+                worker["manifest_json"],
+                worker["triggers_json"],
+            ):
                 continue
 
             stat = stats_by_worker.get(worker_id)
@@ -362,13 +373,17 @@ def _is_system_worker(name: str) -> bool:
     )
 
 
-def _is_manual_only_worker(trigger_type: str | None, config_json: str | None) -> bool:
+def _is_manual_only_worker(
+    trigger_type: str | None,
+    manifest_json: str | None,
+    triggers_json: str | None = None,
+) -> bool:
     """Return True for workers that only run from explicit operator action."""
     normalized = (trigger_type or "").strip().lower()
     if normalized and normalized not in ("manual", "on_demand"):
         return False
     try:
-        config = json.loads(config_json or "{}")
+        config = json.loads(manifest_json or "{}")
     except (TypeError, json.JSONDecodeError):
         config = {}
     trigger = config.get("trigger") if isinstance(config, dict) else {}
@@ -379,6 +394,17 @@ def _is_manual_only_worker(trigger_type: str | None, config_json: str | None) ->
     triggers = config.get("triggers") if isinstance(config, dict) else None
     if isinstance(triggers, list):
         for item in triggers:
+            if not isinstance(item, dict):
+                continue
+            item_kind = str(item.get("type") or item.get("kind") or "").strip().lower()
+            if item_kind and item_kind not in ("manual", "on_demand"):
+                return False
+    try:
+        stored_triggers = json.loads(triggers_json or "[]")
+    except (TypeError, json.JSONDecodeError):
+        stored_triggers = []
+    if isinstance(stored_triggers, list):
+        for item in stored_triggers:
             if not isinstance(item, dict):
                 continue
             item_kind = str(item.get("type") or item.get("kind") or "").strip().lower()
