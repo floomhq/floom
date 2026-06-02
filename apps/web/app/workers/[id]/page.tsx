@@ -2769,7 +2769,11 @@ function ConnectionsSection({
           </div>
         </section>
       ) : (
-        <p className="text-sm text-muted-foreground">This worker requires no connections.</p>
+        <p className="text-sm text-muted-foreground">
+          {requiredSecrets.length > 0
+            ? "This worker needs no app connections — it only requires the secrets listed below."
+            : "This worker needs no app connections."}
+        </p>
       )}
 
       {configuredMcpConnections.length > 0 && (
@@ -2839,7 +2843,12 @@ function ConnectionsSection({
 
       {requiredSecrets.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-base font-semibold text-foreground">Required secrets</h2>
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Secrets</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              API keys and tokens this worker reads from the environment. These are separate from app connections.
+            </p>
+          </div>
           <ul className="space-y-2">
             {requiredSecrets.map((s) => (
               <li key={s} className="flex items-center justify-between py-2 border-b border-line last:border-0">
