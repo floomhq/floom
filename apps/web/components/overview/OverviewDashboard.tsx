@@ -2,6 +2,7 @@
 
 // S44: accepts server-fetched initialData to eliminate client-side fetch round-trip.
 // S45: sparklines on metric tiles, alerts moved to AlertsBell in header.
+// W8: worker icons in activity + upcoming list rows.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -27,6 +28,8 @@ import {
   formatTimeOfDay,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import { workerIcon } from "@/lib/worker-icon";
+import { BrandLogo } from "@/components/connections/BrandLogo";
 
 export type { SystemOverviewAttentionItem };
 
@@ -228,6 +231,28 @@ function useOverviewVisibleRows() {
   return rows;
 }
 
+// W8: small leading icon for each row — matches the squircle style from
+// WorkerIconPills but at xs scale (size-5). Resolves via workerIcon() exactly
+// as worker cards do: connection brand → category glyph → hash fallback.
+// Overview run/scheduled items carry only id + name (no connections/tags),
+// so the resolver uses name-keyword matching then stable-hash fallback.
+function WorkerRowIcon({ workerId, workerName }: { workerId: string; workerName?: string | null }) {
+  const resolved = workerIcon({ id: workerId, name: workerName || undefined });
+  return (
+    <span
+      className="inline-flex shrink-0 items-center justify-center size-5 bg-[var(--accent-soft)] text-[var(--accent)] ring-1 ring-[var(--accent-line)]"
+      style={{ borderRadius: "var(--radius-squircle)" }}
+      aria-hidden="true"
+    >
+      {resolved.kind === "brand" ? (
+        <BrandLogo icon={resolved.slug} className="size-3" />
+      ) : (
+        <resolved.Icon className="size-3" />
+      )}
+    </span>
+  );
+}
+
 function WorkerActivity({
   runs,
   loading,
@@ -270,6 +295,7 @@ function WorkerActivity({
                     <span className="text-xs font-medium" style={{ color: meta.color }}>
                       {meta.label}
                     </span>
+                    <WorkerRowIcon workerId={run.worker_id} workerName={run.worker_name} />
                     <span className="truncate text-sm font-medium text-[var(--text-primary)]">
                       {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
                     </span>
@@ -339,6 +365,7 @@ function ComingUp({
               </span>
               <span className="min-w-0">
                 <span className="flex items-center gap-1.5">
+                  <WorkerRowIcon workerId={item.worker_id} workerName={item.worker_name} />
                   <span
                     className={cn(
                       "block truncate text-sm",
