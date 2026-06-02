@@ -178,7 +178,7 @@ export default function AssistantPage() {
     <div className="space-y-6">
       <div>
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">Agent</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Assistant</h1>
           {agent?.model ? (
             <Badge variant="outline" className="font-mono text-xs">
               {agent.model}
@@ -188,14 +188,14 @@ export default function AssistantPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           Your interactive workspace assistant — chat with it to get help and orchestrate your
           workers. It shares the same Brain and Connections your workers use. Workers run
-          autonomously on triggers; the agent is interactive.
+          autonomously on triggers; the assistant is interactive.
         </p>
       </div>
 
       {error ? (
         <Alert variant="destructive">
           <AlertTriangle className="size-4" />
-          <AlertTitle>Couldn&apos;t load the agent</AlertTitle>
+          <AlertTitle>Couldn&apos;t load the assistant</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}

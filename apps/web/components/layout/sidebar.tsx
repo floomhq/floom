@@ -37,10 +37,14 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
 // a surface.
+// `hint` is surfaced as a native title tooltip on hover — the flat single-row
+// nav has no room for a permanent subtitle without a redesign, so the
+// employee-model microcopy ("Assistant = the thing you talk to"; "Workers run
+// on triggers") lives in the tooltip instead (Federico 2026-06-02).
 const nav = [
   { href: "/overview", label: "Overview", icon: Activity },
-  { href: "/workers", label: "Workers", icon: Box },
-  { href: "/assistant", label: "Agent", icon: Bot },
+  { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
+  { href: "/assistant", label: "Assistant", icon: Bot, hint: "Chat, ask, delegate" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
@@ -65,6 +69,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
             key={item.href}
             href={item.href}
             onClick={onNavigate}
+            title={item.hint}
             className={cn(
               "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
               active
