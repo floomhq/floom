@@ -7,7 +7,9 @@ const API_BASE =
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  const upstream = await fetch(`${API_BASE}/auth/password-login`, {
+  const mode = typeof body.mode === "string" ? body.mode : "signin";
+  const path = mode === "signup" ? "/auth/password-signup" : "/auth/password-login";
+  const upstream = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),

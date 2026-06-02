@@ -40,7 +40,7 @@ function normalizeNextPath(value: string): string {
 export function LoginEmailPanel({ next }: { next: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"magic" | "password">("magic");
+  const [mode, setMode] = useState<"magic" | "signin" | "signup">("magic");
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -53,13 +53,17 @@ export function LoginEmailPanel({ next }: { next: string }) {
     try {
       const normalizedNext = normalizeNextPath(next);
       const endpoint = mode === "magic" ? "/app/api/auth/email" : "/app/api/auth/password";
-      const response = await postAuth(endpoint, { email, password, next: normalizedNext });
+      const response = await postAuth(endpoint, { email, password, next: normalizedNext, mode });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(typeof body.detail === "string" ? body.detail : "Sign-in failed");
       }
-      if (mode === "password") {
+      if (mode === "signin" || body.ok) {
         window.location.replace(normalizeNextPath(body.next || normalizedNext || "/app"));
+        return;
+      }
+      if (mode === "signup" && body.status === "confirmation_required") {
+        setStatus("Check your email to confirm your Workeros account.");
         return;
       }
       setStatus("Check your email for the magic link.");
@@ -72,7 +76,7 @@ export function LoginEmailPanel({ next }: { next: string }) {
 
   return (
     <form className="mt-4 space-y-3" onSubmit={submit}>
-      <div className="grid grid-cols-2 rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper-2)] p-1">
+      <div className="grid grid-cols-3 rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper-2)] p-1">
         <button
           type="button"
           onClick={() => setMode("magic")}
@@ -84,12 +88,21 @@ export function LoginEmailPanel({ next }: { next: string }) {
         </button>
         <button
           type="button"
-          onClick={() => setMode("password")}
+          onClick={() => setMode("signin")}
           className={`h-8 rounded-[calc(var(--radius-button)-4px)] text-[13px] font-medium transition-colors ${
-            mode === "password" ? "bg-[var(--paper)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-soft)]"
+            mode === "signin" ? "bg-[var(--paper)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-soft)]"
           }`}
         >
-          Password
+          Sign in
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("signup")}
+          className={`h-8 rounded-[calc(var(--radius-button)-4px)] text-[13px] font-medium transition-colors ${
+            mode === "signup" ? "bg-[var(--paper)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-soft)]"
+          }`}
+        >
+          Sign up
         </button>
       </div>
 
@@ -106,14 +119,14 @@ export function LoginEmailPanel({ next }: { next: string }) {
         />
       </label>
 
-      {mode === "password" ? (
+      {mode !== "magic" ? (
         <label className="block">
           <span className="sr-only">Password</span>
           <input
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            autoComplete="current-password"
+            autoComplete={mode === "signup" ? "new-password" : "current-password"}
             required
             placeholder="Password"
             className="h-11 w-full rounded-[var(--radius-input)] border border-[var(--line)] bg-[var(--paper)] px-3 text-sm outline-none transition-colors placeholder:text-[var(--ink-mute)] focus:border-[var(--ink-soft)]"
@@ -126,7 +139,13 @@ export function LoginEmailPanel({ next }: { next: string }) {
         disabled={loading}
         className="auth-btn auth-btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {loading ? "Sending..." : mode === "magic" ? "Email me a magic link" : "Sign in with password"}
+        {loading
+          ? "Sending..."
+          : mode === "magic"
+            ? "Email me a magic link"
+            : mode === "signup"
+              ? "Create account"
+              : "Sign in with password"}
       </button>
 
       {status ? <p className="text-center text-[12px] text-[var(--success)]">{status}</p> : null}

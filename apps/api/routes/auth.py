@@ -7,12 +7,13 @@ import os
 import secrets
 import time
 from functools import lru_cache
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from apps.api import email as email_service
@@ -66,6 +67,22 @@ class PasswordLoginRequest(BaseModel):
     email: str = Field(..., min_length=3)
     password: str = Field(..., min_length=1)
     next: str = "/app"
+
+
+class PasswordSignupRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=8)
+    next: str = "/app"
+
+
+class FragmentSessionRequest(BaseModel):
+    access_token: str = Field(..., min_length=10)
+    refresh_token: str = Field(..., min_length=10)
+    expires_at: int | None = None
+    expires_in: int | None = None
+    next: str = "/app"
+    device_code: str | None = None
+    user_code: str | None = None
 
 
 def _safe_next(value: str | None) -> str:
@@ -164,6 +181,105 @@ def _encode_session_cookie(session: Any) -> str:
     return base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode()
     ).decode().rstrip("=")
+
+
+def _session_from_tokens(
+    *,
+    access_token: str,
+    refresh_token: str,
+    expires_at: int | None,
+    expires_in: int | None,
+    user: Any,
+) -> SimpleNamespace:
+    ttl = max(int(expires_in or 3600), 60)
+    resolved_expires_at = int(expires_at or (time.time() + ttl))
+    return SimpleNamespace(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_at=resolved_expires_at,
+        expires_in=ttl,
+        user=user,
+    )
+
+
+def _script_json(value: Any) -> str:
+    return (
+        json.dumps(value, separators=(",", ":"))
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
+def _auth_fragment_bridge_html(
+    *,
+    next_path: str,
+    device_code: str | None,
+    user_code: str | None,
+) -> str:
+    fallback_url = _frontend_redirect("/login?error=auth_callback_missing")
+    payload = {
+        "next": next_path,
+        "device_code": device_code,
+        "user_code": user_code,
+        "fallback": fallback_url,
+    }
+    # Supabase can redirect with OAuth tokens in the URL fragment. Fragments
+    # never reach FastAPI, so this page posts them back to the same API origin
+    # where the token is verified before the HttpOnly session cookie is set.
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Completing sign in - Workeros</title>
+  <style>
+    :root {{ color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #fbfaf7; color: #181716; }}
+    main {{ width: min(360px, calc(100vw - 40px)); border: 1px solid #ded8cf; border-radius: 18px; background: #fffefb; padding: 28px; box-shadow: 0 18px 60px rgba(20, 20, 20, 0.08); }}
+    h1 {{ margin: 0 0 8px; font-size: 22px; line-height: 1.15; letter-spacing: 0; }}
+    p {{ margin: 0; color: #6f6960; font-size: 14px; line-height: 1.5; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Completing sign in</h1>
+    <p>Workeros is finishing your secure session.</p>
+  </main>
+  <script>
+    const cfg = {_script_json(payload)};
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const accessToken = hash.get("access_token");
+    const refreshToken = hash.get("refresh_token");
+    const expiresAt = hash.get("expires_at");
+    const expiresIn = hash.get("expires_in");
+    if (!accessToken || !refreshToken) {{
+      window.location.replace(cfg.fallback);
+    }} else {{
+      fetch("/auth/fragment-session", {{
+        method: "POST",
+        headers: {{ "content-type": "application/json" }},
+        credentials: "include",
+        body: JSON.stringify({{
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          expires_at: expiresAt ? Number(expiresAt) : null,
+          expires_in: expiresIn ? Number(expiresIn) : null,
+          next: cfg.next,
+          device_code: cfg.device_code,
+          user_code: cfg.user_code
+        }})
+      }})
+      .then(async (response) => {{
+        const body = await response.json().catch(() => ({{}}));
+        if (!response.ok) throw new Error(body.detail || "Auth callback failed");
+        window.location.replace(body.redirect_to || cfg.fallback);
+      }})
+      .catch(() => window.location.replace(cfg.fallback));
+    }}
+  </script>
+</body>
+</html>"""
 
 
 def _decode_session_cookie(raw_value: str | None) -> dict[str, Any] | None:
@@ -457,6 +573,93 @@ def password_login(payload: PasswordLoginRequest):
     return response
 
 
+@router.post("/password-signup")
+def password_signup(payload: PasswordSignupRequest):
+    normalized_email = payload.email.strip().lower()
+    if not normalized_email or "@" not in normalized_email:
+        raise HTTPException(status_code=400, detail="valid email is required")
+    next_path = _safe_next(payload.next)
+    callback_url = _callback_url(next_path=next_path)
+    client = new_supabase_anon_client()
+    try:
+        auth_response = client.auth.sign_up(
+            {
+                "email": normalized_email,
+                "password": payload.password,
+                "options": {"email_redirect_to": callback_url},
+            }
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="Sign-up failed") from exc
+
+    session = getattr(auth_response, "session", None)
+    user = getattr(auth_response, "user", None) or getattr(session, "user", None)
+    if user is not None and getattr(user, "id", None):
+        _upsert_user_row(user)
+
+    if session is None or user is None or not getattr(user, "id", None):
+        return JSONResponse(
+            {
+                "ok": False,
+                "status": "confirmation_required",
+                "email": normalized_email,
+                "next": next_path,
+            }
+        )
+
+    _maybe_send_welcome_email(user)
+    response = JSONResponse({"ok": True, "next": next_path})
+    _set_cookie(
+        response,
+        _SESSION_COOKIE_NAME,
+        _encode_session_cookie(session),
+        max_age=max(int(getattr(session, "expires_in", 3600) or 3600), 60),
+    )
+    _clear_cookie(response, _OAUTH_VERIFIER_COOKIE_NAME)
+    return response
+
+
+@router.post("/fragment-session")
+def fragment_session(payload: FragmentSessionRequest, request: Request):
+    client = new_supabase_anon_client()
+    try:
+        auth_user_response = client.auth.get_user(payload.access_token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Auth token verification failed") from exc
+
+    user = getattr(auth_user_response, "user", None) or auth_user_response
+    if user is None or not getattr(user, "id", None):
+        raise HTTPException(status_code=401, detail="No authenticated user returned")
+
+    _upsert_user_row(user)
+    _maybe_send_welcome_email(user)
+    next_path = _safe_next(payload.next)
+    session = _session_from_tokens(
+        access_token=payload.access_token,
+        refresh_token=payload.refresh_token,
+        expires_at=payload.expires_at,
+        expires_in=payload.expires_in,
+        user=user,
+    )
+    if payload.device_code and payload.user_code:
+        _store_cli_exchange(
+            request=request,
+            user_id=str(user.id),
+            device_code=payload.device_code,
+            user_code=payload.user_code,
+            refresh_token=payload.refresh_token,
+        )
+    response = JSONResponse({"ok": True, "next": next_path, "redirect_to": _frontend_redirect(next_path)})
+    _set_cookie(
+        response,
+        _SESSION_COOKIE_NAME,
+        _encode_session_cookie(session),
+        max_age=max(int(getattr(session, "expires_in", 3600) or 3600), 60),
+    )
+    _clear_cookie(response, _OAUTH_VERIFIER_COOKIE_NAME)
+    return response
+
+
 @router.get("/callback")
 def callback(
     request: Request,
@@ -503,7 +706,13 @@ def callback(
                 }
             )
         else:
-            raise HTTPException(status_code=400, detail="Missing auth callback parameters")
+            return HTMLResponse(
+                _auth_fragment_bridge_html(
+                    next_path=next_path,
+                    device_code=device_code,
+                    user_code=user_code,
+                )
+            )
     except HTTPException:
         raise
     except Exception as exc:
