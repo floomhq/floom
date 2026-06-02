@@ -186,7 +186,9 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Workspace instructions and the final system prompt.
+          Your interactive workspace assistant — chat with it to get help and orchestrate your
+          workers. It shares the same Brain and Connections your workers use. Workers run
+          autonomously on triggers; the agent is interactive.
         </p>
       </div>
 

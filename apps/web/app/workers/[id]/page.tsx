@@ -92,15 +92,18 @@ function isValidSection(s: string): s is Section {
 }
 
 // P2-3: the URL hash must match the visible tab label, not the internal
-// Section id. Labels: About / Run / Triggers / History / Connections / Source.
+// Section id. Labels: About / Run / Runs / Source / Settings / Brain / Tools.
 // Internal ids stay stable (runs/connections/code) for back-compat; only the
 // hash slug the user sees/links changes.
+// 2026-06-02: run-history hash is now `runs` (matches the "Runs" label set in
+// PR #359). The legacy `#history` deep-link still resolves to the Runs tab via
+// HASH_TO_SECTION below, so old links don't break.
 const SECTION_TO_HASH: Record<Section, string> = {
   about: "about",
   run: "run",
   settings: "settings",
   brain: "brain",
-  runs: "history",
+  runs: "runs",
   connections: "connections",
   code: "source",
   versions: "versions",
@@ -156,7 +159,12 @@ const NAV_ITEMS: NavItem[] = [
   { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" />, group: "view" },
   { id: "settings", label: "Settings", icon: <Settings2 className="w-4 h-4" />, group: "setup" },
   { id: "brain", label: "Brain", icon: <BrainIcon className="w-4 h-4" />, group: "setup" },
-  { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" />, group: "setup" },
+  // Labelled "Tools" (not "Connections") to disambiguate from the GLOBAL
+  // Connections nav (account inventory). This per-worker tab shows the
+  // tools/connections THIS worker is allowed to use — its permission
+  // allowlist. Internal section id stays `connections` for hash/link
+  // back-compat (see HASH_TO_SECTION).
+  { id: "connections", label: "Tools", icon: <Plug2 className="w-4 h-4" />, group: "setup" },
 ];
 // Note: "Versions" is intentionally NOT a tab. Worker config-version history is
 // surfaced via a header "Versions" dropdown → dialog (VersionsSection), to match
@@ -2745,9 +2753,11 @@ function ConnectionsSection({
         <section className="space-y-3">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-foreground">Connection permissions</h2>
+              <h2 className="text-base font-semibold text-foreground">Tools this worker can use</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Worker-level allowlists limit tool execution even when an account grants broader OAuth scopes.
+                The connections and tools this worker is allowed to use. These are this worker&apos;s
+                permissions — separate from your account-wide Connections inventory. Worker-level
+                allowlists limit tool execution even when an account grants broader OAuth scopes.
               </p>
             </div>
             <Link href="/connections">

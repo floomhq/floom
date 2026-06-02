@@ -14030,6 +14030,30 @@ def system_overview(
         _scoped_completed_7d / completed_or_failed_7d if completed_or_failed_7d else None
     )
 
+    # IA-fix 2026-06-02: the FLAGSHIP outcome tiles (work_shipped_7d /
+    # completed_today / failed_today) were computed over ALL runs, so failing
+    # internal listener workers (slack-listener, whatsapp-listener,
+    # ai-news-discord-digest, …) that fail every ~10min on config gaps dragged
+    # the headline "work shipped" metric to a near-total failure read. Those
+    # workers are NOT real user outcomes. Scope the OUTCOME tiles to the same
+    # active-real-worker set already trusted for success_rate_7d (no new
+    # denylist — reuses _active_real_worker_ids, which excludes paused/example/
+    # system/stock/listener workers). The failing listeners are NOT hidden: they
+    # still surface in needs_attention (failure clusters / disabled workers
+    # above), so the operator can see and fix them. runs_today / runs_24h stay
+    # unscoped — those are raw activity volume, not user-outcome quality.
+    _today_real_rows = [
+        row for row in today_rows if row.get("worker_id") in _active_real_worker_ids
+    ]
+    completed_7d = sum(1 for row in _success_scope_rows if _is_completed(row))
+    completed_previous_7d = sum(
+        1
+        for row in previous_7d_rows
+        if _is_completed(row) and row.get("worker_id") in _active_real_worker_ids
+    )
+    completed_today = sum(1 for row in _today_real_rows if _is_completed(row))
+    failed_today = sum(1 for row in _today_real_rows if _is_failed(row))
+
     return OverviewResponse(
         stats=OverviewStats(
             runs_24h=runs_24h,
