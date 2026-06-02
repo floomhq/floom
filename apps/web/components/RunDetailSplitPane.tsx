@@ -67,10 +67,10 @@ export function RunDetailSplitPane({
           Runs
         </Link>
       )}
-      <div className="flex items-start gap-3">
+      <div className="flex flex-col items-start gap-3 sm:flex-row">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className={cn("truncate font-semibold tracking-tight", inline ? "text-base" : "text-xl")}>
+            <h1 className={cn("min-w-0 break-words font-semibold tracking-tight sm:truncate", inline ? "text-base" : "text-xl")}>
               {run.worker_name || run.worker_id}
             </h1>
             <RunStatusBadge status={latestStatus(run, transcriptParts)} />
