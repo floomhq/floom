@@ -4648,6 +4648,7 @@ def list_workers(
                 example_output=None if list_shape else w.get("example_output"),
                 how_it_works=None if list_shape else w.get("how_it_works"),
                 is_example=w.get("is_example"),
+                system=bool((w.get("manifest") or {}).get("system_worker", False)),
                 archived=is_archived,
                 archive_reason=_sanitize_operator_text(w.get("archive_reason")),
                 tags=w.get("tags") or [],

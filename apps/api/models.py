@@ -1349,6 +1349,11 @@ class WorkerSummary(BaseModel):
     example_output: Optional[str] = None
     how_it_works: Optional[str] = None
     is_example: Optional[bool] = None
+    # Engine/system worker (manifest system_worker:true, e.g. worker-author).
+    # The API already excludes these from the default /workers view, but the
+    # flag is carried on the payload so the web UI can defensively classify and
+    # filter system/internal workers without hardcoding ids (Federico 2026-06-02).
+    system: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
