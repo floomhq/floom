@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Check, ChevronsUpDown, Plus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronsUpDown, Download, Plus, Upload } from "lucide-react";
+import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,9 @@ export function WorkspaceSwitcher() {
   const [createName, setCreateName] = useState("");
   const [creating, setCreating] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +100,45 @@ export function WorkspaceSwitcher() {
     } catch (err) {
       setError((err as Error).message || "Failed to create workspace");
       setCreating(false);
+    }
+  }
+
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const { blob, filename } = await api.workspace.exportTemplate();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Workspace template exported");
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to export template");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleImportFile(file: File) {
+    setImporting(true);
+    try {
+      const result = await api.workspace.importTemplate(file);
+      const imported = result.workers_imported.length + result.contexts_imported.length;
+      toast.success(
+        `Imported ${imported} item${imported === 1 ? "" : "s"}${
+          result.skipped.length ? ` · ${result.skipped.length} skipped` : ""
+        }`
+      );
+      window.location.reload();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to import template");
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -190,8 +233,49 @@ export function WorkspaceSwitcher() {
               New workspace
             </DropdownMenuItem>
           </DropdownMenuGroup>
+          <DropdownMenuSeparator className="-mx-1 my-1" />
+          {/* W9 (Federico 2026-06-02): the export/import template actions were
+              not discoverable. A labeled "Workspace actions" header makes it
+              obvious to a first-time user that exporting (sharing) and
+              importing a workspace template exist, without re-bloating the main
+              chrome with standalone buttons. */}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--ink-mute)]">
+              Workspace actions
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              closeOnClick={false}
+              disabled={exporting}
+              onClick={() => void handleExport()}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            >
+              <Download className="size-4" />
+              {exporting ? "Exporting…" : "Export / share as template"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              closeOnClick={false}
+              disabled={importing}
+              onClick={() => importInputRef.current?.click()}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            >
+              <Upload className="size-4" />
+              {importing ? "Importing…" : "Import template…"}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".zip,application/zip"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void handleImportFile(file);
+          event.target.value = "";
+        }}
+      />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-md">
