@@ -17,11 +17,11 @@ try:
     _LOCK_EX = _fcntl_mod.LOCK_EX
     _LOCK_UN = _fcntl_mod.LOCK_UN
 except ImportError:
-    # Windows: no fcntl — use msvcrt or fall back to no-op for single-process dev
+    # Windows: no fcntl, so use msvcrt or fall back to a no-op for single-process dev.
     try:
         import msvcrt as _msvcrt
         def _flock(fd, op):
-            if op == 1:  # LOCK_EX
+            if op == 1:
                 _msvcrt.locking(fd.fileno(), _msvcrt.LK_NBLCK, 1)
             else:
                 _msvcrt.locking(fd.fileno(), _msvcrt.LK_UNLCK, 1)
@@ -43,9 +43,9 @@ import secrets as pysecrets
 import subprocess
 import uuid as _uuid_mod
 import zipfile
+import urllib.parse
 import ipaddress
 import math
-import urllib.parse
 import requests
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
@@ -55,6 +55,7 @@ from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Type
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
@@ -64,13 +65,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from dotenv import load_dotenv
 
 from auth import AuthContext, get_auth_context, get_auth_provider
-from auth.context import current_auth_user_id
+from auth.context import current_auth_context, current_auth_user_id, set_current_auth_context
 from auth.local_workspaces import (
     DEFAULT_WORKSPACE_ID,
     create_local_workspace,
     get_local_workspace,
     list_local_workspaces,
     local_workspace_base_user_id,
+    local_workspace_user_id,
 )
 from contexts import (
     MAX_CONTEXT_BYTES,
@@ -913,6 +915,8 @@ async def auth_middleware(request: Request, call_next):
             or path == "/slack/interactivity"
             or path == "/mcp"
             or path == "/api/mcp"
+            or path == "/mcp/setup/langdock"
+            or path == "/api/mcp/setup/langdock"
             or path == "/langdock/mcp"
             or path == "/workspace-agent/mcp"
             or path == "/api/langdock/mcp"
@@ -1429,9 +1433,6 @@ def _is_sensitive_artifact_row(row: Any) -> bool:
 
 
 def _raise_if_protected_worker_mutation(worker_id: str) -> None:
-    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
-    if deploy == "local":
-        return
     if worker_id in PROTECTED_STOCK_WORKER_IDS:
         raise HTTPException(status_code=403, detail="Stock workers cannot be modified through the API")
 
@@ -1610,6 +1611,20 @@ def _resolve_worker_status(
         status = WorkerStatus.READY
 
     return status
+
+
+def _available_secret_names_for_user(user_id: str, repos: Repositories) -> set[str]:
+    names = set(repos.secrets.list_names(user_id=user_id))
+    try:
+        from run_service import _platform_worker_secret_names
+        names.update(
+            name
+            for name in _platform_worker_secret_names()
+            if (os.environ.get(name) or "").strip()
+        )
+    except Exception:
+        pass
+    return names
 
 
 def _get_stats_batch(
@@ -4327,7 +4342,7 @@ def list_workers(
         {} if list_shape
         else _get_timeseries_batch(worker_ids, user_id=auth.user_id, repos=repos, days=14)
     )
-    available_secret_names = repos.secrets.list_names(user_id=auth.user_id)
+    available_secret_names = _available_secret_names_for_user(auth.user_id, repos)
     result: List[WorkerSummary] = []
     for w in workers:
         last_run_row = _get_last_run_for_worker(w["id"], user_id=auth.user_id, repos=repos)
@@ -4442,7 +4457,7 @@ def _build_worker_detail(
     # disabled / never-run, see _resolve_worker_status). The worker dict already
     # carries `enabled` (same w.enabled column get_recipe reads), so no separate
     # recipe fetch is needed.
-    available_secret_names = repos.secrets.list_names(user_id=user_id)
+    available_secret_names = _available_secret_names_for_user(user_id, repos)
     status = _resolve_worker_status(
         worker,
         config=config,
@@ -9817,6 +9832,7 @@ def list_secrets(
     }
 
     workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True)
+    platform_available = _available_secret_names_for_user(auth.user_id, repos) - set(db_secrets)
 
     # (a) All secrets declared by any worker.yml
     worker_secret_names: set[str] = set()
@@ -9835,6 +9851,8 @@ def list_secrets(
         status_value = str(db_row.get("status") or "").lower()
         if status_value in SecretStatus._value2member_map_:
             status = SecretStatus(status_value)
+        elif name in platform_available:
+            status = SecretStatus.SET
         else:
             status = SecretStatus.SET if value else SecretStatus.MISSING
         used_by = []
@@ -11400,6 +11418,30 @@ def _approval_action_run_id(value: str) -> str:
     return raw
 
 
+def _approve_pending_run_for_slack(*, run_id: str, user_id: str, repos: Repositories) -> ActionResponse:
+    return approve_run(
+        run_id,
+        ApproveRequest(),
+        AuthContext(user_id=user_id, email=None, scopes=("slack",)),
+        repos,
+    )
+
+
+def _reject_pending_run_for_slack(
+    *,
+    run_id: str,
+    user_id: str,
+    repos: Repositories,
+    reason: str,
+) -> ActionResponse:
+    return reject_run(
+        run_id,
+        RejectRequest(reason=reason),
+        AuthContext(user_id=user_id, email=None, scopes=("slack",)),
+        repos,
+    )
+
+
 def _slack_pending_approvals_response(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not rows:
         return {
@@ -11767,7 +11809,7 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
         prompt = _clean_slack_agent_prompt(str(event.get("text") or ""), None)
         if not prompt:
             return JSONResponse({"ok": True, "ignored": "empty_prompt"})
-        user_id = _slack_workspace_user_id()
+        user_id = (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
         background_tasks.add_task(
             _handle_slack_direct_message,
             event=event,
@@ -11794,22 +11836,6 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
         user_id=user_id,
     )
     return JSONResponse({"ok": True, "status": "queued"})
-
-
-def _approve_pending_run_for_slack(*, run_id: str, user_id: str, repos: Repositories) -> ActionResponse:
-    auth = AuthContext(user_id=user_id, email=None, scopes=("slack",))
-    return approve_run(run_id, ApproveRequest(), auth, repos)
-
-
-def _reject_pending_run_for_slack(
-    *,
-    run_id: str,
-    user_id: str,
-    repos: Repositories,
-    reason: str,
-) -> ActionResponse:
-    auth = AuthContext(user_id=user_id, email=None, scopes=("slack",))
-    return reject_run(run_id, RejectRequest(reason=reason), auth, repos)
 
 
 @app.post("/slack/commands")
@@ -11947,8 +11973,12 @@ async def slack_interactivity(request: Request) -> Response:
 # Workspace Agent MCP API
 # ---------------------------------------------------------------------------
 
-_WORKSPACE_AGENT_MCP_TOOL_NAME = "ask_workeros_workspace_agent"
+_WORKSPACE_AGENT_MCP_TOOL_NAME = "ask_workspace_agent"
+_WORKSPACE_AGENT_MCP_LEGACY_TOOL_NAME = "ask_workeros_workspace_agent"
 _WORKSPACE_AGENT_MCP_PROTOCOL_VERSION = "2024-11-05"
+_WORKEROS_REMOTE_MCP_NAME = "workeros"
+_WORKEROS_REMOTE_MCP_VERSION = "0.2.0"
+_MCP_TERMINAL_RUN_STATUSES = {"completed", "failed", "pending_approval", "approved", "rejected", "success", "error"}
 
 
 def _workspace_agent_mcp_enabled() -> bool:
@@ -11956,26 +11986,35 @@ def _workspace_agent_mcp_enabled() -> bool:
     return value not in {"0", "false", "no", "off"}
 
 
-def _workspace_agent_mcp_token() -> str:
-    return (
-        os.environ.get("WORKSPACE_AGENT_MCP_TOKEN")
-        or os.environ.get("LANGDOCK_WORKEROS_MCP_TOKEN")
-        or ""
-    ).strip()
+def _workspace_agent_mcp_tokens() -> List[str]:
+    tokens: List[str] = []
+    for name in (
+        "WORKSPACE_AGENT_MCP_TOKEN",
+        "LANGDOCK_WORKEROS_MCP_TOKEN",
+        "WORKEROS_API_SECRET",
+        "WORKEROS_API_TOKEN",
+        "FLOOM_SECRET",
+    ):
+        value = (os.environ.get(name) or "").strip()
+        if value and value not in tokens:
+            tokens.append(value)
+    return tokens
 
 
 def _verify_workspace_agent_mcp_auth(request: Request) -> bool:
-    expected = _workspace_agent_mcp_token()
-    if not expected:
+    expected_tokens = _workspace_agent_mcp_tokens()
+    if not expected_tokens:
         return False
     authorization = request.headers.get("authorization", "").strip()
     bearer = ""
     if authorization.lower().startswith("bearer "):
         bearer = authorization[7:].strip()
     api_key = request.headers.get("x-api-key", "").strip()
+    floom_secret = request.headers.get("x-floom-secret", "").strip()
+    floom_token = request.headers.get("x-floom-token", "").strip()
+    candidates = [value for value in (bearer, api_key, floom_secret, floom_token) if value]
     return bool(
-        (bearer and hmac.compare_digest(bearer, expected))
-        or (api_key and hmac.compare_digest(api_key, expected))
+        any(hmac.compare_digest(candidate, expected) for candidate in candidates for expected in expected_tokens)
     )
 
 
@@ -11987,6 +12026,44 @@ def _workspace_agent_mcp_user_id() -> str:
     ).strip() or _bootstrap_user_id()
 
 
+def _workspace_agent_mcp_auth_context() -> AuthContext:
+    existing = current_auth_context()
+    if existing is not None:
+        return existing
+    user_id = _workspace_agent_mcp_user_id()
+    if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local":
+        user_id = local_workspace_user_id(local_workspace_base_user_id(user_id), DEFAULT_WORKSPACE_ID)
+    ctx = AuthContext(user_id=user_id, email=None, scopes=("admin", "mcp"))
+    set_current_auth_context(ctx)
+    return ctx
+
+
+async def _workspace_agent_mcp_cloud_auth_context(request: Request) -> Optional[AuthContext]:
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy != "cloud":
+        return None
+    authorization = request.headers.get("authorization", "").strip()
+    bearer = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    token = (
+        request.headers.get("x-floom-token", "").strip()
+        or request.headers.get("x-api-key", "").strip()
+        or bearer
+    )
+    if not token:
+        return None
+    scope = dict(request.scope)
+    headers = [
+        (key, value)
+        for key, value in scope.get("headers", [])
+        if key.lower() != b"x-floom-token"
+    ]
+    headers.append((b"x-floom-token", token.encode("utf-8")))
+    scope["headers"] = headers
+    ctx = await get_auth_provider().verify(Request(scope, request.receive))
+    set_current_auth_context(ctx)
+    return ctx
+
+
 def _workspace_agent_mcp_conversation_id(raw: Any) -> str:
     value = str(raw or "default").strip() or "default"
     safe = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", value)[:160].strip("._:-")
@@ -11995,12 +12072,51 @@ def _workspace_agent_mcp_conversation_id(raw: Any) -> str:
 
 def _workspace_agent_mcp_discovery() -> Dict[str, Any]:
     return {
-        "name": "workeros-workspace-agent",
-        "version": "0.1.0",
+        "name": _WORKEROS_REMOTE_MCP_NAME,
+        "version": _WORKEROS_REMOTE_MCP_VERSION,
         "protocol": _WORKSPACE_AGENT_MCP_PROTOCOL_VERSION,
         "transport": "streamable-http",
         "endpoint": "POST /api/mcp",
-        "tools": [_WORKSPACE_AGENT_MCP_TOOL_NAME],
+        "tools": [tool["name"] for tool in _workeros_remote_mcp_tool_definitions()],
+    }
+
+
+def _workspace_agent_mcp_setup_card() -> Dict[str, Any]:
+    tools = [tool["name"] for tool in _workeros_remote_mcp_tool_definitions()]
+    recommended_prompt = (
+        "You are the Workeros Agent. Use Workeros MCP actions to inspect workers, "
+        "runs, brain packs, connections, and secrets. Use ask_workspace_agent for "
+        "broad delegation and direct tools for precise operations. Confirm before "
+        "destructive actions such as deleting workers or secrets."
+    )
+    return {
+        "name": "Workeros",
+        "description": "Remote MCP setup for Langdock, Claude Code, Cursor, and other agent clients.",
+        "server_url": "https://workeros-api.floom.dev/api/mcp",
+        "transport": "STREAMABLE_HTTP",
+        "authentication": {
+            "method": "API Key",
+            "header_options": [
+                "Authorization: Bearer <WORKEROS_API_TOKEN>",
+                "x-api-key: <WORKEROS_API_TOKEN>",
+            ],
+            "accepts_existing_workeros_token": True,
+            "token_configured": bool(_workspace_agent_mcp_tokens()),
+        },
+        "recommended_langdock_agent": {
+            "name": "Workeros Agent",
+            "instructions": recommended_prompt,
+        },
+        "tools": tools,
+        "checklist": [
+            "Create or copy a Workeros API token.",
+            "In Langdock Integrations, add an MCP integration.",
+            "Use the Workeros server URL and API key authentication.",
+            "Test the connection and save the discovered tools.",
+            "Create a Langdock custom agent named Workeros Agent.",
+            "Attach the Workeros MCP actions to that agent.",
+            "Smoke test: list workers and summarize the latest failed runs.",
+        ],
     }
 
 
@@ -12018,7 +12134,7 @@ async def _collect_workspace_agent_reply_for_langdock(
 
 
 def _mcp_result(request_id: Any, result: Dict[str, Any]) -> Dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+    return {"jsonrpc": "2.0", "id": request_id, "result": jsonable_encoder(result)}
 
 
 def _mcp_error(request_id: Any, code: int, message: str) -> Dict[str, Any]:
@@ -12034,6 +12150,440 @@ def _mcp_tool_error(message: str) -> Dict[str, Any]:
         "content": [{"type": "text", "text": message}],
         "isError": True,
     }
+
+
+def _mcp_redact(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_mcp_redact(item) for item in value]
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, nested in value.items():
+            if re.search(r"(secret|token|password|api[_-]?key)", str(key), re.IGNORECASE):
+                redacted[str(key)] = "[redacted]"
+            else:
+                redacted[str(key)] = _mcp_redact(nested)
+        return redacted
+    return value
+
+
+def _mcp_text(data: Any, summary: Optional[str] = None) -> str:
+    safe = _mcp_redact(jsonable_encoder(data))
+    rendered = json.dumps(safe, ensure_ascii=False, indent=2)
+    return f"{summary}\n{rendered}" if summary else rendered
+
+
+def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]:
+    structured = jsonable_encoder(data)
+    if not isinstance(structured, dict):
+        structured = {"data": structured}
+    return {
+        "content": [{"type": "text", "text": _mcp_text(data, summary)}],
+        "structuredContent": structured,
+        "isError": False,
+    }
+
+
+def _mcp_http_error_result(exc: HTTPException) -> Dict[str, Any]:
+    detail = exc.detail if isinstance(exc.detail, str) else json.dumps(jsonable_encoder(exc.detail), ensure_ascii=False)
+    return {
+        "content": [{"type": "text", "text": detail}],
+        "structuredContent": {"status": exc.status_code, "detail": jsonable_encoder(exc.detail)},
+        "isError": True,
+    }
+
+
+def _mcp_json_schema(properties: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required or [],
+        "additionalProperties": False,
+    }
+
+
+def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
+    workspace_schema = _mcp_json_schema(
+        {
+            "message": {
+                "type": "string",
+                "description": "The instruction or question for the Workeros workspace agent.",
+            },
+            "conversation_id": {
+                "type": "string",
+                "description": "Optional stable client thread or chat id for continuity.",
+            },
+        },
+        ["message"],
+    )
+    return [
+        {
+            "name": _WORKSPACE_AGENT_MCP_TOOL_NAME,
+            "description": (
+                "Ask the Workeros workspace agent to inspect or operate the workspace: "
+                "workers, runs, approvals, brain packs, connections, and secret names."
+            ),
+            "inputSchema": workspace_schema,
+        },
+        {
+            "name": "workers.list",
+            "description": "List Workeros workers.",
+            "inputSchema": _mcp_json_schema({
+                "include_system": {"type": "boolean", "default": False},
+                "include_archived": {"type": "boolean", "default": False},
+            }),
+        },
+        {
+            "name": "workers.get",
+            "description": "Get a Workeros worker by id.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.create",
+            "description": "Create a Workeros worker from WorkerContract YAML and Python source.",
+            "inputSchema": _mcp_json_schema(
+                {
+                    "worker_yml": {"type": "string", "description": "WorkerContract YAML content."},
+                    "run_py": {"type": "string", "description": "Python source for run.py."},
+                    "skill_md": {"type": "string", "description": "Optional SKILL.md content."},
+                },
+                ["worker_yml", "run_py"],
+            ),
+        },
+        {
+            "name": "workers.update",
+            "description": "Update worker settings such as trigger, cron, defaults, and capabilities.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "trigger_type": {"type": "string"},
+                "cron_expr": {"type": "string"},
+                "cron_timezone": {"type": "string"},
+                "input_values": {"type": "object"},
+                "capabilities": {"type": "object"},
+                "webhook_secret_rotate": {"type": "boolean"},
+            }, ["id"]),
+        },
+        {
+            "name": "workers.run",
+            "description": "Start a manual Workeros worker run.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "inputs": {"type": "object", "default": {}},
+                "trigger_source": {"type": "string", "default": "manual"},
+            }, ["id"]),
+        },
+        {
+            "name": "runs.list",
+            "description": "List Workeros runs, optionally filtered by worker id or status.",
+            "inputSchema": _mcp_json_schema({
+                "worker_id": {"type": "string"},
+                "status": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+                "offset": {"type": "integer", "minimum": 0, "default": 0},
+                "include_system": {"type": "boolean", "default": False},
+            }),
+        },
+        {
+            "name": "runs.get",
+            "description": "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "runs.watch",
+            "description": "Poll a Workeros run until terminal status or timeout.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 600000, "default": 120000},
+            }, ["id"]),
+        },
+        {
+            "name": "secrets.list",
+            "description": "List configured secret names and status. Values are never returned.",
+            "inputSchema": _mcp_json_schema({}),
+        },
+        {
+            "name": "secrets.set",
+            "description": "Create or update a secret value.",
+            "inputSchema": _mcp_json_schema({
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+            }, ["key", "value"]),
+        },
+        {
+            "name": "connections.list",
+            "description": "List configured app and MCP connections.",
+            "inputSchema": _mcp_json_schema({}),
+        },
+        {
+            "name": "connections.add_mcp",
+            "description": "Save an MCP server connection for workers to use at run time.",
+            "inputSchema": _mcp_json_schema({
+                "label": {"type": "string"},
+                "transport": {"type": "string", "enum": ["streamable_http", "sse", "stdio"], "default": "streamable_http"},
+                "url": {"type": "string"},
+                "command": {"type": "string"},
+                "args": {"type": "array", "items": {"type": "string"}, "default": []},
+                "env": {"type": "object", "additionalProperties": {"type": "string"}, "default": {}},
+                "cwd": {"type": "string"},
+                "auth_secret": {"type": "string"},
+                "allowed_tools": {"type": "array", "items": {"type": "string"}, "default": []},
+            }, ["label"]),
+        },
+        {
+            "name": "contexts.list",
+            "description": "List Workeros brain packs.",
+            "inputSchema": _mcp_json_schema({}),
+        },
+        {
+            "name": "contexts.read",
+            "description": "Read a UTF-8 brain-pack file, or return metadata for binary files.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string"},
+                "path": {"type": "string"},
+            }, ["name", "path"]),
+        },
+        {
+            "name": "contexts.write",
+            "description": "Create or update a UTF-8 text file inside a brain pack.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string"},
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            }, ["name", "path", "content"]),
+        },
+    ]
+
+
+def _mcp_arg(arguments: Dict[str, Any], name: str) -> str:
+    value = str(arguments.get(name) or "").strip()
+    if not value:
+        raise ValueError(f"Tool argument '{name}' is required")
+    return value
+
+
+async def _mcp_call_workspace_agent(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    message = str(arguments.get("message") or "").strip()
+    if not message:
+        return _mcp_tool_error("Tool argument 'message' is required")
+    if len(message) > 20000:
+        return _mcp_tool_error("Tool argument 'message' is too long")
+
+    conversation_id = _workspace_agent_mcp_conversation_id(arguments.get("conversation_id"))
+    reply = await _collect_workspace_agent_reply_for_langdock(
+        message=message,
+        user_id=current_auth_user_id() or _workspace_agent_mcp_auth_context().user_id,
+        conversation_id=conversation_id,
+    )
+    return {
+        "content": [{"type": "text", "text": reply or "(No reply)"}],
+        "structuredContent": {"conversation_id": conversation_id},
+        "isError": False,
+    }
+
+
+def _mcp_call_workers_list(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_workers(
+        include_system=bool(arguments.get("include_system", False)),
+        include_archived=bool(arguments.get("include_archived", False)),
+        shape="full",
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(data)
+
+
+def _mcp_call_workers_get(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = get_worker_detail(_mcp_arg(arguments, "id"), auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+def _mcp_call_workers_create(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    payload = WorkerCreateRequest(
+        worker_yml=_mcp_arg(arguments, "worker_yml"),
+        run_py=_mcp_arg(arguments, "run_py"),
+        skill_md=arguments.get("skill_md"),
+    )
+    data = create_worker(payload, auth=auth, repos=repos)
+    return _mcp_call_result(data, "Worker created.")
+
+
+def _mcp_call_workers_update(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    worker_id = _mcp_arg(arguments, "id")
+    update_args = {k: v for k, v in arguments.items() if k != "id"}
+    payload = WorkerUpdateRequest(**update_args)
+    data = update_worker(worker_id, payload, auth=auth, repos=repos)
+    return _mcp_call_result(data, "Worker updated.")
+
+
+def _mcp_call_workers_run(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    payload = RunCreate(
+        inputs=arguments.get("inputs") if isinstance(arguments.get("inputs"), dict) else {},
+        trigger_source=str(arguments.get("trigger_source") or "manual"),
+    )
+    data = create_worker_run(_mcp_arg(arguments, "id"), payload, request=None, auth=auth, repos=repos)
+    return _mcp_call_result(data, "Worker run started.")
+
+
+def _mcp_call_runs_list(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_runs(
+        Response(),
+        worker_id=arguments.get("worker_id") or None,
+        status=arguments.get("status") or None,
+        limit=min(max(int(arguments.get("limit") or 50), 1), 200),
+        offset=max(int(arguments.get("offset") or 0), 0),
+        include_system=bool(arguments.get("include_system", False)),
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(data)
+
+
+def _mcp_call_runs_get(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = get_run(_mcp_arg(arguments, "id"), auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+async def _mcp_call_runs_watch(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    run_id = _mcp_arg(arguments, "id")
+    timeout_ms = min(max(int(arguments.get("timeout_ms") or 120000), 1000), 600000)
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    last: Dict[str, Any] = {}
+    while True:
+        row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Run not found")
+        last = row_to_dict(row)
+        status = str(last.get("status") or "")
+        if status in _MCP_TERMINAL_RUN_STATUSES or time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(1.0)
+    logs = [
+        {"level": r["level"], "message": _redact_public_log_message(r["message"]), "timestamp": r["timestamp"]}
+        for r in repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)[-50:]
+    ]
+    return _mcp_call_result({"run_id": run_id, "status": last.get("status"), "run": last, "logs": logs}, "Run watch completed.")
+
+
+def _mcp_call_secrets_list(auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_secrets(auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+def _mcp_call_secrets_set(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    key = _mcp_arg(arguments, "key").upper()
+    payload = SecretUpsertRequest(value=_mcp_arg(arguments, "value"))
+    data = upsert_secret(key, payload, auth=auth, repos=repos)
+    return _mcp_call_result(data, "Secret saved.")
+
+
+def _mcp_call_connections_list(auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_connections(auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+def _mcp_call_connections_add_mcp(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    payload = MCPConnectionCreateRequest(
+        label=_mcp_arg(arguments, "label"),
+        transport=arguments.get("transport") or "streamable_http",
+        url=arguments.get("url"),
+        command=arguments.get("command"),
+        args=arguments.get("args") if isinstance(arguments.get("args"), list) else [],
+        env=arguments.get("env") if isinstance(arguments.get("env"), dict) else {},
+        cwd=arguments.get("cwd"),
+        auth_secret=arguments.get("auth_secret"),
+        allowed_tools=arguments.get("allowed_tools") if isinstance(arguments.get("allowed_tools"), list) else [],
+    )
+    data = create_mcp_connection(payload, auth=auth, repos=repos)
+    return _mcp_call_result(data, "MCP connection saved.")
+
+
+def _mcp_call_contexts_list(auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_contexts(auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+def _mcp_call_contexts_read(arguments: Dict[str, Any], auth: AuthContext) -> Dict[str, Any]:
+    name = _mcp_arg(arguments, "name")
+    rel = _mcp_arg(arguments, "path")
+    safe_name, _metadata = _require_readable_context_for_user(name, user_id=auth.user_id)
+    target = _safe_context_file_or_400(safe_name, _context_file_path_or_400(rel))
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    mime_type = guess_mime_type(rel)
+    if is_binary_file(rel, mime_type):
+        return _mcp_call_result({
+            "name": safe_name,
+            "path": rel,
+            "size": target.stat().st_size,
+            "mime_type": mime_type,
+            "is_binary": True,
+            "note": "Binary brain-pack file. Use the Workeros HTTP API to download bytes.",
+        })
+    return _mcp_call_result({
+        "name": safe_name,
+        "path": rel,
+        "size": target.stat().st_size,
+        "mime_type": mime_type,
+        "is_binary": False,
+        "content": target.read_text(errors="replace"),
+    })
+
+
+def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    name = _mcp_arg(arguments, "name")
+    rel = _mcp_arg(arguments, "path")
+    content = str(arguments.get("content") or "")
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    result = _write_context_file(
+        safe_name,
+        _context_file_path_or_400(rel),
+        content.encode("utf-8"),
+        user_id=auth.user_id,
+    )
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos, change_source="ai")
+    return _mcp_call_result(result, "Context file saved.")
+
+
+async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    auth = _workspace_agent_mcp_auth_context()
+    repos = get_repositories()
+    try:
+        if tool_name in {_WORKSPACE_AGENT_MCP_TOOL_NAME, _WORKSPACE_AGENT_MCP_LEGACY_TOOL_NAME, "workspace.chat"}:
+            return await _mcp_call_workspace_agent(arguments)
+        if tool_name == "workers.list":
+            return _mcp_call_workers_list(arguments, auth, repos)
+        if tool_name == "workers.get":
+            return _mcp_call_workers_get(arguments, auth, repos)
+        if tool_name == "workers.create":
+            return _mcp_call_workers_create(arguments, auth, repos)
+        if tool_name == "workers.update":
+            return _mcp_call_workers_update(arguments, auth, repos)
+        if tool_name == "workers.run":
+            return _mcp_call_workers_run(arguments, auth, repos)
+        if tool_name == "runs.list":
+            return _mcp_call_runs_list(arguments, auth, repos)
+        if tool_name == "runs.get":
+            return _mcp_call_runs_get(arguments, auth, repos)
+        if tool_name == "runs.watch":
+            return await _mcp_call_runs_watch(arguments, auth, repos)
+        if tool_name == "secrets.list":
+            return _mcp_call_secrets_list(auth, repos)
+        if tool_name == "secrets.set":
+            return _mcp_call_secrets_set(arguments, auth, repos)
+        if tool_name == "connections.list":
+            return _mcp_call_connections_list(auth, repos)
+        if tool_name == "connections.add_mcp":
+            return _mcp_call_connections_add_mcp(arguments, auth, repos)
+        if tool_name == "contexts.list":
+            return _mcp_call_contexts_list(auth, repos)
+        if tool_name == "contexts.read":
+            return _mcp_call_contexts_read(arguments, auth)
+        if tool_name == "contexts.write":
+            return _mcp_call_contexts_write(arguments, auth, repos)
+        return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
+    except ValueError as exc:
+        return _mcp_tool_error(str(exc))
+    except HTTPException as exc:
+        return _mcp_http_error_result(exc)
 
 
 def _workspace_agent_mcp_tool_definition() -> Dict[str, Any]:
@@ -12073,54 +12623,38 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
                 "protocolVersion": _WORKSPACE_AGENT_MCP_PROTOCOL_VERSION,
                 "capabilities": {"tools": {}},
                 "serverInfo": {
-                    "name": "workeros-workspace-agent",
-                    "version": "0.1.0",
+                    "name": _WORKEROS_REMOTE_MCP_NAME,
+                    "version": _WORKEROS_REMOTE_MCP_VERSION,
                 },
             },
         )
     if method == "tools/list":
-        return _mcp_result(request_id, {"tools": [_workspace_agent_mcp_tool_definition()]})
+        return _mcp_result(request_id, {"tools": _workeros_remote_mcp_tool_definitions()})
     if method != "tools/call":
         return _mcp_error(request_id, -32601, f"Unsupported MCP method: {method or 'unknown'}")
 
     params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
     tool_name = str(params.get("name") or "")
-    if tool_name != _WORKSPACE_AGENT_MCP_TOOL_NAME:
-        return _mcp_result(request_id, _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}"))
     arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
-    message = str(arguments.get("message") or "").strip()
-    if not message:
-        return _mcp_result(request_id, _mcp_tool_error("Tool argument 'message' is required"))
-    if len(message) > 20000:
-        return _mcp_result(request_id, _mcp_tool_error("Tool argument 'message' is too long"))
-
-    conversation_id = _workspace_agent_mcp_conversation_id(arguments.get("conversation_id"))
     try:
-        reply = await _collect_workspace_agent_reply_for_langdock(
-            message=message,
-            user_id=_workspace_agent_mcp_user_id(),
-            conversation_id=conversation_id,
-        )
+        return _mcp_result(request_id, await _call_workeros_remote_mcp_tool(tool_name, arguments))
     except Exception as exc:
-        return _mcp_error(request_id, -32603, f"Workspace agent call failed: {exc}")
-    text = reply or "(No reply)"
-    return _mcp_result(
-        request_id,
-        {
-            "content": [{"type": "text", "text": text}],
-            "structuredContent": {"conversation_id": conversation_id},
-            "isError": False,
-        },
-    )
+        return _mcp_error(request_id, -32603, f"Workeros MCP tool call failed: {exc}")
 
 
 async def _workspace_agent_mcp_post(request: Request) -> Response:
     if not _workspace_agent_mcp_enabled():
-        raise HTTPException(status_code=503, detail="Workspace Agent MCP is disabled")
-    if not _workspace_agent_mcp_token():
-        raise HTTPException(status_code=503, detail="WORKSPACE_AGENT_MCP_TOKEN is not configured")
-    if not _verify_workspace_agent_mcp_auth(request):
-        raise HTTPException(status_code=401, detail="Invalid Workspace Agent MCP token")
+        raise HTTPException(status_code=503, detail="Workeros Remote MCP is disabled")
+    static_tokens = _workspace_agent_mcp_tokens()
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if not static_tokens and deploy != "cloud":
+        raise HTTPException(status_code=503, detail="No Workeros MCP/API token is configured")
+    if _verify_workspace_agent_mcp_auth(request):
+        _workspace_agent_mcp_auth_context()
+    else:
+        cloud_ctx = await _workspace_agent_mcp_cloud_auth_context(request)
+        if cloud_ctx is None:
+            raise HTTPException(status_code=401, detail="Invalid Workeros MCP token")
 
     body = await request.body()
     try:
@@ -12163,6 +12697,16 @@ async def workspace_agent_mcp_discovery() -> Response:
 @app.get("/mcp")
 async def workspace_agent_mcp_mount_discovery() -> Response:
     return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/api/mcp/setup/langdock")
+async def workspace_agent_mcp_langdock_setup() -> Response:
+    return JSONResponse(_workspace_agent_mcp_setup_card())
+
+
+@app.get("/mcp/setup/langdock")
+async def workspace_agent_mcp_mount_langdock_setup() -> Response:
+    return JSONResponse(_workspace_agent_mcp_setup_card())
 
 
 @app.get("/langdock/mcp")
