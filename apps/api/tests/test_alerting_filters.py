@@ -37,3 +37,11 @@ def test_multi_trigger_worker_with_schedule_is_not_filtered_from_scheduler_alert
     }
 
     assert alerting._is_manual_only_worker("manual", json.dumps(config)) is False
+
+
+def test_persisted_schedule_trigger_is_not_filtered_from_scheduler_alerts():
+    alerting = _alerting()
+    config = {"trigger": {"type": "manual"}}
+    triggers = [{"type": "schedule", "cron": "0 * * * *"}]
+
+    assert alerting._is_manual_only_worker("manual", json.dumps(config), json.dumps(triggers)) is False
