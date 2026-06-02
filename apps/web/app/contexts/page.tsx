@@ -6,6 +6,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  AlertTriangle,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -31,7 +32,7 @@ import {
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ContextDetail, ContextFileItem, ContextSummary, VersionSummary } from "@/lib/types";
+import type { ContextDetail, ContextFileItem, ContextSummary, SecretWarning, VersionSummary } from "@/lib/types";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -350,6 +351,10 @@ function ContextsPage() {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [versionsKey, setVersionsKey] = useState(0);
+  // Secret-detection warnings from the most recent save/upload. Brain packs are
+  // readable by anyone with workspace access, so a live credential stored here
+  // is a leak — we surface it inline and nudge the operator to Secrets.
+  const [secretWarnings, setSecretWarnings] = useState<SecretWarning[]>([]);
 
   const [search, setSearch] = useState("");
   const [newContextName, setNewContextName] = useState("");
@@ -547,6 +552,7 @@ function ContextsPage() {
   }
 
   function openFile(path: string) {
+    setSecretWarnings([]);
     setSelectedFile(path);
     setMobilePane("file");
     // Drill folderPath to the file's parent so the column stack stays coherent
@@ -612,11 +618,21 @@ function ContextsPage() {
       return;
     }
     try {
-      await api.contexts.upload(selectedName, files, folderPath.length ? folderPath.join("/") : undefined);
+      const result = await api.contexts.upload(
+        selectedName,
+        files,
+        folderPath.length ? folderPath.join("/") : undefined,
+      );
       const refreshed = await api.contexts.get(selectedName);
       setDetail(refreshed);
       await loadContexts(selectedName);
-      toast.success("File added");
+      const warnings = (result.files ?? []).flatMap((f) => f.secret_warnings ?? []);
+      if (warnings.length) {
+        setSecretWarnings(warnings);
+        toast.warning("File added — but it looks like it contains a secret");
+      } else {
+        toast.success("File added");
+      }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to add file");
     }
@@ -667,13 +683,20 @@ function ContextsPage() {
   async function saveFile() {
     if (!fileObj) return;
     try {
-      await api.contexts.saveTextFile(selectedName, fileObj.path, editText);
+      const saved = await api.contexts.saveTextFile(selectedName, fileObj.path, editText);
       setFileText(editText);
       setEditing(false);
       const refreshed = await api.contexts.get(selectedName);
       setDetail(refreshed);
       setVersionsKey((k) => k + 1);
-      toast.success("File saved");
+      const warnings = saved.secret_warnings ?? [];
+      if (warnings.length) {
+        setSecretWarnings(warnings);
+        toast.warning("File saved — but it looks like it contains a secret");
+      } else {
+        setSecretWarnings([]);
+        toast.success("File saved");
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to save file");
     }
@@ -911,6 +934,12 @@ function ContextsPage() {
                 dragActive && !readOnly ? "bg-muted/30" : ""
               } ${mobilePane === "file" ? "flex" : "hidden lg:flex"}`}
             >
+              {secretWarnings.length > 0 && (
+                <SecretWarningBanner
+                  warnings={secretWarnings}
+                  onDismiss={() => setSecretWarnings([])}
+                />
+              )}
               <FilePane
                 file={fileObj}
                 kind={kind}
@@ -955,6 +984,63 @@ function ContextsPage() {
           }}
         />
       </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// Secret-detection warning banner.
+//
+// Brain packs are readable by anyone with workspace access, so a stored live
+// credential is a leak. When a save/upload returns secret_warnings we surface
+// this inline (masked findings only — the raw value is never returned) and
+// point the operator at Settings → Secrets.
+// ===========================================================================
+
+function SecretWarningBanner({
+  warnings,
+  onDismiss,
+}: {
+  warnings: SecretWarning[];
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="mx-3 mt-3 flex items-start gap-3 rounded-[var(--radius-card)] border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm"
+    >
+      <AlertTriangle className="size-4 shrink-0 text-amber-500 mt-0.5" />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <p className="font-medium text-[var(--ink)]">
+          This file looks like it contains a live API key or secret.
+        </p>
+        <p className="text-muted-foreground">
+          Brain packs are readable by anyone with workspace access. Move secrets
+          to{" "}
+          <Link href="/connections/secrets" className="underline underline-offset-2">
+            Secrets
+          </Link>{" "}
+          instead of storing them here.
+        </p>
+        <ul className="space-y-0.5 font-mono text-xs text-muted-foreground">
+          {warnings.slice(0, 5).map((w, i) => (
+            <li key={`${w.pattern}:${w.line}:${i}`} className="truncate">
+              line {w.line}: {w.pattern} — {w.masked}
+            </li>
+          ))}
+          {warnings.length > 5 && (
+            <li className="text-muted-foreground">+{warnings.length - 5} more</li>
+          )}
+        </ul>
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="p-1 rounded-[var(--radius-button)] hover:bg-muted shrink-0"
+        aria-label="Dismiss warning"
+      >
+        <X className="size-3.5 text-muted-foreground" />
+      </button>
     </div>
   );
 }
@@ -1363,7 +1449,15 @@ function FolderColumn({
                 >
                   {displayTypeIcon(fileDisplayType(entry.file))}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-mono">{entry.name}</span>
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="block truncate text-sm font-mono">{entry.name}</span>
+                      {entry.file.has_secret_warning && (
+                        <AlertTriangle
+                          className="size-3.5 shrink-0 text-amber-500"
+                          aria-label="Possible secret detected"
+                        />
+                      )}
+                    </span>
                     {!compact && (
                       <>
                         <span className="block text-xs text-muted-foreground truncate">

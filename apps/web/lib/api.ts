@@ -370,6 +370,12 @@ export const api = {
     },
     fileUrl: (name: string, path: string) =>
       `${API_BASE}${withWorkspaceQuery(`/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`)}`,
+    // Audit a pack's CURRENT files for stored live credentials (masked findings
+    // only). This is what catches secrets already sitting in a Brain pack.
+    secretScan: (name: string) =>
+      fetchJson<import("./types").ContextSecretScanResponse>(
+        `/contexts/${encodeURIComponent(name)}/secret-scan`
+      ),
     listVersions: (name: string, limit = 50) =>
       fetchJson<import("./types").VersionSummary[]>(`/contexts/${encodeURIComponent(name)}/versions?limit=${limit}`),
     getVersion: (name: string, versionId: string) =>
