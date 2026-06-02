@@ -121,6 +121,9 @@ from models import (
     SecretItem,
     ReloadResponse,
     ActionResponse,
+    McpToolItem,
+    McpToolCreate,
+    McpToolUpdate,
     RunStatus,
     SecretStatus,
     WorkerStatus,
@@ -14128,6 +14131,328 @@ async def get_conversation_detail(
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = list_conversation_messages(conversation_id, auth.user_id)
     return {**conv, "messages": messages}
+
+
+# ---------------------------------------------------------------------------
+# MCP tool CRUD endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/mcp-tools", response_model=List[McpToolItem])
+def list_mcp_tools(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[McpToolItem]:
+    return repos.mcp_tools.list(user_id=auth.user_id)
+
+
+@app.post("/mcp-tools", response_model=McpToolItem)
+def create_mcp_tool(
+    payload: McpToolCreate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> McpToolItem:
+    worker = repos.workers.get(user_id=auth.user_id, worker_id=payload.worker_id)
+    if not worker:
+        all_workers = repos.workers.list(user_id=auth.user_id)
+        worker = next((w for w in all_workers if w["name"] == payload.worker_id), None)
+    if not worker:
+        raise HTTPException(status_code=404, detail=f"Worker {payload.worker_id!r} not found")
+
+    if repos.mcp_tools.get_by_name(user_id=auth.user_id, name=payload.name):
+        raise HTTPException(status_code=409, detail=f"A tool named {payload.name!r} already exists")
+
+    input_schema = payload.input_schema
+    if not input_schema:
+        config = json.loads(worker.get("config_json") or "{}")
+        input_schema = config.get("inputs_schema") or {}
+
+    return repos.mcp_tools.create(
+        user_id=auth.user_id,
+        name=payload.name,
+        description=payload.description,
+        input_schema=input_schema,
+        worker_id=worker["id"],
+    )
+
+
+@app.put("/mcp-tools/{tool_id}", response_model=McpToolItem)
+def update_mcp_tool(
+    tool_id: str,
+    payload: McpToolUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> McpToolItem:
+    if not repos.mcp_tools.get(user_id=auth.user_id, tool_id=tool_id):
+        raise HTTPException(status_code=404, detail="MCP tool not found")
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    updated = repos.mcp_tools.update(user_id=auth.user_id, tool_id=tool_id, **updates)
+    return updated
+
+
+@app.delete("/mcp-tools/{tool_id}", response_model=ActionResponse)
+def delete_mcp_tool(
+    tool_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    if not repos.mcp_tools.get(user_id=auth.user_id, tool_id=tool_id):
+        raise HTTPException(status_code=404, detail="MCP tool not found")
+    repos.mcp_tools.delete(user_id=auth.user_id, tool_id=tool_id)
+    return ActionResponse(status="deleted")
+
+
+# ---------------------------------------------------------------------------
+# HTTP MCP server — JSON-RPC 2.0 over streamable HTTP
+# Exposes default WorkerOS management tools + custom workspace tools.
+# OSS:   POST /mcp          (x-floom-secret auth)
+# Cloud: POST /mcp/{workspace_id}  (PAT Bearer auth, added in workeros-cloud)
+# ---------------------------------------------------------------------------
+
+_MCP_DEFAULT_TOOLS: List[dict] = [
+    {
+        "name": "workers_list",
+        "description": "List all workers in the workspace.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "workers_run",
+        "description": "Run a worker by ID or name. Returns immediately with a run_id; poll with runs_get for the result.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "worker_id": {"type": "string", "description": "Worker ID or name"},
+                "inputs": {"type": "object", "description": "Input key-value pairs for the worker"},
+            },
+            "required": ["worker_id"],
+        },
+    },
+    {
+        "name": "runs_get",
+        "description": "Get the status and output of a run by run_id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "Run ID"},
+            },
+            "required": ["run_id"],
+        },
+    },
+    {
+        "name": "runs_list",
+        "description": "List recent runs, optionally filtered by worker.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "worker_id": {"type": "string", "description": "Filter by worker ID (optional)"},
+                "limit": {"type": "integer", "description": "Max results, default 20"},
+            },
+        },
+    },
+    {
+        "name": "tools_list",
+        "description": "List custom MCP tools registered for this workspace.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "tools_register",
+        "description": "Register a custom MCP tool backed by a worker. Once registered, the tool appears in tools/list and can be called directly by name.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Tool name agents will use to call it"},
+                "description": {"type": "string", "description": "What the tool does"},
+                "worker_id": {"type": "string", "description": "Worker ID or name to invoke when the tool is called"},
+                "input_schema": {"type": "object", "description": "JSON Schema for tool inputs (optional — defaults to the worker's own input schema)"},
+            },
+            "required": ["name", "description", "worker_id"],
+        },
+    },
+    {
+        "name": "tools_delete",
+        "description": "Delete a custom MCP tool by name.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Tool name to delete"},
+            },
+            "required": ["name"],
+        },
+    },
+]
+
+
+def _mcp_ok(rpc_id: Any, result: Any) -> dict:
+    return {"jsonrpc": "2.0", "id": rpc_id, "result": result}
+
+
+def _mcp_err(rpc_id: Any, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": code, "message": message}}
+
+
+def _mcp_content(text: str, is_error: bool = False) -> dict:
+    return {"content": [{"type": "text", "text": text}], "isError": is_error}
+
+
+async def _mcp_dispatch(
+    name: str,
+    arguments: dict,
+    auth: AuthContext,
+    repos: "Repositories",
+) -> dict:
+    import asyncio
+    import time as _time
+
+    if name == "workers_list":
+        workers = repos.workers.list(user_id=auth.user_id)
+        return _mcp_content(json.dumps(
+            [{"id": w["id"], "name": w["name"], "description": w.get("description", "")} for w in workers],
+            indent=2,
+        ))
+
+    if name == "workers_run":
+        worker_ref = arguments.get("worker_id", "")
+        inputs = arguments.get("inputs") or {}
+        worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_ref)
+        if not worker:
+            workers = repos.workers.list(user_id=auth.user_id)
+            worker = next((w for w in workers if w["name"] == worker_ref), None)
+        if not worker:
+            return _mcp_content(f"Worker {worker_ref!r} not found", is_error=True)
+        run_id = create_run(worker["id"], inputs, "mcp", user_id=auth.user_id, repos=repos)
+        start_run(run_id, worker["id"], inputs, user_id=auth.user_id, repos=repos)
+        return _mcp_content(json.dumps({"run_id": run_id, "status": "running"}))
+
+    if name == "runs_get":
+        run_id = arguments.get("run_id", "")
+        run = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+        if not run:
+            return _mcp_content(f"Run {run_id!r} not found", is_error=True)
+        return _mcp_content(json.dumps({
+            "id": run["id"],
+            "status": run["status"],
+            "output": run.get("output_json") or run.get("output"),
+            "error": run.get("error"),
+        }, indent=2, default=str))
+
+    if name == "runs_list":
+        limit = int(arguments.get("limit", 20))
+        worker_id = arguments.get("worker_id")
+        runs, _ = repos.runs.list(user_id=auth.user_id, worker_id=worker_id, limit=limit)
+        return _mcp_content(json.dumps(
+            [{"id": r["id"], "worker_id": r["worker_id"], "status": r["status"], "created_at": r["created_at"]} for r in runs],
+            indent=2,
+        ))
+
+    if name == "tools_list":
+        tools = repos.mcp_tools.list(user_id=auth.user_id)
+        return _mcp_content(json.dumps(tools, indent=2, default=str))
+
+    if name == "tools_register":
+        tool_name = arguments.get("name", "")
+        description = arguments.get("description", "")
+        worker_ref = arguments.get("worker_id", "")
+        input_schema = arguments.get("input_schema") or {}
+        if not all([tool_name, description, worker_ref]):
+            return _mcp_content("name, description, and worker_id are required", is_error=True)
+        worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_ref)
+        if not worker:
+            workers = repos.workers.list(user_id=auth.user_id)
+            worker = next((w for w in workers if w["name"] == worker_ref), None)
+        if not worker:
+            return _mcp_content(f"Worker {worker_ref!r} not found", is_error=True)
+        if repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name):
+            return _mcp_content(f"Tool {tool_name!r} already exists — use tools_delete first to replace it", is_error=True)
+        if not input_schema:
+            config = json.loads(worker.get("config_json") or "{}")
+            input_schema = config.get("inputs_schema") or {}
+        tool = repos.mcp_tools.create(
+            user_id=auth.user_id,
+            name=tool_name,
+            description=description,
+            input_schema=input_schema,
+            worker_id=worker["id"],
+        )
+        return _mcp_content(json.dumps(tool, indent=2, default=str))
+
+    if name == "tools_delete":
+        tool_name = arguments.get("name", "")
+        tool = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name)
+        if not tool:
+            return _mcp_content(f"Tool {tool_name!r} not found", is_error=True)
+        repos.mcp_tools.delete(user_id=auth.user_id, tool_id=tool["id"])
+        return _mcp_content(f"Tool {tool_name!r} deleted")
+
+    # Custom workspace tool — trigger the backing worker and wait for result
+    custom = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=name)
+    if custom:
+        worker_id = custom["worker_id"]
+        run_id = create_run(worker_id, arguments, "mcp", user_id=auth.user_id, repos=repos)
+        start_run(run_id, worker_id, arguments, user_id=auth.user_id, repos=repos)
+        deadline = _time.monotonic() + 120
+        run = None
+        while _time.monotonic() < deadline:
+            await asyncio.sleep(1.0)
+            run = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+            if run and run["status"] in ("completed", "failed"):
+                break
+        if not run or run["status"] not in ("completed", "failed"):
+            return _mcp_content(f"Tool timed out after 120s (run_id={run_id})", is_error=True)
+        if run["status"] == "failed":
+            return _mcp_content(run.get("error") or "Worker run failed", is_error=True)
+        output = run.get("output_json") or run.get("output") or {}
+        return _mcp_content(json.dumps(output, indent=2, default=str))
+
+    return _mcp_content(f"Unknown tool: {name!r}", is_error=True)
+
+
+async def _mcp_handle_request(
+    body: dict,
+    auth: AuthContext,
+    repos: "Repositories",
+) -> dict:
+    """Core MCP JSON-RPC 2.0 dispatcher. Called by /mcp and by the cloud /mcp/{workspace_id}."""
+    rpc_id = body.get("id")
+    method = body.get("method", "")
+    params = body.get("params") or {}
+
+    if method == "initialize":
+        return _mcp_ok(rpc_id, {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "workeros", "version": "1.0.0"},
+        })
+
+    if method == "tools/list":
+        custom = repos.mcp_tools.list(user_id=auth.user_id)
+        tools = list(_MCP_DEFAULT_TOOLS) + [
+            {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
+            for t in custom
+        ]
+        return _mcp_ok(rpc_id, {"tools": tools})
+
+    if method == "tools/call":
+        result = await _mcp_dispatch(
+            params.get("name", ""),
+            params.get("arguments") or {},
+            auth,
+            repos,
+        )
+        return _mcp_ok(rpc_id, result)
+
+    return _mcp_err(rpc_id, -32601, f"Method not found: {method!r}")
+
+
+@app.post("/mcp")
+async def mcp_http_endpoint(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(_mcp_err(None, -32700, "Parse error"), status_code=400)
+    return JSONResponse(await _mcp_handle_request(body, auth, repos))
 
 
 if __name__ == "__main__":
