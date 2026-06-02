@@ -70,7 +70,7 @@ def main():
         f"We noticed you're looking for a {role} and wanted to reach out.\n\n"
         "Our AI workers have already matched three candidates from your network "
         "that fit the profile. Happy to walk you through them in a 15-minute call.\n\n"
-        "Best,\nThe Workeros team"
+        "Best,\nThe Floom Workers team"
     )
 
     _write_result({
