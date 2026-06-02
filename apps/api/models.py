@@ -1,8 +1,12 @@
 """Pydantic models for Floom V0: request schemas, response schemas, and domain types."""
 
+import ipaddress
+import os
 import re
+import socket
 import warnings
 from typing import Any, Dict, List, Literal, Optional, Union
+from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
 
@@ -11,6 +15,162 @@ def _model_data(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump()
     return value
+
+
+# ---------------------------------------------------------------------------
+# SSRF deny-list for outbound MCP server URLs
+# ---------------------------------------------------------------------------
+#
+# An MCP HTTP/SSE connection URL is dialed by the worker runtime. Without
+# validation, a user can register an MCP server pointing at an internal /
+# loopback / link-local address (e.g. the cloud metadata endpoint
+# 169.254.169.254, localhost, RFC1918 hosts) and the worker run will issue an
+# outbound request from inside our network — a classic SSRF.
+#
+# This helper rejects unsafe MCP URLs. It is enforced at REGISTRATION (when the
+# connection is added) AND re-checked at DIAL time (defense in depth, since DNS
+# can rebind between registration and use).
+#
+# Self-hosters who legitimately run a local MCP server can opt out with
+# WORKEROS_ALLOW_PRIVATE_MCP_URLS=1 (default OFF / secure).
+
+# Resolution timeout so a hostile/slow DNS record can't hang the request.
+_MCP_DNS_RESOLVE_TIMEOUT_SECONDS = 3.0
+
+
+class UnsafeMCPUrlError(ValueError):
+    """Raised when an MCP server URL points to an internal/loopback/link-local
+    address (or uses a disallowed scheme)."""
+
+
+def _allow_private_mcp_urls() -> bool:
+    """Self-hoster escape hatch: WORKEROS_ALLOW_PRIVATE_MCP_URLS=1 bypasses the
+    SSRF deny-list. Default OFF (secure)."""
+    return os.environ.get("WORKEROS_ALLOW_PRIVATE_MCP_URLS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _ip_is_disallowed(ip: ipaddress._BaseAddress) -> bool:
+    """True if an IP is in a range we must never dial from inside our network.
+
+    Covers (IPv4 + IPv6):
+      - loopback           (127.0.0.0/8, ::1)
+      - link-local         (169.254.0.0/16 incl. cloud metadata 169.254.169.254, fe80::/10)
+      - private RFC1918    (10/8, 172.16/12, 192.168/16)
+      - unique-local       (fc00::/7)
+      - unspecified        (0.0.0.0, ::)
+      - other non-global   (reserved, multicast, etc.)
+    """
+    # IPv4-mapped IPv6 (::ffff:127.0.0.1) — unwrap to judge the real target.
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return (
+        ip.is_loopback
+        or ip.is_link_local
+        or ip.is_private
+        or ip.is_unspecified
+        or ip.is_reserved
+        or ip.is_multicast
+        or not ip.is_global
+    )
+
+
+def _resolve_host_ips(host: str) -> List[ipaddress._BaseAddress]:
+    """Resolve a hostname to all of its IPs (A + AAAA), bounded by a short
+    timeout. Returns parsed ip_address objects. Raises socket.gaierror on
+    failure (caller treats resolution failure as unsafe)."""
+    old_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(_MCP_DNS_RESOLVE_TIMEOUT_SECONDS)
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    finally:
+        socket.setdefaulttimeout(old_timeout)
+    ips: List[ipaddress._BaseAddress] = []
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        try:
+            ips.append(ipaddress.ip_address(sockaddr[0]))
+        except ValueError:
+            continue
+    return ips
+
+
+def assert_safe_outbound_mcp_url(url: str) -> str:
+    """Validate an MCP HTTP/SSE server URL for outbound safety (anti-SSRF).
+
+    Rejects:
+      - schemes other than http/https,
+      - URLs with no hostname,
+      - hosts that are, or resolve to, loopback / link-local (incl. the cloud
+        metadata IP 169.254.169.254) / RFC1918 private / unique-local /
+        unspecified / otherwise non-global addresses.
+
+    Resolves the hostname (all A/AAAA records, bounded timeout) and checks every
+    resolved IP, so a public-looking hostname that points at an internal address
+    is still rejected. Resolution failure is treated as unsafe (fail closed).
+
+    Returns the (stripped) url when safe. Raises UnsafeMCPUrlError otherwise.
+
+    Bypassed entirely when WORKEROS_ALLOW_PRIVATE_MCP_URLS=1 (self-hoster opt-in).
+    """
+    stripped = (url or "").strip()
+    if _allow_private_mcp_urls():
+        return stripped
+
+    parts = urlsplit(stripped)
+    if parts.scheme.lower() not in {"http", "https"}:
+        raise UnsafeMCPUrlError(
+            "MCP server URL is not allowed: only http:// and https:// schemes are permitted"
+        )
+
+    host = parts.hostname
+    if not host:
+        raise UnsafeMCPUrlError("MCP server URL is not allowed: missing host")
+
+    # If the host is already an IP literal, judge it directly (no DNS needed).
+    try:
+        literal_ip = ipaddress.ip_address(host)
+    except ValueError:
+        literal_ip = None
+
+    if literal_ip is not None:
+        if _ip_is_disallowed(literal_ip):
+            raise UnsafeMCPUrlError(
+                "MCP server URL is not allowed: points to an internal/loopback/link-local address"
+            )
+        return stripped
+
+    # Reject obvious localhost aliases up front (cheap, before DNS).
+    if host.lower() in {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"}:
+        raise UnsafeMCPUrlError(
+            "MCP server URL is not allowed: points to an internal/loopback/link-local address"
+        )
+
+    try:
+        resolved = _resolve_host_ips(host)
+    except (socket.gaierror, socket.timeout, OSError) as exc:
+        raise UnsafeMCPUrlError(
+            f"MCP server URL is not allowed: host could not be resolved ({host})"
+        ) from exc
+
+    if not resolved:
+        raise UnsafeMCPUrlError(
+            f"MCP server URL is not allowed: host could not be resolved ({host})"
+        )
+
+    for ip in resolved:
+        if _ip_is_disallowed(ip):
+            raise UnsafeMCPUrlError(
+                "MCP server URL is not allowed: points to an internal/loopback/link-local address"
+            )
+    return stripped
 
 
 # ---------------------------------------------------------------------------
