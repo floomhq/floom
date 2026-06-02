@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Box, ChevronRight, Folder, Plus, Search, Star, Archive,
+  Box, ChevronRight, Folder, Plus, Search, Star, Archive, LayoutGrid, Clock,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -329,14 +329,23 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
                 className="pl-9"
               />
             </div>
+            {/* V9 (Federico 2026-06-02): "replace these by icons as well" —
+                icon-only filter tabs. Each carries an aria-label + title so it
+                stays discoverable; the active-state underline is unchanged. */}
             <Tabs value={tab} onValueChange={handleTabChange}>
               <TabsList>
-                <TabsTrigger value="all">All</TabsTrigger>
-                {/* U7 (Federico 2026-05-31): "the logos say enough" — drop the
-                    Star + Archive glyphs from the filter tabs; text labels alone. */}
-                <TabsTrigger value="starred">Starred</TabsTrigger>
-                <TabsTrigger value="recent">Recent</TabsTrigger>
-                <TabsTrigger value="archived">Archived</TabsTrigger>
+                <TabsTrigger value="all" aria-label="All workers" title="All">
+                  <LayoutGrid />
+                </TabsTrigger>
+                <TabsTrigger value="starred" aria-label="Starred workers" title="Starred">
+                  <Star />
+                </TabsTrigger>
+                <TabsTrigger value="recent" aria-label="Recently run workers" title="Recent">
+                  <Clock />
+                </TabsTrigger>
+                <TabsTrigger value="archived" aria-label="Archived workers" title="Archived">
+                  <Archive />
+                </TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
