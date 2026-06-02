@@ -45,6 +45,7 @@ import uuid as _uuid_mod
 import zipfile
 import ipaddress
 import math
+import urllib.parse
 import requests
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
@@ -908,6 +909,8 @@ async def auth_middleware(request: Request, call_next):
             or path in {"/healthz", "/health"}
             or path == "/composio-events"
             or path == "/slack/events"
+            or path == "/slack/commands"
+            or path == "/slack/interactivity"
             or path == "/mcp"
             or path == "/api/mcp"
             or path == "/langdock/mcp"
@@ -11330,6 +11333,147 @@ def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str) -> None
         raise RuntimeError(f"Slack post failed: {error}")
 
 
+def _set_slack_assistant_status(*, channel: str, thread_ts: str, status: str) -> None:
+    bot_token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+    if not bot_token:
+        raise RuntimeError("SLACK_BOT_TOKEN is not configured")
+    response = requests.post(
+        "https://slack.com/api/assistant.threads.setStatus",
+        headers={
+            "Authorization": f"Bearer {bot_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        json={
+            "channel_id": channel,
+            "thread_ts": thread_ts,
+            "status": status,
+        },
+        timeout=15,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"Slack assistant status failed with HTTP {response.status_code}") from exc
+    if not response.ok or not payload.get("ok"):
+        error = str(payload.get("error") or f"HTTP {response.status_code}")
+        raise RuntimeError(f"Slack assistant status failed: {error}")
+
+
+def _post_slack_response_url(*, response_url: str, text: str, response_type: str = "ephemeral") -> None:
+    if not response_url:
+        raise RuntimeError("Slack response_url is required")
+    response = requests.post(
+        response_url,
+        json={
+            "response_type": response_type,
+            "text": text or "(No reply)",
+        },
+        timeout=15,
+    )
+    if not response.ok:
+        raise RuntimeError(f"Slack response_url post failed with HTTP {response.status_code}")
+
+
+def _slack_workspace_user_id() -> str:
+    return (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
+
+
+def _parse_slack_form_body(body: bytes) -> Dict[str, str]:
+    parsed = urllib.parse.parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
+    return {key: values[-1] if values else "" for key, values in parsed.items()}
+
+
+def _approval_action_value(run_id: str) -> str:
+    return json.dumps({"run_id": run_id}, separators=(",", ":"))
+
+
+def _approval_action_run_id(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return raw
+    if isinstance(parsed, dict):
+        return str(parsed.get("run_id") or "")
+    return raw
+
+
+def _slack_pending_approvals_response(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not rows:
+        return {
+            "response_type": "ephemeral",
+            "text": "No pending approvals.",
+        }
+
+    blocks: List[Dict[str, Any]] = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "Pending approvals", "emoji": True},
+        },
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": "Approve or reject directly from Slack."}
+            ],
+        },
+    ]
+    for row in rows[:5]:
+        run_id = str(row.get("run_id") or "")
+        worker_name = str(row.get("worker_name") or row.get("worker_id") or "Worker")
+        label = str(row.get("label") or "Approval requested")
+        preview = str(row.get("preview") or "").strip()
+        preview_text = f"\n>{preview[:500]}" if preview else ""
+        blocks.extend([
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{worker_name}* — {label}{preview_text}\n`{run_id}`",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Approve", "emoji": True},
+                        "style": "primary",
+                        "action_id": "workeros_approval_approve",
+                        "value": _approval_action_value(run_id),
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Reject", "emoji": True},
+                        "style": "danger",
+                        "action_id": "workeros_approval_reject",
+                        "value": _approval_action_value(run_id),
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Dismiss", "emoji": True},
+                        "action_id": "workeros_approval_dismiss",
+                        "value": _approval_action_value(run_id),
+                    },
+                ],
+            },
+        ])
+
+    if len(rows) > 5:
+        blocks.append({
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": f"Showing 5 of {len(rows)} pending approvals."}
+            ],
+        })
+    return {
+        "response_type": "ephemeral",
+        "text": f"{len(rows)} pending approval(s).",
+        "blocks": blocks,
+    }
+
+
 async def _handle_slack_app_mention(
     *,
     event: Dict[str, Any],
@@ -11362,6 +11506,197 @@ async def _handle_slack_app_mention(
                 logger.exception("Slack error reply failed")
 
 
+async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any]) -> None:
+    assistant_thread = event.get("assistant_thread") if isinstance(event.get("assistant_thread"), dict) else {}
+    channel = str(assistant_thread.get("channel_id") or "")
+    thread_ts = str(assistant_thread.get("thread_ts") or "")
+    if not channel or not thread_ts:
+        logger.warning("Slack assistant_thread_started missing channel/thread timestamp")
+        return
+    try:
+        _post_slack_thread_reply(
+            channel=channel,
+            thread_ts=thread_ts,
+            text="I am ready. Ask me to inspect workers, draft an action, or list approvals.",
+        )
+    except Exception:
+        logger.exception("Slack assistant thread greeting failed")
+
+
+async def _handle_slack_direct_message(
+    *,
+    event: Dict[str, Any],
+    prompt: str,
+    user_id: str,
+) -> None:
+    channel = str(event.get("channel") or "")
+    thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
+    if not channel or not thread_ts:
+        logger.warning("Slack direct message missing channel/thread timestamp")
+        return
+    conversation_id = f"slack-assistant:{channel}:{thread_ts}"
+    try:
+        try:
+            _set_slack_assistant_status(
+                channel=channel,
+                thread_ts=thread_ts,
+                status="is working on your request...",
+            )
+        except Exception:
+            logger.exception("Slack assistant status update failed")
+        reply = await _collect_workspace_agent_reply_for_slack(
+            message=prompt,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply)
+    except Exception:
+        logger.exception("Slack direct message processing failed")
+        if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
+            try:
+                _post_slack_thread_reply(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    text="I could not complete that request. The failure was logged for the workspace operator.",
+                )
+            except Exception:
+                logger.exception("Slack direct message error reply failed")
+
+
+async def _handle_slack_command_message(
+    *,
+    prompt: str,
+    response_url: str,
+    user_id: str,
+    channel_id: str,
+) -> None:
+    conversation_id = f"slack-command:{channel_id}" if channel_id else "slack-command"
+    try:
+        reply = await _collect_workspace_agent_reply_for_slack(
+            message=prompt,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        _post_slack_response_url(response_url=response_url, text=reply or "(No reply)")
+    except Exception:
+        logger.exception("Slack command processing failed")
+        try:
+            _post_slack_response_url(
+                response_url=response_url,
+                text="I could not complete that request. The failure was logged for the workspace operator.",
+            )
+        except Exception:
+            logger.exception("Slack command error reply failed")
+
+
+async def _slack_command_response_from_form(
+    form: Dict[str, str],
+    background_tasks: BackgroundTasks,
+) -> Response:
+    team_id = str(form.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    text = str(form.get("text") or "").strip()
+    response_url = str(form.get("response_url") or "")
+    channel_id = str(form.get("channel_id") or "")
+    user_id = _slack_workspace_user_id()
+    command = text.lower()
+
+    if command in {"", "help"}:
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": "Try `/floom approvals` or `/floom <question for your workspace agent>`.",
+        })
+
+    if command in {"approvals", "approval", "pending approvals"}:
+        repos = get_repositories()
+        rows = repos.approvals.list_pending(owner_id=user_id)
+        return JSONResponse(_slack_pending_approvals_response(rows))
+
+    if not response_url:
+        raise HTTPException(status_code=400, detail="Slack response_url is required")
+
+    background_tasks.add_task(
+        _handle_slack_command_message,
+        prompt=text,
+        response_url=response_url,
+        user_id=user_id,
+        channel_id=channel_id,
+    )
+    return JSONResponse({
+        "response_type": "ephemeral",
+        "text": "Working on it...",
+    })
+
+
+def _slack_interactivity_response_from_form(form: Dict[str, str]) -> Response:
+    raw_payload = form.get("payload") or ""
+    try:
+        payload = json.loads(raw_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack interaction payload") from exc
+
+    team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
+    team_id = str(team.get("id") or payload.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    actions = payload.get("actions")
+    action = actions[0] if isinstance(actions, list) and actions else {}
+    if not isinstance(action, dict):
+        return JSONResponse({"replace_original": False, "text": "No Slack action found."})
+
+    action_id = str(action.get("action_id") or "")
+    run_id = _approval_action_run_id(str(action.get("value") or ""))
+    slack_user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+    slack_user_id = str(slack_user.get("id") or "unknown")
+    user_id = _slack_workspace_user_id()
+
+    if action_id == "workeros_approval_dismiss":
+        return JSONResponse({
+            "replace_original": True,
+            "text": f"Dismissed approval `{run_id}`.",
+        })
+
+    if action_id not in {"workeros_approval_approve", "workeros_approval_reject"}:
+        return JSONResponse({
+            "replace_original": False,
+            "text": f"Unsupported Slack action: {action_id or 'unknown'}",
+        })
+    if not run_id:
+        return JSONResponse({
+            "replace_original": False,
+            "text": "Missing run_id for Slack approval action.",
+        })
+
+    repos = get_repositories()
+    try:
+        if action_id == "workeros_approval_approve":
+            result = _approve_pending_run_for_slack(run_id=run_id, user_id=user_id, repos=repos)
+            return JSONResponse({
+                "replace_original": True,
+                "text": f"Approved `{run_id}` from Slack. Follow-up run: `{result.run_id}`.",
+            })
+        _reject_pending_run_for_slack(
+            run_id=run_id,
+            user_id=user_id,
+            repos=repos,
+            reason=f"Rejected from Slack by {slack_user_id}",
+        )
+        return JSONResponse({
+            "replace_original": True,
+            "text": f"Rejected `{run_id}` from Slack.",
+        })
+    except HTTPException as exc:
+        return JSONResponse({
+            "replace_original": False,
+            "text": f"Could not apply Slack approval action: {exc.detail}",
+        })
+
+
 @app.post("/slack/events")
 async def slack_events(request: Request, background_tasks: BackgroundTasks) -> Response:
     """Receive native Slack Events API callbacks.
@@ -11379,6 +11714,13 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
     body = await request.body()
     if not _verify_slack_signature(body, request, signing_secret):
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/x-www-form-urlencoded" in content_type:
+        form = _parse_slack_form_body(body)
+        if "payload" in form:
+            return _slack_interactivity_response_from_form(form)
+        return await _slack_command_response_from_form(form, background_tasks)
 
     try:
         payload: Dict[str, Any] = json.loads(body.decode("utf-8") or "{}")
@@ -11399,7 +11741,9 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
 
     event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
     event_type = str(event.get("type") or "")
-    if event_type != "app_mention":
+    is_direct_message = event_type == "message" and str(event.get("channel_type") or "") == "im"
+    supported_event_types = {"app_mention", "assistant_thread_started", "assistant_thread_context_changed"}
+    if event_type not in supported_event_types and not is_direct_message:
         return JSONResponse({"ok": True, "ignored": event_type or "unknown"})
 
     if not os.environ.get("SLACK_BOT_TOKEN", "").strip():
@@ -11408,6 +11752,29 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
     event_id = str(payload.get("event_id") or request.headers.get("X-Slack-Retry-Num") or "")
     if event_id and not _claim_webhook_delivery("slack:events", event_id):
         return JSONResponse({"ok": True, "duplicate": True})
+
+    if event_type == "assistant_thread_started":
+        background_tasks.add_task(_handle_slack_assistant_thread_started, event=event)
+        return JSONResponse({"ok": True, "status": "queued"})
+
+    if event_type == "assistant_thread_context_changed":
+        return JSONResponse({"ok": True, "status": "context_updated"})
+
+    if is_direct_message:
+        subtype = str(event.get("subtype") or "")
+        if subtype or event.get("bot_id"):
+            return JSONResponse({"ok": True, "ignored": subtype or "bot_message"})
+        prompt = _clean_slack_agent_prompt(str(event.get("text") or ""), None)
+        if not prompt:
+            return JSONResponse({"ok": True, "ignored": "empty_prompt"})
+        user_id = _slack_workspace_user_id()
+        background_tasks.add_task(
+            _handle_slack_direct_message,
+            event=event,
+            prompt=prompt,
+            user_id=user_id,
+        )
+        return JSONResponse({"ok": True, "status": "queued"})
 
     authorizations = payload.get("authorizations")
     bot_user_id = None
@@ -11427,6 +11794,153 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
         user_id=user_id,
     )
     return JSONResponse({"ok": True, "status": "queued"})
+
+
+def _approve_pending_run_for_slack(*, run_id: str, user_id: str, repos: Repositories) -> ActionResponse:
+    auth = AuthContext(user_id=user_id, email=None, scopes=("slack",))
+    return approve_run(run_id, ApproveRequest(), auth, repos)
+
+
+def _reject_pending_run_for_slack(
+    *,
+    run_id: str,
+    user_id: str,
+    repos: Repositories,
+    reason: str,
+) -> ActionResponse:
+    auth = AuthContext(user_id=user_id, email=None, scopes=("slack",))
+    return reject_run(run_id, RejectRequest(reason=reason), auth, repos)
+
+
+@app.post("/slack/commands")
+async def slack_commands(request: Request, background_tasks: BackgroundTasks) -> Response:
+    """Receive Slack slash-command requests for the workspace agent."""
+    if not _slack_events_enabled():
+        raise HTTPException(status_code=503, detail="Slack integration is disabled")
+    signing_secret = os.environ.get("SLACK_SIGNING_SECRET", "").strip()
+    if not signing_secret:
+        raise HTTPException(status_code=503, detail="SLACK_SIGNING_SECRET is not configured")
+
+    body = await request.body()
+    if not _verify_slack_signature(body, request, signing_secret):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    form = _parse_slack_form_body(body)
+    team_id = str(form.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    text = str(form.get("text") or "").strip()
+    response_url = str(form.get("response_url") or "")
+    channel_id = str(form.get("channel_id") or "")
+    user_id = _slack_workspace_user_id()
+    command = text.lower()
+
+    if command in {"", "help"}:
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": "Try `/floom approvals` or `/floom <question for your workspace agent>`.",
+        })
+
+    if command in {"approvals", "approval", "pending approvals"}:
+        repos = get_repositories()
+        rows = repos.approvals.list_pending(owner_id=user_id)
+        return JSONResponse(_slack_pending_approvals_response(rows))
+
+    if not response_url:
+        raise HTTPException(status_code=400, detail="Slack response_url is required")
+
+    background_tasks.add_task(
+        _handle_slack_command_message,
+        prompt=text,
+        response_url=response_url,
+        user_id=user_id,
+        channel_id=channel_id,
+    )
+    return JSONResponse({
+        "response_type": "ephemeral",
+        "text": "Working on it...",
+    })
+
+
+@app.post("/slack/interactivity")
+async def slack_interactivity(request: Request) -> Response:
+    """Receive Slack Block Kit action payloads."""
+    if not _slack_events_enabled():
+        raise HTTPException(status_code=503, detail="Slack integration is disabled")
+    signing_secret = os.environ.get("SLACK_SIGNING_SECRET", "").strip()
+    if not signing_secret:
+        raise HTTPException(status_code=503, detail="SLACK_SIGNING_SECRET is not configured")
+
+    body = await request.body()
+    if not _verify_slack_signature(body, request, signing_secret):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    form = _parse_slack_form_body(body)
+    raw_payload = form.get("payload") or ""
+    try:
+        payload = json.loads(raw_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack interaction payload") from exc
+
+    team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
+    team_id = str(team.get("id") or payload.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    actions = payload.get("actions")
+    action = actions[0] if isinstance(actions, list) and actions else {}
+    if not isinstance(action, dict):
+        return JSONResponse({"replace_original": False, "text": "No Slack action found."})
+
+    action_id = str(action.get("action_id") or "")
+    run_id = _approval_action_run_id(str(action.get("value") or ""))
+    slack_user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+    slack_user_id = str(slack_user.get("id") or "unknown")
+    user_id = _slack_workspace_user_id()
+
+    if action_id == "workeros_approval_dismiss":
+        return JSONResponse({
+            "replace_original": True,
+            "text": f"Dismissed approval `{run_id}`.",
+        })
+
+    if action_id not in {"workeros_approval_approve", "workeros_approval_reject"}:
+        return JSONResponse({
+            "replace_original": False,
+            "text": f"Unsupported Slack action: {action_id or 'unknown'}",
+        })
+    if not run_id:
+        return JSONResponse({
+            "replace_original": False,
+            "text": "Missing run_id for Slack approval action.",
+        })
+
+    repos = get_repositories()
+    try:
+        if action_id == "workeros_approval_approve":
+            result = _approve_pending_run_for_slack(run_id=run_id, user_id=user_id, repos=repos)
+            return JSONResponse({
+                "replace_original": True,
+                "text": f"Approved `{run_id}` from Slack. Follow-up run: `{result.run_id}`.",
+            })
+        _reject_pending_run_for_slack(
+            run_id=run_id,
+            user_id=user_id,
+            repos=repos,
+            reason=f"Rejected from Slack by {slack_user_id}",
+        )
+        return JSONResponse({
+            "replace_original": True,
+            "text": f"Rejected `{run_id}` from Slack.",
+        })
+    except HTTPException as exc:
+        return JSONResponse({
+            "replace_original": False,
+            "text": f"Could not apply Slack approval action: {exc.detail}",
+        })
 
 
 # ---------------------------------------------------------------------------
