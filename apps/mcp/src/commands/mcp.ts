@@ -102,8 +102,14 @@ function genericSnippet(mcpUrl: string, headers: Record<string, string>): string
   }, null, 2);
 }
 
+function redactedHeaders(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.keys(headers).map((key) => [key, `<${key}>`]),
+  );
+}
+
 function manualSnippets(mcpUrl: string, headers: Record<string, string>): string {
-  const snippet = genericSnippet(mcpUrl, headers);
+  const snippet = genericSnippet(mcpUrl, redactedHeaders(headers));
   return [
     "No supported MCP client config was found.",
     "Create one of these files and add the snippet below:",
