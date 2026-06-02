@@ -36,6 +36,23 @@ API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
+import socket as _socket  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _stub_outbound_dns():
+    """Alert creation + webhook delivery now SSRF-validate the URL, which
+    resolves the host (fail-closed). These tests use public-looking example
+    hostnames that don't resolve in the sandbox, so stub DNS to a public IP.
+    Keeps the file's "no network calls" invariant while exercising the real
+    (safe) validation path. SSRF rejection is covered in test_alert_webhook_ssrf.
+    """
+    def _fake_getaddrinfo(host, *args, **kwargs):
+        return [(_socket.AF_INET, _socket.SOCK_STREAM, _socket.IPPROTO_TCP, "", ("93.184.216.34", 0))]
+
+    with patch("models.socket.getaddrinfo", side_effect=_fake_getaddrinfo):
+        yield
+
 _WORKER_YML = """\
 schema_version: "0.3"
 name: "ai-news-digest"

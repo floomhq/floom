@@ -18,29 +18,38 @@ def _model_data(value: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# SSRF deny-list for outbound MCP server URLs
+# SSRF deny-list for outbound URLs (MCP server URLs, alert webhook URLs, ...)
 # ---------------------------------------------------------------------------
 #
-# An MCP HTTP/SSE connection URL is dialed by the worker runtime. Without
-# validation, a user can register an MCP server pointing at an internal /
-# loopback / link-local address (e.g. the cloud metadata endpoint
-# 169.254.169.254, localhost, RFC1918 hosts) and the worker run will issue an
-# outbound request from inside our network — a classic SSRF.
+# Several features cause the backend to dial a user-supplied URL from inside our
+# network: an MCP HTTP/SSE connection URL is dialed by the worker runtime, and
+# an alert webhook URL is POSTed to on run terminal status. Without validation,
+# a user can point such a URL at an internal / loopback / link-local address
+# (e.g. the cloud metadata endpoint 169.254.169.254, localhost, RFC1918 hosts)
+# and the backend will issue an outbound request from inside our network — a
+# classic SSRF.
 #
-# This helper rejects unsafe MCP URLs. It is enforced at REGISTRATION (when the
-# connection is added) AND re-checked at DIAL time (defense in depth, since DNS
-# can rebind between registration and use).
+# `assert_safe_outbound_url` is the single shared validator. It is enforced at
+# STORE/REGISTRATION time (MCP connection add, alert create) AND re-checked at
+# USE time (MCP dial, webhook POST) for defense in depth, since DNS can rebind
+# between store and use.
 #
-# Self-hosters who legitimately run a local MCP server can opt out with
+# Self-hosters who legitimately target a local URL can opt out with
 # WORKEROS_ALLOW_PRIVATE_MCP_URLS=1 (default OFF / secure).
 
 # Resolution timeout so a hostile/slow DNS record can't hang the request.
 _MCP_DNS_RESOLVE_TIMEOUT_SECONDS = 3.0
 
 
-class UnsafeMCPUrlError(ValueError):
-    """Raised when an MCP server URL points to an internal/loopback/link-local
-    address (or uses a disallowed scheme)."""
+class UnsafeOutboundUrlError(ValueError):
+    """Raised when an outbound URL (MCP server, alert webhook, ...) points to an
+    internal/loopback/link-local address (or uses a disallowed scheme)."""
+
+
+# Backward-compatible alias: the original MCP-specific name. Existing call sites
+# and tests import UnsafeMCPUrlError; it is the exact same exception type, so
+# `except UnsafeMCPUrlError` and `except UnsafeOutboundUrlError` both catch it.
+UnsafeMCPUrlError = UnsafeOutboundUrlError
 
 
 def _allow_private_mcp_urls() -> bool:
@@ -102,8 +111,10 @@ def _resolve_host_ips(host: str) -> List[ipaddress._BaseAddress]:
     return ips
 
 
-def assert_safe_outbound_mcp_url(url: str) -> str:
-    """Validate an MCP HTTP/SSE server URL for outbound safety (anti-SSRF).
+def assert_safe_outbound_url(url: str, *, label: str = "URL") -> str:
+    """Validate a user-supplied outbound http(s) URL for SSRF safety.
+
+    Shared by the MCP-connection registration path and the alert-webhook path.
 
     Rejects:
       - schemes other than http/https,
@@ -116,7 +127,10 @@ def assert_safe_outbound_mcp_url(url: str) -> str:
     resolved IP, so a public-looking hostname that points at an internal address
     is still rejected. Resolution failure is treated as unsafe (fail closed).
 
-    Returns the (stripped) url when safe. Raises UnsafeMCPUrlError otherwise.
+    ``label`` is woven into the error message (e.g. "MCP server URL", "Alert
+    webhook URL") so callers get a clear rejection reason.
+
+    Returns the (stripped) url when safe. Raises UnsafeOutboundUrlError otherwise.
 
     Bypassed entirely when WORKEROS_ALLOW_PRIVATE_MCP_URLS=1 (self-hoster opt-in).
     """
@@ -126,13 +140,13 @@ def assert_safe_outbound_mcp_url(url: str) -> str:
 
     parts = urlsplit(stripped)
     if parts.scheme.lower() not in {"http", "https"}:
-        raise UnsafeMCPUrlError(
-            "MCP server URL is not allowed: only http:// and https:// schemes are permitted"
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: only http:// and https:// schemes are permitted"
         )
 
     host = parts.hostname
     if not host:
-        raise UnsafeMCPUrlError("MCP server URL is not allowed: missing host")
+        raise UnsafeOutboundUrlError(f"{label} is not allowed: missing host")
 
     # If the host is already an IP literal, judge it directly (no DNS needed).
     try:
@@ -142,35 +156,41 @@ def assert_safe_outbound_mcp_url(url: str) -> str:
 
     if literal_ip is not None:
         if _ip_is_disallowed(literal_ip):
-            raise UnsafeMCPUrlError(
-                "MCP server URL is not allowed: points to an internal/loopback/link-local address"
+            raise UnsafeOutboundUrlError(
+                f"{label} is not allowed: points to an internal/loopback/link-local address"
             )
         return stripped
 
     # Reject obvious localhost aliases up front (cheap, before DNS).
     if host.lower() in {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"}:
-        raise UnsafeMCPUrlError(
-            "MCP server URL is not allowed: points to an internal/loopback/link-local address"
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: points to an internal/loopback/link-local address"
         )
 
     try:
         resolved = _resolve_host_ips(host)
     except (socket.gaierror, socket.timeout, OSError) as exc:
-        raise UnsafeMCPUrlError(
-            f"MCP server URL is not allowed: host could not be resolved ({host})"
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: host could not be resolved ({host})"
         ) from exc
 
     if not resolved:
-        raise UnsafeMCPUrlError(
-            f"MCP server URL is not allowed: host could not be resolved ({host})"
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: host could not be resolved ({host})"
         )
 
     for ip in resolved:
         if _ip_is_disallowed(ip):
-            raise UnsafeMCPUrlError(
-                "MCP server URL is not allowed: points to an internal/loopback/link-local address"
+            raise UnsafeOutboundUrlError(
+                f"{label} is not allowed: points to an internal/loopback/link-local address"
             )
     return stripped
+
+
+def assert_safe_outbound_mcp_url(url: str) -> str:
+    """SSRF validator for MCP HTTP/SSE server URLs. Thin wrapper around
+    :func:`assert_safe_outbound_url` preserving the original API + error text."""
+    return assert_safe_outbound_url(url, label="MCP server URL")
 
 
 # ---------------------------------------------------------------------------
