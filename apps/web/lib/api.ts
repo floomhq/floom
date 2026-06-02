@@ -378,6 +378,17 @@ export const api = {
       fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}/rollback/${versionId}`, {
         method: "POST",
       }),
+    // Per-file version history. The backend snapshots each brain-pack file on
+    // every save/delete/upload under the `brain_file` asset type, so these list
+    // and read the revisions of ONE file (not the whole pack).
+    listFileVersions: (name: string, path: string, limit = 50) =>
+      fetchJson<import("./types").VersionSummary[]>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/versions?limit=${limit}`
+      ),
+    getFileVersion: (name: string, path: string, versionId: string) =>
+      fetchJson<import("./types").VersionFileDetail>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/versions/${versionId}`
+      ),
   },
   system: {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
