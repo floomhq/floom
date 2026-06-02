@@ -293,6 +293,7 @@ class VersionRepository(Protocol):
         user_id: str,
         snapshot_json: str,
         change_source: str,
+        keep: int | None = 20,
     ) -> RowDict: ...
 
     def list(
@@ -310,7 +311,7 @@ class VersionRepository(Protocol):
         *,
         asset_type: str,
         asset_id: str,
-        keep: int = 50,
+        keep: int = 20,
     ) -> int: ...
 
 

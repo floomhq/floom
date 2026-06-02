@@ -1237,6 +1237,29 @@ def _health_check_db() -> Dict[str, Any]:
     return {"ok": True}
 
 
+# Minimum free disk before /health flips to degraded. A full disk silently
+# corrupts SQLite writes and 507s worker-create while /health stayed "ok" at
+# 0 bytes free (2026-06-02 P1). Override with HEALTH_MIN_FREE_DISK_GB.
+_HEALTH_MIN_FREE_DISK_GB = float(os.environ.get("HEALTH_MIN_FREE_DISK_GB", "5") or "5")
+
+
+def _health_check_disk() -> Dict[str, Any]:
+    """Warn before the disk fills. Checks the filesystem holding the SQLite DB."""
+    db_path = str(DB_PATH)
+    target = db_path if os.path.exists(db_path) else (os.path.dirname(db_path) or "/")
+    usage = shutil.disk_usage(target if os.path.exists(target) else "/")
+    free_gb = usage.free / (1024**3)
+    ok = free_gb >= _HEALTH_MIN_FREE_DISK_GB
+    result: Dict[str, Any] = {
+        "ok": ok,
+        "free_gb": round(free_gb, 2),
+        "min_free_gb": _HEALTH_MIN_FREE_DISK_GB,
+    }
+    if not ok:
+        result["error"] = f"low disk: {free_gb:.2f}GB free < {_HEALTH_MIN_FREE_DISK_GB}GB"
+    return result
+
+
 def _health_check_e2b() -> Dict[str, Any]:
     if not os.environ.get("E2B_API_KEY"):
         return {"ok": False, "error": "E2B_API_KEY missing"}
@@ -1279,6 +1302,7 @@ def _run_health_checks() -> Dict[str, Any]:
     checks: Dict[str, Any] = {}
     for name, fn in {
         "db": _health_check_db,
+        "disk": _health_check_disk,
         "e2b": _health_check_e2b,
         "openai": _health_check_openai,
         "composio": _health_check_composio,
@@ -1990,7 +2014,7 @@ def _snapshot_workspace_instructions(
         repos.versions.prune(
             asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
             asset_id=asset_id,
-            keep=50,
+            keep=20,
         )
     except Exception as _exc:
         logger.warning("version snapshot failed for workspace instructions: %s", _exc)
@@ -2035,7 +2059,7 @@ def _snapshot_worker_version(
             snapshot_json=_json.dumps(snapshot),
             change_source=change_source,
         )
-        repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=50)
+        repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
     except Exception as _exc:
         logger.warning("version snapshot failed for worker %s: %s", worker_id, _exc)
 
@@ -2239,7 +2263,7 @@ def rollback_worker(
                 snapshot_json=_json2.dumps(rollback_snapshot),
                 change_source=f"rollback:{version_id}",
             )
-            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=50)
+            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
         except Exception as _ver_exc:
             logger.warning("version snapshot after rollback failed for %s: %s", worker_id, _ver_exc)
 
@@ -2354,7 +2378,7 @@ def _snapshot_brain_file_version(
             snapshot_json=_json.dumps(snapshot),
             change_source=change_source,
         )
-        repos.versions.prune(asset_type="brain_file", asset_id=_brain_file_asset_id(name, rel), keep=50)
+        repos.versions.prune(asset_type="brain_file", asset_id=_brain_file_asset_id(name, rel), keep=20)
     except Exception as _exc:
         logger.warning("version snapshot failed for brain_file %s/%s: %s", name, rel, _exc)
 
@@ -2460,7 +2484,7 @@ def rollback_context(
                 snapshot_json=_json.dumps(rollback_snapshot),
                 change_source=f"rollback:{version_id}",
             )
-            repos.versions.prune(asset_type="brain_pack", asset_id=safe_name, keep=50)
+            repos.versions.prune(asset_type="brain_pack", asset_id=safe_name, keep=20)
         except Exception as _exc:
             logger.warning("version snapshot after context rollback failed: %s", _exc)
 
@@ -4397,7 +4421,7 @@ def _snapshot_brain_pack_version(
             snapshot_json=_json.dumps(snapshot),
             change_source=change_source,
         )
-        repos.versions.prune(asset_type="brain_pack", asset_id=name, keep=50)
+        repos.versions.prune(asset_type="brain_pack", asset_id=name, keep=20)
     except Exception as _exc:
         logger.warning("version snapshot failed for brain_pack %s: %s", name, _exc)
 
@@ -5200,7 +5224,7 @@ def update_worker(
                 snapshot_json=_json.dumps(snapshot),
                 change_source="user",
             )
-            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=50)
+            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
         except Exception as _ver_exc:
             logger.warning("version snapshot on PATCH failed for %s: %s", worker_id, _ver_exc)
 
@@ -7633,7 +7657,7 @@ def update_worker_files(
                 snapshot_json=_json.dumps(snapshot),
                 change_source="user",
             )
-            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=50)
+            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
         except Exception as _ver_exc:
             logger.warning("version snapshot failed for worker %s: %s", worker_id, _ver_exc)
 
