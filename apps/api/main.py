@@ -1995,6 +1995,50 @@ def _snapshot_workspace_instructions(
     except Exception as _exc:
         logger.warning("version snapshot failed for workspace instructions: %s", _exc)
 
+
+def _snapshot_worker_version(
+    worker_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+    change_source: str = "user",
+) -> None:
+    """Create a version snapshot of a worker's current source files."""
+    import json as _json
+    from worker_registry import WORKERS_DIR
+
+    try:
+        files_snapshot = []
+        worker_dir = WORKERS_DIR / worker_id
+        if worker_dir.is_dir():
+            for fp in sorted(worker_dir.rglob("*")):
+                if not fp.is_file():
+                    continue
+                try:
+                    rel = fp.relative_to(worker_dir).as_posix()
+                except ValueError:
+                    continue
+                if _should_ignore_worker_file(rel):
+                    continue
+                try:
+                    files_snapshot.append({"path": rel, "content": fp.read_text(encoding="utf-8")})
+                except Exception:
+                    pass
+        snapshot = {
+            "worker": repos.workers.get(user_id=user_id, worker_id=worker_id),
+            "files": files_snapshot,
+        }
+        repos.versions.create(
+            asset_type="worker",
+            asset_id=worker_id,
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=50)
+    except Exception as _exc:
+        logger.warning("version snapshot failed for worker %s: %s", worker_id, _exc)
+
 class VersionSummary(BaseModel):
     id: str
     asset_type: str
@@ -2073,6 +2117,14 @@ def list_worker_versions(
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     rows = repos.versions.list(asset_type="worker", asset_id=worker_id, limit=min(limit, 100))
+    if not rows:
+        _snapshot_worker_version(
+            worker_id,
+            user_id=auth.user_id,
+            repos=repos,
+            change_source="baseline",
+        )
+        rows = repos.versions.list(asset_type="worker", asset_id=worker_id, limit=min(limit, 100))
     return [VersionSummary(**r) for r in rows]
 
 
@@ -2229,6 +2281,14 @@ def list_context_versions(
     """List saved versions of a brain pack (newest first)."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rows = repos.versions.list(asset_type="brain_pack", asset_id=safe_name, limit=min(limit, 100))
+    if not rows:
+        _snapshot_brain_pack_version(
+            safe_name,
+            user_id=auth.user_id,
+            repos=repos,
+            change_source="baseline",
+        )
+        rows = repos.versions.list(asset_type="brain_pack", asset_id=safe_name, limit=min(limit, 100))
     return [VersionSummary(**r) for r in rows]
 
 
