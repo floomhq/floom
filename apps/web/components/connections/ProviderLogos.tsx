@@ -28,6 +28,9 @@ const SLUG_ALIASES: Record<string, string> = {
   googledocs: "google-docs",
   googlesheets: "google-sheets",
   googlemeet: "google-meet",
+  googlesearchconsole: "google-search-console",
+  gsc: "google-search-console",
+  searchconsole: "google-search-console",
 };
 
 function normalizeIcon(slug: string): string {

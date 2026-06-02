@@ -13,6 +13,7 @@ import Editor from "react-simple-code-editor";
 import { load as parseYaml } from "js-yaml";
 import "highlight.js/styles/github.css";
 import type { WorkerFile } from "@/lib/types";
+import { humanizeCron } from "@/lib/humanize-cron";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ---------------------------------------------------------------------------
@@ -610,7 +611,10 @@ function triggerLabel(value: unknown) {
   if (!value || typeof value !== "object") return "";
   const type = String((value as Record<string, unknown>).type || "manual");
   const cron = (value as Record<string, unknown>).cron;
-  return cron ? `${type} · ${cron}` : type;
+  const tz = (value as Record<string, unknown>).timezone;
+  return cron
+    ? `${type} · ${humanizeCron(String(cron), typeof tz === "string" ? tz : "UTC")}`
+    : type;
 }
 
 function runtimeLabel(value: unknown) {

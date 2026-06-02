@@ -969,7 +969,7 @@ function PackDetailPane({
         </div>
         {readOnly && (
           <p className="mt-2 text-xs text-muted-foreground">
-            This is a Workeros engine pack. It shapes how workers are generated and is read-only.
+            This is a Floom Workers engine pack. It shapes how workers are generated and is read-only.
           </p>
         )}
         {detail.description ? (
