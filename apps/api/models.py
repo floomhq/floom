@@ -1369,6 +1369,10 @@ class WorkerSummary(BaseModel):
     connections: List[str] = Field(default_factory=list)  # Composio app slugs declared in worker.yml
     inputs: List[Union[WorkerInput, WorkerSummaryInput]] = Field(default_factory=list)  # input descriptors for worker-card icon composition
     runtime: Optional[str] = None  # exec.runtime ("skill", "python311", "node22", …)
+    # Owner-only signed share link to the standalone public worker page
+    # (/w/<id>?token=<hmac>). Lets the worker card render a Share affordance
+    # without a second fetch. Same deterministic HMAC as WorkerDetail.public_link.
+    public_link: Optional[str] = None
 
 
 class WorkerFile(BaseModel):
@@ -1411,6 +1415,62 @@ class WorkerDetail(BaseModel):
     webhook_url: Optional[str] = None  # Full webhook URL (only when trigger includes webhook)
     files: List[WorkerFile] = Field(default_factory=list)  # All files in the worker dir
     triggers_spec: List[TriggerSpec] = Field(default_factory=list)  # structured trigger objects (all triggers)
+    # Owner-only signed share link to the standalone public worker page
+    # (/w/<id>?token=<hmac>). Mirrors the approval `public_link` pattern: the
+    # token is a deterministic HMAC the /workers/public/* route verifies, so the
+    # owner can copy this URL to share a read-only "skill card" view of the
+    # worker with anyone — no secrets, source, or run history are exposed there.
+    public_link: Optional[str] = None
+
+
+class PublicWorkerInput(BaseModel):
+    """Input descriptor exposed on the public share page.
+
+    Deliberate allow-list mirror of ``WorkerInput`` that drops fields a public
+    viewer has no business seeing (e.g. nothing sensitive lives here today, but
+    keeping a dedicated model means a future field added to ``WorkerInput`` is
+    NOT silently leaked to the public surface — it must be added here on purpose).
+    """
+    name: str
+    label: str
+    type: str
+    required: bool = False
+    description: Optional[str] = None
+    options: Optional[List[str]] = None
+
+
+class PublicWorkerOutput(BaseModel):
+    """Output descriptor exposed on the public share page (allow-list)."""
+    name: str
+    label: str
+    type: str
+
+
+class PublicWorker(BaseModel):
+    """Read-only, owner-scoped projection of a worker for a signed share link.
+
+    This is a STRICT allow-list. The public endpoint NEVER returns the full
+    ``WorkerDetail`` object — only the fields enumerated here. Secrets, source
+    files, run history, the owner id, the webhook URL, and any config internals
+    (bundle paths, MCP urls/env/commands) are intentionally absent. See
+    ``_public_worker_response`` for the projection and
+    ``tests/test_worker_share_public.py`` for the no-leak guarantees.
+    """
+    id: str
+    name: str
+    description: Optional[str] = None
+    long_description: Optional[str] = None
+    use_cases: Optional[List[str]] = None
+    how_it_works: Optional[str] = None
+    is_example: Optional[bool] = None
+    tags: List[str] = Field(default_factory=list)
+    trigger_type: str
+    runtime: Optional[str] = None
+    # Tool/connection display only: Composio app slugs + MCP server LABELS.
+    # No MCP urls, env, commands, or auth values are exposed.
+    connections: List[str] = Field(default_factory=list)
+    inputs: List[PublicWorkerInput] = Field(default_factory=list)
+    outputs: List[PublicWorkerOutput] = Field(default_factory=list)
 
 
 class SecretItem(BaseModel):
