@@ -28,11 +28,12 @@ type McpConnection = ConnectionItem & {
 };
 
 const MCP_INSTALL_TARGETS = [
-  { label: "Codex", target: "generic", command: "workeros mcp install --target generic" },
+  { label: "Codex / Generic", target: "generic", command: "workeros mcp install --target generic" },
   { label: "Claude", target: "claude", command: "workeros mcp install --target claude" },
   { label: "Cursor", target: "cursor", command: "workeros mcp install --target cursor" },
   { label: "VS Code", target: "vscode", command: "workeros mcp install --target vscode" },
   { label: "Windsurf", target: "windsurf", command: "workeros mcp install --target windsurf" },
+  { label: "Continue", target: "continue", command: "workeros mcp install --target continue" },
 ] as const;
 
 // Subset of Claude Desktop / VS Code / Cursor mcpServers shape
