@@ -61,6 +61,8 @@ def test_callback_without_query_params_returns_fragment_bridge(monkeypatch):
     assert "text/html" in response.headers["content-type"]
     assert "/auth/fragment-session" in response.text
     assert "Missing auth callback parameters" not in response.text
+    assert "https://workeros.floom.dev/app/login?error=auth_callback_missing" in response.text
+    assert "https://workeros.floom.dev/login?error=auth_callback_missing" not in response.text
 
 
 def test_email_magic_link_rejects_invalid_email_before_supabase(monkeypatch):

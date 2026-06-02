@@ -226,7 +226,7 @@ def _auth_fragment_bridge_html(
     device_code: str | None,
     user_code: str | None,
 ) -> str:
-    fallback_url = _frontend_redirect("/login?error=auth_callback_missing")
+    fallback_url = _frontend_redirect("/app/login?error=auth_callback_missing")
     payload = {
         "next": next_path,
         "device_code": device_code,
