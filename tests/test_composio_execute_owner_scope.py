@@ -79,13 +79,21 @@ trigger:
 
 def _seed_worker(main, *, owner_id: str, connections: str = "connections: [gmail]") -> str:
     """Create a worker owned by ``owner_id``; return its id."""
+    import yaml as _yaml
+    from worker_registry import WORKERS_DIR
+
     repos = main.get_repositories()
     worker_id = f"wk{uuid.uuid4().hex[:8]}"
+    manifest = _valid_manifest(worker_id, connections=connections)
+    worker_dir = WORKERS_DIR / worker_id
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    (worker_dir / "worker.yml").write_text(_yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    (worker_dir / "SKILL.md").write_text("# Test worker\n", encoding="utf-8")
     repos.workers.upsert(
         user_id=owner_id,
         worker_id=worker_id,
         name=worker_id,
-        manifest_json=_valid_manifest(worker_id, connections=connections),
+        manifest_json=manifest,
         trigger_type="manual",
     )
     return worker_id

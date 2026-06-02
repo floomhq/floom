@@ -367,11 +367,26 @@ class TestVersioningIntegration:
             client = TestClient(app, raise_server_exceptions=False)
             yield client, "version-test-worker"
 
-    def test_list_versions_empty(self, client_and_worker):
+    def test_list_versions_bootstraps_baseline(self, client_and_worker):
         client, worker_id = client_and_worker
         r = client.get(f"/workers/{worker_id}/versions", headers={"x-floom-secret": "test-secret"})
         assert r.status_code == 200
-        assert r.json() == []
+        versions = r.json()
+        assert len(versions) == 1
+        assert versions[0]["version_number"] == 1
+        assert versions[0]["change_source"] == "baseline"
+
+        detail = client.get(
+            f"/workers/{worker_id}/versions/{versions[0]['id']}",
+            headers={"x-floom-secret": "test-secret"},
+        )
+        assert detail.status_code == 200
+        paths = {item["path"] for item in detail.json()["files"]}
+        assert {"worker.yml", "run.py"} <= paths
+
+        r2 = client.get(f"/workers/{worker_id}/versions", headers={"x-floom-secret": "test-secret"})
+        assert r2.status_code == 200
+        assert len(r2.json()) == 1
 
     def test_version_created_on_file_save(self, client_and_worker):
         client, worker_id = client_and_worker
@@ -433,6 +448,63 @@ class TestVersioningIntegration:
         headers = {"x-floom-secret": "test-secret"}
         r = client.post(f"/workers/{worker_id}/rollback/ver_does_not_exist", headers=headers)
         assert r.status_code == 404
+
+    @pytest.fixture
+    def client_and_context(self, tmp_path):
+        """Create a TestClient with a temporary Brain pack."""
+        import sys
+        from fastapi.testclient import TestClient
+
+        contexts_dir = tmp_path / "contexts"
+        pack_dir = contexts_dir / "baseline-pack"
+        pack_dir.mkdir(parents=True)
+        (pack_dir / "README.md").write_text("# Baseline pack\n", encoding="utf-8")
+        (pack_dir / "data.csv").write_text("name,value\nalpha,1\n", encoding="utf-8")
+
+        env_patches = {
+            "FLOOM_CONTEXTS_DIR": str(contexts_dir),
+            "WORKEROS_DB": str(tmp_path / "workeros.db"),
+            "FLOOM_DB": str(tmp_path / "workeros.db"),
+            "WORKEROS_DEPLOY": "local",
+            "FLOOM_SECRET": "test-secret",
+        }
+        with pytest.MonkeyPatch().context() as mp:
+            for k, v in env_patches.items():
+                mp.setenv(k, v)
+
+            for mod in [
+                "db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",
+                "db.interface", "contexts", "main",
+            ]:
+                sys.modules.pop(mod, None)
+
+            import db as db_mod
+            db_mod.init_db()
+            db_mod.get_repositories.cache_clear()
+
+            import main as app_main
+            client = TestClient(app_main.app, raise_server_exceptions=False)
+            yield client, "baseline-pack"
+
+    def test_context_versions_bootstrap_baseline(self, client_and_context):
+        client, context_name = client_and_context
+        headers = {"x-floom-secret": "test-secret"}
+
+        r = client.get(f"/contexts/{context_name}/versions", headers=headers)
+        assert r.status_code == 200
+        versions = r.json()
+        assert len(versions) == 1
+        assert versions[0]["version_number"] == 1
+        assert versions[0]["change_source"] == "baseline"
+
+        detail = client.get(f"/contexts/{context_name}/versions/{versions[0]['id']}", headers=headers)
+        assert detail.status_code == 200
+        paths = {item["path"] for item in detail.json()["files"]}
+        assert paths == {"README.md", "data.csv"}
+
+        r2 = client.get(f"/contexts/{context_name}/versions", headers=headers)
+        assert r2.status_code == 200
+        assert len(r2.json()) == 1
 
 
 @_LINUX_ONLY

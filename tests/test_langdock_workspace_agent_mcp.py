@@ -57,7 +57,8 @@ def test_langdock_mcp_initialize_bypasses_floom_secret_with_bearer_auth(monkeypa
     body = response.json()
     assert body["jsonrpc"] == "2.0"
     assert body["id"] == 1
-    assert body["result"]["serverInfo"]["name"] == "workeros-workspace-agent"
+    assert body["result"]["serverInfo"]["name"] == "workeros"
+    assert body["result"]["serverInfo"]["version"] == "0.2.0"
     assert "tools" in body["result"]["capabilities"]
 
 
@@ -71,14 +72,14 @@ def test_workspace_agent_mcp_get_discovery_matches_nova_pattern(monkeypatch, tmp
     assert response.status_code == 200, response.text
     assert mounted_response.status_code == 200, mounted_response.text
     body = response.json()
-    assert body == {
-        "name": "workeros-workspace-agent",
-        "version": "0.1.0",
-        "protocol": "2024-11-05",
-        "transport": "streamable-http",
-        "endpoint": "POST /api/mcp",
-        "tools": ["ask_workeros_workspace_agent"],
-    }
+    assert body["name"] == "workeros"
+    assert body["version"] == "0.2.0"
+    assert body["protocol"] == "2024-11-05"
+    assert body["transport"] == "streamable-http"
+    assert body["endpoint"] == "POST /api/mcp"
+    assert "ask_workspace_agent" in body["tools"]
+    assert "workers.list" in body["tools"]
+    assert "contexts.write" in body["tools"]
     assert mounted_response.json() == body
 
 
@@ -113,8 +114,11 @@ def test_langdock_mcp_lists_workspace_agent_tool(monkeypatch, tmp_path):
 
     assert response.status_code == 200, response.text
     tools = response.json()["result"]["tools"]
-    assert [tool["name"] for tool in tools] == ["ask_workeros_workspace_agent"]
-    assert tools[0]["inputSchema"]["required"] == ["message"]
+    by_name = {tool["name"]: tool for tool in tools}
+    assert "ask_workspace_agent" in by_name
+    assert "workers.list" in by_name
+    assert "contexts.write" in by_name
+    assert by_name["ask_workspace_agent"]["inputSchema"]["required"] == ["message"]
 
 
 def test_langdock_mcp_tool_call_forwards_to_workspace_agent(monkeypatch, tmp_path):
