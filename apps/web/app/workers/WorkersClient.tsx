@@ -15,6 +15,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
+import { ShareWorkerButton } from "@/components/ShareWorkerButton";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -644,25 +645,31 @@ function WorkerCard({
             />
           )}
           {!worker.archived && (
-            // Favourite star (Federico 2026-05-30): hover-only to cut cognitive
-            // load — except an already-favourited worker keeps its filled star
-            // at rest. focus-visible keeps it reachable for keyboard users.
-            <button
-              type="button"
-              title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onFavoriteToggle(worker.id);
-              }}
-              className={`-my-1.5 -mr-1.5 flex size-9 shrink-0 items-center justify-center rounded transition-[color,opacity] focus-visible:opacity-100 sm:my-0 sm:-mr-1 sm:size-6 ${
-                isFavorite
-                  ? "text-[var(--accent)] hover:opacity-80"
-                  : "text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-[var(--accent)]"
-              }`}
-            >
-              <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
-            </button>
+            <div className="flex items-center gap-0.5 shrink-0">
+              {/* Share — hover-only, mirrors the favourite star treatment. */}
+              <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <ShareWorkerButton publicLink={worker.public_link} variant="icon" />
+              </span>
+              {/* Favourite star (Federico 2026-05-30): hover-only to cut cognitive
+                  load — except an already-favourited worker keeps its filled star
+                  at rest. focus-visible keeps it reachable for keyboard users. */}
+              <button
+                type="button"
+                title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onFavoriteToggle(worker.id);
+                }}
+                className={`-my-1.5 -mr-1.5 flex size-9 shrink-0 items-center justify-center rounded transition-[color,opacity] focus-visible:opacity-100 sm:my-0 sm:-mr-1 sm:size-6 ${
+                  isFavorite
+                    ? "text-[var(--accent)] hover:opacity-80"
+                    : "text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-[var(--accent)]"
+                }`}
+              >
+                <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
+              </button>
+            </div>
           )}
         </div>
 
