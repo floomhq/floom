@@ -128,6 +128,8 @@ from models import (
     SecretStatus,
     WorkerStatus,
     WorkerConfig,
+    WorkerInput,
+    WorkerSummaryInput,
     WorkerUpdateRequest,
     RecentStats,
     TriggerSpec,
@@ -4389,7 +4391,15 @@ def list_workers(
         for _raw_input in _worker_config_dict.get("inputs") or []:
             if isinstance(_raw_input, dict):
                 try:
-                    _inputs.append(WorkerInput(**_raw_input))
+                    if list_shape:
+                        _inputs.append(
+                            WorkerSummaryInput(
+                                name=str(_raw_input["name"]),
+                                type=str(_raw_input["type"]),
+                            )
+                        )
+                    else:
+                        _inputs.append(WorkerInput(**_raw_input))
                 except Exception:
                     continue
 
