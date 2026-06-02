@@ -60,6 +60,8 @@ from runner_sandbox import get_driver as get_sandbox_driver
 from models import (
     WorkerConfig,
     RunStatus,
+    assert_safe_outbound_url,
+    UnsafeOutboundUrlError,
 )
 
 import hashlib
@@ -175,7 +177,19 @@ def _fire_alert_webhooks(
 
         # --- Webhook delivery ---
         url = (row.get("url") or "").strip()
+        # SSRF guard (defense in depth): the URL was already validated at
+        # alert-create time, but DNS can rebind between store and use, so we
+        # re-validate here before dialing. Fail closed — never POST to an
+        # internal/loopback/link-local/metadata target. A skipped webhook does
+        # NOT skip the email channel for the same alert row.
+        url_safe = False
         if url:
+            try:
+                assert_safe_outbound_url(url, label="Alert webhook URL")
+                url_safe = True
+            except UnsafeOutboundUrlError as exc:
+                logger.warning("Skipping unsafe alert webhook URL for run %s: %s", run_id, exc)
+        if url and url_safe:
             secret = row.get("secret")
             headers = {"Content-Type": "application/json", "X-Workeros-Run-Id": run_id}
             if secret:
@@ -183,10 +197,14 @@ def _fire_alert_webhooks(
                 headers["X-Workeros-Signature"] = f"sha256={sig}"
             try:
                 req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-                with urllib.request.urlopen(req, timeout=10):
+                # Bounded timeout — a hostile/slow endpoint must not hang the
+                # alert daemon thread.
+                with urllib.request.urlopen(req, timeout=5):
                     pass
                 logger.debug("Alert webhook delivered to %s for run %s (%s)", url, run_id, status)
             except Exception as exc:
+                # Best-effort: a failed POST is logged but never crashes the
+                # alert path or other channels.
                 logger.warning("Alert webhook delivery failed for %s: %s", url, exc)
 
         # --- Email delivery ---
