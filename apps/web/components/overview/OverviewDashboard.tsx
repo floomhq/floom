@@ -476,16 +476,22 @@ export function OverviewDashboard({
       {
         value: completedThisWeek,
         label: "Runs completed",
+        // Backend scopes this to active, real workers (excludes paused/example/
+        // system/listener churn) so the flagship metric reflects real outcomes,
+        // not failing internal listeners. Failing listeners stay in Needs
+        // attention, not here.
         context:
           workTrend !== null
             ? `${workTrend >= 0 ? "+" : ""}${workTrend}% vs last week`
-            : "Completed runs, last 7 days",
+            : "Your active workers, last 7 days",
         trend: workTrend,
         sparkline: runs7dSparkline,
       },
       {
         value: runsToday,
         label: "Runs today",
+        // completed/failed breakdown is scoped to active, real workers (matches
+        // "Runs completed" above); the runsToday total is raw activity volume.
         context: hasRunBreakdown
           ? `${completedToday ?? 0} ok · ${failedToday ?? 0} failed`
           : `${runsToday} in last 24h`,
