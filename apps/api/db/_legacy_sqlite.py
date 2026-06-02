@@ -1059,6 +1059,31 @@ MIGRATIONS: list[Migration] = [
     );
     CREATE INDEX IF NOT EXISTS idx_mcp_tools_user_id ON mcp_tools(user_id);
     """,
+    # -- migration 47: native Slack app OAuth installations -------------------
+    """
+    CREATE TABLE IF NOT EXISTS slack_installations (
+        team_id TEXT PRIMARY KEY,
+        team_name TEXT,
+        enterprise_id TEXT,
+        enterprise_name TEXT,
+        app_id TEXT,
+        bot_user_id TEXT,
+        bot_token_env_key TEXT NOT NULL,
+        scopes_json TEXT,
+        installer_user_id TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        installed_by_user_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_checked_at TEXT,
+        last_check_status TEXT,
+        last_check_error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_slack_installations_installed_by
+        ON slack_installations(installed_by_user_id);
+    CREATE INDEX IF NOT EXISTS idx_slack_installations_status
+        ON slack_installations(status);
+    """,
 ]
 
 

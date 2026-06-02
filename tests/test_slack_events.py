@@ -18,6 +18,7 @@ def _load_api(monkeypatch, tmp_path):
     db_path = tmp_path / "floom.db"
 
     monkeypatch.setenv("FLOOM_DB", str(db_path))
+    monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_SECRET", "test-api-secret")
     monkeypatch.setenv("WORKEROS_USER_ID", "slack-test-user")
@@ -134,8 +135,8 @@ def test_slack_app_mention_queues_workspace_agent_reply(monkeypatch, tmp_path):
         calls.append((message, user_id, conversation_id))
         return "workspace reply"
 
-    def fake_post(*, channel, thread_ts, text):
-        posts.append((channel, thread_ts, text))
+    def fake_post(*, channel, thread_ts, text, bot_token=None):
+        posts.append((channel, thread_ts, text, bot_token))
 
     monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", fake_collect)
     monkeypatch.setattr(main, "_post_slack_thread_reply", fake_post)
@@ -162,7 +163,65 @@ def test_slack_app_mention_queues_workspace_agent_reply(monkeypatch, tmp_path):
     assert response.status_code == 200, response.text
     assert response.json() == {"ok": True, "status": "queued"}
     assert calls == [("summarize failed runs", "slack-test-user", "slack:C123:1710000000.000001")]
-    assert posts == [("C123", "1710000000.000001", "workspace reply")]
+    assert posts == [("C123", "1710000000.000001", "workspace reply", "xoxb-test-token")]
+
+
+def test_slack_app_mention_uses_team_install_bot_token(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    calls = []
+    posts = []
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    monkeypatch.setenv("SLACK_BOT_TOKEN_T123", "xoxb-team-token")
+    main._upsert_slack_installation(
+        team_id="T123",
+        team_name="test-games",
+        enterprise_id=None,
+        enterprise_name=None,
+        app_id="A123",
+        bot_user_id="U999",
+        bot_token_env_key="SLACK_BOT_TOKEN_T123",
+        scopes=["app_mentions:read", "chat:write"],
+        installer_user_id="U111",
+        installed_by_user_id="slack-test-user",
+    )
+
+    async def fake_collect(*, message, user_id, conversation_id):
+        calls.append((message, user_id, conversation_id))
+        return "team reply"
+
+    def fake_post(*, channel, thread_ts, text, bot_token=None):
+        posts.append({
+            "channel": channel,
+            "thread_ts": thread_ts,
+            "text": text,
+            "bot_token": bot_token,
+        })
+
+    monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", fake_collect)
+    monkeypatch.setattr(main, "_post_slack_thread_reply", fake_post)
+
+    body = json.dumps(
+        {
+            "type": "event_callback",
+            "team_id": "T123",
+            "event_id": "EvTeamToken",
+            "authorizations": [{"user_id": "U999"}],
+            "event": {
+                "type": "app_mention",
+                "channel": "C123",
+                "ts": "1710000000.000002",
+                "text": "<@U999> inspect workspace",
+                "user": "U111",
+            },
+        }
+    ).encode("utf-8")
+
+    with TestClient(main.app) as client:
+        response = client.post("/slack/events", data=body, headers=_slack_headers(body))
+
+    assert response.status_code == 200, response.text
+    assert calls == [("inspect workspace", "slack-test-user", "slack:C123:1710000000.000002")]
+    assert posts[0]["bot_token"] == "xoxb-team-token"
 
 
 def test_slack_app_mention_deduplicates_event_id(monkeypatch, tmp_path):
