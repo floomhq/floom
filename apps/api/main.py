@@ -131,6 +131,203 @@ app.include_router(workspace_agent_router, prefix="/api")
 app.include_router(slack_events_router, prefix="/api")
 
 
+def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any) -> None:
+    """Save worker file contents to Supabase manifest_json._files.
+
+    Called after any worker creation or file update so Supabase is always
+    the authoritative source of worker code in cloud mode. Railway's disk
+    is ephemeral; this ensures files survive restarts.
+    """
+    import json as _json
+    updated_worker = repos.workers.get_any(worker_id=worker_id) or {}
+    sv_id = (updated_worker.get("skill_version_id") or "").strip()
+    if not sv_id:
+        return
+    svc = get_supabase_service_client()
+    sv_resp = svc.table("skill_versions").select("manifest_json").eq("id", sv_id).limit(1).execute()
+    sv_rows = sv_resp.data or []
+    raw_mj = sv_rows[0].get("manifest_json") if sv_rows else {}
+    manifest_json = raw_mj if isinstance(raw_mj, dict) else (_json.loads(raw_mj) if isinstance(raw_mj, str) else {})
+    manifest_json.pop("_files", None)
+    manifest_json["_files"] = files
+    svc.table("skill_versions").update({"manifest_json": manifest_json}).eq("id", sv_id).execute()
+
+
+def _read_worker_files_from_disk(worker_id: str) -> dict:
+    """Read all worker source files from WORKERS_DIR/{worker_id}/."""
+    from pathlib import Path as _Path
+    workers_dir_env = (os.environ.get("FLOOM_WORKERS_DIR") or "").strip()
+    workers_dir = _Path(workers_dir_env) if workers_dir_env else _Path("/opt/workeros-cloud/var/workers")
+    worker_dir = workers_dir / worker_id
+    if not worker_dir.is_dir():
+        return {}
+    files = {}
+    for fpath in sorted(worker_dir.iterdir()):
+        if fpath.is_file() and not fpath.name.startswith(".") and not fpath.name.endswith(".bak"):
+            try:
+                files[fpath.name] = fpath.read_text(encoding="utf-8")
+            except Exception:
+                pass
+    return files
+
+
+@app.post("/workers")
+@app.post("/api/workers")
+async def cloud_create_worker(
+    payload: engine_main.WorkerCreateRequest,
+    request: Request,
+) -> Any:
+    """Cloud override for POST /workers.
+
+    Delegates to the engine handler (which writes files to disk and registers
+    the worker in DB), then persists file contents to Supabase manifest_json._files
+    so worker code survives Railway restarts.
+    """
+    import asyncio as _asyncio
+
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from auth.context import AuthContext as _AuthContext
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    repos = engine_main.get_repositories()
+    engine_auth = _AuthContext(
+        user_id=auth.user_id,
+        email=getattr(auth, "email", None),
+        scopes=getattr(auth, "scopes", ()),
+    )
+
+    # Engine creates the worker: validates YAML, writes to disk, registers in DB
+    result = await _asyncio.to_thread(engine_main.create_worker, payload, engine_auth, repos)
+
+    # Persist files to Supabase — source of truth in cloud (Railway disk is ephemeral)
+    files = _read_worker_files_from_disk(result.id)
+    if not files:
+        # Fallback: use payload directly if disk read misses something
+        files = {"worker.yml": payload.worker_yml, "run.py": payload.run_py}
+        if payload.skill_md:
+            files["SKILL.md"] = payload.skill_md
+    _cloud_persist_worker_files(result.id, files, repos)
+
+    return result
+
+
+@app.post("/workers/draft-and-create")
+@app.post("/api/workers/draft-and-create")
+async def cloud_draft_and_create(
+    payload: engine_main.DraftAndCreateRequest,
+    request: Request,
+) -> Any:
+    """Cloud override for POST /workers/draft-and-create.
+
+    Delegates to the engine handler then persists the generated file contents
+    to Supabase manifest_json._files so worker code survives Railway restarts.
+    """
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from auth.context import AuthContext as _AuthContext
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    repos = engine_main.get_repositories()
+    engine_auth = _AuthContext(
+        user_id=auth.user_id,
+        email=getattr(auth, "email", None),
+        scopes=getattr(auth, "scopes", ()),
+    )
+    result = await engine_main.draft_and_create_worker(payload, request, engine_auth, repos)
+
+    # Save files to Supabase right after engine writes them to disk
+    files = _read_worker_files_from_disk(result.worker_id)
+    if files:
+        _cloud_persist_worker_files(result.worker_id, files, repos)
+
+    return result
+
+
+@app.put("/workers/{worker_id}/files")
+@app.put("/api/workers/{worker_id}/files")
+async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
+    """Cloud override for PUT /workers/{id}/files.
+
+    Saves file contents to Supabase manifest_json._files (DB = source of truth),
+    ensures the worker directory exists on disk, then builds and returns WorkerDetail.
+    """
+    import asyncio as _asyncio
+    import json as _json
+    from pathlib import Path as _Path
+
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from apps.api.config import get_supabase_service_client
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    files_list = body.get("files") or []
+    if not files_list:
+        raise HTTPException(status_code=400, detail="files list must not be empty")
+    files = {f["path"]: f["content"] for f in files_list if "path" in f and "content" in f}
+
+    try:
+        import yaml as _yaml
+        manifest = _yaml.safe_load(files["worker.yml"])
+        if not isinstance(manifest, dict):
+            raise ValueError("worker.yml did not parse to a dict")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid worker.yml: {exc}") from exc
+
+    repos = engine_main.get_repositories()
+    worker = repos.workers.get_any(worker_id=worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    # --- Write files to disk ---
+    workers_dir_env = (os.environ.get("FLOOM_WORKERS_DIR") or "").strip()
+    workers_dir = _Path(workers_dir_env) if workers_dir_env else _Path("/opt/workeros-cloud/var/workers")
+    worker_dir = workers_dir / worker_id
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    for fname, content in files.items():
+        fpath = worker_dir / fname
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(content, encoding="utf-8")
+
+    # --- Persist to Supabase (source of truth in cloud) ---
+    _cloud_persist_worker_files(worker_id, files, repos)
+
+    # --- Build WorkerDetail response ---
+    from auth.context import AuthContext as _AuthContext
+    engine_auth = _AuthContext(
+        user_id=auth.user_id,
+        email=getattr(auth, "email", None),
+        scopes=getattr(auth, "scopes", ()),
+    )
+    return await _asyncio.to_thread(
+        engine_main._build_worker_detail, worker_id,
+        user_id=auth.user_id, repos=repos
+    )
+
+
 @app.post("/mcp/{workspace_id}")
 async def cloud_mcp_endpoint(
     workspace_id: str,

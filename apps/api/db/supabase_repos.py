@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import time
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
+
+_repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 
 from supabase import Client
 
@@ -30,6 +35,27 @@ from models import (  # noqa: E402
 
 def _json_dump(value: Any) -> str:
     return json.dumps(value if value is not None else {}, separators=(",", ":"))
+
+
+def _materialize_worker_files(worker_id: str, files: dict[str, str]) -> None:
+    """Write worker files from Supabase manifest_json._files to WORKERS_DIR.
+
+    Called by get_recipe() so the engine's skill/e2b drivers find the files
+    at the expected path. Supabase is the source of truth in cloud mode;
+    the filesystem is a write-through cache rebuilt on demand.
+    """
+    workers_dir_env = (os.environ.get("FLOOM_WORKERS_DIR") or "").strip()
+    workers_dir = Path(workers_dir_env) if workers_dir_env else Path("/opt/workeros-cloud/var/workers")
+    worker_dir = workers_dir / worker_id
+    try:
+        worker_dir.mkdir(parents=True, exist_ok=True)
+        for fname, content in files.items():
+            fpath = worker_dir / fname
+            fpath.parent.mkdir(parents=True, exist_ok=True)
+            fpath.write_text(content, encoding="utf-8")
+        _repo_logger.debug("Materialized %d file(s) for worker %s to %s", len(files), worker_id, worker_dir)
+    except Exception:
+        _repo_logger.warning("Failed to materialize files for worker %s", worker_id, exc_info=True)
 
 
 def _json_load(value: Any, default: Any) -> Any:
@@ -851,9 +877,22 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         skill = skill_map.get(worker.get("skill_version_id"))
         if not skill:
             return None
+
+        # Work on a copy so we never mutate the Supabase response object.
+        manifest_json = dict(_json_load(skill.get("manifest_json"), {}))
+
+        # Cloud: Supabase is the source of truth for worker code. If
+        # _files is present in manifest_json, materialize them to
+        # WORKERS_DIR so the engine's skill/e2b drivers find them at
+        # the expected filesystem path. Strip _files before passing to
+        # parse_worker_manifest so the config parser never sees it.
+        embedded_files = manifest_json.pop("_files", None)
+        if embedded_files and isinstance(embedded_files, dict):
+            _materialize_worker_files(str(worker["id"]), embedded_files)
+
         config = _config_from_manifest(
             worker_id=str(worker["id"]),
-            manifest_json=skill.get("manifest_json") or {},
+            manifest_json=manifest_json,
             trigger_type=worker.get("trigger_type"),
             cron_expr=worker.get("cron_expr"),
             cron_timezone=worker.get("cron_timezone"),
@@ -866,7 +905,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             "enabled": bool(worker.get("enabled", True)),
             "owner_id": worker.get("user_id"),
             "bundle_path": skill.get("bundle_path"),
-            "manifest_json": _json_load(skill.get("manifest_json"), {}),
+            "manifest_json": manifest_json,
         }
 
     def upsert_webhook_secret_hash(
@@ -1339,6 +1378,45 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
     def get_bundle_snapshot_path(self, *, user_id: str, run_id: str) -> str | None:
         run = self.get(user_id=user_id, run_id=run_id)
         return str(run["bundle_snapshot_path"]) if run and run.get("bundle_snapshot_path") else None
+
+    def get_queued(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Return queued runs ordered by created_at (FIFO) for the drain loop.
+
+        Not scoped by workspace — the drain loop dispatches across all workspaces.
+        Skips cancel_requested rows so cancelled-before-dispatch runs are ignored.
+        Returns rows with run_id, worker_id, user_id, input_json keys matching
+        the sqlite implementation expected by run_service._drain_one_batch().
+        """
+        response = (
+            self._client.table("runs")
+            .select("id,worker_id,user_id,input_json")
+            .eq("status", "queued")
+            .eq("cancel_requested", False)
+            .order("created_at", desc=False)
+            .limit(limit)
+            .execute()
+        )
+        rows = _response_rows(response)
+        result = []
+        for row in rows:
+            result.append({
+                "run_id": row["id"],
+                "worker_id": row["worker_id"],
+                "user_id": row["user_id"],
+                "input_json": _json_text(row.get("input_json"), {}),
+            })
+        return result
+
+    def count_queued(self) -> int:
+        """Return count of pending queued runs across all workspaces."""
+        response = (
+            self._client.table("runs")
+            .select("id", count="exact")
+            .eq("status", "queued")
+            .eq("cancel_requested", False)
+            .execute()
+        )
+        return int(getattr(response, "count", 0) or 0)
 
 
 class SupabaseApprovalRepository(_BaseSupabaseRepository):
