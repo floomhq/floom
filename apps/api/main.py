@@ -14204,80 +14204,114 @@ def delete_mcp_tool(
 # ---------------------------------------------------------------------------
 # HTTP MCP server — JSON-RPC 2.0 over streamable HTTP
 # Exposes default WorkerOS management tools + custom workspace tools.
-# OSS:   POST /mcp          (x-floom-secret auth)
-# Cloud: POST /mcp/{workspace_id}  (PAT Bearer auth, added in workeros-cloud)
+# OSS:   POST /mcp-tools/serve   (x-floom-secret auth)
+# Cloud: POST /mcp/{workspace_id} (PAT Bearer auth, added in workeros-cloud)
+# All default tools proxy to the existing REST API via httpx ASGITransport
+# (in-process, no network round-trip).  Custom tools trigger a worker run.
 # ---------------------------------------------------------------------------
 
+def _enc(s: str) -> str:
+    from urllib.parse import quote
+    return quote(str(s), safe="")
+
+
+async def _api_call(
+    method: str,
+    path: str,
+    request: Request,
+    *,
+    body: Any = None,
+    params: dict | None = None,
+) -> tuple[Any, int]:
+    import httpx
+    _AUTH_HEADERS = {"x-floom-secret", "x-floom-token", "authorization", "cookie", "x-workeros-workspace"}
+    auth_headers = {k: v for k, v in request.headers.items() if k.lower() in _AUTH_HEADERS}
+    clean_params = {k: str(v) for k, v in (params or {}).items() if v is not None}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://asgi",
+    ) as client:
+        resp = await client.request(method, path, headers=auth_headers, json=body, params=clean_params)
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"detail": resp.text}
+    return data, resp.status_code
+
+
 _MCP_DEFAULT_TOOLS: List[dict] = [
-    {
-        "name": "workers_list",
-        "description": "List all workers in the workspace.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "workers_run",
-        "description": "Run a worker by ID or name. Returns immediately with a run_id; poll with runs_get for the result.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "worker_id": {"type": "string", "description": "Worker ID or name"},
-                "inputs": {"type": "object", "description": "Input key-value pairs for the worker"},
-            },
-            "required": ["worker_id"],
-        },
-    },
-    {
-        "name": "runs_get",
-        "description": "Get the status and output of a run by run_id.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "run_id": {"type": "string", "description": "Run ID"},
-            },
-            "required": ["run_id"],
-        },
-    },
-    {
-        "name": "runs_list",
-        "description": "List recent runs, optionally filtered by worker.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "worker_id": {"type": "string", "description": "Filter by worker ID (optional)"},
-                "limit": {"type": "integer", "description": "Max results, default 20"},
-            },
-        },
-    },
-    {
-        "name": "tools_list",
-        "description": "List custom MCP tools registered for this workspace.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "tools_register",
-        "description": "Register a custom MCP tool backed by a worker. Once registered, the tool appears in tools/list and can be called directly by name.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Tool name agents will use to call it"},
-                "description": {"type": "string", "description": "What the tool does"},
-                "worker_id": {"type": "string", "description": "Worker ID or name to invoke when the tool is called"},
-                "input_schema": {"type": "object", "description": "JSON Schema for tool inputs (optional — defaults to the worker's own input schema)"},
-            },
-            "required": ["name", "description", "worker_id"],
-        },
-    },
-    {
-        "name": "tools_delete",
-        "description": "Delete a custom MCP tool by name.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Tool name to delete"},
-            },
-            "required": ["name"],
-        },
-    },
+    # --- workers ---
+    {"name": "workers.list", "description": "List Workeros workers.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workers.get", "description": "Get a Workeros worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
+    {"name": "workers.create", "description": "Create a Workeros worker from WorkerContract YAML. For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md and a minimal run_py stub.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}}, "required": ["worker_yml", "run_py"]}},
+    {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
+    {"name": "workers.delete", "description": "Delete a Workeros worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
+    {"name": "workers.run", "description": "Start a manual Workeros worker run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run."}, "trigger_source": {"type": "string", "default": "manual"}}, "required": ["id"]}},
+    {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
+    {"name": "workers.logs", "description": "Fetch cross-run logs for a worker, optionally filtered by level or time.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error", "debug"]}, "since": {"type": "string", "description": "ISO 8601 timestamp."}, "limit": {"type": "integer", "default": 200}}, "required": ["id"]}},
+    {"name": "workers.stats", "description": "Get run statistics for a specific worker — success rate, error rate, average duration for the last 7 days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.timeseries", "description": "Get daily run counts and success/failure breakdown for a worker over the last N days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "days": {"type": "integer", "default": 30, "description": "Days of history (1–90)."}}, "required": ["id"]}},
+    {"name": "workers.versions", "description": "List saved versions of a worker, newest first.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["id"]}},
+    {"name": "workers.rollback", "description": "Restore a worker to a previous version. Use workers.versions to find the version_id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "version_id": {"type": "string"}}, "required": ["id", "version_id"]}},
+    {"name": "workers.archive", "description": "Archive a worker so it no longer appears in the active list or runs on schedule.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.restore", "description": "Restore an archived worker back to active status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.reload", "description": "Reload all workers from disk. Use after manually editing worker files on an OSS self-hosted deployment.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workers.sample_input", "description": "Get example input values for a worker's input fields.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.alerts.list", "description": "List configured alerts for a worker (email/webhook on failure, success, etc.).", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.alerts.create", "description": "Add an alert to a worker — fires on specified events via webhook or email.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "on": {"type": "array", "items": {"type": "string"}, "description": "Events to alert on, e.g. ['failed', 'approval_required']."}, "url": {"type": "string"}, "email_to": {"type": "array", "items": {"type": "string"}}}, "required": ["id", "on"]}},
+    {"name": "workers.alerts.delete", "description": "Remove a worker alert by its ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "alert_id": {"type": "string"}}, "required": ["id", "alert_id"]}},
+    # --- runs ---
+    {"name": "runs.list", "description": "List Workeros runs, optionally filtered by worker id.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "status": {"type": "string"}, "limit": {"type": "integer", "default": 50}, "offset": {"type": "integer", "default": 0}}}},
+    {"name": "runs.get", "description": "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "runs.cancel", "description": "Cancel an in-progress run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "runs.replay", "description": "Replay a completed or failed run with the same inputs.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "run_id": {"type": "string"}}, "required": ["worker_id", "run_id"]}},
+    {"name": "runs.watch", "description": "Poll a run until it reaches a terminal status. Blocks up to timeout_ms.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["id"]}},
+    # --- secrets ---
+    {"name": "secrets.list", "description": "List configured secret names and status.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "secrets.set", "description": "Create or update a secret value.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}},
+    {"name": "secrets.delete", "description": "Delete a secret by key.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}},
+    {"name": "secrets.test", "description": "Verify a secret exists and is reachable without revealing its value.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}},
+    # --- connections ---
+    {"name": "connections.list", "description": "List configured app connections.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "connections.add_mcp", "description": "Save an MCP server connection. Supports streamable_http, sse, and stdio transports.", "inputSchema": {"type": "object", "properties": {"label": {"type": "string"}, "transport": {"type": "string", "enum": ["streamable_http", "sse", "stdio"], "default": "streamable_http"}, "url": {"type": "string"}, "command": {"type": "string"}, "args": {"type": "array", "items": {"type": "string"}, "default": []}, "env": {"type": "object", "default": {}}, "cwd": {"type": "string"}, "auth_secret": {"type": "string"}, "allowed_tools": {"type": "array", "items": {"type": "string"}, "default": []}}, "required": ["label"]}},
+    {"name": "connections.delete", "description": "Remove a configured app connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
+    {"name": "connections.status", "description": "Check the health and auth status of a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
+    {"name": "connections.test", "description": "Run a live connectivity check on a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
+    # --- contexts ---
+    {"name": "contexts.list", "description": "List Workeros context folders.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}}, "required": ["name"]}},
+    {"name": "contexts.read", "description": "Read a UTF-8 context file, or return metadata for binary files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
+    {"name": "contexts.write", "description": "Create or update a UTF-8 text file inside a context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["name", "path", "content"]}},
+    {"name": "contexts.delete", "description": "Delete a brain pack context and all its files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
+    {"name": "contexts.delete_file", "description": "Delete a specific file from a brain pack context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
+    {"name": "contexts.versions", "description": "List saved versions of a brain pack context, newest first.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["name"]}},
+    {"name": "contexts.rollback", "description": "Restore a brain pack context to a previous version.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "version_id": {"type": "string"}}, "required": ["name", "version_id"]}},
+    # --- triggers ---
+    {"name": "triggers.list", "description": "List integration triggers, globally or filtered by worker/app.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "app": {"type": "string"}}}},
+    # --- approvals ---
+    {"name": "approvals.list", "description": "List pending approval requests.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}},
+    {"name": "approvals.approve", "description": "Approve a pending run so it continues executing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
+    {"name": "approvals.reject", "description": "Reject a pending run, stopping it from continuing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
+    # --- workspace ---
+    {"name": "workspace.chat", "description": "Send a message to the Workeros workspace agent and receive a reply.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "conversation_id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["message"]}},
+    {"name": "workspace.instructions.get", "description": "Read the current workspace agent instructions.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workspace.instructions.set", "description": "Update the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
+    {"name": "workspace.versions", "description": "List saved versions of the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}}},
+    {"name": "workspace.rollback", "description": "Restore workspace agent instructions to a previous version.", "inputSchema": {"type": "object", "properties": {"version_id": {"type": "string"}}, "required": ["version_id"]}},
+    # --- system ---
+    {"name": "system.overview", "description": "Full workspace dashboard — worker health, recent run counts, pending approvals, system alerts, and scheduler status.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "system.stats", "description": "Aggregate run statistics across the workspace for the last 7 days.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "system.info", "description": "Get platform version, deployment mode, and configuration flags.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "system.alerts", "description": "Get system-wide active alerts — worker failures, scheduler issues, connection errors.", "inputSchema": {"type": "object", "properties": {}}},
+    # --- integrations ---
+    {"name": "integrations.catalog", "description": "Browse available integrations (apps, triggers, actions) supported by Workeros.", "inputSchema": {"type": "object", "properties": {}}},
+    # --- conversations ---
+    {"name": "conversations.list", "description": "List past workspace agent conversations.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}}},
+    {"name": "conversations.get", "description": "Retrieve a full conversation history by ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    # --- custom tools management ---
+    {"name": "tools_list", "description": "List custom MCP tools registered for this workspace.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "tools_register", "description": "Register a custom MCP tool backed by a worker. Once registered the tool appears in tools/list and can be called directly by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Tool name agents will use."}, "description": {"type": "string"}, "worker_id": {"type": "string", "description": "Worker ID or name."}, "input_schema": {"type": "object", "description": "JSON Schema for inputs (optional — defaults to worker schema)."}}, "required": ["name", "description", "worker_id"]}},
+    {"name": "tools_delete", "description": "Delete a custom MCP tool by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
 ]
 
 
@@ -14298,60 +14332,235 @@ async def _mcp_dispatch(
     arguments: dict,
     auth: AuthContext,
     repos: "Repositories",
+    request: Request,
 ) -> dict:
     import asyncio
     import time as _time
 
-    if name == "workers_list":
-        workers = repos.workers.list(user_id=auth.user_id)
-        return _mcp_content(json.dumps(
-            [{"id": w["id"], "name": w["name"], "description": w.get("description", "")} for w in workers],
-            indent=2,
-        ))
+    a = arguments  # shorthand
 
-    if name == "workers_run":
-        worker_ref = arguments.get("worker_id", "")
-        inputs = arguments.get("inputs") or {}
-        worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_ref)
-        if not worker:
-            workers = repos.workers.list(user_id=auth.user_id)
-            worker = next((w for w in workers if w["name"] == worker_ref), None)
-        if not worker:
-            return _mcp_content(f"Worker {worker_ref!r} not found", is_error=True)
-        run_id = create_run(worker["id"], inputs, "mcp", user_id=auth.user_id, repos=repos)
-        start_run(run_id, worker["id"], inputs, user_id=auth.user_id, repos=repos)
-        return _mcp_content(json.dumps({"run_id": run_id, "status": "running"}))
+    # --- workers ---
+    if name == "workers.list":
+        data, s = await _api_call("GET", "/workers", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.get":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.create":
+        body = {k: a[k] for k in ("worker_yml", "run_py") if k in a}
+        if "skill_md" in a: body["skill_md"] = a["skill_md"]
+        data, s = await _api_call("POST", "/workers", request, body=body)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.update":
+        body = {k: a[k] for k in a if k != "id"}
+        data, s = await _api_call("PATCH", f"/workers/{_enc(a['id'])}", request, body=body)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.delete":
+        data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.run":
+        body = {"inputs": a.get("inputs") or {}, "trigger_source": a.get("trigger_source", "manual")}
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/runs", request, body=body)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.write_file":
+        data, s = await _api_call("PUT", f"/workers/{_enc(a['id'])}/files", request, body={"files": a["files"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.logs":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/logs", request, params={"level": a.get("level"), "since": a.get("since"), "limit": a.get("limit", 200)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.stats":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/stats", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.timeseries":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/runs/timeseries", request, params={"days": a.get("days", 30)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.versions":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/versions", request, params={"limit": a.get("limit", 50)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.rollback":
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/rollback/{_enc(a['version_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.archive":
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/archive", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.restore":
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/restore", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.reload":
+        data, s = await _api_call("POST", "/workers/reload", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.sample_input":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/sample-input", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.alerts.list":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/alerts", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.alerts.create":
+        body = {k: a[k] for k in a if k != "id"}
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/alerts", request, body=body)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.alerts.delete":
+        data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}/alerts/{_enc(a['alert_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
 
-    if name == "runs_get":
-        run_id = arguments.get("run_id", "")
-        run = repos.runs.get(user_id=auth.user_id, run_id=run_id)
-        if not run:
-            return _mcp_content(f"Run {run_id!r} not found", is_error=True)
-        return _mcp_content(json.dumps({
-            "id": run["id"],
-            "status": run["status"],
-            "output": run.get("output_json") or run.get("output"),
-            "error": run.get("error"),
-        }, indent=2, default=str))
+    # --- runs ---
+    if name == "runs.list":
+        data, s = await _api_call("GET", "/runs", request, params={"worker_id": a.get("worker_id"), "status": a.get("status"), "limit": a.get("limit", 50), "offset": a.get("offset", 0)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "runs.get":
+        data, s = await _api_call("GET", f"/runs/{_enc(a['id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "runs.cancel":
+        data, s = await _api_call("POST", f"/runs/{_enc(a['id'])}/cancel", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "runs.replay":
+        data, s = await _api_call("POST", f"/workers/{_enc(a['worker_id'])}/runs/{_enc(a['run_id'])}/replay", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "runs.watch":
+        run_id = a["id"]
+        timeout = min(int(a.get("timeout_ms", 120000)), 600000) / 1000
+        deadline = _time.monotonic() + timeout
+        run = None
+        while _time.monotonic() < deadline:
+            await asyncio.sleep(1.5)
+            run_data, s = await _api_call("GET", f"/runs/{_enc(run_id)}", request)
+            if s >= 400:
+                return _mcp_content(json.dumps(run_data, indent=2, default=str), True)
+            if run_data.get("status") in ("completed", "failed", "cancelled"):
+                return _mcp_content(json.dumps(run_data, indent=2, default=str), run_data.get("status") == "failed")
+        return _mcp_content(f"Run {run_id!r} did not complete within {timeout:.0f}s", is_error=True)
 
-    if name == "runs_list":
-        limit = int(arguments.get("limit", 20))
-        worker_id = arguments.get("worker_id")
-        runs, _ = repos.runs.list(user_id=auth.user_id, worker_id=worker_id, limit=limit)
-        return _mcp_content(json.dumps(
-            [{"id": r["id"], "worker_id": r["worker_id"], "status": r["status"], "created_at": r["created_at"]} for r in runs],
-            indent=2,
-        ))
+    # --- secrets ---
+    if name == "secrets.list":
+        data, s = await _api_call("GET", "/secrets", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "secrets.set":
+        data, s = await _api_call("POST", f"/secrets/{_enc(a['key'])}", request, body={"value": a["value"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "secrets.delete":
+        data, s = await _api_call("DELETE", f"/secrets/{_enc(a['key'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "secrets.test":
+        data, s = await _api_call("POST", f"/secrets/{_enc(a['key'])}/test", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
 
+    # --- connections ---
+    if name == "connections.list":
+        data, s = await _api_call("GET", "/connections", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "connections.add_mcp":
+        data, s = await _api_call("POST", "/connections/mcp", request, body=a)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "connections.delete":
+        data, s = await _api_call("DELETE", f"/connections/{_enc(a['connection_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "connections.status":
+        data, s = await _api_call("GET", f"/connections/{_enc(a['connection_id'])}/status", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "connections.test":
+        data, s = await _api_call("POST", f"/connections/{_enc(a['connection_id'])}/test", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- contexts ---
+    if name == "contexts.list":
+        data, s = await _api_call("GET", "/contexts", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.create":
+        data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}", request, body={"writeable": a.get("writeable", False)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.read":
+        encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
+        data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.write":
+        encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
+        data, s = await _api_call("PUT", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request, body={"content": a["content"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.delete":
+        qs = "?force=true" if a.get("force") else ""
+        data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}{qs}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.delete_file":
+        encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
+        data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.versions":
+        data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/versions", request, params={"limit": a.get("limit", 50)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.rollback":
+        data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}/rollback/{_enc(a['version_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- triggers ---
+    if name == "triggers.list":
+        data, s = await _api_call("GET", "/triggers", request, params={"worker_id": a.get("worker_id"), "app": a.get("app")})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- approvals ---
+    if name == "approvals.list":
+        data, s = await _api_call("GET", "/approvals", request, params={"limit": a.get("limit", 50)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "approvals.approve":
+        data, s = await _api_call("POST", f"/runs/{_enc(a['run_id'])}/approve", request, body={"comment": a.get("comment")})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "approvals.reject":
+        data, s = await _api_call("POST", f"/runs/{_enc(a['run_id'])}/reject", request, body={"comment": a.get("comment")})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- workspace ---
+    if name == "workspace.chat":
+        data, s = await _api_call("POST", "/chat", request, body={"message": a["message"], "conversation_id": a.get("conversation_id")})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workspace.instructions.get":
+        data, s = await _api_call("GET", "/workspace", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workspace.instructions.set":
+        data, s = await _api_call("PUT", "/workspace", request, body={"content": a["content"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workspace.versions":
+        data, s = await _api_call("GET", "/workspace/versions", request, params={"limit": a.get("limit", 20)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workspace.rollback":
+        data, s = await _api_call("POST", f"/workspace/rollback/{_enc(a['version_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- system ---
+    if name == "system.overview":
+        data, s = await _api_call("GET", "/system/overview", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "system.stats":
+        data, s = await _api_call("GET", "/stats", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "system.info":
+        data, s = await _api_call("GET", "/system/info", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "system.alerts":
+        data, s = await _api_call("GET", "/system/alerts", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- integrations ---
+    if name == "integrations.catalog":
+        data, s = await _api_call("GET", "/integrations/catalog", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- conversations ---
+    if name == "conversations.list":
+        data, s = await _api_call("GET", "/conversations", request, params={"limit": a.get("limit", 20)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "conversations.get":
+        data, s = await _api_call("GET", f"/conversations/{_enc(a['id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- custom tools management ---
     if name == "tools_list":
         tools = repos.mcp_tools.list(user_id=auth.user_id)
         return _mcp_content(json.dumps(tools, indent=2, default=str))
 
     if name == "tools_register":
-        tool_name = arguments.get("name", "")
-        description = arguments.get("description", "")
-        worker_ref = arguments.get("worker_id", "")
-        input_schema = arguments.get("input_schema") or {}
+        tool_name = a.get("name", "")
+        description = a.get("description", "")
+        worker_ref = a.get("worker_id", "")
+        input_schema = a.get("input_schema") or {}
         if not all([tool_name, description, worker_ref]):
             return _mcp_content("name, description, and worker_id are required", is_error=True)
         worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_ref)
@@ -14375,19 +14584,19 @@ async def _mcp_dispatch(
         return _mcp_content(json.dumps(tool, indent=2, default=str))
 
     if name == "tools_delete":
-        tool_name = arguments.get("name", "")
+        tool_name = a.get("name", "")
         tool = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name)
         if not tool:
             return _mcp_content(f"Tool {tool_name!r} not found", is_error=True)
         repos.mcp_tools.delete(user_id=auth.user_id, tool_id=tool["id"])
         return _mcp_content(f"Tool {tool_name!r} deleted")
 
-    # Custom workspace tool — trigger the backing worker and wait for result
+    # --- custom workspace tools — trigger backing worker, wait, return output ---
     custom = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=name)
     if custom:
         worker_id = custom["worker_id"]
-        run_id = create_run(worker_id, arguments, "mcp", user_id=auth.user_id, repos=repos)
-        start_run(run_id, worker_id, arguments, user_id=auth.user_id, repos=repos)
+        run_id = create_run(worker_id, a, "mcp", user_id=auth.user_id, repos=repos)
+        start_run(run_id, worker_id, a, user_id=auth.user_id, repos=repos)
         deadline = _time.monotonic() + 120
         run = None
         while _time.monotonic() < deadline:
@@ -14409,8 +14618,9 @@ async def _mcp_handle_request(
     body: dict,
     auth: AuthContext,
     repos: "Repositories",
+    request: Request | None = None,
 ) -> dict:
-    """Core MCP JSON-RPC 2.0 dispatcher. Called by /mcp and by the cloud /mcp/{workspace_id}."""
+    """Core MCP JSON-RPC 2.0 dispatcher. Called by /mcp-tools/serve and by the cloud /mcp/{workspace_id}."""
     rpc_id = body.get("id")
     method = body.get("method", "")
     params = body.get("params") or {}
@@ -14431,11 +14641,14 @@ async def _mcp_handle_request(
         return _mcp_ok(rpc_id, {"tools": tools})
 
     if method == "tools/call":
+        if request is None:
+            return _mcp_err(rpc_id, -32603, "Internal error: request context unavailable")
         result = await _mcp_dispatch(
             params.get("name", ""),
             params.get("arguments") or {},
             auth,
             repos,
+            request,
         )
         return _mcp_ok(rpc_id, result)
 
@@ -14452,7 +14665,7 @@ async def mcp_http_endpoint(
         body = await request.json()
     except Exception:
         return JSONResponse(_mcp_err(None, -32700, "Parse error"), status_code=400)
-    return JSONResponse(await _mcp_handle_request(body, auth, repos))
+    return JSONResponse(await _mcp_handle_request(body, auth, repos, request))
 
 
 if __name__ == "__main__":
