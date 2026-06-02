@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from functools import lru_cache
@@ -48,6 +49,7 @@ def _hash_token(raw: str) -> str:
 _SESSION_COOKIE_NAME = "workeros_cloud_session"
 _OAUTH_VERIFIER_COOKIE_NAME = "workeros_cloud_pkce_verifier"
 _OAUTH_COOKIE_MAX_AGE = 600
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class CliExchangeRequest(BaseModel):
@@ -100,6 +102,13 @@ def _safe_next(value: str | None) -> str:
     if candidate.startswith(("//", "/\\", "\\")):
         return "/"
     return candidate
+
+
+def _normalize_email(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if not normalized or not _EMAIL_RE.match(normalized):
+        raise HTTPException(status_code=400, detail="valid email is required")
+    return normalized
 
 
 def _frontend_redirect(next_path: str) -> str:
@@ -521,16 +530,17 @@ def login(
         return response
 
     if normalized_provider == "email":
-        normalized_email = (email or "").strip().lower()
-        if not normalized_email:
-            raise HTTPException(status_code=400, detail="email is required for email login")
+        normalized_email = _normalize_email(email)
         client = new_supabase_anon_client()
-        client.auth.sign_in_with_otp(
-            {
-                "email": normalized_email,
-                "options": {"email_redirect_to": callback_url},
-            }
-        )
+        try:
+            client.auth.sign_in_with_otp(
+                {
+                    "email": normalized_email,
+                    "options": {"email_redirect_to": callback_url},
+                }
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="Magic link delivery failed") from exc
         return JSONResponse(
             {
                 "provider": "email",
@@ -544,9 +554,7 @@ def login(
 
 @router.post("/password-login")
 def password_login(payload: PasswordLoginRequest):
-    normalized_email = payload.email.strip().lower()
-    if not normalized_email or "@" not in normalized_email:
-        raise HTTPException(status_code=400, detail="valid email is required")
+    normalized_email = _normalize_email(payload.email)
     client = new_supabase_anon_client()
     try:
         auth_response = client.auth.sign_in_with_password(
@@ -575,9 +583,7 @@ def password_login(payload: PasswordLoginRequest):
 
 @router.post("/password-signup")
 def password_signup(payload: PasswordSignupRequest):
-    normalized_email = payload.email.strip().lower()
-    if not normalized_email or "@" not in normalized_email:
-        raise HTTPException(status_code=400, detail="valid email is required")
+    normalized_email = _normalize_email(payload.email)
     next_path = _safe_next(payload.next)
     callback_url = _callback_url(next_path=next_path)
     client = new_supabase_anon_client()

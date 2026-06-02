@@ -19,8 +19,13 @@ def _settings() -> SimpleNamespace:
 class _AuthClient:
     def __init__(self, *, signup_response: SimpleNamespace | None = None, user: SimpleNamespace | None = None) -> None:
         self.signup_payloads: list[dict] = []
+        self.otp_payloads: list[dict] = []
         self.signup_response = signup_response
         self.user = user
+
+    def sign_in_with_otp(self, payload: dict):
+        self.otp_payloads.append(payload)
+        return SimpleNamespace()
 
     def sign_up(self, payload: dict):
         self.signup_payloads.append(payload)
@@ -56,6 +61,44 @@ def test_callback_without_query_params_returns_fragment_bridge(monkeypatch):
     assert "text/html" in response.headers["content-type"]
     assert "/auth/fragment-session" in response.text
     assert "Missing auth callback parameters" not in response.text
+
+
+def test_email_magic_link_rejects_invalid_email_before_supabase(monkeypatch):
+    auth_client = _AuthClient()
+    client = _app(monkeypatch, auth_client)
+
+    response = client.get("/auth/login?provider=email&email=not-an-email&next=/app")
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "valid email is required"}
+    assert auth_client.otp_payloads == []
+
+
+def test_password_login_rejects_invalid_email_before_supabase(monkeypatch):
+    auth_client = _AuthClient()
+    client = _app(monkeypatch, auth_client)
+
+    response = client.post(
+        "/auth/password-login",
+        json={"email": "not-an-email", "password": "passw0rd-long", "next": "/app"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "valid email is required"}
+
+
+def test_password_signup_rejects_invalid_email_before_supabase(monkeypatch):
+    auth_client = _AuthClient()
+    client = _app(monkeypatch, auth_client)
+
+    response = client.post(
+        "/auth/password-signup",
+        json={"email": "not-an-email", "password": "passw0rd-long", "next": "/app"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "valid email is required"}
+    assert auth_client.signup_payloads == []
 
 
 def test_password_signup_confirmation_required_is_not_signin_failure(monkeypatch):
