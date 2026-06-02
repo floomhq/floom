@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -52,6 +53,7 @@ import type {
   RunDetail,
   ContextSummary,
   WorkerConnectionSpec,
+  WorkerComposioConnection,
   WorkerContextSpec,
   WorkerMcpConnection,
   VersionSummary,
@@ -271,6 +273,56 @@ function patchBrainContexts(yaml: string, contexts: WorkerContextSpec[]): string
   return replaceTopLevelYamlBlock(yaml, "contexts", block);
 }
 
+// Mirror of patchBrainContexts for the connections block. Persists the worker's
+// connection specs (Composio app slugs + allowed_tools, MCP specs) back into
+// worker.yml via the same top-level-block replacement the Brain toggle uses.
+function patchWorkerConnections(yaml: string, connections: WorkerConnectionSpec[]): string {
+  const block = dumpYaml(
+    { connections: connections.length > 0 ? connections : [] },
+    { noRefs: true, lineWidth: -1, sortKeys: false },
+  ).trimEnd();
+  return replaceTopLevelYamlBlock(yaml, "connections", block);
+}
+
+// Produce a new connections list where the Composio entry for `slug` has its
+// allowlist set to `tools`, or cleared when `tools` is null.
+//
+// Empty-allowlist semantics (backend models.py declared_composio_connections +
+// main.py composio_execute gate, line ~9768): `allowed_tools is None` (the key
+// absent) means FULL app access; an explicit list — INCLUDING an empty [] —
+// RESTRICTS to exactly that set (an empty list blocks every tool). So clearing
+// the restriction MUST drop the key entirely (tools === null), never emit [].
+function setComposioAllowlist(
+  connections: WorkerConnectionSpec[],
+  slug: string,
+  tools: string[] | null,
+): WorkerConnectionSpec[] {
+  const slugKey = slug.toLowerCase();
+  let matched = false;
+  const next = connections.map((spec): WorkerConnectionSpec => {
+    const specApp = connectionSpecApp(spec);
+    if (!specApp || specApp.toLowerCase() !== slugKey) return spec;
+    matched = true;
+    // Preserve any extra composio fields (scope/scopes) when present.
+    const existingComposio =
+      typeof spec === "object" && "composio" in spec ? spec.composio : undefined;
+    const base: WorkerComposioConnection = {
+      ...(existingComposio ?? {}),
+      app: existingComposio?.app ?? specApp,
+    };
+    if (tools && tools.length > 0) {
+      base.allowed_tools = tools;
+    } else {
+      delete base.allowed_tools;
+    }
+    return { composio: base };
+  });
+  // A bare-string declaration that we never matched as object means the slug
+  // wasn't present at all; nothing to do.
+  if (!matched) return connections;
+  return next;
+}
+
 // ---------------------------------------------------------------------------
 // Main page component
 // ---------------------------------------------------------------------------
@@ -310,6 +362,8 @@ export default function WorkerDetailPage() {
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [brainPacks, setBrainPacks] = useState<ContextSummary[]>([]);
   const [savingBrain, setSavingBrain] = useState<string | null>(null);
+  // Keyed by lowercased app slug while its tool allowlist is being persisted.
+  const [savingAllowlist, setSavingAllowlist] = useState<string | null>(null);
   const [_selectedFile, setSelectedFile] = useState<string | null>(null);
   const activeRunStream = useRunStream(activeRunId);
 
@@ -915,6 +969,55 @@ export default function WorkerDetailPage() {
       toast.error(e instanceof Error ? e.message : "Failed to update brain resources");
     } finally {
       setSavingBrain(null);
+    }
+  }
+
+  // Persist a Composio app's tool allowlist into worker.yml, reusing the exact
+  // save path the Brain toggle uses (yaml-block patch -> updateFiles -> refetch).
+  // `tools === null` clears the restriction (drops allowed_tools => full access).
+  async function handleSetComposioAllowlist(slug: string, tools: string[] | null) {
+    if (!worker || savingAllowlist) return;
+    const slugKey = slug.toLowerCase();
+    const currentConnections = worker.config.connections ?? [];
+    const nextConnections = setComposioAllowlist(currentConnections, slug, tools);
+
+    const currentYml =
+      editFiles.find((f) => f.path === "worker.yml")?.content ||
+      deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
+      worker.manifest_yaml ||
+      "";
+
+    if (!currentYml.trim()) {
+      toast.error("worker.yml is unavailable for this worker");
+      return;
+    }
+
+    setSavingAllowlist(slugKey);
+    try {
+      const patched = patchWorkerConnections(currentYml, nextConnections);
+      const sourceFiles =
+        editFiles.length > 0
+          ? textSourceFiles(editFiles)
+          : deriveSourceFiles(worker)
+              .filter((f) => !f.binary)
+              .map((f) => ({ path: f.path, content: f.content || "" }));
+      const nextFiles = sourceFiles.some((f) => f.path === "worker.yml")
+        ? sourceFiles.map((f) => (f.path === "worker.yml" ? { ...f, content: patched } : f))
+        : [{ path: "worker.yml", content: patched }, ...sourceFiles];
+
+      await api.workers.updateFiles(worker.id, nextFiles);
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+      toast.success("Tool allowlist updated");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to update tool allowlist");
+    } finally {
+      setSavingAllowlist(null);
     }
   }
 
@@ -2202,6 +2305,8 @@ export default function WorkerDetailPage() {
             configuredMcpConnections={configuredMcpConnections}
             activeConnectionSlugs={activeConnectionSlugs}
             requiredSecrets={requiredSecrets}
+            savingAllowlist={savingAllowlist}
+            onSetComposioAllowlist={handleSetComposioAllowlist}
           />
         )}
 
@@ -2716,6 +2821,165 @@ function BrainSection({
 // Connections section
 // ---------------------------------------------------------------------------
 
+// Point-and-click editor for a single Composio app's worker-level tool
+// allowlist. Persists via the parent's onSet (yaml-block patch -> updateFiles).
+//
+// Empty-allowlist semantics preserved (backend gate main.py ~9768): no
+// allowed_tools => FULL app access; an explicit list => restricted. The
+// "Restrict tools" switch off => onSet(slug, null) drops the key (full access);
+// on => the worker is limited to the listed slugs.
+//
+// NOTE (Codex flag): there is no per-app tool-CATALOG endpoint exposed to the
+// client. /integrations/catalog only returns `tools_count`, and the backend has
+// no route that lists a toolkit's tool slugs (Composio v3 `/tools?toolkit_slug=`
+// is unwired). So we cannot render checkboxes against the full toolkit; we let
+// the user manage the existing entries + add by slug. Wiring a
+// GET /integrations/tools?app=<slug> proxy (Composio v3 /tools) would unlock a
+// real per-tool checklist here.
+function ComposioAllowlistEditor({
+  slug,
+  allowedTools,
+  saving,
+  disabled,
+  onSet,
+}: {
+  slug: string;
+  allowedTools: string[] | null;
+  saving: boolean;
+  disabled: boolean;
+  onSet: (slug: string, tools: string[] | null) => void | Promise<void>;
+}) {
+  const restricted = (allowedTools?.length ?? 0) > 0;
+  const [addValue, setAddValue] = useState("");
+  // Local intent so the user can switch "Restrict" on and see the add UI before
+  // any slug exists (we never persist an empty [] — see semantics note above).
+  const [localRestrictIntent, setLocalRestrictIntent] = useState(false);
+  const busy = saving || disabled;
+  const showRestricted = restricted || localRestrictIntent;
+
+  function handleToggleRestrict(next: boolean) {
+    if (busy) return;
+    if (next) {
+      // Reveal the add UI. We do NOT persist an empty [] (it would block all
+      // tools); persistence happens only once the first slug is added.
+      setAddValue("");
+      setLocalRestrictIntent(true);
+    } else {
+      setLocalRestrictIntent(false);
+      void onSet(slug, null);
+    }
+  }
+
+  function handleAdd() {
+    const slugToAdd = addValue.trim().toUpperCase();
+    if (!slugToAdd || busy) return;
+    const current = allowedTools ?? [];
+    if (current.some((t) => t.toUpperCase() === slugToAdd)) {
+      setAddValue("");
+      return;
+    }
+    setAddValue("");
+    void onSet(slug, [...current, slugToAdd]);
+  }
+
+  function handleRemove(tool: string) {
+    if (busy) return;
+    const current = allowedTools ?? [];
+    const next = current.filter((t) => t !== tool);
+    // Removing the last slug clears the restriction entirely (full access)
+    // rather than persisting an empty list that would block every tool.
+    if (next.length === 0) {
+      setLocalRestrictIntent(true); // keep the add UI visible after clearing
+      void onSet(slug, null);
+    } else {
+      void onSet(slug, next);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-foreground">Restrict tools</p>
+          <p className="text-[0.68rem] text-muted-foreground">
+            {showRestricted
+              ? "Worker can only use the tools listed below."
+              : "Worker can use every tool this app exposes."}
+          </p>
+        </div>
+        <Switch
+          checked={showRestricted}
+          disabled={busy}
+          onCheckedChange={handleToggleRestrict}
+          aria-label={`Restrict ${slug} tools`}
+        />
+      </div>
+
+      {showRestricted && (
+        <div className="space-y-2">
+          {allowedTools && allowedTools.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {allowedTools.map((tool) => (
+                <Badge
+                  key={tool}
+                  variant="outline"
+                  className="max-w-full items-center gap-1 border-line bg-muted px-2 font-mono text-[0.68rem]"
+                >
+                  <span className="max-w-[200px] truncate">{tool}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${tool}`}
+                    disabled={busy}
+                    onClick={() => handleRemove(tool)}
+                    className="ml-0.5 rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[0.68rem] text-muted-foreground">
+              No tools allowed yet — add at least one slug below, or turn off
+              Restrict tools for full access.
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            <Input
+              value={addValue}
+              disabled={busy}
+              onChange={(e) => setAddValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAdd();
+                }
+              }}
+              placeholder="Tool slug e.g. GMAIL_FETCH_EMAILS"
+              className="h-8 flex-1 font-mono text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 border-line"
+              disabled={busy || !addValue.trim()}
+              onClick={handleAdd}
+            >
+              {saving ? "Saving…" : "Add"}
+            </Button>
+          </div>
+          <p className="text-[0.6rem] text-muted-foreground">
+            Tool slugs come from the app&apos;s Composio toolkit (uppercase, e.g.{" "}
+            <span className="font-mono">SLACK_SEND_MESSAGE</span>). A live per-app
+            tool picker is not available yet.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConnectionsSection({
   worker,
   connections,
@@ -2723,6 +2987,8 @@ function ConnectionsSection({
   configuredMcpConnections,
   activeConnectionSlugs,
   requiredSecrets,
+  savingAllowlist,
+  onSetComposioAllowlist,
 }: {
   worker: WorkerDetail;
   connections: ConnectionItem[];
@@ -2730,6 +2996,8 @@ function ConnectionsSection({
   configuredMcpConnections: WorkerMcpConnection[];
   activeConnectionSlugs: Set<string>;
   requiredSecrets: string[];
+  savingAllowlist: string | null;
+  onSetComposioAllowlist: (slug: string, tools: string[] | null) => void | Promise<void>;
 }) {
   const composioRequirements = (worker.config.connections ?? [])
     .map((spec) => {
@@ -2791,8 +3059,6 @@ function ConnectionsSection({
               const grantedScopes = activeConnection?.scopes ?? [];
               const visibleScopes = grantedScopes.slice(0, 4);
               const hiddenScopes = Math.max(grantedScopes.length - visibleScopes.length, 0);
-              const visibleTools = (allowedTools ?? []).slice(0, 5);
-              const hiddenTools = Math.max((allowedTools?.length ?? 0) - visibleTools.length, 0);
               return (
                 <div key={slug} className="grid gap-4 border-b border-line p-4 last:border-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
                   <div className="min-w-0 space-y-2">
@@ -2832,25 +3098,13 @@ function ConnectionsSection({
                   </div>
 
                   <div className="min-w-0 space-y-3">
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-foreground">Worker allowlist</p>
-                      {allowedTools?.length ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {visibleTools.map((tool) => (
-                            <Badge key={tool} variant="outline" className="max-w-full border-line bg-muted px-2 font-mono text-[0.68rem]">
-                              <span className="max-w-[220px] truncate">{tool}</span>
-                            </Badge>
-                          ))}
-                          {hiddenTools > 0 && (
-                            <Badge variant="outline" className="border-line bg-muted px-2 text-[0.68rem] text-muted-foreground">
-                              +{hiddenTools} more
-                            </Badge>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">No worker-level tool allowlist declared.</p>
-                      )}
-                    </div>
+                    <ComposioAllowlistEditor
+                      slug={slug}
+                      allowedTools={allowedTools}
+                      saving={savingAllowlist === slugKey}
+                      disabled={savingAllowlist !== null && savingAllowlist !== slugKey}
+                      onSet={onSetComposioAllowlist}
+                    />
 
                     <div className="space-y-1">
                       <p className="text-xs font-medium text-foreground">Granted OAuth scopes</p>
