@@ -44,28 +44,8 @@ jobs:
           npx --yes vercel@50.22.1 pull --yes --environment=production --token "$VERCEL_TOKEN"
 
       - name: Deploy production
-        id: deploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN" | tee /tmp/vercel-deploy.log
-          deployment_url="$(grep -Eo 'https://[^[:space:]]+\.vercel\.app' /tmp/vercel-deploy.log | tail -n1)"
-          test -n "$deployment_url"
-          echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
-
-      - name: Re-assert production aliases
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
-        run: |
-          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          sleep 120
-          for alias in \
-            workers.floom.dev \
-            workeros-delta.vercel.app \
-            workeros-fedes-projects-5891bd50.vercel.app \
-            workeros-depontefede-6377-fedes-projects-5891bd50.vercel.app
-          do
-            npx --yes vercel@50.22.1 alias set "$DEPLOYMENT_URL" "$alias" --token "$VERCEL_TOKEN"
-          done
+          npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
