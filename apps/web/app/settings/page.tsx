@@ -15,7 +15,7 @@ import type {
 } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,8 +31,18 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 // to "api" when a hidden tab is requested.
 type TabKey = "api" | "system" | "assistant" | "notifications" | "appearance" | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "appearance", "danger"];
+// N2: "assistant" (Workspace agent) is now a real left-nav entry. Notifications
+// stays hidden until outbound email ships (S22f).
+const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "assistant", "appearance", "danger"];
 const TAB_KEYS: TabKey[] = ["api", "system", "assistant", "notifications", "appearance", "danger"];
+
+const NAV_ITEMS: { key: TabKey; label: string }[] = [
+  { key: "api", label: "API access" },
+  { key: "system", label: "System" },
+  { key: "assistant", label: "Workspace agent" },
+  { key: "appearance", label: "Appearance" },
+  { key: "danger", label: "Danger zone" },
+];
 
 function isValidTab(value: string | null): value is TabKey {
   return value !== null && TAB_KEYS.includes(value as TabKey);
@@ -100,12 +110,6 @@ function SettingsContent() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
-
-  useEffect(() => {
-    if (window.location.hash.replace(/^#/, "") === "assistant") {
-      window.location.replace("/assistant#instructions");
-    }
-  }, []);
 
   // Keep state in sync with the URL hash for deep-links and back/forward.
   useEffect(() => {
@@ -243,24 +247,33 @@ function SettingsContent() {
         </p>
       </div>
 
-      {/* S22f: hide Notifications tab. Roast P1: it shipped two "Soon"
-          placeholder toggles, which read as "this team ships features that
-          don't exist yet". When the feature ships, restore the tab. */}
-      <Tabs value={tab} onValueChange={handleTabChange}>
-        {/* S30: on narrow viewports the w-fit tab strip ran off the right edge
-            (scrollWidth 489 > 375) and clipped "Danger zone", forcing a
-            horizontal page scroll. Wrap it in an overflow-x-auto, full-width
-            container with a hidden scrollbar so the page stays at viewport
-            width while the strip scrolls internally. Desktop is unchanged: the
-            strip fits, so nothing scrolls. */}
-        <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <TabsList>
-          <TabsTrigger value="api">API access</TabsTrigger>
-          <TabsTrigger value="system">System</TabsTrigger>
-          <TabsTrigger value="appearance">Appearance</TabsTrigger>
-          <TabsTrigger value="danger">Danger zone</TabsTrigger>
+      {/* N2: left vertical nav (sidebar within the page) instead of a
+          horizontal pill strip — the sections (esp. Workspace agent) were a lot
+          to scroll past. base-ui Tabs orientation="vertical" lays the list out
+          as a left column with an active right-edge bar; TabsContent is the
+          flex-1 panel on the right.
+          S22f: Notifications stays hidden until outbound email ships. */}
+      <Tabs
+        orientation="vertical"
+        value={tab}
+        onValueChange={handleTabChange}
+        className="flex-col gap-6 sm:flex-row sm:gap-8"
+      >
+        {/* Mobile (<sm): the nav collapses to a full-width stacked list at the
+            top of the page (the Tabs root is flex-col below sm), so the page
+            never exceeds the viewport width. Desktop: a ~200px fixed left
+            column beside the panel. base-ui's vertical orientation already
+            lays the list out as a column; we only need to size it. */}
+        <TabsList
+          variant="line"
+          className="w-full max-w-full sm:w-48 sm:shrink-0"
+        >
+          {NAV_ITEMS.map((item) => (
+            <TabsTrigger key={item.key} value={item.key}>
+              {item.label}
+            </TabsTrigger>
+          ))}
         </TabsList>
-        </div>
 
         <TabsContent value="api" className="space-y-4">
           <CliCommandPanel />
@@ -348,13 +361,30 @@ function SettingsContent() {
         </TabsContent>
 
         <TabsContent value="assistant" className="space-y-8">
-          <section className="space-y-2">
+          <section className="space-y-3">
             <h2 className="text-sm font-medium text-muted-foreground">Workspace agent</h2>
             <p className="text-sm text-muted-foreground">
               This is the assistant behind <code className="text-foreground">/chat</code>. It reads
               your workspace and can manage workers, runs, secrets, connections, brain packs, and
-              approvals on your behalf. The instructions and tools below are read-only.
+              approvals on your behalf.
             </p>
+            {/* N2: the editable instructions live on the Agent page (single
+                source of truth, with version history + rollback). The prompt
+                and tools below are a read-only overview; editing happens there. */}
+            <div className="flex items-start justify-between gap-4 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Edit instructions</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Change what the agent does, with version history and rollback, on the Agent page.
+                </p>
+              </div>
+              <a
+                href="/assistant#instructions"
+                className={buttonVariants({ variant: "outline", size: "sm", className: "shrink-0" })}
+              >
+                Open editor
+              </a>
+            </div>
           </section>
 
           {workspaceAgentLoading && !workspaceAgent ? (

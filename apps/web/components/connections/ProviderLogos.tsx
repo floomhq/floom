@@ -35,7 +35,11 @@ const SLUG_ALIASES: Record<string, string> = {
 
 function normalizeIcon(slug: string): string {
   const lower = slug.toLowerCase();
-  return SLUG_ALIASES[lower] ?? lower;
+  if (SLUG_ALIASES[lower]) return SLUG_ALIASES[lower];
+  // U17b: collapse separators so "google_search_console" resolves like the
+  // separator-free Composio slug "googlesearchconsole".
+  const collapsed = lower.replace(/[\s_-]+/g, "");
+  return SLUG_ALIASES[collapsed] ?? lower;
 }
 
 export function ProviderLogos({ providerIcon }: { providerIcon: string }) {
