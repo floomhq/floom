@@ -27,10 +27,12 @@ function targetProperties(target: Element): Record<string, unknown> {
 
 export function TelemetryProvider() {
   const pathname = usePathname();
+  const telemetryDisabled = pathname === "/approvals/review" || pathname?.startsWith("/approvals/review/");
   const seenSession = useRef(false);
   const lastPath = useRef<string | null>(null);
 
   useEffect(() => {
+    if (telemetryDisabled) return;
     if (!seenSession.current) {
       seenSession.current = true;
       trackTelemetry("web.session_start", {
@@ -39,9 +41,10 @@ export function TelemetryProvider() {
         viewport_height: window.innerHeight,
       });
     }
-  }, []);
+  }, [telemetryDisabled]);
 
   useEffect(() => {
+    if (telemetryDisabled) return;
     const path = pathname || window.location.pathname;
     if (lastPath.current === path) return;
     lastPath.current = path;
@@ -49,9 +52,10 @@ export function TelemetryProvider() {
       page: path,
       referrer_path: safeHrefPath(document.referrer),
     });
-  }, [pathname]);
+  }, [pathname, telemetryDisabled]);
 
   useEffect(() => {
+    if (telemetryDisabled) return;
     const onClick = (event: MouseEvent) => {
       if (!(event.target instanceof Element)) return;
       const properties = targetProperties(event.target);
@@ -84,7 +88,7 @@ export function TelemetryProvider() {
       window.removeEventListener("unhandledrejection", onUnhandledRejection);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, []);
+  }, [telemetryDisabled]);
 
   return null;
 }
