@@ -5,6 +5,7 @@ import json
 import sys
 import time
 import types
+import urllib.parse
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -44,6 +45,16 @@ def _slack_headers(body: bytes, secret: str = "test-slack-signing-secret", ts: i
     }
 
 
+def _slack_form_headers(body: bytes, secret: str = "test-slack-signing-secret", ts: int | None = None):
+    headers = _slack_headers(body, secret=secret, ts=ts)
+    headers["Content-Type"] = "application/x-www-form-urlencoded"
+    return headers
+
+
+def _form_body(payload: dict[str, str]) -> bytes:
+    return urllib.parse.urlencode(payload).encode("utf-8")
+
+
 def test_slack_events_url_verification_uses_slack_hmac_without_api_secret(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     body = json.dumps(
@@ -68,6 +79,49 @@ def test_slack_events_rejects_invalid_signature(monkeypatch, tmp_path):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid Slack signature"
+
+
+def test_slack_commands_help_uses_signed_form_without_api_secret(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    body = _form_body(
+        {
+            "team_id": "T123",
+            "channel_id": "C123",
+            "text": "help",
+            "response_url": "https://hooks.slack.test/response",
+        }
+    )
+
+    with TestClient(main.app) as client:
+        response = client.post("/slack/commands", data=body, headers=_slack_form_headers(body))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["response_type"] == "ephemeral"
+    assert "/floom approvals" in response.json()["text"]
+
+
+def test_slack_interactivity_dismisses_signed_approval_action(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = {
+        "team": {"id": "T123"},
+        "user": {"id": "U123"},
+        "actions": [
+            {
+                "action_id": "workeros_approval_dismiss",
+                "value": json.dumps({"run_id": "run_123"}),
+            }
+        ],
+    }
+    body = _form_body({"payload": json.dumps(payload)})
+
+    with TestClient(main.app) as client:
+        response = client.post("/slack/interactivity", data=body, headers=_slack_form_headers(body))
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "replace_original": True,
+        "text": "Dismissed approval `run_123`.",
+    }
 
 
 def test_slack_app_mention_queues_workspace_agent_reply(monkeypatch, tmp_path):
