@@ -1,5 +1,8 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
+
 // V5: the MCP/CLI tool catalog rendered in Settings -> API access. There is no
 // backend endpoint that returns the live tool list (the /system/workspace-agent
 // endpoint returns the *agent's* management tools, a different set), so this is
@@ -121,40 +124,106 @@ const TOOL_GROUPS: { group: string; tools: { name: string; description: string }
 const TOTAL_TOOLS = TOOL_GROUPS.reduce((sum, g) => sum + g.tools.length, 0);
 
 export function McpToolCatalog() {
+  // W3: the catalog used to render all ~58 tools across 11 groups expanded at
+  // once, which made the page unscrollably long. Now: a filter box + groups
+  // that are COLLAPSED by default and expand on click. A non-empty filter
+  // forces matching groups open so search results are always visible.
+  const [query, setQuery] = useState("");
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
+  const q = query.trim().toLowerCase();
+  const filteredGroups = useMemo(() => {
+    if (!q) return TOOL_GROUPS;
+    return TOOL_GROUPS.map((group) => ({
+      ...group,
+      tools: group.tools.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          t.description.toLowerCase().includes(q),
+      ),
+    })).filter((group) => group.tools.length > 0);
+  }, [q]);
+
+  const matchCount = filteredGroups.reduce((sum, g) => sum + g.tools.length, 0);
+
+  function toggle(groupName: string) {
+    setOpenGroups((prev) => ({ ...prev, [groupName]: !prev[groupName] }));
+  }
+
   return (
     <section className="space-y-3">
       <div>
         <h2 className="text-base font-medium text-foreground">
-          MCP &amp; CLI tools{" "}
+          MCP tools{" "}
           <span className="font-normal text-muted-foreground">({TOTAL_TOOLS})</span>
         </h2>
+        {/* W4: /connections/mcp is a real route (apps/web/app/connections/mcp).
+            Link verified, not dead. */}
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Every tool the Floom Workers MCP server and CLI expose to connected agents. Custom MCP
+          Every tool the Floom Workers MCP server exposes to connected agents. Custom MCP
           tools you add live under{" "}
           <a href="/connections/mcp" className="font-medium text-foreground underline underline-offset-2">
-            Connections → MCP
+            Connections &rarr; MCP
           </a>
           .
         </p>
       </div>
 
-      <div className="space-y-6">
-        {TOOL_GROUPS.map((group) => (
-          <div key={group.group} className="space-y-2">
-            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {group.group}
-            </h3>
-            <div className="divide-y divide-line rounded-[var(--radius-button)] border border-line">
-              {group.tools.map((tool) => (
-                <div key={tool.name} className="px-3 py-2.5">
-                  <code className="text-xs font-medium text-foreground">{tool.name}</code>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Filter tools..."
+        className="h-9 w-full rounded-[var(--radius-input)] border border-line bg-[var(--bg-2)] px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring sm:max-w-xs"
+      />
+
+      {filteredGroups.length === 0 ? (
+        <p className="py-3 text-sm text-muted-foreground">No tools match &ldquo;{query}&rdquo;.</p>
+      ) : (
+        <div className="space-y-2">
+          {q ? (
+            <p className="text-xs text-muted-foreground">
+              {matchCount} {matchCount === 1 ? "tool" : "tools"} match
+            </p>
+          ) : null}
+          {filteredGroups.map((group) => {
+            const expanded = q.length > 0 || !!openGroups[group.group];
+            return (
+              <div
+                key={group.group}
+                className="overflow-hidden rounded-[var(--radius-card)] border border-line"
+              >
+                <button
+                  type="button"
+                  onClick={() => toggle(group.group)}
+                  aria-expanded={expanded}
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-muted"
+                >
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {group.group}{" "}
+                    <span className="ml-1 normal-case tracking-normal text-muted-foreground/70">
+                      ({group.tools.length})
+                    </span>
+                  </span>
+                  <ChevronDown
+                    className={`size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {expanded ? (
+                  <div className="divide-y divide-line border-t border-line">
+                    {group.tools.map((tool) => (
+                      <div key={tool.name} className="px-3 py-2.5">
+                        <code className="text-xs font-medium text-foreground">{tool.name}</code>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

@@ -18,7 +18,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
-import { McpToolCatalog } from "@/components/McpToolCatalog";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
@@ -190,7 +189,6 @@ function SettingsContent() {
 
         <TabsContent value="api" className="space-y-8 pt-6">
           <CliCommandPanel />
-          <McpToolCatalog />
         </TabsContent>
 
         <TabsContent value="system" className="space-y-8 pt-6">
