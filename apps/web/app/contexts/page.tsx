@@ -17,7 +17,6 @@ import {
   FileText,
   Film,
   Folder,
-  History,
   Image as ImageIcon,
   Link as LinkIcon,
   Lock,
@@ -32,21 +31,13 @@ import {
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ContextDetail, ContextFileItem, ContextSummary, VersionFileSnapshot, VersionSummary } from "@/lib/types";
-import { VersionDiffPanel } from "@/components/VersionDiffPanel";
+import type { ContextDetail, ContextFileItem, ContextSummary, VersionSummary } from "@/lib/types";
+import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 const TEXT_PREVIEW_LIMIT = 512 * 1024;
 const TABLE_PREVIEW_ROWS = 100;
@@ -357,7 +348,6 @@ function ContextsPage() {
   const [loadingText, setLoadingText] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
-  const [versionsOpen, setVersionsOpen] = useState(false);
   const [versionsKey, setVersionsKey] = useState(0);
 
   const [search, setSearch] = useState("");
@@ -517,7 +507,6 @@ function ContextsPage() {
     setSelectedName(name);
     setFolderPath([]);
     setSelectedFile(null);
-    setVersionsOpen(false);
     setMobilePane("files");
     try {
       setDetail(await api.contexts.get(name));
@@ -532,12 +521,10 @@ function ContextsPage() {
     const parts = folderPathStr.split("/").filter(Boolean);
     setFolderPath(parts);
     setSelectedFile(null);
-    setVersionsOpen(false);
   }
 
   function openFile(path: string) {
     setSelectedFile(path);
-    setVersionsOpen(false);
     setMobilePane("file");
     // Drill folderPath to the file's parent so the column stack stays coherent
     // (so the parent folder column is visible alongside the file pane).
@@ -849,22 +836,6 @@ function ContextsPage() {
           <section className="flex-1 overflow-hidden flex items-center justify-center">
             <Skeleton className="h-10 w-48 rounded-[var(--radius-button)]" />
           </section>
-        ) : versionsOpen && fileObj ? (
-          <BrainFileVersionsPane
-            key={`${selectedName}:${fileObj.path}:${versionsKey}`}
-            packName={selectedName}
-            selectedFile={fileObj}
-            currentFileContent={isKnownTextFile(fileObj) ? fileText : ""}
-            readOnly={readOnly}
-            onClose={() => setVersionsOpen(false)}
-            onRestored={(restoredContent) => {
-              setFileText(restoredContent);
-              setVersionsOpen(false);
-              setVersionsKey((k) => k + 1);
-              void api.contexts.get(selectedName).then(setDetail).catch(() => {});
-              void loadContexts(selectedName);
-            }}
-          />
         ) : !fileOpen ? (
           /* DEFAULT: 70% pack-detail with the file/folder tree + metadata.
              Folder drill happens via miller columns inside this pane. */
@@ -927,15 +898,18 @@ function ContextsPage() {
                 editing={editing}
                 editText={editText}
                 readOnly={readOnly}
+                versionsKey={versionsKey}
                 onEdit={() => { setEditText(fileText); setEditing(true); }}
                 onCancelEdit={() => setEditing(false)}
                 onChangeEdit={setEditText}
                 onSave={saveFile}
                 onClose={closeFile}
                 onBackMobile={() => setMobilePane("files")}
-                onOpenVersions={() => {
-                  setVersionsOpen(true);
-                  setMobilePane("files");
+                onRestored={(restoredContent) => {
+                  setFileText(restoredContent);
+                  setVersionsKey((k) => k + 1);
+                  void api.contexts.get(selectedName).then(setDetail).catch(() => {});
+                  void loadContexts(selectedName);
                 }}
               />
               {dragActive && !readOnly && (
@@ -1410,13 +1384,14 @@ function FilePane({
   editing,
   editText,
   readOnly,
+  versionsKey,
   onEdit,
   onCancelEdit,
   onChangeEdit,
   onSave,
   onClose,
   onBackMobile,
-  onOpenVersions,
+  onRestored,
 }: {
   file: ContextFileItem | null;
   kind: FileKind | null;
@@ -1427,13 +1402,14 @@ function FilePane({
   editing: boolean;
   editText: string;
   readOnly: boolean;
+  versionsKey: number;
   onEdit: () => void;
   onCancelEdit: () => void;
   onChangeEdit: (v: string) => void;
   onSave: () => void;
   onClose: () => void;
   onBackMobile: () => void;
-  onOpenVersions: () => void;
+  onRestored: (restoredContent: string) => void;
 }) {
   const [fileLinkCopied, setFileLinkCopied] = useState(false);
   if (!file) return null;
@@ -1500,16 +1476,13 @@ function FilePane({
             </>
           )}
           {!editing && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs gap-1"
-              onClick={onOpenVersions}
-              title="View this file's earlier revisions"
-            >
-              <History className="size-3.5" />
-              History
-            </Button>
+            <FileHistoryMenu
+              packName={packName}
+              file={file}
+              readOnly={readOnly}
+              refreshKey={versionsKey}
+              onRestored={onRestored}
+            />
           )}
           <button
             type="button"
@@ -1995,74 +1968,71 @@ function PreviewUnavailable({
   );
 }
 
-// Per-file version history. Each brain-pack file is snapshotted independently
-// on the backend (asset_type `brain_file`), so this lists the revisions of ONE
-// file and restores only THAT file — not the whole pack. Restore writes the
-// chosen revision's content back via the normal save path (which records a new
-// snapshot), so it is limited to text files (the only kind that carries an
-// inline, diffable content body here).
-function BrainFileVersionsPane({
+// Inline per-file "History ▾" dropdown. Each brain-pack file is snapshotted
+// independently on the backend (asset_type `brain_file`), so this lists the
+// revisions of ONE file and restores only THAT file — not the whole pack.
+// Restore fetches the chosen revision's snapshot and writes it back via the
+// normal save path (which records a new snapshot), so it is limited to text
+// files (the only kind that carries an inline content body here). This mirrors
+// the workspace-instructions History dropdown on /assistant so both surfaces
+// feel like the same affordance.
+function FileHistoryMenu({
   packName,
-  selectedFile,
-  currentFileContent,
+  file,
   readOnly,
-  onClose,
+  refreshKey,
   onRestored,
 }: {
   packName: string;
-  selectedFile: ContextFileItem;
-  currentFileContent: string;
+  file: ContextFileItem;
   readOnly: boolean;
-  onClose: () => void;
+  refreshKey: number;
   onRestored: (restoredContent: string) => void;
 }) {
-  const selectedFilePath = selectedFile.path;
+  const filePath = file.path;
+  const fileName = filePath.split("/").pop() ?? filePath;
   const [versions, setVersions] = useState<VersionSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [expandedSnapshot, setExpandedSnapshot] = useState<VersionFileSnapshot | null>(null);
-  const [loadingExpand, setLoadingExpand] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
-  const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
 
-  const canRestore = isKnownTextFile(selectedFile) && !readOnly;
+  const canRestore = isKnownTextFile(file) && !readOnly;
 
   const loadVersions = useCallback(async () => {
     setLoading(true);
     try {
-      setVersions(await api.contexts.listFileVersions(packName, selectedFilePath));
+      setVersions(await api.contexts.listFileVersions(packName, filePath));
     } catch {
       setVersions([]);
     } finally {
       setLoading(false);
+      setLoadedOnce(true);
     }
-  }, [packName, selectedFilePath]);
+  }, [packName, filePath]);
 
-  useEffect(() => { void loadVersions(); }, [loadVersions]);
+  // Reset the loaded state when the open file changes so the next open fetches
+  // that file's history; also re-fetch (when already opened) after a save.
+  useEffect(() => {
+    setLoadedOnce(false);
+    setVersions([]);
+  }, [packName, filePath]);
 
-  async function handleExpand(v: VersionSummary) {
-    if (expandedId === v.id) {
-      setExpandedId(null);
-      setExpandedSnapshot(null);
-      return;
-    }
-    setLoadingExpand(v.id);
-    try {
-      const detail = await api.contexts.getFileVersion(packName, selectedFilePath, v.id);
-      setExpandedSnapshot(detail.file ?? null);
-      setExpandedId(v.id);
-    } catch {
-      toast.error("Failed to load version");
-    } finally {
-      setLoadingExpand(null);
-    }
-  }
+  useEffect(() => {
+    if (loadedOnce) void loadVersions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   async function handleRestore(v: VersionSummary) {
-    setPendingRestore(null);
+    if (
+      !confirm(
+        `Restore "${fileName}" to v${v.version_number}?\n\nThis replaces the current contents. The current version is saved as a new revision first.`
+      )
+    ) {
+      return;
+    }
     setRestoring(v.id);
     try {
-      const detail = await api.contexts.getFileVersion(packName, selectedFilePath, v.id);
+      const detail = await api.contexts.getFileVersion(packName, filePath, v.id);
       const snapshot = detail.file;
       if (!snapshot || snapshot.deleted) {
         toast.error("This snapshot recorded the file as deleted and can't be restored inline.");
@@ -2073,9 +2043,10 @@ function BrainFileVersionsPane({
         return;
       }
       const restoredContent = snapshot.content ?? "";
-      await api.contexts.saveTextFile(packName, selectedFilePath, restoredContent);
+      await api.contexts.saveTextFile(packName, filePath, restoredContent);
       onRestored(restoredContent);
-      toast.success(`Restored ${selectedFileName} to v${v.version_number}`);
+      await loadVersions();
+      toast.success(`Restored ${fileName} to v${v.version_number}`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Restore failed");
     } finally {
@@ -2083,107 +2054,18 @@ function BrainFileVersionsPane({
     }
   }
 
-  const selectedFileName = selectedFilePath.split("/").pop() ?? selectedFilePath;
-  const expandedFiles = expandedSnapshot
-    ? [{ path: selectedFilePath, content: expandedSnapshot.content ?? "" }]
-    : null;
-  const currentFiles = [{ path: selectedFilePath, content: currentFileContent }];
-
   return (
-    <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex min-h-[82px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-5 py-4">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold">Version history</h2>
-          <p className="mt-0.5 truncate text-sm text-muted-foreground">
-            <span className="font-mono">{selectedFileName}</span> · earlier revisions of this file
-          </p>
-        </div>
-        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Close version history" onClick={onClose}>
-          <X className="size-4" />
-        </Button>
-      </div>
-      <div className="flex-1 overflow-auto p-5">
-        <div className="mb-3 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-medium">Current file</p>
-              <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{selectedFilePath}</p>
-            </div>
-            <span className="rounded-[var(--radius-pill)] bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              Current
-            </span>
-          </div>
-        </div>
-        {loading ? (
-          <div className="space-y-2">
-            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full rounded-[var(--radius-card)]" />)}
-          </div>
-        ) : versions.length === 0 ? (
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-6">
-            <p className="text-sm font-medium">No earlier revisions of this file yet</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              A revision is saved here each time this file is edited, replaced, or deleted.
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)]">
-            {versions.map((v) => (
-              <div key={v.id} className="border-b border-[var(--border-default)] last:border-b-0">
-                <div
-                  className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 hover:bg-muted/40"
-                  onClick={() => { void handleExpand(v); }}
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs text-muted-foreground">v{v.version_number}</span>
-                    </div>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {v.change_source} · {formatDate(v.created_at)}
-                    </p>
-                  </div>
-                  {loadingExpand === v.id
-                    ? <Skeleton className="size-4 rounded-full" />
-                    : <ChevronRight className={`size-4 shrink-0 text-muted-foreground transition-transform ${expandedId === v.id ? "rotate-90" : ""}`} />}
-                </div>
-                {expandedId === v.id && expandedFiles && (
-                  <VersionDiffPanel
-                    versionNumber={v.version_number}
-                    versionFiles={expandedFiles}
-                    currentFiles={currentFiles}
-                    isRestoring={restoring === v.id}
-                    canRestore={canRestore}
-                    onRestore={() => setPendingRestore(v)}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      <Dialog open={Boolean(pendingRestore)} onOpenChange={(open) => { if (!open && !restoring) setPendingRestore(null); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Restore this file?</DialogTitle>
-            <DialogDescription>
-              This replaces the current contents of <span className="font-mono">{selectedFileName}</span> with
-              v{pendingRestore?.version_number}. Other files in {packName} are untouched, and the current contents
-              are saved as a new revision first.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingRestore(null)} disabled={Boolean(restoring)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => { if (pendingRestore) void handleRestore(pendingRestore); }}
-              disabled={Boolean(restoring)}
-            >
-              {restoring ? "Restoring..." : `Restore to v${pendingRestore?.version_number ?? ""}`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </section>
+    <VersionHistoryMenu
+      versions={versions}
+      loading={loading && !loadedOnce}
+      canRestore={canRestore}
+      restoringId={restoring}
+      buttonClassName="h-7 text-xs"
+      onOpen={() => {
+        if (!loadedOnce) void loadVersions();
+      }}
+      onRestore={(v) => void handleRestore(v)}
+    />
   );
 }
 
