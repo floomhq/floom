@@ -347,6 +347,12 @@ export interface ContextWorkerRef {
   worker_name: string;
 }
 
+export interface SecretWarning {
+  pattern: string;
+  line: number;
+  masked: string;
+}
+
 export interface ContextFileItem {
   path: string;
   size: number;
@@ -357,11 +363,24 @@ export interface ContextFileItem {
   display_type?: string;
   tags?: string[];
   metadata?: Record<string, string | number | boolean | null | undefined>;
+  has_secret_warning?: boolean;
+  secret_warnings?: SecretWarning[];
 }
 
 export interface ContextDetail extends ContextSummary {
   files: ContextFileItem[];
   used_by?: ContextWorkerRef[];
+}
+
+export interface ContextSecretScanFile {
+  path: string;
+  secret_warnings: SecretWarning[];
+}
+
+export interface ContextSecretScanResponse {
+  name: string;
+  scanned_files: number;
+  flagged_files: ContextSecretScanFile[];
 }
 
 export interface ReloadResponse {
