@@ -162,6 +162,8 @@ function UserProfileFooter() {
   const pathname = usePathname();
   const isLoginPath = pathname === "/login" || pathname.startsWith("/login/") || pathname === "/app/login" || pathname.startsWith("/app/login/");
   const [email, setEmail] = useState<string | null>(null);
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   useEffect(() => {
     if (isLoginPath) return;
     let cancelled = false;
@@ -191,8 +193,6 @@ function UserProfileFooter() {
   const initial = email
     ? email.split("@")[0]?.slice(0, 2).toUpperCase() ?? "??"
     : "—";
-  const [signOutOpen, setSignOutOpen] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
 
   const confirmSignOut = async () => {
     setSigningOut(true);
