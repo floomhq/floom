@@ -9,9 +9,14 @@
 @custom-variant dark (&:is(.dark *));
 
 /* S29c F8.11: theme-aware syntax highlighting. Light theme uses
-   github.css (imported by FilesEditor); dark variants override only
-   token colors so the same DOM stays readable in either palette. */
-.hljs { background: transparent; }
+   github.css (imported by FilesEditor + contexts); dark variants override
+   only token colors so the same DOM stays readable in either palette.
+   github.css is a component-level import that loads AFTER this global
+   sheet, so its `.hljs { background:#fff }` would otherwise win the
+   equal-specificity cascade and paint a white block inside dark-mode code
+   previews. Force the background to inherit the surrounding <pre> token bg
+   (`--bg-2` / dark hex) in both themes. */
+.hljs { background: transparent !important; }
 
 .dark .hljs { color: #adbac7; }
 .dark .hljs-comment, .dark .hljs-quote { color: #768390; font-style: italic; }
