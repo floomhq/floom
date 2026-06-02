@@ -15,6 +15,7 @@ interface Props {
   versionFiles: VersionFile[];
   currentFiles: VersionFile[];
   isRestoring: boolean;
+  canRestore?: boolean;
   onRestore: () => void;
 }
 
@@ -100,6 +101,7 @@ export function VersionDiffPanel({
   versionFiles,
   currentFiles,
   isRestoring,
+  canRestore = true,
   onRestore,
 }: Props) {
   const [activeFile, setActiveFile] = useState(versionFiles[0]?.path ?? "");
@@ -179,25 +181,27 @@ export function VersionDiffPanel({
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between border-t border-[var(--border-default)] px-4 py-2.5">
-        <p className="text-xs text-muted-foreground">
-          Restoring will replace current files with v{versionNumber}.
-        </p>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 gap-1.5 text-xs"
-          disabled={isRestoring}
-          onClick={onRestore}
-        >
-          {isRestoring ? (
-            <Loader2 className="size-3 animate-spin" />
-          ) : (
-            <RotateCcw className="size-3" />
-          )}
-          {isRestoring ? "Restoring…" : `Restore to v${versionNumber}`}
-        </Button>
-      </div>
+      {canRestore && (
+        <div className="flex items-center justify-between border-t border-[var(--border-default)] px-4 py-2.5">
+          <p className="text-xs text-muted-foreground">
+            Restoring replaces this file&apos;s current contents with v{versionNumber}.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1.5 text-xs"
+            disabled={isRestoring}
+            onClick={onRestore}
+          >
+            {isRestoring ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <RotateCcw className="size-3" />
+            )}
+            {isRestoring ? "Restoring…" : `Restore to v${versionNumber}`}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
