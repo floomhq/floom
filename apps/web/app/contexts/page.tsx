@@ -17,7 +17,7 @@ import {
   FileText,
   Film,
   Folder,
-  GitFork,
+  History,
   Image as ImageIcon,
   Link as LinkIcon,
   Lock,
@@ -32,7 +32,7 @@ import {
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ContextDetail, ContextFileItem, ContextSummary, VersionDetail, VersionSummary } from "@/lib/types";
+import type { ContextDetail, ContextFileItem, ContextSummary, VersionFileSnapshot, VersionSummary } from "@/lib/types";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -850,16 +850,18 @@ function ContextsPage() {
             <Skeleton className="h-10 w-48 rounded-[var(--radius-button)]" />
           </section>
         ) : versionsOpen && fileObj ? (
-          <BrainPackVersionsPane
-            key={`${selectedName}:${versionsKey}`}
+          <BrainFileVersionsPane
+            key={`${selectedName}:${fileObj.path}:${versionsKey}`}
             packName={selectedName}
-            selectedFilePath={fileObj.path}
+            selectedFile={fileObj}
             currentFileContent={isKnownTextFile(fileObj) ? fileText : ""}
+            readOnly={readOnly}
             onClose={() => setVersionsOpen(false)}
-            onRollback={(updated) => {
-              setDetail(updated);
+            onRestored={(restoredContent) => {
+              setFileText(restoredContent);
               setVersionsOpen(false);
               setVersionsKey((k) => k + 1);
+              void api.contexts.get(selectedName).then(setDetail).catch(() => {});
               void loadContexts(selectedName);
             }}
           />
@@ -1025,7 +1027,7 @@ function PackRow({
       {!compact && (
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
           <button type="button" onClick={copyLink} className="p-1 rounded-[var(--radius-button)] hover:bg-muted" title="Copy link to this pack">
-            {copied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5 text-muted-foreground" />}
+            {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5 text-muted-foreground" />}
           </button>
           {!ctx.read_only && (
             <button
@@ -1125,7 +1127,7 @@ function PackDetailPane({
             className="p-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground transition-colors shrink-0"
             title="Copy link to this pack"
           >
-            {packLinkCopied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5" />}
+            {packLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
           </button>
         </div>
         {readOnly && (
@@ -1451,7 +1453,7 @@ function FilePane({
       {/* Breadcrumb + actions */}
       <div className="flex h-[82px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-2.5">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 text-sm min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
               onClick={onBackMobile}
@@ -1462,10 +1464,17 @@ function FilePane({
             </button>
             {displayTypeIcon(displayType)}
             <span className="font-mono text-sm font-medium truncate">{file.path.split("/").pop()}</span>
-            <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-              · {displayType} · {formatBytes(file.size)}
-              {file.updated_at && ` · ${formatDate(file.updated_at)}`}
-            </span>
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span>{displayType}</span>
+            <span aria-hidden className="opacity-40">·</span>
+            <span>{formatBytes(file.size)}</span>
+            {file.updated_at && (
+              <>
+                <span aria-hidden className="opacity-40">·</span>
+                <span className="truncate">{formatDate(file.updated_at)}</span>
+              </>
+            )}
           </div>
           <FileTagChips file={file} compact />
         </div>
@@ -1489,9 +1498,15 @@ function FilePane({
             </>
           )}
           {!editing && (
-            <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={onOpenVersions}>
-              <GitFork className="size-3.5" />
-              Versions
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs gap-1"
+              onClick={onOpenVersions}
+              title="View this file's earlier revisions"
+            >
+              <History className="size-3.5" />
+              History
             </Button>
           )}
           <button
@@ -1500,7 +1515,7 @@ function FilePane({
             className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-default)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title="Copy link to this file"
           >
-            {fileLinkCopied ? <Check className="size-3.5 text-green-600" /> : <LinkIcon className="size-3.5" />}
+            {fileLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
           </button>
           <a
             href={fileUrl}
@@ -1566,54 +1581,31 @@ function FileContent({
 
   if (kind === "markdown") {
     return (
-      <Tabs defaultValue="preview" className="flex flex-col h-full">
-        <div className="border-b border-[var(--border-default)] px-4 pt-2 shrink-0">
-          <TabsList variant="line" className="h-8">
-            <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
-            <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent value="preview" className="flex-1 overflow-auto p-0 mt-0">
-          <div className="px-6 py-5">
+      <PreviewRawTabs
+        preview={
+          <div className="mx-auto max-w-3xl px-6 py-6">
             <MarkdownRenderer content={text} />
           </div>
-        </TabsContent>
-        <TabsContent value="raw" className="flex-1 overflow-auto p-0 mt-0">
-          <pre className="p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-words">{text}</pre>
-        </TabsContent>
-      </Tabs>
+        }
+        raw={<RawText text={text} />}
+      />
     );
   }
 
   if (kind === "code") {
     return (
-      <Tabs defaultValue="preview" className="flex flex-col h-full">
-        <div className="border-b border-[var(--border-default)] px-4 pt-2 shrink-0">
-          <TabsList variant="line" className="h-8">
-            <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
-            <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent value="preview" className="flex-1 overflow-auto p-0 mt-0">
-          <CodeBlock text={text} filePath={file.path} />
-        </TabsContent>
-        <TabsContent value="raw" className="flex-1 overflow-auto p-0 mt-0">
-          <pre className="p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-words">{text}</pre>
-        </TabsContent>
-      </Tabs>
+      <PreviewRawTabs
+        preview={<CodeBlock text={text} filePath={file.path} />}
+        raw={<RawText text={text} />}
+      />
     );
   }
 
   if (kind === "html") {
     return (
-      <Tabs defaultValue="preview" className="flex flex-col h-full">
-        <div className="border-b border-[var(--border-default)] px-4 pt-2 shrink-0">
-          <TabsList variant="line" className="h-8">
-            <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
-            <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent value="preview" className="flex-1 overflow-auto p-0 mt-0 bg-white">
+      <PreviewRawTabs
+        previewClassName="bg-white"
+        preview={
           <iframe
             title={file.path}
             srcDoc={text}
@@ -1621,30 +1613,18 @@ function FileContent({
             referrerPolicy="no-referrer"
             className="h-full min-h-[600px] w-full border-0 bg-white"
           />
-        </TabsContent>
-        <TabsContent value="raw" className="flex-1 overflow-auto p-0 mt-0">
-          <CodeBlock text={text} filePath={file.path} />
-        </TabsContent>
-      </Tabs>
+        }
+        raw={<CodeBlock text={text} filePath={file.path} />}
+      />
     );
   }
 
   if (kind === "table") {
     return (
-      <Tabs defaultValue="preview" className="flex flex-col h-full">
-        <div className="border-b border-[var(--border-default)] px-4 pt-2 shrink-0">
-          <TabsList variant="line" className="h-8">
-            <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
-            <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent value="preview" className="flex-1 overflow-auto p-0 mt-0">
-          <DelimitedTablePreview text={text} path={file.path} />
-        </TabsContent>
-        <TabsContent value="raw" className="flex-1 overflow-auto p-0 mt-0">
-          <pre className="p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-words">{text}</pre>
-        </TabsContent>
-      </Tabs>
+      <PreviewRawTabs
+        preview={<DelimitedTablePreview text={text} path={file.path} />}
+        raw={<RawText text={text} />}
+      />
     );
   }
 
@@ -1691,6 +1671,42 @@ function FileContent({
         Download
       </a>
     </div>
+  );
+}
+
+// Shared Preview/Raw shell for the text-like file kinds (markdown, code, html,
+// table). Keeps the tab strip, spacing, and surface identical across kinds
+// instead of each viewer re-declaring its own slightly different version.
+function PreviewRawTabs({
+  preview,
+  raw,
+  previewClassName = "",
+}: {
+  preview: ReactNode;
+  raw: ReactNode;
+  previewClassName?: string;
+}) {
+  return (
+    <Tabs defaultValue="preview" className="flex h-full flex-col">
+      <div className="shrink-0 border-b border-[var(--border-default)] px-4 pt-2">
+        <TabsList variant="line" className="h-8">
+          <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
+          <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent value="preview" className={`mt-0 flex-1 overflow-auto p-0 ${previewClassName}`}>
+        {preview}
+      </TabsContent>
+      <TabsContent value="raw" className="mt-0 flex-1 overflow-auto p-0">
+        {raw}
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function RawText({ text }: { text: string }) {
+  return (
+    <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-foreground">{text}</pre>
   );
 }
 
@@ -1977,52 +1993,44 @@ function PreviewUnavailable({
   );
 }
 
-function BrainPackVersionsPane({
+// Per-file version history. Each brain-pack file is snapshotted independently
+// on the backend (asset_type `brain_file`), so this lists the revisions of ONE
+// file and restores only THAT file — not the whole pack. Restore writes the
+// chosen revision's content back via the normal save path (which records a new
+// snapshot), so it is limited to text files (the only kind that carries an
+// inline, diffable content body here).
+function BrainFileVersionsPane({
   packName,
-  selectedFilePath,
+  selectedFile,
   currentFileContent,
+  readOnly,
   onClose,
-  onRollback,
+  onRestored,
 }: {
   packName: string;
-  selectedFilePath: string;
+  selectedFile: ContextFileItem;
   currentFileContent: string;
+  readOnly: boolean;
   onClose: () => void;
-  onRollback: (updated: ContextDetail) => void;
+  onRestored: (restoredContent: string) => void;
 }) {
+  const selectedFilePath = selectedFile.path;
   const [versions, setVersions] = useState<VersionSummary[]>([]);
-  const [versionDetails, setVersionDetails] = useState<Record<string, VersionDetail>>({});
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [expandedFiles, setExpandedFiles] = useState<{ path: string; content: string }[] | null>(null);
-  const [currentFiles, setCurrentFiles] = useState<{ path: string; content: string }[]>([]);
+  const [expandedSnapshot, setExpandedSnapshot] = useState<VersionFileSnapshot | null>(null);
   const [loadingExpand, setLoadingExpand] = useState<string | null>(null);
-  const [rollingBack, setRollingBack] = useState<string | null>(null);
-  const [pendingRollback, setPendingRollback] = useState<VersionSummary | null>(null);
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
+
+  const canRestore = isKnownTextFile(selectedFile) && !readOnly;
 
   const loadVersions = useCallback(async () => {
     setLoading(true);
     try {
-      const summaries = await api.contexts.listVersions(packName);
-      const detailEntries = await Promise.all(
-        summaries.map(async (summary) => {
-          try {
-            return [summary.id, await api.contexts.getVersion(packName, summary.id)] as const;
-          } catch {
-            return [summary.id, null] as const;
-          }
-        })
-      );
-      const detailMap = Object.fromEntries(detailEntries.filter(([, value]) => value !== null)) as Record<string, VersionDetail>;
-      setVersionDetails(detailMap);
-      setVersions(
-        summaries.filter((summary) =>
-          (detailMap[summary.id]?.files ?? []).some((file) => file.path === selectedFilePath)
-        )
-      );
+      setVersions(await api.contexts.listFileVersions(packName, selectedFilePath));
     } catch {
       setVersions([]);
-      setVersionDetails({});
     } finally {
       setLoading(false);
     }
@@ -2033,15 +2041,13 @@ function BrainPackVersionsPane({
   async function handleExpand(v: VersionSummary) {
     if (expandedId === v.id) {
       setExpandedId(null);
-      setExpandedFiles(null);
+      setExpandedSnapshot(null);
       return;
     }
     setLoadingExpand(v.id);
     try {
-      const versionDetail = versionDetails[v.id] ?? await api.contexts.getVersion(packName, v.id);
-      const versionFile = versionDetail.files.find((file) => file.path === selectedFilePath);
-      setCurrentFiles([{ path: selectedFilePath, content: currentFileContent }]);
-      setExpandedFiles(versionFile ? [versionFile] : []);
+      const detail = await api.contexts.getFileVersion(packName, selectedFilePath, v.id);
+      setExpandedSnapshot(detail.file ?? null);
       setExpandedId(v.id);
     } catch {
       toast.error("Failed to load version");
@@ -2050,35 +2056,47 @@ function BrainPackVersionsPane({
     }
   }
 
-  async function handleRollback(v: VersionSummary) {
-    setPendingRollback(null);
-    setRollingBack(v.id);
+  async function handleRestore(v: VersionSummary) {
+    setPendingRestore(null);
+    setRestoring(v.id);
     try {
-      const updated = await api.contexts.rollback(packName, v.id);
-      onRollback(updated);
-      await loadVersions();
-      setExpandedId(null);
-      setExpandedFiles(null);
-      toast.success(`Rolled back to version ${v.version_number}`);
+      const detail = await api.contexts.getFileVersion(packName, selectedFilePath, v.id);
+      const snapshot = detail.file;
+      if (!snapshot || snapshot.deleted) {
+        toast.error("This snapshot recorded the file as deleted and can't be restored inline.");
+        return;
+      }
+      if (snapshot.encoding === "base64") {
+        toast.error("Restoring binary file revisions isn't supported yet.");
+        return;
+      }
+      const restoredContent = snapshot.content ?? "";
+      await api.contexts.saveTextFile(packName, selectedFilePath, restoredContent);
+      onRestored(restoredContent);
+      toast.success(`Restored ${selectedFileName} to v${v.version_number}`);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Rollback failed");
+      toast.error(err instanceof Error ? err.message : "Restore failed");
     } finally {
-      setRollingBack(null);
+      setRestoring(null);
     }
   }
 
   const selectedFileName = selectedFilePath.split("/").pop() ?? selectedFilePath;
+  const expandedFiles = expandedSnapshot
+    ? [{ path: selectedFilePath, content: expandedSnapshot.content ?? "" }]
+    : null;
+  const currentFiles = [{ path: selectedFilePath, content: currentFileContent }];
 
   return (
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <div className="flex min-h-[82px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-5 py-4">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold">File versions</h2>
+          <h2 className="text-base font-semibold">Version history</h2>
           <p className="mt-0.5 truncate text-sm text-muted-foreground">
-            {selectedFileName} in {packName}. Rollback restores the whole Brain pack.
+            <span className="font-mono">{selectedFileName}</span> · earlier revisions of this file
           </p>
         </div>
-        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Close versions" onClick={onClose}>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Close version history" onClick={onClose}>
           <X className="size-4" />
         </Button>
       </div>
@@ -2096,13 +2114,13 @@ function BrainPackVersionsPane({
         </div>
         {loading ? (
           <div className="space-y-2">
-            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full rounded-[var(--radius-card)]" />)}
           </div>
         ) : versions.length === 0 ? (
           <div className="rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-6">
-            <p className="text-sm font-medium">No previous snapshots for this file yet</p>
+            <p className="text-sm font-medium">No earlier revisions of this file yet</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Snapshots appear here after this file has been edited, deleted, or restored.
+              A revision is saved here each time this file is edited, replaced, or deleted.
             </p>
           </div>
         ) : (
@@ -2123,15 +2141,16 @@ function BrainPackVersionsPane({
                   </div>
                   {loadingExpand === v.id
                     ? <Skeleton className="size-4 rounded-full" />
-                    : <svg className={`size-4 text-muted-foreground transition-transform ${expandedId === v.id ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>}
+                    : <ChevronRight className={`size-4 shrink-0 text-muted-foreground transition-transform ${expandedId === v.id ? "rotate-90" : ""}`} />}
                 </div>
                 {expandedId === v.id && expandedFiles && (
                   <VersionDiffPanel
                     versionNumber={v.version_number}
                     versionFiles={expandedFiles}
                     currentFiles={currentFiles}
-                    isRestoring={rollingBack === v.id}
-                    onRestore={() => setPendingRollback(v)}
+                    isRestoring={restoring === v.id}
+                    canRestore={canRestore}
+                    onRestore={() => setPendingRestore(v)}
                   />
                 )}
               </div>
@@ -2139,24 +2158,25 @@ function BrainPackVersionsPane({
           </div>
         )}
       </div>
-      <Dialog open={Boolean(pendingRollback)} onOpenChange={(open) => { if (!open && !rollingBack) setPendingRollback(null); }}>
+      <Dialog open={Boolean(pendingRestore)} onOpenChange={(open) => { if (!open && !restoring) setPendingRestore(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Restore Brain pack snapshot?</DialogTitle>
+            <DialogTitle>Restore this file?</DialogTitle>
             <DialogDescription>
-              This restores every file in {packName} to v{pendingRollback?.version_number}, not only {selectedFileName}.
-              A new rollback snapshot will be recorded after restore.
+              This replaces the current contents of <span className="font-mono">{selectedFileName}</span> with
+              v{pendingRestore?.version_number}. Other files in {packName} are untouched, and the current contents
+              are saved as a new revision first.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingRollback(null)} disabled={Boolean(rollingBack)}>
+            <Button variant="outline" onClick={() => setPendingRestore(null)} disabled={Boolean(restoring)}>
               Cancel
             </Button>
             <Button
-              onClick={() => { if (pendingRollback) void handleRollback(pendingRollback); }}
-              disabled={Boolean(rollingBack)}
+              onClick={() => { if (pendingRestore) void handleRestore(pendingRestore); }}
+              disabled={Boolean(restoring)}
             >
-              {rollingBack ? "Restoring..." : `Restore to v${pendingRollback?.version_number ?? ""}`}
+              {restoring ? "Restoring..." : `Restore to v${pendingRestore?.version_number ?? ""}`}
             </Button>
           </DialogFooter>
         </DialogContent>
