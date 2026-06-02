@@ -256,10 +256,19 @@ export function WorkerIconPills({
   const visible = entries.length > max ? entries.slice(0, max) : entries;
   const overflow = entries.length - visible.length;
 
+  // The cells are decorative (icons are aria-hidden; sighted users get the
+  // per-cell `title` tooltip). For assistive tech the strip is announced once
+  // as a single image with a label summarizing what it represents — the
+  // worker's identity, inputs, and connected tools — so it is never a silent
+  // run of unlabeled glyphs.
+  const stripLabel = `${worker?.name ? `${worker.name}: ` : ""}inputs and tools — ${entries
+    .map((e) => e.title)
+    .join(", ")}`;
+
   return (
     <div className={cn("flex items-center", className)}>
       {/* The composed strip: one connected unit, no gaps between cells. */}
-      <div className="flex items-center">
+      <div className="flex items-center" role="img" aria-label={stripLabel} title={stripLabel}>
         {visible.map((e, i) => (
           <Cell key={e.key} size={size} title={e.title} accent={e.accent} first={i === 0}>
             {e.kind === "brand" ? (
