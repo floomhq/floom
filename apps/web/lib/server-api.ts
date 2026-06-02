@@ -76,3 +76,15 @@ export async function fetchConnections() {
     next: { revalidate: 10 },
   });
 }
+
+/**
+ * Fetch the read-only public projection of a worker for a signed share link.
+ * Authenticated by the HMAC `token` alone (no app login). Returns the
+ * allow-listed PublicWorker — never secrets, source, or run history.
+ */
+export async function fetchPublicWorker(id: string, token: string) {
+  return serverFetch<import("./types").PublicWorker>(
+    `/workers/public/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,
+    { next: { revalidate: 30 } }
+  );
+}

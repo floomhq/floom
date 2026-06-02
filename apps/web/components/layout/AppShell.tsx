@@ -7,7 +7,9 @@ import { IconSprite } from "@/components/IconSprite";
 import { Toaster } from "@/components/ui/sonner";
 import { Sidebar } from "@/components/layout/sidebar";
 
-const standalonePrefixes = ["/approvals/review"];
+// Public, shareable "skill card" pages render full-bleed without the app
+// sidebar / command palette. /w is the standalone public worker share page.
+const standalonePrefixes = ["/approvals/review", "/w"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

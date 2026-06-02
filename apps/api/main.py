@@ -112,6 +112,9 @@ from models import (
     RunCreate,
     WorkerSummary,
     WorkerDetail,
+    PublicWorker,
+    PublicWorkerInput,
+    PublicWorkerOutput,
     WorkerFile,
     RunSummary,
     RunDetail,
@@ -933,6 +936,7 @@ async def auth_middleware(request: Request, call_next):
             or path == "/api/workspace-agent/mcp"
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
+            or path.startswith("/workers/public/")
             or path == "/cli-auth/devices"
             or path.startswith("/cli-auth/poll/")
             or _RE_RUN_COMPOSIO_PROXY.match(path)
@@ -4665,9 +4669,102 @@ def list_workers(
                 connections=_conn_slugs,
                 inputs=_inputs,
                 runtime=_runtime_type,
+                public_link=_worker_public_link(w),
             )
         )
     return result
+
+
+def _worker_public_payload(worker: Dict[str, Any]) -> str:
+    """Stable HMAC payload for a worker share link.
+
+    Bound to both the worker id AND its owner so a link minted for one owner's
+    worker can never resolve a same-id worker owned by someone else (defense in
+    depth alongside the owner-scoped detail build).
+    """
+    return ".".join(
+        ("worker", str(worker.get("id") or ""), str(worker.get("owner_id") or ""))
+    )
+
+
+def _worker_public_token(worker: Dict[str, Any]) -> str:
+    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    return hmac.new(
+        secret.encode("utf-8"),
+        _worker_public_payload(worker).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _worker_public_link(worker: Dict[str, Any]) -> Optional[str]:
+    """Owner-only standalone share URL for a worker (or None if id is missing)."""
+    worker_id = str(worker.get("id") or "")
+    if not worker_id:
+        return None
+    token = _worker_public_token(worker)
+    return f"{_frontend_base_url()}/w/{worker_id}?token={token}"
+
+
+def _public_connection_labels(config: WorkerConfig) -> List[str]:
+    """Public, display-only tool/connection identifiers.
+
+    Composio connections are plain app slugs (safe). MCP connections expose only
+    their human LABEL — never the server url, env, command, args, or auth value,
+    which can carry internal infrastructure detail or credentials.
+    """
+    labels: List[str] = []
+    for connection in (config.connections or []):
+        if isinstance(connection, str):
+            slug = connection.strip()
+            if slug:
+                labels.append(slug)
+        else:
+            # WorkerConnection(mcp=WorkerMCPConnection(...)) — expose the human
+            # label only, never the url/env/command/auth.
+            mcp = getattr(connection, "mcp", None)
+            label = (getattr(mcp, "label", "") or "").strip() if mcp else ""
+            if label:
+                labels.append(label)
+    return labels
+
+
+def _public_worker_response(worker: Dict[str, Any], config: WorkerConfig) -> PublicWorker:
+    """Project a full worker dict + parsed config into the public allow-list.
+
+    NOTHING outside the ``PublicWorker`` field set leaves this function: no
+    secrets, no source files, no run history, no owner id, no webhook url, no
+    config internals (bundle paths, MCP urls/env). Inputs and outputs are
+    re-projected through ``PublicWorkerInput`` / ``PublicWorkerOutput`` so a
+    future sensitive field on ``WorkerInput`` is not auto-forwarded.
+    """
+    return PublicWorker(
+        id=str(worker.get("id") or config.id),
+        name=str(worker.get("name") or config.name),
+        description=worker.get("description"),
+        long_description=worker.get("long_description"),
+        use_cases=worker.get("use_cases"),
+        how_it_works=worker.get("how_it_works"),
+        is_example=worker.get("is_example"),
+        tags=worker.get("tags") or [],
+        trigger_type=str(worker.get("trigger_type") or "manual"),
+        runtime=(config.runtime.type if config.runtime else None),
+        connections=_public_connection_labels(config),
+        inputs=[
+            PublicWorkerInput(
+                name=inp.name,
+                label=inp.label,
+                type=inp.type,
+                required=inp.required,
+                description=inp.description,
+                options=inp.options,
+            )
+            for inp in (config.inputs or [])
+        ],
+        outputs=[
+            PublicWorkerOutput(name=out.name, label=out.label, type=out.type)
+            for out in (config.outputs or [])
+        ],
+    )
 
 
 def _build_worker_detail(
@@ -4795,7 +4892,52 @@ def _build_worker_detail(
         files=worker_files,
         webhook_url=webhook_url,
         triggers_spec=triggers_spec,
+        public_link=_worker_public_link(worker),
     )
+
+
+def _load_public_worker(worker_id: str, token: str, repos: Repositories) -> Dict[str, Any]:
+    """Resolve + authenticate a worker for a signed public share link.
+
+    Missing worker -> 404. Forged/missing token -> 401 (constant-time compare).
+    Returns the full worker dict (owner-scoped projection happens in the route).
+    """
+    try:
+        worker = repos.workers.get_any(worker_id=worker_id)
+    except Exception:
+        worker = None
+    if worker is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    expected = _worker_public_token(worker)
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid worker link")
+    return worker
+
+
+@app.get("/workers/public/{worker_id}", response_model=PublicWorker)
+def get_public_worker(
+    worker_id: str,
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> PublicWorker:
+    """Return a read-only, allow-listed projection of a worker for a signed link.
+
+    Authenticated solely by the HMAC ``token`` (no app login). The response is
+    a strict ``PublicWorker`` allow-list — no secrets, source, run history,
+    owner id, or webhook url. See ``_public_worker_response``.
+    """
+    worker = _load_public_worker(worker_id, token, repos)
+    config_dict = worker.get("config", {})
+    try:
+        config = WorkerConfig(**config_dict)
+    except Exception:
+        config = WorkerConfig(
+            id=str(worker.get("id") or worker_id),
+            name=str(worker.get("name") or worker_id),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
+    return _public_worker_response(worker, config)
 
 
 @app.get("/workers/{worker_id}", response_model=WorkerDetail)

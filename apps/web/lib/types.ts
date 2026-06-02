@@ -228,6 +228,7 @@ export interface WorkerSummary {
   connections: string[];  // Composio app slugs declared in worker.yml
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
+  public_link?: string;   // owner-only signed share link to /w/<id>?token=
 }
 
 export interface WorkerFile {
@@ -267,6 +268,43 @@ export interface WorkerDetail {
   webhook_url?: string;
   files: WorkerFile[];
   triggers_spec: TriggerSpec[];
+  // Owner-only signed share link to the standalone public worker page
+  // (/w/<id>?token=<hmac>). Only present on the owner's authenticated fetch.
+  public_link?: string;
+}
+
+// Read-only allow-list projection of a worker returned by
+// GET /workers/public/{id}?token=. Strictly a subset of WorkerDetail: no
+// secrets, source files, run history, owner id, or webhook url.
+export interface PublicWorkerInput {
+  name: string;
+  label: string;
+  type: string;
+  required: boolean;
+  description?: string | null;
+  options?: string[] | null;
+}
+
+export interface PublicWorkerOutput {
+  name: string;
+  label: string;
+  type: string;
+}
+
+export interface PublicWorker {
+  id: string;
+  name: string;
+  description?: string | null;
+  long_description?: string | null;
+  use_cases?: string[] | null;
+  how_it_works?: string | null;
+  is_example?: boolean | null;
+  tags: string[];
+  trigger_type: string;
+  runtime?: string | null;
+  connections: string[];
+  inputs: PublicWorkerInput[];
+  outputs: PublicWorkerOutput[];
 }
 
 export interface WorkerSuggestion {
