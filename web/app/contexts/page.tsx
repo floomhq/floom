@@ -32,13 +32,21 @@ import {
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ContextDetail, ContextFileItem, ContextSummary, VersionSummary } from "@/lib/types";
+import type { ContextDetail, ContextFileItem, ContextSummary, VersionDetail, VersionSummary } from "@/lib/types";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const TEXT_PREVIEW_LIMIT = 512 * 1024;
 const TABLE_PREVIEW_ROWS = 100;
@@ -206,6 +214,115 @@ function buildEntries(files: ContextFileItem[], currentFolder: string): Entry[] 
   return [...folderEntries, ...directFiles];
 }
 
+// ---------------------------------------------------------------------------
+// Resizable panes (Cursor-IDE style). Two draggable vertical dividers let the
+// user set the width of the packs pane and the middle pane; the final pane
+// flexes to fill the rest. Widths persist to localStorage and only apply on
+// the desktop side-by-side layout (lg+), so the mobile drill-in is untouched.
+// ---------------------------------------------------------------------------
+
+const PANE_WIDTHS_KEY = "floom:brain:pane-widths";
+const PACKS_MIN = 160;
+const PACKS_MAX = 420;
+const MID_MIN = 180;
+const MID_MAX = 560;
+const PACKS_DEFAULT = 300;
+const MID_DEFAULT = 280;
+
+type PaneWidths = { packs: number; mid: number };
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function loadPaneWidths(): PaneWidths {
+  if (typeof window === "undefined") return { packs: PACKS_DEFAULT, mid: MID_DEFAULT };
+  try {
+    const raw = window.localStorage.getItem(PANE_WIDTHS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PaneWidths>;
+      return {
+        packs: clamp(Number(parsed.packs) || PACKS_DEFAULT, PACKS_MIN, PACKS_MAX),
+        mid: clamp(Number(parsed.mid) || MID_DEFAULT, MID_MIN, MID_MAX),
+      };
+    }
+  } catch {
+    /* ignore malformed storage */
+  }
+  return { packs: PACKS_DEFAULT, mid: MID_DEFAULT };
+}
+
+// True on the desktop side-by-side layout (Tailwind lg breakpoint). Inline pane
+// widths are only honoured here; below lg each pane is full-width and drill-in.
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsDesktop(mql.matches);
+    update();
+    mql.addEventListener("change", update);
+    return () => mql.removeEventListener("change", update);
+  }, []);
+  return isDesktop;
+}
+
+// A thin draggable divider. onResize receives the pointer's horizontal delta in
+// px since the drag started; the parent clamps + commits the new width.
+function ResizableDivider({
+  ariaLabel,
+  onResizeStart,
+  onResize,
+  onResizeEnd,
+}: {
+  ariaLabel: string;
+  onResizeStart: () => void;
+  onResize: (deltaX: number) => void;
+  onResizeEnd: () => void;
+}) {
+  const startX = useRef(0);
+  const dragging = useRef(false);
+
+  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    startX.current = e.clientX;
+    dragging.current = true;
+    onResizeStart();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragging.current) return;
+    onResize(e.clientX - startX.current);
+  }
+  function endDrag(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragging.current) return;
+    dragging.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* pointer already released */
+    }
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    onResizeEnd();
+  }
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={ariaLabel}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      className="relative z-20 hidden lg:block w-px shrink-0 cursor-col-resize bg-[var(--border-default)] transition-colors hover:bg-[var(--primary)]/40 before:absolute before:inset-y-0 before:-left-1.5 before:-right-1.5 before:content-['']"
+    />
+  );
+}
+
 // ===========================================================================
 
 export default function ContextsPageShell() {
@@ -247,6 +364,37 @@ function ContextsPage() {
   const [newContextName, setNewContextName] = useState("");
   const [showNewContext, setShowNewContext] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+
+  // ---- Resizable panes (desktop only) -------------------------------------
+  const isDesktop = useIsDesktop();
+  const [paneWidths, setPaneWidths] = useState<PaneWidths>(() => loadPaneWidths());
+  // Width captured at the moment a divider drag starts, so the delta is applied
+  // to a stable base instead of compounding across pointermove events.
+  const resizeBase = useRef<PaneWidths>(paneWidths);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(PANE_WIDTHS_KEY, JSON.stringify(paneWidths));
+    } catch {
+      /* storage unavailable / quota */
+    }
+  }, [paneWidths]);
+
+  const beginResize = useCallback(() => {
+    resizeBase.current = paneWidths;
+  }, [paneWidths]);
+
+  const resizePacks = useCallback((deltaX: number) => {
+    setPaneWidths((prev) => ({ ...prev, packs: clamp(resizeBase.current.packs + deltaX, PACKS_MIN, PACKS_MAX) }));
+  }, []);
+
+  const resizeMid = useCallback((deltaX: number) => {
+    setPaneWidths((prev) => ({ ...prev, mid: clamp(resizeBase.current.mid + deltaX, MID_MIN, MID_MAX) }));
+  }, []);
+
+  const noop = useCallback(() => {}, []);
+
   // On mobile only one pane shows at a time. Initialise from the URL so a
   // deep-link (?pack=&file=) lands on the right pane instead of stranding the
   // user on the pack list with the file pane absent from the DOM.
@@ -478,21 +626,23 @@ function ContextsPage() {
   const dropHandlers = readOnly
     ? {}
     : {
+        // preventDefault on BOTH dragenter and dragover is REQUIRED, otherwise
+        // the browser treats the pane as a non-drop target and the `drop` event
+        // never fires. We always preventDefault here and only gate the *visual*
+        // dragActive overlay on whether the payload is actually files — some
+        // browsers report an empty `types` list mid-drag, so guarding the
+        // preventDefault itself (the previous behavior) silently broke drops.
         onDragEnter: (e: React.DragEvent) => {
-          if (!isFileDrag(e)) return;
           e.preventDefault();
           dragDepth.current += 1;
-          setDragActive(true);
+          if (isFileDrag(e)) setDragActive(true);
         },
-        // preventDefault on dragover is REQUIRED or the browser never fires drop.
         onDragOver: (e: React.DragEvent) => {
-          if (!isFileDrag(e)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
-          if (!dragActive) setDragActive(true);
+          if (isFileDrag(e) && !dragActive) setDragActive(true);
         },
-        onDragLeave: (e: React.DragEvent) => {
-          if (!isFileDrag(e)) return;
+        onDragLeave: () => {
           dragDepth.current = Math.max(0, dragDepth.current - 1);
           if (dragDepth.current === 0) setDragActive(false);
         },
@@ -535,7 +685,11 @@ function ContextsPage() {
     );
   }
 
-  const packsWidth = fileOpen ? "lg:w-[10%] lg:min-w-[140px]" : "lg:w-[30%] lg:min-w-[260px] lg:max-w-[380px]";
+  // Desktop pane width comes from the resizable state; on mobile each pane is
+  // full-width (drill-in). The packs pane keeps its user-set width in both the
+  // default and file-open modes so dragging the divider behaves predictably.
+  const packsStyle = isDesktop ? { width: paneWidths.packs } : undefined;
+  const midStyle = isDesktop ? { width: paneWidths.mid } : undefined;
 
   return (
     <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 120px)" }}>
@@ -548,19 +702,6 @@ function ContextsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {selectedName && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setSelectedFile(null);
-                setVersionsOpen((value) => !value);
-              }}
-            >
-              <GitFork className="size-4" />
-              Versions
-            </Button>
-          )}
           <Button size="sm" onClick={() => setShowNewContext(true)}>
             <Plus className="size-4" />
             New pack
@@ -593,9 +734,11 @@ function ContextsPage() {
           side-by-side panes separated by internal dividers (not floating cards),
           compressing as a file opens. Mobile: a single drill-in column. */}
       <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
-        {/* ---- Packs pane (30% default → 10% when a file is open) ---------- */}
+        {/* ---- Packs pane (resizable on desktop, drag the divider to its
+            right). Full-width on mobile drill-in. ---------------------------- */}
         <section
-          className={`flex flex-col w-full shrink-0 transition-all duration-300 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] ${packsWidth} ${
+          style={packsStyle}
+          className={`flex flex-col w-full lg:w-auto shrink-0 border-b lg:border-b-0 border-[var(--border-default)] ${
             mobilePane === "packs" ? "flex" : "hidden lg:flex"
           }`}
         >
@@ -676,6 +819,14 @@ function ContextsPage() {
           </div>
         </section>
 
+        {/* Divider between the packs pane and the detail/middle pane. */}
+        <ResizableDivider
+          ariaLabel="Resize knowledge packs pane"
+          onResizeStart={beginResize}
+          onResize={resizePacks}
+          onResizeEnd={noop}
+        />
+
         {/* ---- Pack detail / miller folder columns ------------------------ */}
         {!selectedName ? (
           <section className="flex-1 overflow-hidden flex items-center justify-center p-8">
@@ -698,15 +849,16 @@ function ContextsPage() {
           <section className="flex-1 overflow-hidden flex items-center justify-center">
             <Skeleton className="h-10 w-48 rounded-[var(--radius-button)]" />
           </section>
-        ) : versionsOpen ? (
+        ) : versionsOpen && fileObj ? (
           <BrainPackVersionsPane
             key={`${selectedName}:${versionsKey}`}
             packName={selectedName}
-            detail={detail}
+            selectedFilePath={fileObj.path}
+            currentFileContent={isKnownTextFile(fileObj) ? fileText : ""}
+            onClose={() => setVersionsOpen(false)}
             onRollback={(updated) => {
               setDetail(updated);
-              setSelectedFile(null);
-              setFolderPath([]);
+              setVersionsOpen(false);
               setVersionsKey((k) => k + 1);
               void loadContexts(selectedName);
             }}
@@ -729,10 +881,11 @@ function ContextsPage() {
             dropHandlers={dropHandlers}
           />
         ) : (
-          /* FILE OPEN: 20% folder columns + 70% file content. */
+          /* FILE OPEN: resizable folder columns + flexing file content. */
           <>
             <section
-              className={`flex overflow-hidden w-full lg:w-[20%] lg:min-w-[200px] shrink-0 transition-all duration-300 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] ${
+              style={midStyle}
+              className={`flex overflow-hidden w-full lg:w-auto shrink-0 border-b lg:border-b-0 border-[var(--border-default)] ${
                 mobilePane === "files" ? "flex" : "hidden lg:flex"
               }`}
             >
@@ -747,6 +900,14 @@ function ContextsPage() {
                 onOpenFile={openFile}
               />
             </section>
+
+            {/* Divider between the folder columns and the file viewer. */}
+            <ResizableDivider
+              ariaLabel="Resize files pane"
+              onResizeStart={beginResize}
+              onResize={resizeMid}
+              onResizeEnd={noop}
+            />
 
             <section
               {...dropHandlers}
@@ -1818,31 +1979,54 @@ function PreviewUnavailable({
 
 function BrainPackVersionsPane({
   packName,
-  detail,
+  selectedFilePath,
+  currentFileContent,
+  onClose,
   onRollback,
 }: {
   packName: string;
-  detail: ContextDetail | null;
+  selectedFilePath: string;
+  currentFileContent: string;
+  onClose: () => void;
   onRollback: (updated: ContextDetail) => void;
 }) {
   const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [versionDetails, setVersionDetails] = useState<Record<string, VersionDetail>>({});
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedFiles, setExpandedFiles] = useState<{ path: string; content: string }[] | null>(null);
   const [currentFiles, setCurrentFiles] = useState<{ path: string; content: string }[]>([]);
   const [loadingExpand, setLoadingExpand] = useState<string | null>(null);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [pendingRollback, setPendingRollback] = useState<VersionSummary | null>(null);
 
   const loadVersions = useCallback(async () => {
     setLoading(true);
     try {
-      setVersions(await api.contexts.listVersions(packName));
+      const summaries = await api.contexts.listVersions(packName);
+      const detailEntries = await Promise.all(
+        summaries.map(async (summary) => {
+          try {
+            return [summary.id, await api.contexts.getVersion(packName, summary.id)] as const;
+          } catch {
+            return [summary.id, null] as const;
+          }
+        })
+      );
+      const detailMap = Object.fromEntries(detailEntries.filter(([, value]) => value !== null)) as Record<string, VersionDetail>;
+      setVersionDetails(detailMap);
+      setVersions(
+        summaries.filter((summary) =>
+          (detailMap[summary.id]?.files ?? []).some((file) => file.path === selectedFilePath)
+        )
+      );
     } catch {
       setVersions([]);
+      setVersionDetails({});
     } finally {
       setLoading(false);
     }
-  }, [packName]);
+  }, [packName, selectedFilePath]);
 
   useEffect(() => { void loadVersions(); }, [loadVersions]);
 
@@ -1854,15 +2038,10 @@ function BrainPackVersionsPane({
     }
     setLoadingExpand(v.id);
     try {
-      const textFiles = (detail?.files ?? []).filter((f) => !f.is_binary);
-      const [versionDetail, ...fileContents] = await Promise.all([
-        api.contexts.getVersion(packName, v.id),
-        ...textFiles.map((f) =>
-          api.contexts.readTextFile(packName, f.path).catch(() => "")
-        ),
-      ]);
-      setCurrentFiles(textFiles.map((f, i) => ({ path: f.path, content: fileContents[i] as string })));
-      setExpandedFiles(versionDetail.files);
+      const versionDetail = versionDetails[v.id] ?? await api.contexts.getVersion(packName, v.id);
+      const versionFile = versionDetail.files.find((file) => file.path === selectedFilePath);
+      setCurrentFiles([{ path: selectedFilePath, content: currentFileContent }]);
+      setExpandedFiles(versionFile ? [versionFile] : []);
       setExpandedId(v.id);
     } catch {
       toast.error("Failed to load version");
@@ -1872,6 +2051,7 @@ function BrainPackVersionsPane({
   }
 
   async function handleRollback(v: VersionSummary) {
+    setPendingRollback(null);
     setRollingBack(v.id);
     try {
       const updated = await api.contexts.rollback(packName, v.id);
@@ -1887,48 +2067,63 @@ function BrainPackVersionsPane({
     }
   }
 
+  const selectedFileName = selectedFilePath.split("/").pop() ?? selectedFilePath;
+
   return (
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="min-h-[82px] shrink-0 border-b border-[var(--border-default)] px-5 py-4">
-        <h2 className="text-base font-semibold">Versions</h2>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          Automatic snapshots for {packName}, newest first. Click a version to preview changes.
-        </p>
+      <div className="flex min-h-[82px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-5 py-4">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold">File versions</h2>
+          <p className="mt-0.5 truncate text-sm text-muted-foreground">
+            {selectedFileName} in {packName}. Rollback restores the whole Brain pack.
+          </p>
+        </div>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Close versions" onClick={onClose}>
+          <X className="size-4" />
+        </Button>
       </div>
       <div className="flex-1 overflow-auto p-5">
+        <div className="mb-3 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Current file</p>
+              <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{selectedFilePath}</p>
+            </div>
+            <span className="rounded-[var(--radius-pill)] bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+              Current
+            </span>
+          </div>
+        </div>
         {loading ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
           </div>
         ) : versions.length === 0 ? (
           <div className="rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-6">
-            <p className="text-sm font-medium">No versions yet</p>
+            <p className="text-sm font-medium">No previous snapshots for this file yet</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Versions are saved automatically when files are added, edited, deleted, or restored.
+              Snapshots appear here after this file has been edited, deleted, or restored.
             </p>
           </div>
         ) : (
           <div className="overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)]">
-            {versions.map((v, idx) => (
+            {versions.map((v) => (
               <div key={v.id} className="border-b border-[var(--border-default)] last:border-b-0">
                 <div
-                  className={`flex items-center justify-between gap-3 px-4 py-3 ${idx !== 0 ? "cursor-pointer hover:bg-muted/40" : ""}`}
-                  onClick={() => { if (idx !== 0) void handleExpand(v); }}
+                  className="flex cursor-pointer items-center justify-between gap-3 px-4 py-3 hover:bg-muted/40"
+                  onClick={() => { void handleExpand(v); }}
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-xs text-muted-foreground">v{v.version_number}</span>
-                      {idx === 0 && <span className="text-[10px] font-medium text-muted-foreground">(current)</span>}
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {v.change_source} · {formatDate(v.created_at)}
                     </p>
                   </div>
-                  {idx !== 0 && (
-                    loadingExpand === v.id
-                      ? <Skeleton className="size-4 rounded-full" />
-                      : <svg className={`size-4 text-muted-foreground transition-transform ${expandedId === v.id ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
-                  )}
+                  {loadingExpand === v.id
+                    ? <Skeleton className="size-4 rounded-full" />
+                    : <svg className={`size-4 text-muted-foreground transition-transform ${expandedId === v.id ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>}
                 </div>
                 {expandedId === v.id && expandedFiles && (
                   <VersionDiffPanel
@@ -1936,7 +2131,7 @@ function BrainPackVersionsPane({
                     versionFiles={expandedFiles}
                     currentFiles={currentFiles}
                     isRestoring={rollingBack === v.id}
-                    onRestore={() => void handleRollback(v)}
+                    onRestore={() => setPendingRollback(v)}
                   />
                 )}
               </div>
@@ -1944,6 +2139,28 @@ function BrainPackVersionsPane({
           </div>
         )}
       </div>
+      <Dialog open={Boolean(pendingRollback)} onOpenChange={(open) => { if (!open && !rollingBack) setPendingRollback(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Restore Brain pack snapshot?</DialogTitle>
+            <DialogDescription>
+              This restores every file in {packName} to v{pendingRollback?.version_number}, not only {selectedFileName}.
+              A new rollback snapshot will be recorded after restore.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRollback(null)} disabled={Boolean(rollingBack)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => { if (pendingRollback) void handleRollback(pendingRollback); }}
+              disabled={Boolean(rollingBack)}
+            >
+              {rollingBack ? "Restoring..." : `Restore to v${pendingRollback?.version_number ?? ""}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

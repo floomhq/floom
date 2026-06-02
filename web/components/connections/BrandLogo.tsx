@@ -73,7 +73,15 @@ export const KNOWN_BRAND_SLUGS = new Set([
 
 export function normalizeBrandSlug(slug: string): string {
   const lower = (slug || "").toLowerCase();
-  return SLUG_ALIASES[lower] ?? lower;
+  // U17b: backend connection app_names arrive separator-rich
+  // (e.g. "google_search_console"), but SLUG_ALIASES is keyed on the
+  // separator-free Composio form ("googlesearchconsole"). Try the literal
+  // value first, then a separator-collapsed form so underscore/hyphen/space
+  // variants all resolve to the same #brand-* symbol.
+  if (SLUG_ALIASES[lower]) return SLUG_ALIASES[lower];
+  const collapsed = lower.replace(/[\s_-]+/g, "");
+  if (SLUG_ALIASES[collapsed]) return SLUG_ALIASES[collapsed];
+  return lower;
 }
 
 // Neutral lettered fallback — never an empty box. Monochrome, restrained,

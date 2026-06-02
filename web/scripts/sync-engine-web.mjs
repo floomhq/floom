@@ -63,10 +63,13 @@ const COPY_ROOT_FILES = [
 // explicitly so the drift guard knows exactly which paths to exclude from
 // the "must equal engine" check. Keep in sync with overlay/ contents.
 export const OVERLAY_FILES = [
+  "app/api/auth/email/route.ts",
+  "app/api/auth/password/route.ts",
   "app/api/proxy/[...path]/route.ts",
   "app/assistant/page.tsx",
   "app/cloud-shell.css",
   "app/layout.tsx",
+  "app/login/page.tsx",
   "app/api/me/route.ts",
   "app/api/cli-auth/[action]/route.ts",
   "app/cli-auth/page.tsx",
@@ -74,7 +77,9 @@ export const OVERLAY_FILES = [
   "app/page.tsx",
   "app/privacy/page.tsx",
   "app/settings/page.tsx",
+  "app/workers/page.tsx",
   "app/workspace/share/[token]/page.tsx",
+  "components/CloudAppChrome.tsx",
   "components/TelemetryProvider.tsx",
   "components/layout/WorkspaceSwitcher.tsx",
   "components/layout/sidebar.tsx",
