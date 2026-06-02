@@ -9,6 +9,7 @@ from .interface import (
     ApprovalRepository,
     CliAuthRepository,
     ConnectionRepository,
+    McpToolRepository,
     RunRepository,
     SecretRepository,
     VersionRepository,
@@ -19,6 +20,7 @@ from .sqlite import (
     SqliteApprovalRepository,
     SqliteCliAuthRepository,
     SqliteConnectionRepository,
+    SqliteMcpToolRepository,
     SqliteRunRepository,
     SqliteSecretRepository,
     SqliteVersionRepository,
@@ -35,6 +37,7 @@ class Repositories(NamedTuple):
     approvals: ApprovalRepository
     alerts: AlertRepository
     versions: VersionRepository
+    mcp_tools: McpToolRepository
 
 
 def _local_repositories() -> Repositories:
@@ -47,6 +50,7 @@ def _local_repositories() -> Repositories:
         approvals=SqliteApprovalRepository(),
         alerts=SqliteAlertRepository(),
         versions=SqliteVersionRepository(),
+        mcp_tools=SqliteMcpToolRepository(),
     )
 
 
