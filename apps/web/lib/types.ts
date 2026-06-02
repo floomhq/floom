@@ -75,6 +75,8 @@ export interface WorkerMcpConnection {
 export interface WorkerComposioConnection {
   app: string;
   allowed_tools?: string[] | null;
+  scope?: string | null;
+  scopes?: string[] | null;
 }
 
 export type WorkerConnectionSpec =
