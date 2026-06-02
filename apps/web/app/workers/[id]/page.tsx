@@ -1446,7 +1446,12 @@ export default function WorkerDetailPage() {
       {/* U2 (Federico 2026-05-31): letter-avatar removed. The tool/connection
           icon strip (WorkerIconPills, below) + the title carry identity now —
           no initials circle anywhere. */}
-      <div className="flex items-start gap-4">
+      {/* Mobile (375): stack — title/description/icon-strip column gets the FULL
+          width, and the shrink-0 action cluster (Versions/Share/Edit/actions)
+          drops BELOW it instead of competing for width and starving the
+          flex-1 min-w-0 column to ~0px (one-word-per-line bug). From sm: up the
+          original `flex items-start gap-4` row layout is restored unchanged. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className={`text-xl font-semibold tracking-tight ${worker.archived ? "text-muted-foreground" : ""}`}>{worker.name}</h1>
