@@ -109,6 +109,16 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
   })) as DeviceResponse;
 
   log.ok(`Open: ${started.verification_url}`);
+  // Anti-phishing: show the user_code prominently and tell the user to verify
+  // it matches the code on the approval page. A device flow approval can be
+  // phished (an attacker starts a flow and tricks the owner into approving it),
+  // so the only safe approval is one where the code on screen equals the code
+  // shown HERE, in the terminal the user actually started.
+  log.heading(`Verification code: ${started.user_code}`);
+  log.warn(
+    "Approve ONLY if this exact code appears on the page. " +
+      "If it differs, someone may be trying to hijack your login — deny it.",
+  );
   const shouldOpen = await promptYesNo("Or open the URL automatically? [Y/n] ", true);
   if (shouldOpen) {
     try {

@@ -73,9 +73,13 @@ function CliAuthContent() {
           Code: <code className="bg-muted px-1.5 py-0.5 font-mono">{code || "(missing)"}</code>
         </p>
         <p>Client: floom-cli</p>
+        <p className="text-xs text-muted-foreground">
+          Only approve if this code matches the one shown in your terminal. If it
+          does not match, deny — someone may be trying to hijack your login.
+        </p>
         <div className="space-y-2">
           <label className="text-xs font-medium text-muted-foreground" htmlFor="cli-auth-confirm-code">
-            Confirm code
+            Re-type the code from your terminal to confirm
           </label>
           <Input
             id="cli-auth-confirm-code"
