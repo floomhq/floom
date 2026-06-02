@@ -1044,6 +1044,21 @@ MIGRATIONS: list[Migration] = [
     """,
     # -- migration 45: repair DBs that already consumed older MCP migrations ---
     _ensure_mcp_connection_columns,
+    # -- migration 46: mcp_tools (custom tools backed by workers) --------------
+    """
+    CREATE TABLE IF NOT EXISTS mcp_tools (
+        id           TEXT PRIMARY KEY,
+        user_id      TEXT NOT NULL,
+        name         TEXT NOT NULL,
+        description  TEXT NOT NULL,
+        input_schema TEXT NOT NULL DEFAULT '{}',
+        worker_id    TEXT NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        UNIQUE(user_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_mcp_tools_user_id ON mcp_tools(user_id);
+    """,
 ]
 
 

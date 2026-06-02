@@ -1337,6 +1337,30 @@ class ActionResponse(BaseModel):
     run_id: Optional[str] = None
 
 
+class McpToolItem(BaseModel):
+    id: str
+    name: str
+    description: str
+    input_schema: Dict[str, Any] = Field(default_factory=dict)
+    worker_id: str
+    created_at: str
+    updated_at: str
+
+
+class McpToolCreate(BaseModel):
+    name: str
+    description: str
+    input_schema: Dict[str, Any] = Field(default_factory=dict)
+    worker_id: str
+
+
+class McpToolUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    input_schema: Optional[Dict[str, Any]] = None
+    worker_id: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Domain types for worker execution
 # ---------------------------------------------------------------------------
