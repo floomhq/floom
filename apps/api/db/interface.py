@@ -314,6 +314,30 @@ class VersionRepository(Protocol):
     ) -> int: ...
 
 
+class McpToolRepository(Protocol):
+    """Custom MCP tools backed by workers, scoped per user/workspace."""
+
+    def list(self, *, user_id: str) -> list[RowDict]: ...
+
+    def get(self, *, user_id: str, tool_id: str) -> RowDict | None: ...
+
+    def get_by_name(self, *, user_id: str, name: str) -> RowDict | None: ...
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        worker_id: str,
+    ) -> RowDict: ...
+
+    def update(self, *, user_id: str, tool_id: str, **fields: Any) -> RowDict | None: ...
+
+    def delete(self, *, user_id: str, tool_id: str) -> bool: ...
+
+
 class AlertRepository(Protocol):
     """Webhook and email alert registrations per-worker."""
 
