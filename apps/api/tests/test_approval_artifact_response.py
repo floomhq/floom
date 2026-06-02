@@ -44,6 +44,26 @@ class _RunsRepo:
                 "size_bytes": 100,
                 "created_at": "2026-06-01T10:00:01Z",
             },
+            {
+                "id": "art_3",
+                "run_id": "run_1",
+                "name": "brief.pdf",
+                "type": "application/pdf",
+                "path": "run_1/out/brief.pdf",
+                "relative_path": "run_1/out/brief.pdf",
+                "size_bytes": 28,
+                "created_at": "2026-06-01T10:00:02Z",
+            },
+            {
+                "id": "art_4",
+                "run_id": "run_1",
+                "name": "metrics.xlsx",
+                "type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "path": "run_1/out/metrics.xlsx",
+                "relative_path": "run_1/out/metrics.xlsx",
+                "size_bytes": 22,
+                "created_at": "2026-06-01T10:00:03Z",
+            },
         ]
 
 
@@ -78,18 +98,9 @@ def test_public_approval_response_includes_safe_artifact_metadata_without_owner(
     )
 
     assert "owner_id" not in response
-    assert response["artifacts"] == [
-        {
-            "id": "art_1",
-            "run_id": "run_1",
-            "name": "report.csv",
-            "type": "text/csv",
-            "path": "run_1/out/report.csv",
-            "relative_path": "run_1/out/report.csv",
-            "size_bytes": 42,
-            "created_at": "2026-06-01T10:00:00Z",
-        }
-    ]
+    artifact_ids = [artifact["id"] for artifact in response["artifacts"]]
+    assert artifact_ids == ["art_1", "art_3", "art_4"]
+    assert "art_2" not in artifact_ids
 
 
 def test_public_approval_artifact_download_uses_signed_link(monkeypatch, tmp_path):
@@ -113,6 +124,42 @@ def test_public_approval_artifact_download_uses_signed_link(monkeypatch, tmp_pat
     assert response.headers["content-type"].startswith("text/csv")
     assert "report.csv" in response.headers["content-disposition"]
     assert response.text == "name,value\nFloom,1\n"
+
+
+def test_public_approval_artifact_download_serves_pdf_and_xlsx(monkeypatch, tmp_path):
+    artifact_root = tmp_path / "artifacts"
+    pdf_path = artifact_root / "run_1" / "out" / "brief.pdf"
+    xlsx_path = artifact_root / "run_1" / "out" / "metrics.xlsx"
+    pdf_path.parent.mkdir(parents=True)
+    pdf_bytes = b"%PDF-1.4\n% test pdf\n"
+    xlsx_bytes = b"PK\x03\x04test workbook bytes"
+    pdf_path.write_bytes(pdf_bytes)
+    xlsx_path.write_bytes(xlsx_bytes)
+    _set_artifacts_dir(monkeypatch, artifact_root)
+    main.app.dependency_overrides[main.get_repos] = lambda: _Repos()
+    token = main._approval_public_token(_ApprovalsRepo().get_public(approval_id="apr_1"))
+
+    try:
+        client = TestClient(main.app)
+        pdf_response = client.get(
+            f"/approvals/public/apr_1/artifacts/art_3/download?token={token}"
+        )
+        xlsx_response = client.get(
+            f"/approvals/public/apr_1/artifacts/art_4/download?token={token}"
+        )
+    finally:
+        main.app.dependency_overrides.clear()
+
+    assert pdf_response.status_code == 200
+    assert pdf_response.headers["content-type"].startswith("application/pdf")
+    assert "brief.pdf" in pdf_response.headers["content-disposition"]
+    assert pdf_response.content == pdf_bytes
+    assert xlsx_response.status_code == 200
+    assert xlsx_response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert "metrics.xlsx" in xlsx_response.headers["content-disposition"]
+    assert xlsx_response.content == xlsx_bytes
 
 
 def test_public_approval_artifact_download_hides_sensitive_artifacts(monkeypatch, tmp_path):
