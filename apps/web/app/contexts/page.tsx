@@ -1,6 +1,5 @@
 "use client";
 
-import "highlight.js/styles/github.css";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -10,6 +9,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   Edit3,
   File as FileIcon,
@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { CodeBlock } from "@/components/file-viewer/code-block";
 
 const TEXT_PREVIEW_LIMIT = 512 * 1024;
 const TABLE_PREVIEW_ROWS = 100;
@@ -1577,6 +1578,8 @@ function FileContent({
   }
 
   if (kind === "markdown") {
+    // Markdown is the one genuine rendered-vs-source case: Preview shows the
+    // formatted document, Raw shows the highlighted source.
     return (
       <PreviewRawTabs
         preview={
@@ -1584,17 +1587,23 @@ function FileContent({
             <MarkdownRenderer content={text} />
           </div>
         }
-        raw={<RawText text={text} />}
+        raw={<CodeBlock text={text} filePath={file.path} />}
       />
     );
   }
 
   if (kind === "code") {
+    // Single syntax-highlighted view — no redundant Preview-vs-Raw tabs.
+    // A .py/.ts/.json/.yaml/.txt file has one canonical rendering: the
+    // highlighted code block (with a copy affordance), shared with the
+    // worker-detail Source view.
     return (
-      <PreviewRawTabs
-        preview={<CodeBlock text={text} filePath={file.path} />}
-        raw={<RawText text={text} />}
-      />
+      <div className="flex h-full flex-col">
+        <CodeViewToolbar text={text} />
+        <div className="flex-1 overflow-auto">
+          <CodeBlock text={text} filePath={file.path} />
+        </div>
+      </div>
     );
   }
 
@@ -1620,7 +1629,7 @@ function FileContent({
     return (
       <PreviewRawTabs
         preview={<DelimitedTablePreview text={text} path={file.path} />}
-        raw={<RawText text={text} />}
+        raw={<CodeBlock text={text} filePath={file.path} />}
       />
     );
   }
@@ -1701,10 +1710,27 @@ function PreviewRawTabs({
   );
 }
 
-function RawText({ text }: { text: string }) {
+// A single "Copy" affordance for the code view — replaces the old redundant
+// Raw tab. One canonical highlighted block + a copy button, instead of a second
+// tab that showed the same content unhighlighted.
+function CodeViewToolbar({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
   return (
-    <div className="p-4">
-      <pre className="overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] p-3 font-mono text-xs leading-6 text-foreground dark:bg-[#1a1a1a]">{text}</pre>
+    <div className="flex shrink-0 items-center justify-end border-b border-[var(--border-default)] px-4 py-1.5">
+      <button
+        type="button"
+        onClick={copy}
+        className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <Copy className="size-3.5" />}
+        {copied ? "Copied" : "Copy"}
+      </button>
     </div>
   );
 }
@@ -2175,72 +2201,3 @@ function MarkdownRenderer({ content }: { content: string }) {
   );
 }
 
-function CodeBlock({ text, filePath }: { text: string; filePath: string }) {
-  const [highlighted, setHighlighted] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const language = detectLanguage(filePath);
-    if (language === "text") {
-      setHighlighted(null);
-      return;
-    }
-
-    import("highlight.js/lib/core").then(async (hljsCore) => {
-      const hljs = hljsCore.default;
-      const loaders: Record<string, () => Promise<{ default: unknown }>> = {
-        python: () => import("highlight.js/lib/languages/python"),
-        yaml: () => import("highlight.js/lib/languages/yaml"),
-        json: () => import("highlight.js/lib/languages/json"),
-        bash: () => import("highlight.js/lib/languages/bash"),
-        typescript: () => import("highlight.js/lib/languages/typescript"),
-        javascript: () => import("highlight.js/lib/languages/javascript"),
-        sql: () => import("highlight.js/lib/languages/sql"),
-        xml: () => import("highlight.js/lib/languages/xml"),
-        css: () => import("highlight.js/lib/languages/css"),
-        go: () => import("highlight.js/lib/languages/go"),
-        rust: () => import("highlight.js/lib/languages/rust"),
-      };
-
-      const loader = loaders[language];
-      if (loader && !hljs.getLanguage(language)) {
-        const mod = await loader();
-        hljs.registerLanguage(language, mod.default as Parameters<typeof hljs.registerLanguage>[1]);
-      }
-
-      if (!cancelled && hljs.getLanguage(language)) {
-        const result = hljs.highlight(text, { language });
-        if (!cancelled) setHighlighted(result.value);
-      }
-    }).catch(() => { /* fallback to plain */ });
-
-    return () => { cancelled = true; };
-  }, [text, filePath]);
-
-  return (
-    <div className="p-4">
-      <pre className="overflow-auto rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] p-3 font-mono text-xs leading-6 dark:bg-[#1a1a1a]">
-        {highlighted ? (
-          <code className={`hljs language-${detectLanguage(filePath)}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
-        ) : (
-          <code>{text}</code>
-        )}
-      </pre>
-    </div>
-  );
-}
-
-function detectLanguage(path: string): string {
-  if (path.endsWith(".py")) return "python";
-  if (path.endsWith(".yml") || path.endsWith(".yaml")) return "yaml";
-  if (path.endsWith(".json")) return "json";
-  if (path.endsWith(".sh")) return "bash";
-  if (path.endsWith(".ts") || path.endsWith(".tsx")) return "typescript";
-  if (path.endsWith(".js") || path.endsWith(".jsx")) return "javascript";
-  if (path.endsWith(".sql")) return "sql";
-  if (path.endsWith(".xml") || path.endsWith(".html") || path.endsWith(".htm")) return "xml";
-  if (path.endsWith(".css") || path.endsWith(".scss")) return "css";
-  if (path.endsWith(".go")) return "go";
-  if (path.endsWith(".rs")) return "rust";
-  return "text";
-}
