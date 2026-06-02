@@ -27,7 +27,13 @@ from contexts import (
     normalize_context_mount,
     use_context_scope,
 )
-from models import WorkerConfig, WorkerResult, declared_composio_connections
+from models import (
+    UnsafeMCPUrlError,
+    WorkerConfig,
+    WorkerResult,
+    assert_safe_outbound_mcp_url,
+    declared_composio_connections,
+)
 from runner_utils import ARTIFACTS_DIR, _validate_output_schema
 from worker_registry import WORKERS_DIR
 
@@ -1072,6 +1078,16 @@ class AgentDriver(SandboxDriver):
             if getattr(connection, "cwd", None):
                 params["cwd"] = connection.cwd
             return MCPServerStdio(params=params, **common)
+
+        # Defense in depth: re-validate the URL at dial time. DNS can rebind
+        # between registration (where we also check) and the actual run, so a
+        # previously-safe hostname could now resolve to an internal address.
+        try:
+            assert_safe_outbound_mcp_url(connection.url or "")
+        except UnsafeMCPUrlError as exc:
+            raise _MCPConnectionError(
+                f"MCP connection {connection.label} refused: {exc}"
+            ) from exc
 
         params = {"url": connection.url}
         headers = self._mcp_auth_headers(connection, secrets)

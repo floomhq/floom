@@ -141,6 +141,8 @@ from models import (
     WorkerAlertCreate,
     WorkerStats,
     WorkspaceStats,
+    UnsafeMCPUrlError,
+    assert_safe_outbound_mcp_url,
     composio_app_for_tool_slug,
     composio_tool_allowed_by_scope,
     declared_composio_connections,
@@ -10625,6 +10627,13 @@ def _normalize_mcp_connection_payload(payload: MCPConnectionCreateRequest) -> Di
             raise HTTPException(status_code=400, detail="MCP URL is required for HTTP/SSE transports")
         if not url.startswith(("http://", "https://")):
             raise HTTPException(status_code=400, detail="MCP URL must start with http:// or https://")
+        # SSRF deny-list: reject internal/loopback/link-local (incl. cloud
+        # metadata 169.254.169.254) and RFC1918 targets at registration time.
+        # Re-checked at dial time in the agent driver (DNS can rebind).
+        try:
+            url = assert_safe_outbound_mcp_url(url)
+        except UnsafeMCPUrlError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if command:
             raise HTTPException(status_code=400, detail="MCP command is only valid for stdio transport")
     if transport == "stdio":
