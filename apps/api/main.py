@@ -14783,6 +14783,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "tools_list", "description": "List custom MCP tools registered for this workspace.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "tools_register", "description": "Register a custom MCP tool backed by a worker. Once registered the tool appears in tools/list and can be called directly by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Tool name agents will use."}, "description": {"type": "string"}, "worker_id": {"type": "string", "description": "Worker ID or name."}, "input_schema": {"type": "object", "description": "JSON Schema for inputs (optional — defaults to worker schema)."}}, "required": ["name", "description", "worker_id"]}},
     {"name": "tools_delete", "description": "Delete a custom MCP tool by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "tools_update", "description": "Update an existing custom MCP tool. Only the fields you provide are changed.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Name of the tool to update."}, "description": {"type": "string", "description": "New description."}, "worker_id": {"type": "string", "description": "New worker ID or name to back this tool."}, "input_schema": {"type": "object", "description": "New JSON Schema for inputs."}}, "required": ["name"]}},
 ]
 
 
@@ -15061,6 +15062,28 @@ async def _mcp_dispatch(
             return _mcp_content(f"Tool {tool_name!r} not found", is_error=True)
         repos.mcp_tools.delete(user_id=auth.user_id, tool_id=tool["id"])
         return _mcp_content(f"Tool {tool_name!r} deleted")
+
+    if name == "tools_update":
+        tool_name = a.get("name", "")
+        tool = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name)
+        if not tool:
+            return _mcp_content(f"Tool {tool_name!r} not found", is_error=True)
+        updates: dict = {}
+        if a.get("description"):
+            updates["description"] = a["description"]
+        if a.get("input_schema"):
+            updates["input_schema"] = a["input_schema"]
+        if a.get("worker_id"):
+            worker_ref = a["worker_id"]
+            worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_ref)
+            if not worker:
+                workers = repos.workers.list(user_id=auth.user_id)
+                worker = next((w for w in workers if w["name"] == worker_ref), None)
+            if not worker:
+                return _mcp_content(f"Worker {worker_ref!r} not found", is_error=True)
+            updates["worker_id"] = worker["id"]
+        updated = repos.mcp_tools.update(user_id=auth.user_id, tool_id=tool["id"], **updates)
+        return _mcp_content(json.dumps(updated, indent=2, default=str))
 
     # --- custom workspace tools — trigger backing worker, wait, return output ---
     custom = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=name)
