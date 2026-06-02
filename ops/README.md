@@ -14,12 +14,21 @@ Backup output:
 
 ```text
 /root/backups/workeros-YYYY-MM-DD-HHMM/
-  floom.db
+  floom.db.gz      # gzip-compressed SQLite online backup
   artifacts.tar.gz
   manifest.json
 ```
 
-Retention keeps 48 hourly restore points, 7 daily restore points, and 4 weekly restore points.
+Retention keeps 6 hourly restore points, 7 daily restore points, and 4 weekly restore points.
+(Hourly was 48 until 2026-06-02; the DB grew to ~11GB and 48 uncompressed copies
+filled the disk. The snapshot is now gzip-compressed and hourly points reduced.)
+
+Restore a backup:
+
+```bash
+gunzip -c /root/backups/workeros-YYYY-MM-DD-HHMM/floom.db.gz > /tmp/restore-floom.db
+sqlite3 /root/workeros/data/floom.db ".restore '/tmp/restore-floom.db'"
+```
 
 Install or refresh production units:
 
@@ -46,7 +55,7 @@ Tunables:
 - `FLOOM_DB` source SQLite path, default `$WORKEROS_ROOT/data/floom.db`; relative paths resolve from `WORKEROS_API_DIR`
 - `FLOOM_ARTIFACTS_DIR` artifacts dir, default `$WORKEROS_ROOT/data/artifacts`; relative paths resolve from `WORKEROS_API_DIR`
 - `WORKEROS_BACKUP_ROOT` destination root, default `/root/backups`
-- `WORKEROS_BACKUP_HOURLY` hourly retention count, default `48`
+- `WORKEROS_BACKUP_HOURLY` hourly retention count, default `6`
 - `WORKEROS_BACKUP_DAILY` daily retention count, default `7`
 - `WORKEROS_BACKUP_WEEKLY` weekly retention count, default `4`
 - `WORKEROS_ARTIFACT_RETENTION_DAYS` transcript gzip cutoff, default `30`
