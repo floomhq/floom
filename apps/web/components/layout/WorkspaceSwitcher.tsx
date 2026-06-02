@@ -142,14 +142,20 @@ export function WorkspaceSwitcher() {
           <span className="flex-1 truncate text-left">{active.name}</span>
           <ChevronsUpDown className="size-4 opacity-60" />
         </DropdownMenuTrigger>
+        {/* V9 (Federico 2026-06-02): "this can also be cleaner." The popover is
+            split into two clear sections — the workspace LIST (active row
+            carries the checkmark) and the ACTIONS group below a divider — with
+            consistent spacing. The active workspace name is shown only here in
+            the list (the trigger above is the closed-state control), so there's
+            no redundant repetition inside the menu. */}
         <DropdownMenuContent
           align="start"
           side="bottom"
-          className="w-56"
+          className="w-56 p-1"
           sideOffset={6}
         >
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-[var(--ink-mute)]">
+            <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--ink-mute)]">
               Workspaces
             </DropdownMenuLabel>
             {state.workspaces.map((w) => {
@@ -171,17 +177,19 @@ export function WorkspaceSwitcher() {
               );
             })}
           </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => {
-              setCreateName("");
-              setCreateOpen(true);
-            }}
-            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-          >
-            <Plus className="size-4" />
-            New workspace
-          </DropdownMenuItem>
+          <DropdownMenuSeparator className="-mx-1 my-1" />
+          <DropdownMenuGroup>
+            <DropdownMenuItem
+              onClick={() => {
+                setCreateName("");
+                setCreateOpen(true);
+              }}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            >
+              <Plus className="size-4" />
+              New workspace
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
 
