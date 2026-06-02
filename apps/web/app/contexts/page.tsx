@@ -1355,30 +1355,32 @@ function FolderColumn({
             ) : (
               <div
                 key={`file:${entry.file.path}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => onOpenFile(entry.file.path)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpenFile(entry.file.path); }}
                 className={`group flex w-full items-center gap-2 px-3 py-2 text-left transition-colors cursor-pointer ${
                   selectedFile === entry.file.path ? "bg-[var(--active-nav-bg)]" : "hover:bg-muted/40"
                 }`}
               >
-                {displayTypeIcon(fileDisplayType(entry.file))}
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-mono">{entry.name}</span>
-                  {!compact && (
-                    <>
-                      <span className="block text-xs text-muted-foreground truncate">
-                        {formatBytes(entry.file.size)} · {fileDisplayType(entry.file)}
-                      </span>
-                      <FileTagChips file={entry.file} compact />
-                    </>
-                  )}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => onOpenFile(entry.file.path)}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                  {displayTypeIcon(fileDisplayType(entry.file))}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-mono">{entry.name}</span>
+                    {!compact && (
+                      <>
+                        <span className="block text-xs text-muted-foreground truncate">
+                          {formatBytes(entry.file.size)} · {fileDisplayType(entry.file)}
+                        </span>
+                        <FileTagChips file={entry.file} compact />
+                      </>
+                    )}
+                  </span>
+                </button>
                 {!compact && !readOnly && onDeleteFile && (
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); onDeleteFile(entry.file.path); }}
+                    onClick={() => onDeleteFile(entry.file.path)}
                     className="p-1 rounded-[var(--radius-button)] hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                     title="Delete file"
                   >
