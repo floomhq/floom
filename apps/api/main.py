@@ -43,6 +43,7 @@ engine_main = import_engine_module("main")
 # (which gates every request behind x-floom-secret when FLOOM_SECRET is set)
 # rejects all our JWT-authed cloud traffic with 401. Strip it in cloud mode.
 if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
+    os.environ.setdefault("WORKEROS_RATE_LIMIT_DEV", "1")
     os.environ.pop("FLOOM_SECRET", None)
 
 
@@ -82,6 +83,24 @@ app = FastAPI(
     redoc_url="/redoc" if _docs_enabled else None,
     openapi_url="/openapi.json" if _docs_enabled else None,
 )
+
+
+@app.middleware("http")
+async def cloud_security_headers_middleware(request: Request, call_next):
+    """Keep cloud-owned routes on the same security-header baseline as engine routes."""
+    response = await call_next(request)
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    )
+    response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+    return response
+
+
 app.include_router(auth_router)
 # Mount workspaces + cli-auth/devices under /api BEFORE the engine sub-app
 # mount; otherwise FastAPI's path matching dispatches /api/workspaces (and
