@@ -172,7 +172,11 @@ def _open_incident(conn, worker_id: str, incident_key: str, reason: str, details
         """
         INSERT INTO alert_incidents (worker_id, incident_key, reason, details, fired_at)
         VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(worker_id, incident_key) DO NOTHING
+        ON CONFLICT(worker_id, incident_key) DO UPDATE SET
+            reason = excluded.reason,
+            details = excluded.details,
+            fired_at = excluded.fired_at,
+            resolved_at = NULL
         """,
         (worker_id, incident_key, reason, details, now),
     )
