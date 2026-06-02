@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -78,19 +79,20 @@ export function VersionHistoryMenu({
         History
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className="w-72 p-1">
-        <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          Version history
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator className="-mx-1 my-1" />
-        {loading ? (
-          <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>
-        ) : versions.length === 0 ? (
-          <div className="px-2 py-3 text-xs text-muted-foreground">
-            No versions yet. A snapshot is saved on every edit.
-          </div>
-        ) : (
-          <div className="max-h-80 overflow-y-auto">
-            {versions.map((v, idx) => {
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            Version history
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator className="-mx-1 my-1" />
+          {loading ? (
+            <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>
+          ) : versions.length === 0 ? (
+            <div className="px-2 py-3 text-xs text-muted-foreground">
+              No versions yet. A snapshot is saved on every edit.
+            </div>
+          ) : (
+            <div className="max-h-80 overflow-y-auto">
+              {versions.map((v, idx) => {
               const isCurrent = idx === 0;
               const isRestoring = restoringId === v.id;
               return (
@@ -129,8 +131,9 @@ export function VersionHistoryMenu({
                 </DropdownMenuItem>
               );
             })}
-          </div>
-        )}
+            </div>
+          )}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
