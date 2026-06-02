@@ -11,7 +11,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle, ChevronDown, Clock, XCircle } from "lucide-react";
+import { Check, CheckCircle, ChevronDown, Clock, ExternalLink, Link2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ApprovalRow } from "@/lib/types";
@@ -69,7 +69,24 @@ function ApprovalCard({
   const [editedText, setEditedText] = useState(approval.preview ?? "");
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
+  const [copied, setCopied] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  // Standalone signed review link the owner can share or open full-page outside
+  // the dashboard. Minted server-side and returned on the approval row.
+  const shareLink = approval.public_link ?? null;
+
+  const handleCopyLink = useCallback(async () => {
+    if (!shareLink) return;
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      toast.success("Link copied");
+    } catch {
+      toast.error("Could not copy link");
+    }
+  }, [shareLink]);
 
   const decisionInput = parseDecisionInput(approval.decision_input_json);
   const isDestructiveDelete = decisionInput.kind === "destructive_delete";
@@ -282,6 +299,32 @@ function ApprovalCard({
             Confirm reject
           </button>
         )}
+
+        {/* Share / open-as-page — copy the standalone signed review link or open
+            it full-page outside the dashboard. Pushed to the right of the row. */}
+        {shareLink && (
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleCopyLink}
+              title="Copy a shareable full-page link to this approval"
+              className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-2.5 text-xs font-medium text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-[var(--ink)] transition-colors"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-green-600 dark:text-green-400" /> : <Link2 className="h-3.5 w-3.5" />}
+              {copied ? "Copied" : "Copy link"}
+            </button>
+            <a
+              href={shareLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open this approval as a standalone full page"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-[var(--ink)] transition-colors"
+              aria-label="Open as standalone page"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -292,6 +335,86 @@ type WorkerGroup = {
   workerName: string;
   rows: ApprovalRow[];
 };
+
+// Loading skeleton that mirrors the real loaded layout (sort/count bar → worker
+// group header → cards with worker name, label, run link, preview block, action
+// row). Same radius/spacing/border tokens as ApprovalCard so data arrival causes
+// no layout shift. Shared by the inline loading state and the Suspense fallback.
+function ApprovalCardSkeleton() {
+  return (
+    <div className="rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1 space-y-2">
+          {/* worker name + pending age */}
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-32 animate-pulse rounded bg-[var(--bg-2)]" />
+            <div className="h-3 w-16 animate-pulse rounded bg-[var(--bg-2)]" />
+          </div>
+          {/* label */}
+          <div className="h-3 w-48 animate-pulse rounded bg-[var(--bg-2)]" />
+          {/* run link */}
+          <div className="h-2.5 w-28 animate-pulse rounded bg-[var(--bg-2)]" />
+        </div>
+        {/* Pending pill */}
+        <div className="h-5 w-20 shrink-0 animate-pulse rounded-[var(--radius-pill)] bg-[var(--bg-2)]" />
+      </div>
+      {/* preview block */}
+      <div className="mt-4 h-16 animate-pulse rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)]" />
+      {/* action row */}
+      <div className="mt-4 flex items-center gap-2">
+        <div className="h-8 w-24 animate-pulse rounded-[var(--radius-button)] bg-[var(--bg-2)]" />
+        <div className="h-8 w-28 animate-pulse rounded-[var(--radius-button)] bg-[var(--bg-2)]" />
+        <div className="h-8 w-20 animate-pulse rounded-[var(--radius-button)] bg-[var(--bg-2)]" />
+        <div className="ml-auto h-8 w-24 animate-pulse rounded-[var(--radius-button)] bg-[var(--bg-2)]" />
+      </div>
+    </div>
+  );
+}
+
+function ApprovalsListSkeleton() {
+  return (
+    <div className="max-w-2xl">
+      {/* Sort + count bar */}
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="h-3 w-20 animate-pulse rounded bg-[var(--bg-2)]" />
+        <div className="flex items-center gap-3">
+          <div className="h-3 w-12 animate-pulse rounded bg-[var(--bg-2)]" />
+          <div className="h-3 w-16 animate-pulse rounded bg-[var(--bg-2)]" />
+          <div className="h-3 w-14 animate-pulse rounded bg-[var(--bg-2)]" />
+        </div>
+      </div>
+      <div className="space-y-5">
+        <section className="space-y-3">
+          {/* Worker group header */}
+          <div className="flex items-center gap-1.5">
+            <div className="h-4 w-4 animate-pulse rounded bg-[var(--bg-2)]" />
+            <div className="h-4 w-28 animate-pulse rounded bg-[var(--bg-2)]" />
+            <div className="h-4 w-6 animate-pulse rounded bg-[var(--bg-2)]" />
+          </div>
+          <div className="space-y-3">
+            <ApprovalCardSkeleton />
+            <ApprovalCardSkeleton />
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function ApprovalsPageSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-2">
+          <div className="h-7 w-28 animate-pulse rounded bg-[var(--bg-2)]" />
+          <div className="h-4 w-64 animate-pulse rounded bg-[var(--bg-2)]" />
+        </div>
+        <div className="h-4 w-28 shrink-0 animate-pulse rounded bg-[var(--bg-2)]" />
+      </div>
+      <ApprovalsListSkeleton />
+    </div>
+  );
+}
 
 function ApprovalsContent() {
   const searchParams = useSearchParams();
@@ -474,27 +597,38 @@ function ApprovalsContent() {
             Workers waiting for your decision before executing.
           </p>
         </div>
-        {/* P1-9: link back to the dashboard for chat-only operators who land
-            here from a notification. "Go to platform" was both low-contrast and
-            ambiguous in the single-tenant OS (implied the separate Cloud
-            product). Clearer copy + readable contrast. */}
-        <Link
-          href="/overview"
-          className="shrink-0 text-sm text-[var(--ink-soft)] underline-offset-2 hover:text-[var(--ink)] hover:underline transition-colors"
-        >
-          Back to dashboard
-        </Link>
+        <div className="flex shrink-0 items-center gap-4">
+          {/* Standalone full-page review of all pending approvals — the
+              /approvals/review route renders chrome-free (no dashboard sidebar)
+              and steps through every pending item. Opens in a new tab so it can
+              be used full-screen or handed off. */}
+          {approvals.length > 0 && (
+            <a
+              href="/approvals/review"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-[var(--ink-soft)] underline-offset-2 hover:text-[var(--ink)] hover:underline transition-colors"
+              title="Open all pending approvals as a standalone full page"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Open as full page
+            </a>
+          )}
+          {/* P1-9: link back to the dashboard for chat-only operators who land
+              here from a notification. "Go to platform" was both low-contrast and
+              ambiguous in the single-tenant OS (implied the separate Cloud
+              product). Clearer copy + readable contrast. */}
+          <Link
+            href="/overview"
+            className="text-sm text-[var(--ink-soft)] underline-offset-2 hover:text-[var(--ink)] hover:underline transition-colors"
+          >
+            Back to dashboard
+          </Link>
+        </div>
       </div>
 
       {loading ? (
-        <div className="space-y-3">
-          {[0, 1].map((i) => (
-            <div
-              key={i}
-              className="h-28 animate-pulse rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--bg-2)]"
-            />
-          ))}
-        </div>
+        <ApprovalsListSkeleton />
       ) : approvals.length === 0 ? (
         <div className="w-full rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] px-6 py-10 text-center">
           <CheckCircle className="mx-auto h-8 w-8 text-[var(--ink-faint)]" />
@@ -664,19 +798,7 @@ function ApprovalsContent() {
 
 export default function ApprovalsPage() {
   return (
-    <Suspense fallback={
-      <div className="space-y-6">
-        <div>
-          <div className="h-7 w-28 animate-pulse rounded bg-[var(--bg-2)]" />
-          <div className="mt-1 h-4 w-64 animate-pulse rounded bg-[var(--bg-2)]" />
-        </div>
-        <div className="max-w-2xl space-y-3">
-          {[0, 1].map((i) => (
-            <div key={i} className="h-28 animate-pulse rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--bg-2)]" />
-          ))}
-        </div>
-      </div>
-    }>
+    <Suspense fallback={<ApprovalsPageSkeleton />}>
       <ApprovalsContent />
     </Suspense>
   );
