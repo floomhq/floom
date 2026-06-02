@@ -23,6 +23,7 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_USER_ID", "slack-test-user")
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "test-slack-signing-secret")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+    monkeypatch.setenv("SLACK_ALLOWED_TEAM_IDS", "T123")
 
     sys.path.insert(0, str(api_dir))
     for name in ["main", "db", "models", "worker_registry", "run_service", "chat_service"]:
