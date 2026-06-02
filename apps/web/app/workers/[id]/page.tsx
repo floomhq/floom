@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/dialog";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
+import { ShareWorkerButton } from "@/components/ShareWorkerButton";
 import type {
   WorkerDetail,
   WorkerInput,
@@ -1578,6 +1579,7 @@ export default function WorkerDetailPage() {
               Versions
               <ChevronDown className="size-3.5 text-muted-foreground" />
             </Button>
+            <ShareWorkerButton publicLink={worker.public_link} />
             <Button
               variant="outline"
               size="sm"
