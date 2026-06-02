@@ -206,6 +206,115 @@ function buildEntries(files: ContextFileItem[], currentFolder: string): Entry[] 
   return [...folderEntries, ...directFiles];
 }
 
+// ---------------------------------------------------------------------------
+// Resizable panes (Cursor-IDE style). Two draggable vertical dividers let the
+// user set the width of the packs pane and the middle pane; the final pane
+// flexes to fill the rest. Widths persist to localStorage and only apply on
+// the desktop side-by-side layout (lg+), so the mobile drill-in is untouched.
+// ---------------------------------------------------------------------------
+
+const PANE_WIDTHS_KEY = "floom:brain:pane-widths";
+const PACKS_MIN = 160;
+const PACKS_MAX = 420;
+const MID_MIN = 180;
+const MID_MAX = 560;
+const PACKS_DEFAULT = 300;
+const MID_DEFAULT = 280;
+
+type PaneWidths = { packs: number; mid: number };
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function loadPaneWidths(): PaneWidths {
+  if (typeof window === "undefined") return { packs: PACKS_DEFAULT, mid: MID_DEFAULT };
+  try {
+    const raw = window.localStorage.getItem(PANE_WIDTHS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PaneWidths>;
+      return {
+        packs: clamp(Number(parsed.packs) || PACKS_DEFAULT, PACKS_MIN, PACKS_MAX),
+        mid: clamp(Number(parsed.mid) || MID_DEFAULT, MID_MIN, MID_MAX),
+      };
+    }
+  } catch {
+    /* ignore malformed storage */
+  }
+  return { packs: PACKS_DEFAULT, mid: MID_DEFAULT };
+}
+
+// True on the desktop side-by-side layout (Tailwind lg breakpoint). Inline pane
+// widths are only honoured here; below lg each pane is full-width and drill-in.
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsDesktop(mql.matches);
+    update();
+    mql.addEventListener("change", update);
+    return () => mql.removeEventListener("change", update);
+  }, []);
+  return isDesktop;
+}
+
+// A thin draggable divider. onResize receives the pointer's horizontal delta in
+// px since the drag started; the parent clamps + commits the new width.
+function ResizableDivider({
+  ariaLabel,
+  onResizeStart,
+  onResize,
+  onResizeEnd,
+}: {
+  ariaLabel: string;
+  onResizeStart: () => void;
+  onResize: (deltaX: number) => void;
+  onResizeEnd: () => void;
+}) {
+  const startX = useRef(0);
+  const dragging = useRef(false);
+
+  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    startX.current = e.clientX;
+    dragging.current = true;
+    onResizeStart();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragging.current) return;
+    onResize(e.clientX - startX.current);
+  }
+  function endDrag(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragging.current) return;
+    dragging.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* pointer already released */
+    }
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    onResizeEnd();
+  }
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={ariaLabel}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      className="relative z-20 hidden lg:block w-px shrink-0 cursor-col-resize bg-[var(--border-default)] transition-colors hover:bg-[var(--primary)]/40 before:absolute before:inset-y-0 before:-left-1.5 before:-right-1.5 before:content-['']"
+    />
+  );
+}
+
 // ===========================================================================
 
 export default function ContextsPageShell() {
@@ -247,6 +356,37 @@ function ContextsPage() {
   const [newContextName, setNewContextName] = useState("");
   const [showNewContext, setShowNewContext] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+
+  // ---- Resizable panes (desktop only) -------------------------------------
+  const isDesktop = useIsDesktop();
+  const [paneWidths, setPaneWidths] = useState<PaneWidths>(() => loadPaneWidths());
+  // Width captured at the moment a divider drag starts, so the delta is applied
+  // to a stable base instead of compounding across pointermove events.
+  const resizeBase = useRef<PaneWidths>(paneWidths);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(PANE_WIDTHS_KEY, JSON.stringify(paneWidths));
+    } catch {
+      /* storage unavailable / quota */
+    }
+  }, [paneWidths]);
+
+  const beginResize = useCallback(() => {
+    resizeBase.current = paneWidths;
+  }, [paneWidths]);
+
+  const resizePacks = useCallback((deltaX: number) => {
+    setPaneWidths((prev) => ({ ...prev, packs: clamp(resizeBase.current.packs + deltaX, PACKS_MIN, PACKS_MAX) }));
+  }, []);
+
+  const resizeMid = useCallback((deltaX: number) => {
+    setPaneWidths((prev) => ({ ...prev, mid: clamp(resizeBase.current.mid + deltaX, MID_MIN, MID_MAX) }));
+  }, []);
+
+  const noop = useCallback(() => {}, []);
+
   // On mobile only one pane shows at a time. Initialise from the URL so a
   // deep-link (?pack=&file=) lands on the right pane instead of stranding the
   // user on the pack list with the file pane absent from the DOM.
@@ -478,21 +618,23 @@ function ContextsPage() {
   const dropHandlers = readOnly
     ? {}
     : {
+        // preventDefault on BOTH dragenter and dragover is REQUIRED, otherwise
+        // the browser treats the pane as a non-drop target and the `drop` event
+        // never fires. We always preventDefault here and only gate the *visual*
+        // dragActive overlay on whether the payload is actually files — some
+        // browsers report an empty `types` list mid-drag, so guarding the
+        // preventDefault itself (the previous behavior) silently broke drops.
         onDragEnter: (e: React.DragEvent) => {
-          if (!isFileDrag(e)) return;
           e.preventDefault();
           dragDepth.current += 1;
-          setDragActive(true);
+          if (isFileDrag(e)) setDragActive(true);
         },
-        // preventDefault on dragover is REQUIRED or the browser never fires drop.
         onDragOver: (e: React.DragEvent) => {
-          if (!isFileDrag(e)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
-          if (!dragActive) setDragActive(true);
+          if (isFileDrag(e) && !dragActive) setDragActive(true);
         },
         onDragLeave: (e: React.DragEvent) => {
-          if (!isFileDrag(e)) return;
           dragDepth.current = Math.max(0, dragDepth.current - 1);
           if (dragDepth.current === 0) setDragActive(false);
         },
@@ -535,7 +677,11 @@ function ContextsPage() {
     );
   }
 
-  const packsWidth = fileOpen ? "lg:w-[10%] lg:min-w-[140px]" : "lg:w-[30%] lg:min-w-[260px] lg:max-w-[380px]";
+  // Desktop pane width comes from the resizable state; on mobile each pane is
+  // full-width (drill-in). The packs pane keeps its user-set width in both the
+  // default and file-open modes so dragging the divider behaves predictably.
+  const packsStyle = isDesktop ? { width: paneWidths.packs } : undefined;
+  const midStyle = isDesktop ? { width: paneWidths.mid } : undefined;
 
   return (
     <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 120px)" }}>
@@ -593,9 +739,11 @@ function ContextsPage() {
           side-by-side panes separated by internal dividers (not floating cards),
           compressing as a file opens. Mobile: a single drill-in column. */}
       <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
-        {/* ---- Packs pane (30% default → 10% when a file is open) ---------- */}
+        {/* ---- Packs pane (resizable on desktop, drag the divider to its
+            right). Full-width on mobile drill-in. ---------------------------- */}
         <section
-          className={`flex flex-col w-full shrink-0 transition-all duration-300 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] ${packsWidth} ${
+          style={packsStyle}
+          className={`flex flex-col w-full lg:w-auto shrink-0 border-b lg:border-b-0 border-[var(--border-default)] ${
             mobilePane === "packs" ? "flex" : "hidden lg:flex"
           }`}
         >
@@ -676,6 +824,14 @@ function ContextsPage() {
           </div>
         </section>
 
+        {/* Divider between the packs pane and the detail/middle pane. */}
+        <ResizableDivider
+          ariaLabel="Resize knowledge packs pane"
+          onResizeStart={beginResize}
+          onResize={resizePacks}
+          onResizeEnd={noop}
+        />
+
         {/* ---- Pack detail / miller folder columns ------------------------ */}
         {!selectedName ? (
           <section className="flex-1 overflow-hidden flex items-center justify-center p-8">
@@ -729,10 +885,11 @@ function ContextsPage() {
             dropHandlers={dropHandlers}
           />
         ) : (
-          /* FILE OPEN: 20% folder columns + 70% file content. */
+          /* FILE OPEN: resizable folder columns + flexing file content. */
           <>
             <section
-              className={`flex overflow-hidden w-full lg:w-[20%] lg:min-w-[200px] shrink-0 transition-all duration-300 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] ${
+              style={midStyle}
+              className={`flex overflow-hidden w-full lg:w-auto shrink-0 border-b lg:border-b-0 border-[var(--border-default)] ${
                 mobilePane === "files" ? "flex" : "hidden lg:flex"
               }`}
             >
@@ -747,6 +904,14 @@ function ContextsPage() {
                 onOpenFile={openFile}
               />
             </section>
+
+            {/* Divider between the folder columns and the file viewer. */}
+            <ResizableDivider
+              ariaLabel="Resize files pane"
+              onResizeStart={beginResize}
+              onResize={resizeMid}
+              onResizeEnd={noop}
+            />
 
             <section
               {...dropHandlers}
