@@ -346,6 +346,8 @@ export interface ApprovalRow {
   follow_up_run_id?: string;
   owner_id?: string;
   artifacts?: Artifact[];
+  /** Standalone signed review URL (?id=&token=) the owner can copy/share or open full-page. Set by the API for the authenticated owner. */
+  public_link?: string;
 }
 
 export interface SystemInfo {
