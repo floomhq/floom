@@ -41,6 +41,9 @@ def client_and_main(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "")
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "")
+    monkeypatch.setenv("SLACK_ALLOWED_TEAM_IDS", "")
 
     for name in [
         "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory",
