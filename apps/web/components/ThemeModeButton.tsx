@@ -88,7 +88,6 @@ export function ThemeModeButton({ className = "" }: { className?: string }) {
           </>
         )}
       </svg>
-      <span>{LABELS[mode]}</span>
     </button>
   );
 }

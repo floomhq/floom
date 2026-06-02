@@ -602,17 +602,22 @@ html.dark .grain {
   }
 }
 
+/* Icon-only theme toggle (V6, Federico 2026-06-02: "remove the labels here,
+   the icons are enough."). Square icon button; the mode name lives only in the
+   aria-label + title for accessibility. */
 .theme-mode-button {
   display: inline-flex;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
   min-height: 32px;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
   background: var(--glass-bg);
   color: var(--ink-soft);
-  padding: 5px 11px;
-  font: 500 12px/1 var(--font);
+  padding: 0;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
   transition:
@@ -655,10 +660,6 @@ html.dark .grain {
   background: var(--bg-2);
   border-color: transparent;
   color: var(--ink);
-}
-
-.theme-mode-button-compact span {
-  display: none;
 }
 
 /* Match the 20px (w-5 h-5) icon size of the sibling top-bar buttons. */
