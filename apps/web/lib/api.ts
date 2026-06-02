@@ -443,7 +443,10 @@ export const api = {
       }),
   },
   slack: {
-    setupStatus: () => fetchJson<import("./types").SlackSetupStatus>("/slack/setup/status"),
+    setupStatus: () =>
+      fetchJson<import("./types").SlackSetupStatus>("/slack/setup/status", {
+        cache: "no-store",
+      }),
     updateSetupConfig: (payload: {
       client_id?: string;
       client_secret?: string;
