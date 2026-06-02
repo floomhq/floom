@@ -192,6 +192,11 @@ if not _docs_enabled:
         if getattr(route, "path", None) not in _docs_paths
     ]
 
+# Keep versioned API prefixes as compatibility aliases for clients that expect
+# a conventional /v1 shape. They must be registered before /api, otherwise the
+# broader /api mount consumes /api/v1/* and returns the engine's 404.
+app.mount("/api/v1", engine_main.app)
+app.mount("/v1", engine_main.app)
 app.mount("/api", engine_main.app)
 
 

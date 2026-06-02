@@ -59,3 +59,20 @@ def test_cloud_enables_engine_rate_limiter_without_floom_secret(monkeypatch, tmp
     assert main.os.environ["WORKEROS_RATE_LIMIT_DEV"] == "1"
     assert "FLOOM_SECRET" not in main.os.environ
     assert Counter(codes) == Counter({401: 20, 429: 5})
+
+
+def test_cloud_versioned_api_prefixes_reach_engine_routes(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    paths = [
+        "/api/v1/workers/example/versions",
+        "/v1/workers/example/versions",
+        "/api/v1/workspace/versions",
+        "/v1/workspace/versions",
+    ]
+
+    for path in paths:
+        response = client.get(path)
+        assert response.status_code == 401, path
+        assert response.json()["detail"] in {"missing bearer token", "unauthorized"}
