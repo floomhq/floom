@@ -14442,7 +14442,7 @@ async def _mcp_handle_request(
     return _mcp_err(rpc_id, -32601, f"Method not found: {method!r}")
 
 
-@app.post("/mcp")
+@app.post("/mcp-tools/serve")
 async def mcp_http_endpoint(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
