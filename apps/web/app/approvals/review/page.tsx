@@ -627,10 +627,13 @@ function ApprovalFilePreview({
   isSignedLink: boolean;
   token: string | null;
 }) {
-  const artifactHref = file.artifact
+  const artifactId = typeof file.artifact?.id === "string" && file.artifact.id.trim()
+    ? file.artifact.id
+    : null;
+  const artifactHref = file.artifact && artifactId
     ? isSignedLink && token
-      ? api.approvals.publicArtifactUrl(approval.id, file.artifact.id, token)
-      : api.runs.artifactUrl(approval.run_id, file.artifact.id)
+      ? api.approvals.publicArtifactUrl(approval.id, artifactId, token)
+      : api.runs.artifactUrl(approval.run_id, artifactId)
     : null;
   const href = file.href || artifactHref;
   const kind = approvalFileKind(file);
