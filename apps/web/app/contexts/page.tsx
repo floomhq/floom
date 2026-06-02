@@ -2018,13 +2018,13 @@ function PreviewUnavailable({
   );
 }
 
-// Inline per-file "History ▾" dropdown. Each brain-pack file is snapshotted
+// Inline per-file "Versions ▾" dropdown. Each brain-pack file is snapshotted
 // independently on the backend (asset_type `brain_file`), so this lists the
 // revisions of ONE file and restores only THAT file — not the whole pack.
 // Restore fetches the chosen revision's snapshot and writes it back via the
 // normal save path (which records a new snapshot), so it is limited to text
 // files (the only kind that carries an inline content body here). This mirrors
-// the workspace-instructions History dropdown on /assistant so both surfaces
+// the workspace-instructions Versions dropdown on /assistant so both surfaces
 // feel like the same affordance.
 function FileHistoryMenu({
   packName,
