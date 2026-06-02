@@ -7,7 +7,9 @@
  *   1. Pick a connected app (from user's active connections).
  *   2. Pick an event/trigger from that app's catalog.
  *
- * Resolves the composio_connection_id automatically from the selected connection.
+ * Resolves the connection reference automatically from the selected connection.
+ * The reference is the internal Floom connection UUID (`ConnectionItem.id`); the
+ * API resolves it to the raw Composio `ca_*` id server-side (NEW-7, 2026-06-02).
  * White-label: never shows "Composio" to the user.
  */
 
@@ -83,7 +85,7 @@ export function ConnectionEventPicker({
   useEffect(() => {
     if (composioEvent && composioConnectionId && !selectedApp && activeConnections.length > 0) {
       const conn = activeConnections.find(
-        (c) => c.composio_connection_id === composioConnectionId
+        (c) => c.id === composioConnectionId
       );
       if (conn) setSelectedApp(conn.app_name.toLowerCase());
     }
@@ -114,7 +116,7 @@ export function ConnectionEventPicker({
     // Auto-select connection if only one exists for this app
     const appsConns = activeConnections.filter((c) => c.app_name.toLowerCase() === app);
     if (appsConns.length === 1) {
-      onConnectionIdChange(appsConns[0].composio_connection_id);
+      onConnectionIdChange(appsConns[0].id);
     }
   }
 
@@ -123,7 +125,7 @@ export function ConnectionEventPicker({
     onEventChange(event);
     // Ensure connection is set
     if (!composioConnectionId && appConnections.length === 1) {
-      onConnectionIdChange(appConnections[0].composio_connection_id);
+      onConnectionIdChange(appConnections[0].id);
     }
   }
 
@@ -139,7 +141,7 @@ export function ConnectionEventPicker({
     const app = appDisplayName(conn.app_name.toLowerCase());
     const account = conn.display_name || conn.account_label;
     if (account) return `${app} · ${account}`;
-    return `${app} · account ending ${conn.composio_connection_id.slice(-6)}`;
+    return `${app} · account ending ${conn.id.slice(-6)}`;
   }
 
   // N4: show the connected account alongside the app name in the Integration
@@ -264,13 +266,13 @@ export function ConnectionEventPicker({
             <SelectTrigger className="w-full border-border">
               <SelectValue placeholder="Select account">
                 {composioConnectionId
-                  ? connectionAccountLabel(appConnections.find((conn) => conn.composio_connection_id === composioConnectionId) || appConnections[0])
+                  ? connectionAccountLabel(appConnections.find((conn) => conn.id === composioConnectionId) || appConnections[0])
                   : null}
               </SelectValue>
             </SelectTrigger>
             <SelectContent className="z-50">
               {appConnections.map((conn) => (
-                <SelectItem key={conn.composio_connection_id} value={conn.composio_connection_id}>
+                <SelectItem key={conn.id} value={conn.id}>
                   {connectionAccountLabel(conn)}
                 </SelectItem>
               ))}

@@ -617,7 +617,9 @@ export type ConnectionStatus = "active" | "initiated" | "failed" | "expired" | "
 export interface ConnectionItem {
   id: string;
   app_name: string;
-  composio_connection_id: string;
+  // NEW-7 (2026-06-02): the API no longer returns the raw Composio `ca_*` id.
+  // Reference a connection by the internal Floom UUID `id`; the API resolves it
+  // to the raw `ca_*` server-side when wiring triggers / fetching account info.
   status: ConnectionStatus;
   created_at: string;
   updated_at: string;

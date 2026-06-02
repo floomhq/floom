@@ -314,6 +314,10 @@ class VersionRepository(Protocol):
         keep: int = 20,
     ) -> int: ...
 
+    def delete_for_asset(self, *, asset_type: str, asset_id: str) -> int: ...
+
+    def delete_for_context(self, *, name: str) -> int: ...
+
 
 class McpToolRepository(Protocol):
     """Custom MCP tools backed by workers, scoped per user/workspace."""

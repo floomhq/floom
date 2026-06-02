@@ -1957,6 +1957,41 @@ class SqliteVersionRepository:
             )
         return cursor.rowcount
 
+    def delete_for_asset(self, *, asset_type: str, asset_id: str) -> int:
+        """Delete ALL versions for a single (asset_type, asset_id) pair.
+
+        Called when the parent asset (worker, brain pack, brain file) is deleted,
+        so its snapshot history does not linger as an orphan forever (2026-06-02 P2).
+        """
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM asset_versions WHERE asset_type = ? AND asset_id = ?",
+                (asset_type, asset_id),
+            )
+        return cursor.rowcount
+
+    def delete_for_context(self, *, name: str) -> int:
+        """Delete every version row belonging to a context (brain pack).
+
+        A context owns one brain_pack asset (asset_id == name) plus one brain_file
+        asset per file (asset_id == f"{name}:{rel}"). Deleting the context must remove
+        all of them. The name portion is escaped because '_' and '%' are LIKE wildcards
+        and context names may legitimately contain underscores.
+        """
+        # Escape LIKE metacharacters in the name so a context like "my_pack" does not
+        # also match "myXpack:...". Backslash is the ESCAPE char.
+        escaped = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM asset_versions
+                WHERE (asset_type = 'brain_pack' AND asset_id = ?)
+                   OR (asset_type = 'brain_file' AND asset_id LIKE ? ESCAPE '\\')
+                """,
+                (name, f"{escaped}:%"),
+            )
+        return cursor.rowcount
+
 
 class SqliteAlertRepository:
     """SQLite implementation of AlertRepository for webhook alert registrations."""

@@ -2730,6 +2730,30 @@ def _bootstrap_user_id() -> str:
     return configured or "federico"
 
 
+def _resolve_composio_connection_id(connection_ref: str) -> str:
+    """Resolve a trigger's connection reference to the raw Composio ``ca_*`` id.
+
+    NEW-7 (2026-06-02): the raw ``ca_*`` id is no longer exposed via GET /connections,
+    so the worker form now references a connection by its internal Floom UUID ``id``.
+    Existing worker.yml files still carry the raw ``ca_*`` value, so this resolver is
+    backward-compatible: a ``ca_*`` ref passes through unchanged, anything else is
+    looked up by internal id. Composio's enable_trigger needs the raw ``ca_*`` value.
+    """
+    ref = (connection_ref or "").strip()
+    if not ref or ref.startswith("ca_"):
+        return ref
+    try:
+        repos = get_repositories()
+        row = repos.connections.get(user_id=_bootstrap_user_id(), composio_id=ref)
+        if row and row.get("composio_connection_id"):
+            return str(row["composio_connection_id"])
+    except Exception:
+        logger.exception("Failed to resolve composio connection ref %s", ref)
+    # Fall back to the original ref so the upstream call surfaces a clear error
+    # instead of silently dropping the connection.
+    return ref
+
+
 def _composio_trigger_signature(config: Optional[WorkerConfig]) -> Optional[Dict[str, Any]]:
     if not config or config.trigger.type != "composio" or not config.trigger.composio:
         return None
@@ -2796,7 +2820,7 @@ def _enable_composio_trigger(config: WorkerConfig, worker_id: str) -> str:
         from composio_client import enable_trigger
         return enable_trigger(
             signature["event"],
-            signature["connection_id"],
+            _resolve_composio_connection_id(signature["connection_id"]),
             _composio_webhook_url(),
             signature["filters"],
         )
@@ -4435,6 +4459,13 @@ def delete_context(
         )
     shutil.rmtree(root)
     delete_context_metadata(safe_name)
+    # Prune the brain-pack + brain-file version snapshots so they don't orphan
+    # in asset_versions (the keep-20 cap never fires once the context is gone) —
+    # 2026-06-02 P2.
+    try:
+        repos.versions.delete_for_context(name=safe_name)
+    except Exception as exc:
+        logger.warning("Could not prune asset_versions for context %s: %s", safe_name, exc)
     return ContextDeleteResponse(status="deleted", referenced_by=referenced_by)
 
 
@@ -5544,6 +5575,13 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
 
     # Delete the worker (FK CASCADE removes runs/artifacts/logs/webhooks)
     repos.workers.delete(user_id=owner_id, worker_id=worker_id)
+
+    # Prune the worker's version snapshots so they don't orphan in asset_versions
+    # (the keep-20 cap never fires once the worker is gone) — 2026-06-02 P2.
+    try:
+        repos.versions.delete_for_asset(asset_type="worker", asset_id=worker_id)
+    except Exception as exc:
+        logger.warning("Could not prune asset_versions for worker %s: %s", worker_id, exc)
 
     # Check if skill_version is still referenced by other workers; preserve if so.
     ref_count = repos.workers.get_skill_version_ref_count(skill_version_id=skill_version_id)
@@ -8788,6 +8826,10 @@ def _execute_destructive_delete(path: str, owner_id: str, repos: Repositories) -
         if ctx is None:
             raise HTTPException(status_code=404, detail=f"Brain pack '{name}' not found")
         repos.contexts.delete(owner_id=owner_id, name=name)
+        try:
+            repos.versions.delete_for_context(name=name)
+        except Exception as exc:
+            logger.warning("Could not prune asset_versions for context %s: %s", name, exc)
         return f"Brain pack '{name}' deleted"
 
     m = _RE_DELETE_CONTEXT_FILE.match(path)
@@ -10436,9 +10478,12 @@ class MCPConnectionCreateRequest(BaseModel):
 
 
 class ConnectionItem(BaseModel):
+    # NEW-7 (2026-06-02): the raw Composio ``ca_*`` connection id is no longer
+    # exposed. Clients reference a connection by the internal Floom UUID ``id``;
+    # the API resolves it to the raw ``ca_*`` server-side (with the server-held
+    # COMPOSIO_API_KEY) when registering triggers / fetching account info.
     id: str
     app_name: str
-    composio_connection_id: str
     status: str
     created_at: str
     updated_at: str
@@ -10703,6 +10748,8 @@ def _normalize_owner_account_label(value: Optional[str]) -> Optional[str]:
 
 def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
     item = dict(data)
+    # NEW-7: never surface the raw Composio ``ca_*`` id to clients.
+    item.pop("composio_connection_id", None)
     item["kind"] = item.get("kind") or "composio"
     # Single-tenant owner view: show the owner their OWN account identity.
     # display_name carries the real label when present; fall back to
