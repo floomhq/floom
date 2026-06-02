@@ -12,7 +12,13 @@ from typing import Any, Callable, Dict, Iterable, Optional
 import requests
 
 from .base import SandboxDriver
-from models import WorkerConfig, WorkerResult, declared_composio_connections
+from models import (
+    WorkerConfig,
+    WorkerResult,
+    composio_tool_allowed_by_scope,
+    declared_composio_connection_scopes,
+    declared_composio_connections,
+)
 from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.skill")
@@ -375,7 +381,7 @@ class SkillRuntimeDriver(SandboxDriver):
         return OpenAI(api_key=api_key)
 
     def _model_for(self, config: Optional[WorkerConfig]) -> str:
-        return (config.model if config and config.model else None) or os.environ.get("OPENAI_DEFAULT_MODEL") or "gpt-4.1"
+        return (config.model if config and config.model else None) or os.environ.get("OPENAI_DEFAULT_MODEL") or "gpt-5-mini"
 
     def _build_tools(self, config: Optional[WorkerConfig]) -> list[Dict[str, Any]]:
         tools = [
@@ -587,6 +593,13 @@ class SkillRuntimeDriver(SandboxDriver):
             return {
                 "ok": False,
                 "error": f"Tool {tool_slug} is not allowed for worker connection {app_name}",
+                "error_code": "tool_outside_connection_scope",
+            }
+        declared_scopes = declared_composio_connection_scopes(config)
+        if not composio_tool_allowed_by_scope(app_name, tool_slug, declared_scopes.get(app_name)):
+            return {
+                "ok": False,
+                "error": f"Tool {tool_slug} is outside the worker connection scope for {app_name}",
                 "error_code": "tool_outside_connection_scope",
             }
         connection_id = self._connection_id_for(app_name, worker_id, config)

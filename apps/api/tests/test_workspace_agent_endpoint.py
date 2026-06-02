@@ -80,7 +80,7 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["agent_id"] == "workspace-agent"
-    assert body["model"] == "gpt-4.1-mini"
+    assert body["model"] == "gpt-5-mini"
     assert body["channels"]["slack"] == {
         "events_configured": False,
         "bot_configured": False,

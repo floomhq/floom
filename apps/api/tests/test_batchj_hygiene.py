@@ -25,6 +25,16 @@ def test_bare_typeerror_message_maps_to_code_headline() -> None:
     assert "unsupported operand" not in headline
 
 
+def test_worker_traceback_with_timeout_code_maps_to_code_headline() -> None:
+    raw = (
+        "Traceback (most recent call last):\n"
+        '  File "/home/user/worker/run.py", line 4, in run\n'
+        "RuntimeError: user raised failure"
+    )
+    headline = main._operator_error_message(raw, "timeout")
+    assert headline == main._CODE_HEADLINE
+
+
 def test_other_bare_python_messages_map_to_code_headline() -> None:
     for raw in [
         "'NoneType' object is not subscriptable",
