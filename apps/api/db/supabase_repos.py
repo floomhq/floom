@@ -2288,9 +2288,11 @@ class SupabaseMcpToolRepository(_BaseSupabaseRepository):
         input_schema: dict[str, Any],
         worker_id: str,
     ) -> dict[str, Any]:
+        import uuid as _uuid
         workspace_id = _resolve_workspace_id_for_write(user_id=user_id)
         now = datetime.now(timezone.utc).isoformat()
         self._client.table("mcp_tools").insert({
+            "id": str(_uuid.uuid4()),
             "user_id": user_id,
             "workspace_id": workspace_id,
             "name": name,
