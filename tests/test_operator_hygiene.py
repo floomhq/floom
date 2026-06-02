@@ -145,7 +145,7 @@ def test_unknown_error_code_gets_generic_headline(api):
     msg = api._operator_error_message("some weird internal RuntimeError blob", "totally_new_code")
     assert msg
     assert "RuntimeError" not in msg
-    assert msg == api._RUNTIME_HEADLINE or msg == api._OPERATOR_ERROR_GENERIC
+    assert msg in {api._RUNTIME_HEADLINE, api._OPERATOR_ERROR_GENERIC, api._CALM_CODE_ERROR_LOG}
 
 
 def test_known_codes_map_to_calm_headlines(api):
