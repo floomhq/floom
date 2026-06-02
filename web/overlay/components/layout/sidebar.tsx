@@ -18,6 +18,8 @@ import {
   NavLinks,
   SidebarPrimaryActions,
 } from "@/components/layout/sidebar.engine";
+
+export { FloomMark };
 import {
   Dialog,
   DialogContent,
