@@ -2162,18 +2162,23 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
     />
   );
   if (!hasContent) {
+    // The Flow diagram is a fixed-width monospace grid that can be wider than
+    // the prose column; it spans the full content width (with its own internal
+    // overflow-x fallback) so the OUTPUTS column is never clipped on desktop.
+    // Prose stays at max-w-2xl for readability.
     return (
-      <div className="max-w-2xl space-y-6">
+      <div className="space-y-6">
         {diagram}
-        <p className="text-sm text-muted-foreground">
+        <p className="max-w-2xl text-sm text-muted-foreground">
           {worker.description || "No description provided."}
         </p>
       </div>
     );
   }
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="space-y-6">
       {diagram}
+      <div className="max-w-2xl space-y-6">
       {worker.long_description && (
         <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
           {worker.long_description}
@@ -2200,6 +2205,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
           </p>
         </div>
       )}
+      </div>
     </div>
   );
 }
