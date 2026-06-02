@@ -186,78 +186,41 @@ class TestMultiTriggerScheduler:
 
 
 # ---------------------------------------------------------------------------
-# 4. Deterministic webhook token
+# 4. Deterministic webhook token (now derived from the per-worker rotatable key)
 # ---------------------------------------------------------------------------
 
 class TestDeterministicWebhookToken:
-    def test_same_worker_same_token(self):
+    """The pure derivation `derive_webhook_token(worker_id, token_key)` is keyed
+    on the per-worker secret hash (post-2026-06-02). DB-backed behaviour
+    (backfill, rotation invalidation) is covered in test_webhook_token_rotation.
+    """
+
+    def test_same_inputs_same_token(self):
         from webhook_service import derive_webhook_token
-        t1 = derive_webhook_token("my-worker")
-        t2 = derive_webhook_token("my-worker")
+        t1 = derive_webhook_token("my-worker", "key-abc")
+        t2 = derive_webhook_token("my-worker", "key-abc")
         assert t1 == t2
 
     def test_different_workers_different_tokens(self):
         from webhook_service import derive_webhook_token
-        t1 = derive_webhook_token("worker-a")
-        t2 = derive_webhook_token("worker-b")
+        t1 = derive_webhook_token("worker-a", "shared-key")
+        t2 = derive_webhook_token("worker-b", "shared-key")
         assert t1 != t2
 
     def test_token_length_32_hex(self):
         from webhook_service import derive_webhook_token
-        token = derive_webhook_token("some-worker-id")
+        token = derive_webhook_token("some-worker-id", "some-key")
         assert len(token) == 32
         # All hex chars
         int(token, 16)
 
-    def test_token_changes_with_platform_secret(self, monkeypatch):
+    def test_token_changes_with_key(self):
+        """Rotating the per-worker key (the secret hash) changes the token —
+        this is the core of the security fix."""
         from webhook_service import derive_webhook_token
-        monkeypatch.setenv("FLOOM_SECRET", "secret-a")
-        t1 = derive_webhook_token("worker-x")
-        monkeypatch.setenv("FLOOM_SECRET", "secret-b")
-        t2 = derive_webhook_token("worker-x")
+        t1 = derive_webhook_token("worker-x", "key-a")
+        t2 = derive_webhook_token("worker-x", "key-b")
         assert t1 != t2
-
-    def test_verify_correct_token(self):
-        from webhook_service import verify_webhook_token, derive_webhook_token
-        worker_id = "test-worker-verify"
-        token = derive_webhook_token(worker_id)
-        assert verify_webhook_token(worker_id, token) is True
-
-    def test_verify_wrong_token_returns_false(self):
-        from webhook_service import verify_webhook_token
-        assert verify_webhook_token("test-worker", "wrong-token-12345678901234") is False
-
-    def test_verify_empty_token_returns_false(self):
-        from webhook_service import verify_webhook_token
-        assert verify_webhook_token("test-worker", "") is False
-
-
-# ---------------------------------------------------------------------------
-# 5. build_webhook_url
-# ---------------------------------------------------------------------------
-
-class TestBuildWebhookUrl:
-    def test_url_contains_worker_id_and_token(self, monkeypatch):
-        from webhook_service import build_webhook_url, derive_webhook_token
-        monkeypatch.setenv("FLOOM_SECRET", "test-secret-for-url")
-        url = build_webhook_url("my-worker")
-        expected_token = derive_webhook_token("my-worker")
-        assert "my-worker" in url
-        assert f"token={expected_token}" in url
-
-    def test_url_uses_custom_base(self, monkeypatch):
-        from webhook_service import build_webhook_url
-        monkeypatch.delenv("WORKERS_API_URL", raising=False)
-        monkeypatch.delenv("FLOOM_API_BASE", raising=False)
-        url = build_webhook_url("my-worker", base_url="https://custom.example.com")
-        assert url.startswith("https://custom.example.com/webhooks/my-worker")
-
-    def test_url_stable_across_calls(self, monkeypatch):
-        from webhook_service import build_webhook_url
-        monkeypatch.setenv("FLOOM_SECRET", "stable-secret")
-        url1 = build_webhook_url("stable-worker")
-        url2 = build_webhook_url("stable-worker")
-        assert url1 == url2
 
 
 # ---------------------------------------------------------------------------
