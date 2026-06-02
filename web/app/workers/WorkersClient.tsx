@@ -633,7 +633,7 @@ function WorkerCard({
                 e.stopPropagation();
                 onFavoriteToggle(worker.id);
               }}
-              className={`-mr-1 flex size-6 shrink-0 items-center justify-center rounded transition-[color,opacity] focus-visible:opacity-100 ${
+              className={`-my-1.5 -mr-1.5 flex size-9 shrink-0 items-center justify-center rounded transition-[color,opacity] focus-visible:opacity-100 sm:my-0 sm:-mr-1 sm:size-6 ${
                 isFavorite
                   ? "text-[var(--accent)] hover:opacity-80"
                   : "text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-[var(--accent)]"
