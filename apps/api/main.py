@@ -4849,9 +4849,11 @@ def _build_worker_detail(
     webhook_url: Optional[str] = None
     if _worker_has_webhook_trigger(worker, config):
         try:
-            webhook_url = _build_webhook_url(worker["id"])
+            # Token derives from the worker's current rotatable secret (backfilled
+            # lazily if absent), so this always surfaces the working current URL.
+            webhook_url = _build_webhook_url(worker["id"], repos=repos)
         except Exception:
-            pass
+            logger.warning("Could not build webhook URL for %s", worker["id"], exc_info=True)
 
     triggers_spec = _build_triggers_spec(worker)
 
@@ -14526,6 +14528,9 @@ def _check_webhook_rate_limit(key: str) -> bool:
 class WebhookSecretResponse(BaseModel):
     worker_id: str
     secret: Optional[str] = None  # Only present on generation/rotation
+    # The CURRENT webhook URL after rotation. Rotating changes the URL token
+    # (it derives from the rotatable secret), so the user must re-register this.
+    webhook_url: Optional[str] = None
 
 
 def _worker_has_webhook_trigger(worker: Dict[str, Any], config: Optional["WorkerConfig"]) -> bool:
@@ -14587,8 +14592,9 @@ async def webhook_trigger(
 
     # Authentication: token query param takes priority over signature header.
     if token is not None:
-        # Deterministic token auth — reject on mismatch
-        if not verify_webhook_token(worker_id, token):
+        # Deterministic token auth — derived from the worker's CURRENT rotatable
+        # secret, so a rotated/leaked URL stops authorizing. Reject on mismatch.
+        if not verify_webhook_token(worker_id, token, repos=repos):
             raise HTTPException(status_code=401, detail="Invalid webhook token")
     else:
         # Signature verification (only when webhook.secret=true on first trigger)
@@ -14641,8 +14647,11 @@ def rotate_webhook_secret(
     """Rotate the webhook HMAC secret for a worker.
 
     Returns the new raw secret exactly once — it is never stored in plaintext.
+    Rotation also changes the webhook URL token (it derives from the rotatable
+    secret), so the new ``webhook_url`` is returned for the user to re-register;
+    the previous URL stops authorizing.
     """
-    from webhook_service import generate_webhook_secret
+    from webhook_service import build_webhook_url, generate_webhook_secret
 
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
@@ -14657,7 +14666,12 @@ def rotate_webhook_secret(
         )
 
     raw_secret = generate_webhook_secret(worker_id, repos=repos)
-    return WebhookSecretResponse(worker_id=worker_id, secret=raw_secret)
+    new_url: Optional[str] = None
+    try:
+        new_url = build_webhook_url(worker_id, repos=repos)
+    except Exception:
+        logger.warning("Could not build webhook URL after rotation for %s", worker_id, exc_info=True)
+    return WebhookSecretResponse(worker_id=worker_id, secret=raw_secret, webhook_url=new_url)
 
 
 # ---------------------------------------------------------------------------
