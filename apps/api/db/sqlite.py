@@ -1854,6 +1854,14 @@ class SqliteApprovalRepository:
 class SqliteVersionRepository:
     """SQLite implementation of VersionRepository."""
 
+    # Per-asset version cap. brain_pack snapshots embed the FULL content of every
+    # file in the pack, so a single large vault-pack snapshot can be 50-60MB. Keeping
+    # 50 of those filled an 11GB SQLite DB and the disk (2026-06-02 P1). 20 is generous
+    # for brain/worker history while bounding worst-case table growth. Pruning runs in
+    # the same transaction as the insert so the table self-limits forever, even if a
+    # future caller forgets the explicit prune() call.
+    DEFAULT_KEEP = 20
+
     def create(
         self,
         *,
@@ -1862,6 +1870,7 @@ class SqliteVersionRepository:
         user_id: str,
         snapshot_json: str,
         change_source: str,
+        keep: int | None = DEFAULT_KEEP,
     ) -> dict[str, Any]:
         version_id = f"ver_{uuid.uuid4().hex[:12]}"
         created_at = datetime.now(timezone.utc).isoformat()
@@ -1878,6 +1887,26 @@ class SqliteVersionRepository:
                 """,
                 (version_id, asset_type, asset_id, user_id, next_version, snapshot_json, change_source, created_at),
             )
+            # Self-limit within the same transaction so the table can never grow
+            # unbounded, even if a caller omits the explicit prune() below.
+            if keep is not None and keep > 0:
+                keep_ids = [
+                    r[0]
+                    for r in conn.execute(
+                        """
+                        SELECT id FROM asset_versions
+                        WHERE asset_type = ? AND asset_id = ?
+                        ORDER BY version_number DESC LIMIT ?
+                        """,
+                        (asset_type, asset_id, keep),
+                    ).fetchall()
+                ]
+                if keep_ids:
+                    placeholders = ",".join("?" * len(keep_ids))
+                    conn.execute(
+                        f"DELETE FROM asset_versions WHERE asset_type = ? AND asset_id = ? AND id NOT IN ({placeholders})",
+                        [asset_type, asset_id] + keep_ids,
+                    )
         return self.get(version_id=version_id) or {}
 
     def list(
@@ -1908,7 +1937,7 @@ class SqliteVersionRepository:
             ).fetchone()
         return _row_dict(row) if row else None
 
-    def prune(self, *, asset_type: str, asset_id: str, keep: int = 50) -> int:
+    def prune(self, *, asset_type: str, asset_id: str, keep: int = 20) -> int:
         with get_db() as conn:
             ids_to_keep = conn.execute(
                 """

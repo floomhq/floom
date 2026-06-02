@@ -3,12 +3,15 @@
 #
 # Writes one directory per backup:
 #   /root/backups/workeros-YYYY-MM-DD-HHMM/
-#     floom.db
+#     floom.db.gz       (gzip-compressed SQLite online backup)
 #     artifacts.tar.gz
 #     manifest.json
 #
-# Retention:
-#   - 48 newest hourly restore points
+# Restore: gunzip floom.db.gz first, then sqlite3 .restore (see ops/README.md).
+#
+# Retention (tightened 2026-06-02 — DB grew to 11GB, uncompressed 48x copies
+# filled the disk; gzip ~5x + fewer hourly points keeps backup footprint bounded):
+#   - 6 newest hourly restore points
 #   - 7 daily restore points
 #   - 4 weekly restore points
 #
@@ -18,7 +21,7 @@
 #   FLOOM_DB                 SQLite path (default: $WORKEROS_ROOT/data/floom.db)
 #   FLOOM_ARTIFACTS_DIR      artifacts dir (default: $WORKEROS_ROOT/data/artifacts)
 #   WORKEROS_BACKUP_ROOT     destination root (default: /root/backups)
-#   WORKEROS_BACKUP_HOURLY   hourly retention count (default: 48)
+#   WORKEROS_BACKUP_HOURLY   hourly retention count (default: 6)
 #   WORKEROS_BACKUP_DAILY    daily retention count (default: 7)
 #   WORKEROS_BACKUP_WEEKLY   weekly retention count (default: 4)
 
@@ -29,7 +32,7 @@ WORKEROS_API_DIR="${WORKEROS_API_DIR:-$WORKEROS_ROOT/apps/api}"
 DB_PATH="${FLOOM_DB:-$WORKEROS_ROOT/data/floom.db}"
 ARTIFACTS_DIR="${FLOOM_ARTIFACTS_DIR:-$WORKEROS_ROOT/data/artifacts}"
 BACKUP_ROOT="${WORKEROS_BACKUP_ROOT:-/root/backups}"
-HOURLY_KEEP="${WORKEROS_BACKUP_HOURLY:-48}"
+HOURLY_KEEP="${WORKEROS_BACKUP_HOURLY:-6}"
 DAILY_KEEP="${WORKEROS_BACKUP_DAILY:-7}"
 WEEKLY_KEEP="${WORKEROS_BACKUP_WEEKLY:-4}"
 
@@ -69,12 +72,17 @@ fi
 mkdir -p "$DEST"
 
 # Online snapshot. SQLite .backup is safe while the API is running.
+# Snapshot to a temp file, then gzip it. The DB is ~11GB raw; storing 48
+# uncompressed copies filled the disk. gzip (~5x) + the tightened retention
+# above keeps the backup footprint bounded. Restore = gunzip then .restore.
+TMP_DB="$DEST/floom.db"
 if command -v sqlite3 >/dev/null 2>&1; then
-  sqlite3 "$DB_PATH" ".backup '$DEST/floom.db'"
+  sqlite3 "$DB_PATH" ".backup '$TMP_DB'"
 else
   echo "[backup-db] sqlite3 not found, copying database file directly" >&2
-  cp -a "$DB_PATH" "$DEST/floom.db"
+  cp -a "$DB_PATH" "$TMP_DB"
 fi
+gzip -f "$TMP_DB"   # -> $DEST/floom.db.gz
 
 mkdir -p "$ARTIFACTS_DIR"
 tar -C "$(dirname "$ARTIFACTS_DIR")" -czf "$DEST/artifacts.tar.gz" "$(basename "$ARTIFACTS_DIR")"
@@ -107,9 +115,9 @@ manifest = {
     "source_db": str(db_path),
     "source_artifacts": str(artifacts_dir),
     "files": {
-        "floom.db": {
-            "size_bytes": (dest / "floom.db").stat().st_size,
-            "sha256": sha256(dest / "floom.db"),
+        "floom.db.gz": {
+            "size_bytes": (dest / "floom.db.gz").stat().st_size,
+            "sha256": sha256(dest / "floom.db.gz"),
         },
         "artifacts.tar.gz": {
             "size_bytes": (dest / "artifacts.tar.gz").stat().st_size,

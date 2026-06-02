@@ -225,6 +225,47 @@ class TestSqliteVersionRepository:
         finally:
             self._cleanup(repo)
 
+    def test_create_self_limits_to_keep(self):
+        """create() prunes within the same transaction so the table self-limits
+        even when callers never call prune() (2026-06-02 disk P1 root-cause guard)."""
+        conn = self._make_conn()
+        repo = self._make_repo(conn)
+        try:
+            for _ in range(25):
+                repo.create(
+                    asset_type="brain_pack",
+                    asset_id="big-pack",
+                    user_id="u",
+                    snapshot_json="{}",
+                    change_source="user",
+                    keep=20,
+                )
+            remaining = repo.list(asset_type="brain_pack", asset_id="big-pack", limit=100)
+            assert len(remaining) == 20
+            # Newest 20 survive (versions 25..6); latest is always kept
+            assert remaining[0]["version_number"] == 25
+            assert remaining[-1]["version_number"] == 6
+        finally:
+            self._cleanup(repo)
+
+    def test_create_keep_none_disables_self_limit(self):
+        conn = self._make_conn()
+        repo = self._make_repo(conn)
+        try:
+            for _ in range(30):
+                repo.create(
+                    asset_type="worker",
+                    asset_id="unbounded",
+                    user_id="u",
+                    snapshot_json="{}",
+                    change_source="user",
+                    keep=None,
+                )
+            remaining = repo.list(asset_type="worker", asset_id="unbounded", limit=100)
+            assert len(remaining) == 30
+        finally:
+            self._cleanup(repo)
+
     def test_prune_noop_when_under_limit(self):
         conn = self._make_conn()
         repo = self._make_repo(conn)
