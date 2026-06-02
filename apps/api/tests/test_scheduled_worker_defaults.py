@@ -13,6 +13,7 @@ Specifically tests:
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from pathlib import Path
 
@@ -211,6 +212,29 @@ def test_scheduled_worker_with_all_defaults_is_not_flagged(client_and_main):
     worker = _get_worker(client, "scheduled-with-defaults")
     incomplete = _incomplete_scheduled_inputs(worker)
     assert incomplete == [], f"Expected no incomplete inputs, got: {incomplete}"
+
+
+def test_scheduled_run_creation_applies_worker_yml_defaults(client_and_main):
+    """Scheduler-created runs with empty inputs still receive YAML defaults."""
+    _, _, _ = client_and_main
+    run_service = importlib.import_module("run_service")
+    db = importlib.import_module("db")
+    repos = db.get_repositories()
+
+    run_id = run_service.create_run(
+        "scheduled-with-defaults",
+        {},
+        trigger_source="schedule",
+        user_id="federico",
+        repos=repos,
+    )
+
+    row = repos.runs.get_any(run_id=run_id)
+    assert row is not None
+    payload = row["input_json"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    assert payload["channel_id"] == "123456789012345678"
 
 
 def test_manual_worker_with_missing_defaults_is_not_flagged(client_and_main):
