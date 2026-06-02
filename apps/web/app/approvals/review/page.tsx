@@ -773,7 +773,10 @@ function ReviewContent() {
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-6 sm:px-6 sm:py-10">
       <div className="mb-6 flex items-center justify-between gap-4">
         {isSignedLink ? (
-          <span className="text-sm text-[var(--ink-soft)]">Approval review</span>
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold tracking-tight text-[var(--ink)]">Floom Workers</span>
+            <span className="text-xs text-[var(--ink-soft)]">Approval review</span>
+          </div>
         ) : (
           <Link
             href="/approvals"
@@ -820,14 +823,26 @@ function ReviewContent() {
               {approval.label || "Review approval"}
             </h1>
             <div className="mt-2 flex flex-wrap gap-3 text-sm text-[var(--ink-soft)]">
-              <Link className="inline-flex items-center gap-1 hover:text-[var(--ink)]" href={`/workers/${approval.worker_id}`}>
-                {approval.worker_name ?? approval.worker_id}
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Link>
-              <Link className="inline-flex items-center gap-1 hover:text-[var(--ink)]" href={`/runs/${approval.run_id}`}>
-                Run {approval.run_id}
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Link>
+              {isSignedLink ? (
+                <>
+                  {/* Signed-link approvers are external — they have no access to
+                      the authed /workers and /runs routes, so surface the
+                      identifiers as plain text rather than dead links. */}
+                  <span>{approval.worker_name ?? approval.worker_id}</span>
+                  <span>Run {approval.run_id}</span>
+                </>
+              ) : (
+                <>
+                  <Link className="inline-flex items-center gap-1 hover:text-[var(--ink)]" href={`/workers/${approval.worker_id}`}>
+                    {approval.worker_name ?? approval.worker_id}
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </Link>
+                  <Link className="inline-flex items-center gap-1 hover:text-[var(--ink)]" href={`/runs/${approval.run_id}`}>
+                    Run {approval.run_id}
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </Link>
+                </>
+              )}
             </div>
           </div>
 
