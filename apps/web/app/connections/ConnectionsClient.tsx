@@ -48,7 +48,7 @@ export default function ConnectionsClient({
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const hydrateOneConnection = useCallback(async (record: ConnectionRecord) => {
-    const account = await fetchConnectedAccount(record.composio_connection_id);
+    const account = await fetchConnectedAccount(record.id);
     if (account) {
       setMetadataByConnectionId((previous) => ({
         ...previous,

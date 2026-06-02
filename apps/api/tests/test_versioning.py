@@ -295,6 +295,62 @@ class TestSqliteVersionRepository:
         finally:
             self._cleanup(repo)
 
+    def test_delete_for_asset_removes_only_that_asset(self):
+        """Deleting a worker prunes its versions; a sibling worker's stay (2026-06-02 orphan P2)."""
+        conn = self._make_conn()
+        repo = self._make_repo(conn)
+        try:
+            for _ in range(5):
+                repo.create(asset_type="worker", asset_id="worker-a", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+            for _ in range(3):
+                repo.create(asset_type="worker", asset_id="worker-b", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+
+            deleted = repo.delete_for_asset(asset_type="worker", asset_id="worker-a")
+            assert deleted == 5
+            assert repo.list(asset_type="worker", asset_id="worker-a") == []
+            # Sibling untouched
+            assert len(repo.list(asset_type="worker", asset_id="worker-b")) == 3
+        finally:
+            self._cleanup(repo)
+
+    def test_delete_for_asset_does_not_cross_asset_types(self):
+        """A worker delete must not touch a brain_pack that shares the same asset_id."""
+        conn = self._make_conn()
+        repo = self._make_repo(conn)
+        try:
+            repo.create(asset_type="worker", asset_id="shared", user_id="u", snapshot_json="{}", change_source="user")
+            repo.create(asset_type="brain_pack", asset_id="shared", user_id="u", snapshot_json="{}", change_source="user")
+            repo.delete_for_asset(asset_type="worker", asset_id="shared")
+            assert repo.list(asset_type="worker", asset_id="shared") == []
+            assert len(repo.list(asset_type="brain_pack", asset_id="shared")) == 1
+        finally:
+            self._cleanup(repo)
+
+    def test_delete_for_context_removes_pack_and_files(self):
+        """Deleting a context removes its brain_pack + every brain_file; a sibling context's stay."""
+        conn = self._make_conn()
+        repo = self._make_repo(conn)
+        try:
+            # Target context "my_pack": one brain_pack + two brain_file assets.
+            repo.create(asset_type="brain_pack", asset_id="my_pack", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+            repo.create(asset_type="brain_file", asset_id="my_pack:README.md", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+            repo.create(asset_type="brain_file", asset_id="my_pack:data/rows.csv", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+            # Sibling context whose name is a LIKE-wildcard near-miss of "my_pack".
+            repo.create(asset_type="brain_pack", asset_id="myXpack", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+            repo.create(asset_type="brain_file", asset_id="myXpack:README.md", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+
+            deleted = repo.delete_for_context(name="my_pack")
+            assert deleted == 3
+            assert repo.list(asset_type="brain_pack", asset_id="my_pack") == []
+            assert repo.list(asset_type="brain_file", asset_id="my_pack:README.md") == []
+            assert repo.list(asset_type="brain_file", asset_id="my_pack:data/rows.csv") == []
+            # Underscore in the name must NOT be treated as a LIKE wildcard:
+            # the "myXpack" sibling is fully intact.
+            assert len(repo.list(asset_type="brain_pack", asset_id="myXpack")) == 1
+            assert len(repo.list(asset_type="brain_file", asset_id="myXpack:README.md")) == 1
+        finally:
+            self._cleanup(repo)
+
     def test_workspace_instructions_versions(self):
         conn = self._make_conn()
         repo = self._make_repo(conn)
@@ -449,6 +505,77 @@ class TestVersioningIntegration:
         assert len(versions) == 1
         assert versions[0]["version_number"] == 1
         assert versions[0]["asset_type"] == "worker"
+
+    def test_delete_worker_prunes_its_asset_versions(self, client_and_worker):
+        """Deleting a worker removes its asset_versions; a sibling's stay (orphan-GC P2)."""
+        client, worker_id = client_and_worker
+        headers = {"x-floom-secret": "test-secret", "content-type": "application/json"}
+
+        import db as db_mod
+        import main as app_main
+        repos = db_mod.get_repositories()
+        owner = app_main._bootstrap_user_id()
+
+        # Register the worker as a DB row so the DELETE handler can find + remove it.
+        repos.workers.create(
+            user_id=owner,
+            worker_id=worker_id,
+            name="Version Test Worker",
+            manifest_json={
+                "id": worker_id,
+                "name": "Version Test Worker",
+                "trigger": {"type": "manual"},
+                "runtime": {"type": "python", "entrypoint": "run.py", "runner": "e2b"},
+                "inputs": [],
+                "outputs": [],
+                "secrets": [],
+            },
+            bundle_path=f"workers/{worker_id}",
+        )
+
+        # Seed version history for the worker-under-test plus a sibling worker id.
+        for i in range(3):
+            repos.versions.create(
+                asset_type="worker", asset_id=worker_id, user_id="u",
+                snapshot_json=f'{{"v":{i}}}', change_source="user", keep=None,
+            )
+        repos.versions.create(
+            asset_type="worker", asset_id="sibling-worker", user_id="u",
+            snapshot_json="{}", change_source="user", keep=None,
+        )
+        assert len(repos.versions.list(asset_type="worker", asset_id=worker_id, limit=100)) == 3
+
+        r = client.delete(f"/workers/{worker_id}", headers=headers)
+        assert r.status_code == 204
+
+        # The deleted worker's versions are gone; the sibling's survive.
+        assert repos.versions.list(asset_type="worker", asset_id=worker_id, limit=100) == []
+        assert len(repos.versions.list(asset_type="worker", asset_id="sibling-worker", limit=100)) == 1
+
+    def test_delete_context_prunes_pack_and_file_versions(self, client_and_context):
+        """Deleting a context removes its brain_pack + brain_file versions; a sibling stays."""
+        client, context_name = client_and_context
+        headers = {"x-floom-secret": "test-secret"}
+
+        import db as db_mod
+        repos = db_mod.get_repositories()
+
+        # Seed pack + file versions for the context-under-test plus a sibling context.
+        repos.versions.create(asset_type="brain_pack", asset_id=context_name, user_id="u", snapshot_json="{}", change_source="user", keep=None)
+        repos.versions.create(asset_type="brain_file", asset_id=f"{context_name}:README.md", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+        repos.versions.create(asset_type="brain_file", asset_id=f"{context_name}:data.csv", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+        repos.versions.create(asset_type="brain_pack", asset_id="other-pack", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+        repos.versions.create(asset_type="brain_file", asset_id="other-pack:README.md", user_id="u", snapshot_json="{}", change_source="user", keep=None)
+
+        r = client.delete(f"/contexts/{context_name}?force=true", headers=headers)
+        assert r.status_code == 200
+
+        assert repos.versions.list(asset_type="brain_pack", asset_id=context_name, limit=100) == []
+        assert repos.versions.list(asset_type="brain_file", asset_id=f"{context_name}:README.md", limit=100) == []
+        assert repos.versions.list(asset_type="brain_file", asset_id=f"{context_name}:data.csv", limit=100) == []
+        # Sibling context untouched.
+        assert len(repos.versions.list(asset_type="brain_pack", asset_id="other-pack", limit=100)) == 1
+        assert len(repos.versions.list(asset_type="brain_file", asset_id="other-pack:README.md", limit=100)) == 1
 
     def test_rollback_restores_previous_version(self, client_and_worker):
         client, worker_id = client_and_worker
