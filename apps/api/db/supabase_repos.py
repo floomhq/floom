@@ -2254,3 +2254,73 @@ class SupabaseVersionRepository:
             .execute()
         )
         return len(_response_rows(delete_resp))
+
+
+class SupabaseMcpToolRepository(_BaseSupabaseRepository):
+    """Supabase implementation of McpToolRepository — workspace-scoped."""
+
+    def list(self, *, user_id: str) -> list[dict[str, Any]]:
+        builder = self._client.table("mcp_tools").select(
+            "id,user_id,workspace_id,name,description,input_schema,worker_id,created_at,updated_at"
+        )
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.order("created_at").execute()
+        return _response_rows(response)
+
+    def get(self, *, user_id: str, tool_id: str) -> dict[str, Any] | None:
+        builder = self._client.table("mcp_tools").select("*")
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.eq("id", tool_id).limit(1).execute()
+        return _first_row(response)
+
+    def get_by_name(self, *, user_id: str, name: str) -> dict[str, Any] | None:
+        builder = self._client.table("mcp_tools").select("*")
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.eq("name", name).limit(1).execute()
+        return _first_row(response)
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        worker_id: str,
+    ) -> dict[str, Any]:
+        workspace_id = _resolve_workspace_id_for_write(user_id=user_id)
+        now = datetime.now(timezone.utc).isoformat()
+        self._client.table("mcp_tools").insert({
+            "user_id": user_id,
+            "workspace_id": workspace_id,
+            "name": name,
+            "description": description,
+            "input_schema": input_schema,
+            "worker_id": worker_id,
+            "created_at": now,
+            "updated_at": now,
+        }).execute()
+        item = self.get_by_name(user_id=user_id, name=name)
+        if item is None:
+            raise RuntimeError(f"failed to create mcp_tool {name!r}")
+        return item
+
+    def update(self, *, user_id: str, tool_id: str, **fields: Any) -> dict[str, Any] | None:
+        existing = self.get(user_id=user_id, tool_id=tool_id)
+        if existing is None:
+            return None
+        allowed = {"name", "description", "input_schema", "worker_id"}
+        updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+        if not updates:
+            return existing
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        builder = self._client.table("mcp_tools").update(updates).eq("id", tool_id)
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        builder.execute()
+        return self.get(user_id=user_id, tool_id=tool_id)
+
+    def delete(self, *, user_id: str, tool_id: str) -> bool:
+        builder = self._client.table("mcp_tools").delete().eq("id", tool_id)
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.execute()
+        return bool(_response_rows(response))

@@ -116,6 +116,44 @@ app.include_router(workspace_agent_router, prefix="/api")
 app.include_router(slack_events_router, prefix="/api")
 
 
+@app.post("/mcp/{workspace_id}")
+async def cloud_mcp_endpoint(
+    workspace_id: str,
+    request: Request,
+) -> Any:
+    """Workspace-scoped HTTP MCP server.
+
+    Auth: PAT Bearer token in Authorization header (or x-floom-token).
+    The PAT must belong to workspace_id — validated by SupabaseAuthProvider,
+    which sets the active workspace contextvar before this handler runs.
+    """
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from apps.api.auth.workspace_context import get_active_workspace_id
+    from fastapi.responses import JSONResponse as _JSONResponse
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    # Confirm the workspace in the URL matches the authenticated workspace.
+    active_ws = get_active_workspace_id()
+    if active_ws and active_ws != workspace_id:
+        raise HTTPException(status_code=403, detail="token is not valid for this workspace")
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}, status_code=400)
+
+    repos = engine_main.get_repositories()
+    result = await engine_main._mcp_handle_request(body, auth, repos)
+    return _JSONResponse(result)
+
+
 @app.post("/api/webhooks/{worker_id}", response_model=engine_main.ActionResponse)
 async def cloud_webhook_trigger(
     worker_id: str,
