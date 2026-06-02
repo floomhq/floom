@@ -2,8 +2,17 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "workeros_cloud_session";
 
+function normalizeCookieValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
 function decodeBase64Url(value: string): string | null {
   try {
+    value = normalizeCookieValue(value);
     const padded = value + "=".repeat((4 - (value.length % 4)) % 4);
     const normalized = padded.replace(/-/g, "+").replace(/_/g, "/");
     return atob(normalized);
@@ -38,9 +47,11 @@ function isPublicPath(pathname: string): boolean {
   // routing context. Handle both.
   const path = pathname.startsWith("/app") ? pathname.slice(4) || "/" : pathname;
   if (path === "/favicon.ico") return true;
+  if (path === "/login") return true;
   if (path === "/privacy" || path === "/terms") return true;
   if (path === "/approvals/review") return true;
   if (path.startsWith("/_next/")) return true;
+  if (path.startsWith("/api/auth/")) return true;
   if (path.startsWith("/api/proxy/")) return true;
   if (path === "/api/me") return true;
   return false;
@@ -51,12 +62,13 @@ export function middleware(req: NextRequest): NextResponse {
     return NextResponse.next();
   }
   const session = req.cookies.get(SESSION_COOKIE);
-  if (!hasUsableSession(session?.value)) {
+  const usableSession = hasUsableSession(session?.value);
+  if (!usableSession) {
     const path = req.nextUrl.pathname.startsWith("/app")
       ? req.nextUrl.pathname.slice(4) || "/"
       : req.nextUrl.pathname;
     const next = encodeURIComponent(`/app${path === "/" ? "" : path}${req.nextUrl.search}`);
-    return NextResponse.redirect(new URL(`/login?next=${next}`, req.url));
+    return NextResponse.redirect(new URL(`/app/login?next=${next}`, req.url));
   }
   return NextResponse.next();
 }

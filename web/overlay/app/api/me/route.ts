@@ -3,7 +3,16 @@ import { cookies } from "next/headers";
 
 const SESSION_COOKIE = "workeros_cloud_session";
 
+function normalizeCookieValue(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
 function decodeBase64Url(value: string): string {
+  value = normalizeCookieValue(value);
   const padded = value + "=".repeat((4 - (value.length % 4)) % 4);
   const normalized = padded.replace(/-/g, "+").replace(/_/g, "/");
   return Buffer.from(normalized, "base64").toString("utf-8");

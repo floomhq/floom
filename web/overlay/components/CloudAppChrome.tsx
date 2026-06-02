@@ -1,0 +1,55 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+import { Ambient } from "@/components/Ambient";
+import { CommandPalette } from "@/components/CommandPalette";
+import { IconSprite } from "@/components/IconSprite";
+import { TelemetryProvider } from "@/components/TelemetryProvider";
+import { Sidebar } from "@/components/layout/sidebar";
+import { Toaster } from "@/components/ui/sonner";
+
+export function CloudAppChrome({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isLoginPath = pathname === "/login" || pathname.startsWith("/login/") || pathname === "/app/login" || pathname.startsWith("/app/login/");
+  const isApprovalReviewPath =
+    pathname === "/approvals/review" ||
+    pathname.startsWith("/approvals/review/") ||
+    pathname === "/app/approvals/review" ||
+    pathname.startsWith("/app/approvals/review/");
+
+  if (isLoginPath) {
+    return (
+      <>
+        <IconSprite />
+        {children}
+        <Toaster position="bottom-right" />
+      </>
+    );
+  }
+
+  if (isApprovalReviewPath) {
+    return (
+      <>
+        <IconSprite />
+        <Ambient />
+        <main className="relative z-10 min-h-screen w-full">{children}</main>
+        <TelemetryProvider />
+        <Toaster position="bottom-right" />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <IconSprite />
+      <Ambient />
+      <Sidebar />
+      <main className="relative z-10 flex-1 min-w-0">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
+      </main>
+      <CommandPalette />
+      <TelemetryProvider />
+      <Toaster position="bottom-right" />
+    </>
+  );
+}

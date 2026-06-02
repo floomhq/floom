@@ -159,8 +159,11 @@ export function Sidebar() {
 // /auth/callback) and shows email + initial. Logout posts to the cloud
 // backend's /auth/logout (through the proxy) and bounces back to /login.
 function UserProfileFooter() {
+  const pathname = usePathname();
+  const isLoginPath = pathname === "/login" || pathname.startsWith("/login/") || pathname === "/app/login" || pathname.startsWith("/app/login/");
   const [email, setEmail] = useState<string | null>(null);
   useEffect(() => {
+    if (isLoginPath) return;
     let cancelled = false;
     fetch("/app/api/me", { cache: "no-store" })
       .then((r) => r.json())
@@ -174,16 +177,17 @@ function UserProfileFooter() {
             headers: activeWorkspaceHeaders(),
           }).catch(() => {});
         } else if (!cancelled) {
-          window.location.replace("/login?next=/app");
+          window.location.replace("/app/login?next=/app");
         }
       })
       .catch(() => {
-        if (!cancelled) window.location.replace("/login?next=/app");
+        if (!cancelled) window.location.replace("/app/login?next=/app");
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isLoginPath]);
+  if (isLoginPath) return null;
   const initial = email
     ? email.split("@")[0]?.slice(0, 2).toUpperCase() ?? "??"
     : "—";
@@ -195,7 +199,7 @@ function UserProfileFooter() {
     try {
       await fetch("/app/api/proxy/auth/logout", { method: "POST" });
     } finally {
-      window.location.replace("/login?next=/app");
+      window.location.replace("/app/login?next=/app");
     }
   };
   return (

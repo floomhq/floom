@@ -1,0 +1,113 @@
+{
+  "schema_version": "2026-06-01",
+  "source": "Verified NovaSearch production evidence from /root/fede-vault/novasearch/2026-06-01-candidate-discovery-test-results.md",
+  "defaults": {
+    "include_external": false,
+    "use_ai_curation": false
+  },
+  "thresholds": {
+    "top_1_exact_for_named_fixtures": true,
+    "top_10_overlap_min": 0.8,
+    "deterministic_score_delta_max": 0.05,
+    "displayed_count_delta_max": 1,
+    "downloadable_count_delta_max": 1,
+    "external_count_expected": 0
+  },
+  "fixtures": [
+    {
+      "id": "fico_hamburg_v1_crm",
+      "description": "SAP FI/CO Hamburg CRM-only deterministic benchmark",
+      "old_query_log_id": "ff11b4cec96c47dfb64ed72e67e5d4c6",
+      "request": {
+        "job_title": "SAP FI/CO Consultant",
+        "job_description": "Senior FI/CO rollout role in Hamburg. German required.",
+        "location": "Hamburg",
+        "required_modules": ["FI-CO"],
+        "nice_modules": ["S/4HANA"],
+        "min_years_experience": 3,
+        "ranking_version": "v1",
+        "include_external": false,
+        "use_ai_curation": false
+      },
+      "expected": {
+        "external_count": 0,
+        "top_names_include": [
+          "David McDermott",
+          "Muammer Bozat",
+          "Agnieszka Potyra"
+        ],
+        "non_empty": true
+      }
+    },
+    {
+      "id": "tm_duesseldorf_v2_sparse_crm",
+      "description": "SAP TM Duesseldorf sparse-coverage case",
+      "old_query_log_id": "5e0635263b294be48a40aa298e17ebea",
+      "request": {
+        "job_title": "SAP TM Consultant",
+        "job_description": "Senior SAP TM role near Duesseldorf. German required.",
+        "location": "Duesseldorf",
+        "required_modules": ["TM"],
+        "nice_modules": ["S/4HANA", "EWM"],
+        "min_years_experience": 3,
+        "ranking_version": "v2",
+        "include_external": false,
+        "use_ai_curation": false
+      },
+      "expected": {
+        "external_count": 0,
+        "curated_count": 0,
+        "downloadable_count": 0,
+        "coverage_note_required": true
+      }
+    },
+    {
+      "id": "mmsd_remote_v1_crm",
+      "description": "SAP MM/SD remote CRM-only deterministic benchmark",
+      "old_query_log_id": "81235fd5f43646ed9566b899c2df70f1",
+      "request": {
+        "job_title": "SAP MM/SD Consultant",
+        "job_description": "Senior SAP MM and SD consultant. Remote possible. German required.",
+        "location": "Remote",
+        "required_modules": ["MM", "SD"],
+        "nice_modules": ["S/4HANA"],
+        "min_years_experience": 3,
+        "ranking_version": "v1",
+        "include_external": false,
+        "use_ai_curation": false
+      },
+      "expected": {
+        "external_count": 0,
+        "top_names_include": [
+          "Dennis Plep",
+          "Wolfgang P. Prenosil",
+          "Petra Dieckmann"
+        ],
+        "non_empty": true
+      }
+    },
+    {
+      "id": "basis_berlin_remote_v1_crm",
+      "description": "SAP Basis Berlin/Remote CRM-only async evidence converted to sync fixture",
+      "old_job_id": "c0de091071194835aeb95789c5b6f45a",
+      "old_query_log_id": "75c7b4dfb99444fc97f6518314cdb441",
+      "request": {
+        "job_title": "SAP Basis Administrator",
+        "job_description": "SAP Basis administrator for Berlin or remote work. S/4HANA and security nice to have. German required.",
+        "location": "Berlin",
+        "required_modules": ["Basis"],
+        "nice_modules": ["S/4HANA", "Security"],
+        "min_years_experience": 3,
+        "ranking_version": "v1",
+        "include_external": false,
+        "use_ai_curation": false
+      },
+      "expected": {
+        "external_count": 0,
+        "displayed_count": 8,
+        "downloadable_count": 8,
+        "non_empty": true
+      }
+    }
+  ]
+}

@@ -88,7 +88,7 @@ def _mcp_tool_definitions() -> list[dict[str, Any]]:
         raise RuntimeError("NovaSearch MCP definitions could not be loaded")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return list(module.TOOLS)
+    return json.loads(json.dumps(list(module.TOOLS)))
 
 
 def _require_workspace_id() -> str:
@@ -283,9 +283,18 @@ def _mcp_find_sap_candidates(
         )
     except Exception:
         pass
+    mcp_result = {
+        "curated_matches": (result.get("curated_matches") or [])[:10],
+        "total_scored": result.get("total_scored"),
+        "curation_method": result.get("curation_method"),
+        "ranking_version": sanitized.get("ranking_version", "v2"),
+        "include_external": bool(sanitized.get("include_external")),
+        "response_time_ms": result.get("response_time_ms"),
+    }
     if result.get("query_log_id"):
-        result["review_url"] = _review_url(str(result["query_log_id"]))
-    return _tool_ok(result)
+        mcp_result["query_log_id"] = result["query_log_id"]
+        mcp_result["review_url"] = _review_url(str(result["query_log_id"]))
+    return _tool_ok(mcp_result)
 
 
 def _queue_outreach(workspace_id: str, user_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -730,7 +739,7 @@ def _mcp_dispatch(
             arguments = params.get("arguments") or {}
             if not isinstance(arguments, dict):
                 result = _tool_error("Invalid arguments: arguments must be an object.")
-            elif name == "find_sap_candidates":
+            elif name in {"find_sap_candidates", "find_candidates"}:
                 result = _mcp_find_sap_candidates(
                     workspace_id=workspace_id,
                     user_id=user_id,
