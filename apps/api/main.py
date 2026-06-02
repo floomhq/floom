@@ -920,6 +920,7 @@ async def auth_middleware(request: Request, call_next):
             or path == "/slack/events"
             or path == "/slack/commands"
             or path == "/slack/interactivity"
+            or path == "/slack/oauth/callback"
             or path == "/mcp"
             or path == "/api/mcp"
             or path == "/mcp/setup/langdock"
@@ -11273,6 +11274,457 @@ async def composio_events_alias(request: Request) -> ActionResponse:
 # Slack Events API
 # ---------------------------------------------------------------------------
 
+SLACK_INSTALL_SCOPES = [
+    "app_mentions:read",
+    "assistant:write",
+    "chat:write",
+    "commands",
+    "im:history",
+    "im:write",
+]
+
+SLACK_SETUP_ENV_ALLOWLIST = frozenset({
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_EVENTS_ENABLED",
+})
+
+
+class SlackSetupConfigRequest(BaseModel):
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    signing_secret: Optional[str] = None
+    events_enabled: Optional[bool] = None
+
+
+class SlackSetupStatus(BaseModel):
+    configured: bool
+    missing: List[str]
+    client_id_set: bool
+    client_secret_set: bool
+    signing_secret_set: bool
+    events_enabled: bool
+    callback_url: str
+    events_url: str
+    command_url: str
+    interactivity_url: str
+    install_url: Optional[str]
+    installed_teams: List[Dict[str, Any]]
+    allowed_team_ids: List[str]
+
+
+class SlackInstallUrlResponse(BaseModel):
+    install_url: str
+    expires_at: str
+
+
+class SlackSetupConfigResponse(BaseModel):
+    status: str
+    updated: List[str]
+    setup: SlackSetupStatus
+
+
+def _public_api_base_url() -> str:
+    raw = (
+        os.environ.get("WORKEROS_PUBLIC_API_URL")
+        or os.environ.get("WORKEROS_API_URL")
+        or os.environ.get("WORKERS_API_URL")
+        or "https://workers-api.floom.dev"
+    )
+    return raw.rstrip("/")
+
+
+def _frontend_base_url() -> str:
+    return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
+
+
+def _slack_oauth_callback_url() -> str:
+    return f"{_public_api_base_url()}/slack/oauth/callback"
+
+
+def _slack_events_url() -> str:
+    return f"{_public_api_base_url()}/slack/events"
+
+
+def _slack_commands_url() -> str:
+    return f"{_public_api_base_url()}/slack/commands"
+
+
+def _slack_interactivity_url() -> str:
+    return f"{_public_api_base_url()}/slack/interactivity"
+
+
+def _slack_state_secret() -> str:
+    secret = (os.environ.get("FLOOM_SECRET") or os.environ.get("SLACK_CLIENT_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="FLOOM_SECRET or SLACK_CLIENT_SECRET is required for Slack OAuth state")
+    return secret
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    padded = value + ("=" * (-len(value) % 4))
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def _issue_slack_oauth_state(*, user_id: str, return_to: Optional[str] = None, ttl_seconds: int = 600) -> tuple[str, datetime]:
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    payload = {
+        "user_id": user_id,
+        "return_to": return_to or "/connections/slack",
+        "nonce": pysecrets.token_urlsafe(18),
+        "exp": int(expires_at.timestamp()),
+    }
+    encoded = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    signature = hmac.new(_slack_state_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}", expires_at
+
+
+def _consume_slack_oauth_state(state: str) -> Dict[str, Any]:
+    try:
+        encoded, signature = state.split(".", 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack OAuth state") from exc
+    expected = hmac.new(_slack_state_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=400, detail="Invalid Slack OAuth state")
+    try:
+        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack OAuth state") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid Slack OAuth state")
+    if int(payload.get("exp") or 0) < int(time.time()):
+        raise HTTPException(status_code=400, detail="Slack OAuth state expired")
+    return payload
+
+
+def _slack_install_url(*, state: str) -> str:
+    client_id = os.environ.get("SLACK_CLIENT_ID", "").strip()
+    if not client_id:
+        raise HTTPException(status_code=503, detail="SLACK_CLIENT_ID is not configured")
+    params = urllib.parse.urlencode({
+        "client_id": client_id,
+        "scope": ",".join(SLACK_INSTALL_SCOPES),
+        "redirect_uri": _slack_oauth_callback_url(),
+        "state": state,
+    })
+    return f"https://slack.com/oauth/v2/authorize?{params}"
+
+
+def _safe_slack_team_env_suffix(team_id: str) -> str:
+    suffix = re.sub(r"[^A-Za-z0-9_]", "_", team_id.strip()).upper()
+    if not suffix:
+        raise HTTPException(status_code=400, detail="Slack team_id is required")
+    return suffix
+
+
+def _slack_team_bot_token_env_key(team_id: str) -> str:
+    return f"SLACK_BOT_TOKEN_{_safe_slack_team_env_suffix(team_id)}"
+
+
+def _append_slack_allowed_team_id(team_id: str) -> None:
+    allowed = _slack_allowed_team_ids()
+    if team_id in allowed:
+        return
+    allowed.add(team_id)
+    _upsert_env_var("SLACK_ALLOWED_TEAM_IDS", ",".join(sorted(allowed)))
+
+
+def _list_slack_installations() -> List[Dict[str, Any]]:
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT team_id, team_name, enterprise_id, enterprise_name, app_id,
+                       bot_user_id, bot_token_env_key, scopes_json, installer_user_id,
+                       status, installed_by_user_id, created_at, updated_at,
+                       last_checked_at, last_check_status, last_check_error
+                FROM slack_installations
+                ORDER BY updated_at DESC, team_id
+                """
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        item = row_to_dict(row)
+        item["scopes"] = _parse_json_string_list(item.pop("scopes_json", None))
+        item["bot_token_set"] = bool(os.environ.get(item.get("bot_token_env_key") or ""))
+        item.pop("bot_token_env_key", None)
+        items.append(item)
+    return items
+
+
+def _get_slack_installation(team_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT team_id, team_name, enterprise_id, enterprise_name, app_id,
+                       bot_user_id, bot_token_env_key, scopes_json, installer_user_id,
+                       status, installed_by_user_id, created_at, updated_at,
+                       last_checked_at, last_check_status, last_check_error
+                FROM slack_installations
+                WHERE team_id = ?
+                LIMIT 1
+                """,
+                (team_id,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    return row_to_dict(row) if row else None
+
+
+def _upsert_slack_installation(
+    *,
+    team_id: str,
+    team_name: Optional[str],
+    enterprise_id: Optional[str],
+    enterprise_name: Optional[str],
+    app_id: Optional[str],
+    bot_user_id: Optional[str],
+    bot_token_env_key: str,
+    scopes: List[str],
+    installer_user_id: Optional[str],
+    installed_by_user_id: str,
+    status: str = "active",
+) -> Dict[str, Any]:
+    now = now_iso()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO slack_installations
+                (team_id, team_name, enterprise_id, enterprise_name, app_id,
+                 bot_user_id, bot_token_env_key, scopes_json, installer_user_id,
+                 status, installed_by_user_id, created_at, updated_at,
+                 last_checked_at, last_check_status, last_check_error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(team_id) DO UPDATE SET
+                team_name = excluded.team_name,
+                enterprise_id = excluded.enterprise_id,
+                enterprise_name = excluded.enterprise_name,
+                app_id = excluded.app_id,
+                bot_user_id = excluded.bot_user_id,
+                bot_token_env_key = excluded.bot_token_env_key,
+                scopes_json = excluded.scopes_json,
+                installer_user_id = excluded.installer_user_id,
+                status = excluded.status,
+                installed_by_user_id = excluded.installed_by_user_id,
+                updated_at = excluded.updated_at,
+                last_checked_at = excluded.last_checked_at,
+                last_check_status = excluded.last_check_status,
+                last_check_error = excluded.last_check_error
+            """,
+            (
+                team_id,
+                team_name,
+                enterprise_id,
+                enterprise_name,
+                app_id,
+                bot_user_id,
+                bot_token_env_key,
+                json.dumps(scopes, separators=(",", ":")),
+                installer_user_id,
+                status,
+                installed_by_user_id,
+                now,
+                now,
+                now,
+                "valid",
+                None,
+            ),
+        )
+    row = _get_slack_installation(team_id)
+    if row is None:
+        raise RuntimeError(f"failed to persist Slack installation for {team_id}")
+    return row
+
+
+def _slack_bot_token_for_team(team_id: Optional[str]) -> str:
+    if team_id:
+        install = _get_slack_installation(team_id)
+        if install:
+            token = os.environ.get(str(install.get("bot_token_env_key") or ""), "").strip()
+            if token:
+                return token
+    return os.environ.get("SLACK_BOT_TOKEN", "").strip()
+
+
+def _slack_setup_status_for_user(user_id: str) -> SlackSetupStatus:
+    missing = [
+        name
+        for name in ("SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_SIGNING_SECRET")
+        if not os.environ.get(name, "").strip()
+    ]
+    install_url = None
+    if not missing:
+        try:
+            state, _expires_at = _issue_slack_oauth_state(user_id=user_id)
+            install_url = _slack_install_url(state=state)
+        except HTTPException:
+            install_url = None
+    return SlackSetupStatus(
+        configured=not missing,
+        missing=missing,
+        client_id_set=bool(os.environ.get("SLACK_CLIENT_ID", "").strip()),
+        client_secret_set=bool(os.environ.get("SLACK_CLIENT_SECRET", "").strip()),
+        signing_secret_set=bool(os.environ.get("SLACK_SIGNING_SECRET", "").strip()),
+        events_enabled=_slack_events_enabled(),
+        callback_url=_slack_oauth_callback_url(),
+        events_url=_slack_events_url(),
+        command_url=_slack_commands_url(),
+        interactivity_url=_slack_interactivity_url(),
+        install_url=install_url,
+        installed_teams=_list_slack_installations(),
+        allowed_team_ids=sorted(_slack_allowed_team_ids()),
+    )
+
+
+def _extract_slack_oauth_scopes(payload: Dict[str, Any]) -> List[str]:
+    raw = payload.get("scope") or payload.get("scopes") or ""
+    if isinstance(raw, list):
+        return [str(item) for item in raw if str(item).strip()]
+    return [part for part in re.split(r"[,\s]+", str(raw).strip()) if part]
+
+
+def _exchange_slack_oauth_code(code: str) -> Dict[str, Any]:
+    client_id = os.environ.get("SLACK_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("SLACK_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="Slack OAuth client is not configured")
+    response = requests.post(
+        "https://slack.com/api/oauth.v2.access",
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "redirect_uri": _slack_oauth_callback_url(),
+        },
+        timeout=15,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Slack OAuth returned a non-JSON response") from exc
+    if not response.ok or not payload.get("ok"):
+        raise HTTPException(status_code=502, detail=f"Slack OAuth failed: {payload.get('error') or response.status_code}")
+    return payload
+
+
+def _slack_auth_test(bot_token: str) -> Dict[str, Any]:
+    response = requests.get(
+        "https://slack.com/api/auth.test",
+        headers={"Authorization": f"Bearer {bot_token}"},
+        timeout=10,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Slack auth.test returned a non-JSON response") from exc
+    if not response.ok or not payload.get("ok"):
+        raise HTTPException(status_code=502, detail=f"Slack auth.test failed: {payload.get('error') or response.status_code}")
+    return payload
+
+
+@app.get("/slack/setup/status", response_model=SlackSetupStatus)
+def slack_setup_status(auth: AuthContext = Depends(get_auth_context)) -> SlackSetupStatus:
+    return _slack_setup_status_for_user(auth.user_id)
+
+
+@app.post("/slack/setup/config", response_model=SlackSetupConfigResponse)
+def slack_setup_config(
+    payload: SlackSetupConfigRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> SlackSetupConfigResponse:
+    updates: Dict[str, str] = {}
+    if payload.client_id is not None:
+        updates["SLACK_CLIENT_ID"] = payload.client_id.strip()
+    if payload.client_secret is not None:
+        updates["SLACK_CLIENT_SECRET"] = payload.client_secret.strip()
+    if payload.signing_secret is not None:
+        updates["SLACK_SIGNING_SECRET"] = payload.signing_secret.strip()
+    if payload.events_enabled is not None:
+        updates["SLACK_EVENTS_ENABLED"] = "1" if payload.events_enabled else "0"
+
+    for name, value in updates.items():
+        if name not in SLACK_SETUP_ENV_ALLOWLIST:
+            raise HTTPException(status_code=400, detail=f"Unsupported Slack setup env var: {name}")
+        if not value and name != "SLACK_EVENTS_ENABLED":
+            raise HTTPException(status_code=400, detail=f"{name} cannot be empty")
+        _upsert_env_var(name, value)
+
+    return SlackSetupConfigResponse(
+        status="updated",
+        updated=sorted(updates),
+        setup=_slack_setup_status_for_user(auth.user_id),
+    )
+
+
+@app.post("/slack/oauth/install", response_model=SlackInstallUrlResponse)
+def slack_oauth_install(
+    return_to: Optional[str] = Body(default="/connections/slack", embed=True),
+    auth: AuthContext = Depends(get_auth_context),
+) -> SlackInstallUrlResponse:
+    state, expires_at = _issue_slack_oauth_state(user_id=auth.user_id, return_to=return_to)
+    return SlackInstallUrlResponse(
+        install_url=_slack_install_url(state=state),
+        expires_at=expires_at.isoformat(),
+    )
+
+
+@app.get("/slack/oauth/callback")
+def slack_oauth_callback(code: str = "", state: str = "", error: str = ""):
+    from fastapi.responses import RedirectResponse
+
+    frontend_url = _frontend_base_url()
+    if error:
+        return RedirectResponse(url=f"{frontend_url}/connections/slack?slack_error={urllib.parse.quote(error)}")
+    if not code or not state:
+        return RedirectResponse(url=f"{frontend_url}/connections/slack?slack_error=missing_code_or_state")
+
+    state_payload = _consume_slack_oauth_state(state)
+    installed_by_user_id = str(state_payload.get("user_id") or _bootstrap_user_id())
+    oauth_payload = _exchange_slack_oauth_code(code)
+    bot_token = str(oauth_payload.get("access_token") or "").strip()
+    if not bot_token:
+        raise HTTPException(status_code=502, detail="Slack OAuth response did not include a bot token")
+
+    team = oauth_payload.get("team") if isinstance(oauth_payload.get("team"), dict) else {}
+    enterprise = oauth_payload.get("enterprise") if isinstance(oauth_payload.get("enterprise"), dict) else {}
+    authed_user = oauth_payload.get("authed_user") if isinstance(oauth_payload.get("authed_user"), dict) else {}
+    auth_test = _slack_auth_test(bot_token)
+    team_id = str(team.get("id") or auth_test.get("team_id") or "").strip()
+    if not team_id:
+        raise HTTPException(status_code=502, detail="Slack OAuth response did not include a team id")
+
+    bot_token_env_key = _slack_team_bot_token_env_key(team_id)
+    _upsert_env_var(bot_token_env_key, bot_token)
+    _upsert_env_var("SLACK_BOT_TOKEN", bot_token)
+    _append_slack_allowed_team_id(team_id)
+
+    _upsert_slack_installation(
+        team_id=team_id,
+        team_name=str(team.get("name") or auth_test.get("team") or ""),
+        enterprise_id=str(enterprise.get("id") or "") or None,
+        enterprise_name=str(enterprise.get("name") or "") or None,
+        app_id=str(oauth_payload.get("app_id") or "") or None,
+        bot_user_id=str(oauth_payload.get("bot_user_id") or auth_test.get("user_id") or "") or None,
+        bot_token_env_key=bot_token_env_key,
+        scopes=_extract_slack_oauth_scopes(oauth_payload),
+        installer_user_id=str(authed_user.get("id") or "") or None,
+        installed_by_user_id=installed_by_user_id,
+    )
+
+    return_to = str(state_payload.get("return_to") or "/connections/slack")
+    safe_return_to = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/connections/slack"
+    return RedirectResponse(url=f"{frontend_url}{safe_return_to}?slack_connected=1&team_id={urllib.parse.quote(team_id)}")
+
+
 def _slack_events_enabled() -> bool:
     value = os.environ.get("SLACK_EVENTS_ENABLED", "1").strip().lower()
     return value not in {"0", "false", "no", "off"}
@@ -11349,8 +11801,8 @@ async def _collect_workspace_agent_reply_for_slack(
     return "".join(text_parts).strip()
 
 
-def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str) -> None:
-    bot_token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str, bot_token: Optional[str] = None) -> None:
+    bot_token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
     if not bot_token:
         raise RuntimeError("SLACK_BOT_TOKEN is not configured")
     response = requests.post(
@@ -11377,8 +11829,8 @@ def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str) -> None
         raise RuntimeError(f"Slack post failed: {error}")
 
 
-def _set_slack_assistant_status(*, channel: str, thread_ts: str, status: str) -> None:
-    bot_token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+def _set_slack_assistant_status(*, channel: str, thread_ts: str, status: str, bot_token: Optional[str] = None) -> None:
+    bot_token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
     if not bot_token:
         raise RuntimeError("SLACK_BOT_TOKEN is not configured")
     response = requests.post(
@@ -11547,6 +11999,7 @@ async def _handle_slack_app_mention(
     event: Dict[str, Any],
     prompt: str,
     user_id: str,
+    bot_token: Optional[str] = None,
 ) -> None:
     channel = str(event.get("channel") or "")
     thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
@@ -11560,7 +12013,7 @@ async def _handle_slack_app_mention(
             user_id=user_id,
             conversation_id=conversation_id,
         )
-        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply)
+        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply, bot_token=bot_token)
     except Exception:
         logger.exception("Slack app_mention processing failed")
         if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
@@ -11569,12 +12022,13 @@ async def _handle_slack_app_mention(
                     channel=channel,
                     thread_ts=thread_ts,
                     text="I could not complete that request. The failure was logged for the workspace operator.",
+                    bot_token=bot_token,
                 )
             except Exception:
                 logger.exception("Slack error reply failed")
 
 
-async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any]) -> None:
+async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any], bot_token: Optional[str] = None) -> None:
     assistant_thread = event.get("assistant_thread") if isinstance(event.get("assistant_thread"), dict) else {}
     channel = str(assistant_thread.get("channel_id") or "")
     thread_ts = str(assistant_thread.get("thread_ts") or "")
@@ -11586,6 +12040,7 @@ async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any]) -> No
             channel=channel,
             thread_ts=thread_ts,
             text="I am ready. Ask me to inspect workers, draft an action, or list approvals.",
+            bot_token=bot_token,
         )
     except Exception:
         logger.exception("Slack assistant thread greeting failed")
@@ -11596,6 +12051,7 @@ async def _handle_slack_direct_message(
     event: Dict[str, Any],
     prompt: str,
     user_id: str,
+    bot_token: Optional[str] = None,
 ) -> None:
     channel = str(event.get("channel") or "")
     thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
@@ -11609,6 +12065,7 @@ async def _handle_slack_direct_message(
                 channel=channel,
                 thread_ts=thread_ts,
                 status="is working on your request...",
+                bot_token=bot_token,
             )
         except Exception:
             logger.exception("Slack assistant status update failed")
@@ -11617,7 +12074,7 @@ async def _handle_slack_direct_message(
             user_id=user_id,
             conversation_id=conversation_id,
         )
-        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply)
+        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply, bot_token=bot_token)
     except Exception:
         logger.exception("Slack direct message processing failed")
         if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
@@ -11626,6 +12083,7 @@ async def _handle_slack_direct_message(
                     channel=channel,
                     thread_ts=thread_ts,
                     text="I could not complete that request. The failure was logged for the workspace operator.",
+                    bot_token=bot_token,
                 )
             except Exception:
                 logger.exception("Slack direct message error reply failed")
@@ -11814,7 +12272,8 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
     if event_type not in supported_event_types and not is_direct_message:
         return JSONResponse({"ok": True, "ignored": event_type or "unknown"})
 
-    if not os.environ.get("SLACK_BOT_TOKEN", "").strip():
+    bot_token = _slack_bot_token_for_team(team_id)
+    if not bot_token:
         raise HTTPException(status_code=503, detail="SLACK_BOT_TOKEN is not configured")
 
     event_id = str(payload.get("event_id") or request.headers.get("X-Slack-Retry-Num") or "")
@@ -11822,7 +12281,7 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
         return JSONResponse({"ok": True, "duplicate": True})
 
     if event_type == "assistant_thread_started":
-        background_tasks.add_task(_handle_slack_assistant_thread_started, event=event)
+        background_tasks.add_task(_handle_slack_assistant_thread_started, event=event, bot_token=bot_token)
         return JSONResponse({"ok": True, "status": "queued"})
 
     if event_type == "assistant_thread_context_changed":
@@ -11841,6 +12300,7 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
             event=event,
             prompt=prompt,
             user_id=user_id,
+            bot_token=bot_token,
         )
         return JSONResponse({"ok": True, "status": "queued"})
 
@@ -11860,6 +12320,7 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
         event=event,
         prompt=prompt,
         user_id=user_id,
+        bot_token=bot_token,
     )
     return JSONResponse({"ok": True, "status": "queued"})
 

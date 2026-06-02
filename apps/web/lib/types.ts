@@ -362,6 +362,52 @@ export interface PlatformConfig {
   required_count: number;
 }
 
+export interface SlackInstalledTeam {
+  team_id: string;
+  team_name?: string | null;
+  enterprise_id?: string | null;
+  enterprise_name?: string | null;
+  app_id?: string | null;
+  bot_user_id?: string | null;
+  scopes?: string[];
+  installer_user_id?: string | null;
+  status: string;
+  installed_by_user_id: string;
+  created_at: string;
+  updated_at: string;
+  last_checked_at?: string | null;
+  last_check_status?: string | null;
+  last_check_error?: string | null;
+  bot_token_set: boolean;
+}
+
+export interface SlackSetupStatus {
+  configured: boolean;
+  missing: string[];
+  client_id_set: boolean;
+  client_secret_set: boolean;
+  signing_secret_set: boolean;
+  events_enabled: boolean;
+  callback_url: string;
+  events_url: string;
+  command_url: string;
+  interactivity_url: string;
+  install_url?: string | null;
+  installed_teams: SlackInstalledTeam[];
+  allowed_team_ids: string[];
+}
+
+export interface SlackInstallUrlResponse {
+  install_url: string;
+  expires_at: string;
+}
+
+export interface SlackSetupConfigResponse {
+  status: string;
+  updated: string[];
+  setup: SlackSetupStatus;
+}
+
 export interface WorkspaceAgentTool {
   name: string;
   description: string;
