@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Code2, AlignLeft, Download, ExternalLink, File, FilePlus, FolderOpen, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import "highlight.js/styles/github.css";
 import type { WorkerFile } from "@/lib/types";
 import { humanizeCron } from "@/lib/humanize-cron";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CodeBlock } from "@/components/file-viewer/code-block";
 
 // ---------------------------------------------------------------------------
 // Language detection helpers
@@ -45,9 +46,25 @@ function sourceFileKind(path: string, language?: string) {
   return "code";
 }
 
+// A file has a *genuine* rendered-vs-source distinction worth a second tab.
+// Generic .yaml/.yml/.json/.py/etc. do NOT: their "rendered" form is just the
+// same syntax-highlighted source, so showing both a Preview and a Raw tab is
+// redundant (the confusing dual-tab Federico flagged). Only these kinds render
+// to something materially different from their source:
+//   - markdown -> formatted document
+//   - html     -> iframe
+//   - table    -> parsed grid
+// worker.yml is special-cased separately (structured summary), handled by
+// `hasWorkerYamlSummary`.
 function supportsRenderedPreview(path: string, binary?: boolean): boolean {
   if (binary) return false;
-  return ["yaml", "markdown", "html", "table"].includes(sourceFileKind(path));
+  return ["markdown", "html", "table"].includes(sourceFileKind(path));
+}
+
+// worker.yml gets a structured "Summary" rendering distinct from its raw YAML
+// source — the one YAML file with a real rendered view.
+function hasWorkerYamlSummary(path: string, binary?: boolean): boolean {
+  return !binary && path === "worker.yml";
 }
 
 function sourceFileDownloadName(path: string): string {
@@ -116,7 +133,7 @@ function span(color: string, s: string, extra = ""): string {
 }
 
 // Colors chosen to be legible on both the light (var(--bg-2)) and dark
-// (#1e1e2e) editor backgrounds used by FilesEditor.
+// (#1a1a1a) editor backgrounds used by FilesEditor.
 const YC = {
   key:     "hsl(210 80% 55%)",   // blue — keys
   colon:   "hsl(220 10% 55%)",   // muted — : separator
@@ -186,43 +203,24 @@ function makeHighlighter(language: string) {
 // View-mode syntax highlight (read-only)
 // ---------------------------------------------------------------------------
 
-function SyntaxHighlightedCode({ content, language }: { content: string; language?: string }) {
-  const codeRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    import("highlight.js/lib/core").then(async (hljsCore) => {
-      const hljs = hljsCore.default;
-      if (language === "python") {
-        const python = await import("highlight.js/lib/languages/python");
-        hljs.registerLanguage("python", python.default);
-      } else if (language === "yaml") {
-        const yaml = await import("highlight.js/lib/languages/yaml");
-        hljs.registerLanguage("yaml", yaml.default);
-      } else if (language === "json") {
-        const json = await import("highlight.js/lib/languages/json");
-        hljs.registerLanguage("json", json.default);
-      } else if (language === "bash" || language === "shell") {
-        const bash = await import("highlight.js/lib/languages/bash");
-        hljs.registerLanguage("bash", bash.default);
-      }
-      if (!cancelled && codeRef.current) hljs.highlightElement(codeRef.current);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [content, language]);
-
+// View-mode read-only code. Delegates to the canonical shared CodeBlock so the
+// rounded surface, highlight palette, and dark/light backgrounds match the
+// Brain file viewer exactly. `path` lets CodeBlock fall back to path-based
+// language detection; `language` (hljs id) overrides it when the backend
+// supplies one.
+function SyntaxHighlightedCode({
+  content,
+  language,
+  path = "file.txt",
+}: {
+  content: string;
+  language?: string;
+  path?: string;
+}) {
   return (
-    <pre
-      className="text-xs font-mono overflow-auto max-h-[600px] bg-[var(--bg-2)] dark:bg-[#1e1e2e] whitespace-pre m-0 rounded-b-[var(--radius-card)]"
-    >
-      <code
-        ref={codeRef}
-        className={language ? `language-${language}` : ""}
-        style={{ background: "transparent", padding: "0.75rem", display: "block" }}
-      >
-        {content}
-      </code>
-    </pre>
+    <div className="max-h-[600px] overflow-auto">
+      <CodeBlock text={content} filePath={path} language={language} />
+    </div>
   );
 }
 
@@ -268,15 +266,16 @@ export function FilesEditor(props: FilesEditorProps) {
 
 function defaultSourceMode(path: string, hasForm: boolean, binary?: boolean): SourceMode {
   if (binary) return "raw";
-  if (path === "worker.yml") return "preview";
+  if (hasWorkerYamlSummary(path, binary)) return "preview";
   if (supportsRenderedPreview(path)) return "preview";
   return hasForm ? "form" : "raw";
 }
 
-function sourceModeLabel(mode: SourceMode): string {
-  if (mode === "raw") return "Raw source";
+function sourceModeLabel(mode: SourceMode, isWorkerYaml = false): string {
+  if (mode === "raw") return "Raw";
   if (mode === "form") return "Form";
-  return "Rendered preview";
+  // worker.yml's rendered view is a structured summary, not a "preview".
+  return isWorkerYaml ? "Summary" : "Preview";
 }
 
 function sourceModeIcon(mode: SourceMode) {
@@ -361,38 +360,58 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
     );
   }
 
-  if (!supportsRenderedPreview(file.path, file.binary)) {
+  const content = file.content || "";
+  const lang = file.language || detectLanguage(file.path);
+
+  // worker.yml: structured Summary vs raw YAML source — a real distinction.
+  if (hasWorkerYamlSummary(file.path, file.binary)) {
     return (
-      <div>
-        <SourcePreviewToolbar path={file.path} content={file.content || ""} label="Raw source" />
-        <SyntaxHighlightedCode content={file.content || ""} language={file.language || detectLanguage(file.path)} />
-      </div>
+      <Tabs defaultValue="preview" className="bg-muted/20">
+        <div className="flex items-center justify-end gap-3 border-b border-line px-4 py-2">
+          <TabsList>
+            <TabsTrigger value="preview">Summary</TabsTrigger>
+            <TabsTrigger value="raw">Raw</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="preview" className="m-0">
+          <RenderedFilePreview path={file.path} content={content} language={lang} />
+        </TabsContent>
+        <TabsContent value="raw" className="m-0">
+          <SourcePreviewToolbar path={file.path} content={content} label="Raw" />
+          <SyntaxHighlightedCode content={content} path={file.path} language={lang} />
+        </TabsContent>
+      </Tabs>
     );
   }
 
+  // markdown / html / table: rendered document vs source — a real distinction.
+  if (supportsRenderedPreview(file.path, file.binary)) {
+    return (
+      <Tabs defaultValue="preview" className="bg-muted/20">
+        <div className="flex items-center justify-end gap-3 border-b border-line px-4 py-2">
+          <TabsList>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsTrigger value="raw">Raw</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="preview" className="m-0">
+          <RenderedFilePreview path={file.path} content={content} language={lang} />
+        </TabsContent>
+        <TabsContent value="raw" className="m-0">
+          <SourcePreviewToolbar path={file.path} content={content} label="Raw" />
+          <SyntaxHighlightedCode content={content} path={file.path} language={lang} />
+        </TabsContent>
+      </Tabs>
+    );
+  }
+
+  // Everything else (.py / .ts / .json / .yaml / .yml / .txt / ...): a single
+  // canonical syntax-highlighted view — no redundant Preview-vs-Raw tabs.
   return (
-    <Tabs defaultValue="preview" className="bg-muted/20">
-      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
-        <p className="text-xs text-muted-foreground">
-          Rendered preview for {sourceFileKind(file.path, file.language)}
-        </p>
-        <TabsList>
-          <TabsTrigger value="preview">Rendered preview</TabsTrigger>
-          <TabsTrigger value="raw">Raw source</TabsTrigger>
-        </TabsList>
-      </div>
-      <TabsContent value="preview" className="m-0">
-        <RenderedFilePreview
-          path={file.path}
-          content={file.content || ""}
-          language={file.language || detectLanguage(file.path)}
-        />
-      </TabsContent>
-      <TabsContent value="raw" className="m-0">
-        <SourcePreviewToolbar path={file.path} content={file.content || ""} label="Raw source" />
-        <SyntaxHighlightedCode content={file.content || ""} language={file.language || detectLanguage(file.path)} />
-      </TabsContent>
-    </Tabs>
+    <div>
+      <SourcePreviewToolbar path={file.path} content={content} label="Source" />
+      <SyntaxHighlightedCode content={content} path={file.path} language={lang} />
+    </div>
   );
 }
 
@@ -505,7 +524,7 @@ function RenderedFilePreview({
     );
   }
 
-  return <SyntaxHighlightedCode content={content} language={detected} />;
+  return <SyntaxHighlightedCode content={content} path={path} language={detected} />;
 }
 
 function SourceDelimitedTablePreview({ content, path }: { content: string; path: string }) {
@@ -541,7 +560,7 @@ function SourceDelimitedTablePreview({ content, path }: { content: string; path:
 function WorkerYamlPreviewContent({ content }: { content: string }) {
   const parsed = parseWorkerYaml(content);
   if (!parsed) {
-    return <SyntaxHighlightedCode content={content} language="yaml" />;
+    return <SyntaxHighlightedCode content={content} path="worker.yml" language="yaml" />;
   }
 
   const entries = [
@@ -693,7 +712,13 @@ function FilesEditorEdit({
   const effectiveSelected = selectedPath ?? files[0]?.path ?? "worker.yml";
   const selectedFile = files.find((f) => f.path === effectiveSelected) || null;
   const selectedHasForm = Boolean(selectedFile && selectedFile.path === "worker.yml" && renderYamlPreview);
-  const selectedHasPreview = Boolean(selectedFile && supportsRenderedPreview(selectedFile.path, selectedFile.binary));
+  const selectedIsWorkerYaml = Boolean(selectedFile && hasWorkerYamlSummary(selectedFile.path, selectedFile.binary));
+  // A second rendered tab is only meaningful for files with a real
+  // rendered-vs-source distinction (markdown/html/table) or worker.yml's
+  // structured summary. Generic .yaml/.json/.py show a single raw editor.
+  const selectedHasPreview = Boolean(
+    selectedFile && (supportsRenderedPreview(selectedFile.path, selectedFile.binary) || selectedIsWorkerYaml)
+  );
 
   const [sourceMode, setSourceMode] = useState<SourceMode>(() =>
     defaultSourceMode(effectiveSelected, Boolean(renderYamlPreview))
@@ -816,7 +841,7 @@ function FilesEditorEdit({
                     }`}
                   >
                     {sourceModeIcon(mode)}
-                    {sourceModeLabel(mode)}
+                    {sourceModeLabel(mode, selectedIsWorkerYaml)}
                   </button>
                 ))}
               </div>
@@ -834,7 +859,7 @@ function FilesEditorEdit({
                   detail="This worker source listing does not include inline bytes for binary files, so this file cannot be rendered or edited here."
                   path={selectedFile.path}
                 />
-              ) : supportsRenderedPreview(selectedFile.path) ? (
+              ) : supportsRenderedPreview(selectedFile.path) || hasWorkerYamlSummary(selectedFile.path, selectedFile.binary) ? (
                 <RenderedFilePreview
                   path={selectedFile.path}
                   content={selectedFile.content}
@@ -843,7 +868,7 @@ function FilesEditorEdit({
               ) : (
                 <UnsupportedSourcePreview
                   title="Rendered preview unavailable"
-                  detail="This source file type does not have a renderer in the worker Source editor. Use Raw source, Open, or Download."
+                  detail="This source file type does not have a renderer in the worker Source editor. Use Raw, Open, or Download."
                   path={selectedFile.path}
                 />
               )
@@ -857,9 +882,9 @@ function FilesEditorEdit({
                   />
                 ) : (
                   <>
-                    <SourcePreviewToolbar path={selectedFile.path} content={selectedFile.content} label="Raw source" />
+                    <SourcePreviewToolbar path={selectedFile.path} content={selectedFile.content} label="Raw" />
                     <div
-                      className="rounded-b-[var(--radius-card)] overflow-hidden bg-[var(--bg-2)] dark:bg-[#1e1e2e]"
+                      className="rounded-b-[var(--radius-card)] overflow-hidden bg-[var(--bg-2)] dark:bg-[#1a1a1a]"
                       style={{ minHeight: 640 }}
                     >
                       <Editor
