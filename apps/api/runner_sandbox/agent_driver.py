@@ -20,6 +20,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from contexts import (
+    context_dir,
+    context_scope_for_user,
+    iter_context_files,
+    normalize_context_mount,
+    use_context_scope,
+)
 from models import WorkerConfig, WorkerResult, declared_composio_connections
 from runner_utils import ARTIFACTS_DIR, _validate_output_schema
 from worker_registry import WORKERS_DIR
@@ -111,6 +118,7 @@ class _AgentRunState:
     bundle_dir: Path
     input_dir: Path
     output_dir: Path
+    context_dir: Path
     outputs: Dict[str, Any]
     artifacts: list[Dict[str, Any]]
     timeout_seconds: int
@@ -258,9 +266,21 @@ class AgentDriver(SandboxDriver):
         artifact_dir = _safe_path(ARTIFACTS_DIR, run_id)
         input_dir = _safe_path(artifact_dir, "inputs")
         output_dir = _safe_path(artifact_dir, "outputs")
+        context_root = _safe_path(artifact_dir, "context")
         input_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
         _safe_path(input_dir, "inputs.json").write_text(json.dumps(inputs, indent=2), encoding="utf-8")
+
+        # Stage attached brain packs (config.contexts) into a per-run context/
+        # tree the agent's file tools can read, mirroring the e2b driver's
+        # {workdir}/context/<name>/... layout. Owner-scoped: a run only ever
+        # sees ITS attached packs, never another tenant's.
+        staged_context_packs = self._stage_contexts(
+            config=config,
+            context_root=context_root,
+            user_id=user_id,
+            log_fn=log_fn,
+        )
 
         outputs: Dict[str, Any] = {}
         artifacts: list[Dict[str, Any]] = []
@@ -276,6 +296,7 @@ class AgentDriver(SandboxDriver):
             bundle_dir=bundle_dir,
             input_dir=input_dir,
             output_dir=output_dir,
+            context_dir=context_root,
             outputs=outputs,
             artifacts=artifacts,
             timeout_seconds=timeout_seconds,
@@ -283,7 +304,7 @@ class AgentDriver(SandboxDriver):
             user_id=user_id,
         )
 
-        system_prompt = self._load_system_prompt(bundle_dir, config)
+        system_prompt = self._load_system_prompt(bundle_dir, config, staged_context_packs)
         run_input: str | list[dict[str, Any]] = json.dumps(
             {
                 "worker_id": worker_id,
@@ -693,7 +714,71 @@ class AgentDriver(SandboxDriver):
         except Exception:
             return False
 
-    def _load_system_prompt(self, bundle_dir: Path, config: WorkerConfig) -> str:
+    def _stage_contexts(
+        self,
+        *,
+        config: Optional[WorkerConfig],
+        context_root: Path,
+        user_id: str | None,
+        log_fn: Callable[[str, str], None],
+    ) -> list[str]:
+        """Stage each attached brain pack into ``context_root/<name>/...``.
+
+        Mirrors ``E2BSandboxDriver._upload_contexts_to_sandbox``: same owner
+        scope (``use_context_scope(context_scope_for_user(user_id))``), same
+        per-pack ``context/<name>`` layout, same source helper
+        (``context_dir`` / ``iter_context_files``). Returns the list of staged
+        pack names so they can be surfaced to the model.
+
+        Security: pack file resolution happens under the run owner's context
+        scope, so a worker only ever stages ITS attached packs. Git contexts
+        are skipped here (local agent-mode has no sandboxed clone target);
+        local packs are the supported attachment form for agent-mode.
+        """
+        if not config or not config.contexts:
+            return []
+
+        staged: list[str] = []
+        with use_context_scope(context_scope_for_user(user_id)):
+            for raw_context in config.contexts:
+                try:
+                    context = normalize_context_mount(raw_context)
+                except ValueError as exc:
+                    log_fn(f"[agent] Skipping invalid context: {exc}", "warning")
+                    continue
+
+                name = context["name"]
+                source = context["source"]
+                if source.startswith("git+"):
+                    log_fn(
+                        f"[agent] Skipping git context {name!r}: git contexts are "
+                        "not supported for agent-mode workers",
+                        "warning",
+                    )
+                    continue
+
+                local_dir = context_dir(name)
+                if not local_dir.is_dir():
+                    log_fn(f"[agent] Context {name!r} not found locally", "warning")
+                    continue
+
+                pack_target = _safe_path(context_root, name)
+                pack_target.mkdir(parents=True, exist_ok=True)
+                for fpath in iter_context_files(local_dir):
+                    rel = fpath.relative_to(local_dir)
+                    dest = _safe_path(pack_target, rel.as_posix())
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(fpath.read_bytes())
+                staged.append(name)
+                log_fn(f"[agent] Staged context {name!r}", "debug")
+        return staged
+
+    def _load_system_prompt(
+        self,
+        bundle_dir: Path,
+        config: WorkerConfig,
+        staged_context_packs: list[str] | None = None,
+    ) -> str:
         prompt_parts: list[str] = []
         if config.runtime.system_prompt:
             prompt_parts.append(config.runtime.system_prompt.strip())
@@ -706,6 +791,16 @@ class AgentDriver(SandboxDriver):
             prompt_parts.append(entrypoint_path.read_text())
         elif config.runtime.type != "none":
             raise FileNotFoundError(f"Agent entrypoint not found: {entrypoint}")
+        if staged_context_packs:
+            names = ", ".join(sorted(staged_context_packs))
+            prompt_parts.append(
+                "## Attached context packs\n\n"
+                f"The following brain packs are attached: {names}. Their files are "
+                "available under `context/<name>/` and readable with list_dir and "
+                "read_file (e.g. list_dir('context'), read_file('context/"
+                f"{sorted(staged_context_packs)[0]}/<file>')). Consult them as "
+                "reference knowledge for this run."
+            )
         prompt_parts.append(
             "Use tools to inspect bundle files as needed. "
             "Use web_search for fresh or external facts unless disabled. "
@@ -1043,6 +1138,7 @@ class AgentDriver(SandboxDriver):
                     outputs=state.outputs,
                     artifacts=state.artifacts,
                     timeout_seconds=state.timeout_seconds,
+                    context_dir=state.context_dir,
                     connection_ids=state.connection_ids,
                     user_id=state.user_id,
                 )
@@ -1099,14 +1195,15 @@ class AgentDriver(SandboxDriver):
         outputs: Dict[str, Any],
         artifacts: list[Dict[str, Any]],
         timeout_seconds: int,
+        context_dir: Path,
         connection_ids: Optional[Dict[str, str]] = None,
         user_id: str | None = None,
     ) -> Dict[str, Any]:
         try:
             if name == "list_dir":
-                return self._list_dir(bundle_dir, str(args.get("path") or "."))
+                return self._list_dir(bundle_dir, str(args.get("path") or "."), context_dir)
             if name == "read_file":
-                return self._read_file(bundle_dir, str(args.get("path") or ""))
+                return self._read_file(bundle_dir, str(args.get("path") or ""), context_dir)
             if name == "write_output":
                 return self._write_output(args, output_dir, outputs, artifacts, config)
             if name == "finish_with_outputs":
@@ -1133,8 +1230,23 @@ class AgentDriver(SandboxDriver):
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def _list_dir(self, bundle_dir: Path, path: str) -> Dict[str, Any]:
-        target = _safe_path(bundle_dir, path)
+    def _resolve_read_path(self, bundle_dir: Path, context_dir: Path, path: str) -> Path:
+        """Resolve a file-tool path to the bundle, or the staged context tree.
+
+        Attached brain packs live under ``context/<name>/...`` (mirroring the
+        e2b driver). ``context`` itself and any ``context/...`` path resolve
+        against the per-run staged context root; everything else resolves
+        against the read-only bundle. Both roots are path-traversal-guarded.
+        """
+        normalized = Path(path or ".").as_posix().strip("/")
+        if normalized == "context":
+            return context_dir.resolve()
+        if normalized.startswith("context/"):
+            return _safe_path(context_dir, normalized[len("context/") :])
+        return _safe_path(bundle_dir, path)
+
+    def _list_dir(self, bundle_dir: Path, path: str, context_dir: Path) -> Dict[str, Any]:
+        target = self._resolve_read_path(bundle_dir, context_dir, path)
         if not target.is_dir():
             return {"ok": False, "error": f"Not a directory: {path}"}
         entries = []
@@ -1142,8 +1254,8 @@ class AgentDriver(SandboxDriver):
             entries.append({"name": child.name, "type": "dir" if child.is_dir() else "file"})
         return {"ok": True, "entries": entries}
 
-    def _read_file(self, bundle_dir: Path, path: str) -> Dict[str, Any]:
-        target = _safe_path(bundle_dir, path)
+    def _read_file(self, bundle_dir: Path, path: str, context_dir: Path) -> Dict[str, Any]:
+        target = self._resolve_read_path(bundle_dir, context_dir, path)
         if not target.is_file():
             return {"ok": False, "error": f"File not found: {path}"}
         return {"ok": True, "content": target.read_text()}
