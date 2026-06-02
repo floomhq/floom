@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { Fragment, useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
@@ -18,10 +18,10 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
-  Play, Plug, Pencil, ClipboardCheck, ChevronRight,
-  Copy, Code2, Clock, Plug2, ListChecks,
+  Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
+  Copy, Code2, Clock, Plug2, ListChecks, History,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, Plus, GitFork, RotateCcw,
+  Brain as BrainIcon, Settings2, Plus, RotateCcw,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
@@ -134,21 +134,35 @@ interface NavItem {
   id: Section;
   label: string;
   icon: React.ReactNode;
+  // Tab grouping for visual rhythm: "view" = day-to-day/read tabs,
+  // "setup" = configuration tabs. A subtle gap+divider separates the two
+  // groups in the same row so the eye reads two short clusters instead of one
+  // long run of 7 tabs.
+  group: "view" | "setup";
 }
 
 // S34: Federico — "this page about this worker and run should be different
 // tabs. These are completely different content and it's confusing." Restored
 // About as a first-class tab (was inlined as <details> on the Run tab in S32).
+// Grouped so the bar reads as two short clusters, not one long run of 7 tabs:
+//   view group  → About · Run · Runs · Source   (what the worker is + does)
+//   setup group → Settings · Brain · Connections (how it's configured)
+// A subtle gap+divider sits between the groups in the same row. Every tab is
+// still one click away — no nesting, no hidden features.
 const NAV_ITEMS: NavItem[] = [
-  { id: "about", label: "About", icon: <BookOpen className="w-4 h-4" /> },
-  { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
-  { id: "settings", label: "Settings", icon: <Settings2 className="w-4 h-4" /> },
-  { id: "brain", label: "Brain", icon: <BrainIcon className="w-4 h-4" /> },
-  { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
-  { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
-  { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
-  { id: "versions", label: "Versions", icon: <GitFork className="w-4 h-4" /> },
+  { id: "about", label: "About", icon: <BookOpen className="w-4 h-4" />, group: "view" },
+  { id: "run", label: "Run", icon: <Play className="w-4 h-4" />, group: "view" },
+  { id: "runs", label: "Runs", icon: <ListChecks className="w-4 h-4" />, group: "view" },
+  { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" />, group: "view" },
+  { id: "settings", label: "Settings", icon: <Settings2 className="w-4 h-4" />, group: "setup" },
+  { id: "brain", label: "Brain", icon: <BrainIcon className="w-4 h-4" />, group: "setup" },
+  { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" />, group: "setup" },
 ];
+// Note: "Versions" is intentionally NOT a tab. Worker config-version history is
+// surfaced via a header "Versions" dropdown → dialog (VersionsSection), to match
+// the inline Versions dropdown on Agent (/assistant) and Brain (/contexts) and
+// to keep this bar from overflowing. `versions` stays a valid Section purely so
+// the legacy `#versions` deep-link opens that dialog (see the effect above).
 
 // ---------------------------------------------------------------------------
 // Source-file derivation
@@ -357,6 +371,13 @@ export default function WorkerDetailPage() {
   const [archiving, setArchiving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Config-version history. Unified to a "Versions" affordance across
+  // Agent (/assistant), Brain (/contexts), and worker detail: instead of a
+  // dedicated tab, worker config versions now open from a header "Versions"
+  // dropdown trigger into a dialog that hosts the full list + diff + rollback
+  // (VersionsSection), preserving every capability the old tab had.
+  const [versionsOpen, setVersionsOpen] = useState(false);
+
   // Derived dirty flags
   const filesDirty = editFiles.some((f) => !f.binary && f.content !== (editFilesOriginal[f.path] ?? ""));
   const metaDirty =
@@ -376,6 +397,17 @@ export default function WorkerDetailPage() {
     url.hash = SECTION_TO_HASH[s];
     window.history.pushState(null, "", url.toString());
   }, []);
+
+  // Versions is no longer a tab — it's a header dropdown that opens a dialog.
+  // Preserve the legacy `#versions` deep-link: if a section ever resolves to
+  // "versions" (initial hash, back/forward, pasted link), open the dialog and
+  // snap the visible tab back to a real one so the tab bar stays valid.
+  useEffect(() => {
+    if (activeSection === "versions") {
+      setVersionsOpen(true);
+      setActiveSection("about");
+    }
+  }, [activeSection]);
 
   // S30: useState initializer only runs once. When the URL hash changes
   // externally (back/forward navigation, deep link, direct paste), the
@@ -1383,23 +1415,34 @@ export default function WorkerDetailPage() {
             </Button>
           </div>
         ) : worker.archived ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={async () => {
-              try {
-                const updated = await api.workers.restore(worker.id);
-                setWorker(updated);
-                toast.success("Worker restored");
-              } catch (e: unknown) {
-                toast.error(e instanceof Error ? e.message : "Failed to restore worker");
-              }
-            }}
-          >
-            <ArchiveRestore className="w-4 h-4 mr-1.5" />
-            Restore
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setVersionsOpen(true)}
+              aria-label="Versions"
+            >
+              <History className="size-3.5" />
+              Versions
+              <ChevronDown className="size-3.5 text-muted-foreground" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  const updated = await api.workers.restore(worker.id);
+                  setWorker(updated);
+                  toast.success("Worker restored");
+                } catch (e: unknown) {
+                  toast.error(e instanceof Error ? e.message : "Failed to restore worker");
+                }
+              }}
+            >
+              <ArchiveRestore className="w-4 h-4 mr-1.5" />
+              Restore
+            </Button>
+          </div>
         ) : (
           <div className="flex items-center gap-2 shrink-0">
             {/* FIX 2 (Federico 2026-05-29): "Example" tag relocated OFF the
@@ -1410,6 +1453,20 @@ export default function WorkerDetailPage() {
                 Example
               </span>
             )}
+            {/* Unified "Versions" affordance (matches the inline Versions
+                dropdown on Agent /assistant + Brain /contexts). Was a dedicated
+                tab; now a quiet header trigger that opens the full version
+                list + diff + rollback in a dialog (VersionsSection). */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setVersionsOpen(true)}
+              aria-label="Versions"
+            >
+              <History className="size-3.5" />
+              Versions
+              <ChevronDown className="size-3.5 text-muted-foreground" />
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -1447,6 +1504,23 @@ export default function WorkerDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Versions dialog. Hosts the full config-version history (list +
+          per-version diff + rollback) that used to be a dedicated tab. Opened
+          from the header "Versions" trigger so the affordance matches Agent
+          (/assistant) and Brain (/contexts) and the tab bar stays compact. */}
+      <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Versions</DialogTitle>
+            <DialogDescription>
+              A snapshot is saved on every edit. Click a version to preview the
+              diff and restore it.
+            </DialogDescription>
+          </DialogHeader>
+          <VersionsSection worker={worker} onRollback={(updated) => setWorker(updated)} />
+        </DialogContent>
+      </Dialog>
 
       {/* P1-C: destructive delete confirm. Archive is reversible so it acts
           immediately from the menu; Delete removes the worker and all of its
@@ -1580,18 +1654,32 @@ export default function WorkerDetailPage() {
       <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
         <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
           <TabsList>
-            {NAV_ITEMS.map((item) => (
-              <TabsTrigger key={item.id} value={item.id}>
-                {item.icon}
-                <span>{item.label}</span>
-                {item.id === "settings" && triggersCount > 1 && (
-                  <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
-                )}
-                {item.id === "runs" && runsCount > 0 && (
-                  <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
-                )}
-              </TabsTrigger>
-            ))}
+            {NAV_ITEMS.map((item, i) => {
+              // Divider at the view→setup group boundary: extra gap + a hairline
+              // rule so the 7 tabs read as two short clusters in one row. Every
+              // tab stays one click away; this is purely visual rhythm.
+              const startsNewGroup = i > 0 && NAV_ITEMS[i - 1].group !== item.group;
+              return (
+                <Fragment key={item.id}>
+                  {startsNewGroup && (
+                    <span
+                      aria-hidden
+                      className="mx-1 h-4 w-px shrink-0 self-center bg-border"
+                    />
+                  )}
+                  <TabsTrigger value={item.id}>
+                    {item.icon}
+                    <span>{item.label}</span>
+                    {item.id === "settings" && triggersCount > 1 && (
+                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
+                    )}
+                    {item.id === "runs" && runsCount > 0 && (
+                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
+                    )}
+                  </TabsTrigger>
+                </Fragment>
+              );
+            })}
           </TabsList>
         </div>
       </Tabs>
@@ -2121,9 +2209,8 @@ export default function WorkerDetailPage() {
         {activeSection === "runs" && (
           <RunsSection worker={worker} />
         )}
-        {activeSection === "versions" && (
-          <VersionsSection worker={worker} onRollback={(updated) => setWorker(updated)} />
-        )}
+        {/* Versions is no longer a tab — it opens from the header "Versions"
+            dropdown into a dialog (see <Dialog open={versionsOpen}> above). */}
       </div>
     </div>
   );

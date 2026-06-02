@@ -43,12 +43,14 @@ function changeSourceBadge(src: string) {
   );
 }
 
-// A single, consistent "History ▾" dropdown affordance for version history.
-// Used both for workspace instructions (/assistant) and per-file brain
-// revisions (/contexts) so the two surfaces feel identical. The trigger sits
-// inline on an editor/file header; opening it lists recent versions (newest
-// first) with a per-version Restore action. Restore semantics (what content is
-// fetched and written back) stay with the caller via onRestore.
+// A single, consistent "Versions ▾" dropdown affordance for config-version
+// history. Used for workspace instructions (/assistant), per-file brain
+// revisions (/contexts), and worker config versions (/workers/<id>) so all
+// three surfaces feel identical and the affordance is named "Versions"
+// everywhere. The trigger sits inline on an editor/file/worker header; opening
+// it lists recent versions (newest first) with a per-version Restore action.
+// Restore semantics (what content is fetched and written back) stay with the
+// caller via onRestore.
 export function VersionHistoryMenu({
   versions,
   loading,
@@ -76,7 +78,7 @@ export function VersionHistoryMenu({
         className={cn(buttonVariants({ variant: "ghost", size: "sm" }), buttonClassName)}
       >
         <History className="size-3.5" />
-        History
+        Versions
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className="w-72 p-1">
         <DropdownMenuGroup>
