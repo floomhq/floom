@@ -182,7 +182,11 @@ class SupabaseAuthProvider:
 
         # JWT path: existing Supabase Bearer token flow (browser dashboard,
         # CLI via refresh-token exchange).
+        # Also accept PATs sent as "Authorization: Bearer floom_..." — clients
+        # like Claude Code write this format from mcp install.
         token = _parse_bearer_token(request.headers.get("authorization"))
+        if token.startswith("floom_"):
+            return await self._verify_pat(token, request)
         claims = _verify_jwt(token, self._settings.supabase_url)
         user_id = claims.get("sub")
         if not user_id:
