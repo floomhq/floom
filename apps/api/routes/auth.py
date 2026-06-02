@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from apps.api import email as email_service
 from apps.api._engine import ensure_engine_api_path
-from apps.api.auth.supabase_provider import PAT_HEADER
+from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, PAT_HEADER
 from apps.api.config import (
     get_cloud_settings,
     new_supabase_anon_client,
@@ -139,14 +139,19 @@ def _set_cookie(response: JSONResponse | RedirectResponse, name: str, value: str
 
 
 def _clear_cookie(response: JSONResponse | RedirectResponse, name: str) -> None:
-    response.delete_cookie(
-        key=name,
-        httponly=True,
-        secure=True,
-        samesite="lax",
-        path="/",
-        domain=_cookie_domain(),
-    )
+    domains = [None]
+    configured_domain = _cookie_domain()
+    if configured_domain:
+        domains.append(configured_domain)
+    for domain in domains:
+        response.delete_cookie(
+            key=name,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            path="/",
+            domain=domain,
+        )
 
 
 def _encode_session_cookie(session: Any) -> str:
@@ -765,4 +770,5 @@ def logout(request: Request):
     response = JSONResponse({"ok": True})
     _clear_cookie(response, _SESSION_COOKIE_NAME)
     _clear_cookie(response, _OAUTH_VERIFIER_COOKIE_NAME)
+    _clear_cookie(response, ACTIVE_WORKSPACE_COOKIE)
     return response
