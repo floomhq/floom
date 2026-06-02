@@ -150,7 +150,7 @@ async def cloud_mcp_endpoint(
         return _JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}, status_code=400)
 
     repos = engine_main.get_repositories()
-    result = await engine_main._mcp_handle_request(body, auth, repos)
+    result = await engine_main._mcp_handle_request(body, auth, repos, request)
     return _JSONResponse(result)
 
 
