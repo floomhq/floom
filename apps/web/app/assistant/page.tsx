@@ -2,12 +2,13 @@
 
 export const dynamic = "force-dynamic";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Edit3, RotateCcw, Save, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Edit3, History, RotateCcw, Save, X } from "lucide-react";
 
 import { api } from "@/lib/api";
-import type { ConnectionItem, VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
+import type { VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
 import { formatRelative } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -17,9 +18,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-type TabKey = "instructions" | "prompt" | "tools" | "channels" | "versions";
+type TabKey = "instructions" | "prompt" | "tools" | "versions";
 
-const TABS: TabKey[] = ["instructions", "prompt", "tools", "channels", "versions"];
+const TABS: TabKey[] = ["instructions", "prompt", "tools", "versions"];
 
 function validTab(value: string): value is TabKey {
   return TABS.includes(value as TabKey);
@@ -171,7 +172,6 @@ export default function AssistantPage() {
   const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
   const [instructions, setInstructions] = useState("");
   const [originalInstructions, setOriginalInstructions] = useState("");
-  const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingInstructions, setEditingInstructions] = useState(false);
@@ -184,15 +184,13 @@ export default function AssistantPage() {
     setLoading(true);
     setError(null);
     try {
-      const [agentRes, instructionsRes, connectionRes] = await Promise.all([
+      const [agentRes, instructionsRes] = await Promise.all([
         api.system.workspaceAgent(),
         api.system.workspaceInstructions(),
-        api.connections.list(),
       ]);
       setAgent(agentRes);
       setInstructions(instructionsRes);
       setOriginalInstructions(instructionsRes);
-      setConnections(connectionRes);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspace agent");
     } finally {
@@ -246,14 +244,6 @@ export default function AssistantPage() {
     setVersionsKey((k) => k + 1);
   }
 
-  const slackConnections = connections.filter(
-    (connection) => connection.kind !== "mcp" && connection.app_name.toLowerCase() === "slack"
-  );
-  const activeSlackConnections = slackConnections.filter((connection) => connection.status === "active");
-  const slackEventsConfigured = Boolean(agent?.channels?.slack?.events_configured);
-  const slackBotConfigured = Boolean(agent?.channels?.slack?.bot_configured);
-  const slackReady = activeSlackConnections.length > 0 && slackEventsConfigured && slackBotConfigured;
-
   return (
     <div className="space-y-6">
       <div>
@@ -266,7 +256,7 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Workspace instructions, tools, and channel wiring.
+          Workspace instructions, tools, and version history.
         </p>
       </div>
 
@@ -284,7 +274,6 @@ export default function AssistantPage() {
             <TabsTrigger value="instructions">Instructions</TabsTrigger>
             <TabsTrigger value="prompt">Final prompt</TabsTrigger>
             <TabsTrigger value="tools">Tools</TabsTrigger>
-            <TabsTrigger value="channels">Channels</TabsTrigger>
             <TabsTrigger value="versions">Versions</TabsTrigger>
           </TabsList>
         </div>
@@ -324,10 +313,20 @@ export default function AssistantPage() {
                     </Button>
                   </div>
                 ) : (
-                  <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
-                    <Edit3 className="size-3.5" />
-                    Edit
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => changeTab("versions")}
+                    >
+                      <History className="size-3.5" />
+                      Version history
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
+                      <Edit3 className="size-3.5" />
+                      Edit
+                    </Button>
+                  </div>
                 )}
               </div>
               <Textarea
@@ -369,7 +368,17 @@ export default function AssistantPage() {
             <Skeleton className="h-72 w-full" />
           ) : (
             <>
-              <h2 className="text-sm font-medium">Tools</h2>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-medium">Tools</h2>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    This agent can use all {agent.tools.length} connected MCP tool
+                    {agent.tools.length === 1 ? "" : "s"}. There is nothing to select — tools
+                    become available automatically as you add connections.
+                  </p>
+                </div>
+                <Badge variant="outline" className="text-xs">Informational</Badge>
+              </div>
               <div className="divide-y divide-[var(--border-default)] rounded-[var(--radius-button)] border border-[var(--border-default)]">
                 {agent.tools.map((tool) => (
                   <div key={tool.name} className="px-3 py-2.5">
@@ -382,46 +391,6 @@ export default function AssistantPage() {
               </div>
             </>
           )}
-        </TabsContent>
-
-        <TabsContent value="channels" className="space-y-4">
-          <section className="rounded-[var(--radius-card)] border border-line bg-card p-4">
-            <div className="flex items-start gap-3">
-              {slackReady ? (
-                <CheckCircle2 className="mt-0.5 size-4 text-[var(--positive)]" />
-              ) : (
-                <AlertTriangle className="mt-0.5 size-4 text-[var(--warning)]" />
-              )}
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-sm font-medium">Slack</h2>
-                  <Badge variant="outline" className="text-xs">
-                    {slackReady
-                      ? "Ready"
-                      : activeSlackConnections.length > 0
-                        ? "OAuth only"
-                        : "Not connected"}
-                  </Badge>
-                </div>
-                <div className="mt-2 grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
-                  <ReadinessPill label="OAuth connection" ready={activeSlackConnections.length > 0} />
-                  <ReadinessPill label="Events secret" ready={slackEventsConfigured} />
-                  <ReadinessPill label="Bot token" ready={slackBotConfigured} />
-                </div>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {slackReady
-                    ? "Slack mentions can be routed to the workspace agent."
-                    : "Slack is only ready after OAuth, Events API signing, and bot reply credentials are all configured."}
-                </p>
-              </div>
-            </div>
-          </section>
-          <section className="rounded-[var(--radius-card)] border border-line bg-card p-4">
-            <h2 className="text-sm font-medium">Connections</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              OAuth and MCP credentials are managed on the Connections page.
-            </p>
-          </section>
         </TabsContent>
 
         <TabsContent value="versions" className="space-y-3">
@@ -437,19 +406,17 @@ export default function AssistantPage() {
           />
         </TabsContent>
       </Tabs>
-    </div>
-  );
-}
 
-function ReadinessPill({ label, ready }: { label: string; ready: boolean }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border-default)] bg-muted/30 px-2 py-1 text-xs">
-      {ready ? (
-        <CheckCircle2 className="size-3 text-[var(--positive)]" />
-      ) : (
-        <AlertTriangle className="size-3 text-[var(--warning)]" />
-      )}
-      {label}
-    </span>
+      <Link
+        href="/connections/slack"
+        className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] border border-line bg-card px-4 py-3 text-sm transition-colors hover:bg-muted/40"
+      >
+        <span className="text-muted-foreground">
+          Channels (Slack workspace, events, and bot wiring) are managed under{" "}
+          <span className="font-medium text-foreground">Connections → Slack</span>.
+        </span>
+        <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+      </Link>
+    </div>
   );
 }
