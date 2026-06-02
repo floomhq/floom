@@ -24,6 +24,8 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from apps.api.cloud_scheduler import start_cloud_scheduler, stop_cloud_scheduler
 from apps.api.cloud_webhooks import verify_webhook_token
 from apps.api._engine import import_engine_module
+
+engine_run_service = import_engine_module("run_service")
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.cli_auth_devices import router as cli_auth_devices_router
 from apps.api.routes.novasearch import router as novasearch_router
@@ -64,10 +66,15 @@ async def lifespan(_app: FastAPI):
             _ie("scheduler").start_scheduler()
         elif not start_cloud_scheduler():
             raise RuntimeError("Cloud scheduler advisory lock is already held.")
+        # Start the run drain loop — picks up queued runs and dispatches them
+        # to E2B. The engine only starts this in local mode; cloud must do it
+        # explicitly here.
+        engine_run_service.start_drain_loop()
     try:
         yield
     finally:
         if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
+            engine_run_service.stop_drain_loop(timeout=5.0)
             stop_cloud_scheduler()
 
 
