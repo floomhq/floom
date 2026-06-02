@@ -205,7 +205,7 @@ export default function SlackConnectionsPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">Connect a Slack workspace to Workeros.</p>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">Connect a Slack workspace to Floom Workers.</p>
         </div>
         <Button data-testid="slack-refresh" variant="outline" size="sm" onClick={() => void loadStatus()} disabled={loading}>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}

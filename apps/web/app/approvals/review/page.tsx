@@ -7,6 +7,7 @@ import { CheckCircle, ChevronLeft, ChevronRight, Download, ExternalLink, FileTex
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { FloomMark } from "@/components/layout/sidebar";
 import type { ApprovalRow, Artifact } from "@/lib/types";
 
 const TABLE_PREVIEW_ROWS = 100;
@@ -772,20 +773,27 @@ function ReviewContent() {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-6 sm:px-6 sm:py-10">
       <div className="mb-6 flex items-center justify-between gap-4">
-        {isSignedLink ? (
-          <div className="flex flex-col">
+        {/* Brand wordmark renders for everyone — external approvers reach this
+            page via a signed link with no app chrome, so the header is the only
+            place the product is identified. Internal reviewers also get the
+            "All approvals" back-link below it. */}
+        <div className="flex flex-col gap-1.5">
+          <span className="inline-flex items-center gap-2">
+            <FloomMark size={20} />
             <span className="text-sm font-semibold tracking-tight text-[var(--ink)]">Floom Workers</span>
+          </span>
+          {isSignedLink ? (
             <span className="text-xs text-[var(--ink-soft)]">Approval review</span>
-          </div>
-        ) : (
-          <Link
-            href="/approvals"
-            className="inline-flex items-center gap-1.5 text-sm text-[var(--ink-soft)] hover:text-[var(--ink)]"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            All approvals
-          </Link>
-        )}
+          ) : (
+            <Link
+              href="/approvals"
+              className="inline-flex items-center gap-1 text-xs text-[var(--ink-soft)] hover:text-[var(--ink)]"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              All approvals
+            </Link>
+          )}
+        </div>
         {rows.length > 0 && (
           <span className="text-sm text-[var(--ink-soft)]">
             {index + 1} of {rows.length}
