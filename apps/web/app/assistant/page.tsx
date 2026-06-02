@@ -26,7 +26,7 @@ function validTab(value: string): value is TabKey {
   return TABS.includes(value as TabKey);
 }
 
-// Inline "History ▾" dropdown for workspace instructions. Lazily loads the
+// Inline "Versions ▾" dropdown for workspace instructions. Lazily loads the
 // version list when opened and rolls back in place — no separate tab/page.
 function InstructionsHistoryMenu({
   onRollback,
