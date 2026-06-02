@@ -1,0 +1,137 @@
+"use client";
+
+import { History, RotateCcw } from "lucide-react";
+
+import type { VersionSummary } from "@/lib/types";
+import { formatRelative } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+function changeSourceLabel(src: string): string {
+  if (src === "user") return "Manual save";
+  if (src === "ai") return "AI edit";
+  if (src.startsWith("rollback:")) return "Rollback";
+  return src;
+}
+
+function changeSourceBadge(src: string) {
+  const label = changeSourceLabel(src);
+  const isRollback = src.startsWith("rollback:");
+  const isAi = src === "ai";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border",
+        isRollback
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          : isAi
+            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
+            : "border-border bg-muted text-muted-foreground"
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+// A single, consistent "History ▾" dropdown affordance for version history.
+// Used both for workspace instructions (/assistant) and per-file brain
+// revisions (/contexts) so the two surfaces feel identical. The trigger sits
+// inline on an editor/file header; opening it lists recent versions (newest
+// first) with a per-version Restore action. Restore semantics (what content is
+// fetched and written back) stay with the caller via onRestore.
+export function VersionHistoryMenu({
+  versions,
+  loading,
+  canRestore = true,
+  restoringId,
+  onRestore,
+  onOpen,
+  buttonClassName,
+}: {
+  versions: VersionSummary[];
+  loading: boolean;
+  canRestore?: boolean;
+  restoringId?: string | null;
+  onRestore: (version: VersionSummary) => void;
+  onOpen?: () => void;
+  buttonClassName?: string;
+}) {
+  return (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) onOpen?.();
+      }}
+    >
+      <DropdownMenuTrigger
+        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), buttonClassName)}
+      >
+        <History className="size-3.5" />
+        History
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={6} className="w-72 p-1">
+        <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Version history
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator className="-mx-1 my-1" />
+        {loading ? (
+          <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>
+        ) : versions.length === 0 ? (
+          <div className="px-2 py-3 text-xs text-muted-foreground">
+            No versions yet. A snapshot is saved on every edit.
+          </div>
+        ) : (
+          <div className="max-h-80 overflow-y-auto">
+            {versions.map((v, idx) => {
+              const isCurrent = idx === 0;
+              const isRestoring = restoringId === v.id;
+              return (
+                <DropdownMenuItem
+                  key={v.id}
+                  closeOnClick={false}
+                  disabled={isCurrent || !canRestore || isRestoring}
+                  onClick={() => {
+                    if (isCurrent || !canRestore || isRestoring) return;
+                    onRestore(v);
+                  }}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        v{v.version_number}
+                      </span>
+                      {changeSourceBadge(v.change_source)}
+                      {isCurrent && (
+                        <span className="text-[10px] font-medium text-muted-foreground">
+                          (current)
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatRelative(v.created_at)}
+                    </span>
+                  </span>
+                  {!isCurrent && canRestore && (
+                    <span className="inline-flex shrink-0 items-center gap-1 text-xs text-foreground">
+                      <RotateCcw className="size-3" />
+                      {isRestoring ? "Restoring…" : "Restore"}
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              );
+            })}
+          </div>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

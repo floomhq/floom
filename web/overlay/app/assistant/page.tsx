@@ -4,12 +4,11 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Edit3, RotateCcw, Save, Trash2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Edit3, Save, Trash2, X } from "lucide-react";
 
 import { api, getActiveWorkspaceId } from "@/lib/api";
 import type { ConnectionItem, VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
 import { formatRelative } from "@/lib/formatters";
-import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,10 +18,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 
-type TabKey = "instructions" | "prompt" | "tools" | "channels" | "versions";
+type TabKey = "instructions" | "prompt" | "channels";
 
-const TABS: TabKey[] = ["instructions", "prompt", "tools", "channels", "versions"];
+const TABS: TabKey[] = ["instructions", "prompt", "channels"];
 const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 
 interface SlackBinding {
@@ -46,33 +46,6 @@ interface WorkspaceAgentInfoWithSlackBinding extends WorkspaceAgentInfo {
 
 function validTab(value: string): value is TabKey {
   return TABS.includes(value as TabKey);
-}
-
-function changeSourceLabel(src: string): string {
-  if (src === "user") return "Manual save";
-  if (src === "ai") return "AI edit";
-  if (src.startsWith("rollback:")) return "Rollback";
-  return src;
-}
-
-function changeSourceBadge(src: string) {
-  const label = changeSourceLabel(src);
-  const isRollback = src.startsWith("rollback:");
-  const isAi = src === "ai";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border",
-        isRollback
-          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-          : isAi
-            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
-            : "border-border bg-muted text-muted-foreground"
-      )}
-    >
-      {label}
-    </span>
-  );
 }
 
 function workspaceHeaders(): Headers {
@@ -123,30 +96,34 @@ async function deleteSlackBinding(): Promise<number> {
   return response.deleted;
 }
 
-function WorkspaceInstructionsVersionsSection({
+function InstructionsHistoryMenu({
   onRollback,
+  refreshKey,
 }: {
   onRollback: (content: string) => void;
+  refreshKey: number;
 }) {
   const [versions, setVersions] = useState<VersionSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
 
   const loadVersions = useCallback(async () => {
     setLoading(true);
     try {
-      const rows = await api.system.listWorkspaceVersions();
-      setVersions(rows);
+      setVersions(await api.system.listWorkspaceVersions());
     } catch {
       setVersions([]);
     } finally {
       setLoading(false);
+      setLoadedOnce(true);
     }
   }, []);
 
   useEffect(() => {
-    void loadVersions();
-  }, [loadVersions]);
+    if (loadedOnce) void loadVersions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   async function handleRollback(v: VersionSummary) {
     if (
@@ -169,67 +146,16 @@ function WorkspaceInstructionsVersionsSection({
     }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        {[...Array(3)].map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full rounded-lg" />
-        ))}
-      </div>
-    );
-  }
-
-  if (versions.length === 0) {
-    return (
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-6 space-y-2">
-        <p className="text-sm font-medium text-foreground">No versions yet</p>
-        <p className="text-xs text-muted-foreground">
-          Versions are saved automatically each time workspace instructions are updated. Save
-          instructions to create the first version.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        {versions.length} version{versions.length !== 1 ? "s" : ""} · newest first
-      </p>
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden divide-y divide-[var(--border-default)]">
-        {versions.map((v, idx) => (
-          <div key={v.id} className="flex items-center justify-between gap-3 px-4 py-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 text-right">
-                v{v.version_number}
-              </span>
-              <div className="min-w-0 flex flex-col gap-0.5">
-                <div className="flex items-center gap-2">
-                  {changeSourceBadge(v.change_source)}
-                  {idx === 0 && (
-                    <span className="text-[10px] text-muted-foreground font-medium">(current)</span>
-                  )}
-                </div>
-                <span className="text-xs text-muted-foreground">{formatRelative(v.created_at)}</span>
-              </div>
-            </div>
-            {idx !== 0 && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={rollingBack === v.id}
-                onClick={() => void handleRollback(v)}
-                className="shrink-0 h-7 text-xs"
-              >
-                <RotateCcw className="h-3 w-3 mr-1" />
-                {rollingBack === v.id ? "Restoring…" : "Rollback"}
-              </Button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+    <VersionHistoryMenu
+      versions={versions}
+      loading={loading && !loadedOnce}
+      restoringId={rollingBack}
+      onOpen={() => {
+        if (!loadedOnce) void loadVersions();
+      }}
+      onRestore={(v) => void handleRollback(v)}
+    />
   );
 }
 
@@ -386,7 +312,7 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Workspace instructions, tools, and channel wiring.
+          Workspace instructions, final prompt, and channel wiring.
         </p>
       </div>
 
@@ -403,9 +329,7 @@ export default function AssistantPage() {
           <TabsList>
             <TabsTrigger value="instructions">Instructions</TabsTrigger>
             <TabsTrigger value="prompt">Final prompt</TabsTrigger>
-            <TabsTrigger value="tools">Tools</TabsTrigger>
             <TabsTrigger value="channels">Channels</TabsTrigger>
-            <TabsTrigger value="versions">Versions</TabsTrigger>
           </TabsList>
         </div>
 
@@ -444,10 +368,16 @@ export default function AssistantPage() {
                     </Button>
                   </div>
                 ) : (
-                  <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
-                    <Edit3 className="size-3.5" />
-                    Edit
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <InstructionsHistoryMenu
+                      refreshKey={versionsKey}
+                      onRollback={handleInstructionsRollback}
+                    />
+                    <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
+                      <Edit3 className="size-3.5" />
+                      Edit
+                    </Button>
+                  </div>
                 )}
               </div>
               <Textarea
@@ -480,26 +410,6 @@ export default function AssistantPage() {
               <pre className="max-h-[42rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
                 {agent.system_prompt}
               </pre>
-            </>
-          )}
-        </TabsContent>
-
-        <TabsContent value="tools" className="space-y-3">
-          {loading || !agent ? (
-            <Skeleton className="h-72 w-full" />
-          ) : (
-            <>
-              <h2 className="text-sm font-medium">Tools</h2>
-              <div className="divide-y divide-[var(--border-default)] rounded-[var(--radius-button)] border border-[var(--border-default)]">
-                {agent.tools.map((tool) => (
-                  <div key={tool.name} className="px-3 py-2.5">
-                    <code className="text-xs font-medium text-foreground">{tool.name}</code>
-                    {tool.description ? (
-                      <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
             </>
           )}
         </TabsContent>
@@ -643,18 +553,6 @@ export default function AssistantPage() {
           </section>
         </TabsContent>
 
-        <TabsContent value="versions" className="space-y-3">
-          <div>
-            <h2 className="text-sm font-medium">Instruction versions</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Automatic snapshots on every save. Roll back to undo AI or manual changes.
-            </p>
-          </div>
-          <WorkspaceInstructionsVersionsSection
-            key={versionsKey}
-            onRollback={handleInstructionsRollback}
-          />
-        </TabsContent>
       </Tabs>
     </div>
   );
