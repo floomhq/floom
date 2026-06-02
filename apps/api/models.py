@@ -1250,6 +1250,12 @@ class TriggerSpec(BaseModel):
     composio: Optional[Dict[str, Any]] = None
 
 
+class WorkerSummaryInput(BaseModel):
+    """Lightweight input descriptor for worker list cards."""
+    name: str
+    type: str
+
+
 class WorkerSummary(BaseModel):
     id: str
     name: str
@@ -1273,7 +1279,7 @@ class WorkerSummary(BaseModel):
     recent_stats: Optional[RecentStats] = None
     timeseries: Optional[List[TimeseriesDay]] = None  # 14-day sparkline data; None when not loaded
     connections: List[str] = Field(default_factory=list)  # Composio app slugs declared in worker.yml
-    inputs: List[WorkerInput] = Field(default_factory=list)  # input descriptors for worker-card icon composition
+    inputs: List[Union[WorkerInput, WorkerSummaryInput]] = Field(default_factory=list)  # input descriptors for worker-card icon composition
     runtime: Optional[str] = None  # exec.runtime ("skill", "python311", "node22", …)
 
 
