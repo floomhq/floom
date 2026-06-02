@@ -2,20 +2,15 @@
 
 export const dynamic = "force-dynamic";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
-import type {
-  PlatformConfig,
-  SystemInfo,
-  WorkspaceAgentInfo,
-  WorkspaceImportResult,
-} from "@/lib/types";
+import type { PlatformConfig, SystemInfo } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,23 +18,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
+import { McpToolCatalog } from "@/components/McpToolCatalog";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 // S22f: Notifications tab is currently hidden. The TabKey type still includes
-// it so the URL ?tab=notifications doesn't blow up; we just silently fall back
-// to "api" when a hidden tab is requested.
+// it (plus the now-removed "assistant") so old URLs (?tab=assistant /
+// #assistant) don't blow up; we silently fall back to "api" for any tab not in
+// VISIBLE_TAB_KEYS.
 type TabKey = "api" | "system" | "assistant" | "notifications" | "appearance" | "danger";
 
-// N2: "assistant" (Workspace agent) is now a real left-nav entry. Notifications
-// stays hidden until outbound email ships (S22f).
-const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "assistant", "appearance", "danger"];
+// V4: Settings uses the same top-bar tab strip as the rest of the app (e.g. the
+// worker-detail page). The "Workspace agent" tab was dropped from Settings — the
+// editable agent instructions live on the Agent page (/assistant), so surfacing
+// it here was confusing. Notifications stays hidden until outbound email ships
+// (S22f). "assistant" stays in TAB_KEYS only for legacy deep-link tolerance.
+const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "appearance", "danger"];
 const TAB_KEYS: TabKey[] = ["api", "system", "assistant", "notifications", "appearance", "danger"];
 
 const NAV_ITEMS: { key: TabKey; label: string }[] = [
   { key: "api", label: "API access" },
   { key: "system", label: "System" },
-  { key: "assistant", label: "Workspace agent" },
   { key: "appearance", label: "Appearance" },
   { key: "danger", label: "Danger zone" },
 ];
@@ -80,19 +79,10 @@ function SettingsContent() {
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
-  const [workspaceAgent, setWorkspaceAgent] = useState<WorkspaceAgentInfo | null>(null);
-  const [workspaceAgentLoading, setWorkspaceAgentLoading] = useState(false);
-  const [workspaceAgentError, setWorkspaceAgentError] = useState<string | null>(null);
   const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
-
-  // Duplicate workspace: export this workspace as a .zip template / import one.
-  const [exporting, setExporting] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<WorkspaceImportResult | null>(null);
-  const importFileRef = useRef<HTMLInputElement | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -122,35 +112,6 @@ function SettingsContent() {
     window.addEventListener("hashchange", syncFromHash);
     return () => window.removeEventListener("hashchange", syncFromHash);
   }, []);
-
-  // Lazy-load the workspace agent prompt + tools only when the tab is opened —
-  // the system prompt can be large, so we don't fetch it on every settings view.
-  // NOTE: workspaceAgentLoading is intentionally excluded from the dep array.
-  // Including it caused the effect to re-run (and cancel the in-flight fetch)
-  // the moment setWorkspaceAgentLoading(true) was called, leaving loading=true
-  // forever. The guard below still reads the current value via closure; the only
-  // triggers we want are a tab switch or data arriving (workspaceAgent).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (tab !== "assistant" || workspaceAgent || workspaceAgentLoading) return;
-    let cancelled = false;
-    setWorkspaceAgentLoading(true);
-    setWorkspaceAgentError(null);
-    api.system
-      .workspaceAgent()
-      .then((res) => {
-        if (!cancelled) setWorkspaceAgent(res);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setWorkspaceAgentError(e instanceof Error ? e.message : "Failed to load");
-      })
-      .finally(() => {
-        if (!cancelled) setWorkspaceAgentLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, workspaceAgent]);
 
   function handleTabChange(value: string) {
     if (!isValidTab(value)) return;
@@ -191,44 +152,6 @@ function SettingsContent() {
     }
   }
 
-  async function handleExportWorkspace() {
-    setExporting(true);
-    try {
-      const { blob, filename } = await api.workspace.exportTemplate();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      toast.success("Workspace template downloaded");
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to export workspace");
-    } finally {
-      setExporting(false);
-    }
-  }
-
-  async function handleImportWorkspace(file: File) {
-    setImporting(true);
-    setImportResult(null);
-    try {
-      const result = await api.workspace.importTemplate(file);
-      setImportResult(result);
-      const n = result.workers_imported.length + result.contexts_imported.length;
-      toast.success(
-        n > 0 ? `Imported ${n} item${n === 1 ? "" : "s"}` : "Nothing new to import"
-      );
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to import workspace");
-    } finally {
-      setImporting(false);
-      if (importFileRef.current) importFileRef.current.value = "";
-    }
-  }
-
   async function copySecretName(name: string) {
     try {
       await navigator.clipboard.writeText(name);
@@ -247,39 +170,30 @@ function SettingsContent() {
         </p>
       </div>
 
-      {/* N2: left vertical nav (sidebar within the page) instead of a
-          horizontal pill strip — the sections (esp. Workspace agent) were a lot
-          to scroll past. base-ui Tabs orientation="vertical" lays the list out
-          as a left column with an active right-edge bar; TabsContent is the
-          flex-1 panel on the right.
+      {/* V4: top-bar tab strip, consistent with the rest of the app (e.g. the
+          worker-detail page). Reverted from the prior left vertical nav.
+          MOBILE-375: the tab bar is `inline-flex w-fit whitespace-nowrap` and
+          cannot shrink below its content width, so we wrap it in a full-width
+          horizontal scroll container — overflow stays inside the strip and never
+          drives page width. Mirrors the worker-detail page exactly.
           S22f: Notifications stays hidden until outbound email ships. */}
-      <Tabs
-        orientation="vertical"
-        value={tab}
-        onValueChange={handleTabChange}
-        className="flex-col gap-6 sm:flex-row sm:gap-8"
-      >
-        {/* Mobile (<sm): the nav collapses to a full-width stacked list at the
-            top of the page (the Tabs root is flex-col below sm), so the page
-            never exceeds the viewport width. Desktop: a ~200px fixed left
-            column beside the panel. base-ui's vertical orientation already
-            lays the list out as a column; we only need to size it. */}
-        <TabsList
-          variant="line"
-          className="w-full max-w-full sm:w-48 sm:shrink-0"
-        >
-          {NAV_ITEMS.map((item) => (
-            <TabsTrigger key={item.key} value={item.key}>
-              {item.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+      <Tabs value={tab} onValueChange={handleTabChange}>
+        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
+          <TabsList>
+            {NAV_ITEMS.map((item) => (
+              <TabsTrigger key={item.key} value={item.key}>
+                {item.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
-        <TabsContent value="api" className="space-y-4">
+        <TabsContent value="api" className="space-y-8 pt-6">
           <CliCommandPanel />
+          <McpToolCatalog />
         </TabsContent>
 
-        <TabsContent value="system" className="space-y-8">
+        <TabsContent value="system" className="space-y-8 pt-6">
           {/* S29s: dropped Card wrappers. Match sister tabs (API access,
               Appearance) which also flat-section now. */}
           <section className="space-y-3">
@@ -360,196 +274,7 @@ function SettingsContent() {
           </section>
         </TabsContent>
 
-        <TabsContent value="assistant" className="space-y-8">
-          <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">Workspace agent</h2>
-            <p className="text-sm text-muted-foreground">
-              This is the assistant behind <code className="text-foreground">/chat</code>. It reads
-              your workspace and can manage workers, runs, secrets, connections, brain packs, and
-              approvals on your behalf.
-            </p>
-            {/* N2: the editable instructions live on the Agent page (single
-                source of truth, with version history + rollback). The prompt
-                and tools below are a read-only overview; editing happens there. */}
-            <div className="flex items-start justify-between gap-4 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Edit instructions</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Change what the agent does, with version history and rollback, on the Agent page.
-                </p>
-              </div>
-              <a
-                href="/assistant#instructions"
-                className={buttonVariants({ variant: "outline", size: "sm", className: "shrink-0" })}
-              >
-                Open editor
-              </a>
-            </div>
-          </section>
-
-          {workspaceAgentLoading && !workspaceAgent ? (
-            <div className="space-y-3">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-48 w-full" />
-            </div>
-          ) : workspaceAgentError ? (
-            <Alert variant="destructive">
-              <AlertTriangle className="size-4" />
-              <AlertTitle>Couldn&apos;t load the workspace agent</AlertTitle>
-              <AlertDescription>{workspaceAgentError}</AlertDescription>
-            </Alert>
-          ) : workspaceAgent ? (
-            <>
-              <section className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-medium">System instructions</h3>
-                  <Badge variant="outline" className="text-xs">
-                    Read-only
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  The full system prompt the agent runs with, including the live workspace snapshot.
-                </p>
-                <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
-                  {workspaceAgent.system_prompt}
-                </pre>
-              </section>
-
-              <section className="space-y-3">
-                <h3 className="text-sm font-medium">
-                  Tools <span className="text-muted-foreground">({workspaceAgent.tools.length})</span>
-                </h3>
-                <p className="text-xs text-muted-foreground">
-                  The management actions the agent can call. It never returns secret values.
-                </p>
-                <div className="divide-y divide-[var(--border-default)] rounded-[var(--radius-button)] border border-[var(--border-default)]">
-                  {workspaceAgent.tools.map((tool) => (
-                    <div key={tool.name} className="px-3 py-2.5">
-                      <code className="text-xs font-medium text-foreground">{tool.name}</code>
-                      {tool.description && (
-                        <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </>
-          ) : null}
-
-          {/* Duplicate workspace (Notion-template style). Export bundles your
-              workers + knowledge packs + workspace agent config into one .zip;
-              import unpacks one into this workspace. Secrets/connections are
-              NEVER bundled — you reconnect those after import. */}
-          <section className="space-y-4 border-t border-[var(--border-default)] pt-8">
-            <div className="space-y-1">
-              <h2 className="text-sm font-medium text-muted-foreground">Duplicate workspace</h2>
-              <p className="text-sm text-muted-foreground">
-                Move or share your whole setup as a template.
-              </p>
-            </div>
-
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Export this workspace as a template</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Bundles your workers and knowledge packs into one .zip. Secrets and
-                  connections are not included — you&apos;ll reconnect those.
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                onClick={handleExportWorkspace}
-                disabled={exporting}
-              >
-                {exporting ? "Exporting..." : "Export template"}
-              </Button>
-            </div>
-
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Import a workspace template</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Adds the template&apos;s workers and knowledge packs to this workspace.
-                  Existing items are kept — nothing is overwritten.
-                </p>
-              </div>
-              <input
-                ref={importFileRef}
-                type="file"
-                accept=".zip,application/zip"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void handleImportWorkspace(file);
-                }}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                onClick={() => importFileRef.current?.click()}
-                disabled={importing}
-              >
-                {importing ? "Importing..." : "Import template"}
-              </Button>
-            </div>
-
-            {importResult ? (
-              <Alert>
-                <CheckCircle2 className="size-4" />
-                <AlertTitle>
-                  Imported {importResult.workers_imported.length}{" "}
-                  {importResult.workers_imported.length === 1 ? "worker" : "workers"} and{" "}
-                  {importResult.contexts_imported.length}{" "}
-                  {importResult.contexts_imported.length === 1 ? "knowledge pack" : "knowledge packs"}
-                </AlertTitle>
-                <AlertDescription>
-                  <div className="mt-2 space-y-2 text-xs">
-                    {importResult.workers_imported.length > 0 && (
-                      <p>
-                        Workers:{" "}
-                        <span className="text-foreground">
-                          {importResult.workers_imported.join(", ")}
-                        </span>
-                      </p>
-                    )}
-                    {importResult.contexts_imported.length > 0 && (
-                      <p>
-                        Knowledge packs:{" "}
-                        <span className="text-foreground">
-                          {importResult.contexts_imported.join(", ")}
-                        </span>
-                      </p>
-                    )}
-                    {importResult.skipped.length > 0 && (
-                      <p className="text-muted-foreground">
-                        Skipped {importResult.skipped.length} item
-                        {importResult.skipped.length === 1 ? "" : "s"} that already existed.
-                      </p>
-                    )}
-                    {(importResult.required_secrets.length > 0 ||
-                      importResult.required_connections.length > 0) && (
-                      <p className="text-muted-foreground">
-                        Reconnect these so the imported workers can run:{" "}
-                        <span className="text-foreground">
-                          {[
-                            ...importResult.required_secrets,
-                            ...importResult.required_connections,
-                          ].join(", ")}
-                        </span>
-                        .
-                      </p>
-                    )}
-                  </div>
-                </AlertDescription>
-              </Alert>
-            ) : null}
-          </section>
-        </TabsContent>
-
-        <TabsContent value="notifications" className="space-y-4">
+        <TabsContent value="notifications" className="space-y-4 pt-6">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm font-medium">Email notifications</CardTitle>
@@ -573,7 +298,7 @@ function SettingsContent() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="appearance" className="space-y-3">
+        <TabsContent value="appearance" className="space-y-3 pt-6">
           {/* S29z: explicit three-button toggle (System / Light / Dark)
               instead of a single cycling button. Sidebar keeps the
               compact cycle button; here we show all three at once. */}
@@ -584,7 +309,7 @@ function SettingsContent() {
           <ThemeModeToggleGroup />
         </TabsContent>
 
-        <TabsContent value="danger" className="space-y-4">
+        <TabsContent value="danger" className="space-y-4 pt-6">
           <Card className="border-destructive/40">
             <CardHeader>
               <CardTitle className="text-sm font-medium text-destructive">Danger zone</CardTitle>
