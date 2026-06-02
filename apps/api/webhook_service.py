@@ -1,4 +1,30 @@
-"""Webhook secret management for per-worker HMAC signature verification."""
+"""Webhook secret management for per-worker HMAC signature verification.
+
+Security model (2026-06-02):
+    The webhook URL token is derived from a PER-WORKER ROTATABLE secret, not
+    from the platform-global FLOOM_SECRET. Rotating a worker's webhook secret
+    (POST /workers/{id}/webhook-secret/rotate) changes the stored secret hash,
+    which changes the derived token, which invalidates the previously surfaced
+    webhook URL. A leaked URL is therefore revocable by rotation.
+
+    Token = HMAC-SHA256(key=<per-worker secret hash>, msg=worker_id)[:32].
+
+    The per-worker secret hash is the SHA-256 of the raw secret minted by
+    ``generate_webhook_secret``. It is a stable, high-entropy, per-worker value
+    that already exists in storage, so it doubles as the URL-token key without
+    storing any additional material.
+
+Legacy migration:
+    Workers created before this change had FLOOM_SECRET-derived tokens. Switching
+    the derivation changes EVERY existing webhook URL — externally registered URLs
+    must be re-copied from the UI (which always surfaces the current token).
+
+    Secure default = HARD CUTOVER: the legacy FLOOM_SECRET-derived token is NOT
+    accepted. To soften a migration you may set
+    ``WORKEROS_WEBHOOK_LEGACY_TOKEN_GRACE=1`` (default OFF / "0"), which makes
+    verification ALSO accept the legacy token during a grace window. This is
+    opt-in so security is the default.
+"""
 
 import hashlib
 import hmac
@@ -26,27 +52,93 @@ def _repos(repos: Repositories | None = None) -> Repositories:
     return repos or get_repositories()
 
 
-def derive_webhook_token(worker_id: str) -> str:
-    """Derive a deterministic webhook token for a worker.
+def _legacy_grace_enabled() -> bool:
+    """True if legacy FLOOM_SECRET-derived tokens are accepted during migration.
 
-    Token = HMAC-SHA256(FLOOM_SECRET, worker_id)[:32] hex chars.
-    Because FLOOM_SECRET is platform-private, the token is opaque to users
-    who only know the worker_id. The same worker_id always produces the same
-    token, so it can be surfaced in the UI without per-run storage.
-
-    Falls back to a fixed sentinel when FLOOM_SECRET is not set (local dev).
+    Default OFF (secure). Opt in with WORKEROS_WEBHOOK_LEGACY_TOKEN_GRACE in
+    {"1", "true", "yes", "on"} (case-insensitive).
     """
-    platform_secret = os.environ.get("FLOOM_SECRET", "dev-secret-not-set")
+    val = os.environ.get("WORKEROS_WEBHOOK_LEGACY_TOKEN_GRACE", "0").strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+
+def _legacy_platform_secret() -> str:
+    return os.environ.get("FLOOM_SECRET", "dev-secret-not-set")
+
+
+def _legacy_token(worker_id: str) -> str:
+    """The pre-2026-06-02 token: HMAC(FLOOM_SECRET, worker_id)[:32].
+
+    Retained ONLY so a grace window can keep accepting already-registered
+    legacy URLs. Never surfaced to users anymore.
+    """
     return hmac.new(
-        platform_secret.encode(),
+        _legacy_platform_secret().encode(),
         worker_id.encode(),
         hashlib.sha256,
     ).hexdigest()[:32]
 
 
-def build_webhook_url(worker_id: str, base_url: Optional[str] = None) -> str:
-    """Build the full webhook URL for a worker, including the derived token."""
-    token = derive_webhook_token(worker_id)
+def derive_webhook_token(worker_id: str, token_key: str) -> str:
+    """Derive the deterministic webhook URL token from a per-worker key.
+
+    Token = HMAC-SHA256(key=token_key, msg=worker_id)[:32] hex chars.
+
+    ``token_key`` is the worker's stored webhook secret hash. Because it rotates
+    when the worker's secret is rotated, the derived token (and thus the webhook
+    URL) changes on rotation, invalidating any leaked URL.
+    """
+    return hmac.new(
+        token_key.encode(),
+        worker_id.encode(),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+
+
+def get_or_create_token_key(worker_id: str, *, repos: Repositories | None = None) -> str:
+    """Return the worker's current webhook token key (secret hash), backfilling
+    one if the worker has none yet.
+
+    Lazy-init: a worker with no stored webhook secret (legacy workers, or workers
+    whose ``webhook.secret`` was false) gets a freshly generated secret on first
+    use so a stable, rotatable token key always exists. The raw secret is NOT
+    returned here (the user re-copies the URL, not the raw secret); only the
+    derived URL token is user-facing for query-param auth.
+    """
+    repos_obj = _repos(repos)
+    existing = repos_obj.workers.get_webhook_secret_hash(worker_id=worker_id)
+    if existing:
+        return existing
+    # Backfill: mint a secret so a rotatable token key exists.
+    generate_webhook_secret(worker_id, repos=repos_obj)
+    backfilled = repos_obj.workers.get_webhook_secret_hash(worker_id=worker_id)
+    if not backfilled:
+        # Should never happen, but fail loud rather than silently degrade.
+        raise RuntimeError(
+            f"Failed to backfill webhook token key for worker {worker_id!r}"
+        )
+    logger.info("Backfilled webhook token key for worker %s", worker_id)
+    return backfilled
+
+
+def current_webhook_token(worker_id: str, *, repos: Repositories | None = None) -> str:
+    """Return the worker's current webhook URL token (backfilling key if needed)."""
+    token_key = get_or_create_token_key(worker_id, repos=repos)
+    return derive_webhook_token(worker_id, token_key)
+
+
+def build_webhook_url(
+    worker_id: str,
+    base_url: Optional[str] = None,
+    *,
+    repos: Repositories | None = None,
+) -> str:
+    """Build the full webhook URL for a worker, including the CURRENT token.
+
+    The token is derived from the worker's current (rotatable) secret hash, so
+    the URL surfaced in the UI always reflects the latest rotation.
+    """
+    token = current_webhook_token(worker_id, repos=repos)
     api_base = (
         base_url
         or os.environ.get("WORKERS_API_URL")
@@ -56,17 +148,36 @@ def build_webhook_url(worker_id: str, base_url: Optional[str] = None) -> str:
     return f"{api_base}/webhooks/{worker_id}?token={token}"
 
 
-def verify_webhook_token(worker_id: str, token: str) -> bool:
-    """Return True if the provided token matches the derived token for the worker."""
-    expected = derive_webhook_token(worker_id)
-    return hmac.compare_digest(token, expected)
+def verify_webhook_token(
+    worker_id: str,
+    token: str,
+    *,
+    repos: Repositories | None = None,
+) -> bool:
+    """Return True iff ``token`` matches the worker's CURRENT derived token.
+
+    Constant-time comparison. After a rotation, the previous token no longer
+    matches (the secret hash changed). When the legacy grace flag is enabled,
+    the pre-migration FLOOM_SECRET-derived token is also accepted (constant-time).
+    """
+    if not token:
+        return False
+    token_key = get_or_create_token_key(worker_id, repos=repos)
+    expected = derive_webhook_token(worker_id, token_key)
+    if hmac.compare_digest(token, expected):
+        return True
+    if _legacy_grace_enabled():
+        # Always evaluate the legacy comparison to keep timing uniform.
+        return hmac.compare_digest(token, _legacy_token(worker_id))
+    return False
 
 
 def generate_webhook_secret(worker_id: str, *, repos: Repositories | None = None) -> str:
     """Generate and store a new HMAC secret for the worker.
 
     Returns the raw secret exactly once — it is never stored in plaintext.
-    The DB stores a SHA-256 hash of the secret, used as the HMAC key.
+    The DB stores a SHA-256 hash of the secret, used both as the signature HMAC
+    key and as the webhook URL token key. Rotating thus changes the URL token.
     """
     repos_obj = _repos(repos)
     raw = secrets.token_hex(32)  # 64 hex chars
