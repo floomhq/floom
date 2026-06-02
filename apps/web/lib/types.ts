@@ -691,3 +691,14 @@ export interface VersionFile {
 export interface VersionDetail {
   files: VersionFile[];
 }
+
+export interface VersionFileSnapshot {
+  path: string;
+  content?: string;
+  encoding?: "utf-8" | "base64";
+  deleted?: boolean;
+}
+
+export interface VersionFileDetail {
+  file: VersionFileSnapshot;
+}
