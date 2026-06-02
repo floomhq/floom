@@ -144,7 +144,9 @@ from models import (
     WorkerStats,
     WorkspaceStats,
     UnsafeMCPUrlError,
+    UnsafeOutboundUrlError,
     assert_safe_outbound_mcp_url,
+    assert_safe_outbound_url,
     composio_app_for_tool_slug,
     composio_tool_allowed_by_scope,
     declared_composio_connections,
@@ -1905,6 +1907,15 @@ def create_worker_alert(
             status_code=400,
             detail="At least one of url (webhook) or email_to (email recipients) is required.",
         )
+    # SSRF guard at store time: a webhook URL pointing at an internal /
+    # loopback / link-local / metadata target is rejected on save (400), so a
+    # bad URL never lands in the DB to be POSTed to later. The webhook delivery
+    # path re-checks at send time (DNS-rebinding defense in depth).
+    if body.url:
+        try:
+            body.url = assert_safe_outbound_url(body.url, label="Alert webhook URL")
+        except UnsafeOutboundUrlError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     valid_events = {"failed", "completed"}
     invalid = [e for e in body.on if e not in valid_events]
     if invalid:
