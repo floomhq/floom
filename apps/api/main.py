@@ -239,6 +239,29 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def versioned_api_alias_middleware(request: Request, call_next):
+    """Accept conventional /api/v1 and /v1 prefixes without duplicating routes."""
+    path = request.scope.get("path", "")
+    for prefix in ("/api/v1", "/v1"):
+        if path == prefix:
+            request.scope["path"] = "/"
+            request.scope["raw_path"] = b"/"
+            break
+        if path.startswith(f"{prefix}/"):
+            stripped = path[len(prefix):] or "/"
+            request.scope["path"] = stripped
+            raw_path = request.scope.get("raw_path")
+            if isinstance(raw_path, bytes):
+                raw_prefix = prefix.encode("utf-8")
+                if raw_path == raw_prefix:
+                    request.scope["raw_path"] = b"/"
+                elif raw_path.startswith(raw_prefix + b"/"):
+                    request.scope["raw_path"] = raw_path[len(raw_prefix):]
+            break
+    return await call_next(request)
+
+
 @app.exception_handler(InsufficientDiskSpaceError)
 async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDiskSpaceError):
     return JSONResponse(
