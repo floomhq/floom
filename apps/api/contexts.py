@@ -340,6 +340,38 @@ def set_context_file_metadata(
     return pack
 
 
+def set_context_file_secret_flag(name: str, file_path: str, has_secret_warning: bool) -> None:
+    """Persist (or clear) the ``has_secret_warning`` flag on a context file's
+    metadata entry, without disturbing its tags/metadata. Used by the
+    write-boundary secret scanner so the UI can badge flagged files.
+    """
+    safe_name = validate_context_name(name)
+    rel = normalize_context_file_path(file_path)
+    metadata = load_context_metadata()
+    pack = metadata.get(safe_name, {})
+    files = pack.get("files")
+    if not isinstance(files, dict):
+        files = {}
+    file_entry = files.get(rel)
+    if not isinstance(file_entry, dict):
+        file_entry = {}
+    if has_secret_warning:
+        file_entry["has_secret_warning"] = True
+    else:
+        file_entry.pop("has_secret_warning", None)
+    if file_entry:
+        files[rel] = file_entry
+    else:
+        files.pop(rel, None)
+    if files:
+        pack["files"] = files
+    else:
+        pack.pop("files", None)
+    pack["updated_at"] = now_iso()
+    metadata[safe_name] = pack
+    save_context_metadata(metadata)
+
+
 def delete_context_metadata(name: str) -> None:
     safe_name = validate_context_name(name)
     metadata = load_context_metadata()
@@ -436,6 +468,8 @@ def context_file_metadata(root: Path, path: Path, pack_metadata: dict[str, Any] 
     files = (pack_metadata or {}).get("files")
     file_entry = files.get(rel) if isinstance(files, dict) else None
     if isinstance(file_entry, dict):
+        if file_entry.get("has_secret_warning"):
+            result["has_secret_warning"] = True
         tags = file_entry.get("tags")
         if isinstance(tags, list):
             result["tags"] = [str(tag) for tag in tags if str(tag).strip()]

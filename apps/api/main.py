@@ -96,6 +96,7 @@ from contexts import (
     safe_context_file_path,
     set_context_scope_resolver,
     set_context_file_metadata,
+    set_context_file_secret_flag,
     set_context_metadata,
     use_context_scope,
     validate_context_name,
@@ -108,6 +109,7 @@ except Exception:  # pragma: no cover - fallback only used when dependency is ab
 
 from db import DB_PATH, Repositories, get_db, get_repos, get_repositories, init_db, now_iso, sqlite_runtime_settings
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
+from secret_scan import scan_bytes
 from models import (
     RunCreate,
     WorkerSummary,
@@ -2098,6 +2100,14 @@ class ContextSummary(BaseModel):
     read_only: bool = False
 
 
+class SecretWarning(BaseModel):
+    """A masked secret-detection finding. NEVER carries the raw value."""
+
+    pattern: str
+    line: int
+    masked: str
+
+
 class ContextFileItem(BaseModel):
     path: str
     size: int
@@ -2108,6 +2118,13 @@ class ContextFileItem(BaseModel):
     display_type: str = "File"
     tags: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Set when the file's content matched a high-confidence secret pattern.
+    # The UI badges these so operators can move the credential to Secrets.
+    has_secret_warning: bool = False
+    # Populated only on the write/upload response (and the audit scan), so the
+    # operator sees WHAT was detected (masked) without re-scanning. Never
+    # persisted to disk, never contains the raw value.
+    secret_warnings: List[SecretWarning] = Field(default_factory=list)
 
 
 class ContextDetail(ContextSummary):
@@ -2133,6 +2150,17 @@ class ContextDeleteResponse(BaseModel):
 class ContextUploadResponse(BaseModel):
     files: List[ContextFileItem]
     total_size_bytes: int
+
+
+class ContextSecretScanFile(BaseModel):
+    path: str
+    secret_warnings: List[SecretWarning] = Field(default_factory=list)
+
+
+class ContextSecretScanResponse(BaseModel):
+    name: str
+    scanned_files: int
+    flagged_files: List[ContextSecretScanFile] = Field(default_factory=list)
 
 
 @app.get("/workers/{worker_id}/versions", response_model=List[VersionSummary])
@@ -4235,6 +4263,38 @@ def _raise_context_quota_if_needed(name: str) -> None:
         )
 
 
+def _block_secrets_in_contexts() -> bool:
+    """Strict mode (default OFF): reject context writes that contain a live
+    credential instead of warning. Env-gated so existing installs see no
+    behavior change."""
+    return os.environ.get("WORKEROS_BLOCK_SECRETS_IN_CONTEXTS") == "1"
+
+
+def _scan_context_write(file_path: str, data: bytes) -> List[SecretWarning]:
+    """Scan context-write bytes for high-confidence secrets. Returns masked
+    warnings only — the raw secret value is never returned or logged.
+
+    In strict mode (WORKEROS_BLOCK_SECRETS_IN_CONTEXTS=1) a non-empty result
+    raises 400; the detail names the pattern (masked) and points the operator
+    at the Secrets vault.
+    """
+    findings = scan_bytes(data)
+    if not findings:
+        return []
+    warnings = [SecretWarning(**f.to_dict()) for f in findings]
+    if _block_secrets_in_contexts():
+        first = warnings[0]
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This file appears to contain a live credential "
+                f"({first.pattern}: {first.masked}). Store secrets in "
+                f"Settings → Secrets, not in a Brain pack."
+            ),
+        )
+    return warnings
+
+
 def _write_context_file(
     name: str,
     file_path: str,
@@ -4247,6 +4307,9 @@ def _write_context_file(
     root = context_dir(name)
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="Context not found")
+    # Detective control at the write boundary: scan BEFORE persisting so strict
+    # mode can reject without ever writing the secret to disk.
+    secret_warnings = _scan_context_write(file_path, data)
     destination = _safe_context_file_or_400(name, file_path)
     previous = destination.read_bytes() if destination.exists() else None
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -4270,7 +4333,14 @@ def _write_context_file(
     else:
         set_context_metadata(name, owner_id=user_id)
         pack_meta = load_context_metadata().get(name) or {}
-    return ContextFileItem(**context_file_metadata(root, destination, pack_metadata=pack_meta))
+    # Persist the warning flag so list/detail views badge the file even after
+    # the write response is gone. (Cleared when a later write comes back clean.)
+    set_context_file_secret_flag(name, file_path, bool(secret_warnings))
+    pack_meta = load_context_metadata().get(name) or pack_meta
+    item = ContextFileItem(**context_file_metadata(root, destination, pack_metadata=pack_meta))
+    item.secret_warnings = secret_warnings
+    item.has_secret_warning = bool(secret_warnings)
+    return item
 
 
 def _workers_referencing_context(name: str, *, user_id: str, repos: Repositories) -> List[str]:
@@ -4548,6 +4618,49 @@ async def upload_context_files(
     return ContextUploadResponse(
         files=written,
         total_size_bytes=context_total_size(context_dir(safe_name)),
+    )
+
+
+@app.get("/contexts/{name}/secret-scan", response_model=ContextSecretScanResponse)
+def scan_context_for_secrets(
+    name: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> ContextSecretScanResponse:
+    """Audit a Brain pack's CURRENT files for stored live credentials.
+
+    Owner-gated (operator must own/see the pack; the whole /contexts surface
+    also requires x-floom-secret). This is the control that would have caught
+    keys already stored as readable context content. Returns only masked
+    findings — never the raw value — and refreshes the persisted
+    has_secret_warning flag so the UI badge stays accurate.
+    """
+    safe_name, _metadata = _require_readable_context_for_user(name, user_id=auth.user_id)
+    root = context_dir(safe_name)
+    scanned = 0
+    flagged: List[ContextSecretScanFile] = []
+    for path in iter_context_files(root):
+        rel = path.relative_to(root).as_posix()
+        mime_type = guess_mime_type(rel)
+        if is_binary_file(rel, mime_type):
+            continue
+        scanned += 1
+        try:
+            data = path.read_bytes()
+        except Exception:
+            continue
+        findings = scan_bytes(data)
+        warnings = [SecretWarning(**f.to_dict()) for f in findings]
+        # Refresh the persisted flag so list/detail badges reflect reality.
+        try:
+            set_context_file_secret_flag(safe_name, rel, bool(warnings))
+        except Exception:
+            pass
+        if warnings:
+            flagged.append(ContextSecretScanFile(path=rel, secret_warnings=warnings))
+    return ContextSecretScanResponse(
+        name=safe_name,
+        scanned_files=scanned,
+        flagged_files=flagged,
     )
 
 
@@ -13445,7 +13558,15 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
         user_id=auth.user_id,
     )
     _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos, change_source="ai")
-    return _mcp_call_result(result, "Context file saved.")
+    message = "Context file saved."
+    if result.secret_warnings:
+        patterns = ", ".join(sorted({w.pattern for w in result.secret_warnings}))
+        message = (
+            f"Context file saved. WARNING: this file looks like it contains a live "
+            f"credential ({patterns}). Brain packs are readable by anyone with workspace "
+            f"access — store secrets in Settings → Secrets, not in a Brain pack."
+        )
+    return _mcp_call_result(result, message)
 
 
 async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
