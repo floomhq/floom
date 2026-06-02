@@ -84,14 +84,14 @@ def test_public_url_is_posted(monkeypatch):
 
     captured = {}
 
-    def _fake_urlopen(req, timeout=None):
+    def _fake_open(req, timeout=None):
         captured["url"] = req.full_url
         captured["data"] = req.data
         captured["timeout"] = timeout
         return MagicMock(__enter__=lambda s: s, __exit__=lambda *a: False)
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(rs.urllib.request, "urlopen", side_effect=_fake_urlopen):
+        with patch.object(rs._NO_REDIRECT_OPENER, "open", side_effect=_fake_open):
             rs._fire_alert_webhooks(
                 run_id="run_abc", worker_id="wk_1", status="failed",
                 error="boom", repos=repos,
@@ -119,7 +119,7 @@ def test_internal_url_is_not_posted(monkeypatch, bad_url):
         {"url": bad_url, "email_to": None, "events": "failed", "secret": None},
     ])
 
-    with patch.object(rs.urllib.request, "urlopen") as mock_open:
+    with patch.object(rs._NO_REDIRECT_OPENER, "open") as mock_open:
         rs._fire_alert_webhooks(
             run_id="run_x", worker_id="wk_1", status="failed",
             error=None, repos=repos,
@@ -136,7 +136,7 @@ def test_delivery_failure_does_not_crash(monkeypatch):
     ])
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(rs.urllib.request, "urlopen",
+        with patch.object(rs._NO_REDIRECT_OPENER, "open",
                           side_effect=OSError("connection refused")):
             # Must not raise.
             rs._fire_alert_webhooks(
@@ -156,13 +156,13 @@ def test_payload_contains_no_secret(monkeypatch):
 
     captured = {}
 
-    def _fake_urlopen(req, timeout=None):
+    def _fake_open(req, timeout=None):
         captured["data"] = req.data
         captured["headers"] = req.headers
         return MagicMock(__enter__=lambda s: s, __exit__=lambda *a: False)
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(rs.urllib.request, "urlopen", side_effect=_fake_urlopen):
+        with patch.object(rs._NO_REDIRECT_OPENER, "open", side_effect=_fake_open):
             rs._fire_alert_webhooks(
                 run_id="run_z", worker_id="wk_1", status="failed",
                 error=None, repos=repos,
@@ -174,6 +174,87 @@ def test_payload_contains_no_secret(monkeypatch):
     # The HMAC signature header is derived from the secret but is not the secret.
     sig_header = captured["headers"].get("X-workeros-signature", "")
     assert secret not in sig_header
+
+
+# ---------------------------------------------------------------------------
+# Redirect-driven SSRF bypass: a public webhook that 302-redirects to an
+# internal/metadata target must NOT be followed (the gap in the #370 guard).
+# ---------------------------------------------------------------------------
+
+import http.server
+import threading
+
+
+class _RedirectToMetadataHandler(http.server.BaseHTTPRequestHandler):
+    """First request → 302 to the cloud-metadata IP; record any 2nd hit."""
+
+    redirect_target = "http://169.254.169.254/latest/meta-data/"
+    hits: list[str] = []
+
+    def do_POST(self):  # noqa: N802
+        type(self).hits.append(self.path)
+        # Drain the request body so the client send completes cleanly.
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length:
+            self.rfile.read(length)
+        self.send_response(302)
+        self.send_header("Location", self.redirect_target)
+        self.end_headers()
+
+    def log_message(self, *args):  # silence test server logging
+        return
+
+
+def test_redirect_to_internal_is_not_followed(monkeypatch):
+    """A public 200/302 endpoint that says ``302 Location: 169.254.169.254``
+    must NOT cause the alert POST to reach the internal target.
+
+    Drives the REAL no-redirect opener against a real local HTTP server, so it
+    proves the redirect handler — not a mock — refuses to chase the redirect.
+    """
+    monkeypatch.delenv("WORKEROS_ALLOW_PRIVATE_MCP_URLS", raising=False)
+    rs = _run_service()
+
+    _RedirectToMetadataHandler.hits = []
+    server = http.server.HTTPServer(("127.0.0.1", 0), _RedirectToMetadataHandler)
+    host, port = server.server_address
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    followed = {"hit": False}
+
+    # Track whether the opener ever tries to dial the redirect target.
+    real_open = rs._NO_REDIRECT_OPENER.open
+
+    def _tracking_open(req, timeout=None):
+        if "169.254.169.254" in req.full_url:
+            followed["hit"] = True
+        return real_open(req, timeout=timeout)
+
+    webhook_url = f"http://127.0.0.1:{port}/hook"
+    repos = _fake_repos([
+        {"url": webhook_url, "email_to": None, "events": "failed", "secret": None},
+    ])
+
+    try:
+        # The local webhook host (127.0.0.1) is itself internal, so bypass the
+        # pre-flight SSRF check ONLY for this test to isolate redirect behaviour:
+        # the point under test is that the 302 → metadata is not followed.
+        monkeypatch.setenv("WORKEROS_ALLOW_PRIVATE_MCP_URLS", "1")
+        with patch.object(rs._NO_REDIRECT_OPENER, "open", side_effect=_tracking_open):
+            rs._fire_alert_webhooks(
+                run_id="run_redir", worker_id="wk_1", status="failed",
+                error=None, repos=repos,
+            )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    # The initial webhook was POSTed exactly once...
+    assert _RedirectToMetadataHandler.hits == ["/hook"]
+    # ...and the 302 → metadata target was NEVER dialed.
+    assert followed["hit"] is False
 
 
 # ---------------------------------------------------------------------------
