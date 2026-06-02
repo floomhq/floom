@@ -394,6 +394,28 @@ function ContextsPage() {
     return "packs";
   });
 
+  // ---- Deep-link honouring (?pack=&file=) on initial load -----------------
+  // The state initializers above seed selectedName/selectedFile from the URL,
+  // but the very first `loadContexts()` resolves the pack detail asynchronously
+  // and (when no ?pack is present) can fall back to a different pack, stranding
+  // a deep-linked ?file on the file list. Once the detail that owns the linked
+  // file is available, re-assert the file selection so the viewer opens. Runs
+  // once: the ref latches after the first successful open. In-app navigation
+  // uses replaceState (not Next navigation) so searchParams stays stable and
+  // this never fights a user's later taps.
+  const deepLinkApplied = useRef(false);
+  useEffect(() => {
+    if (deepLinkApplied.current) return;
+    const linkedFile = searchParams.get("file");
+    if (!linkedFile || !detail) return;
+    if (!detail.files.some((f) => f.path === linkedFile)) return;
+    deepLinkApplied.current = true;
+    setSelectedFile(linkedFile);
+    setMobilePane("file");
+    const slash = linkedFile.lastIndexOf("/");
+    setFolderPath(slash === -1 ? [] : linkedFile.slice(0, slash).split("/").filter(Boolean));
+  }, [detail, searchParams]);
+
   // ---- Shallow URL sync (no Next navigation / remount) --------------------
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1681,7 +1703,9 @@ function PreviewRawTabs({
 
 function RawText({ text }: { text: string }) {
   return (
-    <pre className="whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-foreground">{text}</pre>
+    <div className="p-4">
+      <pre className="overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] p-3 font-mono text-xs leading-6 text-foreground dark:bg-[#1a1a1a]">{text}</pre>
+    </div>
   );
 }
 
@@ -2194,13 +2218,15 @@ function CodeBlock({ text, filePath }: { text: string; filePath: string }) {
   }, [text, filePath]);
 
   return (
-    <pre className="p-4 font-mono text-xs leading-6 overflow-auto bg-[var(--bg-app)]">
-      {highlighted ? (
-        <code className={`hljs language-${detectLanguage(filePath)}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
-      ) : (
-        <code>{text}</code>
-      )}
-    </pre>
+    <div className="p-4">
+      <pre className="overflow-auto rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] p-3 font-mono text-xs leading-6 dark:bg-[#1a1a1a]">
+        {highlighted ? (
+          <code className={`hljs language-${detectLanguage(filePath)}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
+        ) : (
+          <code>{text}</code>
+        )}
+      </pre>
+    </div>
   );
 }
 
