@@ -8122,6 +8122,14 @@ def _approval_response(
 ) -> Dict[str, Any]:
     response = dict(approval)
     response["artifacts"] = _approval_artifacts_for_response(response, repos)
+    # Standalone share/review link for the authenticated owner. The token is the
+    # same deterministic HMAC the /approvals/public/* routes verify, so the owner
+    # can copy this URL to open the approval full-page (no app chrome) or share it
+    # with an external approver. Mirrors the chat tool's `link` field.
+    response["public_link"] = (
+        f"{_frontend_base_url()}/approvals/review"
+        f"?id={response.get('id')}&token={_approval_public_token(dict(approval))}"
+    )
     return response
 
 
@@ -8191,6 +8199,9 @@ def _load_public_approval(
 def _public_approval_response(approval: Dict[str, Any], repos: Repositories) -> Dict[str, Any]:
     public = _approval_response(approval, repos)
     public.pop("owner_id", None)
+    # The owner-only share link (and its token) is not echoed back to external
+    # signed-link approvers — they already hold the token they arrived with.
+    public.pop("public_link", None)
     return public
 
 
