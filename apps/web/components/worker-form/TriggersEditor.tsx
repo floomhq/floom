@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { CronBuilder } from "@/components/CronBuilder";
+import { humanizeCron } from "@/lib/humanize-cron";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
 import type { ConnectionItem, TriggerSpec } from "@/lib/types";
 
@@ -131,18 +132,20 @@ function kindMeta(type: TriggerType) {
 // Summary headline helpers (ported from the deleted ConfiguredTriggersSummary)
 // ---------------------------------------------------------------------------
 
-function triggerSummaryLine(row: TriggerRow): string {
+// Returns the readable summary plus, for schedules, the raw cron expression so
+// callers can surface it as a tooltip for power users.
+function triggerSummaryLine(row: TriggerRow): { text: string; title?: string } {
   if (row.type === "schedule") {
     const cron = row.cronExpr || "0 9 * * *";
     const tz = row.cronTimezone || "UTC";
-    return `${cron} ${tz}`;
+    return { text: humanizeCron(cron, tz), title: `${cron} ${tz}` };
   }
-  if (row.type === "webhook") return "HTTP POST endpoint";
+  if (row.type === "webhook") return { text: "HTTP POST endpoint" };
   if (row.type === "composio") {
-    if (row.composioEvent) return row.composioEvent;
-    return "Connected app event";
+    if (row.composioEvent) return { text: row.composioEvent };
+    return { text: "Connected app event" };
   }
-  return "Manual run";
+  return { text: "Manual run" };
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +169,7 @@ function TriggerRowSummary({ row, onEdit, onRemove }: TriggerRowSummaryProps) {
       <div className="flex-1 min-w-0 flex items-center gap-2 overflow-hidden">
         <span className="text-xs font-medium text-foreground shrink-0">{meta.label}</span>
         <span className="text-muted-foreground text-xs select-none">·</span>
-        <span className="text-xs text-muted-foreground font-mono truncate">{summary}</span>
+        <span className="text-xs text-muted-foreground truncate" title={summary.title}>{summary.text}</span>
       </div>
       <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         <Button

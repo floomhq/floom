@@ -17,6 +17,8 @@ const BRAND_COLORS: Record<string, string> = {
   notion: "text-[#111111]",
   salesforce: "text-[#00A1E0]",
   slack: "text-[#611f69]",
+  supabase: "text-[#3FCF8E]",
+  "google-search-console": "text-[#458CF5]",
   whatsapp: "text-[#25D366]",
   openai: "text-[#412991]",
   apify: "text-[#FF9013]",
@@ -34,6 +36,9 @@ export const SLUG_ALIASES: Record<string, string> = {
   googlemeet: "google-meet",
   gcal: "google-calendar",
   gdrive: "google-drive",
+  googlesearchconsole: "google-search-console",
+  gsc: "google-search-console",
+  searchconsole: "google-search-console",
 };
 
 // Slugs whose symbols live under the #icon-* prefix rather than #brand-*.
@@ -58,6 +63,8 @@ export const KNOWN_BRAND_SLUGS = new Set([
   "notion",
   "salesforce",
   "slack",
+  "supabase",
+  "google-search-console",
   "whatsapp",
   "openai",
   "apify",

@@ -137,6 +137,22 @@ export function ConnectionEventPicker({
     return `${app} · account ending ${conn.composio_connection_id.slice(-6)}`;
   }
 
+  // N4: show the connected account alongside the app name in the Integration
+  // dropdown. The account is carried on the connection (display_name /
+  // account_label). When exactly one connection exists for an app we can
+  // surface it here (e.g. "Gmail · depontefede@gmail.com"); apps with multiple
+  // accounts disambiguate in the dedicated Account step below, so we keep their
+  // Integration label to just the app name.
+  function appOptionLabel(slug: string): string {
+    const name = appDisplayName(slug);
+    const conns = activeConnections.filter((c) => c.app_name.toLowerCase() === slug);
+    if (conns.length === 1) {
+      const account = conns[0].display_name || conns[0].account_label;
+      if (account) return `${name} · ${account}`;
+    }
+    return name;
+  }
+
   if (loadingConnections) {
     return (
       <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
@@ -166,7 +182,7 @@ export function ConnectionEventPicker({
         <Select value={selectedApp} onValueChange={handleAppChange}>
           <SelectTrigger className="w-full border-border">
             <SelectValue placeholder="Pick a connected integration">
-              {selectedApp ? appDisplayName(selectedApp) : null}
+              {selectedApp ? appOptionLabel(selectedApp) : null}
             </SelectValue>
           </SelectTrigger>
           <SelectContent className="z-50">
@@ -174,7 +190,7 @@ export function ConnectionEventPicker({
               const slug = c.app_name.toLowerCase();
               return (
                 <SelectItem key={slug} value={slug}>
-                  {appDisplayName(slug)}
+                  {appOptionLabel(slug)}
                 </SelectItem>
               );
             })}

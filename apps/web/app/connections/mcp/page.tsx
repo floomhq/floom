@@ -318,7 +318,7 @@ export default function McpConnectionsPage() {
                 <h2 className="text-base font-medium">Add MCP servers from your terminal</h2>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                Import existing Claude, Cursor, or VS Code configs, or install Workeros as an MCP server for an agent client.
+                Import existing Claude, Cursor, or VS Code configs, or install Floom Workers as an MCP server for an agent client.
               </p>
             </div>
             <Button
@@ -357,7 +357,7 @@ export default function McpConnectionsPage() {
                 ))}
               </div>
               <CommandBlock
-                title="Install Workeros MCP"
+                title="Install Floom Workers MCP"
                 command={MCP_INSTALL_TARGETS.find((target) => target.target === installTarget)?.command ?? MCP_INSTALL_TARGETS[0].command}
                 copied={copiedCommand === (MCP_INSTALL_TARGETS.find((target) => target.target === installTarget)?.command ?? MCP_INSTALL_TARGETS[0].command)}
                 onCopy={() => copyCommand(MCP_INSTALL_TARGETS.find((target) => target.target === installTarget)?.command ?? MCP_INSTALL_TARGETS[0].command)}
