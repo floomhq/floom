@@ -338,3 +338,82 @@ def test_import_skips_worker_without_worker_yml(client_and_main):
         s.get("type") == "worker" and "missing worker.yml" in s.get("reason", "")
         for s in body["skipped"]
     )
+
+
+# ---------------------------------------------------------------------------
+# W9b: Duplicate workspace + Share template link.
+# ---------------------------------------------------------------------------
+
+
+def _active_workspace_id(client) -> str:
+    resp = client.get("/workspaces")
+    assert resp.status_code == 200, resp.text
+    return resp.json()["active_id"]
+
+
+def test_duplicate_workspace_creates_named_copy(client_and_main):
+    client, _main = client_and_main
+
+    # Name the active (default) workspace so we can assert the "(copy)" suffix.
+    create = client.post("/workspaces", json={"name": "Acme Ops"})
+    assert create.status_code == 200, create.text
+    source_id = create.json()["id"]
+    client.post(f"/workspaces/{source_id}/select")
+
+    before = {w["id"] for w in client.get("/workspaces").json()["workspaces"]}
+
+    resp = client.post(f"/workspaces/{source_id}/duplicate")
+    assert resp.status_code == 200, resp.text
+    dup = resp.json()
+    assert dup["name"] == "Acme Ops (copy)"
+    assert dup["id"] not in before  # genuinely a new workspace row
+
+    after = {w["id"] for w in client.get("/workspaces").json()["workspaces"]}
+    assert dup["id"] in after
+    assert len(after) == len(before) + 1
+
+
+def test_duplicate_unknown_workspace_404s(client_and_main):
+    client, _main = client_and_main
+    resp = client.post("/workspaces/ws_does_not_exist/duplicate")
+    assert resp.status_code == 404, resp.text
+
+
+def test_share_link_round_trips_to_the_same_template(client_and_main):
+    client, _main = client_and_main
+
+    link = client.get("/workspace/share-link")
+    assert link.status_code == 200, link.text
+    body = link.json()
+    token = body["token"]
+    assert token and len(token) >= 16
+    # The signed URL embeds the same token + the owner param.
+    assert f"/workspace/template/{token}" in body["url"]
+    assert "owner=" in body["url"]
+
+    # Pull the owner param straight off the minted URL and download via the
+    # public (login-free) share endpoint.
+    from urllib.parse import urlparse, parse_qs
+
+    owner = parse_qs(urlparse(body["url"]).query)["owner"][0]
+    pub = client.get(f"/workspace/template/{token}", params={"owner": owner})
+    assert pub.status_code == 200, pub.text
+    assert pub.headers["content-type"] == "application/zip"
+
+    # Byte-for-byte identical to the authenticated export AND secret-free.
+    shared = zipfile.ZipFile(io.BytesIO(pub.content))
+    direct = _export_zip(client)
+    assert set(shared.namelist()) == set(direct.namelist())
+    blob = b"".join(shared.read(n) for n in shared.namelist())
+    assert _SECRET_VALUE.encode() not in blob
+    assert not any(n.endswith(".env") for n in shared.namelist())
+
+
+def test_share_link_rejects_forged_token(client_and_main):
+    client, _main = client_and_main
+    owner = _active_workspace_id(client)
+    resp = client.get(
+        "/workspace/template/deadbeefdeadbeefdeadbeef",
+        params={"owner": owner},
+    )
+    assert resp.status_code == 401, resp.text

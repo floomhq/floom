@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronsUpDown, Download, Plus, Upload } from "lucide-react";
+import { Check, ChevronsUpDown, Copy, Download, Link2, Plus, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
@@ -48,6 +48,8 @@ export function WorkspaceSwitcher() {
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+  const [sharingLink, setSharingLink] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -139,6 +141,44 @@ export function WorkspaceSwitcher() {
       toast.error((err as Error).message || "Failed to import template");
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleDuplicate() {
+    if (duplicating || !state) return;
+    setDuplicating(true);
+    try {
+      const created = await api.workspace.duplicate(state.activeId);
+      await api.workspace.select(created.id);
+      setActiveWorkspaceId(created.id);
+      toast.success(`Duplicated to “${created.name}”`);
+      window.location.reload();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to duplicate workspace");
+      setDuplicating(false);
+    }
+  }
+
+  async function handleShareLink() {
+    if (sharingLink) return;
+    setSharingLink(true);
+    try {
+      const { url } = await api.workspace.shareLink();
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+      toast.success(
+        copied ? "Template link copied to clipboard" : "Template link ready",
+        { description: copied ? undefined : url }
+      );
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to create template link");
+    } finally {
+      setSharingLink(false);
     }
   }
 
@@ -260,6 +300,28 @@ export function WorkspaceSwitcher() {
             >
               <Upload className="size-4" />
               {importing ? "Importing…" : "Import template…"}
+            </DropdownMenuItem>
+            {/* W9b (Federico 2026-06-03): Duplicate workspace + Share template
+                link, alongside Export/Import. Duplicate mints a "<name> (copy)"
+                sibling; Share copies a signed login-free download link (no
+                secret values) the recipient imports on their own instance. */}
+            <DropdownMenuItem
+              closeOnClick={false}
+              disabled={duplicating}
+              onClick={() => void handleDuplicate()}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            >
+              <Copy className="size-4" />
+              {duplicating ? "Duplicating…" : "Duplicate workspace"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              closeOnClick={false}
+              disabled={sharingLink}
+              onClick={() => void handleShareLink()}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            >
+              <Link2 className="size-4" />
+              {sharingLink ? "Creating link…" : "Share template link"}
             </DropdownMenuItem>
           </DropdownMenuGroup>
         </DropdownMenuContent>

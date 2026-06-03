@@ -549,6 +549,40 @@ def select_workspace(
     return _local_workspace_out(workspace)
 
 
+def _duplicate_workspace_name(name: str) -> str:
+    """``"Acme"`` -> ``"Acme (copy)"`` (clamped to the 80-char name limit)."""
+    base = (name or "").strip() or "Untitled"
+    suffix = " (copy)"
+    if len(base) + len(suffix) > 80:
+        base = base[: 80 - len(suffix)].rstrip()
+    return f"{base}{suffix}"
+
+
+@app.post("/workspaces/{workspace_id}/duplicate", response_model=LocalWorkspaceOut)
+def duplicate_workspace(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> LocalWorkspaceOut:
+    """Duplicate a local OSS workspace into a new ``"<name> (copy)"`` sibling.
+
+    Owner-scoped: the source workspace must belong to the caller's local base
+    user, otherwise 404. On this single-tenant OSS instance, workers and
+    knowledge packs live in a shared on-disk pool (not per-workspace storage),
+    so duplication mints a new workspace row that surfaces the same worker pool.
+    Use Export → Import (the template round-trip) to move workers between
+    instances.
+    """
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    source = get_local_workspace(base_user_id, workspace_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    created = create_local_workspace(
+        base_user_id, _duplicate_workspace_name(source.get("name") or "")
+    )
+    return _local_workspace_out(created)
+
+
 def _connection_row_for_user(
     connection_id: str,
     user_id: str,
@@ -952,6 +986,7 @@ async def auth_middleware(request: Request, call_next):
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
             or path.startswith("/workers/public/")
+            or path.startswith("/workspace/template/")
             or path == "/cli-auth/devices"
             or path.startswith("/cli-auth/poll/")
             or _RE_RUN_COMPOSIO_PROXY.match(path)
@@ -7624,25 +7659,21 @@ def _iter_worker_dir_files(worker_id: str):
         yield rel, path.read_bytes()
 
 
-@app.get("/workspace/export")
-def export_workspace(
-    exported_at: Optional[str] = Query(None),
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> Response:
-    """Export this workspace as a single downloadable .zip template.
+def _build_workspace_template_zip(
+    *,
+    user_id: str,
+    repos: Repositories,
+    exported_at: Optional[str] = None,
+) -> bytes:
+    """Build the workspace template .zip and return its raw bytes.
 
-    Bundles every NON-EXAMPLE, non-system operator worker (worker.yml + run.py /
-    SKILL.md + requirements.txt + lib/*), every OPERATOR knowledge pack
-    (contexts; system packs like worker-author-style and other users' packs are
-    excluded), the workspace-agent config (workspace.md if present), and a
-    ``workspace.json`` manifest.
-
-    NO secret values or connection tokens are ever written — only the NAMES of
-    required secrets/connections so the importer knows what to reconnect.
+    Shared by the authenticated ``GET /workspace/export`` download and the
+    signed public ``GET /workspace/template/{token}`` share-link download so the
+    bundle layout, the example/system exclusions, and the no-secret-value
+    guarantee live in exactly ONE place.
     """
     # ---- workers --------------------------------------------------------
-    all_operator = _list_operator_workers(user_id=auth.user_id, repos=repos)
+    all_operator = _list_operator_workers(user_id=user_id, repos=repos)
     workers = [w for w in all_operator if _is_exportable_operator_worker(w)]
 
     worker_manifest_entries: List[Dict[str, Any]] = []
@@ -7680,7 +7711,7 @@ def export_workspace(
                 # EXCLUDE system/engine packs and other users' packs.
                 if _is_system_context_pack(folder.name, meta):
                     continue
-                if not _context_visible_to_user(folder.name, user_id=auth.user_id, metadata=meta):
+                if not _context_visible_to_user(folder.name, user_id=user_id, metadata=meta):
                     continue
                 pack_files = 0
                 for fpath in iter_context_files(folder):
@@ -7730,16 +7761,111 @@ def export_workspace(
         }
         zf.writestr("workspace.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
-    payload = buf.getvalue()
-    filename = "workeros-workspace-template.zip"
+    return buf.getvalue()
+
+
+WORKSPACE_TEMPLATE_FILENAME = "workeros-workspace-template.zip"
+
+
+def _workspace_template_response(payload: bytes) -> Response:
     return Response(
         content=payload,
         media_type="application/zip",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f'attachment; filename="{WORKSPACE_TEMPLATE_FILENAME}"',
             "Cache-Control": "no-store",
         },
     )
+
+
+@app.get("/workspace/export")
+def export_workspace(
+    exported_at: Optional[str] = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Export this workspace as a single downloadable .zip template.
+
+    Bundles every NON-EXAMPLE, non-system operator worker (worker.yml + run.py /
+    SKILL.md + requirements.txt + lib/*), every OPERATOR knowledge pack
+    (contexts; system packs like worker-author-style and other users' packs are
+    excluded), the workspace-agent config (workspace.md if present), and a
+    ``workspace.json`` manifest.
+
+    NO secret values or connection tokens are ever written — only the NAMES of
+    required secrets/connections so the importer knows what to reconnect.
+    """
+    payload = _build_workspace_template_zip(
+        user_id=auth.user_id, repos=repos, exported_at=exported_at
+    )
+    return _workspace_template_response(payload)
+
+
+# ---------------------------------------------------------------------------
+# Workspace share link (W9b): mint a signed, login-free URL that lets a
+# recipient DOWNLOAD this workspace's template .zip, then import it into their
+# own instance. Mirrors the worker share-link HMAC pattern
+# (``_worker_public_token``): the token is bound to the owner so it can never
+# resolve a different operator's template, and the public download carries the
+# SAME no-secret-value guarantee as the authenticated export (it reuses
+# ``_build_workspace_template_zip``).
+# ---------------------------------------------------------------------------
+
+
+def _workspace_share_payload(user_id: str) -> str:
+    """Stable HMAC payload for an owner's workspace template share link."""
+    return ".".join(("workspace-template", str(user_id or "")))
+
+
+def _workspace_share_token(user_id: str) -> str:
+    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    return hmac.new(
+        secret.encode("utf-8"),
+        _workspace_share_payload(user_id).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+class WorkspaceShareLinkResponse(BaseModel):
+    url: str
+    token: str
+
+
+@app.get("/workspace/share-link", response_model=WorkspaceShareLinkResponse)
+def workspace_share_link(
+    auth: AuthContext = Depends(get_auth_context),
+) -> WorkspaceShareLinkResponse:
+    """Return a signed, login-free URL to download this workspace as a template.
+
+    The recipient opens the URL, downloads the .zip, and imports it via
+    ``POST /workspace/import`` on their own instance. The link carries no secret
+    values (see ``_build_workspace_template_zip``); the HMAC token is bound to
+    the owner id so it cannot resolve another operator's workspace.
+    """
+    token = _workspace_share_token(auth.user_id)
+    owner_q = urllib.parse.quote(auth.user_id, safe="")
+    url = f"{_public_api_base_url()}/workspace/template/{token}?owner={owner_q}"
+    return WorkspaceShareLinkResponse(url=url, token=token)
+
+
+@app.get("/workspace/template/{token}")
+def download_shared_workspace_template(
+    token: str,
+    owner: str = Query(..., min_length=1),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Download a workspace template via a signed share link (no app login).
+
+    Authenticated solely by the HMAC ``token`` bound to ``owner`` (constant-time
+    compare). Reuses ``_build_workspace_template_zip`` so the public bundle is
+    byte-for-byte the same allow-listed, secret-free template as the
+    authenticated export.
+    """
+    expected = _workspace_share_token(owner)
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid workspace link")
+    payload = _build_workspace_template_zip(user_id=owner, repos=repos)
+    return _workspace_template_response(payload)
 
 
 class WorkspaceImportResponse(BaseModel):
