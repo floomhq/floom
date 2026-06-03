@@ -36,6 +36,28 @@ from ._legacy_sqlite import _row_dict, get_db, now_iso
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
 _FLOOM_USER_ID = "federico"
 
+# Per-asset visibility default. Private-by-default matches the Codex design
+# (Notion/Drive convention) — automation assets that hold secrets must not be
+# discoverable until the owner explicitly shares them.
+_DEFAULT_VISIBILITY = "private"
+
+
+def _derive_workspace_id_local(owner_id: str | None) -> str:
+    """Workspace id for an owner_id (``<base>__ws_<14hex>`` suffix, else default).
+
+    Defined early so the worker INSERT paths can stamp workspace_id on create.
+    Mirrors ``derive_workspace_id`` (defined later for external callers).
+    """
+    text = (owner_id or "").strip()
+    match = re.search(r"__(ws_[a-f0-9]{14})$", text)
+    return match.group(1) if match else "local-default"
+
+
+def _normalize_visibility(value: Any) -> str:
+    """Coerce a visibility input to a valid enum value, defaulting to private."""
+    text = (str(value).strip().lower() if value is not None else "")
+    return text if text in {"private", "workspace", "specific_people"} else _DEFAULT_VISIBILITY
+
 
 def _legacy_source_relative_env_path() -> Path:
     """The historical, source-tree-relative secret env file (``apps/api/.env``).
@@ -306,6 +328,8 @@ def _worker_record_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "enabled": bool(data.get("enabled") or 0),
         "created_at": data.get("created_at"),
         "owner_id": data.get("owner_id") or _FLOOM_USER_ID,
+        "workspace_id": data.get("workspace_id") or "local-default",
+        "visibility": data.get("visibility") or "private",
         "composio_trigger_id": data.get("composio_trigger_id"),
         "composio_event": data.get("composio_event"),
     }
@@ -331,6 +355,8 @@ def _worker_select_sql(where_clause: str = "", limit_clause: str = "") -> str:
             w.enabled,
             w.created_at,
             w.owner_id,
+            w.workspace_id,
+            w.visibility,
             w.composio_trigger_id,
             w.composio_event,
             w.triggers_json,
@@ -416,8 +442,9 @@ class SqliteWorkerRepository:
                     (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
                      next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
                      notify_webhook_url, grants_json, input_values_json, enabled, created_at,
-                     owner_id, composio_trigger_id, composio_event, triggers_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     owner_id, workspace_id, visibility, composio_trigger_id, composio_event,
+                     triggers_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     worker_id,
@@ -436,6 +463,8 @@ class SqliteWorkerRepository:
                     enabled,
                     created_at,
                     user_id,
+                    fields.get("workspace_id") or _derive_workspace_id_local(user_id),
+                    _normalize_visibility(fields.get("visibility")),
                     composio_trigger_id,
                     composio_event,
                     _json_dump(triggers_json) if triggers_json is not None else None,
@@ -499,8 +528,9 @@ class SqliteWorkerRepository:
                     (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
                      next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
                      notify_webhook_url, grants_json, input_values_json, enabled, created_at,
-                     owner_id, composio_trigger_id, composio_event, triggers_json)
-                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, ?, ?, ?, ?)
+                     owner_id, workspace_id, visibility, composio_trigger_id, composio_event,
+                     triggers_json)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     skill_version_id=excluded.skill_version_id,
                     name=excluded.name,
@@ -523,6 +553,8 @@ class SqliteWorkerRepository:
                     _json_dump(fields.get("input_values_json") or {}),
                     created_at,
                     user_id,
+                    fields.get("workspace_id") or _derive_workspace_id_local(user_id),
+                    _normalize_visibility(fields.get("visibility")),
                     fields.get("composio_trigger_id"),
                     fields.get("composio_event"),
                     _json_dump(triggers_json) if triggers_json is not None else None,
@@ -2485,3 +2517,293 @@ class SqliteMcpToolRepository:
                 (user_id, tool_id),
             )
         return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Members + per-asset visibility (Members STEP 1)
+# ---------------------------------------------------------------------------
+
+# Allowed enum values. ``specific_people`` is reserved (hidden in UI) until the
+# asset_grants table ships in a later step.
+VISIBILITY_VALUES: frozenset[str] = frozenset({"private", "workspace", "specific_people"})
+MEMBER_ROLES: frozenset[str] = frozenset({"owner", "admin", "member"})
+_ASSET_TABLES: dict[str, str] = {"worker": "workers"}
+
+
+def derive_workspace_id(owner_id: str | None) -> str:
+    """Workspace id for an engine owner_id (mirrors the migration helper).
+
+    owner_id is the per-workspace scoped user_id: the base user under the default
+    workspace, or ``<base>__ws_<14hex>`` under a non-default local workspace. The
+    workspace is the suffix when present, else ``local-default``.
+    """
+    text = (owner_id or "").strip()
+    match = re.search(r"__(ws_[a-f0-9]{14})$", text)
+    return match.group(1) if match else "local-default"
+
+
+class SqliteWorkspaceMemberRepository:
+    """Single-owner-degenerate WorkspaceMemberRepository for the OSS engine.
+
+    On the OSS engine each workspace has exactly one active owner (the local
+    user). ``list`` returns that one owner row; mutations that don't apply to a
+    single-owner workspace (invite/set_role/remove others) are no-ops or raise so
+    the same API surface renders identically to Cloud without forking the UI.
+    """
+
+    _cols = (
+        "workspace_id, user_id, email, display_name, role, status, "
+        "invited_by, created_at, updated_at"
+    )
+
+    def list(self, *, workspace_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {self._cols} FROM workspace_members
+                WHERE workspace_id = ? AND status != 'removed'
+                ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
+                         created_at
+                """,
+                (workspace_id,),
+            ).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def get(self, *, workspace_id: str, user_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT {self._cols} FROM workspace_members "
+                "WHERE workspace_id = ? AND user_id = ? LIMIT 1",
+                (workspace_id, user_id),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def _owner(self, conn: sqlite3.Connection, workspace_id: str) -> sqlite3.Row | None:
+        return conn.execute(
+            "SELECT user_id FROM workspace_members "
+            "WHERE workspace_id = ? AND role = 'owner' AND status = 'active' LIMIT 1",
+            (workspace_id,),
+        ).fetchone()
+
+    def _assert_owner_or_admin(self, conn: sqlite3.Connection, workspace_id: str, actor_id: str) -> str:
+        row = conn.execute(
+            "SELECT role FROM workspace_members "
+            "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+            (workspace_id, actor_id),
+        ).fetchone()
+        role = row["role"] if row else None
+        if role not in {"owner", "admin"}:
+            raise PermissionError("actor is not an owner or admin of this workspace")
+        return role
+
+    def invite(self, *, workspace_id: str, email: str, role: str, invited_by: str) -> dict[str, Any]:
+        if role not in MEMBER_ROLES:
+            raise ValueError(f"invalid role {role!r}")
+        if role == "owner":
+            raise ValueError("cannot invite a second owner; use transfer_owner")
+        now = now_iso()
+        # user_id is unknown until the invitee accepts; on the OSS engine we key
+        # the invited row by the email so the row is unique and acceptable later.
+        user_id = f"invite:{email.strip().lower()}"
+        with get_db() as conn:
+            self._assert_owner_or_admin(conn, workspace_id, invited_by)
+            conn.execute(
+                """
+                INSERT INTO workspace_members
+                    (workspace_id, user_id, email, display_name, role, status,
+                     invited_by, created_at, updated_at)
+                VALUES (?, ?, ?, NULL, ?, 'invited', ?, ?, ?)
+                ON CONFLICT(workspace_id, user_id) DO UPDATE SET
+                    role = excluded.role, status = 'invited',
+                    invited_by = excluded.invited_by, updated_at = excluded.updated_at
+                """,
+                (workspace_id, user_id, email.strip(), role, invited_by, now, now),
+            )
+        member = self.get(workspace_id=workspace_id, user_id=user_id)
+        if member is None:
+            raise RuntimeError("failed to invite member")
+        return member
+
+    def set_role(self, *, workspace_id: str, actor_id: str, user_id: str, role: str) -> dict[str, Any] | None:
+        if role not in MEMBER_ROLES or role == "owner":
+            raise ValueError("set_role only supports 'admin' or 'member'; use transfer_owner for owner")
+        with get_db() as conn:
+            owner = self._owner(conn, workspace_id)
+            if owner is None or owner["user_id"] != actor_id:
+                raise PermissionError("only the workspace owner can change roles")
+            if user_id == actor_id:
+                raise ValueError("owner cannot change their own role; use transfer_owner")
+            cursor = conn.execute(
+                "UPDATE workspace_members SET role = ?, updated_at = ? "
+                "WHERE workspace_id = ? AND user_id = ? AND role != 'owner'",
+                (role, now_iso(), workspace_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get(workspace_id=workspace_id, user_id=user_id)
+
+    def remove(self, *, workspace_id: str, actor_id: str, user_id: str) -> bool:
+        with get_db() as conn:
+            actor_role = self._assert_owner_or_admin(conn, workspace_id, actor_id)
+            target = conn.execute(
+                "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ? LIMIT 1",
+                (workspace_id, user_id),
+            ).fetchone()
+            if target is None:
+                return False
+            if target["role"] == "owner":
+                raise PermissionError("cannot remove the workspace owner; transfer ownership first")
+            if actor_role == "admin" and target["role"] == "admin":
+                raise PermissionError("admins can only remove members, not other admins")
+            cursor = conn.execute(
+                "UPDATE workspace_members SET status = 'removed', updated_at = ? "
+                "WHERE workspace_id = ? AND user_id = ?",
+                (now_iso(), workspace_id, user_id),
+            )
+        return cursor.rowcount > 0
+
+    def transfer_owner(self, *, workspace_id: str, actor_id: str, new_owner_id: str) -> dict[str, Any]:
+        with get_db() as conn:
+            owner = self._owner(conn, workspace_id)
+            if owner is None or owner["user_id"] != actor_id:
+                raise PermissionError("only the current owner can transfer ownership")
+            target = conn.execute(
+                "SELECT user_id FROM workspace_members "
+                "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+                (workspace_id, new_owner_id),
+            ).fetchone()
+            if target is None:
+                raise ValueError("new owner must be an active member of the workspace")
+            now = now_iso()
+            # Demote current owner to admin, then promote the target. The partial
+            # unique index forbids two active owners, so demote first.
+            conn.execute(
+                "UPDATE workspace_members SET role = 'admin', updated_at = ? "
+                "WHERE workspace_id = ? AND user_id = ?",
+                (now, workspace_id, actor_id),
+            )
+            conn.execute(
+                "UPDATE workspace_members SET role = 'owner', updated_at = ? "
+                "WHERE workspace_id = ? AND user_id = ?",
+                (now, workspace_id, new_owner_id),
+            )
+        member = self.get(workspace_id=workspace_id, user_id=new_owner_id)
+        if member is None:
+            raise RuntimeError("failed to transfer ownership")
+        return member
+
+
+class SqliteAssetAccessRepository:
+    """Per-asset visibility + computed permission resolution for the OSS engine.
+
+    ``get_permissions`` combines the asset's owner_id + visibility with the
+    requesting user's workspace role. The OSS single-owner case: the local user
+    is the owner of their own assets, so every permission is granted; a private
+    asset they do not own is invisible (no permissions). The same logic is the
+    multi-member-correct rule, so Cloud's RLS mirrors it without a fork.
+    """
+
+    def _asset_row(self, conn: sqlite3.Connection, asset_type: str, asset_id: str) -> sqlite3.Row | None:
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        return conn.execute(
+            f"SELECT id, owner_id, workspace_id, visibility FROM {table} WHERE id = ? LIMIT 1",
+            (asset_id,),
+        ).fetchone()
+
+    def _role(self, conn: sqlite3.Connection, workspace_id: str, user_id: str) -> str | None:
+        row = conn.execute(
+            "SELECT role FROM workspace_members "
+            "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+            (workspace_id, user_id),
+        ).fetchone()
+        return row["role"] if row else None
+
+    @staticmethod
+    def _compute(
+        *, owner_id: str | None, visibility: str, role: str | None, user_id: str
+    ) -> dict[str, Any]:
+        is_owner = bool(owner_id) and owner_id == user_id
+        is_admin = role in {"owner", "admin"}
+        is_member = role in {"owner", "admin", "member"}
+        shared = visibility == "workspace"
+        # Discoverability gate: a private asset is visible only to its owner.
+        can_view = is_owner or (shared and is_member)
+        return {
+            "owner_id": owner_id,
+            "visibility": visibility,
+            "is_owner": is_owner,
+            "role": role,
+            "can_view": can_view,
+            # Owner edits/deletes/shares their own asset; an owner/admin may also
+            # edit/delete a workspace-shared asset owned by someone else.
+            "can_edit": is_owner or (shared and is_admin),
+            "can_delete": is_owner or (shared and is_admin),
+            "can_run": can_view,
+            "can_share": is_owner or is_admin,
+        }
+
+    def get_permissions(
+        self, *, workspace_id: str, user_id: str, asset_type: str, asset_id: str
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            asset = self._asset_row(conn, asset_type, asset_id)
+            if asset is None:
+                return self._compute(owner_id=None, visibility="private", role=None, user_id=user_id)
+            role = self._role(conn, asset["workspace_id"] or workspace_id, user_id)
+        visibility = asset["visibility"] or "private"
+        return self._compute(
+            owner_id=asset["owner_id"], visibility=visibility, role=role, user_id=user_id
+        )
+
+    def set_visibility(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, visibility: str
+    ) -> dict[str, Any] | None:
+        if visibility not in VISIBILITY_VALUES:
+            raise ValueError(f"invalid visibility {visibility!r}")
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        with get_db() as conn:
+            asset = self._asset_row(conn, asset_type, asset_id)
+            if asset is None:
+                return None
+            role = self._role(conn, asset["workspace_id"] or workspace_id, actor_id)
+            perms = self._compute(
+                owner_id=asset["owner_id"],
+                visibility=asset["visibility"] or "private",
+                role=role,
+                user_id=actor_id,
+            )
+            if not perms["can_share"]:
+                raise PermissionError("only the asset owner or a workspace admin can change visibility")
+            conn.execute(
+                f"UPDATE {table} SET visibility = ? WHERE id = ?",
+                (visibility, asset_id),
+            )
+        return self.get_permissions(
+            workspace_id=workspace_id, user_id=actor_id, asset_type=asset_type, asset_id=asset_id
+        )
+
+    def transfer_asset_owner(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, new_owner_id: str
+    ) -> dict[str, Any] | None:
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        with get_db() as conn:
+            asset = self._asset_row(conn, asset_type, asset_id)
+            if asset is None:
+                return None
+            role = self._role(conn, asset["workspace_id"] or workspace_id, actor_id)
+            is_owner = asset["owner_id"] == actor_id
+            if not (is_owner or role in {"owner", "admin"}):
+                raise PermissionError("only the asset owner or a workspace admin can transfer the asset")
+            conn.execute(
+                f"UPDATE {table} SET owner_id = ? WHERE id = ?",
+                (new_owner_id, asset_id),
+            )
+        return self.get_permissions(
+            workspace_id=workspace_id, user_id=actor_id, asset_type=asset_type, asset_id=asset_id
+        )

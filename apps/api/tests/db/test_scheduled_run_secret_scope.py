@@ -217,6 +217,53 @@ def test_scheduled_secret_not_resolved_under_wrong_owner(repo_bundle, run_servic
     assert "NEWS_API_KEY" in _gate_missing(config.secrets, resolved)
 
 
+def test_shared_worker_run_scopes_secrets_to_owner_not_runner(repo_bundle, run_service):
+    """Members STEP 1 secret-scoping guard (Codex top risk).
+
+    When a member RUNS a shared (workspace-visibility) worker, the run is created
+    with the RUNNER's id as ``user_id``. Secrets MUST still resolve to the
+    worker's OWNER, never the runner:
+
+      * the owner's declared secret resolves (the run would otherwise fail), and
+      * the runner's OWN identically-named private secret is NOT used (no leak of
+        the runner's value into someone else's worker).
+    """
+    repos, _db, _manifest = repo_bundle
+
+    owner = "owner-1"
+    runner = "member-2"
+    worker_id = "ai-news-discord-digest"
+
+    repos.workers.create(
+        user_id=owner,
+        worker_id=worker_id,
+        name="AI News Discord Digest",
+        manifest_json=_scheduled_news_manifest(worker_id, "AI News Discord Digest"),
+        bundle_path=f"workers/{worker_id}",
+        trigger_type="schedule",
+        cron_expr="0 * * * *",
+    )
+
+    # Owner has the real value; the runner has a DIFFERENT value under the same
+    # name in their own secret store.
+    repos.secrets.set(user_id=owner, name="NEWS_API_KEY", value="owner-news-value")
+    repos.secrets.set(user_id=owner, name="DISCORD_BOT_TOKEN", value="owner-discord-value")
+    repos.secrets.set(user_id=runner, name="NEWS_API_KEY", value="RUNNER-LEAK-value")
+
+    _simulate_fresh_process()
+    run_service._load_runtime_env_files()
+
+    # The run passes the RUNNER as user_id (as create_worker_run does).
+    resolved = run_service.get_secrets_for_worker(
+        worker_id, user_id=runner, repos=repos
+    )
+
+    # Resolved to the OWNER's values, never the runner's.
+    assert resolved.get("NEWS_API_KEY") == "owner-news-value"
+    assert resolved.get("DISCORD_BOT_TOKEN") == "owner-discord-value"
+    assert resolved.get("NEWS_API_KEY") != "RUNNER-LEAK-value"
+
+
 def test_secret_store_path_is_db_anchored_not_source_relative(monkeypatch, tmp_path):
     """The N4-1 root cause: the secret-value store must be anchored to the DB
     directory, NOT to the source tree. A source-relative path diverges across
