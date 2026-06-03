@@ -29,7 +29,7 @@ _catalog_cache: Dict[tuple, tuple[float, Dict[str, Any]]] = {}
 _catalog_cache_lock = threading.Lock()
 
 _TOOLKIT_TOOLS_TTL_SECONDS = 60 * 60
-_toolkit_tools_cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
+_toolkit_tools_cache: Dict[tuple, tuple[float, List[Dict[str, Any]]]] = {}
 _toolkit_tools_cache_lock = threading.Lock()
 
 load_dotenv("/root/.config/workeros/api.env", override=False)
@@ -227,16 +227,21 @@ def list_catalog_apps(
     return result
 
 
-def list_toolkit_tools(slug: str, *, limit: int = 8) -> List[Dict[str, Any]]:
+def list_toolkit_tools(slug: str, *, limit: int = 100) -> List[Dict[str, Any]]:
     """Return the top N tools for a Composio toolkit slug, cached for 1 hour.
+
+    Default limit raised to 100 to support the full tool list in the Browse
+    modal (e.g. Gmail has 85+ tools). Cache key includes limit so that
+    different callers with different caps get correct independent entries.
 
     Returns a list of dicts with keys: name, description.
     Falls back to [] on any error so the UI degrades gracefully.
     """
     normalized = slug.strip().lower()
+    cache_key = (normalized, limit)
     now = time.monotonic()
     with _toolkit_tools_cache_lock:
-        cached = _toolkit_tools_cache.get(normalized)
+        cached = _toolkit_tools_cache.get(cache_key)
         if cached and now - cached[0] < _TOOLKIT_TOOLS_TTL_SECONDS:
             return cached[1]
 
@@ -246,7 +251,7 @@ def list_toolkit_tools(slug: str, *, limit: int = 8) -> List[Dict[str, Any]]:
         result: List[Dict[str, Any]] = [
             {
                 "name": item.get("name") or item.get("slug") or "",
-                "description": (item.get("description") or "")[:120],
+                "description": (item.get("description") or "")[:200],
             }
             for item in items
             if item.get("name") or item.get("slug")
@@ -256,7 +261,7 @@ def list_toolkit_tools(slug: str, *, limit: int = 8) -> List[Dict[str, Any]]:
         result = []
 
     with _toolkit_tools_cache_lock:
-        _toolkit_tools_cache[normalized] = (now, result)
+        _toolkit_tools_cache[cache_key] = (now, result)
     return result
 
 
