@@ -25,7 +25,7 @@ from urllib.parse import urljoin
 # ---------------------------------------------------------------------------
 _cache_lock = Lock()
 _pat_cache: dict[str, tuple[str, str | None, float]] = {}   # hash → (user_id, workspace_id, ts)
-_ws_cache:  dict[str, tuple[str, float]] = {}   # user_id → (workspace_id, ts)
+_ws_cache:  dict[str, tuple[str, str | None, float]] = {}   # key → (workspace_id, role, ts)
 _PAT_TTL = 60.0
 _WS_TTL  = 30.0
 
@@ -33,7 +33,7 @@ import jwt
 from fastapi import HTTPException, Request
 
 from apps.api._engine import ensure_engine_api_path
-from apps.api.auth.workspace_context import set_active_workspace_id
+from apps.api.auth.workspace_context import set_active_member_role, set_active_workspace_id
 from apps.api.config import get_cloud_settings
 from apps.api.db import workspaces as workspace_repo
 
@@ -162,6 +162,14 @@ def _verify_jwt(token: str, supabase_url: str) -> dict:
     return claims
 
 
+def _resolve_role(*, workspace_id: str, user_id: str) -> str | None:
+    """Return 'admin' if user owns the workspace, else their workspace_members role."""
+    ws = workspace_repo.get(workspace_id=workspace_id)
+    if ws and str(ws.get("owner_user_id", "")) == str(user_id):
+        return "admin"
+    return workspace_repo.get_member_role(workspace_id=workspace_id, user_id=user_id)
+
+
 class SupabaseAuthProvider:
     """Cloud auth provider: local JWT verify via Supabase JWKS.
 
@@ -260,6 +268,9 @@ class SupabaseAuthProvider:
 
         if workspace_id:
             set_active_workspace_id(workspace_id)
+            # Determine role: owner → 'admin', else look up workspace_members.
+            role = _resolve_role(workspace_id=workspace_id, user_id=user_id)
+            set_active_member_role(role)
             return AuthContext(user_id=user_id, email=None, scopes=("api",))
 
         # Legacy safety path for rows created before the workspace_id
@@ -300,9 +311,13 @@ class SupabaseAuthProvider:
 
         with _cache_lock:
             ws_cached = _ws_cache.get(ws_cache_key)
-        if ws_cached and (now - ws_cached[1]) < _WS_TTL:
+        role: str | None = None
+        if ws_cached and (now - ws_cached[2]) < _WS_TTL:
             workspace_id = ws_cached[0]
+            role = ws_cached[1]
         else:
+            # Step 1: resolve workspace (must not be swallowed by role lookup errors).
+            active: dict | None = None
             try:
                 active = workspace_repo.resolve_active_workspace(
                     user_id=user_id,
@@ -310,13 +325,27 @@ class SupabaseAuthProvider:
                     requested_id=requested_workspace_id,
                 )
                 workspace_id = str(active["id"])
-                with _cache_lock:
-                    _ws_cache[ws_cache_key] = (workspace_id, now)
             except Exception:
                 # Transient Supabase error — fall back to user-scoped behavior.
                 workspace_id = None
 
+            # Step 2: resolve role (separate try so workspace is not lost on failure).
+            if workspace_id and active is not None:
+                try:
+                    if str(active.get("owner_user_id", "")) == str(user_id):
+                        role = "admin"
+                    else:
+                        role = workspace_repo.get_member_role(
+                            workspace_id=workspace_id, user_id=user_id
+                        )
+                except Exception:
+                    role = None
+
+            with _cache_lock:
+                _ws_cache[ws_cache_key] = (workspace_id, role, now)
+
         set_active_workspace_id(workspace_id)
+        set_active_member_role(role)
 
         return AuthContext(
             user_id=user_id,

@@ -106,6 +106,49 @@ def list_for_owner(*, owner_user_id: str) -> list[dict[str, Any]]:
     return [dict(row) for row in _rows(response)]
 
 
+def get_member_role(*, workspace_id: str, user_id: str) -> str | None:
+    """Return the caller's role in workspace_members, or None if not a member.
+
+    Does NOT check ownership — the caller is responsible for returning 'admin'
+    when the user is the workspace owner.
+    """
+    client = get_supabase_service_client()
+    response = (
+        client.table("workspace_members")
+        .select("role")
+        .eq("workspace_id", workspace_id)
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    row = _row(response)
+    return str(row["role"]) if row else None
+
+
+def list_member_workspaces(*, user_id: str) -> list[dict[str, Any]]:
+    """All workspaces where user is an active member (not owner), oldest-joined-first.
+
+    Returns workspace rows augmented with a ``role`` field from workspace_members.
+    """
+    client = get_supabase_service_client()
+    response = (
+        client.table("workspace_members")
+        .select("role,joined_at,workspaces(id,name,owner_user_id,created_at)")
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .order("joined_at")
+        .execute()
+    )
+    result = []
+    for row in _rows(response):
+        ws = dict(row.get("workspaces") or {})
+        if ws:
+            ws["role"] = row.get("role", "member")
+            result.append(ws)
+    return result
+
+
 def get(*, workspace_id: str) -> dict[str, Any] | None:
     client = get_supabase_service_client()
     response = (
@@ -279,24 +322,37 @@ def resolve_active_workspace(*, user_id: str, email: str | None, requested_id: s
     """Pick the workspace to scope a request by.
 
     Priority:
-      1. If ``requested_id`` is set and the caller owns it -> use it.
-      2. Otherwise, oldest workspace owned by the caller.
-      3. Otherwise (brand-new user), lazy-bootstrap one named after the
-         email prefix and return it.
+      1. If ``requested_id`` is set and the caller owns it → use it.
+      2. If ``requested_id`` is set and the caller is an active member → use it.
+      3. Oldest workspace owned by the caller.
+      4. First workspace the caller is an active member of (invited user with
+         no workspace of their own yet).
+      5. Otherwise (brand-new user with no memberships), lazy-bootstrap one
+         named after the email prefix and return it.
 
-    Returns the full workspace row.
+    Returns the full workspace row. A stale/invalid cookie just falls through
+    to the default — we never raise from here.
     """
     if requested_id:
         candidate = get(workspace_id=requested_id)
-        if candidate and str(candidate.get("owner_user_id")) == str(user_id):
-            return candidate
-        # Requested id doesn't exist or doesn't belong to this user; fall
-        # through to default. Don't raise — a stale cookie shouldn't 401
-        # the user out.
+        if candidate:
+            if str(candidate.get("owner_user_id")) == str(user_id):
+                return candidate
+            # Check active membership for the requested workspace.
+            if get_member_role(workspace_id=requested_id, user_id=user_id) is not None:
+                return candidate
+        # Unknown or inaccessible workspace — fall through gracefully.
 
     owned = list_for_owner(owner_user_id=user_id)
     if owned:
         return dict(owned[0])
+
+    member_workspaces = list_member_workspaces(user_id=user_id)
+    if member_workspaces:
+        # Return the raw workspace row (strip injected role field) so callers
+        # always get a uniform workspace dict.
+        ws = {k: v for k, v in member_workspaces[0].items() if k != "role"}
+        return ws
 
     # Bootstrap: brand-new user, no rows yet. Guarantee the public.users row
     # exists first so the workspaces FK can't 500 a validly-authenticated user

@@ -1,0 +1,299 @@
+"""Member management CRUD against Supabase.
+
+Covers the full lifecycle: invite → accept → manage → remove.
+
+Design rules:
+- Workspace owner (workspaces.owner_user_id) is always admin and does NOT
+  appear in workspace_members — ownership is authoritative.
+- workspace_invitations keeps one pending row per (workspace, email); the
+  unique constraint is deferrable so revoked/accepted rows coexist.
+- Accepting an invitation adds a workspace_members row AND mints a PAT for
+  the new member so they can authenticate immediately.
+- remove_member soft-deletes (status='removed') so audit history is retained.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import secrets
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from apps.api.config import get_supabase_service_client
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _row(response: Any) -> dict[str, Any] | None:
+    data = getattr(response, "data", None)
+    if not data:
+        return None
+    if isinstance(data, list):
+        return dict(data[0]) if data else None
+    return dict(data)
+
+
+def _rows(response: Any) -> list[dict[str, Any]]:
+    data = getattr(response, "data", None)
+    if not data:
+        return []
+    if isinstance(data, list):
+        return [dict(r) for r in data]
+    return [dict(data)]
+
+
+def _invite_token() -> tuple[str, str]:
+    """Return (raw_token, sha256_hex_hash). Raw token is returned to caller once."""
+    raw = "wsi_" + secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    return raw, token_hash
+
+
+def _pat_token() -> tuple[str, str]:
+    """Return (raw_token, sha256_hex_hash) for a workspace PAT."""
+    raw = "floom_" + secrets.token_urlsafe(40)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    return raw, token_hash
+
+
+# ---------------------------------------------------------------------------
+# invitations
+# ---------------------------------------------------------------------------
+
+def invite_member(
+    *,
+    workspace_id: str,
+    inviter_user_id: str,
+    email: str,
+    role: str = "member",
+    expires_days: int = 7,
+) -> tuple[dict[str, Any], str]:
+    """Create or refresh a pending invitation for ``email``.
+
+    Returns ``(invitation_row, raw_token)``. Raw token is shown once; store
+    only the hash. If a pending invite already exists for this (workspace,
+    email) it is revoked first so a fresh token is issued.
+    """
+    client = get_supabase_service_client()
+    email = email.strip().lower()
+
+    # Revoke any existing pending invite for this email in the workspace.
+    client.table("workspace_invitations").update(
+        {"status": "revoked"}
+    ).eq("workspace_id", workspace_id).eq("email", email).eq("status", "pending").execute()
+
+    raw_token, token_hash = _invite_token()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat()
+    row_id = str(uuid.uuid4())
+    row = {
+        "id": row_id,
+        "workspace_id": workspace_id,
+        "email": email,
+        "role": role,
+        "invited_by": inviter_user_id,
+        "token_hash": token_hash,
+        "status": "pending",
+        "created_at": _now(),
+        "expires_at": expires_at,
+    }
+    client.table("workspace_invitations").insert(row).execute()
+    saved = _row(
+        client.table("workspace_invitations").select("*").eq("id", row_id).limit(1).execute()
+    )
+    return saved or row, raw_token
+
+
+def get_invitation_by_token(*, raw_token: str) -> dict[str, Any] | None:
+    """Look up a pending invitation by its raw (unhashed) token."""
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    client = get_supabase_service_client()
+    response = (
+        client.table("workspace_invitations")
+        .select("*")
+        .eq("token_hash", token_hash)
+        .eq("status", "pending")
+        .limit(1)
+        .execute()
+    )
+    return _row(response)
+
+
+def accept_invitation(
+    *,
+    raw_token: str,
+    accepting_user_id: str,
+) -> dict[str, Any]:
+    """Accept a pending invitation and onboard the member.
+
+    Steps:
+    1. Validate token (pending, not expired).
+    2. Mark invitation accepted.
+    3. Upsert workspace_members row (idempotent re-join).
+    4. Mint a PAT for the new member scoped to the workspace.
+
+    Returns ``{"member": {...}, "pat_token": "<raw>"}`` — caller must surface
+    the PAT to the user exactly once.
+    """
+    invite = get_invitation_by_token(raw_token=raw_token)
+    if not invite:
+        raise ValueError("invitation not found or already used")
+
+    now = datetime.now(timezone.utc)
+    expires_at_str = invite.get("expires_at") or ""
+    if expires_at_str:
+        try:
+            exp = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if now > exp:
+                raise ValueError("invitation has expired")
+        except (ValueError, TypeError) as exc:
+            if "expired" in str(exc):
+                raise
+            raise ValueError("invalid invitation expiry") from exc
+
+    client = get_supabase_service_client()
+    now_iso = now.isoformat()
+
+    # Mark accepted.
+    client.table("workspace_invitations").update(
+        {
+            "status": "accepted",
+            "accepted_at": now_iso,
+            "accepted_by_user_id": accepting_user_id,
+        }
+    ).eq("id", invite["id"]).execute()
+
+    workspace_id = str(invite["workspace_id"])
+    role = str(invite.get("role") or "member")
+
+    # Upsert member row.
+    member_id = str(uuid.uuid4())
+    client.table("workspace_members").upsert(
+        {
+            "id": member_id,
+            "workspace_id": workspace_id,
+            "user_id": accepting_user_id,
+            "role": role,
+            "invited_by": invite.get("invited_by"),
+            "invited_at": invite.get("created_at") or now_iso,
+            "joined_at": now_iso,
+            "status": "active",
+        },
+        on_conflict="workspace_id,user_id",
+    ).execute()
+
+    member = _row(
+        client.table("workspace_members")
+        .select("*")
+        .eq("workspace_id", workspace_id)
+        .eq("user_id", accepting_user_id)
+        .limit(1)
+        .execute()
+    )
+
+    # Mint a PAT scoped to the workspace.
+    raw_pat, pat_hash = _pat_token()
+    client.table("api_tokens").insert(
+        {
+            "id": str(uuid.uuid4()),
+            "user_id": accepting_user_id,
+            "workspace_id": workspace_id,
+            "token_hash": pat_hash,
+            "label": f"auto-{workspace_id[:8]}",
+            "created_at": now_iso,
+            "last_used_at": None,
+        }
+    ).execute()
+
+    return {"member": member or {}, "pat_token": raw_pat}
+
+
+def revoke_invitation(*, invitation_id: str, workspace_id: str) -> bool:
+    """Revoke a pending invitation. Returns True if a row was updated."""
+    client = get_supabase_service_client()
+    response = (
+        client.table("workspace_invitations")
+        .update({"status": "revoked"})
+        .eq("id", invitation_id)
+        .eq("workspace_id", workspace_id)
+        .eq("status", "pending")
+        .execute()
+    )
+    return bool(_rows(response))
+
+
+def list_invitations(*, workspace_id: str) -> list[dict[str, Any]]:
+    """All invitations for a workspace (all statuses), newest-first."""
+    client = get_supabase_service_client()
+    response = (
+        client.table("workspace_invitations")
+        .select("id,workspace_id,email,role,invited_by,status,created_at,expires_at,accepted_at,accepted_by_user_id")
+        .eq("workspace_id", workspace_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return _rows(response)
+
+
+# ---------------------------------------------------------------------------
+# members
+# ---------------------------------------------------------------------------
+
+def list_members(*, workspace_id: str) -> list[dict[str, Any]]:
+    """All active members for a workspace, joined-at order."""
+    client = get_supabase_service_client()
+    response = (
+        client.table("workspace_members")
+        .select("id,workspace_id,user_id,role,invited_by,invited_at,joined_at,status")
+        .eq("workspace_id", workspace_id)
+        .eq("status", "active")
+        .order("joined_at")
+        .execute()
+    )
+    return _rows(response)
+
+
+def get_member(*, workspace_id: str, user_id: str) -> dict[str, Any] | None:
+    """Return the active member row or None."""
+    client = get_supabase_service_client()
+    response = (
+        client.table("workspace_members")
+        .select("*")
+        .eq("workspace_id", workspace_id)
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    return _row(response)
+
+
+def change_role(*, workspace_id: str, user_id: str, new_role: str) -> dict[str, Any] | None:
+    """Change the role of an active member. Returns updated row or None."""
+    client = get_supabase_service_client()
+    client.table("workspace_members").update({"role": new_role}).eq(
+        "workspace_id", workspace_id
+    ).eq("user_id", user_id).eq("status", "active").execute()
+    return get_member(workspace_id=workspace_id, user_id=user_id)
+
+
+def remove_member(*, workspace_id: str, user_id: str) -> bool:
+    """Soft-delete a member (status='removed'). Returns True if found."""
+    client = get_supabase_service_client()
+    response = (
+        client.table("workspace_members")
+        .update({"status": "removed"})
+        .eq("workspace_id", workspace_id)
+        .eq("user_id", user_id)
+        .eq("status", "active")
+        .execute()
+    )
+    return bool(_rows(response))

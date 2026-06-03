@@ -15,7 +15,7 @@ _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 from supabase import Client
 
 from apps.api._engine import ensure_engine_api_path
-from apps.api.auth.workspace_context import get_active_workspace_id
+from apps.api.auth.workspace_context import get_active_member_role, get_active_workspace_id
 from apps.api.config import get_supabase_service_client
 from apps.api.db import workspaces as workspace_repo
 from apps.api.db._secret_crypto import decrypt_secret, encrypt_secret
@@ -187,6 +187,10 @@ def _worker_record_from_rows(
         "owner_id": worker_row.get("user_id"),
         "composio_trigger_id": worker_row.get("composio_trigger_id"),
         "composio_event": worker_row.get("composio_event"),
+        "visibility": worker_row.get("visibility") or "private",
+        "published_at": worker_row.get("published_at"),
+        "clone_token_hash": worker_row.get("clone_token_hash"),
+        "clone_token_expires_at": worker_row.get("clone_token_expires_at"),
     }
 
 
@@ -288,6 +292,31 @@ def _scope_by_workspace(
     return builder
 
 
+def _log_admin_access(
+    *,
+    workspace_id: str,
+    admin_user_id: str,
+    target_user_id: str,
+    resource_type: str,
+    resource_id: str,
+) -> None:
+    """Silently append a row to admin_access_log. Never raises — logging must not break reads."""
+    try:
+        get_supabase_service_client().table("admin_access_log").insert(
+            {
+                "workspace_id": workspace_id,
+                "admin_user_id": admin_user_id,
+                "target_user_id": target_user_id,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+            }
+        ).execute()
+    except Exception:
+        _repo_logger.warning(
+            "Failed to write admin_access_log for %s/%s", resource_type, resource_id, exc_info=True
+        )
+
+
 def _resolve_workspace_id_for_write(
     *,
     user_id: str,
@@ -364,6 +393,16 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         # Workspace scope: filter by workspace_id when set (per-request
         # contextvar). Falls back to user_id when out of request context.
         builder = _scope_by_workspace(builder, user_id=user_id)
+
+        # Visibility filter: applies only inside a workspace-scoped request.
+        # Admins (owner + promoted members) see all workers in the workspace.
+        # Regular members see their own private workers + all shared workers.
+        workspace_id_ctx = get_active_workspace_id()
+        if workspace_id_ctx and user_id:
+            role = get_active_member_role()
+            if role != "admin":
+                builder = builder.or_(f"user_id.eq.{user_id},visibility.eq.shared")
+
         if worker_id is not None:
             builder = builder.eq("id", worker_id)
         if worker_ids is not None:
@@ -401,6 +440,21 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         if not rows:
             return None
         row = rows[0]
+        # Log when an admin reads a private worker they don't own.
+        workspace_id_ctx = get_active_workspace_id()
+        if (
+            workspace_id_ctx
+            and get_active_member_role() == "admin"
+            and str(row.get("user_id", "")) != str(user_id)
+            and (row.get("visibility") or "private") == "private"
+        ):
+            _log_admin_access(
+                workspace_id=workspace_id_ctx,
+                admin_user_id=user_id,
+                target_user_id=str(row.get("user_id", "")),
+                resource_type="worker",
+                resource_id=worker_id,
+            )
         skill_map = self._skill_versions_by_id([row.get("skill_version_id")])
         return _worker_record_from_rows(row, skill_map.get(row.get("skill_version_id")))
 
@@ -942,6 +996,45 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             worker_id,
         ).execute()
         return existed
+
+    def get_by_clone_token(self, *, token_hash: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("workers")
+            .select("*")
+            .eq("clone_token_hash", token_hash)
+            .limit(1)
+            .execute()
+        )
+        rows = _response_rows(response)
+        if not rows:
+            return None
+        row = rows[0]
+        skill_map = self._skill_versions_by_id([row.get("skill_version_id")])
+        return _worker_record_from_rows(row, skill_map.get(row.get("skill_version_id")))
+
+    def set_visibility(self, *, worker_id: str, visibility: str) -> None:
+        client = self._client
+        existing = (
+            client.table("workers")
+            .select("published_at,visibility")
+            .eq("id", worker_id)
+            .limit(1)
+            .execute()
+        )
+        row = _first_row(existing)
+        current_published_at = row.get("published_at") if row else None
+        update: dict[str, Any] = {"visibility": visibility}
+        if visibility == "shared" and not current_published_at:
+            update["published_at"] = datetime.now(timezone.utc).isoformat()
+        client.table("workers").update(update).eq("id", worker_id).execute()
+
+    def set_clone_token(self, *, worker_id: str, token_hash: str, expires_at: str) -> None:
+        self._client.table("workers").update(
+            {
+                "clone_token_hash": token_hash,
+                "clone_token_expires_at": expires_at,
+            }
+        ).eq("id", worker_id).execute()
 
 
 class SupabaseRunRepository(_BaseSupabaseRepository):
