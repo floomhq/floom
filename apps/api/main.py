@@ -151,6 +151,8 @@ from models import (
     composio_tool_allowed_by_scope,
     declared_composio_connections,
     declared_composio_connection_scopes,
+    read_only_preset_for_app,
+    read_only_presets,
 )
 from worker_registry import (
     WORKERS_DIR,
@@ -2143,6 +2145,9 @@ class ContextFileItem(BaseModel):
     # operator sees WHAT was detected (masked) without re-scanning. Never
     # persisted to disk, never contains the raw value.
     secret_warnings: List[SecretWarning] = Field(default_factory=list)
+    # Set on a restore response when the restored version was a "deleted"
+    # snapshot, so the History UI knows the file was removed (not written).
+    deleted: bool = False
 
 
 class ContextDetail(ContextSummary):
@@ -2476,6 +2481,83 @@ def get_context_file_version(
         raise HTTPException(status_code=404, detail="Version not found")
     snapshot = _json.loads(version["snapshot_json"])
     return {"file": snapshot.get("file") or {}}
+
+
+@app.post("/contexts/{name}/files/{file_path:path}/restore/{version_id}", response_model=ContextFileItem)
+def restore_context_file_version(
+    name: str,
+    file_path: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextFileItem:
+    """Restore one brain-pack file to a specific saved version (C-BINREST, #348).
+
+    The per-file PUT path only accepts UTF-8 text (``ContextTextWriteRequest``),
+    so a binary file revision (image/PDF/etc., stored as base64 in the snapshot)
+    could never be restored through it. This endpoint decodes the stored
+    snapshot — base64 OR utf-8 — back to raw bytes and writes them atomically,
+    owner-scoped. Restoring a snapshot whose file was ``deleted`` removes the
+    current file.
+    """
+    import base64
+    import json as _json
+
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    rel = _context_file_path_or_400(file_path)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != "brain_file"
+        or version.get("asset_id") != _brain_file_asset_id(safe_name, rel)
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    file_snapshot = snapshot.get("file") or {}
+
+    if file_snapshot.get("deleted"):
+        target = _safe_context_file_or_400(safe_name, rel)
+        if target.is_file():
+            target.unlink()
+            for parent in target.parents:
+                if parent == context_dir(safe_name):
+                    break
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+        _snapshot_brain_file_version(
+            safe_name, rel, user_id=auth.user_id, repos=repos,
+            change_source=f"restore:{version_id}", deleted=True,
+        )
+        _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+        # No current file to describe; surface a minimal deleted marker.
+        return ContextFileItem(
+            path=rel, size=0, mime_type=guess_mime_type(rel),
+            updated_at=now_iso(),
+            is_binary=is_binary_file(rel, guess_mime_type(rel)),
+            display_type=context_file_display_type(rel, guess_mime_type(rel)),
+            deleted=True,
+        )
+
+    raw_content = file_snapshot.get("content") or ""
+    encoding = file_snapshot.get("encoding")
+    if encoding == "base64":
+        try:
+            data = base64.b64decode(raw_content)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="Version snapshot is corrupt") from exc
+    else:
+        data = str(raw_content).encode("utf-8")
+
+    result = _write_context_file(safe_name, rel, data, user_id=auth.user_id)
+    _snapshot_brain_file_version(
+        safe_name, rel, user_id=auth.user_id, repos=repos,
+        change_source=f"restore:{version_id}",
+    )
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+    return result
 
 
 @app.post("/contexts/{name}/rollback/{version_id}")
@@ -10438,6 +10520,10 @@ def composio_execute_proxy(
         )
     allowed_tools = declared_connections.get(tool_prefix)
     if allowed_tools is not None and tool_slug.upper() not in allowed_tools:
+        logger.warning(
+            "composio tool denied: worker=%s app=%s tool=%s blocked by allowlist",
+            worker_id, tool_prefix, tool_slug.upper(),
+        )
         raise HTTPException(
             status_code=403,
             detail=f"Tool {tool_slug} is not allowed for worker connection {tool_prefix}",
@@ -11354,6 +11440,24 @@ def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict
     except Exception as exc:
         logger.warning("Composio account-info fetch failed for %s: %s", composio_conn_id, exc)
         return {}
+
+
+@app.get("/connections/tool-presets")
+def list_connection_tool_presets(
+    app: Optional[str] = None,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Curated read-only tool presets for the Tools-tab allowlist editor (C-B9).
+
+    The UI's "Read-only" preset button calls this to fill a worker connection's
+    ``allowed_tools`` with the curated read subset for the app. When ``app`` is
+    given, returns the single preset (``tools: null`` when no curated preset
+    exists, signalling the UI to fall back to the generic read_only scope).
+    Without ``app``, returns every preset keyed by canonical app slug.
+    """
+    if app:
+        return {"app": app, "tools": read_only_preset_for_app(app)}
+    return {"presets": read_only_presets()}
 
 
 @app.get("/connections", response_model=List[ConnectionItem])
