@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -35,6 +36,7 @@ from db.factory import get_repositories  # noqa: E402
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger("workeros.cloud.auth")
 
 _TOKEN_PREFIX = "floom_"
 
@@ -85,6 +87,26 @@ class FragmentSessionRequest(BaseModel):
     next: str = "/app"
     device_code: str | None = None
     user_code: str | None = None
+
+
+def _gotrue_detail(exc: Exception) -> str:
+    """Return a log-safe summary of a GoTrue/Supabase auth exception.
+
+    Extracts the error type, GoTrue error_code, and HTTP status when
+    available (supabase_auth.errors.AuthApiError). Never includes request
+    bodies, passwords, or raw tokens.
+    """
+    exc_type = type(exc).__name__
+    code = getattr(exc, "code", None)
+    status = getattr(exc, "status", None)
+    message = getattr(exc, "message", None) or str(exc)
+    parts = [f"exc_type={exc_type}"]
+    if status is not None:
+        parts.append(f"gotrue_status={status}")
+    if code:
+        parts.append(f"gotrue_code={code}")
+    parts.append(f"message={message!r}")
+    return " ".join(parts)
 
 
 def _safe_next(value: str | None) -> str:
@@ -540,6 +562,7 @@ def login(
                 }
             )
         except Exception as exc:
+            logger.warning("auth/login magic-link delivery failed: %s", _gotrue_detail(exc))
             raise HTTPException(status_code=502, detail="Magic link delivery failed") from exc
         return JSONResponse(
             {
@@ -561,6 +584,9 @@ def password_login(payload: PasswordLoginRequest):
             {"email": normalized_email, "password": payload.password}
         )
     except Exception as exc:
+        logger.warning("auth/password-login failed: %s", _gotrue_detail(exc))
+        if getattr(exc, "status", None) == 429:
+            raise HTTPException(status_code=429, detail="Too many login attempts — try again later") from exc
         raise HTTPException(status_code=401, detail="Invalid email or password") from exc
 
     session = getattr(auth_response, "session", None)
@@ -596,6 +622,9 @@ def password_signup(payload: PasswordSignupRequest):
             }
         )
     except Exception as exc:
+        logger.warning("auth/password-signup failed: %s", _gotrue_detail(exc))
+        if getattr(exc, "status", None) == 429:
+            raise HTTPException(status_code=429, detail="Too many sign-up attempts — try again later") from exc
         raise HTTPException(status_code=409, detail="Sign-up failed") from exc
 
     session = getattr(auth_response, "session", None)
@@ -631,6 +660,7 @@ def fragment_session(payload: FragmentSessionRequest, request: Request):
     try:
         auth_user_response = client.auth.get_user(payload.access_token)
     except Exception as exc:
+        logger.warning("auth/fragment-session token verification failed: %s", _gotrue_detail(exc))
         raise HTTPException(status_code=401, detail="Auth token verification failed") from exc
 
     user = getattr(auth_user_response, "user", None) or auth_user_response
@@ -722,6 +752,7 @@ def callback(
     except HTTPException:
         raise
     except Exception as exc:
+        logger.warning("auth/callback failed: %s", _gotrue_detail(exc))
         raise HTTPException(status_code=401, detail="Auth callback failed") from exc
 
     session = getattr(auth_response, "session", None)
