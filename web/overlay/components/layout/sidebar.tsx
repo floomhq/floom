@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Menu, X, Search, Settings } from "lucide-react";
+import { Menu, X, Search, Settings, Users } from "lucide-react";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
@@ -40,6 +40,28 @@ function activeWorkspaceHeaders(headers?: HeadersInit): Headers {
     next.set("x-workeros-workspace", workspaceId);
   }
   return next;
+}
+
+// Cloud-only nav link added below the engine's NavLinks.
+function MembersNavLink({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const active = pathname === "/members" || pathname.startsWith("/members/");
+  return (
+    <div className="px-3">
+      <Link
+        href="/members"
+        onClick={onNavigate}
+        className={cn(
+          "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
+          active
+            ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
+            : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
+        )}
+      >
+        <Users className="w-4 h-4" />
+        Members
+      </Link>
+    </div>
+  );
 }
 
 function SidebarSettingsLink({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
@@ -110,6 +132,7 @@ export function Sidebar() {
         </div>
         <SidebarPrimaryActions />
         <NavLinks pathname={pathname} />
+        <MembersNavLink pathname={pathname} />
         <div className="mt-auto pt-3 border-t border-[var(--border-soft)]">
           <WorkspaceSwitcher />
           <SidebarSettingsLink pathname={pathname} />
@@ -143,6 +166,7 @@ export function Sidebar() {
             <div className="py-3 flex-1 overflow-auto">
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
+              <MembersNavLink pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
             <div className="pt-3 border-t border-[var(--border-soft)]">
               <WorkspaceSwitcher />

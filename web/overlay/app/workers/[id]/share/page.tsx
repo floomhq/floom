@@ -4,25 +4,46 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
+import { ArrowLeft, Link2, Lock, Globe, Copy, Check } from "lucide-react";
+import { toast } from "sonner";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE ?? "/api/proxy";
+const WS_KEY = "workeros.activeWorkspaceId";
 
-function apiUrl(path: string) {
-  return `${API_BASE}${path}`;
+function wsHeaders(init?: HeadersInit): Headers {
+  const h = new Headers(init);
+  if (typeof window !== "undefined") {
+    const id = window.localStorage.getItem(WS_KEY);
+    if (id && id !== "local-default") h.set("x-workeros-workspace", id);
+  }
+  if (!h.has("Content-Type")) h.set("Content-Type", "application/json");
+  return h;
 }
+
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: wsHeaders(options?.headers),
+  });
+  if (!res.ok) {
+    let msg = "";
+    try { const b = await res.json(); msg = b.detail ?? JSON.stringify(b); } catch { msg = ""; }
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  if (res.status === 204) return null as T;
+  return res.json() as Promise<T>;
+}
+
+// ---------------------------------------------------------------------------
+// types
+// ---------------------------------------------------------------------------
 
 type Worker = {
   id: string;
@@ -31,200 +52,264 @@ type Worker = {
   published_at: string | null;
 };
 
+// ---------------------------------------------------------------------------
+// loading skeleton
+// ---------------------------------------------------------------------------
+
+function LoadingSkeleton({ workerId }: { workerId: string }) {
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-1">
+        <Skeleton className="h-4 w-4 rounded" />
+        <Skeleton className="h-4 w-24 rounded" />
+      </div>
+      <div className="space-y-1.5">
+        <Skeleton className="h-7 w-48 rounded" />
+        <Skeleton className="h-4 w-32 rounded" />
+      </div>
+      <Skeleton className="h-px w-full" />
+      <div className="max-w-xl space-y-4">
+        <Skeleton className="h-24 w-full rounded-lg" />
+        <Skeleton className="h-24 w-full rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// page
+// ---------------------------------------------------------------------------
+
 export default function WorkerSharePage() {
   const params = useParams();
-  const workerId = typeof params?.id === "string" ? params.id : Array.isArray(params?.id) ? params.id[0] : "";
+  const workerId =
+    typeof params?.id === "string"
+      ? params.id
+      : Array.isArray(params?.id)
+      ? params.id[0]
+      : "";
 
   const [worker, setWorker] = useState<Worker | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [togglingVisibility, setTogglingVisibility] = useState(false);
-
-  // Clone link state
-  const [cloneLinkOpen, setCloneLinkOpen] = useState(false);
+  const [notFound, setNotFound] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const [cloneToken, setCloneToken] = useState<string | null>(null);
   const [cloneExpires, setCloneExpires] = useState<string | null>(null);
-  const [cloneBusy, setCloneBusy] = useState(false);
-  const [cloneCopied, setCloneCopied] = useState(false);
+  const [generatingLink, setGeneratingLink] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (workerId) void loadWorker();
+    if (!workerId) return;
+    void load();
   }, [workerId]);
 
-  async function loadWorker() {
+  async function load() {
     setLoading(true);
-    setError(null);
     try {
-      const resp = await fetch(apiUrl(`/workers/${workerId}`));
-      if (!resp.ok) {
-        setError("Worker not found.");
-        return;
-      }
-      const data = (await resp.json()) as Worker;
+      const data = await apiFetch<Worker>(`/workers/${workerId}`);
       setWorker(data);
     } catch {
-      setError("Failed to load worker.");
+      setNotFound(true);
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleVisibilityToggle(checked: boolean) {
-    if (!worker || togglingVisibility) return;
-    const newVisibility = checked ? "shared" : "private";
-    setTogglingVisibility(true);
+  async function handleVisibilityToggle(next: "private" | "shared") {
+    if (!worker || toggling) return;
+    setToggling(true);
     try {
-      const resp = await fetch(apiUrl(`/workers/${worker.id}/visibility`), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visibility: newVisibility }),
-      });
-      if (resp.ok) {
-        const updated = (await resp.json()) as { visibility: string; published_at?: string };
-        setWorker((prev) =>
-          prev
-            ? {
-                ...prev,
-                visibility: updated.visibility as "private" | "shared",
-                published_at: updated.published_at ?? prev.published_at,
-              }
-            : prev
-        );
-      }
+      const updated = await apiFetch<{ visibility: string; published_at?: string }>(
+        `/workers/${worker.id}/visibility`,
+        { method: "PATCH", body: JSON.stringify({ visibility: next }) }
+      );
+      setWorker((prev) =>
+        prev
+          ? { ...prev, visibility: updated.visibility as "private" | "shared", published_at: updated.published_at ?? prev.published_at }
+          : prev
+      );
+      toast.success(next === "shared" ? "Worker shared with all members" : "Worker set to private");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to update visibility");
     } finally {
-      setTogglingVisibility(false);
+      setToggling(false);
     }
   }
 
-  async function handleCreateCloneLink() {
-    if (!worker || cloneBusy) return;
-    setCloneBusy(true);
+  async function handleGenerateCloneLink() {
+    if (!worker || generatingLink) return;
+    setGeneratingLink(true);
     setCloneToken(null);
     try {
-      const resp = await fetch(apiUrl(`/workers/${worker.id}/clone-link`), { method: "POST" });
-      if (resp.ok) {
-        const data = (await resp.json()) as { token: string; expires_at: string };
-        setCloneToken(data.token);
-        setCloneExpires(data.expires_at);
-        setCloneLinkOpen(true);
-        setCloneCopied(false);
-      }
+      const data = await apiFetch<{ token: string; expires_at: string }>(
+        `/workers/${worker.id}/clone-link`,
+        { method: "POST" }
+      );
+      setCloneToken(data.token);
+      setCloneExpires(data.expires_at);
+      toast.success("Clone link created — copy it now, it won't be shown again");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to generate clone link");
     } finally {
-      setCloneBusy(false);
+      setGeneratingLink(false);
     }
   }
 
-  function cloneUrl(token: string) {
-    const base = process.env.NEXT_PUBLIC_API_PROXY_BASE?.replace("/api/proxy", "") ?? "";
-    return `${base}/app/workers/clone/${token}`;
-  }
-
-  function handleCopy(text: string) {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCloneCopied(true);
-      setTimeout(() => setCloneCopied(false), 2000);
+  function handleCopy() {
+    if (!cloneToken) return;
+    const url = cloneUrl(cloneToken);
+    void navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     });
   }
 
-  if (loading) {
-    return <div className="text-sm text-muted-foreground">Loading…</div>;
+  function cloneUrl(token: string) {
+    const base = (process.env.NEXT_PUBLIC_API_PROXY_BASE ?? "").replace("/api/proxy", "");
+    return `${base}/app/workers/clone/${token}`;
   }
 
-  if (error || !worker) {
-    return <div className="text-sm text-destructive">{error ?? "Worker not found."}</div>;
+  // ---- render ---------------------------------------------------------------
+
+  if (loading) return <LoadingSkeleton workerId={workerId} />;
+
+  if (notFound || !worker) {
+    return (
+      <div className="space-y-4">
+        <Link href="/workers" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="size-3.5" /> Workers
+        </Link>
+        <p className="text-sm text-muted-foreground">Worker not found.</p>
+      </div>
+    );
   }
 
   return (
-    <div className="max-w-xl space-y-8">
+    <div className="space-y-6">
+
+      {/* breadcrumb */}
+      <Link
+        href={`/workers/${worker.id}`}
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="size-3.5" />
+        {worker.name}
+      </Link>
+
+      {/* header */}
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Share settings</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">{worker.name}</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Share &amp; clone</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Control who can see this worker and generate one-time clone links.
+        </p>
       </div>
 
-      {/* Visibility toggle */}
-      <section className="rounded-lg border p-5 space-y-4">
-        <div>
-          <h2 className="text-sm font-semibold">Visibility</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Shared workers are visible to all workspace members. Private workers are only visible to you
-            and workspace admins.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Switch
-            id="visibility-toggle"
-            checked={worker.visibility === "shared"}
-            disabled={togglingVisibility}
-            onCheckedChange={(checked) => void handleVisibilityToggle(checked)}
-          />
-          <Label htmlFor="visibility-toggle" className="text-sm cursor-pointer">
-            {worker.visibility === "shared" ? (
-              <span className="flex items-center gap-1.5">
-                <Badge variant="secondary">Shared</Badge>
-                <span className="text-muted-foreground">— visible to all members</span>
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5">
-                <Badge variant="outline">Private</Badge>
-                <span className="text-muted-foreground">— only you and admins</span>
-              </span>
-            )}
-          </Label>
-        </div>
-        {worker.visibility === "shared" && worker.published_at && (
-          <p className="text-xs text-muted-foreground">
-            Shared since {new Date(worker.published_at).toLocaleDateString()}. Members see runs from
-            this date onwards only.
-          </p>
-        )}
-        {worker.visibility === "private" && worker.published_at && (
-          <p className="text-xs text-muted-foreground">
-            Previously shared on {new Date(worker.published_at).toLocaleDateString()}. Re-sharing will
-            keep the original share date — members will see the same run history window.
-          </p>
-        )}
-      </section>
+      <Separator />
 
-      {/* Clone link */}
-      <section className="rounded-lg border p-5 space-y-4">
-        <div>
-          <h2 className="text-sm font-semibold">Clone link</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Share a one-time link so others can clone this worker. The clone copies the worker&apos;s
-            files and auto-wires existing connections by app name.
-          </p>
-        </div>
-        <div className="rounded-md bg-muted/60 border px-3 py-2.5 text-xs text-muted-foreground space-y-0.5">
-          <p>• Connections are auto-wired by app name (first active connection).</p>
-          <p>• Secrets, run history, and brain data are <strong>not</strong> copied.</p>
-          <p>• Links expire in 7 days and can only be used once per token.</p>
-        </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={cloneBusy}
-          onClick={() => void handleCreateCloneLink()}
-        >
-          {cloneBusy ? "Generating…" : "Generate clone link"}
-        </Button>
-      </section>
+      <div className="max-w-xl space-y-6">
 
-      {/* Clone token dialog */}
-      <Dialog open={cloneLinkOpen} onOpenChange={setCloneLinkOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Clone link created</DialogTitle>
-            <DialogDescription>
-              This link is shown once. Copy it now — it cannot be retrieved again.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="rounded-md bg-muted/60 border px-3 py-2.5 text-xs text-muted-foreground space-y-0.5">
-              <p>• Secrets, run history, and brain data are not included.</p>
-              <p>• Connections auto-wired by app name (first active match).</p>
-              <p>• Review and test the clone before using in production.</p>
-            </div>
-            {cloneToken && (
+        {/* ---- visibility section ---- */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold">Visibility</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Private workers are only visible to you and workspace admins. Shared workers appear on every
+              member's Workers page.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-border divide-y divide-border">
+            {/* private option */}
+            <button
+              type="button"
+              disabled={toggling || worker.visibility === "private"}
+              onClick={() => void handleVisibilityToggle("private")}
+              className="flex w-full items-start gap-4 p-4 text-left transition-colors hover:bg-[var(--active-nav-bg)] disabled:cursor-default"
+            >
+              <div className={`mt-0.5 rounded-full p-1.5 ${worker.visibility === "private" ? "bg-foreground text-background" : "bg-muted text-muted-foreground"}`}>
+                <Lock className="w-3.5 h-3.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Private</span>
+                  {worker.visibility === "private" && (
+                    <Badge variant="secondary" className="text-xs h-4 px-1.5">Current</Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Only you and workspace admins can see this worker.
+                </p>
+              </div>
+            </button>
+
+            {/* shared option */}
+            <button
+              type="button"
+              disabled={toggling || worker.visibility === "shared"}
+              onClick={() => void handleVisibilityToggle("shared")}
+              className="flex w-full items-start gap-4 p-4 text-left transition-colors hover:bg-[var(--active-nav-bg)] disabled:cursor-default"
+            >
+              <div className={`mt-0.5 rounded-full p-1.5 ${worker.visibility === "shared" ? "bg-foreground text-background" : "bg-muted text-muted-foreground"}`}>
+                <Globe className="w-3.5 h-3.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Shared</span>
+                  {worker.visibility === "shared" && (
+                    <Badge variant="secondary" className="text-xs h-4 px-1.5">Current</Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  All workspace members can see and trigger this worker.
+                  {worker.visibility !== "shared" && " Members will only see runs from the moment you share it."}
+                </p>
+              </div>
+            </button>
+          </div>
+
+          {worker.published_at && (
+            <p className="text-xs text-muted-foreground">
+              {worker.visibility === "shared"
+                ? <>Shared since <strong>{new Date(worker.published_at).toLocaleDateString()}</strong>. Members see run history from this date.</>
+                : <>Previously shared on <strong>{new Date(worker.published_at).toLocaleDateString()}</strong>. Re-sharing will use this same date — member run history is preserved.</>
+              }
+            </p>
+          )}
+        </section>
+
+        <Separator />
+
+        {/* ---- clone link section ---- */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold">Clone link</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Generate a one-time link so anyone can clone this worker into their own workspace.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-1.5 text-xs text-muted-foreground">
+            <p>• The clone copies worker files and auto-wires connections by app name.</p>
+            <p>• <strong className="text-foreground">Secrets, run history, and brain data are not copied.</strong></p>
+            <p>• Links expire in 7 days. Each token can only be used once.</p>
+          </div>
+
+          {!cloneToken ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={generatingLink}
+              onClick={() => void handleGenerateCloneLink()}
+            >
+              <Link2 className="w-3.5 h-3.5" />
+              {generatingLink ? "Generating…" : "Generate clone link"}
+            </Button>
+          ) : (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 px-4 py-3 text-xs text-amber-800 dark:text-amber-300">
+                Copy this link now — it cannot be retrieved again.
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">Clone URL</Label>
                 <div className="flex gap-1.5">
@@ -234,12 +319,9 @@ export default function WorkerSharePage() {
                     className="font-mono text-xs"
                     onFocus={(e) => e.target.select()}
                   />
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => handleCopy(cloneUrl(cloneToken!))}
-                  >
-                    {cloneCopied ? "Copied!" : "Copy"}
+                  <Button size="sm" variant="secondary" onClick={handleCopy} className="gap-1 shrink-0">
+                    {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copied ? "Copied!" : "Copy"}
                   </Button>
                 </div>
                 {cloneExpires && (
@@ -248,13 +330,19 @@ export default function WorkerSharePage() {
                   </p>
                 )}
               </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setCloneLinkOpen(false)}>Done</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-xs h-7 px-2"
+                onClick={() => { setCloneToken(null); setCloneExpires(null); }}
+              >
+                Generate another link
+              </Button>
+            </div>
+          )}
+        </section>
+
+      </div>
     </div>
   );
 }
