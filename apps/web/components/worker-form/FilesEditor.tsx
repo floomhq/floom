@@ -769,8 +769,9 @@ function FilesEditorEdit({
           <button
             type="button"
             onClick={() => setAddingFile((v) => !v)}
-            className="text-muted-foreground hover:text-foreground transition-colors"
+            className="-m-1.5 inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground sm:-m-1 sm:h-7 sm:w-7"
             title="Add file"
+            aria-label="Add file"
           >
             <FilePlus className="w-3.5 h-3.5" />
           </button>
@@ -805,12 +806,17 @@ function FilesEditorEdit({
             >
               <File className="w-3 h-3 shrink-0 text-muted-foreground" />
               <span className="text-xs font-mono truncate flex-1" title={f.path}>{f.path}</span>
+              {/* Touch devices can't hover, so the delete affordance must be
+                  visible by default on mobile (opacity-100) and only fade-to-
+                  reveal on pointer-hover screens (sm:opacity-0). Tap target is
+                  ≥36px on mobile, tightened back to the icon size on desktop. */}
               {f.path !== "worker.yml" && !f.binary && (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); deleteFile(f.path); }}
-                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 transition-all"
+                  className="-my-1.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground opacity-100 transition-all hover:text-red-500 sm:-my-1 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100"
                   title={`Delete ${f.path}`}
+                  aria-label={`Delete ${f.path}`}
                 >
                   <Trash2 className="w-3 h-3" />
                 </button>
