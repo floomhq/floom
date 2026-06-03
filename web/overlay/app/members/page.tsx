@@ -3,6 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -340,7 +341,7 @@ function MembersContent() {
             {members.map((m) => (
               <div
                 key={m.user_id}
-                className="flex items-center justify-between p-3 rounded-lg hover:bg-[var(--active-nav-bg)] transition-colors"
+                className="group flex items-center justify-between p-3 rounded-lg hover:bg-[var(--active-nav-bg)] transition-colors"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   {m.role === "admin"
@@ -439,7 +440,7 @@ function MembersContent() {
         )}
       </section>
 
-      {/* Accept-invite flow — surfaced as a dialog that members open via a link */}
+      {/* Accept-invite flow — auto-opens when ?invite=<token> is in the URL */}
       <AcceptInviteSection onJoined={() => void refresh(workspaceId)} />
     </div>
   );
@@ -450,8 +451,10 @@ function MembersContent() {
 // ---------------------------------------------------------------------------
 
 function AcceptInviteSection({ onJoined }: { onJoined: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [token, setToken] = useState("");
+  const searchParams = useSearchParams();
+  const urlToken = searchParams?.get("invite") ?? "";
+  const [open, setOpen] = useState(!!urlToken);
+  const [token, setToken] = useState(urlToken);
   const [accepting, setAccepting] = useState(false);
   const [pat, setPat] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);

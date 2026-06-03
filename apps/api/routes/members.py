@@ -94,7 +94,7 @@ async def invite_member(
     # Send email — non-fatal on failure so the invite row is still created.
     try:
         inviter_name = (auth.email or "").split("@")[0] or "A workspace admin"
-        invite_url = f"https://workeros.floom.dev/invite/{raw_token}"
+        invite_url = f"https://workeros.floom.dev/app/members?invite={raw_token}"
         msg = build_workspace_invite_email(
             inviter_name=inviter_name,
             workspace_name=ws["name"],
