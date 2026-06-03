@@ -1489,7 +1489,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
 class WorkerUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    trigger_type: Optional[Literal["manual", "schedule", "webhook"]] = None
+    trigger_type: Optional[Literal["manual", "schedule", "cron", "webhook"]] = None
     cron_expr: Optional[str] = None
     cron_timezone: Optional[str] = None
     webhook_secret_rotate: Optional[bool] = None  # True → rotate secret, return new raw once
