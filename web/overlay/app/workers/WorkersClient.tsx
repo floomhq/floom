@@ -12,7 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Box, ChevronRight, Folder, Globe, Plus, Search, Star, Archive, LayoutGrid, Clock,
+  Box, ChevronRight, ChevronDown, Folder, Globe, Lock, Plus, Search, Shield, Star, Archive, LayoutGrid, Clock,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,8 +22,24 @@ import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { ShareWorkerButton } from "@/components/ShareWorkerButton";
 
-// Cloud-only: extend WorkerSummary with workspace visibility.
-type CloudWorkerSummary = WorkerSummary & { visibility?: string };
+// Cloud-only: extend WorkerSummary with workspace visibility + owner.
+type CloudWorkerSummary = WorkerSummary & { visibility?: string; owner_id?: string };
+
+type AdminWorkerStub = { id: string; name: string; visibility: string; owner_id: string; owner_email: string };
+
+const API_PROXY_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE ?? "/api/proxy";
+const WS_KEY = "workeros.activeWorkspaceId";
+function getActiveWorkspaceId(): string | null {
+  if (typeof window === "undefined") return null;
+  const v = window.localStorage.getItem(WS_KEY);
+  return v && v !== "local-default" ? v : null;
+}
+function wsHeaders(): Headers {
+  const h = new Headers({ "Content-Type": "application/json" });
+  const id = getActiveWorkspaceId();
+  if (id) h.set("x-workeros-workspace", id);
+  return h;
+}
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -33,8 +49,8 @@ function isSystemWorker(w: WorkerSummary): boolean {
   return w.system === true || SYSTEM_WORKER_ID_FALLBACK.has(w.id);
 }
 
-type WorkersTab = "all" | "starred" | "recent" | "archived";
-const TAB_KEYS: WorkersTab[] = ["all", "starred", "recent", "archived"];
+type WorkersTab = "all" | "starred" | "recent" | "archived" | "admin";
+const TAB_KEYS: WorkersTab[] = ["all", "starred", "recent", "archived", "admin"];
 function isValidTab(value: string | null): value is WorkersTab {
   return value !== null && TAB_KEYS.includes(value as WorkersTab);
 }
@@ -65,6 +81,16 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   const [loading, setLoading] = useState(false);
   const [loadingArchived, setLoadingArchived] = useState(false);
   const [favorites, setFavorites] = useState<Set<string>>(() => getFavorites());
+
+  // Shared/Private section collapse state (both expanded by default)
+  const [sharedCollapsed, setSharedCollapsed] = useState(false);
+  const [privateCollapsed, setPrivateCollapsed] = useState(false);
+
+  // Admin tab state
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminWorkers, setAdminWorkers] = useState<AdminWorkerStub[]>([]);
+  const [loadingAdmin, setLoadingAdmin] = useState(false);
+  const [expandedOwners, setExpandedOwners] = useState<Set<string>>(new Set());
 
   const initialTab =
     (typeof window !== "undefined" && window.location.hash.replace(/^#/, "")) ||
@@ -115,6 +141,63 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
       cancelled = true;
     };
   }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Check admin role once on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/app/api/me").then(r => r.json()).then(d => {
+      const email = d?.user?.email as string | undefined;
+      if (!email || cancelled) return;
+      const wsId = getActiveWorkspaceId();
+      if (!wsId) return;
+      fetch(`${API_PROXY_BASE}/workspaces/${wsId}/members`, { headers: wsHeaders() })
+        .then(r => r.ok ? r.json() : null)
+        .then((data: { owner?: { email: string }; members?: { email: string; role: string }[] } | null) => {
+          if (!data || cancelled) return;
+          const isOwner = data.owner?.email === email;
+          const isAdminMember = (data.members ?? []).some(m => m.email === email && m.role === "admin");
+          if (isOwner || isAdminMember) setIsAdmin(true);
+        })
+        .catch(() => {});
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch admin workers when admin tab is opened
+  useEffect(() => {
+    if (tab !== "admin" || !isAdmin) return;
+    const wsId = getActiveWorkspaceId();
+    if (!wsId) return;
+    let cancelled = false;
+    setLoadingAdmin(true);
+    fetch(`${API_PROXY_BASE}/workspaces/${wsId}/workers`, { headers: wsHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: AdminWorkerStub[]) => { if (!cancelled) setAdminWorkers(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingAdmin(false); });
+    return () => { cancelled = true; };
+  }, [tab, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleOwnerExpanded = useCallback((ownerId: string) => {
+    setExpandedOwners(prev => {
+      const next = new Set(prev);
+      if (next.has(ownerId)) next.delete(ownerId); else next.add(ownerId);
+      return next;
+    });
+  }, []);
+
+  // Group admin workers by owner for the admin tab
+  const adminWorkersByOwner = useMemo(() => {
+    if (tab !== "admin") return [];
+    // Admin tab: only private workers from other members
+    const privateOnly = adminWorkers.filter(w => w.visibility !== "shared");
+    const map = new Map<string, { email: string; workers: AdminWorkerStub[] }>();
+    for (const w of privateOnly) {
+      if (!map.has(w.owner_id)) map.set(w.owner_id, { email: w.owner_email, workers: [] });
+      map.get(w.owner_id)!.workers.push(w);
+    }
+    return Array.from(map.entries()).map(([ownerId, { email, workers: ows }]) => ({ ownerId, email, workers: ows }));
+  }, [adminWorkers, tab]);
 
   const toggleFavorite = useCallback((id: string) => {
     setFavorites((prev) => {
@@ -292,6 +375,8 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
         <EmptyWorkersState />
       ) : (
         <div className="space-y-5">
+          {/* Hide search + tabs when a filtered tab is empty — nothing to search */}
+          {!(["archived", "starred", "recent"].includes(tab) && !loading && !loadingArchived && displayedWorkers.length === 0) && (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative max-w-sm flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -317,9 +402,15 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
                 <TabsTrigger value="archived" aria-label="Archived workers" title="Archived">
                   <Archive />
                 </TabsTrigger>
+                {isAdmin && (
+                  <TabsTrigger value="admin" aria-label="Admin view — all workspace workers" title="Admin">
+                    <Shield />
+                  </TabsTrigger>
+                )}
               </TabsList>
             </Tabs>
           </div>
+          )}
 
           {showFolderNav && (
             <div className="flex items-center gap-1.5 flex-wrap min-h-7">
@@ -363,33 +454,162 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {(loading || (isArchivedTab && loadingArchived))
-              ? Array.from({ length: 8 }).map((_, i) => (
-                  <WorkerCardSkeleton key={i} />
-                ))
-              : displayedWorkers.map((w) => (
-                  <WorkerCard
-                    key={w.id}
-                    worker={w}
-                    isFavorite={favorites.has(w.id)}
-                    onFavoriteToggle={toggleFavorite}
-                  />
-                ))}
-          </div>
+          {tab !== "admin" && (() => {
+            if (loading || (isArchivedTab && loadingArchived)) {
+              return (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {Array.from({ length: 8 }).map((_, i) => <WorkerCardSkeleton key={i} />)}
+                </div>
+              );
+            }
+            // Split shared / private only on the "all" tab without folder/search filters
+            const splitSections = (tab === "all" || tab === "starred") && !searchLower && !folderFilter;
+            if (!splitSections) {
+              return (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {displayedWorkers.map((w) => (
+                    <WorkerCard key={w.id} worker={w} isFavorite={favorites.has(w.id)} onFavoriteToggle={toggleFavorite} />
+                  ))}
+                </div>
+              );
+            }
+            const sharedWorkers = displayedWorkers.filter(w => w.visibility === "shared");
+            const privateWorkers = displayedWorkers.filter(w => w.visibility !== "shared");
+            return (
+              <div className="space-y-8">
+                {sharedWorkers.length > 0 && (
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => setSharedCollapsed(c => !c)}
+                      className="flex items-center gap-2 group"
+                    >
+                      <ChevronDown className={`size-3.5 text-muted-foreground transition-transform duration-150 ${sharedCollapsed ? "-rotate-90" : ""}`} />
+                      <Globe className="size-3.5 text-muted-foreground" />
+                      <h2 className="text-sm font-medium text-muted-foreground group-hover:text-foreground transition-colors">Shared</h2>
+                      <span className="text-xs text-muted-foreground/60">{sharedWorkers.length}</span>
+                    </button>
+                    {!sharedCollapsed && (
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        {sharedWorkers.map((w) => (
+                          <WorkerCard key={w.id} worker={w} isFavorite={favorites.has(w.id)} onFavoriteToggle={toggleFavorite} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {privateWorkers.length > 0 && (
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => setPrivateCollapsed(c => !c)}
+                      className="flex items-center gap-2 group"
+                    >
+                      <ChevronDown className={`size-3.5 text-muted-foreground transition-transform duration-150 ${privateCollapsed ? "-rotate-90" : ""}`} />
+                      <Lock className="size-3.5 text-muted-foreground" />
+                      <h2 className="text-sm font-medium text-muted-foreground group-hover:text-foreground transition-colors">Private</h2>
+                      <span className="text-xs text-muted-foreground/60">{privateWorkers.length}</span>
+                    </button>
+                    {!privateCollapsed && (
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        {privateWorkers.map((w) => (
+                          <WorkerCard key={w.id} worker={w} isFavorite={favorites.has(w.id)} onFavoriteToggle={toggleFavorite} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
-          {!loading && !loadingArchived && displayedWorkers.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              {tab === "starred"
-                ? "Nothing starred yet. Click the star on any worker card to pin it here."
-                : tab === "recent"
-                ? "No workers run yet."
-                : tab === "archived"
-                ? "No archived workers."
-                : searchLower
-                ? `No workers match "${search}".`
-                : "No workers in this folder."}
-            </p>
+          {!loading && !loadingArchived && tab !== "admin" && displayedWorkers.length === 0 && (() => {
+            if (tab === "archived") return (
+              <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
+                <div className="size-10 rounded-full bg-muted flex items-center justify-center">
+                  <Archive className="size-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">No archived workers</p>
+                  <p className="text-xs text-muted-foreground mt-1">Workers you archive will appear here.</p>
+                </div>
+              </div>
+            );
+            if (tab === "starred") return (
+              <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
+                <div className="size-10 rounded-full bg-muted flex items-center justify-center">
+                  <Star className="size-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Nothing starred yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Click the star on any worker card to pin it here.</p>
+                </div>
+              </div>
+            );
+            if (tab === "recent") return (
+              <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
+                <div className="size-10 rounded-full bg-muted flex items-center justify-center">
+                  <Clock className="size-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">No workers run yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Recently triggered workers will show up here.</p>
+                </div>
+              </div>
+            );
+            return <p className="text-sm text-muted-foreground">{searchLower ? `No workers match "${search}".` : "No workers in this folder."}</p>;
+          })()}
+
+          {tab === "admin" && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground mb-4">
+                All workspace workers grouped by owner. Expand a member to see their workers.
+              </p>
+              {loadingAdmin ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-12 rounded-lg border border-border bg-muted/30 animate-pulse" />
+                ))
+              ) : adminWorkersByOwner.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No workers found in this workspace.</p>
+              ) : (
+                adminWorkersByOwner.map(({ ownerId, email, workers: ownerWorkers }) => {
+                  const expanded = expandedOwners.has(ownerId);
+                  return (
+                    <div key={ownerId} className="rounded-lg border border-border overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => toggleOwnerExpanded(ownerId)}
+                        className="w-full flex items-center justify-between px-4 py-3 text-sm hover:bg-muted/40 transition-colors text-left"
+                      >
+                        <span className="flex items-center gap-2.5 min-w-0">
+                          <div className="size-6 rounded-full bg-muted text-foreground border border-border grid place-items-center text-[10px] font-medium shrink-0">
+                            {email.split("@")[0]?.slice(0, 2).toUpperCase()}
+                          </div>
+                          <span className="font-medium truncate">{email}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            {ownerWorkers.length} {ownerWorkers.length === 1 ? "worker" : "workers"}
+                          </span>
+                        </span>
+                        <ChevronDown className={`size-4 text-muted-foreground shrink-0 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`} />
+                      </button>
+                      {expanded && (
+                        <div className="border-t border-border divide-y divide-border/60">
+                          {ownerWorkers.map(w => (
+                            <Link key={w.id} href={`/workers/${w.id}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors">
+                              <span className="flex-1 text-sm truncate">{w.name}</span>
+                              <span className="inline-flex items-center gap-1 rounded-sm border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground shrink-0">
+                                <Lock className="size-2.5" />
+                                Private
+                              </span>
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           )}
         </div>
       )}
@@ -543,9 +763,7 @@ function WorkerCard({
           )}
           {!worker.archived && (
             <div className="flex items-center gap-0.5 shrink-0">
-              <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                <ShareWorkerButton publicLink={worker.public_link} variant="icon" />
-              </span>
+              <ShareWorkerButton publicLink={worker.public_link} variant="icon" />
               <button
                 type="button"
                 title={isFavorite ? "Remove from favourites" : "Add to favourites"}
@@ -554,10 +772,10 @@ function WorkerCard({
                   e.stopPropagation();
                   onFavoriteToggle(worker.id);
                 }}
-                className={`-my-1.5 -mr-1.5 flex size-9 shrink-0 items-center justify-center rounded transition-[color,opacity] focus-visible:opacity-100 sm:my-0 sm:-mr-1 sm:size-6 ${
+                className={`-my-1.5 -mr-1.5 flex size-9 shrink-0 items-center justify-center rounded transition-colors sm:my-0 sm:-mr-1 sm:size-6 ${
                   isFavorite
                     ? "text-[var(--accent)] hover:opacity-80"
-                    : "text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-[var(--accent)]"
+                    : "text-muted-foreground/40 hover:text-[var(--accent)]"
                 }`}
               >
                 <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
@@ -616,22 +834,11 @@ function CardFooterLine({
   visibility?: string;
 }) {
   const attention = footerStatus(status);
-  const lastRun = stats?.last_run_at ? formatRelativeTime(stats.last_run_at) : null;
-  const isShared = visibility === "shared";
+  const lastRun = stats?.last_run_at ? formatRelativeTime(stats.last_run_at) : "No runs yet";
 
-  if (!attention && !lastRun && !isShared) {
-    return <div className="mt-auto h-4" aria-hidden />;
-  }
   return (
     <div className="mt-auto flex items-center gap-2 text-[11px] text-[var(--ink-soft)]">
-      {lastRun && <span className="truncate">{lastRun}</span>}
-      {/* Cloud: shared badge — visible to workspace members */}
-      {isShared && (
-        <span className="inline-flex items-center gap-1 rounded-sm border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] text-[var(--ink-mute)]">
-          <Globe className="size-2.5" />
-          Shared
-        </span>
-      )}
+      <span className="truncate">{lastRun}</span>
       {attention && (
         <span className="ml-auto flex items-center gap-1.5 shrink-0">
           <span className={`size-1.5 rounded-full ${attention.cls}`} aria-hidden="true" />
