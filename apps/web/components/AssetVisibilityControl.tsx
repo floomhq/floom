@@ -7,9 +7,8 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -140,27 +139,25 @@ export function AssetVisibilityControl({
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel>{titleLabel ?? `${noun[0].toUpperCase()}${noun.slice(1)} visibility`}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuRadioGroup value={value} onValueChange={apply}>
-          {(["private", "workspace"] as const).map((key) => {
-            const im = VIS[key];
-            const ItemIcon = im.icon;
-            const active = value === key;
-            return (
-              <DropdownMenuRadioItem
-                key={key}
-                value={key}
-                className="flex-col items-start gap-0.5 py-2 [&>span:first-child]:hidden"
-              >
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  <ItemIcon className="size-3.5" />
-                  {im.label}
-                  {active && <Check className="size-3.5 text-foreground ml-auto" />}
-                </span>
-                <span className="text-xs text-muted-foreground">{im.hint}</span>
-              </DropdownMenuRadioItem>
-            );
-          })}
-        </DropdownMenuRadioGroup>
+        {(["private", "workspace"] as const).map((key) => {
+          const im = VIS[key];
+          const ItemIcon = im.icon;
+          const active = value === key;
+          return (
+            <DropdownMenuItem
+              key={key}
+              onClick={() => void apply(key)}
+              className="flex-col items-start gap-0.5 py-2"
+            >
+              <span className="flex w-full items-center gap-1.5 text-sm font-medium">
+                <ItemIcon className="size-3.5" />
+                {im.label}
+                {active && <Check className="size-3.5 text-foreground ml-auto" />}
+              </span>
+              <span className="text-xs text-muted-foreground">{im.hint}</span>
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
