@@ -87,6 +87,22 @@ export function formatScope(scope: string) {
     .trim();
 }
 
+// N6-2: the worker Tools tab used to print the owner's full personal email
+// (e.g. firstname.lastname@gmail.com) in plain view. Mask the local part so the
+// account is still recognizable (provider + a hint) without leaking the full
+// address. Non-email labels (display names, "account …849fe7", status strings)
+// are returned unchanged.
+export function maskAccountLabel(label: string): string {
+  const trimmed = label.trim();
+  const at = trimmed.indexOf("@");
+  if (at <= 0 || at !== trimmed.lastIndexOf("@")) return trimmed;
+  const local = trimmed.slice(0, at);
+  const domain = trimmed.slice(at + 1);
+  if (!domain.includes(".")) return trimmed;
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}${"•".repeat(3)}@${domain}`;
+}
+
 export function formatTimestamp(value?: string) {
   if (!value) return "Never";
   const date = new Date(value);
