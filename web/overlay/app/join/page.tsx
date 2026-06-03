@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,14 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export default function JoinPage() {
+  return (
+    <Suspense>
+      <JoinContent />
+    </Suspense>
+  );
+}
+
+function JoinContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const urlToken = searchParams?.get("invite") ?? "";
