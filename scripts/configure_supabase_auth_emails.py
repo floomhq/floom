@@ -68,54 +68,54 @@ def _template(
 
 def _payload() -> dict[str, Any]:
     return {
-        "mailer_subjects_confirmation": "Confirm your Workeros email",
-        "mailer_subjects_magic_link": "Your Workeros sign-in link",
-        "mailer_subjects_recovery": "Reset your Workeros password",
-        "mailer_subjects_email_change": "Confirm your new Workeros email",
-        "mailer_subjects_invite": "You've been invited to Workeros",
-        "mailer_subjects_reauthentication": "Verify this is you on Workeros",
+        "mailer_subjects_confirmation": "Confirm your Floom email",
+        "mailer_subjects_magic_link": "Your Floom sign-in link",
+        "mailer_subjects_recovery": "Reset your Floom password",
+        "mailer_subjects_email_change": "Confirm your new Floom email",
+        "mailer_subjects_invite": "You've been invited to Floom",
+        "mailer_subjects_reauthentication": "Verify this is you on Floom",
         "mailer_templates_confirmation_content": _template(
-            preheader="Confirm your email to finish setting up Workeros.",
+            preheader="Confirm your email to finish setting up Floom.",
             eyebrow="Account setup",
             headline="Confirm your email",
-            body="Confirm this is your address to finish setting up your Workeros account.",
+            body="Confirm this is your address to finish setting up your Floom account.",
             cta_label="Confirm email",
             otp_type="signup",
         ),
         "mailer_templates_magic_link_content": _template(
-            preheader="Click to sign in to Workeros. This link expires soon.",
+            preheader="Click to sign in to Floom. This link expires soon.",
             eyebrow="Sign in",
-            headline="Your Workeros sign-in link",
-            body="Click below to sign in to Workeros. The link can only be used once.",
-            cta_label="Sign in to Workeros",
+            headline="Your Floom sign-in link",
+            body="Click below to sign in to Floom. The link can only be used once.",
+            cta_label="Sign in to Floom",
             otp_type="email",
         ),
         "mailer_templates_recovery_content": _template(
-            preheader="Reset your Workeros password.",
+            preheader="Reset your Floom password.",
             eyebrow="Password reset",
             headline="Reset your password",
-            body="Click below to choose a new password for your Workeros account.",
+            body="Click below to choose a new password for your Floom account.",
             cta_label="Reset password",
             otp_type="recovery",
         ),
         "mailer_templates_email_change_content": _template(
-            preheader="Confirm your new Workeros email address.",
+            preheader="Confirm your new Floom email address.",
             eyebrow="Email change",
             headline="Confirm your new email",
-            body="Click below to confirm the new email address for your Workeros account.",
+            body="Click below to confirm the new email address for your Floom account.",
             cta_label="Confirm new email",
             otp_type="email_change",
         ),
         "mailer_templates_invite_content": _template(
-            preheader="You have been invited to a Workeros workspace.",
+            preheader="You have been invited to a Floom workspace.",
             eyebrow="Workspace invite",
             headline="You've been invited",
-            body="Accept the invite to join a Workeros workspace and start using shared workers, connections, and Brain packs.",
+            body="Accept the invite to join a Floom workspace and start using shared workers, connections, and Brain packs.",
             cta_label="Accept invite",
             otp_type="invite",
         ),
         "mailer_templates_reauthentication_content": _template(
-            preheader="Quick verification step for Workeros.",
+            preheader="Quick verification step for Floom.",
             eyebrow="Verify it's you",
             headline="Confirm this is you",
             body="We need to verify your identity before continuing.",
@@ -142,7 +142,7 @@ def _request_json(method: str, url: str, pat: str, payload: dict[str, Any] | Non
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Configure Workeros Supabase Auth email templates.")
+    parser = argparse.ArgumentParser(description="Configure Floom Supabase Auth email templates.")
     parser.add_argument("--apply", action="store_true", help="Patch the live Supabase project.")
     args = parser.parse_args()
 
@@ -155,7 +155,21 @@ def main() -> int:
 
     url = AUTH_CONFIG_URL.format(project_ref=project_ref)
     payload = _payload()
+    # Sender identity: the grey "WORKEROS" name in the inbox comes from the
+    # Supabase auth SMTP sender name. The Supabase Management API requires the
+    # full SMTP block when patching any smtp_* field, and smtp_port must be a
+    # STRING. Read the current config first so we preserve host/user/admin.
     if args.apply:
+        before = _request_json("GET", url, pat)
+        smtp_patch = {
+            "smtp_sender_name": "Floom",
+            "smtp_admin_email": before.get("smtp_admin_email"),
+            "smtp_host": before.get("smtp_host"),
+            "smtp_port": str(before.get("smtp_port") or "587"),
+            "smtp_user": before.get("smtp_user"),
+        }
+        smtp_patch = {k: v for k, v in smtp_patch.items() if v is not None}
+        _request_json("PATCH", url, pat, smtp_patch)
         _request_json("PATCH", url, pat, payload)
         current = _request_json("GET", url, pat)
     else:
@@ -173,12 +187,14 @@ def main() -> int:
             f"{key}: len={len(value)} "
             f"has_token_hash={'TokenHash' in value} "
             f"has_redirect_to={'RedirectTo' in value} "
-            f"has_workeros={'Workeros' in value}"
+            f"has_floom={'Floom' in value} "
+            f"has_logo={'floom-email-logo' in value}"
         )
     for key in [
         "mailer_subjects_confirmation",
         "mailer_subjects_magic_link",
         "mailer_subjects_recovery",
+        "smtp_sender_name",
     ]:
         print(f"{key}={current.get(key)!r}")
     return 0

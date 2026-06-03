@@ -6,6 +6,14 @@ from email.utils import parseaddr
 from html import escape
 from typing import Any
 
+# Floom email logo (dark rounded-square play-arrow mark + "Floom" wordmark),
+# served as a stable absolute https asset from the Floom OS marketing surface.
+# Gmail and other clients require an absolute https URL for <img> in email; data
+# URIs are stripped. The asset is hosted (and verified 200) at
+# workers.floom.dev/brand/floom-email-logo@2x.png — the cloud root domain
+# (workeros.floom.dev) is behind an auth middleware that blocks static assets.
+FLOOM_EMAIL_LOGO_URL = "https://workers.floom.dev/brand/floom-email-logo@2x.png"
+
 
 @dataclass(frozen=True)
 class EmailSendResult:
@@ -29,28 +37,28 @@ def build_welcome_email(*, to: str, dashboard_url: str) -> TransactionalEmail:
     safe_dashboard_url = dashboard_url.rstrip("/") or "https://workeros.floom.dev"
     dashboard_link = f"{safe_dashboard_url}/app"
     html = _workeros_email_html(
-        preheader="Your Workeros workspace is ready.",
+        preheader="Your Floom workspace is ready.",
         eyebrow="Workspace ready",
-        headline="Welcome to Workeros",
+        headline="Welcome to Floom",
         body_html="""
 <p class="workeros-ink" style="font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:17px;line-height:1.55;margin:0 0 20px;color:#181716;font-weight:400;">Your workspace is ready. You can create workers, connect apps, attach Brain packs, and approve work from the dashboard.</p>
 <p class="workeros-ink" style="font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:1.65;margin:0 0 16px;color:#181716;">Start with one worker, then attach the exact connections and Brain resources it is allowed to use.</p>
 """.strip(),
-        cta_label="Open Workeros",
+        cta_label="Open Floom",
         cta_url=dashboard_link,
         footer_note="Need help? Reply to this email - a human reads every one.",
     )
     text = "\n".join(
         [
-            "Welcome to Workeros.",
+            "Welcome to Floom.",
             "",
             "Your workspace is ready. You can create workers, connect apps, attach Brain packs, and approve work from the dashboard.",
-            f"Open Workeros: {dashboard_link}",
+            f"Open Floom: {dashboard_link}",
         ]
     )
     return TransactionalEmail(
         to=to,
-        subject="Welcome to Workeros",
+        subject="Welcome to Floom",
         html=html,
         text=text,
         tags={"kind": "welcome"},
@@ -80,7 +88,7 @@ def _workeros_email_html(
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light only">
 <meta name="supported-color-schemes" content="light only">
-<title>Workeros</title>
+<title>Floom</title>
 <style>
 @media only screen and (max-width: 480px) {{
   .workeros-shell {{ padding: 16px 12px !important; }}
@@ -101,8 +109,8 @@ def _workeros_email_html(
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fbfaf7;">
 <tr><td align="center" class="workeros-shell" style="padding:40px 16px;">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
-<tr><td class="workeros-band" style="background:#f1eee8;border:1px solid #ded8cf;border-bottom:none;border-radius:14px 14px 0 0;padding:28px 36px;border-top:2px solid #181716;">
-<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="width:28px;height:28px;border-radius:8px;background:#181716;color:#fffefb;font-size:0;line-height:0;">&nbsp;</td><td style="padding-left:10px;font-size:16px;font-weight:650;letter-spacing:-0.01em;color:#181716;">Floom <span style="color:#6f6960;font-weight:450;">/ workeros</span></td></tr></table>
+<tr><td class="workeros-band" style="background:#f1eee8;border:1px solid #ded8cf;border-bottom:none;border-radius:14px 14px 0 0;padding:26px 36px;border-top:2px solid #181716;">
+<a href="https://workeros.floom.dev" style="text-decoration:none;display:inline-block;"><img src="{FLOOM_EMAIL_LOGO_URL}" width="120" height="42" alt="Floom" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;"></a>
 </td></tr>
 <tr><td class="workeros-card workeros-card-bg" style="background:#fffefb;border:1px solid #ded8cf;border-top:none;border-radius:0 0 14px 14px;padding:40px 40px 44px;">
 <p style="margin:0 0 10px;font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#6f6960;">{safe_eyebrow}</p>
@@ -114,7 +122,7 @@ def _workeros_email_html(
 <p style="font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:13px;line-height:1.55;margin:16px 0 0;color:#6f6960;">{safe_footer_note}</p>
 </td></tr>
 <tr><td style="padding:28px 4px 4px;font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:12px;line-height:1.6;color:#6f6960;">
-<a href="https://workeros.floom.dev" style="color:#181716;font-weight:650;text-decoration:none;">Workeros</a> &middot; <a href="mailto:team@floom.dev" style="color:#6f6960;text-decoration:underline;">team@floom.dev</a>
+<a href="https://workeros.floom.dev" style="color:#181716;font-weight:650;text-decoration:none;">Floom</a> &middot; <a href="mailto:team@floom.dev" style="color:#6f6960;text-decoration:underline;">team@floom.dev</a>
 </td></tr>
 </table>
 </td></tr>
@@ -133,7 +141,7 @@ def build_workspace_invite_email(
     safe_inviter = escape(inviter_name or "A workspace admin")
     safe_workspace = escape(workspace_name or "a workspace")
     html = _workeros_email_html(
-        preheader=f"{safe_inviter} invited you to join {safe_workspace} on Workeros.",
+        preheader=f"{safe_inviter} invited you to join {safe_workspace} on Floom.",
         eyebrow="Workspace invitation",
         headline=f"You've been invited to {safe_workspace}",
         body_html=f"""
@@ -146,7 +154,7 @@ def build_workspace_invite_email(
     )
     text = "\n".join(
         [
-            f"{inviter_name} invited you to join {workspace_name} on Workeros.",
+            f"{inviter_name} invited you to join {workspace_name} on Floom.",
             "",
             "Accept the invitation to access shared workers and start collaborating.",
             f"Accept invitation: {invite_url}",
@@ -155,7 +163,7 @@ def build_workspace_invite_email(
         ]
     )
     return {
-        "subject": f"You're invited to join {workspace_name} on Workeros",
+        "subject": f"You're invited to join {workspace_name} on Floom",
         "html": html,
         "text": text,
     }
