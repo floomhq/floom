@@ -285,6 +285,25 @@ def change_role(*, workspace_id: str, user_id: str, new_role: str) -> dict[str, 
     return get_member(workspace_id=workspace_id, user_id=user_id)
 
 
+def resolve_member_emails(user_ids: list[str]) -> dict[str, str]:
+    """Batch-look up emails for a list of user_ids via Supabase auth admin.
+
+    Returns {user_id: email}. Missing or erroring users are silently omitted.
+    """
+    if not user_ids:
+        return {}
+    client = get_supabase_service_client()
+    result: dict[str, str] = {}
+    for uid in user_ids:
+        try:
+            resp = client.auth.admin.get_user_by_id(uid)
+            if resp and resp.user and resp.user.email:
+                result[uid] = resp.user.email
+        except Exception:
+            pass
+    return result
+
+
 def remove_member(*, workspace_id: str, user_id: str) -> bool:
     """Soft-delete a member (status='removed'). Returns True if found."""
     client = get_supabase_service_client()

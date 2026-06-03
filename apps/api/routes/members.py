@@ -124,13 +124,18 @@ async def list_members(
     if not _is_admin(auth, workspace_id):
         raise HTTPException(status_code=403, detail="admin access required")
     members = members_db.list_members(workspace_id=workspace_id)
-    # Include workspace owner as a synthetic admin entry.
+    # Resolve emails for all members + owner in one batch.
+    all_user_ids = [str(ws["owner_user_id"])] + [str(m["user_id"]) for m in members]
+    emails = members_db.resolve_member_emails(all_user_ids)
     owner_entry = {
         "user_id": str(ws["owner_user_id"]),
         "role": "admin",
         "status": "active",
         "is_owner": True,
+        "email": emails.get(str(ws["owner_user_id"]), ""),
     }
+    for m in members:
+        m["email"] = emails.get(str(m["user_id"]), "")
     return {
         "workspace_id": workspace_id,
         "owner": owner_entry,

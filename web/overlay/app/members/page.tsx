@@ -77,7 +77,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 // types
 // ---------------------------------------------------------------------------
 
-type Member = { id: string; user_id: string; role: string; joined_at: string | null };
+type Member = { id: string; user_id: string; role: string; joined_at: string | null; email?: string; is_owner?: boolean };
 type Invitation = { id: string; email: string; role: string; status: string; created_at: string; expires_at: string | null };
 
 // ---------------------------------------------------------------------------
@@ -143,10 +143,14 @@ function MembersContent() {
   const refresh = useCallback(async (ws: string) => {
     try {
       const [mRes, iRes] = await Promise.all([
-        apiFetch<{ members: Member[] }>(`/workspaces/${ws}/members`),
+        apiFetch<{ owner: Member; members: Member[] }>(`/workspaces/${ws}/members`),
         apiFetch<{ invitations: Invitation[] }>(`/workspaces/${ws}/invitations`),
       ]);
-      setMembers(mRes.members ?? []);
+      // Combine owner + members into a single sorted list (owner always first).
+      const allMembers: Member[] = [];
+      if (mRes.owner) allMembers.push({ ...mRes.owner, is_owner: true });
+      allMembers.push(...(mRes.members ?? []));
+      setMembers(allMembers);
       setInvitations(iRes.invitations ?? []);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to load members");
@@ -349,10 +353,10 @@ function MembersContent() {
                     : <Users className="w-4 h-4 text-muted-foreground shrink-0" />
                   }
                   <div className="min-w-0">
-                    <p className="text-sm font-mono text-sm truncate">{m.user_id}</p>
+                    <p className="text-sm font-medium truncate">{m.email || m.user_id}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                       <Badge variant={m.role === "admin" ? "default" : "secondary"} className="text-xs h-4 px-1.5">
-                        {m.role}
+                        {m.is_owner ? "owner" : m.role}
                       </Badge>
                       {m.joined_at && (
                         <span className="text-xs text-muted-foreground">
@@ -362,31 +366,33 @@ function MembersContent() {
                     </div>
                   </div>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    disabled={removingId === m.user_id || roleChangingId === m.user_id}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--bg-2)] transition-opacity"
-                  >
-                    <MoreVertical className="w-3.5 h-3.5" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => void handleRoleChange(m.user_id, m.role === "admin" ? "member" : "admin")}
-                      disabled={roleChangingId === m.user_id}
+                {!m.is_owner && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      disabled={removingId === m.user_id || roleChangingId === m.user_id}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--bg-2)] transition-opacity"
                     >
-                      <ShieldCheck className="w-3.5 h-3.5 mr-2" />
-                      Make {m.role === "admin" ? "member" : "admin"}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => void handleRemove(m.user_id)}
-                      disabled={removingId === m.user_id}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <X className="w-3.5 h-3.5 mr-2" />
-                      {removingId === m.user_id ? "Removing…" : "Remove"}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                      <MoreVertical className="w-3.5 h-3.5" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onClick={() => void handleRoleChange(m.user_id, m.role === "admin" ? "member" : "admin")}
+                        disabled={roleChangingId === m.user_id}
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 mr-2" />
+                        Make {m.role === "admin" ? "member" : "admin"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => void handleRemove(m.user_id)}
+                        disabled={removingId === m.user_id}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <X className="w-3.5 h-3.5 mr-2" />
+                        {removingId === m.user_id ? "Removing…" : "Remove"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
             ))}
           </div>
