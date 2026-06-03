@@ -20,23 +20,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from contexts import (
-    context_dir,
-    context_scope_for_user,
-    iter_context_files,
-    normalize_context_mount,
-    use_context_scope,
-)
 from models import (
-    UnsafeMCPUrlError,
     WorkerConfig,
     WorkerResult,
-    assert_safe_outbound_mcp_url,
-    declared_composio_connections,
 )
 from runner_utils import ARTIFACTS_DIR, _validate_output_schema
 from worker_registry import WORKERS_DIR
 
+from . import agent_capabilities
+from .agent_capabilities import WORKER_POLICY, MCPConnectionError
 from .base import SandboxDriver
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
@@ -133,8 +125,10 @@ class _AgentRunState:
     finished: bool = False
 
 
-class _MCPConnectionError(RuntimeError):
-    pass
+# Backwards-compatible alias: the shared capability module now owns this error
+# type. Existing `_MCPConnectionError` references (raises + excepts) keep working
+# because it is the SAME class.
+_MCPConnectionError = MCPConnectionError
 
 
 class AgentDriver(SandboxDriver):
@@ -736,56 +730,17 @@ class AgentDriver(SandboxDriver):
         user_id: str | None,
         log_fn: Callable[[str, str], None],
     ) -> list[str]:
-        """Stage each attached brain pack into ``context_root/<name>/...``.
+        """Stage attached brain packs (delegates to the shared builder).
 
-        Mirrors ``E2BSandboxDriver._upload_contexts_to_sandbox``: same owner
-        scope (``use_context_scope(context_scope_for_user(user_id))``), same
-        per-pack ``context/<name>`` layout, same source helper
-        (``context_dir`` / ``iter_context_files``). Returns the list of staged
-        pack names so they can be surfaced to the model.
-
-        Security: pack file resolution happens under the run owner's context
-        scope, so a worker only ever stages ITS attached packs. Git contexts
-        are skipped here (local agent-mode has no sandboxed clone target);
-        local packs are the supported attachment form for agent-mode.
+        Owner-scoped, per-pack ``context/<name>`` layout, git contexts skipped.
+        See :func:`agent_capabilities.stage_context_packs`.
         """
-        if not config or not config.contexts:
-            return []
-
-        staged: list[str] = []
-        with use_context_scope(context_scope_for_user(user_id)):
-            for raw_context in config.contexts:
-                try:
-                    context = normalize_context_mount(raw_context)
-                except ValueError as exc:
-                    log_fn(f"[agent] Skipping invalid context: {exc}", "warning")
-                    continue
-
-                name = context["name"]
-                source = context["source"]
-                if source.startswith("git+"):
-                    log_fn(
-                        f"[agent] Skipping git context {name!r}: git contexts are "
-                        "not supported for agent-mode workers",
-                        "warning",
-                    )
-                    continue
-
-                local_dir = context_dir(name)
-                if not local_dir.is_dir():
-                    log_fn(f"[agent] Context {name!r} not found locally", "warning")
-                    continue
-
-                pack_target = _safe_path(context_root, name)
-                pack_target.mkdir(parents=True, exist_ok=True)
-                for fpath in iter_context_files(local_dir):
-                    rel = fpath.relative_to(local_dir)
-                    dest = _safe_path(pack_target, rel.as_posix())
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(fpath.read_bytes())
-                staged.append(name)
-                log_fn(f"[agent] Staged context {name!r}", "debug")
-        return staged
+        return agent_capabilities.stage_context_packs(
+            config=config,
+            context_root=context_root,
+            user_id=user_id,
+            log_fn=log_fn,
+        )
 
     def _persist_writeable_contexts(
         self,
@@ -1067,25 +1022,7 @@ class AgentDriver(SandboxDriver):
                 },
             },
         ]
-        for app in self._composio_connection_names(config):
-            safe_app = "".join(ch if ch.isalnum() else "_" for ch in app.lower())
-            tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": f"composio__{safe_app}__execute",
-                        "description": f"Execute a {app} tool as integration.{app}.<tool>(arguments).",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "tool": {"type": "string"},
-                                "arguments": {"type": "object"},
-                            },
-                            "required": ["tool", "arguments"],
-                        },
-                    },
-                }
-            )
+        tools.extend(agent_capabilities.composio_tool_schemas(config, WORKER_POLICY))
         disabled = self._disabled_tool_names(config)
         if disabled:
             tools = [tool for tool in tools if not self._tool_is_disabled(tool, disabled)]
@@ -1097,99 +1034,18 @@ class AgentDriver(SandboxDriver):
         secrets: Dict[str, str],
         log_fn: Callable[[str, str], None],
     ) -> list[Any]:
-        servers = []
-        for connection in self._mcp_connections(config):
-            try:
-                server = self._make_mcp_server(connection, secrets)
-                await server.connect()
-                log_fn(f"Connected MCP server {connection.label}", "debug")
-                servers.append(server)
-            except _MCPConnectionError:
-                raise
-            except Exception as exc:
-                raise _MCPConnectionError(f"MCP connection failed for {connection.label}: {exc}") from exc
-        return servers
+        return await agent_capabilities.connect_mcp_servers(
+            config, secrets, log_fn, WORKER_POLICY
+        )
 
     async def _cleanup_mcp_servers(self, servers: list[Any], log_fn: Callable[[str, str], None]) -> None:
-        for server in reversed(servers):
-            try:
-                await server.cleanup()
-            except Exception as exc:
-                log_fn(f"MCP cleanup failed for {getattr(server, 'name', 'unknown')}: {exc}", "warning")
+        await agent_capabilities.cleanup_mcp_servers(servers, log_fn)
 
     def _make_mcp_server(self, connection: Any, secrets: Dict[str, str]) -> Any:
-        from agents.mcp import MCPServerSse, MCPServerStdio, MCPServerStreamableHttp
-
-        transport = getattr(connection, "transport", None) or "streamable_http"
-
-        tool_filter = None
-        if connection.allowed_tools:
-            tool_filter = {"allowed_tool_names": list(connection.allowed_tools)}
-
-        common = {
-            "name": connection.label,
-            "cache_tools_list": True,
-            "tool_filter": tool_filter,
-            "require_approval": connection.require_approval,
-        }
-
-        if transport == "stdio":
-            env: Dict[str, str] = {}
-            for key, value in (getattr(connection, "env", None) or {}).items():
-                if value.startswith("secret:"):
-                    secret_name = value.split(":", 1)[1]
-                    secret_value = secrets.get(secret_name)
-                    if not secret_value:
-                        raise _MCPConnectionError(f"MCP connection {connection.label} is missing secret {secret_name}")
-                    env[key] = secret_value
-                else:
-                    env[key] = value
-            params: Dict[str, Any] = {
-                "command": connection.command,
-                "args": list(getattr(connection, "args", None) or []),
-                "env": env,
-            }
-            if getattr(connection, "cwd", None):
-                params["cwd"] = connection.cwd
-            return MCPServerStdio(params=params, **common)
-
-        # Defense in depth: re-validate the URL at dial time. DNS can rebind
-        # between registration (where we also check) and the actual run, so a
-        # previously-safe hostname could now resolve to an internal address.
-        try:
-            assert_safe_outbound_mcp_url(connection.url or "")
-        except UnsafeMCPUrlError as exc:
-            raise _MCPConnectionError(
-                f"MCP connection {connection.label} refused: {exc}"
-            ) from exc
-
-        params = {"url": connection.url}
-        headers = self._mcp_auth_headers(connection, secrets)
-        if headers:
-            params["headers"] = headers
-        if transport == "sse":
-            return MCPServerSse(params=params, **common)
-        return MCPServerStreamableHttp(params=params, **common)
-
-    def _mcp_auth_headers(self, connection: Any, secrets: Dict[str, str]) -> Dict[str, str]:
-        auth = getattr(connection, "auth", None)
-        if not auth:
-            return {}
-        scheme, secret_name = auth.split(":", 1)
-        if scheme != "bearer":
-            raise _MCPConnectionError(f"Unsupported MCP auth for {connection.label}: {scheme}")
-        token = secrets.get(secret_name)
-        if not token:
-            raise _MCPConnectionError(f"MCP connection {connection.label} is missing secret {secret_name}")
-        return {"Authorization": f"Bearer {token}"}
+        return agent_capabilities.make_mcp_server(connection, secrets, WORKER_POLICY)
 
     def _mcp_connections(self, config: WorkerConfig) -> list[Any]:
-        connections: list[Any] = []
-        for connection in config.connections:
-            mcp = self._object_get(connection, "mcp")
-            if mcp is not None:
-                connections.append(mcp)
-        return connections
+        return agent_capabilities.mcp_connections(config)
 
     def _sdk_tools(self, config: WorkerConfig, state: _AgentRunState) -> list[Any]:
         from agents import FunctionTool, WebSearchTool
@@ -1248,7 +1104,7 @@ class AgentDriver(SandboxDriver):
         return sdk_tools
 
     def _composio_connection_names(self, config: WorkerConfig) -> list[str]:
-        return sorted(declared_composio_connections(config).keys())
+        return agent_capabilities.composio_connection_names(config)
 
     def _disabled_tool_names(self, config: WorkerConfig) -> set[str]:
         disabled = getattr(config.runtime, "disable_tools", None) or []
@@ -1680,68 +1536,18 @@ class AgentDriver(SandboxDriver):
         connection_ids: Dict[str, str],
         user_id: str | None,
     ) -> Dict[str, Any]:
-        tool = str(args.get("tool") or "")
-        arguments = args.get("arguments") or {}
-        if not tool:
-            return {"ok": False, "error": "tool is required"}
-        if not isinstance(arguments, dict):
-            return {"ok": False, "error": "arguments must be an object"}
-        from db import get_repositories
-        import requests
-
-        app_name = ""
-        if name.startswith("composio__"):
-            parts = name.split("__")
-            app_name = parts[1] if len(parts) >= 3 else ""
-        elif name.startswith("composio."):
-            parts = name.split(".")
-            app_name = parts[1] if len(parts) >= 3 else ""
-        declared = declared_composio_connections(config)
-        if app_name.lower() not in declared:
-            return {"ok": False, "error": f"Worker did not declare connection to {app_name}", "error_code": "tool_outside_declared_connections"}
-        allowed_tools = declared.get(app_name.lower())
-        if allowed_tools is not None and tool.upper() not in allowed_tools:
-            logger.warning(
-                "composio tool denied: worker=%s app=%s tool=%s blocked by allowlist",
-                worker_id, app_name.lower(), tool.upper(),
-            )
-            log_fn(f"Tool {tool} blocked by allowlist for connection {app_name}", "warning")
-            return {"ok": False, "error": f"Tool {tool} is not allowed for worker connection {app_name}", "error_code": "tool_outside_connection_scope"}
-        connection_id = connection_ids.get(app_name.lower())
-        if not connection_id and user_id:
-            repos = get_repositories()
-            active_owner_connections = [
-                row for row in repos.connections.list(user_id=user_id)
-                if row.get("app_name") == app_name.lower() and row.get("status") == "active"
-            ]
-            if active_owner_connections:
-                connection_id = str(active_owner_connections[0].get("composio_connection_id") or "")
-        if not connection_id:
-            return {"ok": False, "error": f"Missing active Composio connection for {app_name}"}
-        api_key = os.environ.get("COMPOSIO_API_KEY")
-        if not api_key:
-            return {"ok": False, "error": "COMPOSIO_API_KEY is not configured"}
-        log_fn(f"Executing Composio tool {tool}", "debug")
-        # Composio v3 requires entity_id alongside connected_account_id. Use the
-        # run owner so local agent-mode matches the E2B HTTP proxy's tenant scope.
-        entity_id = user_id or os.environ.get("FLOOM_USER_ID", "federico")
-        response = requests.post(
-            f"https://backend.composio.dev/api/v3/tools/execute/{tool}",
-            headers={"x-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "connected_account_id": connection_id,
-                "entity_id": entity_id,
-                "arguments": arguments,
-            },
-            timeout=30,
+        # Autonomous workers run under the full WORKER_POLICY (worker.yml scopes
+        # govern). The interactive assistant runs the same shared execute path
+        # under a read-only policy.
+        return agent_capabilities.composio_execute(
+            name=name,
+            args=args,
+            config=config,
+            policy=WORKER_POLICY,
+            connection_ids=connection_ids or {},
+            user_id=user_id,
+            log_fn=log_fn,
         )
-        if response.status_code >= 400:
-            return {
-                "ok": False,
-                "error": f"{response.status_code} {response.reason}: {response.text[:400]}",
-            }
-        result = response.json()
-        return {"ok": True, "result": result}
 
     def _usage_tokens(self, usage: Any) -> int:
         if usage is None:
