@@ -22,8 +22,12 @@ import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { ShareWorkerButton } from "@/components/ShareWorkerButton";
 
-// Cloud-only: extend WorkerSummary with workspace visibility + owner.
-type CloudWorkerSummary = WorkerSummary & { visibility?: string; owner_id?: string };
+// Cloud-only: extend WorkerSummary with workspace visibility (adds "shared") + owner.
+// Use Omit to replace the engine's narrower literal union with the cloud's broader type.
+type CloudWorkerSummary = Omit<WorkerSummary, "visibility"> & {
+  visibility?: string;
+  owner_id?: string;
+};
 
 type AdminWorkerStub = { id: string; name: string; visibility: string; owner_id: string; owner_email: string };
 
