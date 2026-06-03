@@ -2527,7 +2527,11 @@ class SqliteMcpToolRepository:
 # asset_grants table ships in a later step.
 VISIBILITY_VALUES: frozenset[str] = frozenset({"private", "workspace", "specific_people"})
 MEMBER_ROLES: frozenset[str] = frozenset({"owner", "admin", "member"})
-_ASSET_TABLES: dict[str, str] = {"worker": "workers"}
+_ASSET_TABLES: dict[str, str] = {
+    "worker": "workers",
+    "brain_pack": "brain_packs",
+    "assistant": "assistants",
+}
 
 
 def derive_workspace_id(owner_id: str | None) -> str:
@@ -2540,6 +2544,16 @@ def derive_workspace_id(owner_id: str | None) -> str:
     text = (owner_id or "").strip()
     match = re.search(r"__(ws_[a-f0-9]{14})$", text)
     return match.group(1) if match else "local-default"
+
+
+def assistant_row_id(workspace_id: str) -> str:
+    """Stable per-workspace assistant row id (one assistant per workspace).
+
+    Mirrors ``_legacy_sqlite._assistant_row_id`` so the lazily-upserted row and
+    the migration backfill row collide on the same id (idempotent).
+    """
+    ws = (workspace_id or "local-default").strip() or "local-default"
+    return f"workspace-agent:{ws}"
 
 
 class SqliteWorkspaceMemberRepository:
@@ -2711,6 +2725,101 @@ class SqliteAssetAccessRepository:
             f"SELECT id, owner_id, workspace_id, visibility FROM {table} WHERE id = ? LIMIT 1",
             (asset_id,),
         ).fetchone()
+
+    def ensure_brain_pack(
+        self,
+        *,
+        pack_id: str,
+        workspace_id: str,
+        owner_id: str,
+        name: str | None = None,
+        default_visibility: str = "private",
+    ) -> dict[str, Any]:
+        """Lazily upsert the access-control mirror row for a brain pack.
+
+        Brain packs are filesystem dirs; their owner lives in the per-workspace
+        ``.workeros-contexts.json``. The first time the API needs visibility for a
+        pack it calls this so a row exists for ``get_permissions``/``set_visibility``.
+        Idempotent: never downgrades an existing visibility, only refreshes
+        owner/name/workspace. Returns the current row.
+        """
+        if default_visibility not in VISIBILITY_VALUES:
+            default_visibility = "private"
+        now = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO brain_packs
+                    (id, workspace_id, owner_id, visibility, name,
+                     metadata_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, '{}', ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    workspace_id = excluded.workspace_id,
+                    owner_id = excluded.owner_id,
+                    name = excluded.name,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    pack_id,
+                    workspace_id,
+                    owner_id,
+                    default_visibility,
+                    name or pack_id,
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id, owner_id, workspace_id, visibility FROM brain_packs WHERE id = ?",
+                (pack_id,),
+            ).fetchone()
+        return _row_dict(row) if row else {}
+
+    def ensure_assistant(
+        self,
+        *,
+        assistant_id: str,
+        workspace_id: str,
+        owner_id: str,
+        name: str = "Workspace assistant",
+        default_visibility: str = "workspace",
+    ) -> dict[str, Any]:
+        """Lazily upsert the access-control mirror row for the workspace assistant.
+
+        The assistant is a single shared workspace tool (``workspace`` default).
+        Idempotent: never downgrades visibility; refreshes owner/workspace/name.
+        """
+        if default_visibility not in VISIBILITY_VALUES:
+            default_visibility = "workspace"
+        now = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO assistants
+                    (id, workspace_id, owner_id, visibility, name,
+                     config_json, instructions_md, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, '{}', NULL, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    workspace_id = excluded.workspace_id,
+                    owner_id = excluded.owner_id,
+                    name = excluded.name,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    assistant_id,
+                    workspace_id,
+                    owner_id,
+                    default_visibility,
+                    name,
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id, owner_id, workspace_id, visibility FROM assistants WHERE id = ?",
+                (assistant_id,),
+            ).fetchone()
+        return _row_dict(row) if row else {}
 
     def _role(self, conn: sqlite3.Connection, workspace_id: str, user_id: str) -> str | None:
         row = conn.execute(
