@@ -25,6 +25,23 @@ function getSecret(): string {
   return process.env.FLOOM_API_SECRET || "";
 }
 
+// A memorable login password, DECOUPLED from the master API secret. Logging in
+// with this mints the same HMAC session cookie (still derived from
+// FLOOM_API_SECRET), but the password itself never touches the API, the
+// signing keys, or the Cloudflare edge gate — those stay on the strong master
+// secret. Brute-force is bounded by a Cloudflare rate-limit rule on
+// /api/auth/login. Empty/unset -> only the master secret is accepted.
+function getLoginPassword(): string {
+  return process.env.WORKEROS_LOGIN_PASSWORD || "";
+}
+
+/** Constant-time match of `candidate` against a configured credential. */
+function matchesCredential(candidate: string, configured: string): boolean {
+  if (!configured) return false;
+  if (candidate.length !== configured.length) return false;
+  return timingSafeEqual(candidate, configured);
+}
+
 function bytesToHex(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let hex = "";
@@ -67,14 +84,22 @@ export async function deriveSessionToken(): Promise<string> {
   return hmacHex(secret, SESSION_MESSAGE);
 }
 
-/** True if the supplied secret matches the configured FLOOM_API_SECRET. */
+/**
+ * True if the supplied value is an accepted login credential: EITHER the master
+ * FLOOM_API_SECRET (used by agents / non-interactive auth and the proxy) OR the
+ * memorable WORKEROS_LOGIN_PASSWORD (the human owner login). Both mint the same
+ * session cookie. Evaluates both branches (no early short-circuit) so a wrong
+ * value's timing doesn't reveal which credential it was closest to.
+ */
 export function isCorrectSecret(candidate: string): boolean {
   const secret = getSecret();
-  // Fail closed: never accept login when the server has no secret configured.
-  if (!secret) return false;
+  const password = getLoginPassword();
+  // Fail closed: never accept login when no credential is configured at all.
+  if (!secret && !password) return false;
   if (typeof candidate !== "string" || candidate.length === 0) return false;
-  if (candidate.length !== secret.length) return false;
-  return timingSafeEqual(candidate, secret);
+  const matchSecret = matchesCredential(candidate, secret);
+  const matchPassword = matchesCredential(candidate, password);
+  return matchSecret || matchPassword;
 }
 
 /** Verify a cookie token against the configured secret. */
