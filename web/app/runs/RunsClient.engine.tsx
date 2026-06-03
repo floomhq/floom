@@ -1,10 +1,5 @@
 "use client";
 
-// Cloud overlay of the engine's RunsClient.
-// Diff against app/runs/RunsClient.engine.tsx to see cloud-only additions:
-//   - CloudRunSummary extends RunSummary with trigger_member_email
-//   - Trigger column shows "by {email}" when a workspace member triggered the run
-
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import Papa from "papaparse";
@@ -26,9 +21,8 @@ import {
 import { Download, Play } from "lucide-react";
 import type { RunSummary, WorkerSummary } from "@/lib/types";
 
-// Cloud-only: extend RunSummary with workspace member attribution.
-type CloudRunSummary = RunSummary & { trigger_member_email?: string | null };
-
+// Filter out system/test workers from the operator-facing filter dropdown.
+// Matches: audit-*, node-smoke-*, mcp-*-smoke, *-smoke-*, *quality-gate*
 const SYSTEM_WORKER_PATTERNS = [
   /^audit-/i,
   /^node-smoke/i,
@@ -67,12 +61,15 @@ export default function RunsClient({
   const workerFilter = searchParams.get("worker_id") ?? searchParams.get("worker") ?? "";
   const statusFilter = searchParams.get("status") ?? "";
 
-  const [runs, setRuns] = useState<CloudRunSummary[]>(initialRuns as CloudRunSummary[]);
+  // S44: initialRuns from RSC — no loading flash on first render.
+  const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
+  // Only show loading when filters change (not on initial render)
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(initialRuns.length === PAGE_SIZE);
+  // Track whether we've applied filters (RSC data had no filters)
   const [filtersApplied, setFiltersApplied] = useState(false);
 
   const updateFilter = useCallback((key: "status" | "worker_id", value: string) => {
@@ -82,12 +79,14 @@ export default function RunsClient({
     router.replace(`/runs${params.size ? `?${params.toString()}` : ""}`, { scroll: false });
   }, [router, searchParams]);
 
+  // If workers list wasn't pre-fetched (API error), fetch client-side
   useEffect(() => {
     if (initialWorkers.length === 0) {
       api.workers.list().then(setWorkers).catch(() => {});
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Re-fetch when filters change (or if initial data was empty)
   useEffect(() => {
     const hasFilters = Boolean(workerFilter || statusFilter);
     const needsFetch = hasFilters || initialRuns.length === 0;
@@ -110,7 +109,7 @@ export default function RunsClient({
       };
       if (workerFilter) params.worker_id = workerFilter;
       if (statusFilter) params.status = statusFilter;
-      const result = await api.runs.list(params) as CloudRunSummary[];
+      const result = await api.runs.list(params);
       if (replace) setRuns(result);
       else setRuns((prev) => [...prev, ...result]);
       setHasMore(result.length === PAGE_SIZE);
@@ -141,11 +140,11 @@ export default function RunsClient({
     if (workerFilter) baseParams.worker_id = workerFilter;
     if (statusFilter) baseParams.status = statusFilter;
 
-    let allRuns: CloudRunSummary[] = [];
+    let allRuns: typeof runs = [];
     let offset = 0;
     try {
       while (true) {
-        const page = await api.runs.list({ ...baseParams, offset }) as CloudRunSummary[];
+        const page = await api.runs.list({ ...baseParams, offset });
         allRuns = [...allRuns, ...page];
         if (page.length < API_PAGE_MAX) break;
         offset += API_PAGE_MAX;
@@ -158,7 +157,6 @@ export default function RunsClient({
       worker_id: r.worker_id,
       status: r.status,
       trigger_source: r.trigger_source,
-      triggered_by: r.trigger_member_email || "",
       created_at: r.created_at || "",
       started_at: r.started_at || "",
       completed_at: r.completed_at || "",
@@ -267,12 +265,12 @@ export default function RunsClient({
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Single unified container — one border, one set of rounded corners, no per-group cards (engine #395 flatten) */}
+          {/* Single unified container — one border, one set of rounded corners, no per-group cards */}
           <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
             {/* Column headers — shown once at the top of the whole list */}
-            <div className="hidden md:grid grid-cols-[minmax(0,1fr)_140px_110px_150px_160px] gap-4 px-4 py-2 border-b border-[var(--border-default)] text-[11px] font-medium text-muted-foreground">
+            <div className="hidden md:grid grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-2 border-b border-[var(--border-default)] text-[11px] font-medium text-muted-foreground">
               <span>Worker</span>
-              <span>Triggered by</span>
+              <span>Trigger</span>
               <span>Duration</span>
               <span>Status</span>
               <span>Started</span>
@@ -293,7 +291,7 @@ export default function RunsClient({
                     key={r.id}
                     href={`/runs/${r.id}`}
                     title={r.id}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_140px_110px_150px_160px] gap-4 px-4 py-3 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors items-center cursor-pointer"
+                    className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-3 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors items-center cursor-pointer"
                   >
                     <span className="min-w-0">
                       <span className="flex items-center gap-2.5 min-w-0">
@@ -306,14 +304,8 @@ export default function RunsClient({
                         </span>
                       )}
                     </span>
-                    {/* Cloud: show member email when a workspace member triggered the run */}
-                    <span className="hidden md:flex flex-col text-xs leading-tight">
-                      <span className="text-muted-foreground truncate">{formatTrigger(r.trigger_source)}</span>
-                      {r.trigger_member_email && (
-                        <span className="text-[10px] text-muted-foreground/70 truncate" title={r.trigger_member_email}>
-                          {r.trigger_member_email}
-                        </span>
-                      )}
+                    <span className="hidden md:inline text-xs text-muted-foreground truncate">
+                      {formatTrigger(r.trigger_source)}
                     </span>
                     <span className="hidden md:inline text-xs text-muted-foreground tabular-nums">
                       {formatDuration(r.duration_ms)}
@@ -363,8 +355,8 @@ export default function RunsClient({
   );
 }
 
-function groupRunsByDay(runs: CloudRunSummary[]): Array<{ key: string; label: string; runs: CloudRunSummary[] }> {
-  const groups = new Map<string, CloudRunSummary[]>();
+function groupRunsByDay(runs: RunSummary[]): Array<{ key: string; label: string; runs: RunSummary[] }> {
+  const groups = new Map<string, RunSummary[]>();
   for (const run of runs) {
     const timestamp = getRunTimestamp(run);
     const key = timestamp ? new Date(timestamp).toDateString() : "unknown";
@@ -398,7 +390,7 @@ function formatDayLabel(key: string): string {
   });
 }
 
-function formatRunCountSummary(runs: CloudRunSummary[]): string {
+function formatRunCountSummary(runs: RunSummary[]): string {
   const failed = runs.filter((run) => run.status === "failed").length;
   const running = runs.filter((run) => run.status === "running" || run.status === "queued").length;
   const parts = [`${runs.length} ${runs.length === 1 ? "run" : "runs"}`];
@@ -420,6 +412,9 @@ function formatStartedTime(run: RunSummary): string {
 
 function summarizeError(error: string): string {
   const cleaned = error.replace(/\s+/g, " ").trim();
+  // Raw dict / JSON with no "Error code:" prefix that the shared helper
+  // doesn't recognise — pull the message out so the user never sees a raw
+  // Python dict (audit P1).
   const dictMatch = cleaned.match(/Error code:\s*\d+\s*-\s*[{'"]/i);
   if (!dictMatch && (/^[{[]/.test(cleaned) || /['"]message['"]\s*:/.test(cleaned))) {
     const msgMatch = cleaned.match(/['"]message['"]\s*:\s*['"]([^'"]{1,200})['"]/i);
@@ -429,6 +424,8 @@ function summarizeError(error: string): string {
     }
     if (/^[{[]/.test(cleaned)) return "Run failed (see run detail for the full error).";
   }
+  // P1-4: machine error codes ("missing_connection: github",
+  // "output_validation_failed: ...") + OpenAI dict wrappers -> human text.
   return humanizeRunError(cleaned);
 }
 

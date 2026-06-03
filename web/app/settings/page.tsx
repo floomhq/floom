@@ -30,6 +30,7 @@ import { AlertTriangle, CheckCircle2, Download, Trash2 } from "lucide-react";
 // it so the URL ?tab=notifications doesn't blow up; we just silently fall back
 // to "api" when a hidden tab is requested.
 type TabKey =
+  | "workspace"
   | "api"
   | "system"
   | "assistant"
@@ -38,8 +39,9 @@ type TabKey =
   | "data"
   | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "appearance", "data", "danger"];
+const VISIBLE_TAB_KEYS: TabKey[] = ["workspace", "api", "system", "appearance", "data", "danger"];
 const TAB_KEYS: TabKey[] = [
+  "workspace",
   "api",
   "system",
   "assistant",
@@ -96,10 +98,10 @@ function SettingsContent() {
       typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : null;
     const fromQuery = searchParams.get("tab");
     const candidate = fromHash || fromQuery;
-    // S22f: hidden tab (e.g. notifications) requested via URL falls back to api.
+    // S22f: hidden tab (e.g. notifications) requested via URL falls back to workspace.
     return isValidTab(candidate) && VISIBLE_TAB_KEYS.includes(candidate)
       ? candidate
-      : "api";
+      : "workspace";
   })();
   const [tab, setTab] = useState<TabKey>(initialTab);
 
@@ -384,6 +386,7 @@ function SettingsContent() {
             strip fits, so nothing scrolls. */}
         <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <TabsList>
+          <TabsTrigger value="workspace">Workspace</TabsTrigger>
           <TabsTrigger value="api">API access</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
           <TabsTrigger value="appearance">Appearance</TabsTrigger>
@@ -391,6 +394,10 @@ function SettingsContent() {
           <TabsTrigger value="danger">Danger zone</TabsTrigger>
         </TabsList>
         </div>
+
+        <TabsContent value="workspace" className="space-y-4">
+          <WorkspaceSettingsTab />
+        </TabsContent>
 
         <TabsContent value="api" className="space-y-4">
           <CliCommandPanel />
@@ -812,6 +819,105 @@ function Row({
     <div className="flex items-center justify-between">
       <span className="text-muted-foreground">{label}</span>
       <span className={`font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+const WS_KEY = "workeros.activeWorkspaceId";
+
+function WorkspaceSettingsTab() {
+  const [wsId, setWsId] = useState<string | null>(null);
+  const [wsName, setWsName] = useState<string>("");
+  const [editName, setEditName] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    const id = typeof window !== "undefined" ? window.localStorage.getItem(WS_KEY) : null;
+    if (!id || id === "local-default") return;
+    setWsId(id);
+    // Fetch workspace list to get name + role
+    fetch(`${API_PROXY_BASE}/workspaces`, { headers: activeWorkspaceHeaders() })
+      .then((r) => r.json())
+      .then((d: { workspaces?: { id: string; name: string; role: string }[] }) => {
+        const ws = (d.workspaces ?? []).find((w) => w.id === id);
+        if (ws) { setWsName(ws.name); setEditName(ws.name); }
+      })
+      .catch(() => {});
+    // Fetch member count (returns 403 for non-admins — silently ignored)
+    fetch(`${API_PROXY_BASE}/workspaces/${id}/members`, { headers: activeWorkspaceHeaders() })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d: { members?: unknown[] } | null) => {
+        if (d) setMemberCount((d.members ?? []).length);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function handleRename() {
+    if (!wsId || !editName.trim() || editName.trim() === wsName) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_PROXY_BASE}/workspaces/${wsId}`, {
+        method: "PATCH",
+        headers: activeWorkspaceHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ name: editName.trim() }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const updated = (await res.json()) as { name: string };
+      setWsName(updated.name);
+      setEditName(updated.name);
+      toast.success("Workspace renamed");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to rename workspace");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!wsId) {
+    return (
+      <p className="text-sm text-muted-foreground py-4">No active workspace selected.</p>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Workspace name</h2>
+        <div className="flex gap-2 max-w-sm">
+          <Input
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void handleRename(); }}
+            className="text-sm"
+            placeholder="Workspace name"
+          />
+          <Button
+            size="sm"
+            disabled={saving || !editName.trim() || editName.trim() === wsName}
+            onClick={() => void handleRename()}
+          >
+            {saving ? "Saving…" : "Rename"}
+          </Button>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Team</h2>
+        <div className="flex items-center justify-between max-w-sm rounded-lg border border-border bg-card p-3">
+          <div>
+            <p className="text-sm font-medium">Members</p>
+            {memberCount !== null && (
+              <p className="text-xs text-muted-foreground">
+                {memberCount} active {memberCount === 1 ? "member" : "members"}
+              </p>
+            )}
+          </div>
+          <a href="/members" className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+            Manage →
+          </a>
+        </div>
+      </section>
     </div>
   );
 }

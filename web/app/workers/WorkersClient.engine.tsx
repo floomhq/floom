@@ -1,10 +1,5 @@
 "use client";
 
-// Cloud overlay of the engine's WorkersClient.
-// Diff against app/workers/WorkersClient.engine.tsx to see cloud-only additions:
-//   - CloudWorkerSummary extends WorkerSummary with visibility
-//   - CardFooterLine renders a "Shared" badge when visibility === 'shared'
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -12,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Box, ChevronRight, Folder, Globe, Plus, Search, Star, Archive, LayoutGrid, Clock,
+  Box, ChevronRight, Folder, Plus, Search, Star, Archive, LayoutGrid, Clock,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,11 +17,19 @@ import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { ShareWorkerButton } from "@/components/ShareWorkerButton";
 
-// Cloud-only: extend WorkerSummary with workspace visibility.
-type CloudWorkerSummary = WorkerSummary & { visibility?: string };
-
 const LS_KEY_FAVORITES = "workeros:favorites";
 
+// Worker Author is the engine behind /workers/new (manifest system_worker:true),
+// not an employee, so it must never appear in the Workers list. The API already
+// excludes system_worker:true from the default /workers view; this is a
+// defensive display filter so a system/internal worker can never leak into the
+// list (e.g. from a DB-sourced row that bypassed the API filter).
+//
+// Primary signal is the `system` flag on the payload (added 2026-06-02). The
+// hardcoded id is a stopgap fallback for any worker whose payload predates the
+// flag. Worker Author stays fully FUNCTIONAL — this hides it from the list only.
+// (Codex: if a payload ever lacks `system`, that worker.yml is missing
+// system_worker:true upstream; the id fallback covers worker-author specifically.)
 const SYSTEM_WORKER_ID_FALLBACK = new Set(["worker-author"]);
 
 function isSystemWorker(w: WorkerSummary): boolean {
@@ -58,14 +61,19 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [workers, setWorkers] = useState<CloudWorkerSummary[]>(() =>
-    initialWorkers.filter((w) => !isSystemWorker(w)) as CloudWorkerSummary[]
+  // S44: start with server-fetched data — no loading flash for the initial render.
+  // Strip system/engine workers (e.g. Worker Author) at every ingestion point so
+  // they never reach the list, folder counts, or empty-state logic.
+  const [workers, setWorkers] = useState<WorkerSummary[]>(() =>
+    initialWorkers.filter((w) => !isSystemWorker(w))
   );
-  const [archivedWorkers, setArchivedWorkers] = useState<CloudWorkerSummary[]>([]);
+  const [archivedWorkers, setArchivedWorkers] = useState<WorkerSummary[]>([]);
+  // Only show a loading state if initialWorkers is empty AND we're re-fetching
   const [loading, setLoading] = useState(false);
   const [loadingArchived, setLoadingArchived] = useState(false);
   const [favorites, setFavorites] = useState<Set<string>>(() => getFavorites());
 
+  // S28: tabs (All/Starred/Recent) live in URL hash.
   const initialTab =
     (typeof window !== "undefined" && window.location.hash.replace(/^#/, "")) ||
     searchParams.get("tab");
@@ -73,12 +81,20 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   const folderFilter = searchParams.get("folder");
   const [search, setSearch] = useState("");
 
+  // S44: update workers when initialWorkers changes (e.g. after RSC revalidation).
   useEffect(() => {
     if (initialWorkers.length > 0) {
-      setWorkers(initialWorkers.filter((w) => !isSystemWorker(w)) as CloudWorkerSummary[]);
+      setWorkers(initialWorkers.filter((w) => !isSystemWorker(w)));
     }
   }, [initialWorkers]);
 
+  // On mount, reconcile the list with a fresh client fetch.
+  // - When RSC delivered data, the App Router client cache can hand back a stale
+  //   payload after navigating back from a mutation (e.g. delete), so the All
+  //   list briefly shows a ghost of the deleted worker. A mount refetch drops it
+  //   without weakening the deliberate 30s RSC cache used for the no-flash render.
+  // - When RSC delivered empty (API unavailable), this is the only fetch, so show
+  //   a loading state.
   useEffect(() => {
     const cameWithoutData = initialWorkers.length === 0;
     if (cameWithoutData) setLoading(true);
@@ -86,7 +102,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     api.workers
       .list()
       .then((w) => {
-        if (!cancelled) setWorkers(w.filter((x) => !isSystemWorker(x)) as CloudWorkerSummary[]);
+        if (!cancelled) setWorkers(w.filter((x) => !isSystemWorker(x)));
       })
       .catch(() => {})
       .finally(() => {
@@ -97,6 +113,13 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Refetch archived workers every time the Archived tab is entered.
+  // Previously this was guarded by `archivedWorkers.length === 0`, which only
+  // ever fetched once per mount — so a worker archived from its detail page
+  // (then routed back here) never showed up while any archived workers were
+  // already cached, leaving the tab stuck on a stale "No archived workers".
+  // The archived list is small, so an unconditional refetch on tab-enter is the
+  // smallest correct fix; the cancelled flag drops a stale in-flight response.
   useEffect(() => {
     if (tab !== "archived") return;
     let cancelled = false;
@@ -105,7 +128,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
       .list({ include_archived: true })
       .then((all) => {
         if (!cancelled)
-          setArchivedWorkers(all.filter((w) => w.archived && !isSystemWorker(w)) as CloudWorkerSummary[]);
+          setArchivedWorkers(all.filter((w) => w.archived && !isSystemWorker(w)));
       })
       .catch(() => {})
       .finally(() => {
@@ -145,6 +168,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     });
   }
 
+  // Folder hierarchy at the current path
   const subFolders = useMemo(() => {
     const all = flattenFolders(workers);
     if (!folderFilter) {
@@ -220,6 +244,9 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
       );
     }
     if (searchLower) {
+      // Tag matching is folded into the search box (Federico 2026-05-29): the
+      // blob includes the worker's tags, so typing a tag name filters by tag —
+      // no standing tag-chip wall needed.
       pool = pool.filter((w) => {
         const blob = [
           w.name,
@@ -235,28 +262,46 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     return pool;
   }, [workers, archivedWorkers, tab, folderFilter, favorites, searchLower]);
 
+  // R5: one combined breadcrumb + folder-chip row. Render whenever we're on
+  // the All tab (no search/tag) and there is either a drill-in path or
+  // folders to show — so selecting a folder swaps content within the same
+  // row instead of opening a new one.
   const showFolderNav =
     tab === "all" &&
     !searchLower &&
     (breadcrumbs.length > 0 || subFolders.length > 0);
   const isArchivedTab = tab === "archived";
 
+  // ESC key ladder (Federico 2026-05-29). Scoped to the page; bails entirely
+  // when a modal dialog (e.g. the Cmd-K palette) is open so its own ESC-to-close
+  // is never hijacked. Order:
+  //   1. dialog open  → no-op here (the dialog handles ESC).
+  //   2. search has text or is focused → clear + blur the search.
+  //   3. a non-default filter (folder, or tab != all) → reset to All / no folder.
+  //   4. nothing active → no-op (must NOT navigate away).
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+
+      // 1. A modal dialog is open (Cmd-K palette, etc.) — let it own ESC.
       if (document.querySelector('[role="dialog"]')) return;
+
       const active = document.activeElement;
       const searchEl = document.querySelector<HTMLInputElement>(
         "input[data-workers-search]"
       );
       const searchHasText = search.trim().length > 0;
       const searchFocused = active === searchEl && searchEl !== null;
+
+      // 2. Search has text or is focused → clear + blur.
       if (searchHasText || searchFocused) {
         event.preventDefault();
         setSearch("");
         searchEl?.blur();
         return;
       }
+
+      // Never hijack ESC inside another editable field/textarea.
       if (
         active instanceof HTMLElement &&
         (active.tagName === "INPUT" ||
@@ -265,12 +310,16 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
       ) {
         return;
       }
+
+      // 3. A non-default filter is active → reset to All / no folder.
       if (folderFilter || tab !== "all") {
         event.preventDefault();
         setFolder(null);
         if (tab !== "all") handleTabChange("all");
         return;
       }
+
+      // 4. Nothing active → no-op (do NOT navigate away / go back).
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -303,6 +352,9 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
                 className="pl-9"
               />
             </div>
+            {/* V9 (Federico 2026-06-02): "replace these by icons as well" —
+                icon-only filter tabs. Each carries an aria-label + title so it
+                stays discoverable; the active-state underline is unchanged. */}
             <Tabs value={tab} onValueChange={handleTabChange}>
               <TabsList>
                 <TabsTrigger value="all" aria-label="All workers" title="All">
@@ -321,6 +373,10 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
             </Tabs>
           </div>
 
+          {/* R5: breadcrumb + folder chips share ONE wrapping row so
+              selecting a folder never opens a second row / pushes content
+              down. The block renders whenever there are folders to show or
+              a drill-in path is active, on the All tab without search/tag. */}
           {showFolderNav && (
             <div className="flex items-center gap-1.5 flex-wrap min-h-7">
               {breadcrumbs.length > 0 ? (
@@ -363,6 +419,9 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
             </div>
           )}
 
+          {/* Flat grid (not grouped by folder). Tag matching folded into the
+              search box above; the standing tag-chip wall was removed for
+              digestibility (Federico 2026-05-29). */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {(loading || (isArchivedTab && loadingArchived))
               ? Array.from({ length: 8 }).map((_, i) => (
@@ -397,14 +456,19 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   );
 }
 
+// ---------------------------------------------------------------------------
+// Helper: flatten folder tree
+// ---------------------------------------------------------------------------
+
 interface FlatFolder {
   path: string;
   label: string;
   count: number;
 }
 
-function flattenFolders(workers: CloudWorkerSummary[]): FlatFolder[] {
+function flattenFolders(workers: WorkerSummary[]): FlatFolder[] {
   const countByPath = new Map<string, number>();
+
   for (const worker of workers) {
     if (!worker.folder) continue;
     const parts = worker.folder.split("/").filter(Boolean);
@@ -414,10 +478,13 @@ function flattenFolders(workers: CloudWorkerSummary[]): FlatFolder[] {
       countByPath.set(path, (countByPath.get(path) ?? 0) + 1);
     }
   }
+
   if (countByPath.size === 0) return [];
+
   const distinctFolders = Array.from(
     new Set(workers.map((w) => w.folder).filter(Boolean) as string[])
   ).sort();
+
   return distinctFolders.map((path) => ({
     path,
     label: path,
@@ -425,17 +492,23 @@ function flattenFolders(workers: CloudWorkerSummary[]): FlatFolder[] {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// EmptyWorkersState
+// ---------------------------------------------------------------------------
+
 function EmptyWorkersState() {
   const templates = [
     { id: "research_brief", title: "Research brief", description: "Markdown brief from a topic, audience, and depth.", icon: "📄" },
     { id: "gmail_intake_brief", title: "Gmail triage", description: "Unread Gmail summary with next actions.", icon: "✉️" },
     { id: "csv_enricher", title: "CSV enricher", description: "Spreadsheet enrichment with structured output.", icon: "📊" },
   ];
+
   const examples = [
     "Summarise my Granola meetings, post action items to HubSpot, daily",
     "Every morning at 9am, send me a digest of my GitHub PRs",
     "When a new HubSpot deal lands, post a summary to Slack #sales",
   ];
+
   return (
     <Card className="overflow-hidden">
       <CardContent className="p-8 sm:p-12 space-y-8">
@@ -452,6 +525,7 @@ function EmptyWorkersState() {
             the examples below.
           </p>
         </div>
+
         <div className="space-y-3">
           <Link href="/workers/new">
             <Button size="default" className="gap-2">
@@ -460,6 +534,7 @@ function EmptyWorkersState() {
             </Button>
           </Link>
         </div>
+
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-3">
             Or start from a template
@@ -471,15 +546,22 @@ function EmptyWorkersState() {
                 href={`/workers/new?template=${t.id}`}
                 className="group block rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] hover:bg-[var(--active-nav-bg)] transition-colors p-4"
               >
-                <div className="text-2xl mb-2" aria-hidden>{t.icon}</div>
+                <div className="text-2xl mb-2" aria-hidden>
+                  {t.icon}
+                </div>
                 <p className="text-sm font-medium">{t.title}</p>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{t.description}</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {t.description}
+                </p>
               </Link>
             ))}
           </div>
         </div>
+
         <div>
-          <p className="text-xs font-medium text-muted-foreground mb-3">Example prompts</p>
+          <p className="text-xs font-medium text-muted-foreground mb-3">
+            Example prompts
+          </p>
           <ul className="space-y-1.5">
             {examples.map((ex, i) => (
               <li key={i}>
@@ -498,14 +580,27 @@ function EmptyWorkersState() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// WorkerCard
+// ---------------------------------------------------------------------------
+
+// Fixed card height — every card is the same height so the grid reads as a
+// clean, scannable matrix. Hover is a subtle lift only (shadow), never a
+// size jump (Federico 2026-05-29).
 const CARD_HEIGHT = "h-[188px]";
 
+// U4 (Federico 2026-05-31): Langdock-style card. A distinct tinted HEADER BAND
+// (--bg-2) at the top holds the composed icon strip + the favourite star; the
+// white card body (--bg-card) below holds title / description / footer. The
+// band reads as a separate surface from the body, like a Langdock workflow
+// card. Typography is dialled to a compact Langdock scale: title 14px,
+// description 12.5px (text-[13px] leading-snug), footer/meta 11px.
 function WorkerCard({
   worker,
   isFavorite,
   onFavoriteToggle,
 }: {
-  worker: CloudWorkerSummary;
+  worker: WorkerSummary;
   isFavorite: boolean;
   onFavoriteToggle: (id: string) => void;
 }) {
@@ -522,6 +617,10 @@ function WorkerCard({
       title={hoverDescription || undefined}
     >
       <Link href={`/workers/${worker.id}`} className="flex h-full flex-col">
+        {/* HEADER BAND — distinct tinted top surface (Langdock). Holds the
+            composed icon strip (U3: all the worker's tool/connection/category
+            glyphs, capped at 5 then +N) and the favourite star. Top corners
+            follow the card radius; a hairline separates it from the body. */}
         <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--border-default)] bg-[color-mix(in_srgb,var(--foreground)_7%,var(--bg-card))] px-3.5 py-2.5">
           {worker.archived ? (
             <span
@@ -532,6 +631,10 @@ function WorkerCard({
               Archived
             </span>
           ) : (
+            // U3: render the full available icon set (primary category/brand
+            // glyph + trigger glyph + ALL connection logos), capped at 5 cells
+            // then a +N overflow chip — the same composed strip the detail
+            // header shows.
             <WorkerIconPills
               worker={worker}
               inputs={worker.inputs ?? []}
@@ -543,9 +646,13 @@ function WorkerCard({
           )}
           {!worker.archived && (
             <div className="flex items-center gap-0.5 shrink-0">
+              {/* Share — hover-only, mirrors the favourite star treatment. */}
               <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                 <ShareWorkerButton publicLink={worker.public_link} variant="icon" />
               </span>
+              {/* Favourite star (Federico 2026-05-30): hover-only to cut cognitive
+                  load — except an already-favourited worker keeps its filled star
+                  at rest. focus-visible keeps it reachable for keyboard users. */}
               <button
                 type="button"
                 title={isFavorite ? "Remove from favourites" : "Add to favourites"}
@@ -566,7 +673,11 @@ function WorkerCard({
           )}
         </div>
 
+        {/* BODY — white card surface with title / description / footer. */}
         <div className="flex flex-1 flex-col gap-1.5 p-4">
+          {/* Title — compact Langdock scale (14px), capped at 2 lines. No rigid
+              min-height: reserving 2 lines for every title starved the
+              description on cards that also show a status pill. */}
           <h3
             className={`text-sm font-medium leading-snug overflow-hidden shrink-0 ${
               worker.archived ? "text-muted-foreground" : ""
@@ -575,24 +686,35 @@ function WorkerCard({
           >
             {worker.name}
           </h3>
+
+          {/* U1 — Description: a CLEAN 2-line clamp ending in an ellipsis. The
+              Tailwind line-clamp-2 utility computed display:flow-root here
+              (clamp ignored → text sliced mid-line), and as a flex child it was
+              shrunk below 2 lines. Force the -webkit-box clamp via inline style
+              + shrink-0 so it renders exactly 2 lines + ellipsis and flexbox
+              can't squeeze it (the cutoff bug Federico flagged 2026-05-30).
+              Smaller Langdock body size (13px). */}
           <p
             className="text-[13px] leading-snug text-muted-foreground overflow-hidden shrink-0"
             style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }}
           >
             {description}
           </p>
+
+          {/* Spacer pushes the footer to the bottom on a fixed-height card. */}
           <div className="flex-1" />
-          <CardFooterLine
-            stats={stats}
-            status={worker.archived ? undefined : worker.status}
-            visibility={worker.visibility}
-          />
+
+          {/* Quiet footer — relative last-run time + a single small status dot. */}
+          <CardFooterLine stats={stats} status={worker.archived ? undefined : worker.status} />
         </div>
       </Link>
     </Card>
   );
 }
 
+// Footer status: a single small dot + label. Attention states (error /
+// needs-attention / missing-secret) surface here instead of as a title-row pill.
+// Healthy/ready workers show no dot — just the last-run time, kept quiet.
 function footerStatus(status?: string): { cls: string; label: string } | null {
   switch (status) {
     case "error":
@@ -609,29 +731,21 @@ function footerStatus(status?: string): { cls: string; label: string } | null {
 function CardFooterLine({
   stats,
   status,
-  visibility,
 }: {
   stats?: import("@/lib/types").RecentStats | null;
   status?: string;
-  visibility?: string;
 }) {
   const attention = footerStatus(status);
   const lastRun = stats?.last_run_at ? formatRelativeTime(stats.last_run_at) : null;
-  const isShared = visibility === "shared";
 
-  if (!attention && !lastRun && !isShared) {
+  if (!attention && !lastRun) {
+    // Keep the footer slot present so card content lands at the same baseline.
     return <div className="mt-auto h-4" aria-hidden />;
   }
   return (
+    // U4: meta row at the compact Langdock scale (11px).
     <div className="mt-auto flex items-center gap-2 text-[11px] text-[var(--ink-soft)]">
       {lastRun && <span className="truncate">{lastRun}</span>}
-      {/* Cloud: shared badge — visible to workspace members */}
-      {isShared && (
-        <span className="inline-flex items-center gap-1 rounded-sm border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] text-[var(--ink-mute)]">
-          <Globe className="size-2.5" />
-          Shared
-        </span>
-      )}
       {attention && (
         <span className="ml-auto flex items-center gap-1.5 shrink-0">
           <span className={`size-1.5 rounded-full ${attention.cls}`} aria-hidden="true" />
@@ -642,6 +756,7 @@ function CardFooterLine({
   );
 }
 
+
 function firstLine(value?: string): string {
   return (value || "").split("\n").map((line) => line.trim()).find(Boolean) || "";
 }
@@ -649,10 +764,12 @@ function firstLine(value?: string): string {
 function WorkerCardSkeleton() {
   return (
     <Card className={`${CARD_HEIGHT} gap-0 py-0 overflow-hidden`}>
-      <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--border-default)] bg-[color-mix(in_srgb,var(--foreground)_7%,var(--bg-card))] px-3.5 py-2">
+      {/* Header band: icon strip + star */}
+        <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--border-default)] bg-[color-mix(in_srgb,var(--foreground)_7%,var(--bg-card))] px-3.5 py-2">
         <Skeleton className="h-7 w-20 rounded-[var(--radius-squircle)]" />
         <Skeleton className="size-5 rounded shrink-0" />
       </div>
+      {/* Body */}
       <div className="flex flex-1 flex-col gap-1.5 p-4">
         <Skeleton className="h-4 w-3/4" />
         <Skeleton className="h-3 w-full" />

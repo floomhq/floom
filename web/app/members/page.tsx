@@ -3,7 +3,6 @@
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -77,7 +76,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 // types
 // ---------------------------------------------------------------------------
 
-type Member = { id: string; user_id: string; role: string; joined_at: string | null };
+type Member = { id: string; user_id: string; role: string; joined_at: string | null; email?: string; is_owner?: boolean };
 type Invitation = { id: string; email: string; role: string; status: string; created_at: string; expires_at: string | null };
 
 // ---------------------------------------------------------------------------
@@ -143,10 +142,14 @@ function MembersContent() {
   const refresh = useCallback(async (ws: string) => {
     try {
       const [mRes, iRes] = await Promise.all([
-        apiFetch<{ members: Member[] }>(`/workspaces/${ws}/members`),
+        apiFetch<{ owner: Member; members: Member[] }>(`/workspaces/${ws}/members`),
         apiFetch<{ invitations: Invitation[] }>(`/workspaces/${ws}/invitations`),
       ]);
-      setMembers(mRes.members ?? []);
+      // Combine owner + members into a single sorted list (owner always first).
+      const allMembers: Member[] = [];
+      if (mRes.owner) allMembers.push({ ...mRes.owner, is_owner: true });
+      allMembers.push(...(mRes.members ?? []));
+      setMembers(allMembers);
       setInvitations(iRes.invitations ?? []);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to load members");
@@ -349,10 +352,10 @@ function MembersContent() {
                     : <Users className="w-4 h-4 text-muted-foreground shrink-0" />
                   }
                   <div className="min-w-0">
-                    <p className="text-sm font-mono text-sm truncate">{m.user_id}</p>
+                    <p className="text-sm font-medium truncate">{m.email || m.user_id}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                       <Badge variant={m.role === "admin" ? "default" : "secondary"} className="text-xs h-4 px-1.5">
-                        {m.role}
+                        {m.is_owner ? "owner" : m.role}
                       </Badge>
                       {m.joined_at && (
                         <span className="text-xs text-muted-foreground">
@@ -362,31 +365,33 @@ function MembersContent() {
                     </div>
                   </div>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    disabled={removingId === m.user_id || roleChangingId === m.user_id}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--bg-2)] transition-opacity"
-                  >
-                    <MoreVertical className="w-3.5 h-3.5" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => void handleRoleChange(m.user_id, m.role === "admin" ? "member" : "admin")}
-                      disabled={roleChangingId === m.user_id}
+                {!m.is_owner && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      disabled={removingId === m.user_id || roleChangingId === m.user_id}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--bg-2)] transition-opacity"
                     >
-                      <ShieldCheck className="w-3.5 h-3.5 mr-2" />
-                      Make {m.role === "admin" ? "member" : "admin"}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => void handleRemove(m.user_id)}
-                      disabled={removingId === m.user_id}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <X className="w-3.5 h-3.5 mr-2" />
-                      {removingId === m.user_id ? "Removing…" : "Remove"}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                      <MoreVertical className="w-3.5 h-3.5" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onClick={() => void handleRoleChange(m.user_id, m.role === "admin" ? "member" : "admin")}
+                        disabled={roleChangingId === m.user_id}
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 mr-2" />
+                        Make {m.role === "admin" ? "member" : "admin"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => void handleRemove(m.user_id)}
+                        disabled={removingId === m.user_id}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <X className="w-3.5 h-3.5 mr-2" />
+                        {removingId === m.user_id ? "Removing…" : "Remove"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
             ))}
           </div>
@@ -436,99 +441,6 @@ function MembersContent() {
         )}
       </section>
 
-      {/* Accept-invite flow — auto-opens when ?invite=<token> is in the URL */}
-      <AcceptInviteSection onJoined={() => void refresh(workspaceId)} />
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Accept invite — shown as a collapsible section for users who have a token
-// ---------------------------------------------------------------------------
-
-function AcceptInviteSection({ onJoined }: { onJoined: () => void }) {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const urlToken = searchParams?.get("invite") ?? "";
-  const [open, setOpen] = useState(!!urlToken);
-  const [token, setToken] = useState(urlToken);
-  const [accepting, setAccepting] = useState(false);
-  const [pat, setPat] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  async function handleAccept() {
-    if (!token.trim()) { toast.error("Paste your invitation token"); return; }
-    setAccepting(true);
-    try {
-      const result = await apiFetch<{ workspace_id: string; role: string; pat_token: string }>(
-        "/workspaces/accept-invite",
-        { method: "POST", body: JSON.stringify({ token: token.trim() }) }
-      );
-      // Switch active workspace to the one just joined.
-      window.localStorage.setItem(WS_KEY, result.workspace_id);
-      setPat(result.pat_token);
-      toast.success("Invitation accepted — you've joined the workspace");
-      onJoined();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Invalid or expired invitation");
-    } finally {
-      setAccepting(false);
-    }
-  }
-
-  function handleCopy() {
-    if (!pat) return;
-    void navigator.clipboard.writeText(pat).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
-
-  function handleDone() {
-    router.push("/app/workers");
-  }
-
-  return (
-    <section className="border-t border-border pt-6 space-y-3">
-      <button
-        type="button"
-        className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? "▾" : "▸"} Have an invitation? Accept it here
-      </button>
-      {open && !pat && (
-        <div className="flex gap-2 flex-wrap items-center">
-          <Input
-            placeholder="Paste invitation token (wsi_…)"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void handleAccept(); }}
-            className="text-sm font-mono flex-1 min-w-[260px]"
-          />
-          <Button size="sm" disabled={accepting} onClick={() => void handleAccept()}>
-            {accepting ? "Accepting…" : "Accept"}
-          </Button>
-        </div>
-      )}
-      {pat && (
-        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-          <p className="text-sm font-medium">You're in. Save your API token before continuing.</p>
-          <p className="text-xs text-muted-foreground">
-            This token is shown <strong>once only</strong> and cannot be retrieved again. Use it as your{" "}
-            <code className="bg-muted px-1 py-0.5 rounded font-mono">x-floom-token</code> header.
-          </p>
-          <div className="flex gap-2">
-            <Input readOnly value={pat} className="font-mono text-xs" onFocus={(e) => e.target.select()} />
-            <Button size="sm" variant="secondary" onClick={handleCopy}>
-              {copied ? "Copied!" : "Copy"}
-            </Button>
-          </div>
-          <Button size="sm" className="w-full" onClick={handleDone}>
-            I've saved my token — go to workspace
-          </Button>
-        </div>
-      )}
-    </section>
   );
 }

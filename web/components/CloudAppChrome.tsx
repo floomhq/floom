@@ -11,13 +11,14 @@ import { Toaster } from "@/components/ui/sonner";
 export function CloudAppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isLoginPath = pathname === "/login" || pathname.startsWith("/login/") || pathname === "/app/login" || pathname.startsWith("/app/login/");
+  const isJoinPath = pathname === "/join" || pathname.startsWith("/join/") || pathname === "/app/join" || pathname.startsWith("/app/join/");
   const isApprovalReviewPath =
     pathname === "/approvals/review" ||
     pathname.startsWith("/approvals/review/") ||
     pathname === "/app/approvals/review" ||
     pathname.startsWith("/app/approvals/review/");
 
-  if (isLoginPath) {
+  if (isLoginPath || isJoinPath) {
     return (
       <>
         <IconSprite />
