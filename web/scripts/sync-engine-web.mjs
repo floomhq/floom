@@ -79,6 +79,7 @@ export const OVERLAY_FILES = [
   "app/settings/page.tsx",
   "app/members/page.tsx",
   "app/workers/page.tsx",
+  "app/workers/WorkersClient.tsx",
   "app/workers/[id]/share/page.tsx",
   "app/workspace/share/[token]/page.tsx",
   "components/CloudAppChrome.tsx",
@@ -221,6 +222,19 @@ function main() {
     copyFileSync(from, to);
     copied++;
     log(`[sync] preserved engine sidebar exports -> ${companion}`);
+  }
+
+  // 4b) Preserve the engine WorkersClient under a stable companion name so the
+  //     overlay can compose from it and the drift guard has a reference.
+  const engineWorkersClient = "app/workers/WorkersClient.tsx";
+  if (existsSync(join(ENGINE_WEB, engineWorkersClient))) {
+    const companion = "app/workers/WorkersClient.engine.tsx";
+    const from = join(DEST, engineWorkersClient); // already copied in step 2
+    const to = join(DEST, companion);
+    mkdirSync(dirname(to), { recursive: true });
+    copyFileSync(from, to);
+    copied++;
+    log(`[sync] preserved engine WorkersClient -> ${companion}`);
   }
 
   // 5) Layer the overlay on top (overwrites synced engine files).
