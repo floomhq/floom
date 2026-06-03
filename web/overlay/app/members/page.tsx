@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -448,6 +448,7 @@ function MembersContent() {
 
 function AcceptInviteSection({ onJoined }: { onJoined: () => void }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const urlToken = searchParams?.get("invite") ?? "";
   const [open, setOpen] = useState(!!urlToken);
   const [token, setToken] = useState(urlToken);
@@ -463,8 +464,10 @@ function AcceptInviteSection({ onJoined }: { onJoined: () => void }) {
         "/workspaces/accept-invite",
         { method: "POST", body: JSON.stringify({ token: token.trim() }) }
       );
+      // Switch active workspace to the one just joined.
+      window.localStorage.setItem(WS_KEY, result.workspace_id);
       setPat(result.pat_token);
-      toast.success("Invitation accepted — workspace unlocked");
+      toast.success("Invitation accepted — you've joined the workspace");
       onJoined();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Invalid or expired invitation");
@@ -479,6 +482,10 @@ function AcceptInviteSection({ onJoined }: { onJoined: () => void }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  }
+
+  function handleDone() {
+    router.push("/app/workers");
   }
 
   return (
@@ -506,9 +513,9 @@ function AcceptInviteSection({ onJoined }: { onJoined: () => void }) {
       )}
       {pat && (
         <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-          <p className="text-sm font-medium">You're in. Save your API token.</p>
+          <p className="text-sm font-medium">You're in. Save your API token before continuing.</p>
           <p className="text-xs text-muted-foreground">
-            This token is shown once and cannot be retrieved again. Use it as your{" "}
+            This token is shown <strong>once only</strong> and cannot be retrieved again. Use it as your{" "}
             <code className="bg-muted px-1 py-0.5 rounded font-mono">x-floom-token</code> header.
           </p>
           <div className="flex gap-2">
@@ -517,6 +524,9 @@ function AcceptInviteSection({ onJoined }: { onJoined: () => void }) {
               {copied ? "Copied!" : "Copy"}
             </Button>
           </div>
+          <Button size="sm" className="w-full" onClick={handleDone}>
+            I've saved my token — go to workspace
+          </Button>
         </div>
       )}
     </section>
