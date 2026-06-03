@@ -94,17 +94,76 @@ const CLI_COMMANDS: { name: string; description: string }[] = [
 ];
 
 // Representative API endpoints for the API tab. All take the x-floom-secret
-// header shown above; this is a quick map, not the exhaustive surface.
-const API_ENDPOINTS: { method: string; path: string; description: string }[] = [
-  { method: "GET", path: "/workers?shape=list", description: "List workers (compact shape)." },
-  { method: "GET", path: "/workers/{id}", description: "Read one worker." },
-  { method: "POST", path: "/workers/{id}/runs", description: "Start a worker run." },
-  { method: "GET", path: "/runs", description: "List runs, filterable by worker or status." },
-  { method: "GET", path: "/runs/{id}", description: "Read a run with logs, outputs, and approval state." },
-  { method: "GET", path: "/secrets", description: "List secret names and status." },
-  { method: "GET", path: "/connections", description: "List app and MCP connections." },
-  { method: "GET", path: "/system/overview", description: "Workspace dashboard: health, runs, approvals, alerts." },
+// header shown above. This is a curated, honest map of the surface: reads AND
+// mutations (create / run / approve / rotate / archive), grouped by resource so
+// it reads as the full read+write API it is — not a read-only one. Source of
+// truth: apps/api/main.py route decorators (verified 2026-06-03). Not exhaustive.
+type ApiMethod = "GET" | "POST" | "PATCH" | "DELETE";
+const API_ENDPOINT_GROUPS: {
+  group: string;
+  endpoints: { method: ApiMethod; path: string; description: string }[];
+}[] = [
+  {
+    group: "Workers",
+    endpoints: [
+      { method: "GET", path: "/workers?shape=list", description: "List workers (compact shape)." },
+      { method: "GET", path: "/workers/{id}", description: "Read one worker's config and metadata." },
+      { method: "POST", path: "/workers", description: "Create a worker from worker.yml + run.py." },
+      { method: "POST", path: "/workers/draft-and-create", description: "Draft a worker from a prompt and create it." },
+      { method: "PATCH", path: "/workers/{id}", description: "Update trigger, cron, inputs, or capabilities." },
+      { method: "POST", path: "/workers/{id}/archive", description: "Archive a worker (reversible)." },
+      { method: "POST", path: "/workers/{id}/restore", description: "Restore an archived worker." },
+      { method: "POST", path: "/workers/{id}/webhook-secret/rotate", description: "Rotate the worker's webhook secret." },
+      { method: "DELETE", path: "/workers/{id}", description: "Delete a worker and its run data." },
+    ],
+  },
+  {
+    group: "Runs",
+    endpoints: [
+      { method: "POST", path: "/workers/{id}/runs", description: "Start a worker run with input values." },
+      { method: "GET", path: "/runs", description: "List runs, filterable by worker or status." },
+      { method: "GET", path: "/runs/{id}", description: "Read a run with logs, outputs, and approval state." },
+      { method: "GET", path: "/runs/{id}/logs", description: "Fetch a run's log lines." },
+      { method: "POST", path: "/runs/{id}/approve", description: "Approve a run awaiting approval." },
+      { method: "POST", path: "/runs/{id}/reject", description: "Reject a run awaiting approval." },
+      { method: "POST", path: "/runs/{id}/cancel", description: "Cancel an in-progress run." },
+      { method: "POST", path: "/workers/{id}/runs/{run_id}/replay", description: "Replay a previous run." },
+    ],
+  },
+  {
+    group: "Secrets & connections",
+    endpoints: [
+      { method: "GET", path: "/secrets", description: "List secret names and status." },
+      { method: "POST", path: "/secrets/{name}", description: "Set (or test) a secret value." },
+      { method: "DELETE", path: "/secrets/{name}", description: "Delete a secret." },
+      { method: "GET", path: "/connections", description: "List app and MCP connections." },
+      { method: "POST", path: "/connections/mcp", description: "Add an MCP server connection." },
+    ],
+  },
+  {
+    group: "System",
+    endpoints: [
+      { method: "GET", path: "/system/overview", description: "Dashboard: health, runs, approvals, alerts." },
+      { method: "GET", path: "/approvals", description: "List runs awaiting approval." },
+    ],
+  },
 ];
+
+const METHOD_BADGE: Record<ApiMethod, string> = {
+  GET: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
+  POST: "bg-blue-500/12 text-blue-700 dark:text-blue-300",
+  PATCH: "bg-amber-500/12 text-amber-700 dark:text-amber-300",
+  DELETE: "bg-rose-500/12 text-rose-700 dark:text-rose-300",
+};
+
+const API_ENDPOINT_COUNT = API_ENDPOINT_GROUPS.reduce(
+  (sum, g) => sum + g.endpoints.length,
+  0,
+);
+const API_MUTATION_COUNT = API_ENDPOINT_GROUPS.reduce(
+  (sum, g) => sum + g.endpoints.filter((e) => e.method !== "GET").length,
+  0,
+);
 
 export function CliCommandPanel() {
   const [copiedKey, setCopiedKey] = useState("");
@@ -333,6 +392,10 @@ export function CliCommandPanel() {
 
           {/* CLI surface */}
           <TabsContent value="cli" className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Install the <code className="font-mono">workeros</code> CLI and run any command below.
+              The snippet uses your token; full command reference follows.
+            </p>
             <SnippetBox
               text={snippets.cli.display}
               copied={copiedKey === "cli"}
@@ -347,6 +410,10 @@ export function CliCommandPanel() {
 
           {/* MCP surface */}
           <TabsContent value="mcp" className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Connect an MCP client (Claude, Cursor, VS Code…) to your workers.
+              Paste the config or let the CLI write it; the full tool catalog is below.
+            </p>
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">
                 Paste this into your client&apos;s <code className="font-mono">mcpServers</code> config
@@ -392,13 +459,17 @@ export function CliCommandPanel() {
 
           {/* API surface */}
           <TabsContent value="api" className="space-y-4">
-            <div className="space-y-1.5 text-sm">
+            <p className="text-xs text-muted-foreground">
+              Call the HTTP API directly with your token. It is a full read+write API —
+              create workers, start runs, approve, rotate secrets, and more.
+            </p>
+            <div className="rounded-[var(--radius-card)] border border-line bg-[var(--bg-2)] px-3 py-2.5 space-y-1.5 text-sm">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-muted-foreground">Base URL</span>
+                <span className="w-20 shrink-0 text-muted-foreground">Base URL</span>
                 <code className="font-mono text-xs text-foreground">{API_BASE}</code>
               </div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-muted-foreground">Auth header</span>
+                <span className="w-20 shrink-0 text-muted-foreground">Auth header</span>
                 <code className="font-mono text-xs text-foreground">x-floom-secret: {displaySecret}</code>
               </div>
             </div>
@@ -407,14 +478,7 @@ export function CliCommandPanel() {
               copied={copiedKey === "api"}
               onCopy={() => void copySnippet("api")}
             />
-            <RefList
-              title="Endpoints"
-              filterPlaceholder="Filter endpoints..."
-              items={API_ENDPOINTS.map((e) => ({
-                name: `${e.method} ${e.path}`,
-                description: e.description,
-              }))}
-            />
+            <ApiEndpointList />
           </TabsContent>
         </Tabs>
       </div>
@@ -468,6 +532,84 @@ function RefList({
             <div key={item.name} className="px-3 py-2.5">
               <code className="text-xs font-medium text-foreground">{item.name}</code>
               <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// W4: the API endpoint reference. Grouped by resource, with a colour-coded
+// HTTP-method badge per row, so the read+write surface is obvious at a glance
+// (the old flat GET-skewed list read as "the API is read-only"). A filter cuts
+// scrolling; the header advertises the mutation count so the write surface is
+// visible before you even scroll.
+function ApiEndpointList() {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const groups = useMemo(() => {
+    if (!q) return API_ENDPOINT_GROUPS;
+    return API_ENDPOINT_GROUPS.map((g) => ({
+      group: g.group,
+      endpoints: g.endpoints.filter(
+        (e) =>
+          e.path.toLowerCase().includes(q) ||
+          e.method.toLowerCase().includes(q) ||
+          e.description.toLowerCase().includes(q),
+      ),
+    })).filter((g) => g.endpoints.length > 0);
+  }, [q]);
+
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-medium text-foreground">
+          Endpoints{" "}
+          <span className="font-normal text-muted-foreground">
+            ({API_ENDPOINT_COUNT} — {API_MUTATION_COUNT} write)
+          </span>
+        </h3>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter endpoints..."
+          className="h-8 w-44 rounded-[var(--radius-input)] border border-line bg-[var(--bg-2)] px-2.5 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring"
+        />
+      </div>
+      {groups.length === 0 ? (
+        <p className="px-1 py-3 text-xs text-muted-foreground">No matches.</p>
+      ) : (
+        <div className="space-y-3">
+          {groups.map((group) => (
+            <div key={group.group} className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">{group.group}</p>
+              <div className="divide-y divide-line rounded-[var(--radius-card)] border border-line overflow-hidden">
+                {group.endpoints.map((endpoint) => (
+                  <div
+                    key={`${endpoint.method} ${endpoint.path}`}
+                    className="flex items-start gap-2.5 px-3 py-2.5"
+                  >
+                    <span
+                      className={
+                        `mt-0.5 inline-flex shrink-0 items-center justify-center rounded-[var(--radius-button)] px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none tracking-wide ` +
+                        METHOD_BADGE[endpoint.method]
+                      }
+                    >
+                      {endpoint.method}
+                    </span>
+                    <div className="min-w-0">
+                      <code className="text-xs font-medium text-foreground break-all">
+                        {endpoint.path}
+                      </code>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {endpoint.description}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
