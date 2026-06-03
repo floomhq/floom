@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Box, ChevronRight, Folder, Plus, Search, Star, Archive, LayoutGrid, Clock,
+  Box, ChevronRight, Folder, Plus, Search, Star, Archive, LayoutGrid, Clock, Users,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -646,6 +646,14 @@ function WorkerCard({
           )}
           {!worker.archived && (
             <div className="flex items-center gap-0.5 shrink-0">
+              {/* Visibility indicator — only shown when SHARED (private is the
+                  quiet default, so showing it on every card would be noise). */}
+              {worker.visibility === "workspace" && (
+                <span className="mr-1 inline-flex items-center gap-1 text-[10px] font-normal leading-none text-[var(--ink-mute)]">
+                  <Users className="size-3" />
+                  Shared
+                </span>
+              )}
               {/* Share — hover-only, mirrors the favourite star treatment. */}
               <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                 <ShareWorkerButton publicLink={worker.public_link} variant="icon" />

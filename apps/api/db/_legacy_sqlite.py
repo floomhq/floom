@@ -1,6 +1,7 @@
 """Floom database layer with migrations, indexes, and context managers."""
 
 import json
+import re
 import sqlite3
 import os
 import logging
@@ -535,6 +536,161 @@ def _migrate_file_owners(conn: sqlite3.Connection) -> None:
         FROM files
         """
     )
+
+
+def _derive_workspace_id_from_owner(owner_id: str | None) -> str:
+    """Derive a workspace_id from an engine owner_id.
+
+    In OSS/local mode the active workspace is encoded into the scoped user_id:
+    the base user keeps its bare id under the default workspace (``local-default``),
+    and a non-default local workspace appends a ``__ws_<14 hex>`` suffix (see
+    ``auth/local_workspaces.py``). owner_id IS that scoped user_id, so the
+    workspace it belongs to is the suffix when present, else ``local-default``.
+
+    This keeps the new ``workspace_members`` / ``workers.workspace_id`` model
+    consistent with the existing per-workspace owner-scoping with zero new
+    encoding: one workspace == one (base_user, workspace_id) pair.
+    """
+    text = (owner_id or "").strip()
+    match = re.search(r"__(ws_[a-f0-9]{14})$", text)
+    if match:
+        return match.group(1)
+    return "local-default"
+
+
+def _migrate_workspace_members_and_visibility(conn: sqlite3.Connection) -> None:
+    """Members + asset-visibility schema (engine STEP 1).
+
+    Adds the ``workspace_members`` table (workspace-level RBAC) + a partial
+    unique index enforcing exactly one active owner per workspace, and the
+    per-asset ``workspace_id`` / ``visibility`` columns on ``workers``.
+
+    Idempotent: re-runnable. Uses IF NOT EXISTS / PRAGMA checks so a partially
+    applied migration (or a fresh DB that created some of this inline) is safe.
+    Backwards-safe: existing workers keep working; the backfill (next migration)
+    populates the new columns so single-tenant behaviour is unchanged.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_members (
+            workspace_id TEXT NOT NULL,
+            user_id      TEXT NOT NULL,
+            email        TEXT,
+            display_name TEXT,
+            role         TEXT NOT NULL CHECK (role IN ('owner','admin','member')),
+            status       TEXT NOT NULL DEFAULT 'active'
+                         CHECK (status IN ('active','invited','removed')),
+            invited_by   TEXT,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, user_id)
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_one_owner
+            ON workspace_members(workspace_id)
+            WHERE role = 'owner' AND status = 'active';
+
+        CREATE INDEX IF NOT EXISTS idx_workspace_members_user
+            ON workspace_members(user_id);
+        """
+    )
+
+    worker_columns = _table_columns(conn, "workers")
+    if "workspace_id" not in worker_columns:
+        conn.execute("ALTER TABLE workers ADD COLUMN workspace_id TEXT")
+    if "visibility" not in worker_columns:
+        # Cannot inline a CHECK on ADD COLUMN reliably across SQLite versions for
+        # an existing table; enforce the allowed set at the repository layer and
+        # default to the secure value here. New rows created via INSERT paths set
+        # it explicitly.
+        conn.execute(
+            "ALTER TABLE workers ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workers_workspace_id "
+        "ON workers(workspace_id)"
+    )
+
+
+def _migrate_workspace_members_backfill(conn: sqlite3.Connection) -> None:
+    """Backfill members + worker workspace_id/visibility from existing state.
+
+    Idempotent + backwards-safe:
+      1. One active owner ``workspace_members`` row per ``local_workspaces`` row,
+         keyed by (derived workspace_id, owner_user_id). INSERT OR IGNORE so a
+         re-run never duplicates or downgrades an existing membership.
+      2. Every worker gets ``workspace_id`` derived from its owner_id suffix
+         (``local-default`` for the base user) when currently NULL.
+      3. Every worker gets ``visibility='private'`` when currently NULL/empty,
+         preserving the secure default; rows already set are untouched.
+
+    Existing single-tenant behaviour is unchanged: the single local owner becomes
+    the one workspace member, and every existing worker stays private + owned by
+    the same user, so list/run/edit see no change.
+    """
+    now = now_iso()
+
+    if _table_exists(conn, "local_workspaces"):
+        rows = conn.execute(
+            "SELECT id, owner_user_id FROM local_workspaces"
+        ).fetchall()
+        for row in rows:
+            ws_id = row["id"]
+            owner = row["owner_user_id"]
+            if not ws_id or not owner:
+                continue
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO workspace_members
+                    (workspace_id, user_id, email, display_name, role,
+                     status, invited_by, created_at, updated_at)
+                VALUES (?, ?, NULL, NULL, 'owner', 'active', NULL, ?, ?)
+                """,
+                (ws_id, owner, now, now),
+            )
+
+    # Backfill workers.workspace_id + visibility. owner_id already exists.
+    if _table_exists(conn, "workers"):
+        worker_rows = conn.execute(
+            "SELECT id, owner_id, workspace_id, visibility FROM workers"
+        ).fetchall()
+        for row in worker_rows:
+            updates: list[str] = []
+            params: list[Any] = []
+            if not (row["workspace_id"] or "").strip():
+                updates.append("workspace_id = ?")
+                params.append(_derive_workspace_id_from_owner(row["owner_id"]))
+            if not (row["visibility"] or "").strip():
+                updates.append("visibility = ?")
+                params.append("private")
+            if updates:
+                params.append(row["id"])
+                conn.execute(
+                    f"UPDATE workers SET {', '.join(updates)} WHERE id = ?",
+                    tuple(params),
+                )
+
+    # Ensure every distinct worker owner that lacks a local_workspaces row still
+    # has an owner membership (e.g. derived-workspace owners, or DBs predating
+    # local_workspaces). Derive their workspace_id the same way.
+    if _table_exists(conn, "workers"):
+        owner_rows = conn.execute(
+            "SELECT DISTINCT owner_id FROM workers WHERE owner_id IS NOT NULL"
+        ).fetchall()
+        for row in owner_rows:
+            owner = row["owner_id"]
+            if not owner:
+                continue
+            ws_id = _derive_workspace_id_from_owner(owner)
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO workspace_members
+                    (workspace_id, user_id, email, display_name, role,
+                     status, invited_by, created_at, updated_at)
+                VALUES (?, ?, NULL, NULL, 'owner', 'active', NULL, ?, ?)
+                """,
+                (ws_id, owner, now, now),
+            )
 
 
 def _make_worker_alerts_url_nullable(conn: sqlite3.Connection) -> None:
@@ -1147,6 +1303,16 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE runs ADD COLUMN trigger_ref TEXT;
     """,
+    # -- migration 51: workspace_members + per-asset visibility (Members STEP 1) -
+    # Workspace-level RBAC (workspace_members) + per-asset owner_id/visibility on
+    # workers. owner_id already exists; this adds workspace_id + visibility and
+    # the one-active-owner-per-workspace unique index. Idempotent.
+    _migrate_workspace_members_and_visibility,
+    # -- migration 52: backfill members + worker workspace_id/visibility --------
+    # One owner membership per local workspace + per distinct worker owner;
+    # existing workers get derived workspace_id + visibility='private'. Idempotent
+    # + backwards-safe (single-tenant behaviour unchanged).
+    _migrate_workspace_members_backfill,
 ]
 
 
