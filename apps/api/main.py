@@ -5545,7 +5545,8 @@ def update_worker(
     updates: Dict[str, Any] = {}
 
     if payload.trigger_type is not None:
-        updates["trigger_type"] = payload.trigger_type
+        # "cron" is an accepted alias for "schedule"
+        updates["trigger_type"] = "schedule" if payload.trigger_type == "cron" else payload.trigger_type
 
     if new_cron_expr is not None:
         updates["cron_expr"] = new_cron_expr
@@ -7260,6 +7261,8 @@ def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tup
 
     if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
         raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")
+    if len(worker_id) > 64:
+        raise HTTPException(status_code=422, detail=f"Worker ID must be 64 characters or fewer (got {len(worker_id)})")
     if user_id:
         with use_context_scope(context_scope_for_user(user_id)):
             metadata = load_context_metadata()
