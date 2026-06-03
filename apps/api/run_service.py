@@ -1840,8 +1840,11 @@ def _load_runtime_env_files() -> None:
     for secret_store in secret_store_read_paths():
         if secret_store.is_file():
             load_dotenv(secret_store, override=False)
-    if API_ENV_PATH.is_file():
-        load_dotenv(API_ENV_PATH, override=False)
+    try:
+        if API_ENV_PATH.is_file():
+            load_dotenv(API_ENV_PATH, override=False)
+    except (PermissionError, OSError):
+        pass
 
 
 def _env_keys_from_file(path: Path) -> set[str]:
