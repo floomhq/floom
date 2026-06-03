@@ -152,6 +152,72 @@ async def member_write_guard(request: Request, call_next):
 
 
 @app.middleware("http")
+async def runs_trigger_member_middleware(request: Request, call_next):
+    """Inject trigger_member_id and trigger_member_email into run responses.
+
+    The engine's run response model doesn't include these cloud-only fields.
+    This middleware post-processes GET /api/runs/{id} and GET /api/runs list
+    responses to surface member attribution.
+    """
+    import asyncio as _asyncio2
+    import json as _json2
+    import re as _re2
+
+    path = request.url.path.rstrip("/")
+    is_run_detail = request.method == "GET" and bool(_re2.match(r"^/api/runs/[^/]+$", path))
+    is_runs_list = request.method == "GET" and path in ("/api/runs", "/runs")
+    if not (is_run_detail or is_runs_list):
+        return await call_next(request)
+
+    response = await call_next(request)
+    if not (200 <= response.status_code < 300):
+        return response
+
+    body = b""
+    async for chunk in response.body_iterator:
+        body += chunk
+
+    try:
+        data = _json2.loads(body)
+        items = [data] if is_run_detail and isinstance(data, dict) else (data if isinstance(data, list) else [])
+        run_ids = [r["id"] for r in items if isinstance(r, dict) and r.get("id")]
+        if run_ids:
+            def _fetch_run_members():
+                from apps.api.config import get_supabase_service_client
+                svc = get_supabase_service_client()
+                rows = svc.table("runs").select("id,trigger_member_id").in_("id", run_ids).execute()
+                id_to_mid = {r["id"]: r.get("trigger_member_id") for r in (rows.data or []) if r.get("trigger_member_id")}
+                if not id_to_mid:
+                    return {}
+                member_ids = list(set(id_to_mid.values()))
+                email_map: dict[str, str] = {}
+                for mid in member_ids:
+                    try:
+                        resp = svc.auth.admin.get_user_by_id(mid)
+                        if resp and resp.user and resp.user.email:
+                            email_map[mid] = resp.user.email
+                    except Exception:
+                        pass
+                return {run_id: {"trigger_member_id": mid, "trigger_member_email": email_map.get(mid)} for run_id, mid in id_to_mid.items()}
+
+            enrichment = await _asyncio2.to_thread(_fetch_run_members)
+            if enrichment:
+                if is_run_detail and isinstance(data, dict):
+                    meta = enrichment.get(data.get("id", ""), {})
+                    data.update(meta)
+                else:
+                    for item in data:
+                        if isinstance(item, dict):
+                            item.update(enrichment.get(item.get("id", ""), {}))
+                body = _json2.dumps(data).encode()
+    except Exception:
+        pass
+
+    from starlette.responses import Response as _StResponse2
+    return _StResponse2(content=body, status_code=response.status_code, media_type="application/json")
+
+
+@app.middleware("http")
 async def workers_list_visibility_middleware(request: Request, call_next):
     """Inject visibility into workers list API responses.
 
