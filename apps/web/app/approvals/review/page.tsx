@@ -645,7 +645,7 @@ function ApprovalFilePreview({
   return (
     <div>
       <h2 className="text-sm font-medium text-[var(--ink)]">File preview</h2>
-      <div className="mt-2 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)]">
+      <div className="mt-2 overflow-hidden rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)]">
         <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--border-soft)] px-4 py-3">
           <span className="flex min-w-0 items-center gap-2">
             {fileKindIcon(kind)}
@@ -878,7 +878,7 @@ function ReviewContent() {
             )}
 
             {Object.keys(decisionInput).length > 0 && (
-              <details className="rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent">
+              <details className="overflow-hidden rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent">
                 <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-[var(--ink)]">
                   Request metadata
                 </summary>
