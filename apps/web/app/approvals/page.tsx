@@ -300,26 +300,28 @@ function ApprovalCard({
           </button>
         )}
 
-        {/* Share / open-as-page — copy the standalone signed review link or open
-            it full-page outside the dashboard. Pushed to the right of the row. */}
+        {/* Per-approval share — copies THIS approval's own unlisted link (its own
+            id + signed token). Send it to one person to have them review just
+            this item; no login required on their end. Distinct from the header's
+            "Open as full page", which steps through the whole pending queue. */}
         {shareLink && (
           <div className="ml-auto flex items-center gap-1">
             <button
               type="button"
               onClick={handleCopyLink}
-              title="Copy a shareable full-page link to this approval"
+              title="Copy this approval's unlisted link — send it to one person to review just this item (no login needed)"
               className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-2.5 text-xs font-medium text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-[var(--ink)] transition-colors"
             >
               {copied ? <Check className="h-3.5 w-3.5 text-green-600 dark:text-green-400" /> : <Link2 className="h-3.5 w-3.5" />}
-              {copied ? "Copied" : "Copy link"}
+              {copied ? "Copied" : "Copy share link"}
             </button>
             <a
               href={shareLink}
               target="_blank"
               rel="noopener noreferrer"
-              title="Open this approval as a standalone full page"
+              title="Open just this approval as a standalone full page"
               className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-[var(--ink)] transition-colors"
-              aria-label="Open as standalone page"
+              aria-label="Open this approval as a standalone page"
             >
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
@@ -608,10 +610,10 @@ function ApprovalsContent() {
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 text-sm text-[var(--ink-soft)] underline-offset-2 hover:text-[var(--ink)] hover:underline transition-colors"
-              title="Open all pending approvals as a standalone full page"
+              title="Open ALL pending approvals as a standalone full page (steps through the whole queue). To send one approval to one person, use its per-card share link."
             >
               <ExternalLink className="h-3.5 w-3.5" />
-              Open as full page
+              Review all as full page
             </a>
           )}
           {/* P1-9: link back to the dashboard for chat-only operators who land
