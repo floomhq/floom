@@ -51,3 +51,5 @@ CODEX_BRIEF.md
 .codex-*.md
 .codex-*.log
 .gstack/
+.env.test
+tests/e2e/.auth/

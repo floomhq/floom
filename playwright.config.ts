@@ -10,6 +10,9 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "on-first-retry",
+    launchOptions: {
+      slowMo: process.env.SLOW_MO ? parseInt(process.env.SLOW_MO) : 0,
+    },
   },
   projects: [
     // ── API tests ─────────────────────────────────────────────────────────────
@@ -27,7 +30,7 @@ export default defineConfig({
     {
       name: "setup",
       testMatch: "**/*.setup.ts",
-      use: { ...devices["Desktop Chrome"], headless: false },
+      use: { ...devices["Desktop Chrome"] },
     },
 
     // ── UI tests (admin) ──────────────────────────────────────────────────────

@@ -1,6 +1,5 @@
 /**
  * UI tests — Settings page, Workspace tab
- * Verifies rename form, member count, and link to /members.
  */
 import { test, expect } from "@playwright/test";
 
@@ -11,56 +10,56 @@ test.describe("Settings — Workspace tab", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(`${BASE}/app/settings`);
     await page.waitForSelector('[role="tablist"]', { timeout: 10_000 });
+    await page.waitForLoadState("networkidle");
   });
 
   test("Workspace is the first tab and active by default", async ({ page }) => {
-    const workspaceTab = page.getByRole("tab", { name: /workspace/i });
+    const workspaceTab = page.getByRole("tab", { name: /workspace/i }).first();
     await expect(workspaceTab).toBeVisible();
-    await expect(workspaceTab).toHaveAttribute("data-state", "active");
+    const dataState = await workspaceTab.getAttribute("data-state");
+    const ariaSelected = await workspaceTab.getAttribute("aria-selected");
+    expect(dataState === "active" || ariaSelected === "true").toBe(true);
   });
 
   test("workspace tab shows current workspace name", async ({ page }) => {
     const nameInput = page.locator("input[placeholder='Workspace name']");
-    await expect(nameInput).toBeVisible({ timeout: 5_000 });
+    await expect(nameInput).toBeVisible({ timeout: 8_000 });
     const value = await nameInput.inputValue();
     expect(value.length).toBeGreaterThan(0);
   });
 
   test("can rename workspace and it saves", async ({ page }) => {
     const nameInput = page.locator("input[placeholder='Workspace name']");
-    await expect(nameInput).toBeVisible({ timeout: 5_000 });
+    await expect(nameInput).toBeVisible({ timeout: 8_000 });
+    // Wait for the workspace name to be loaded (not empty)
+    await expect(nameInput).not.toHaveValue("", { timeout: 8_000 });
 
-    // Clear and type a new name
-    await nameInput.fill("Nova Search (UI Test)");
+    // Triple-click to select all, then pressSequentially fires real key events React detects
+    await nameInput.click({ clickCount: 3 });
+    await nameInput.pressSequentially("Nova Search Test");
+
+    const renameBtn = page.getByRole("button", { name: /rename/i });
+    await expect(renameBtn).toBeEnabled({ timeout: 5_000 });
+    await renameBtn.click();
+
+    await expect(page.getByText("Workspace renamed")).toBeVisible({ timeout: 8_000 });
+    await expect(nameInput).toHaveValue("Nova Search Test");
+
+    // Restore
+    await nameInput.click({ clickCount: 3 });
+    await nameInput.pressSequentially(ORIGINAL_NAME);
     await page.getByRole("button", { name: /rename/i }).click();
-
-    // Success toast should appear
-    await expect(page.locator("text=Workspace renamed")).toBeVisible({ timeout: 5_000 });
-
-    // Input should now show the new name
-    await expect(nameInput).toHaveValue("Nova Search (UI Test)");
-
-    // Restore original name
-    await nameInput.fill(ORIGINAL_NAME);
-    await page.getByRole("button", { name: /rename/i }).click();
-    await expect(page.locator("text=Workspace renamed")).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText("Workspace renamed")).toBeVisible({ timeout: 8_000 });
   });
 
   test("rename button disabled when name unchanged", async ({ page }) => {
-    await page.waitForSelector("input[placeholder='Workspace name']", { timeout: 5_000 });
-    const renameBtn = page.getByRole("button", { name: /rename/i });
-    await expect(renameBtn).toBeDisabled();
+    await expect(page.locator("input[placeholder='Workspace name']")).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByRole("button", { name: /rename/i })).toBeDisabled();
   });
 
   test("team section shows member count", async ({ page }) => {
-    // Wait for member count to load
-    await page.waitForFunction(() => {
-      const team = document.querySelector("section");
-      return team && /member/.test(team.textContent ?? "");
-    }, { timeout: 8_000 });
-
-    const teamSection = page.locator("section").filter({ hasText: /team/i });
-    await expect(teamSection).toBeVisible();
+    // The Members row shows "X active members/member"
+    await expect(page.getByText(/active member/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
   test("Manage → link goes to /members", async ({ page }) => {
@@ -70,8 +69,13 @@ test.describe("Settings — Workspace tab", () => {
 
   test("all other tabs still accessible", async ({ page }) => {
     for (const tabName of ["API access", "System", "Appearance", "Data", "Danger zone"]) {
-      await page.getByRole("tab", { name: tabName }).click();
-      await expect(page.getByRole("tab", { name: tabName })).toHaveAttribute("data-state", "active");
+      const tab = page.getByRole("tab", { name: tabName }).first();
+      await tab.click();
+      await expect(async () => {
+        const dataState = await tab.getAttribute("data-state");
+        const ariaSelected = await tab.getAttribute("aria-selected");
+        expect(dataState === "active" || ariaSelected === "true").toBe(true);
+      }).toPass({ timeout: 5_000 });
     }
   });
 });

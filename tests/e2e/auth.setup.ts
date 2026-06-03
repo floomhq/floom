@@ -23,8 +23,8 @@ const MEMBER_STATE = path.join(__dirname, ".auth/member.json");
 async function loginAndSave(page: any, email: string, password: string, stateFile: string) {
   if (!email || !password) throw new Error(`Missing credentials for ${stateFile}`);
 
+  // ?mode=signin renders the password field immediately — no tab click needed
   await page.goto(`${BASE}/app/login?mode=signin`);
-  await page.getByRole("button", { name: "Sign in" }).click();
   await page.locator('input[type="email"]').fill(email);
   await page.locator('input[type="password"]').fill(password);
   await page.locator('form button[type="submit"]').click();
@@ -35,10 +35,19 @@ async function loginAndSave(page: any, email: string, password: string, stateFil
     { timeout: 30_000, polling: 500 }
   );
 
-  // Pin to Nova Search workspace
+  // Pin to Nova Search workspace — set both localStorage AND the cookie
+  // (proxy reads the cookie; client-side components read localStorage)
   await page.evaluate((wsId: string) => {
     localStorage.setItem("workeros.activeWorkspaceId", wsId);
   }, WORKSPACE_ID);
+  await page.context().addCookies([{
+    name: "workeros_active_workspace",
+    value: WORKSPACE_ID,
+    domain: "workeros.floom.dev",
+    path: "/",
+    secure: true,
+    sameSite: "Lax",
+  }]);
 
   await page.waitForSelector("nav, aside", { timeout: 10_000 });
 

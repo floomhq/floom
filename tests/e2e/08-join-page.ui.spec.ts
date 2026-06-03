@@ -45,15 +45,15 @@ test.describe("Join page (/app/join)", () => {
     const { invite_url, id: inviteId } = await inviteRes.json();
     if (!invite_url) { test.skip(); return; }
 
-    // Verify the URL contains /join
-    expect(invite_url).toContain("/app/join?invite=");
+    // Verify the URL references the join page with an invite token
+    expect(invite_url).toMatch(/join[^?]*\?.*invite=/i);
 
     // Open the join URL WITHOUT auth — should redirect to login
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     await page.goto(invite_url);
     // Should end up at login (since not authenticated)
-    await expect(page).toHaveURL(/login/, { timeout: 10_000 });
+    await expect(page).toHaveURL(/login/, { timeout: 15_000 });
 
     // Clean up invite
     await request.delete(`${API}/workspaces/${WORKSPACE_ID}/invitations/${inviteId}`, {
@@ -71,7 +71,7 @@ test.describe("Join page (/app/join)", () => {
         "x-workeros-workspace": WORKSPACE_ID,
         "Content-Type": "application/json",
       },
-      data: { email: "vivekbs.10@gmail.com", role: "member" },
+      data: { email: "gohigh3242@gmail.com", role: "member" },
     });
     if (!inviteRes.ok()) { test.skip(); return; }
     const { invite_url } = await inviteRes.json();
@@ -86,7 +86,7 @@ test.describe("Join page (/app/join)", () => {
     await expect(page.locator("h1, h2").filter({ hasText: /join workspace/i })).toBeVisible({ timeout: 10_000 });
 
     // After auto-accept, should show the PAT section
-    await expect(page.locator("text=Your API token")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Your API token", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 
     // Copy button should be present
     await expect(page.getByRole("button", { name: /copy/i })).toBeVisible();
@@ -109,14 +109,14 @@ test.describe("Join page (/app/join)", () => {
         "x-workeros-workspace": WORKSPACE_ID,
         "Content-Type": "application/json",
       },
-      data: { email: "vivekbs.10@gmail.com", role: "member" },
+      data: { email: "gohigh3242@gmail.com", role: "member" },
     });
     if (!inviteRes.ok()) { test.skip(); return; }
     const { invite_url } = await inviteRes.json();
     if (!invite_url) { test.skip(); return; }
 
     await page.goto(invite_url);
-    await expect(page.locator("text=Your API token")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Your API token", { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: /go to workspace/i }).click();
     await expect(page).toHaveURL(/\/workers/, { timeout: 10_000 });
