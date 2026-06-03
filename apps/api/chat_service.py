@@ -270,6 +270,240 @@ def _maybe_evict_conversation(conv_id: str, user_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Synthetic workspace-agent config (brain + connections at runtime)
+# ---------------------------------------------------------------------------
+
+def _owner_brain_pack_names(user_id: str) -> List[str]:
+    """Owner-scoped list of brain pack names attachable to the workspace agent."""
+    from contexts import context_scope_for_user, current_contexts_root, use_context_scope
+
+    names: List[str] = []
+    with use_context_scope(context_scope_for_user(user_id)):
+        root = current_contexts_root()
+        if root.is_dir():
+            for child in sorted(root.iterdir()):
+                if child.is_dir() and not child.name.startswith("."):
+                    names.append(child.name)
+    return names
+
+
+def build_workspace_agent_config(user_id: str) -> Any:
+    """Synthesize a WorkerConfig that gives the interactive workspace agent the
+    SAME brain + connection capabilities a worker gets — but read-only-gated.
+
+    - ``connections``: every active DB-registered Composio app is declared as a
+      read-only connection (``scope: read_only``); every active registered MCP
+      server (``kind == "mcp"``) is declared as a ``WorkerMCPConnection`` so the
+      shared builder dials it (under ``WORKSPACE_AGENT_POLICY`` →
+      ``require_approval="always"``).
+    - ``contexts``: every owner brain pack, staged read-only for the agent.
+
+    The synthetic config carries no secret values; MCP bearer secrets are
+    resolved separately at dial time via the owner's secret store.
+    """
+    from models import (
+        WorkerComposioConnection,
+        WorkerConfig,
+        WorkerConnection,
+        WorkerContextMount,
+        WorkerMCPConnection,
+        WorkerOutput,
+        WorkerRuntime,
+        WorkerTrigger,
+    )
+    from db import get_repositories
+
+    repos = get_repositories()
+    connections: List[Any] = []
+    for row in repos.connections.list(user_id=user_id):
+        if (row.get("status") or "") != "active":
+            continue
+        kind = row.get("kind") or "composio"
+        if kind == "mcp":
+            url = row.get("mcp_url")
+            if not url:
+                continue
+            try:
+                allowed = json.loads(row.get("mcp_allowed_tools_json") or "[]")
+            except Exception:
+                allowed = []
+            allowed = [t for t in allowed if isinstance(t, str)] or None
+            auth_secret = row.get("mcp_auth_secret")
+            try:
+                mcp = WorkerMCPConnection(
+                    label=row.get("mcp_label") or row.get("app_name") or "mcp",
+                    transport=row.get("mcp_transport") or "streamable_http",
+                    url=url,
+                    auth=(f"bearer:{auth_secret}" if auth_secret else None),
+                    allowed_tools=allowed,
+                )
+            except Exception as exc:
+                logger.warning("Skipping invalid registered MCP connection: %s", exc)
+                continue
+            connections.append(WorkerConnection(mcp=mcp))
+        else:
+            app = row.get("app_name")
+            if not app:
+                continue
+            try:
+                connections.append(
+                    WorkerConnection(
+                        composio=WorkerComposioConnection(app=str(app), scope="read_only")
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Skipping invalid registered Composio connection %s: %s", app, exc)
+                continue
+
+    contexts: List[Any] = [
+        WorkerContextMount(name=name) for name in _owner_brain_pack_names(user_id)
+    ]
+
+    return WorkerConfig(
+        id=WORKSPACE_AGENT_ID,
+        name=WORKSPACE_AGENT_ID,
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="agent", entrypoint="SKILL.md", runner="e2b", mode="agent"),
+        connections=connections,
+        contexts=contexts,
+        outputs=[WorkerOutput(name="reply", label="Agent reply", type="markdown", required=True)],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Brain read tools (owner-scoped to the staged context tree)
+# ---------------------------------------------------------------------------
+
+def _brain_read_tools(context_root: Path, staged_packs: List[str]) -> List[Any]:
+    """Read-only file tools over the staged brain packs.
+
+    Both tools resolve paths UNDER ``context_root`` only (path-traversal
+    guarded). The agent can list/read but never write — staging is read-only.
+    """
+    from agents import FunctionTool
+
+    def _resolve(rel_path: str) -> Path:
+        normalized = Path(rel_path or ".").as_posix().strip("/")
+        target = (context_root / normalized).resolve()
+        target.relative_to(context_root.resolve())  # raises ValueError on escape
+        return target
+
+    async def _list(_ctx: Any, raw_args: str) -> str:
+        try:
+            args = json.loads(raw_args or "{}")
+        except json.JSONDecodeError as exc:
+            return json.dumps({"ok": False, "error": f"Invalid JSON: {exc}"})
+        try:
+            target = _resolve(str(args.get("path") or "."))
+        except ValueError:
+            return json.dumps({"ok": False, "error": "Path traversal attempt"})
+        if not target.is_dir():
+            return json.dumps({"ok": False, "error": f"Not a directory: {args.get('path')}"})
+        entries = [
+            {"name": c.name, "type": "dir" if c.is_dir() else "file"}
+            for c in sorted(target.iterdir(), key=lambda i: i.name)
+        ]
+        return json.dumps({"ok": True, "entries": entries})
+
+    async def _read(_ctx: Any, raw_args: str) -> str:
+        try:
+            args = json.loads(raw_args or "{}")
+        except json.JSONDecodeError as exc:
+            return json.dumps({"ok": False, "error": f"Invalid JSON: {exc}"})
+        try:
+            target = _resolve(str(args.get("path") or ""))
+        except ValueError:
+            return json.dumps({"ok": False, "error": "Path traversal attempt"})
+        if not target.is_file():
+            return json.dumps({"ok": False, "error": f"File not found: {args.get('path')}"})
+        return json.dumps({"ok": True, "content": target.read_text(errors="replace")})
+
+    return [
+        FunctionTool(
+            name="brain__list",
+            description=(
+                "List files in the workspace brain packs (read-only). "
+                f"Attached packs: {', '.join(sorted(staged_packs)) or '(none)'}. "
+                "Pass {\"path\": \"<pack>/...\"} or {\"path\": \".\"} for the root."
+            ),
+            params_json_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string", "default": "."}},
+                "required": [],
+            },
+            on_invoke_tool=_list,
+            strict_json_schema=False,
+        ),
+        FunctionTool(
+            name="brain__read",
+            description="Read a UTF-8 file from a workspace brain pack (read-only).",
+            params_json_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+            on_invoke_tool=_read,
+            strict_json_schema=False,
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Read-only Composio app tools (shared scope-gated execute path)
+# ---------------------------------------------------------------------------
+
+def _composio_read_tools(
+    config: Any,
+    policy: Any,
+    user_id: str,
+    log_fn: Callable[[str, str], None],
+) -> List[Any]:
+    """One ``composio__<app>__execute`` tool per connected app, read-only-gated.
+
+    Tool schemas + execute both flow through
+    ``runner_sandbox.agent_capabilities`` under the read-only policy, so
+    mutating tools are neither advertised nor executed. Mirrors the worker
+    driver's Composio surface exactly.
+    """
+    from agents import FunctionTool
+    from runner_sandbox import agent_capabilities
+
+    tools: List[Any] = []
+    for schema in agent_capabilities.composio_tool_schemas(config, policy):
+        function = schema.get("function") or {}
+        name = function["name"]
+
+        async def _invoke(_ctx: Any, raw_args: str, *, tool_name: str = name) -> str:
+            try:
+                args = json.loads(raw_args or "{}")
+                if not isinstance(args, dict):
+                    return json.dumps({"ok": False, "error": "Tool arguments must be an object"})
+            except json.JSONDecodeError as exc:
+                return json.dumps({"ok": False, "error": f"Invalid JSON arguments: {exc}"})
+            result = agent_capabilities.composio_execute(
+                name=tool_name,
+                args=args,
+                config=config,
+                policy=policy,
+                connection_ids={},
+                user_id=user_id,
+                log_fn=log_fn,
+            )
+            return json.dumps(result, default=str)
+
+        tools.append(
+            FunctionTool(
+                name=name,
+                description=function.get("description") or name,
+                params_json_schema=function.get("parameters") or {"type": "object", "properties": {}},
+                on_invoke_tool=_invoke,
+                strict_json_schema=False,
+            )
+        )
+    return tools
+
+
+# ---------------------------------------------------------------------------
 # Workspace-management tools (available only to workspace-agent)
 # ---------------------------------------------------------------------------
 
@@ -1076,15 +1310,37 @@ def _build_system_prompt(user_id: str) -> str:
 def workspace_agent_tool_metadata(user_id: str) -> List[Dict[str, str]]:
     """Return [{name, description}] for the workspace agent's tools.
 
-    No secret values, args, or host paths — names + one-line descriptions only.
+    Includes the workspace-management tools, the read-only brain tools, and the
+    read-only Composio app tools the agent actually gets at runtime, so the
+    ``/system/workspace-agent`` endpoint and the /assistant UI honestly reflect
+    the brain + read-connection capabilities. No secret values, args, or host
+    paths — names + one-line descriptions only.
     """
-    tools = _workspace_tools(user_id)
     meta: List[Dict[str, str]] = []
-    for tool in tools:
-        name = str(getattr(tool, "name", "") or "")
-        description = str(getattr(tool, "description", "") or "")
-        if name:
-            meta.append({"name": name, "description": description})
+
+    def _collect(tools: List[Any]) -> None:
+        for tool in tools:
+            name = str(getattr(tool, "name", "") or "")
+            description = str(getattr(tool, "description", "") or "")
+            if name:
+                meta.append({"name": name, "description": description})
+
+    _collect(_workspace_tools(user_id))
+
+    # Brain + read-only Composio surface (best-effort; never raise the endpoint).
+    try:
+        from runner_sandbox.agent_capabilities import WORKSPACE_AGENT_POLICY
+
+        config = build_workspace_agent_config(user_id)
+        staged = _owner_brain_pack_names(user_id)
+        if staged:
+            _collect(_brain_read_tools(Path("/nonexistent"), staged))
+        _collect(
+            _composio_read_tools(config, WORKSPACE_AGENT_POLICY, user_id, lambda *_a, **_k: None)
+        )
+    except Exception:
+        logger.debug("workspace_agent_tool_metadata: capability surface unavailable", exc_info=True)
+
     return meta
 
 
@@ -1171,6 +1427,68 @@ async def stream_chat(
     system_prompt = _build_system_prompt(user_id)
     workspace_tools = _workspace_tools(user_id)
 
+    # ------------------------------------------------------------------
+    # Runtime capabilities: brain + read-only connections + MCP.
+    #
+    # The interactive assistant gets the SAME capability builder a worker
+    # gets (apps/api/runner_sandbox/agent_capabilities.py), under the
+    # read-only WORKSPACE_AGENT_POLICY:
+    #   - brain packs staged read-only into a per-conversation tree,
+    #   - read-only Composio app tools (mutating tools excluded + refused),
+    #   - registered MCP servers dialled with require_approval="always".
+    # This makes the /assistant claim ("shares your Brain and Connections")
+    # true. SSRF/secret/owner-scope guards carry over from the shared module.
+    # ------------------------------------------------------------------
+    from runner_sandbox import agent_capabilities
+    from runner_sandbox.agent_capabilities import WORKSPACE_AGENT_POLICY
+
+    def _cap_log(message: str, level: str = "info") -> None:
+        logger.log(
+            {"debug": logging.DEBUG, "info": logging.INFO,
+             "warning": logging.WARNING, "error": logging.ERROR}.get(level, logging.INFO),
+            "[workspace-agent capabilities] %s", message,
+        )
+
+    workspace_config = build_workspace_agent_config(user_id)
+
+    # Stage owner brain packs read-only into a per-conversation context tree.
+    from runner_utils import ARTIFACTS_DIR
+    cap_context_root = (Path(ARTIFACTS_DIR) / f"chat_{conversation_id}" / "context").resolve()
+    cap_context_root.mkdir(parents=True, exist_ok=True)
+    staged_packs = agent_capabilities.stage_context_packs(
+        config=workspace_config,
+        context_root=cap_context_root,
+        user_id=user_id,
+        log_fn=_cap_log,
+    )
+
+    # Brain read tools (owner-scoped to the staged tree).
+    brain_tools = _brain_read_tools(cap_context_root, staged_packs)
+
+    # Read-only Composio app tools.
+    composio_tools = _composio_read_tools(
+        workspace_config, WORKSPACE_AGENT_POLICY, user_id, _cap_log
+    )
+
+    # Resolve secrets needed for MCP bearer auth (owner-scoped, never logged).
+    from db import get_repositories as _get_repos
+    mcp_secret_names = {
+        getattr(getattr(c, "mcp", None), "auth", "").split(":", 1)[1]
+        for c in workspace_config.connections
+        if getattr(c, "mcp", None) is not None and getattr(c.mcp, "auth", None)
+    }
+    mcp_secrets = (
+        _get_repos().secrets.resolve(user_id=user_id, names=mcp_secret_names)
+        if mcp_secret_names else {}
+    )
+
+    if staged_packs:
+        system_prompt += (
+            "\n\n## Workspace Brain (read-only)\n\n"
+            f"These brain packs are attached: {', '.join(sorted(staged_packs))}. "
+            "Read them with brain__list and brain__read for reference knowledge."
+        )
+
     # Finish-with-outputs tool
     from agents import FunctionTool
 
@@ -1193,18 +1511,11 @@ async def stream_chat(
     )
 
     from agents import WebSearchTool
-    all_tools = workspace_tools + [WebSearchTool(), finish_tool]
-
-    agent = Agent(
-        name=WORKSPACE_AGENT_ID,
-        instructions=system_prompt,
-        tools=all_tools,
-        model=os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
-        model_settings=ModelSettings(
-            max_tokens=4096,
-            include_usage=True,
-        ),
-        tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
+    all_tools = (
+        workspace_tools
+        + brain_tools
+        + composio_tools
+        + [WebSearchTool(), finish_tool]
     )
 
     # Per-run, loop-local OpenAI client. Worker runs execute in their own fresh
@@ -1244,8 +1555,34 @@ async def stream_chat(
 
     final_message_id: Optional[str] = None
     emitted_text_delta = False
+    mcp_servers: List[Any] = []
 
     try:
+        # Dial registered MCP servers (read-only policy → require_approval=always).
+        # SSRF + auth-header injection carry over from the shared module. A failed
+        # MCP dial degrades gracefully: the assistant still answers with its other
+        # tools rather than 500-ing the whole chat.
+        try:
+            mcp_servers = await agent_capabilities.connect_mcp_servers(
+                workspace_config, mcp_secrets, _cap_log, WORKSPACE_AGENT_POLICY
+            )
+        except agent_capabilities.MCPConnectionError as exc:
+            _cap_log(f"MCP unavailable, continuing without it: {exc}", "warning")
+            mcp_servers = []
+
+        agent = Agent(
+            name=WORKSPACE_AGENT_ID,
+            instructions=system_prompt,
+            tools=all_tools,
+            mcp_servers=mcp_servers,
+            model=os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
+            model_settings=ModelSettings(
+                max_tokens=4096,
+                include_usage=True,
+            ),
+            tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
+        )
+
         result = Runner.run_streamed(
             agent,
             input=input_messages,
@@ -1356,5 +1693,8 @@ async def stream_chat(
             "message_id": None,
         })
     finally:
+        # Tear down MCP servers (best-effort) before releasing the OpenAI client.
+        if mcp_servers:
+            await agent_capabilities.cleanup_mcp_servers(mcp_servers, _cap_log)
         # Release the per-stream OpenAI + httpx client on this loop.
         await loop_local_provider.aclose()
