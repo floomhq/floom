@@ -950,6 +950,7 @@ MIGRATIONS: list[Migration] = [
         decision_input_json TEXT,
         edited_output_json  TEXT,
         follow_up_run_id    TEXT,
+        annotations_json    TEXT,
         owner_id            TEXT NOT NULL,
         FOREIGN KEY(run_id)    REFERENCES runs(id) ON DELETE CASCADE,
         FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
@@ -1084,6 +1085,15 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_slack_installations_status
         ON slack_installations(status);
     """,
+    # -- migration 48: structured reviewer annotations on approvals (X4) -------
+    # Persists the structured highlight+comment / screenshot-pin feedback the
+    # reviewer attaches alongside an approve/reject decision, as a JSON blob:
+    #   {"text": [{"quote", "comment", ...}], "images": [{"url", "comments": [...]}]}
+    # Fresh DBs already created the column inline above, so a duplicate-column
+    # OperationalError here is expected and skipped (see apply_migrations).
+    """
+    ALTER TABLE approvals ADD COLUMN annotations_json TEXT;
+    """,
 ]
 
 
@@ -1111,7 +1121,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
