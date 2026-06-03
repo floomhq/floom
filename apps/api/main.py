@@ -15816,7 +15816,15 @@ def system_overview(
         and row.get("last_check_status") in (None, "valid")
     )
 
-    recent_rows, _ = repos.runs.list(user_id=auth.user_id, limit=10, offset=0)
+    # Orphaned-run fix (2026-06-04): the "Worker activity" feed links each row to
+    # /runs/{id}, but GET /runs/{id} 404s any run whose worker is no longer
+    # API-visible (deleted/hidden internal listeners like slack-listener /
+    # whatsapp-listener whose orphaned failed runs survive worker deletion).
+    # Surfacing those rows produced clickable links that hit a "Run not found"
+    # 404 wall. They are not actionable operator activity, so exclude them here.
+    # We over-fetch then filter to keep up to 10 visible rows. The run rows are
+    # NOT deleted — this is a serving filter, not a data wipe (no-wipe guardrail).
+    recent_rows, _ = repos.runs.list(user_id=auth.user_id, limit=100, offset=0)
     recent_runs = [
         OverviewRunItem(
             run_id=row["id"],
@@ -15828,7 +15836,8 @@ def system_overview(
             trigger_source=row.get("trigger_source") or "manual",
         )
         for row in recent_rows
-    ]
+        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+    ][:10]
 
     scheduled_today: List[OverviewScheduledItem] = []
     try:
@@ -15866,6 +15875,14 @@ def system_overview(
         limit=100000,
         offset=0,
     )
+    # Orphaned-run fix (2026-06-04): failure clusters link to /workers/{id}, which
+    # 404s for deleted/hidden workers (slack-listener, whatsapp-listener, …). A
+    # deleted worker's failures are not actionable "attention" — drop runs whose
+    # worker is no longer API-visible so the cluster + its link cannot 404.
+    failure_runs = [
+        row for row in failure_runs
+        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+    ]
     failure_counts: Dict[str, int] = collections.Counter(row["worker_id"] for row in failure_runs if row.get("worker_id"))
     latest_failure_by_worker: Dict[str, Dict[str, Any]] = {}
     for row in failure_runs:
