@@ -234,6 +234,59 @@ def _open_pinned_webhook(req: urllib.request.Request, *, timeout: int):
     return opener.open(req, timeout=timeout)
 
 
+# Floom email logo (dark rounded-square play-arrow mark + "Floom" wordmark),
+# hosted as a stable absolute https asset on the Floom OS marketing surface.
+# Gmail requires an absolute https <img> src in email (data URIs are stripped).
+FLOOM_EMAIL_LOGO_URL = "https://workers.floom.dev/brand/floom-email-logo@2x.png"
+
+
+def _floom_run_email_html(
+    *,
+    worker_name: str,
+    worker_id: str,
+    run_id: str,
+    status_label: str,
+    timestamp: str,
+    error: str | None,
+) -> str:
+    """Floom-branded run-notification email (matches the Cloud transactional design)."""
+    is_failed = status_label.lower() == "failed"
+    status_color = "#b4231f" if is_failed else "#1f7a4d"
+    rows = [
+        ("Worker", f"{worker_name} <span style=\"color:#6f6960;\">({worker_id})</span>"),
+        ("Run ID", f"<span style=\"font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;\">{run_id}</span>"),
+        ("Status", f"<span style=\"color:{status_color};font-weight:650;\">{status_label}</span>"),
+        ("Time", timestamp),
+    ]
+    if error:
+        rows.append(("Error", f"<span style=\"font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#b4231f;\">{error}</span>"))
+    row_html = "".join(
+        f"<tr><td style=\"padding:6px 0;font-size:13px;color:#6f6960;width:96px;vertical-align:top;\">{label}</td>"
+        f"<td style=\"padding:6px 0;font-size:14px;color:#181716;\">{value}</td></tr>"
+        for label, value in rows
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>Floom</title></head>
+<body style="margin:0;padding:0;background:#fbfaf7;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#181716;-webkit-font-smoothing:antialiased;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fbfaf7;"><tr><td align="center" style="padding:40px 16px;">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
+<tr><td style="background:#f1eee8;border:1px solid #ded8cf;border-bottom:none;border-radius:14px 14px 0 0;padding:26px 36px;border-top:2px solid #181716;">
+<a href="https://workers.floom.dev" style="text-decoration:none;display:inline-block;"><img src="{FLOOM_EMAIL_LOGO_URL}" width="120" height="42" alt="Floom" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;"></a>
+</td></tr>
+<tr><td style="background:#fffefb;border:1px solid #ded8cf;border-top:none;border-radius:0 0 14px 14px;padding:36px 40px 40px;">
+<p style="margin:0 0 10px;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#6f6960;">Worker run</p>
+<h1 style="margin:0 0 22px;font-size:22px;line-height:1.25;font-weight:650;color:#181716;">{worker_name} {status_label}</h1>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{row_html}</table>
+<p style="font-size:13px;line-height:1.55;margin:24px 0 0;color:#6f6960;">You're receiving this because a worker run finished in your Floom workspace.</p>
+</td></tr>
+<tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#6f6960;">
+<a href="https://workers.floom.dev" style="color:#181716;font-weight:650;text-decoration:none;">Floom</a> &middot; <a href="mailto:team@floom.dev" style="color:#6f6960;text-decoration:underline;">team@floom.dev</a>
+</td></tr>
+</table>
+</td></tr></table>
+</body></html>"""
+
+
 def _send_email_notification(
     *,
     to_addrs: list[str],
@@ -264,14 +317,14 @@ def _send_email_notification(
     safe_status_label = escape(status_label)
     safe_error = escape(error) if error else None
 
-    html_lines = [
-        f"<p><strong>Worker:</strong> {safe_worker_name} <code>({safe_worker_id})</code></p>",
-        f"<p><strong>Run ID:</strong> <code>{safe_run_id}</code></p>",
-        f"<p><strong>Status:</strong> {safe_status_label}</p>",
-        f"<p><strong>Time:</strong> {timestamp}</p>",
-    ]
-    if safe_error:
-        html_lines.append(f"<p><strong>Error:</strong> <code>{safe_error}</code></p>")
+    html = _floom_run_email_html(
+        worker_name=safe_worker_name,
+        worker_id=safe_worker_id,
+        run_id=safe_run_id,
+        status_label=safe_status_label,
+        timestamp=timestamp,
+        error=safe_error,
+    )
 
     text_lines = [
         f"Worker: {worker_name} ({worker_id})",
@@ -289,7 +342,7 @@ def _send_email_notification(
             "from": from_addr,
             "to": to_addrs,
             "subject": subject,
-            "html": "\n".join(html_lines),
+            "html": html,
             "text": "\n".join(text_lines),
         })
         logger.debug("Email notification sent via Resend to %s for run %s (%s)", to_addrs, run_id, status)
