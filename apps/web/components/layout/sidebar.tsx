@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Bot, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Activity, Bot, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -227,7 +228,20 @@ export function Sidebar() {
 // on the right.
 export function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
+  const router = useRouter();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Clearing the cookie is best-effort; navigate regardless.
+    }
+    onNavigate?.();
+    router.replace("/login");
+    router.refresh();
+  }
+
   return (
     <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
       <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -253,6 +267,15 @@ export function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = 
       >
         <Settings className="size-4" />
       </Link>
+      <button
+        type="button"
+        onClick={logout}
+        aria-label="Sign out"
+        title="Sign out"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+      >
+        <LogOut className="size-4" />
+      </button>
       <ThemeModeButton />
     </div>
   );
