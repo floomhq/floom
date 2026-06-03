@@ -3362,7 +3362,6 @@ _UPLOAD_ALLOWED_MEDIA_TYPES = frozenset({
     "image/gif",
     "image/jpeg",
     "image/png",
-    "image/svg+xml",
     "image/webp",
     "text/css",
     "text/csv",
@@ -3382,7 +3381,7 @@ _UPLOAD_ALLOWED_EXTENSIONS = frozenset({
     ".csv", ".tsv",
     ".css", ".scss",
     ".docx", ".pptx", ".xlsx", ".rtf", ".odt",
-    ".gif", ".jpeg", ".jpg", ".png", ".webp", ".svg",
+    ".gif", ".jpeg", ".jpg", ".png", ".webp",
     ".go", ".rs", ".rb", ".java", ".kt", ".swift",
     ".htm", ".html", ".xml",
     ".ini", ".toml", ".env", ".conf", ".cfg",
@@ -3402,6 +3401,8 @@ _UPLOAD_ALLOWED_EXTENSIONS = frozenset({
 # file extension is benign — these signal an executable/script payload.
 _UPLOAD_DANGEROUS_MEDIA_TYPES = frozenset({
     "application/javascript",
+    "image/svg+xml",
+    "image/svg",
     "application/x-dosexec",
     "application/x-executable",
     "application/x-msdownload",
@@ -3415,6 +3416,7 @@ _UPLOAD_DANGEROUS_MEDIA_TYPES = frozenset({
 # extension always wins, see _validate_upload_filename).
 _UPLOAD_BLOCKED_EXTENSIONS = frozenset({
     ".bat",
+    ".svg",
     ".cmd",
     ".com",
     ".dll",
