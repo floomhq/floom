@@ -649,5 +649,9 @@ export const api = {
         `/integrations/catalog?${qs.toString()}`
       );
     },
+    catalogTools: (slug: string) =>
+      fetchJson<import("./types").CatalogToolItem[]>(
+        `/integrations/catalog/${encodeURIComponent(slug)}/tools`
+      ),
   },
 };
