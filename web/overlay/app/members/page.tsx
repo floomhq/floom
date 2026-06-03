@@ -363,15 +363,11 @@ function MembersContent() {
                   </div>
                 </div>
                 <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
-                      disabled={removingId === m.user_id || roleChangingId === m.user_id}
-                    >
-                      <MoreVertical className="w-3.5 h-3.5" />
-                    </Button>
+                  <DropdownMenuTrigger
+                    disabled={removingId === m.user_id || roleChangingId === m.user_id}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--bg-2)] transition-opacity"
+                  >
+                    <MoreVertical className="w-3.5 h-3.5" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem
