@@ -963,21 +963,13 @@ function ReviewContent() {
                 />
               )}
 
-            {showReason && (
+            {/* X4: highlight-and-comment + screenshots are FIRST-CLASS feedback,
+                shown up-front (not buried behind Reject). The collected
+                annotations attach to the decision whether you Approve OR Reject.
+                A bare delete request has no reviewable output, so it's skipped. */}
+            {!isDestructiveDelete && (
               <div className="space-y-5">
-                <label className="block">
-                  <span className="text-sm font-medium text-[var(--ink)]">Reason for rejection</span>
-                  <textarea
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    className="mt-2 min-h-24 w-full rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
-                    placeholder="Tell the worker what to change."
-                  />
-                </label>
-
-                {/* X4: highlight + comment on the proposed text. Only shown when
-                    there is reviewable text and this is not a bare delete request. */}
-                {!isDestructiveDelete && highlightableText.trim().length > 0 && (
+                {highlightableText.trim().length > 0 && (
                   <div>
                     <h2 className="text-sm font-medium text-[var(--ink)]">Comment on the text</h2>
                     <p className="mb-2 mt-0.5 text-xs text-[var(--ink-soft)]">
@@ -991,7 +983,6 @@ function ReviewContent() {
                   </div>
                 )}
 
-                {/* X4: screenshot upload + pin-comment annotation. */}
                 <div>
                   <h2 className="text-sm font-medium text-[var(--ink)]">Screenshots</h2>
                   <p className="mb-2 mt-0.5 text-xs text-[var(--ink-soft)]">
@@ -1004,6 +995,21 @@ function ReviewContent() {
                     uploading={uploading}
                   />
                 </div>
+              </div>
+            )}
+
+            {/* Reason textarea appears only once Reject is clicked. */}
+            {showReason && (
+              <div className="space-y-5">
+                <label className="block">
+                  <span className="text-sm font-medium text-[var(--ink)]">Reason for rejection</span>
+                  <textarea
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    className="mt-2 min-h-24 w-full rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                    placeholder="Tell the worker what to change."
+                  />
+                </label>
               </div>
             )}
           </div>
