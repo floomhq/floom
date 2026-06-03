@@ -152,6 +152,56 @@ async def member_write_guard(request: Request, call_next):
 
 
 @app.middleware("http")
+async def workers_list_visibility_middleware(request: Request, call_next):
+    """Inject visibility into workers list API responses.
+
+    The engine's WorkerSummary Pydantic model doesn't include visibility (it's
+    a cloud concept). The Supabase repo already fetches it; this middleware
+    post-processes the list response to surface it so the frontend badge works.
+    Only activates on GET /api/workers or GET /workers (list, not detail).
+    """
+    import asyncio as _asyncio
+    import json as _json
+
+    path = request.url.path.rstrip("/")
+    is_list = request.method == "GET" and path in ("/api/workers", "/workers")
+    if not is_list:
+        return await call_next(request)
+
+    response = await call_next(request)
+    if not (200 <= response.status_code < 300):
+        return response
+
+    body = b""
+    async for chunk in response.body_iterator:
+        body += chunk
+
+    try:
+        data = _json.loads(body)
+        if isinstance(data, list) and data:
+            worker_ids = [w["id"] for w in data if isinstance(w, dict) and w.get("id")]
+            if worker_ids:
+                def _fetch_vis():
+                    from apps.api.config import get_supabase_service_client
+                    svc = get_supabase_service_client()
+                    rows = svc.table("workers").select("id,visibility").in_("id", worker_ids).execute()
+                    return {r["id"]: r.get("visibility") or "private" for r in (rows.data or [])}
+
+                vis_map = await _asyncio.to_thread(_fetch_vis)
+                for w in data:
+                    if isinstance(w, dict) and w.get("id"):
+                        w["visibility"] = vis_map.get(w["id"], "private")
+                body = _json.dumps(data).encode()
+    except Exception:
+        pass
+
+    from starlette.responses import Response as _StResponse
+    headers = dict(response.headers)
+    headers["content-length"] = str(len(body))
+    return _StResponse(content=body, status_code=response.status_code, headers=headers, media_type="application/json")
+
+
+@app.middleware("http")
 async def cloud_security_headers_middleware(request: Request, call_next):
     """Keep cloud-owned routes on the same security-header baseline as engine routes."""
     response = await call_next(request)

@@ -1015,6 +1015,20 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         skill_map = self._skill_versions_by_id([row.get("skill_version_id")])
         return _worker_record_from_rows(row, skill_map.get(row.get("skill_version_id")))
 
+    def count_schedule_trigger_rows(self) -> int:
+        """Count workers with active schedule triggers (scheduler tick optimisation stub)."""
+        try:
+            response = (
+                self._client.table("workers")
+                .select("id", count="exact")
+                .eq("enabled", True)
+                .not_.is_("cron_expr", "null")
+                .execute()
+            )
+            return int(getattr(response, "count", 0) or 0)
+        except Exception:
+            return 0
+
     def set_visibility(self, *, worker_id: str, visibility: str) -> None:
         client = self._client
         existing = (
