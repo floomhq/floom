@@ -12,6 +12,7 @@ import { ConnectionsEmptyState } from "@/components/connections/ConnectionsEmpty
 import {
   getLastUsedByConnection,
   toConnectionView,
+  SUPPORTED_APPS,
   type ConnectionRecord,
   type ConnectionView,
 } from "@/components/connections/connection-data";
@@ -45,7 +46,12 @@ export default function ConnectionsClient({
   const [testing, setTesting] = useState<string | null>(null);
   const [scopesByConnectionId, setScopesByConnectionId] = useState<Record<string, string[]>>({});
   const [connectionSearch, setConnectionSearch] = useState("");
+  // X9: floom UUID of the connection that was just added/reconnected, so the
+  // Connected tab can highlight + scroll to it instead of silently dropping the
+  // user on an unchanged-looking table.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const postConnectHandledRef = useRef(false);
 
   const hydrateOneConnection = useCallback(async (record: ConnectionRecord) => {
     const account = await fetchConnectedAccount(record.id);
@@ -109,6 +115,61 @@ export default function ConnectionsClient({
       void refresh();
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // X9 post-connect feedback: when the OAuth callback bounces back to
+  // /connections?connected=1&app=<slug>&connection_id=<floom-uuid>, confirm
+  // exactly what changed (account identity + tools), highlight the new row,
+  // then strip the params so a refresh doesn't re-fire the toast.
+  useEffect(() => {
+    if (postConnectHandledRef.current) return;
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("connected") !== "1") return;
+    postConnectHandledRef.current = true;
+
+    const connectionId = url.searchParams.get("connection_id") || "";
+    const appSlug = url.searchParams.get("app") || "";
+
+    // Clean the URL immediately so reloads / shares don't replay the toast.
+    url.searchParams.delete("connected");
+    url.searchParams.delete("connection_id");
+    url.searchParams.delete("app");
+    window.history.replaceState({}, "", url.pathname + (url.search || ""));
+
+    void (async () => {
+      // Pull the freshest list so the new/merged row is present.
+      await refresh();
+
+      const appName = appSlug
+        ? SUPPORTED_APPS.find((a) => a.slug === appSlug.toLowerCase())?.displayName ||
+          appSlug.charAt(0).toUpperCase() + appSlug.slice(1)
+        : "your app";
+
+      let accountLabel = "";
+      let toolsCount = 0;
+      if (connectionId) {
+        const [account, toolsN] = await Promise.all([
+          fetchConnectedAccount(connectionId).catch(() => undefined),
+          appSlug ? fetchToolsCount(appSlug).catch(() => 0) : Promise.resolve(0),
+        ]);
+        accountLabel = account?.email || "";
+        toolsCount = toolsN;
+        setHighlightId(connectionId);
+        // Defer scroll until the row has rendered.
+        window.setTimeout(() => {
+          document
+            .getElementById(`connection-${connectionId}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 250);
+        // Fade the highlight after a few seconds.
+        window.setTimeout(() => setHighlightId(null), 6000);
+      }
+
+      const who = accountLabel ? ` as ${accountLabel}` : "";
+      const tools = toolsCount > 0 ? ` — ${toolsCount} tools now available to your workers` : "";
+      toast.success(`Connected ${appName}${who}${tools}`);
+    })();
+  }, [refresh]);
 
   useEffect(() => {
     const hasInitiated = connections.some(
@@ -292,6 +353,7 @@ export default function ConnectionsClient({
                     refreshing={refreshing === connection.id}
                     reconnecting={connecting === connection.app_name}
                     testing={testing === connection.id}
+                    highlighted={highlightId === connection.id}
                     onDelete={handleDelete}
                     onReconnect={handleConnect}
                     onRefresh={handleRefresh}
@@ -329,6 +391,18 @@ async function loadWorkerDetails() {
   return details.flatMap((result) =>
     result.status === "fulfilled" ? [result.value as WorkerDetail] : []
   );
+}
+
+async function fetchToolsCount(appSlug: string): Promise<number> {
+  try {
+    const result = await api.integrations.catalog({ search: appSlug, limit: 10 });
+    const match =
+      result.items.find((it) => it.slug.toLowerCase() === appSlug.toLowerCase()) ||
+      result.items[0];
+    return match?.tools_count ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 async function fetchConnectedAccount(id: string): Promise<ConnectedAccountMetadata | undefined> {
