@@ -124,8 +124,11 @@ async def list_members(
     if not _is_admin(auth, workspace_id):
         raise HTTPException(status_code=403, detail="admin access required")
     members = members_db.list_members(workspace_id=workspace_id)
+    # Owner is shown separately — exclude them from the members list to avoid duplication.
+    owner_uid = str(ws["owner_user_id"])
+    members = [m for m in members if str(m["user_id"]) != owner_uid]
     # Resolve emails for all members + owner in one batch.
-    all_user_ids = [str(ws["owner_user_id"])] + [str(m["user_id"]) for m in members]
+    all_user_ids = [owner_uid] + [str(m["user_id"]) for m in members]
     emails = members_db.resolve_member_emails(all_user_ids)
     owner_entry = {
         "user_id": str(ws["owner_user_id"]),
@@ -141,6 +144,37 @@ async def list_members(
         "owner": owner_entry,
         "members": members,
     }
+
+
+@router.get("/workspaces/{workspace_id}/workers")
+async def list_workspace_workers_admin(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> list:
+    """Admin-only: all workers in the workspace, grouped by owner, with emails resolved."""
+    _require_admin(auth, workspace_id)
+
+    from apps.api.config import get_supabase_service_client
+    import asyncio as _asyncio
+
+    def _fetch():
+        svc = get_supabase_service_client()
+        rows = svc.table("workers").select("id,name,user_id,visibility").eq("workspace_id", workspace_id).execute()
+        worker_rows = rows.data or []
+        user_ids = list({r["user_id"] for r in worker_rows})
+        emails = members_db.resolve_member_emails(user_ids)
+        return [
+            {
+                "id": r["id"],
+                "name": r.get("name") or r["id"],
+                "visibility": r.get("visibility") or "private",
+                "owner_id": r["user_id"],
+                "owner_email": emails.get(r["user_id"], r["user_id"]),
+            }
+            for r in worker_rows
+        ]
+
+    return await _asyncio.to_thread(_fetch)
 
 
 @router.delete("/workspaces/{workspace_id}/members/{user_id}")
