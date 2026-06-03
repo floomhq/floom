@@ -11,7 +11,6 @@ export function ConnectionsTabs() {
   const pathname = usePathname();
   const tabs = [
     { href: "/connections", label: "Connected", match: (p: string) => p === "/connections" },
-    { href: "/connections/slack", label: "Slack", match: (p: string) => p.startsWith("/connections/slack") },
     { href: "/connections/browse", label: "Browse", match: (p: string) => p.startsWith("/connections/browse") },
     { href: "/connections/mcp", label: "MCP", match: (p: string) => p.startsWith("/connections/mcp") },
     { href: "/connections/secrets", label: "Secrets", match: (p: string) => p.startsWith("/connections/secrets") || p.startsWith("/secrets") },
