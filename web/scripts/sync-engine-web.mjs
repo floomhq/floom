@@ -77,6 +77,7 @@ export const OVERLAY_FILES = [
   "app/page.tsx",
   "app/privacy/page.tsx",
   "app/settings/page.tsx",
+  "app/join/page.tsx",
   "app/members/page.tsx",
   "app/workers/page.tsx",
   "app/workers/WorkersClient.tsx",

@@ -3,7 +3,6 @@
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -442,99 +441,6 @@ function MembersContent() {
         )}
       </section>
 
-      {/* Accept-invite flow — auto-opens when ?invite=<token> is in the URL */}
-      <AcceptInviteSection onJoined={() => void refresh(workspaceId)} />
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Accept invite — shown as a collapsible section for users who have a token
-// ---------------------------------------------------------------------------
-
-function AcceptInviteSection({ onJoined }: { onJoined: () => void }) {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const urlToken = searchParams?.get("invite") ?? "";
-  const [open, setOpen] = useState(!!urlToken);
-  const [token, setToken] = useState(urlToken);
-  const [accepting, setAccepting] = useState(false);
-  const [pat, setPat] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  async function handleAccept() {
-    if (!token.trim()) { toast.error("Paste your invitation token"); return; }
-    setAccepting(true);
-    try {
-      const result = await apiFetch<{ workspace_id: string; role: string; pat_token: string }>(
-        "/workspaces/accept-invite",
-        { method: "POST", body: JSON.stringify({ token: token.trim() }) }
-      );
-      // Switch active workspace to the one just joined.
-      window.localStorage.setItem(WS_KEY, result.workspace_id);
-      setPat(result.pat_token);
-      toast.success("Invitation accepted — you've joined the workspace");
-      onJoined();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Invalid or expired invitation");
-    } finally {
-      setAccepting(false);
-    }
-  }
-
-  function handleCopy() {
-    if (!pat) return;
-    void navigator.clipboard.writeText(pat).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
-
-  function handleDone() {
-    router.push("/app/workers");
-  }
-
-  return (
-    <section className="border-t border-border pt-6 space-y-3">
-      <button
-        type="button"
-        className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? "▾" : "▸"} Have an invitation? Accept it here
-      </button>
-      {open && !pat && (
-        <div className="flex gap-2 flex-wrap items-center">
-          <Input
-            placeholder="Paste invitation token (wsi_…)"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void handleAccept(); }}
-            className="text-sm font-mono flex-1 min-w-[260px]"
-          />
-          <Button size="sm" disabled={accepting} onClick={() => void handleAccept()}>
-            {accepting ? "Accepting…" : "Accept"}
-          </Button>
-        </div>
-      )}
-      {pat && (
-        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-          <p className="text-sm font-medium">You're in. Save your API token before continuing.</p>
-          <p className="text-xs text-muted-foreground">
-            This token is shown <strong>once only</strong> and cannot be retrieved again. Use it as your{" "}
-            <code className="bg-muted px-1 py-0.5 rounded font-mono">x-floom-token</code> header.
-          </p>
-          <div className="flex gap-2">
-            <Input readOnly value={pat} className="font-mono text-xs" onFocus={(e) => e.target.select()} />
-            <Button size="sm" variant="secondary" onClick={handleCopy}>
-              {copied ? "Copied!" : "Copy"}
-            </Button>
-          </div>
-          <Button size="sm" className="w-full" onClick={handleDone}>
-            I've saved my token — go to workspace
-          </Button>
-        </div>
-      )}
-    </section>
   );
 }
