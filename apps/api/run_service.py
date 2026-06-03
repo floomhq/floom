@@ -1819,7 +1819,26 @@ def _smoke_empty_output_error(
 
 
 def _load_runtime_env_files() -> None:
-    load_dotenv(LOCAL_ENV_PATH, override=False)
+    # Load the SAME secret-store files the write path (`SqliteSecretRepository
+    # .set`) persists values into, so run-time secret resolution is consistent
+    # across ALL run paths (manual, scheduled, webhook, composio): a secret set
+    # under the worker's owner is found at run time regardless of how the run
+    # was triggered.
+    #
+    # N4-1 root cause: the secret-store path was source-tree-relative
+    # (`apps/api/.env` next to the db source file). Two processes serving the
+    # same shared DB but running from different deploy directories
+    # (/root/workeros vs /opt/workeros-live vs a /tmp worktree) resolved it to
+    # DIFFERENT files. The DB row (absolute WORKEROS_DB path) is shared, so a
+    # secret read back as "set" while its value was orphaned in another tree's
+    # .env — every scheduled run failed "missing_secret". The store path is now
+    # DB-anchored (stable across deploys) and we read across legacy locations
+    # so pre-fix values still resolve.
+    from db import secret_store_read_paths
+
+    for secret_store in secret_store_read_paths():
+        if secret_store.is_file():
+            load_dotenv(secret_store, override=False)
     if API_ENV_PATH.is_file():
         load_dotenv(API_ENV_PATH, override=False)
 
