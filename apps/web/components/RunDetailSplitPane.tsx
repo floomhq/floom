@@ -107,7 +107,10 @@ export function RunDetailSplitPane({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <Link href={`/workers/${run.worker_id}#code`}>
+          {/* Canonical Source-tab hash is #source (SECTION_TO_HASH[code]);
+              #code stays a back-compat alias in HASH_TO_SECTION. Use the
+              canonical slug so the Edit link lands on the Source tab. */}
+          <Link href={`/workers/${run.worker_id}#source`}>
             <Button variant="outline" size="sm">
               <Pencil className="size-3.5 mr-1.5" />
               Edit
