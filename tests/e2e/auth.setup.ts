@@ -1,72 +1,66 @@
 /**
- * Auth setup — run ONCE with:
- *   npx playwright test --project=setup --headed
+ * Auth setup — run ONCE:
+ *   npx playwright test --project=setup
  *
- * Two browser windows open sequentially.
- * Log in with Google in each — Playwright saves the session.
+ * Reads credentials from .env.test (gitignored):
+ *   PLAYWRIGHT_ADMIN_EMAIL / PLAYWRIGHT_ADMIN_PASSWORD
+ *   PLAYWRIGHT_MEMBER_EMAIL / PLAYWRIGHT_MEMBER_PASSWORD
  *
- * Saved to:
- *   tests/e2e/.auth/admin.json   (Frederico — workspace owner)
- *   tests/e2e/.auth/member.json  (vivekbs.10@gmail.com — workspace member)
- *
- * Re-run only when sessions expire.
+ * Saves sessions to tests/e2e/.auth/ — rerun only when sessions expire.
  */
-import { test as setup, expect } from "@playwright/test";
+import { test as setup } from "@playwright/test";
 import path from "path";
+import fs from "fs";
+import dotenv from "dotenv";
+
+dotenv.config({ path: path.join(__dirname, "../../.env.test") });
 
 const BASE = "https://workeros.floom.dev";
 const WORKSPACE_ID = "ws_8bdb2e8127db4f";
 const ADMIN_STATE  = path.join(__dirname, ".auth/admin.json");
 const MEMBER_STATE = path.join(__dirname, ".auth/member.json");
 
-async function loginAndSave(page: any, label: string, statePath: string) {
-  console.log(`\n=== ${label} ===`);
-  console.log(`Opening login page — click "Continue with Google" and sign in.`);
-  console.log(`Waiting up to 2 minutes for you to complete Google sign-in...\n`);
+async function loginAndSave(page: any, email: string, password: string, stateFile: string) {
+  if (!email || !password) throw new Error(`Missing credentials for ${stateFile}`);
 
-  await page.goto(`${BASE}/app/login`);
+  await page.goto(`${BASE}/app/login?mode=signin`);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.locator('input[type="email"]').fill(email);
+  await page.locator('input[type="password"]').fill(password);
+  await page.locator('form button[type="submit"]').click();
 
-  // The Google button is an <a> tag, not a <button>
-  const googleLink = page.locator("a").filter({ hasText: /continue with google/i });
-  await expect(googleLink).toBeVisible({ timeout: 10_000 });
-  await googleLink.click();
-
-  // Wait for Google OAuth to complete and land back on the app.
-  // This can take up to 2 minutes depending on Google's flow.
+  // Wait until redirected into the app
   await page.waitForFunction(
-    () => {
-      const url = window.location.href;
-      return (
-        url.includes("workeros.floom.dev/app") &&
-        !url.includes("/login") &&
-        !url.includes("accounts.google") &&
-        !url.includes("oauth") &&
-        !url.includes("callback")
-      );
-    },
-    { timeout: 120_000, polling: 1000 }
+    () => window.location.href.includes("workeros.floom.dev/app") && !window.location.href.includes("/login"),
+    { timeout: 30_000, polling: 500 }
   );
 
-  console.log(`✓ Logged in — landed at: ${page.url()}`);
-
-  // Set active workspace
+  // Pin to Nova Search workspace
   await page.evaluate((wsId: string) => {
     localStorage.setItem("workeros.activeWorkspaceId", wsId);
   }, WORKSPACE_ID);
 
-  // Wait for the main UI to be ready
-  await page.waitForSelector('nav, aside, [class*="sidebar" i]', { timeout: 15_000 });
+  await page.waitForSelector("nav, aside", { timeout: 10_000 });
 
-  // Save session state
-  await page.context().storageState({ path: statePath });
-  console.log(`✓ Session saved to ${statePath}\n`);
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  await page.context().storageState({ path: stateFile });
+  console.log(`✓ ${email} → ${stateFile}`);
 }
 
 setup("authenticate as admin", async ({ page }) => {
-  await loginAndSave(page, "ADMIN LOGIN (Frederico — workspace owner)", ADMIN_STATE);
+  await loginAndSave(
+    page,
+    process.env.PLAYWRIGHT_ADMIN_EMAIL ?? "",
+    process.env.PLAYWRIGHT_ADMIN_PASSWORD ?? "",
+    ADMIN_STATE
+  );
 });
 
 setup("authenticate as member", async ({ page }) => {
-  console.log("\n>>> IMPORTANT: In this window, sign in as vivekbs.10@gmail.com (the MEMBER account) <<<\n");
-  await loginAndSave(page, "MEMBER LOGIN (vivekbs.10@gmail.com)", MEMBER_STATE);
+  await loginAndSave(
+    page,
+    process.env.PLAYWRIGHT_MEMBER_EMAIL ?? "",
+    process.env.PLAYWRIGHT_MEMBER_PASSWORD ?? "",
+    MEMBER_STATE
+  );
 });
