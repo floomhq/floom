@@ -581,6 +581,28 @@ export interface WorkspaceShareLink {
   token: string;
 }
 
+export type WorkspaceRole = "owner" | "admin" | "member";
+export type WorkspaceMemberStatus = "active" | "invited" | "removed";
+
+export interface WorkspaceMember {
+  workspace_id: string;
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  role: WorkspaceRole;
+  status: WorkspaceMemberStatus;
+  invited_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface WorkspaceMembersResponse {
+  members: WorkspaceMember[];
+  workspace_id: string;
+  my_user_id: string;
+  my_role: WorkspaceRole | null;
+}
+
 export interface SystemOverviewStats {
   runs_24h: number;
   runs_24h_sparkline: number[];
