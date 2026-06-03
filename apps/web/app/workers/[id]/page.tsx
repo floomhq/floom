@@ -68,6 +68,7 @@ import {
   formatRelativeTime,
   formatScope,
   getSupportedApp,
+  maskAccountLabel,
   normalizeAppSlug,
   SUPPORTED_APPS,
 } from "@/components/connections/connection-data";
@@ -109,7 +110,9 @@ const SECTION_TO_HASH: Record<Section, string> = {
   settings: "settings",
   brain: "brain",
   runs: "runs",
-  connections: "connections",
+  // P2-3 / N2-1: canonical hash matches the visible "Tools" label. `#connections`
+  // stays a back-compat alias in HASH_TO_SECTION below so old links don't break.
+  connections: "tools",
   code: "source",
   versions: "versions",
 };
@@ -130,6 +133,9 @@ const HASH_TO_SECTION: Record<string, Section> = {
   code: "code",
   overview: "about",
   runs: "runs",
+  // N2-1: the tab is labelled "Tools"; `#tools` now resolves to it. The old
+  // `#connections` slug stays mapped for back-compat with existing links.
+  tools: "connections",
   connections: "connections",
   versions: "versions",
 };
@@ -3225,8 +3231,6 @@ function ConnectionsSection({
                   : "");
               const latestStatus = appConnections[0]?.status;
               const grantedScopes = activeConnection?.scopes ?? [];
-              const visibleScopes = grantedScopes.slice(0, 4);
-              const hiddenScopes = Math.max(grantedScopes.length - visibleScopes.length, 0);
               return (
                 <div key={slug} className="grid gap-4 border-b border-line p-4 last:border-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
                   <div className="min-w-0 space-y-2">
@@ -3252,7 +3256,7 @@ function ConnectionsSection({
                       )}
                     </div>
                     {connectionLabel ? (
-                      <p className="truncate text-xs text-muted-foreground">{connectionLabel}</p>
+                      <p className="truncate text-xs text-muted-foreground">{maskAccountLabel(connectionLabel)}</p>
                     ) : latestStatus ? (
                       <p className="truncate text-xs text-muted-foreground">Status: {latestStatus}</p>
                     ) : null}
@@ -3274,25 +3278,35 @@ function ConnectionsSection({
                       onSet={onSetComposioAllowlist}
                     />
 
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-foreground">Granted OAuth scopes</p>
-                      {visibleScopes.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {visibleScopes.map((scope) => (
-                            <Badge key={scope} variant="outline" className="max-w-full border-line bg-paper px-2 font-mono text-[0.68rem] text-muted-foreground">
+                    {/* N6-2: OAuth scopes can include sensitive personal-data
+                        grants (contacts, birthday, phone numbers). Show a count
+                        summary by default and collapse the raw scope slugs
+                        behind a disclosure so they aren't dumped in plain view. */}
+                    {grantedScopes.length > 0 ? (
+                      <details className="group overflow-hidden rounded-[var(--radius-button)] border border-line bg-paper">
+                        <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-foreground">
+                          <span>
+                            {grantedScopes.length} OAuth{" "}
+                            {grantedScopes.length === 1 ? "scope" : "scopes"} granted
+                          </span>
+                          <span className="text-[0.68rem] font-normal text-muted-foreground group-open:hidden">
+                            View scopes
+                          </span>
+                        </summary>
+                        <div className="flex flex-wrap gap-1.5 border-t border-line px-3 py-2">
+                          {grantedScopes.map((scope) => (
+                            <Badge key={scope} variant="outline" className="max-w-full border-line bg-card px-2 font-mono text-[0.68rem] text-muted-foreground">
                               <span className="max-w-[220px] truncate">{formatScope(scope)}</span>
                             </Badge>
                           ))}
-                          {hiddenScopes > 0 && (
-                            <Badge variant="outline" className="border-line bg-paper px-2 text-[0.68rem] text-muted-foreground">
-                              +{hiddenScopes} more
-                            </Badge>
-                          )}
                         </div>
-                      ) : (
+                      </details>
+                    ) : (
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-foreground">Granted OAuth scopes</p>
                         <p className="text-xs text-muted-foreground">Scopes not loaded yet.</p>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

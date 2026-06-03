@@ -224,7 +224,7 @@ function SettingsContent() {
                 <Skeleton className="h-12 w-full" />
               ) : (
                 <>
-                  <div className="flex items-center justify-between bg-muted p-3">
+                  <div className="flex items-center justify-between rounded-[var(--radius-card)] bg-muted p-3">
                     <span className="text-sm">Configured</span>
                     <span className="text-sm font-medium">
                       {platformConfig.set_count}/{platformConfig.required_count}
