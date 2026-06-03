@@ -123,6 +123,51 @@ def _workeros_email_html(
 </html>"""
 
 
+def build_workspace_invite_email(
+    *,
+    inviter_name: str,
+    workspace_name: str,
+    invite_url: str,
+) -> dict[str, str]:
+    """Return ``{"subject": ..., "html": ..., "text": ...}`` for a workspace invite."""
+    safe_inviter = escape(inviter_name or "A workspace admin")
+    safe_workspace = escape(workspace_name or "a workspace")
+    html = _workeros_email_html(
+        preheader=f"{safe_inviter} invited you to join {safe_workspace} on Workeros.",
+        eyebrow="Workspace invitation",
+        headline=f"You've been invited to {safe_workspace}",
+        body_html=f"""
+<p class="workeros-ink" style="font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:17px;line-height:1.55;margin:0 0 20px;color:#181716;font-weight:400;"><strong>{safe_inviter}</strong> has invited you to collaborate on <strong>{safe_workspace}</strong>.</p>
+<p class="workeros-ink" style="font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:15px;line-height:1.65;margin:0 0 16px;color:#181716;">Accept the invitation to access shared workers and start collaborating. The link expires in 7 days.</p>
+""".strip(),
+        cta_label="Accept invitation",
+        cta_url=escape(invite_url, quote=True),
+        footer_note="If you didn't expect this invitation, you can safely ignore this email.",
+    )
+    text = "\n".join(
+        [
+            f"{inviter_name} invited you to join {workspace_name} on Workeros.",
+            "",
+            "Accept the invitation to access shared workers and start collaborating.",
+            f"Accept invitation: {invite_url}",
+            "",
+            "The link expires in 7 days. If you didn't expect this, ignore this email.",
+        ]
+    )
+    return {
+        "subject": f"You're invited to join {workspace_name} on Workeros",
+        "html": html,
+        "text": text,
+    }
+
+
+def send_email(*, to: str, subject: str, html: str, text: str | None = None) -> EmailSendResult:
+    """Convenience wrapper for sending a plain html/text email."""
+    return send_transactional_email(
+        TransactionalEmail(to=to, subject=subject, html=html, text=text)
+    )
+
+
 def _enabled() -> bool:
     return (os.environ.get("WORKEROS_EMAIL_ENABLED") or "").strip().lower() in {
         "1",

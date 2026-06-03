@@ -1,0 +1,218 @@
+"""HTTP surface for workspace member management.
+
+Routes mounted under /workspaces (prefix applied in main.py):
+
+  POST   /workspaces/{id}/members/invite          -> send invite (admin only)
+  GET    /workspaces/{id}/members                 -> list active members (admin only)
+  DELETE /workspaces/{id}/members/{user_id}       -> remove member (admin only)
+  PATCH  /workspaces/{id}/members/{user_id}/role  -> change role (admin only)
+  GET    /workspaces/{id}/invitations             -> list invitations (admin only)
+  DELETE /workspaces/{id}/invitations/{inv_id}    -> revoke invite (admin only)
+  POST   /workspaces/accept-invite                -> accept invitation (any auth user)
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, EmailStr, Field
+
+from apps.api._engine import ensure_engine_api_path
+from apps.api.db import members as members_db
+from apps.api.db import workspaces as workspace_repo
+from apps.api.email import build_workspace_invite_email, send_email
+
+ensure_engine_api_path()
+
+from auth import AuthContext, get_auth_context  # noqa: E402
+
+
+router = APIRouter(tags=["members"])
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+def _is_admin(auth: AuthContext, workspace_id: str) -> bool:
+    """True if the caller owns or has admin role in the workspace."""
+    ws = workspace_repo.get(workspace_id=workspace_id)
+    if ws is None:
+        return False
+    if str(ws.get("owner_user_id", "")) == str(auth.user_id):
+        return True
+    role = workspace_repo.get_member_role(workspace_id=workspace_id, user_id=auth.user_id)
+    return role == "admin"
+
+
+def _require_admin(auth: AuthContext, workspace_id: str) -> dict:
+    """Return the workspace row or raise 404/403."""
+    ws = workspace_repo.get(workspace_id=workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    if str(ws.get("owner_user_id", "")) == str(auth.user_id):
+        return ws
+    role = workspace_repo.get_member_role(workspace_id=workspace_id, user_id=auth.user_id)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="admin access required")
+    return ws
+
+
+# ---------------------------------------------------------------------------
+# schemas
+# ---------------------------------------------------------------------------
+
+class InviteMemberRequest(BaseModel):
+    email: EmailStr
+    role: str = Field(default="member", pattern="^(admin|member)$")
+
+
+class ChangeRoleRequest(BaseModel):
+    role: str = Field(..., pattern="^(admin|member)$")
+
+
+class AcceptInviteRequest(BaseModel):
+    token: str = Field(..., min_length=4)
+
+
+# ---------------------------------------------------------------------------
+# routes
+# ---------------------------------------------------------------------------
+
+@router.post("/workspaces/{workspace_id}/members/invite", status_code=201)
+async def invite_member(
+    workspace_id: str,
+    payload: InviteMemberRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict:
+    ws = _require_admin(auth, workspace_id)
+    invite, raw_token = members_db.invite_member(
+        workspace_id=workspace_id,
+        inviter_user_id=auth.user_id,
+        email=str(payload.email),
+        role=payload.role,
+    )
+    # Send email — non-fatal on failure so the invite row is still created.
+    try:
+        inviter_name = (auth.email or "").split("@")[0] or "A workspace admin"
+        invite_url = f"https://workeros.floom.dev/invite/{raw_token}"
+        msg = build_workspace_invite_email(
+            inviter_name=inviter_name,
+            workspace_name=ws["name"],
+            invite_url=invite_url,
+        )
+        send_email(to=str(payload.email), subject=msg["subject"], html=msg["html"])
+    except Exception:
+        pass  # log if needed; never block invite creation
+    return {
+        "id": invite.get("id"),
+        "email": invite.get("email"),
+        "role": invite.get("role"),
+        "status": invite.get("status"),
+        "expires_at": invite.get("expires_at"),
+    }
+
+
+@router.get("/workspaces/{workspace_id}/members")
+async def list_members(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict:
+    ws = workspace_repo.get(workspace_id=workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    if not _is_admin(auth, workspace_id):
+        raise HTTPException(status_code=403, detail="admin access required")
+    members = members_db.list_members(workspace_id=workspace_id)
+    # Include workspace owner as a synthetic admin entry.
+    owner_entry = {
+        "user_id": str(ws["owner_user_id"]),
+        "role": "admin",
+        "status": "active",
+        "is_owner": True,
+    }
+    return {
+        "workspace_id": workspace_id,
+        "owner": owner_entry,
+        "members": members,
+    }
+
+
+@router.delete("/workspaces/{workspace_id}/members/{user_id}")
+async def remove_member(
+    workspace_id: str,
+    user_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict:
+    ws = _require_admin(auth, workspace_id)
+    if str(ws.get("owner_user_id", "")) == user_id:
+        raise HTTPException(status_code=400, detail="cannot remove workspace owner")
+    removed = members_db.remove_member(workspace_id=workspace_id, user_id=user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="member not found")
+    return {"ok": True, "user_id": user_id}
+
+
+@router.patch("/workspaces/{workspace_id}/members/{user_id}/role")
+async def change_member_role(
+    workspace_id: str,
+    user_id: str,
+    payload: ChangeRoleRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict:
+    ws = _require_admin(auth, workspace_id)
+    if str(ws.get("owner_user_id", "")) == user_id:
+        raise HTTPException(status_code=400, detail="cannot change workspace owner role")
+    updated = members_db.change_role(
+        workspace_id=workspace_id, user_id=user_id, new_role=payload.role
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="member not found")
+    return updated
+
+
+@router.get("/workspaces/{workspace_id}/invitations")
+async def list_invitations(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict:
+    _require_admin(auth, workspace_id)
+    invitations = members_db.list_invitations(workspace_id=workspace_id)
+    return {"workspace_id": workspace_id, "invitations": invitations}
+
+
+@router.delete("/workspaces/{workspace_id}/invitations/{invitation_id}")
+async def revoke_invitation(
+    workspace_id: str,
+    invitation_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict:
+    _require_admin(auth, workspace_id)
+    revoked = members_db.revoke_invitation(
+        invitation_id=invitation_id, workspace_id=workspace_id
+    )
+    if not revoked:
+        raise HTTPException(status_code=404, detail="invitation not found or already accepted")
+    return {"ok": True}
+
+
+@router.post("/workspaces/accept-invite", status_code=201)
+async def accept_invite(
+    payload: AcceptInviteRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict:
+    """Accept a workspace invitation. Returns the new PAT (shown once)."""
+    try:
+        result = members_db.accept_invitation(
+            raw_token=payload.token,
+            accepting_user_id=auth.user_id,
+        )
+    except ValueError as exc:
+        status = 410 if "expired" in str(exc) else 404
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    member = result["member"]
+    return {
+        "workspace_id": member.get("workspace_id"),
+        "role": member.get("role"),
+        "joined_at": member.get("joined_at"),
+        "pat_token": result["pat_token"],
+    }

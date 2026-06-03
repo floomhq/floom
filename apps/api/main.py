@@ -28,6 +28,7 @@ from apps.api._engine import import_engine_module
 engine_run_service = import_engine_module("run_service")
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.cli_auth_devices import router as cli_auth_devices_router
+from apps.api.routes.members import router as members_router
 from apps.api.routes.novasearch import router as novasearch_router
 from apps.api.routes.slack_events import router as slack_events_router
 from apps.api.routes.telemetry import router as telemetry_router
@@ -124,6 +125,7 @@ app.include_router(auth_router)
 # UUID FK on public.cli_auth_devices.user_id; the cloud override below mints
 # the row with user_id=NULL and lets /auth/cli-approve claim it later.
 app.include_router(workspaces_router, prefix="/api")
+app.include_router(members_router, prefix="/api")
 app.include_router(cli_auth_devices_router, prefix="/api")
 app.include_router(telemetry_router, prefix="/api")
 app.include_router(novasearch_router, prefix="/api")
@@ -326,6 +328,95 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
         engine_main._build_worker_detail, worker_id,
         user_id=auth.user_id, repos=repos
     )
+
+
+@app.post("/workers/clone/{token}", status_code=201)
+@app.post("/api/workers/clone/{token}", status_code=201)
+async def cloud_clone_worker(token: str, request: Request) -> Any:
+    """Cloud override for POST /workers/clone/{token}.
+
+    In cloud mode, worker files live in Supabase (skill_versions.manifest_json._files),
+    not on disk. This override reads them from Supabase and writes the clone back.
+    """
+    import hashlib as _hashlib
+    import json as _json
+    from datetime import datetime, timezone
+
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from apps.api.config import get_supabase_service_client
+    from auth.context import AuthContext as _AuthContext
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    token_hash = _hashlib.sha256(token.encode()).hexdigest()
+    repos = engine_main.get_repositories()
+    source = repos.workers.get_by_clone_token(token_hash=token_hash)
+    if not source:
+        raise HTTPException(status_code=404, detail="clone token not found")
+    expires_at_str = source.get("clone_token_expires_at") or ""
+    if expires_at_str:
+        try:
+            exp = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) > exp:
+                raise HTTPException(status_code=410, detail="clone token expired")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    # Read files from Supabase manifest_json._files.
+    source_worker_id = str(source["id"])
+    svc = get_supabase_service_client()
+    sv_id = (source.get("skill_version_id") or "").strip()
+    files: dict = {}
+    if sv_id:
+        sv_resp = svc.table("skill_versions").select("manifest_json").eq("id", sv_id).limit(1).execute()
+        sv_rows = sv_resp.data or []
+        if sv_rows:
+            raw_mj = sv_rows[0].get("manifest_json") or {}
+            mj = raw_mj if isinstance(raw_mj, dict) else (_json.loads(raw_mj) if isinstance(raw_mj, str) else {})
+            files = mj.get("_files") or {}
+
+    if not files:
+        # Fall back to disk materialisation if Supabase files are missing.
+        files = _read_worker_files_from_disk(source_worker_id)
+
+    if not files or "worker.yml" not in files:
+        raise HTTPException(status_code=422, detail="source worker has no files to clone")
+
+    DraftFile = engine_main.DraftFile
+    draft_files = [DraftFile(path=name, content=content) for name, content in files.items()]
+
+    engine_auth = _AuthContext(
+        user_id=auth.user_id,
+        email=getattr(auth, "email", None),
+        scopes=getattr(auth, "scopes", ()),
+    )
+
+    new_worker = engine_main._register_worker_from_files(draft_files, engine_auth, repos)
+    new_id = str(new_worker.get("id") or new_worker.get("worker_id", ""))
+
+    # Persist cloned files to Supabase so they survive Railway restarts.
+    if new_id:
+        _cloud_persist_worker_files(new_id, files, repos)
+
+    return {
+        "worker_id": new_id,
+        "cloned_from": source_worker_id,
+        "disclaimer": (
+            "Connections are auto-wired by app name. "
+            "Secrets, run history, and brain data are NOT copied. "
+            "Review and test before using in production."
+        ),
+    }
 
 
 @app.post("/mcp/{workspace_id}")

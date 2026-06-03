@@ -48,6 +48,7 @@ class WorkspaceOut(BaseModel):
     name: str
     owner_user_id: str
     created_at: str
+    role: str = "admin"  # caller's role: 'admin' for owners, 'admin'/'member' for members
 
 
 class WorkspaceListResponse(BaseModel):
@@ -148,12 +149,13 @@ def _set_active_cookie(response: JSONResponse, workspace_id: str) -> None:
     )
 
 
-def _to_out(row: dict) -> WorkspaceOut:
+def _to_out(row: dict, role: str = "admin") -> WorkspaceOut:
     return WorkspaceOut(
         id=str(row["id"]),
         name=str(row["name"]),
         owner_user_id=str(row["owner_user_id"]),
         created_at=str(row["created_at"]),
+        role=role,
     )
 
 
@@ -202,31 +204,47 @@ async def list_workspaces(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> WorkspaceListResponse:
-    rows = workspace_repo.list_for_owner(owner_user_id=auth.user_id)
-    if not rows:
-        # Lazy-bootstrap a default workspace for brand-new users who
-        # somehow bypassed the auth-provider bootstrap (e.g. they hit
-        # /workspaces before any data-fetching endpoint).
-        rows = [
+    owned = workspace_repo.list_for_owner(owner_user_id=auth.user_id)
+    member_rows = workspace_repo.list_member_workspaces(user_id=auth.user_id)
+
+    if not owned and not member_rows:
+        # Lazy-bootstrap a default workspace for brand-new users.
+        owned = [
             workspace_repo.resolve_active_workspace(
                 user_id=auth.user_id,
                 email=auth.email,
                 requested_id=None,
             )
         ]
+
+    # Build combined list: owned workspaces (role='admin') first, then member
+    # workspaces (role from workspace_members) in joined-at order.
+    all_workspaces: list[WorkspaceOut] = []
+    seen_ids: set[str] = set()
+    for row in owned:
+        ws_id = str(row["id"])
+        seen_ids.add(ws_id)
+        all_workspaces.append(_to_out(row, role="admin"))
+    for row in member_rows:
+        ws_id = str(row["id"])
+        if ws_id not in seen_ids:  # guard against owner also appearing as member
+            seen_ids.add(ws_id)
+            all_workspaces.append(_to_out(row, role=str(row.get("role") or "member")))
+
     requested = (
         (request.headers.get(ACTIVE_WORKSPACE_HEADER) or "").strip()
         or request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
     )
     active_id: str | None = None
-    for row in rows:
-        if requested and str(row["id"]) == requested:
+    for ws in all_workspaces:
+        if requested and ws.id == requested:
             active_id = requested
             break
-    if active_id is None:
-        active_id = str(rows[0]["id"])
+    if active_id is None and all_workspaces:
+        active_id = all_workspaces[0].id
+
     return WorkspaceListResponse(
-        workspaces=[_to_out(row) for row in rows],
+        workspaces=all_workspaces,
         active_id=active_id,
     )
 
@@ -246,10 +264,15 @@ async def select_workspace(
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
     workspace = workspace_repo.get(workspace_id=workspace_id)
-    if workspace is None or str(workspace["owner_user_id"]) != auth.user_id:
-        # Don't leak existence to non-owners.
+    if workspace is None:
         raise HTTPException(status_code=404, detail="workspace not found")
-    response = JSONResponse(_to_out(workspace).model_dump())
+    # Allow: owner OR active workspace member.
+    is_owner = str(workspace["owner_user_id"]) == auth.user_id
+    member_role = workspace_repo.get_member_role(workspace_id=workspace_id, user_id=auth.user_id)
+    if not is_owner and member_role is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    role = "admin" if is_owner else (member_role or "member")
+    response = JSONResponse(_to_out(workspace, role=role).model_dump())
     _set_active_cookie(response, workspace_id)
     return response
 
