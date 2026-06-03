@@ -54,6 +54,18 @@ def test_pat_auth_scopes_request_to_token_workspace(monkeypatch):
     )
     setter = Mock()
     monkeypatch.setattr(supa_module, "set_active_workspace_id", setter)
+    # _resolve_role() now runs for PATs; stub the workspace lookups so the
+    # provider does not reach live Supabase with the non-UUID test user id.
+    monkeypatch.setattr(
+        supa_module.workspace_repo,
+        "get",
+        lambda *, workspace_id: {"id": workspace_id, "owner_user_id": "user-1"},
+    )
+    monkeypatch.setattr(
+        supa_module.workspace_repo,
+        "get_member_role",
+        lambda *, workspace_id, user_id: None,
+    )
 
     provider = SupabaseAuthProvider()
     ctx = asyncio.run(provider.verify(_pat_request()))

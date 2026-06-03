@@ -41,6 +41,13 @@ def test_list_workspaces_uses_header_for_active_id(monkeypatch):
         "list_for_owner",
         lambda owner_user_id: rows,
     )
+    # The members feature added a list_member_workspaces() call to the route;
+    # patch it so the test does not hit live Supabase with a non-UUID user id.
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "list_member_workspaces",
+        lambda user_id: [],
+    )
 
     result = asyncio.run(
         workspace_routes.list_workspaces(
@@ -61,6 +68,11 @@ def test_list_workspaces_falls_back_to_cookie_when_header_empty(monkeypatch):
         workspace_routes.workspace_repo,
         "list_for_owner",
         lambda owner_user_id: rows,
+    )
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "list_member_workspaces",
+        lambda user_id: [],
     )
 
     result = asyncio.run(
@@ -253,6 +265,14 @@ def test_transfer_workspace_flips_owner_access_and_reports_revoked_pats(monkeypa
         }
 
     monkeypatch.setattr(workspace_routes.workspace_repo, "transfer_ownership", transfer_ownership)
+    # After transfer, select_workspace() checks membership for the now-former
+    # owner (no longer the owner_user_id), which would otherwise hit live
+    # Supabase. The old owner is not a member, so it resolves to None.
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "get_member_role",
+        lambda *, workspace_id, user_id: None,
+    )
 
     result = asyncio.run(
         workspace_routes.transfer_workspace(

@@ -1039,6 +1039,222 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             }
         ).eq("id", worker_id).execute()
 
+    # -- worker_triggers (normalized multi-trigger rows) ---------------------
+    #
+    # Cloud mirror of the engine's SqliteWorkerRepository trigger methods
+    # (engine/apps/api/db/sqlite.py). The engine scheduler.py + main.py webhook
+    # path call these UNGUARDED, so the Supabase repo must implement them or
+    # scheduled/webhook workers raise AttributeError in cloud mode.
+    #
+    # Row identity is DETERMINISTIC (id = trg_<worker_id>_<position>) so updating
+    # a worker's triggers updates the same rows instead of churning them.
+    # workspace_id is denormalized from the parent worker so the multi-tenant
+    # scheduler/webhook path is tenant-correct without a request context.
+
+    @staticmethod
+    def _trigger_config_for(trigger: dict[str, Any]) -> dict[str, Any]:
+        """Strip the redundant ``type`` key; keep the per-trigger config payload."""
+        return {k: v for k, v in trigger.items() if k != "type" and v is not None}
+
+    def reconcile_triggers(
+        self,
+        *,
+        worker_id: str,
+        triggers: list[dict[str, Any]],
+        external_trigger_id: str | None = None,
+        enabled: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Sync worker_triggers rows to exactly match the declared triggers.
+
+        One row per declared trigger; rows for removed triggers are deleted.
+        Preserves next_run_at/last_fired_at across reconciles when a schedule
+        trigger's config is unchanged, so the scheduler slot stays stable.
+        Mirrors SqliteWorkerRepository.reconcile_triggers_conn.
+        """
+        client = self._client
+        now = datetime.now(timezone.utc).isoformat()
+        workspace_id = workspace_repo.workspace_id_for_worker(worker_id=worker_id)
+
+        existing_rows = _response_rows(
+            client.table("worker_triggers").select("*").eq("worker_id", worker_id).execute()
+        )
+        existing = {str(row.get("id")): row for row in existing_rows}
+
+        kept_ids: list[str] = []
+        for position, trigger in enumerate(triggers):
+            if not isinstance(trigger, dict):
+                continue
+            t_type = str(trigger.get("type") or "manual").strip().lower()
+            if t_type in {"cron", "scheduled"}:
+                t_type = "schedule"
+            if t_type == "composio":
+                t_type = "composio_event"
+            trigger_id = f"trg_{worker_id}_{position}"
+            kept_ids.append(trigger_id)
+            config_json = json.dumps(self._trigger_config_for(trigger))
+            ext_id = external_trigger_id if t_type == "composio_event" else None
+            webhook_path = worker_id if t_type == "webhook" else None
+
+            prior = existing.get(trigger_id)
+            next_run_at = None
+            last_fired_at = None
+            if prior:
+                if t_type == "schedule" and prior.get("config_json") == config_json:
+                    next_run_at = prior.get("next_run_at")
+                last_fired_at = prior.get("last_fired_at")
+
+            payload = {
+                "id": trigger_id,
+                "workspace_id": workspace_id,
+                "worker_id": worker_id,
+                "type": t_type,
+                "config_json": config_json,
+                "enabled": bool(enabled),
+                "next_run_at": next_run_at,
+                "external_trigger_id": ext_id,
+                "webhook_path": webhook_path,
+                "last_fired_at": last_fired_at,
+                "position": position,
+                "created_at": (prior or {}).get("created_at") or now,
+                "updated_at": now,
+            }
+            # Upsert on the deterministic id (matches engine ON CONFLICT(id)).
+            client.table("worker_triggers").upsert(payload, on_conflict="id").execute()
+
+        # Delete rows for triggers that no longer exist.
+        if kept_ids:
+            stale = [tid for tid in existing if tid not in set(kept_ids)]
+            for tid in stale:
+                client.table("worker_triggers").delete().eq("id", tid).execute()
+        else:
+            client.table("worker_triggers").delete().eq("worker_id", worker_id).execute()
+
+        return self.list_trigger_rows(worker_id=worker_id)
+
+    def list_trigger_rows(self, *, worker_id: str) -> list[dict[str, Any]]:
+        rows = _response_rows(
+            self._client.table("worker_triggers")
+            .select("*")
+            .eq("worker_id", worker_id)
+            .order("position")
+            .order("id")
+            .execute()
+        )
+        return rows
+
+    def list_due_schedule_triggers(self, *, now_iso: str) -> list[dict[str, Any]]:
+        """Return enabled schedule trigger rows joined to enabled workers.
+
+        next_run_at due-comparison is done by the caller (the scheduler also
+        handles NULL next_run_at). Each row carries ``owner_id`` (the worker's
+        user_id) and ``workspace_id`` so the cloud scheduler fires each run
+        under the correct tenant + owner. PostgREST cannot express the engine's
+        JOIN+filter cleanly, so this resolves the owning workers in a second
+        query and filters to enabled ones.
+        """
+        client = self._client
+        trigger_rows = _response_rows(
+            client.table("worker_triggers")
+            .select("id,worker_id,workspace_id,config_json,next_run_at,last_fired_at")
+            .eq("type", "schedule")
+            .eq("enabled", True)
+            .order("worker_id")
+            .order("position")
+            .order("id")
+            .execute()
+        )
+        if not trigger_rows:
+            return []
+
+        worker_ids = list({str(r.get("worker_id")) for r in trigger_rows if r.get("worker_id")})
+        worker_rows = _response_rows(
+            client.table("workers")
+            .select("id,user_id,enabled")
+            .in_("id", worker_ids)
+            .execute()
+        )
+        # enabled defaults to True when the column is absent/NULL (engine treats
+        # a worker as enabled unless explicitly disabled).
+        enabled_owner: dict[str, str | None] = {
+            str(w.get("id")): w.get("user_id")
+            for w in worker_rows
+            if w.get("enabled") is None or bool(w.get("enabled"))
+        }
+
+        due: list[dict[str, Any]] = []
+        for row in trigger_rows:
+            wid = str(row.get("worker_id"))
+            if wid not in enabled_owner:
+                continue
+            enriched = dict(row)
+            enriched["owner_id"] = enabled_owner[wid]
+            due.append(enriched)
+        return due
+
+    def set_trigger_next_run_at(self, *, trigger_id: str, next_run_at: str | None) -> None:
+        self._client.table("worker_triggers").update(
+            {"next_run_at": next_run_at, "updated_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", trigger_id).execute()
+
+    def mark_trigger_fired(
+        self,
+        *,
+        trigger_id: str,
+        last_fired_at: str,
+        next_run_at: str | None,
+    ) -> None:
+        self._client.table("worker_triggers").update(
+            {
+                "last_fired_at": last_fired_at,
+                "next_run_at": next_run_at,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ).eq("id", trigger_id).execute()
+
+    def find_trigger_by_external_id(
+        self, *, external_trigger_id: str
+    ) -> dict[str, Any] | None:
+        return _first_row(
+            self._client.table("worker_triggers")
+            .select("*")
+            .eq("external_trigger_id", external_trigger_id)
+            .eq("enabled", True)
+            .limit(1)
+            .execute()
+        )
+
+    def find_trigger_for_webhook(self, *, worker_id: str) -> dict[str, Any] | None:
+        rows = _response_rows(
+            self._client.table("worker_triggers")
+            .select("*")
+            .eq("worker_id", worker_id)
+            .eq("type", "webhook")
+            .eq("enabled", True)
+            .order("position")
+            .order("id")
+            .limit(1)
+            .execute()
+        )
+        return rows[0] if rows else None
+
+    def count_schedule_trigger_rows(self) -> int:
+        """GLOBAL count of schedule trigger rows across all tenants.
+
+        Gates whether the scheduler loop runs at all, so it must NOT be
+        workspace-scoped (matches the engine's global COUNT). service_role
+        bypasses RLS so this sees every tenant's rows.
+        """
+        response = (
+            self._client.table("worker_triggers")
+            .select("id", count="exact")
+            .eq("type", "schedule")
+            .execute()
+        )
+        count = getattr(response, "count", None)
+        if count is not None:
+            return int(count)
+        return len(_response_rows(response))
+
 
 class SupabaseRunRepository(_BaseSupabaseRepository):
     def _decorate_run_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1744,6 +1960,44 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
         row = _first_row(response)
         return self._normalize_row(row) if row else None
 
+    def find_by_app_account(
+        self,
+        *,
+        user_id: str,
+        app_name: str,
+        account_label: str,
+        exclude_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the canonical composio connection for an (app, account) pair.
+
+        Dedupe key (engine N5-1): reconnecting the SAME app + SAME account (by
+        normalized account_label) reuses the OLDEST matching row instead of
+        spawning a duplicate. ``exclude_id`` skips the freshly created reconnect
+        row so it is never matched against itself. Mirrors
+        SqliteConnectionRepository.find_by_app_account; lower/trim matching is
+        done in Python so the semantics are byte-identical to the engine.
+        """
+        label = (account_label or "").strip().lower()
+        if not label:
+            return None
+        builder = self._client.table("connections").select(self._CONNECTION_COLUMNS)
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        response = builder.order("created_at").order("id").execute()
+        for row in _response_rows(response):
+            if str(row.get("user_id")) != str(user_id):
+                continue
+            if (row.get("app_name") or "").strip().lower() != (app_name or "").strip().lower():
+                continue
+            kind = row.get("kind")
+            if kind not in (None, "composio"):
+                continue
+            if (str(row.get("account_label") or "")).strip().lower() != label:
+                continue
+            if exclude_id is not None and str(row.get("id")) == str(exclude_id):
+                continue
+            return self._normalize_row(row)
+        return None
+
     def upsert(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         connection_id = fields["id"]
         created_at = fields.get("created_at") or datetime.now(timezone.utc).isoformat()
@@ -2428,6 +2682,59 @@ class SupabaseVersionRepository:
             .execute()
         )
         return len(_response_rows(delete_resp))
+
+    def delete_for_asset(self, *, asset_type: str, asset_id: str) -> int:
+        """Delete ALL versions for a single (asset_type, asset_id) pair.
+
+        Called when the parent asset (worker, brain pack, brain file) is
+        deleted, so its snapshot history does not linger as an orphan.
+        Mirrors SqliteVersionRepository.delete_for_asset.
+        """
+        response = (
+            self._client.table("asset_versions")
+            .delete()
+            .eq("asset_type", asset_type)
+            .eq("asset_id", asset_id)
+            .execute()
+        )
+        return len(_response_rows(response))
+
+    def delete_for_context(self, *, name: str) -> int:
+        """Delete every version row belonging to a context (brain pack).
+
+        A context owns one brain_pack asset (asset_id == name) plus one
+        brain_file asset per file (asset_id == f"{name}:{rel}"). Deleting the
+        context must remove all of them. Mirrors
+        SqliteVersionRepository.delete_for_context, but matches the prefix in
+        Python (select candidates, filter on asset_id == name or
+        startswith(name + ":")) to avoid PostgREST LIKE-wildcard mismatches on
+        context names that legitimately contain '_' or '%'.
+        """
+        prefix = f"{name}:"
+        deleted = 0
+        for asset_type in ("brain_pack", "brain_file"):
+            rows = _response_rows(
+                self._client.table("asset_versions")
+                .select("id, asset_id")
+                .eq("asset_type", asset_type)
+                .execute()
+            )
+            target_ids = [
+                str(r["id"])
+                for r in rows
+                if str(r.get("asset_id")) == name
+                or str(r.get("asset_id")).startswith(prefix)
+            ]
+            if not target_ids:
+                continue
+            resp = (
+                self._client.table("asset_versions")
+                .delete()
+                .in_("id", target_ids)
+                .execute()
+            )
+            deleted += len(_response_rows(resp))
+        return deleted
 
 
 class SupabaseMcpToolRepository(_BaseSupabaseRepository):
