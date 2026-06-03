@@ -49,6 +49,39 @@ def get_workspace_md() -> str:
     return "# Workspace\n\nNo workspace.md configured yet. PUT /workspace to set one."
 
 
+def unwrap_workspace_body(body: str) -> str:
+    """Normalise a workspace.md write body to raw markdown.
+
+    The OSS ``PUT /workspace`` contract is a RAW ``text/markdown`` body, but the
+    Cloud wrapper (and some clients) send a JSON envelope ``{"content": "..."}``
+    instead. Without this, the JSON string is stored verbatim as the instructions
+    and prepended to every agent's system prompt (N3-1). This makes the write path
+    tolerant: if the body parses as a JSON object whose ONLY meaningful key is
+    ``content`` (a string), unwrap to that inner content; otherwise return the body
+    unchanged.
+
+    Legit markdown that merely starts with ``{`` (e.g. a JSON code block, or text
+    that isn't the envelope shape) is NOT mangled — only the exact single-key
+    ``{"content": <str>}`` envelope is unwrapped.
+    """
+    import json as _json
+
+    stripped = body.lstrip()
+    if not stripped.startswith("{"):
+        return body
+    try:
+        parsed = _json.loads(body)
+    except (ValueError, TypeError):
+        return body
+    if (
+        isinstance(parsed, dict)
+        and set(parsed.keys()) == {"content"}
+        and isinstance(parsed.get("content"), str)
+    ):
+        return parsed["content"]
+    return body
+
+
 def set_workspace_md(content: str) -> None:
     """Overwrite workspace.md."""
     WORKSPACE_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
