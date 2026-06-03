@@ -109,6 +109,7 @@ async def invite_member(
         "role": invite.get("role"),
         "status": invite.get("status"),
         "expires_at": invite.get("expires_at"),
+        "invite_url": invite_url,
     }
 
 

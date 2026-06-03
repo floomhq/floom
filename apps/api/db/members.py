@@ -207,7 +207,7 @@ def accept_invitation(
             "user_id": accepting_user_id,
             "workspace_id": workspace_id,
             "token_hash": pat_hash,
-            "label": f"auto-{workspace_id[:8]}",
+            "name": f"auto-{workspace_id[:8]}",
             "created_at": now_iso,
             "last_used_at": None,
         }
