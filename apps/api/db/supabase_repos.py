@@ -715,6 +715,9 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
     def delete(self, *, user_id: str, worker_id: str) -> bool:
         builder = self._client.table("workers").delete().eq("id", worker_id)
         builder = _scope_by_workspace(builder, user_id=user_id)
+        # Members may only delete their own workers, never shared or other-owned ones.
+        if get_active_member_role():
+            builder = builder.eq("user_id", user_id)
         response = builder.execute()
         return bool(_response_rows(response))
 
