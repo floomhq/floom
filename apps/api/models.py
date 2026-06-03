@@ -586,6 +586,94 @@ def composio_tool_allowed_by_scope(app: str, tool_slug: str, scopes: List[str] |
     return False
 
 
+# ---------------------------------------------------------------------------
+# Read-only tool presets (C-B9)
+# ---------------------------------------------------------------------------
+#
+# ``composio_tool_allowed_by_scope`` enforces a read-only *scope* with a
+# prefix heuristic (deny SEND/CREATE/..., allow GET/LIST/...). That heuristic
+# is the safety net at execution time. These presets are the *curated* read
+# subset a worker's connection can be pinned to via ``allowed_tools`` — an
+# explicit, auditable list per common app that the Tools-tab allowlist editor
+# can apply with a single "Read-only" button instead of asking the operator to
+# hand-pick tool slugs. Keeping the list explicit (rather than only relying on
+# the prefix heuristic) means the allowlist shown in the UI is the exact set of
+# tools the worker can ever call.
+READ_ONLY_TOOL_PRESETS: Dict[str, List[str]] = {
+    "gmail": [
+        "GMAIL_FETCH_EMAILS",
+        "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+        "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+        "GMAIL_LIST_THREADS",
+        "GMAIL_LIST_LABELS",
+        "GMAIL_GET_PROFILE",
+        "GMAIL_SEARCH_PEOPLE",
+        "GMAIL_GET_CONTACTS",
+        "GMAIL_GET_ATTACHMENT",
+    ],
+    "slack": [
+        "SLACK_FETCH_CONVERSATION_HISTORY",
+        "SLACK_LIST_ALL_CHANNELS",
+        "SLACK_LIST_ALL_USERS",
+        "SLACK_LIST_ALL_SLACK_TEAM_CHANNELS_WITH_VARIOUS_FILTERS",
+        "SLACK_SEARCH_MESSAGES",
+        "SLACK_FETCH_CONVERSATION_REPLIES",
+        "SLACK_RETRIEVE_DETAILED_USER_INFORMATION",
+        "SLACK_LIST_ALL_USERS_IN_A_USER_GROUP",
+    ],
+    "github": [
+        "GITHUB_GET_A_REPOSITORY",
+        "GITHUB_LIST_REPOSITORIES_FOR_THE_AUTHENTICATED_USER",
+        "GITHUB_LIST_ISSUES_ASSIGNED_TO_THE_AUTHENTICATED_USER",
+        "GITHUB_GET_AN_ISSUE",
+        "GITHUB_LIST_PULL_REQUESTS",
+        "GITHUB_GET_A_PULL_REQUEST",
+        "GITHUB_LIST_COMMITS",
+        "GITHUB_GET_A_COMMIT",
+        "GITHUB_SEARCH_ISSUES_AND_PULL_REQUESTS",
+        "GITHUB_SEARCH_REPOSITORIES",
+    ],
+    "googlecalendar": [
+        "GOOGLECALENDAR_EVENTS_LIST",
+        "GOOGLECALENDAR_FIND_EVENT",
+        "GOOGLECALENDAR_GET_CALENDAR",
+        "GOOGLECALENDAR_LIST_CALENDARS",
+        "GOOGLECALENDAR_GET_CURRENT_DATE_TIME",
+        "GOOGLECALENDAR_FREE_BUSY_QUERY",
+    ],
+}
+
+# Common app-slug aliases mapped to their canonical preset key, so callers can
+# pass "calendar"/"google_calendar"/"gcal" etc. and still resolve a preset.
+_READ_ONLY_PRESET_ALIASES: Dict[str, str] = {
+    "google_calendar": "googlecalendar",
+    "googlecalender": "googlecalendar",
+    "calendar": "googlecalendar",
+    "gcal": "googlecalendar",
+}
+
+
+def _normalize_preset_app(app: str) -> str:
+    normalized = (app or "").strip().lower().replace("-", "_")
+    return _READ_ONLY_PRESET_ALIASES.get(normalized, normalized)
+
+
+def read_only_preset_for_app(app: str) -> Optional[List[str]]:
+    """Return the curated read-only tool slug subset for ``app``.
+
+    Returns ``None`` when no preset exists for the app (the UI should then fall
+    back to the generic read_only *scope* rather than an explicit allowlist).
+    """
+    key = _normalize_preset_app(app)
+    preset = READ_ONLY_TOOL_PRESETS.get(key)
+    return list(preset) if preset is not None else None
+
+
+def read_only_presets() -> Dict[str, List[str]]:
+    """Return all curated read-only presets, keyed by canonical app slug."""
+    return {app: list(tools) for app, tools in READ_ONLY_TOOL_PRESETS.items()}
+
+
 def composio_app_for_tool_slug(tool_slug: str, declared_apps: List[str]) -> Optional[str]:
     normalized_tool = tool_slug.upper()
     matches = [

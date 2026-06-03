@@ -290,7 +290,6 @@ def _schedule_retry(
 
 
 API_ENV_PATH = Path("/root/.config/workeros/api.env")
-LOCAL_ENV_PATH = Path(__file__).resolve().parent / ".env"
 _PLACEHOLDER_MARKERS = (
     "i don't have access",
     "i cannot fetch",
