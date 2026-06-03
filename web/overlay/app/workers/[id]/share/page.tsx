@@ -8,10 +8,9 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Link2, Lock, Globe, Copy, Check } from "lucide-react";
+import { ArrowLeft, Link2, Share2, Copy, Check, Users } from "lucide-react";
 import { toast } from "sonner";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE ?? "/api/proxy";
@@ -41,22 +40,9 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// ---------------------------------------------------------------------------
-// types
-// ---------------------------------------------------------------------------
+type Worker = { id: string; name: string; visibility?: string };
 
-type Worker = {
-  id: string;
-  name: string;
-  visibility: "private" | "shared";
-  published_at: string | null;
-};
-
-// ---------------------------------------------------------------------------
-// loading skeleton
-// ---------------------------------------------------------------------------
-
-function LoadingSkeleton({ workerId }: { workerId: string }) {
+function LoadingSkeleton() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-1">
@@ -65,34 +51,31 @@ function LoadingSkeleton({ workerId }: { workerId: string }) {
       </div>
       <div className="space-y-1.5">
         <Skeleton className="h-7 w-48 rounded" />
-        <Skeleton className="h-4 w-32 rounded" />
+        <Skeleton className="h-4 w-72 rounded" />
       </div>
       <Skeleton className="h-px w-full" />
       <div className="max-w-xl space-y-4">
-        <Skeleton className="h-24 w-full rounded-lg" />
-        <Skeleton className="h-24 w-full rounded-lg" />
+        <Skeleton className="h-28 w-full rounded-lg" />
+        <Skeleton className="h-28 w-full rounded-lg" />
       </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// page
-// ---------------------------------------------------------------------------
-
 export default function WorkerSharePage() {
   const params = useParams();
   const workerId =
-    typeof params?.id === "string"
-      ? params.id
-      : Array.isArray(params?.id)
-      ? params.id[0]
-      : "";
+    typeof params?.id === "string" ? params.id : Array.isArray(params?.id) ? params.id[0] : "";
 
   const [worker, setWorker] = useState<Worker | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [toggling, setToggling] = useState(false);
+
+  // share-to-workspace state
+  const [sharing, setSharing] = useState(false);
+  const [sharedWorkerId, setSharedWorkerId] = useState<string | null>(null);
+
+  // clone-link state
   const [cloneToken, setCloneToken] = useState<string | null>(null);
   const [cloneExpires, setCloneExpires] = useState<string | null>(null);
   const [generatingLink, setGeneratingLink] = useState(false);
@@ -115,24 +98,21 @@ export default function WorkerSharePage() {
     }
   }
 
-  async function handleVisibilityToggle(next: "private" | "shared") {
-    if (!worker || toggling) return;
-    setToggling(true);
+  async function handleShareToWorkspace() {
+    if (!worker || sharing) return;
+    setSharing(true);
     try {
-      const updated = await apiFetch<{ visibility: string; published_at?: string }>(
-        `/workers/${worker.id}/visibility`,
-        { method: "PATCH", body: JSON.stringify({ visibility: next }) }
+      const result = await apiFetch<{ id?: string; worker_id?: string }>(
+        `/workers/${worker.id}/share-to-workspace`,
+        { method: "POST" }
       );
-      setWorker((prev) =>
-        prev
-          ? { ...prev, visibility: updated.visibility as "private" | "shared", published_at: updated.published_at ?? prev.published_at }
-          : prev
-      );
-      toast.success(next === "shared" ? "Worker shared with all members" : "Worker set to private");
+      const newId = result.id || result.worker_id || "";
+      setSharedWorkerId(newId);
+      toast.success("Worker shared to workspace — members can now trigger it");
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to update visibility");
+      toast.error(e instanceof Error ? e.message : "Failed to share worker");
     } finally {
-      setToggling(false);
+      setSharing(false);
     }
   }
 
@@ -157,8 +137,7 @@ export default function WorkerSharePage() {
 
   function handleCopy() {
     if (!cloneToken) return;
-    const url = cloneUrl(cloneToken);
-    void navigator.clipboard.writeText(url).then(() => {
+    void navigator.clipboard.writeText(cloneUrl(cloneToken)).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -169,9 +148,7 @@ export default function WorkerSharePage() {
     return `${base}/app/workers/clone/${token}`;
   }
 
-  // ---- render ---------------------------------------------------------------
-
-  if (loading) return <LoadingSkeleton workerId={workerId} />;
+  if (loading) return <LoadingSkeleton />;
 
   if (notFound || !worker) {
     return (
@@ -200,7 +177,7 @@ export default function WorkerSharePage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Share &amp; clone</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Control who can see this worker and generate one-time clone links.
+          Share this worker with your workspace or generate a one-time clone link.
         </p>
       </div>
 
@@ -208,78 +185,55 @@ export default function WorkerSharePage() {
 
       <div className="max-w-xl space-y-6">
 
-        {/* ---- visibility section ---- */}
+        {/* ---- share to workspace ---- */}
         <section className="space-y-4">
           <div>
-            <h2 className="text-sm font-semibold">Visibility</h2>
+            <h2 className="text-sm font-semibold">Share to workspace</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Private workers are only visible to you and workspace admins. Shared workers appear on every
-              member's Workers page.
+              Creates a fresh copy of this worker, owned by the workspace admin. All members can
+              trigger it and see every run. Requires admin access.
             </p>
           </div>
 
-          <div className="rounded-lg border border-border divide-y divide-border">
-            {/* private option */}
-            <button
-              type="button"
-              disabled={toggling || worker.visibility === "private"}
-              onClick={() => void handleVisibilityToggle("private")}
-              className="flex w-full items-start gap-4 p-4 text-left transition-colors hover:bg-[var(--active-nav-bg)] disabled:cursor-default"
-            >
-              <div className={`mt-0.5 rounded-full p-1.5 ${worker.visibility === "private" ? "bg-foreground text-background" : "bg-muted text-muted-foreground"}`}>
-                <Lock className="w-3.5 h-3.5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Private</span>
-                  {worker.visibility === "private" && (
-                    <Badge variant="secondary" className="text-xs h-4 px-1.5">Current</Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Only you and workspace admins can see this worker.
-                </p>
-              </div>
-            </button>
-
-            {/* shared option */}
-            <button
-              type="button"
-              disabled={toggling || worker.visibility === "shared"}
-              onClick={() => void handleVisibilityToggle("shared")}
-              className="flex w-full items-start gap-4 p-4 text-left transition-colors hover:bg-[var(--active-nav-bg)] disabled:cursor-default"
-            >
-              <div className={`mt-0.5 rounded-full p-1.5 ${worker.visibility === "shared" ? "bg-foreground text-background" : "bg-muted text-muted-foreground"}`}>
-                <Globe className="w-3.5 h-3.5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Shared</span>
-                  {worker.visibility === "shared" && (
-                    <Badge variant="secondary" className="text-xs h-4 px-1.5">Current</Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  All workspace members can see and trigger this worker.
-                  {worker.visibility !== "shared" && " Members will only see runs from the moment you share it."}
-                </p>
-              </div>
-            </button>
+          <div className="rounded-lg border border-border bg-muted/40 p-4 space-y-1.5 text-xs text-muted-foreground">
+            <p>• The workspace copy starts with a clean brain and no run history.</p>
+            <p>• Runs using <strong className="text-foreground">admin&apos;s secrets</strong> — admin configures them once, applies to everyone.</p>
+            <p>• <strong className="text-foreground">Secrets, brain data, and history from this private worker are not copied.</strong></p>
           </div>
 
-          {worker.published_at && (
-            <p className="text-xs text-muted-foreground">
-              {worker.visibility === "shared"
-                ? <>Shared since <strong>{new Date(worker.published_at).toLocaleDateString()}</strong>. Members see run history from this date.</>
-                : <>Previously shared on <strong>{new Date(worker.published_at).toLocaleDateString()}</strong>. Re-sharing will use this same date — member run history is preserved.</>
-              }
-            </p>
+          {sharedWorkerId ? (
+            <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Users className="w-4 h-4 text-muted-foreground" />
+                Shared — workspace copy created
+              </div>
+              <p className="text-xs text-muted-foreground">
+                The workspace worker is now live. You can share again to create another copy.
+              </p>
+              <Link
+                href={`/workers/${sharedWorkerId}`}
+                className="text-xs underline underline-offset-2 hover:text-foreground transition-colors"
+              >
+                Open workspace worker →
+              </Link>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={sharing}
+              onClick={() => void handleShareToWorkspace()}
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              {sharing ? "Sharing…" : "Share to workspace"}
+            </Button>
           )}
         </section>
 
         <Separator />
 
-        {/* ---- clone link section ---- */}
+        {/* ---- clone link ---- */}
         <section className="space-y-4">
           <div>
             <h2 className="text-sm font-semibold">Clone link</h2>

@@ -455,6 +455,101 @@ async def cloud_generate_clone_link(worker_id: str, request: Request) -> Any:
     return {"token": raw_token, "expires_at": expires_at}
 
 
+@app.post("/workers/{worker_id}/share-to-workspace", status_code=201)
+@app.post("/api/workers/{worker_id}/share-to-workspace", status_code=201)
+async def cloud_share_worker_to_workspace(worker_id: str, request: Request) -> Any:
+    """Share a worker to the workspace by creating an admin-owned clone.
+
+    The clone is owned by the workspace owner (admin), has visibility='shared'
+    so all members see it, and starts with no brain, no run history, and no
+    secrets. The admin's personal secrets power it on execution since the clone
+    runs as the admin's identity.
+
+    Only workspace admins can call this endpoint.
+    """
+    import asyncio as _asyncio
+    import json as _json
+
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from apps.api.auth.workspace_context import get_active_member_role, get_active_workspace_id
+    from apps.api.config import get_supabase_service_client
+    from apps.api.db import workspaces as workspace_repo
+    from auth.context import AuthContext as _AuthContext
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    # Only admins can share to workspace.
+    workspace_id = get_active_workspace_id()
+    if not workspace_id:
+        raise HTTPException(status_code=400, detail="active workspace required")
+
+    ws = workspace_repo.get(workspace_id=workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    is_owner = str(ws.get("owner_user_id", "")) == str(auth.user_id)
+    role = get_active_member_role()
+    if not is_owner and role != "admin":
+        raise HTTPException(status_code=403, detail="admin access required")
+
+    # The workspace copy is always owned by the workspace owner (admin).
+    admin_user_id = str(ws["owner_user_id"])
+
+    # Read source worker + files.
+    repos = engine_main.get_repositories()
+    source = repos.workers.get_any(worker_id=worker_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="worker not found")
+
+    sv_id = (source.get("skill_version_id") or "").strip()
+    files: dict = {}
+    if sv_id:
+        svc = get_supabase_service_client()
+        sv_resp = svc.table("skill_versions").select("manifest_json").eq("id", sv_id).limit(1).execute()
+        sv_rows = sv_resp.data or []
+        if sv_rows:
+            raw_mj = sv_rows[0].get("manifest_json") or {}
+            mj = raw_mj if isinstance(raw_mj, dict) else (_json.loads(raw_mj) if isinstance(raw_mj, str) else {})
+            files = mj.get("_files") or {}
+
+    if not files:
+        files = _read_worker_files_from_disk(worker_id)
+
+    if not files or "worker.yml" not in files:
+        raise HTTPException(status_code=422, detail="source worker has no files to clone")
+
+    DraftFile = engine_main.DraftFile
+    draft_files = [DraftFile(path=name, content=content) for name, content in files.items()]
+
+    # Create the clone as the admin user — this makes the workspace copy
+    # admin-owned so it runs with admin's secrets.
+    admin_auth = _AuthContext(user_id=admin_user_id, email=None, scopes=())
+    new_worker = await _asyncio.to_thread(
+        engine_main._register_worker_from_files, draft_files, admin_auth, repos
+    )
+    if not new_worker:
+        raise HTTPException(status_code=500, detail="failed to create workspace worker")
+
+    new_worker_id = str(getattr(new_worker, "id", None) or new_worker.get("id", ""))
+
+    # Mark as shared — visible to all workspace members.
+    repos.workers.set_visibility(worker_id=new_worker_id, visibility="shared")
+
+    # Persist files to Supabase (Railway disk is ephemeral).
+    _cloud_persist_worker_files(new_worker_id, files, repos)
+
+    result_dict = new_worker.model_dump() if hasattr(new_worker, "model_dump") else dict(new_worker)
+    result_dict["visibility"] = "shared"
+    result_dict["workspace_worker"] = True
+    return result_dict
+
+
 @app.post("/workers/clone/{token}", status_code=201)
 @app.post("/api/workers/clone/{token}", status_code=201)
 async def cloud_clone_worker(token: str, request: Request) -> Any:
