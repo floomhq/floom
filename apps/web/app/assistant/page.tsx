@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
+import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 
 type TabKey = "instructions" | "prompt";
 
@@ -183,6 +184,23 @@ export default function AssistantPage() {
             <Badge variant="outline" className="font-mono text-xs">
               {agent.model}
             </Badge>
+          ) : null}
+          {/* Visibility (Share) control: Private <-> Shared with workspace.
+              The assistant is a shared workspace tool (default Shared). STEP 5. */}
+          {agent ? (
+            <span className="ml-auto">
+              <AssetVisibilityControl
+                visibility={agent.visibility}
+                canShare={agent.permissions?.can_share ?? true}
+                noun="assistant"
+                titleLabel="Assistant visibility"
+                onApply={async (next) => {
+                  const updated = await api.system.setAssistantVisibility(next);
+                  setAgent(updated);
+                  return updated.visibility;
+                }}
+              />
+            </span>
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
