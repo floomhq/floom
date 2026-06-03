@@ -1601,6 +1601,12 @@ class WorkerDetail(BaseModel):
     # owner can copy this URL to share a read-only "skill card" view of the
     # worker with anyone — no secrets, source, or run history are exposed there.
     public_link: Optional[str] = None
+    # Set on the response of an edit that transparently forked a read-only stock
+    # worker into a user-owned editable copy (clone-on-edit). Carries the source
+    # stock worker id so the UI can show "editing created your copy" and redirect
+    # the operator to the new worker (whose `id` differs from the URL they were
+    # on). None for a normal in-place edit.
+    cloned_from: Optional[str] = None
 
 
 class PublicWorkerInput(BaseModel):

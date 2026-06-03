@@ -68,6 +68,8 @@ import {
   formatRelativeTime,
   formatScope,
   getSupportedApp,
+  normalizeAppSlug,
+  SUPPORTED_APPS,
 } from "@/components/connections/connection-data";
 import { formatRelative, formatDuration } from "@/lib/formatters";
 import { humanizeRunError } from "@/lib/run-format";
@@ -782,6 +784,20 @@ export default function WorkerDetailPage() {
     router.push(url.toString());
   }
 
+  // Clone-on-edit: a PUT /workers/{id}/files against a read-only stock worker
+  // forks it into a user-owned copy. The response carries `cloned_from` + a new
+  // `id`. When that happens, redirect to the copy (the URL the operator was on
+  // points at the immutable stock worker) and stop the in-place refetch the
+  // caller would otherwise run. Returns true if a redirect was issued.
+  function maybeRedirectToClone(saved: WorkerDetail, hash?: string): boolean {
+    if (saved.cloned_from && worker && saved.id !== worker.id) {
+      toast.success("Editing created your copy of this worker");
+      router.replace(`/workers/${saved.id}${hash ? `#${hash}` : ""}`);
+      return true;
+    }
+    return false;
+  }
+
   // S42: save all edit-mode changes (metadata + files)
   async function handleSave() {
     if (!worker) return;
@@ -812,7 +828,8 @@ export default function WorkerDetailPage() {
         }
       }
 
-      await api.workers.updateFiles(worker.id, patchedFiles);
+      const saved = await api.workers.updateFiles(worker.id, patchedFiles);
+      if (maybeRedirectToClone(saved, "code")) return;
       toast.success("Worker saved");
       // Reload worker and reset dirty state
       const updated = await api.workers.get(worker.id);
@@ -844,7 +861,8 @@ export default function WorkerDetailPage() {
     if (!worker) return;
     setSaving(true);
     try {
-      await api.workers.updateFiles(worker.id, textSourceFiles(editFiles));
+      const saved = await api.workers.updateFiles(worker.id, textSourceFiles(editFiles));
+      if (maybeRedirectToClone(saved, "code")) return;
       toast.success("Worker saved");
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
@@ -908,7 +926,8 @@ export default function WorkerDetailPage() {
           patched = patchInputDefault(patched, name, value.trim());
         }
       }
-      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      const saved = await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      if (maybeRedirectToClone(saved)) return;
       toast.success("Defaults saved — scheduled runs will now use these values");
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
@@ -957,7 +976,8 @@ export default function WorkerDetailPage() {
         ? sourceFiles.map((f) => (f.path === "worker.yml" ? { ...f, content: patched } : f))
         : [{ path: "worker.yml", content: patched }, ...sourceFiles];
 
-      await api.workers.updateFiles(worker.id, nextFiles);
+      const saved = await api.workers.updateFiles(worker.id, nextFiles);
+      if (maybeRedirectToClone(saved, "brain")) return;
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
       const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
@@ -1006,7 +1026,8 @@ export default function WorkerDetailPage() {
         ? sourceFiles.map((f) => (f.path === "worker.yml" ? { ...f, content: patched } : f))
         : [{ path: "worker.yml", content: patched }, ...sourceFiles];
 
-      await api.workers.updateFiles(worker.id, nextFiles);
+      const saved = await api.workers.updateFiles(worker.id, nextFiles);
+      if (maybeRedirectToClone(saved, "connections")) return;
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
       const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
@@ -1017,6 +1038,67 @@ export default function WorkerDetailPage() {
       toast.success("Tool allowlist updated");
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to update tool allowlist");
+    } finally {
+      setSavingAllowlist(null);
+    }
+  }
+
+  // X6: ADD a brand-new tool/connection even when the worker declares none
+  // (connections: []). Appends the slug as a connections entry and persists via
+  // the same yaml-block patch -> updateFiles -> refetch path the allowlist editor
+  // uses. No-op (with a toast) if the slug is already declared.
+  async function handleAddConnection(rawSlug: string) {
+    if (!worker || savingAllowlist) return;
+    const slug = rawSlug.trim().toLowerCase();
+    if (!slug) return;
+    const currentConnections = worker.config.connections ?? [];
+    const alreadyDeclared = currentConnections.some(
+      (spec) => (connectionSpecApp(spec) || "").toLowerCase() === slug,
+    );
+    if (alreadyDeclared) {
+      toast.info("That tool is already added to this worker");
+      return;
+    }
+    // Append as a bare-string slug (full app access). The operator can then
+    // restrict tools via the per-app allowlist editor that now renders for it.
+    const nextConnections: WorkerConnectionSpec[] = [...currentConnections, slug];
+
+    const currentYml =
+      editFiles.find((f) => f.path === "worker.yml")?.content ||
+      deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
+      worker.manifest_yaml ||
+      "";
+
+    if (!currentYml.trim()) {
+      toast.error("worker.yml is unavailable for this worker");
+      return;
+    }
+
+    setSavingAllowlist(slug);
+    try {
+      const patched = patchWorkerConnections(currentYml, nextConnections);
+      const sourceFiles =
+        editFiles.length > 0
+          ? textSourceFiles(editFiles)
+          : deriveSourceFiles(worker)
+              .filter((f) => !f.binary)
+              .map((f) => ({ path: f.path, content: f.content || "" }));
+      const nextFiles = sourceFiles.some((f) => f.path === "worker.yml")
+        ? sourceFiles.map((f) => (f.path === "worker.yml" ? { ...f, content: patched } : f))
+        : [{ path: "worker.yml", content: patched }, ...sourceFiles];
+
+      const saved = await api.workers.updateFiles(worker.id, nextFiles);
+      if (maybeRedirectToClone(saved, "connections")) return;
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+      toast.success("Tool added");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to add tool");
     } finally {
       setSavingAllowlist(null);
     }
@@ -1048,7 +1130,8 @@ export default function WorkerDetailPage() {
         patched = patchInputDefault(patched, name, value);
       }
 
-      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      const saved = await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      if (maybeRedirectToClone(saved, "settings")) return;
       toast.success("Worker saved");
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
@@ -1111,7 +1194,8 @@ export default function WorkerDetailPage() {
           : null
       );
 
-      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      const saved = await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      if (maybeRedirectToClone(saved, "settings")) return;
       toast.success("Settings saved");
       setTriggersDirty(false);
       const updated = await api.workers.get(worker.id);
@@ -1190,7 +1274,8 @@ export default function WorkerDetailPage() {
       }
 
       const newYaml = dumpYaml(parsed, { lineWidth: 120 });
-      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: newYaml }]);
+      const saved = await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: newYaml }]);
+      if (maybeRedirectToClone(saved, "settings")) return;
       toast.success("Worker saved");
       setConfigDescOriginal(configDesc);
 
@@ -2314,6 +2399,7 @@ export default function WorkerDetailPage() {
             requiredSecrets={requiredSecrets}
             savingAllowlist={savingAllowlist}
             onSetComposioAllowlist={handleSetComposioAllowlist}
+            onAddConnection={handleAddConnection}
           />
         )}
 
@@ -2987,6 +3073,79 @@ function ComposioAllowlistEditor({
   );
 }
 
+// X6: add a NEW tool/connection to a worker — works whether the worker already
+// declares connections or declares none (connections: []). Offers the supported
+// apps that are not already declared, plus a free-text slug fallback for apps not
+// in the curated list. The chosen slug is appended to worker.yml `connections`
+// via the parent's onAdd (yaml-block patch -> updateFiles -> refetch).
+function AddToolControl({
+  existingSlugs,
+  saving,
+  onAdd,
+}: {
+  existingSlugs: string[];
+  saving: string | null;
+  onAdd: (slug: string) => void | Promise<void>;
+}) {
+  const [selected, setSelected] = useState("");
+  const [customSlug, setCustomSlug] = useState("");
+  const existing = new Set(existingSlugs.map((s) => s.toLowerCase()));
+  const options = SUPPORTED_APPS.filter((app) => !existing.has(app.slug.toLowerCase()));
+  const busy = saving !== null;
+
+  const slugToAdd =
+    selected === "__custom__" ? normalizeAppSlug(customSlug) : selected;
+  const canAdd = !busy && !!slugToAdd && !existing.has(slugToAdd.toLowerCase());
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      <Select value={selected} onValueChange={(v) => setSelected(v ?? "")} disabled={busy}>
+        <SelectTrigger className="h-8 w-48 border-line text-xs">
+          <SelectValue placeholder="Add a tool…" />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((app) => (
+            <SelectItem key={app.slug} value={app.slug}>
+              {app.displayName}
+            </SelectItem>
+          ))}
+          <SelectItem value="__custom__">Other (enter slug)…</SelectItem>
+        </SelectContent>
+      </Select>
+      {selected === "__custom__" && (
+        <Input
+          value={customSlug}
+          disabled={busy}
+          onChange={(e) => setCustomSlug(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && canAdd) {
+              e.preventDefault();
+              void onAdd(slugToAdd);
+            }
+          }}
+          placeholder="App slug e.g. airtable"
+          className="h-8 w-40 font-mono text-xs"
+        />
+      )}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-8 border-line"
+        disabled={!canAdd}
+        onClick={() => {
+          void Promise.resolve(onAdd(slugToAdd)).then(() => {
+            setSelected("");
+            setCustomSlug("");
+          });
+        }}
+      >
+        {busy ? "Saving…" : "Add tool"}
+      </Button>
+    </div>
+  );
+}
+
 function ConnectionsSection({
   worker,
   connections,
@@ -2996,6 +3155,7 @@ function ConnectionsSection({
   requiredSecrets,
   savingAllowlist,
   onSetComposioAllowlist,
+  onAddConnection,
 }: {
   worker: WorkerDetail;
   connections: ConnectionItem[];
@@ -3005,6 +3165,7 @@ function ConnectionsSection({
   requiredSecrets: string[];
   savingAllowlist: string | null;
   onSetComposioAllowlist: (slug: string, tools: string[] | null) => void | Promise<void>;
+  onAddConnection: (slug: string) => void | Promise<void>;
 }) {
   const composioRequirements = (worker.config.connections ?? [])
     .map((spec) => {
@@ -3137,13 +3298,24 @@ function ConnectionsSection({
               );
             })}
           </div>
+          <AddToolControl
+            existingSlugs={uniqueComposioRequirements.map((r) => r.slug.toLowerCase())}
+            saving={savingAllowlist}
+            onAdd={onAddConnection}
+          />
         </section>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          {requiredSecrets.length > 0
-            ? "This worker needs no app connections — it only requires the secrets listed below."
-            : "This worker needs no app connections."}
-        </p>
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Tools this worker can use</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {requiredSecrets.length > 0
+                ? "This worker declares no app connections yet — it only requires the secrets listed below. Add a tool to let it call a connected app."
+                : "This worker declares no app connections yet. Add a tool to let it call a connected app."}
+            </p>
+          </div>
+          <AddToolControl existingSlugs={[]} saving={savingAllowlist} onAdd={onAddConnection} />
+        </section>
       )}
 
       {configuredMcpConnections.length > 0 && (
