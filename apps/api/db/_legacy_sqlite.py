@@ -1094,6 +1094,59 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE approvals ADD COLUMN annotations_json TEXT;
     """,
+    # -- migration 49: normalize triggers into worker_triggers -----------------
+    # A worker can declare N triggers (persisted in workers.triggers_json), but
+    # the scheduler/registration historically read only the scalar trigger_type/
+    # cron_expr on the workers row, so only the PRIMARY (first) trigger ever
+    # fired. This table stores ONE ROW PER DECLARED TRIGGER so every trigger is
+    # independently schedulable / resolvable.
+    #
+    #   type           — schedule | webhook | composio_event | manual
+    #   config_json    — the per-trigger config (cron/timezone, webhook spec, or
+    #                    composio event spec) so each row is self-describing.
+    #   enabled        — disabled rows are skipped by the scheduler/resolvers.
+    #   next_run_at    — schedule rows only: next due ISO time (croniter).
+    #   external_trigger_id — composio rows: the Composio registration id used to
+    #                    resolve an incoming event back to this specific row.
+    #   webhook_path   — webhook rows: the worker_id used in the /webhooks/<id>
+    #                    path (kept for forward-compat with per-trigger paths).
+    #   last_fired_at  — bookkeeping for observability.
+    #
+    # Existing single-trigger workers are reconciled into exactly one row on the
+    # next registration/startup, so nothing breaks during the migration.
+    """
+    CREATE TABLE IF NOT EXISTS worker_triggers (
+        id TEXT PRIMARY KEY,
+        worker_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        config_json TEXT,
+        enabled INTEGER DEFAULT 1 NOT NULL,
+        next_run_at TEXT,
+        external_trigger_id TEXT,
+        webhook_path TEXT,
+        last_fired_at TEXT,
+        position INTEGER DEFAULT 0 NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_triggers_worker_id
+        ON worker_triggers(worker_id);
+    CREATE INDEX IF NOT EXISTS idx_worker_triggers_type_enabled
+        ON worker_triggers(type, enabled);
+    CREATE INDEX IF NOT EXISTS idx_worker_triggers_next_run_at
+        ON worker_triggers(next_run_at);
+    CREATE INDEX IF NOT EXISTS idx_worker_triggers_external_id
+        ON worker_triggers(external_trigger_id);
+    """,
+    # -- migration 50: trigger_ref on runs (which trigger fired) ----------------
+    # Records WHICH worker_triggers row fired a run so two schedule triggers on
+    # the same worker produce distinguishable runs. Fresh DBs created by an
+    # earlier inline path may already have it, so a duplicate-column
+    # OperationalError here is expected and skipped (see apply_migrations).
+    """
+    ALTER TABLE runs ADD COLUMN trigger_ref TEXT;
+    """,
 ]
 
 
@@ -1121,7 +1174,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
