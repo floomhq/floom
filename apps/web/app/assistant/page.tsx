@@ -187,8 +187,9 @@ export default function AssistantPage() {
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           Your interactive workspace assistant — chat with it to get help and orchestrate your
-          workers. It shares the same Brain and Connections your workers use. Workers run
-          autonomously on triggers; the assistant is interactive.
+          workers. It reads the same Brain your workers use and can use your Connections read-only;
+          actions that would change a live connection need your approval. Workers run autonomously
+          on triggers; the assistant is interactive.
         </p>
       </div>
 
