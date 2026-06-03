@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ThemeModeButton } from "../ThemeModeButton";
 
 const TEMPLATES_HREF = "/templates";
 const ASK_HREF = "/assistant";
@@ -41,6 +42,7 @@ export function Nav() {
           ))}
         </nav>
         <div className="flex items-center gap-1.5">
+          <ThemeModeButton className="hidden sm:inline-flex" />
           <Link
             href={ASK_HREF}
             className="hidden h-11 items-center rounded-[12px] px-3 text-[13px] font-medium text-foreground hover:bg-accent sm:inline-flex"
