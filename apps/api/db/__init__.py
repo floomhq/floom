@@ -17,6 +17,7 @@ from .interface import (
     SecretRepository,
     WorkerRepository,
 )
+from .sqlite import secret_store_env_path, secret_store_read_paths
 
 __all__ = [
     "DB_PATH",
@@ -36,4 +37,6 @@ __all__ = [
     "ConnectionRepository",
     "SecretRepository",
     "CliAuthRepository",
+    "secret_store_env_path",
+    "secret_store_read_paths",
 ]
