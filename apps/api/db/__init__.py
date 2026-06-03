@@ -21,6 +21,7 @@ from .interface import (
 )
 from .sqlite import (
     VISIBILITY_VALUES,
+    assistant_row_id,
     derive_workspace_id,
     secret_store_env_path,
     secret_store_read_paths,
@@ -47,6 +48,7 @@ __all__ = [
     "WorkspaceMemberRepository",
     "AssetAccessRepository",
     "VISIBILITY_VALUES",
+    "assistant_row_id",
     "derive_workspace_id",
     "secret_store_env_path",
     "secret_store_read_paths",
