@@ -62,10 +62,17 @@ from models import (
     RunStatus,
     assert_safe_outbound_url,
     UnsafeOutboundUrlError,
+    _allow_private_mcp_urls,
+    _ip_is_disallowed,
+    _resolve_host_ips,
 )
 
 import hashlib
 import hmac
+import http.client
+import ipaddress
+import socket as _socket
+import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -92,6 +99,139 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 # Opener used for all outbound alert-webhook POSTs. It does not follow
 # redirects, so a 30x can never escape the pre-flight SSRF validation.
 _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+
+
+# ---------------------------------------------------------------------------
+# SSRF: DNS-rebinding-resistant IP pinning for alert-webhook delivery.
+# ---------------------------------------------------------------------------
+#
+# `assert_safe_outbound_url` resolves the host and validates every resolved IP,
+# but urllib then re-resolves the host at connect time. A hostile DNS server can
+# answer the validation lookup with a public IP and the connect lookup with an
+# internal/metadata IP (DNS rebinding) — a TOCTOU that bypasses the pre-flight
+# check. We close it by resolving ONCE, validating that single IP, and dialing
+# THAT pinned IP at the socket layer while preserving the original Host header
+# and TLS SNI. The pinned IP is re-validated at socket-connect time, so even a
+# bug in the pre-flight path cannot dial an internal address.
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    """HTTPConnection that connects to a pre-validated, pinned IP.
+
+    ``host`` keeps the original hostname (for the Host header); the socket is
+    opened to ``_pinned_ip``. The pinned IP is re-validated against the SSRF
+    deny-list at connect time (defense in depth against a stale/poisoned pin).
+    """
+
+    _pinned_ip: str = ""
+
+    def connect(self) -> None:  # noqa: D401
+        self._assert_pin_safe()
+        self.sock = _socket.create_connection(
+            (self._pinned_ip, self.port), self.timeout
+        )
+
+    def _assert_pin_safe(self) -> None:
+        if _allow_private_mcp_urls():
+            return
+        try:
+            ip_obj = ipaddress.ip_address(self._pinned_ip)
+        except ValueError as exc:
+            raise UnsafeOutboundUrlError(
+                f"Alert webhook URL is not allowed: invalid pinned address {self._pinned_ip!r}"
+            ) from exc
+        if _ip_is_disallowed(ip_obj):
+            raise UnsafeOutboundUrlError(
+                "Alert webhook URL is not allowed: pinned address resolves to an "
+                "internal/loopback/link-local address"
+            )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPSConnection variant of :class:`_PinnedHTTPConnection`.
+
+    Dials the pinned IP but keeps ``server_hostname`` = the original host so TLS
+    SNI + certificate validation still match the intended domain.
+    """
+
+    _pinned_ip: str = ""
+
+    def connect(self) -> None:  # noqa: D401
+        _PinnedHTTPConnection._assert_pin_safe(self)  # type: ignore[arg-type]
+        sock = _socket.create_connection((self._pinned_ip, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+    _assert_pin_safe = _PinnedHTTPConnection._assert_pin_safe
+
+
+def _make_pinned_handler(host: str, pinned_ip: str):
+    """Build a urllib handler whose http/https connections dial ``pinned_ip``."""
+
+    class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+        def http_open(self, req):  # noqa: D401
+            return self.do_open(_pinned_http_factory, req)
+
+    class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):  # noqa: D401
+            return self.do_open(_pinned_https_factory, req)
+
+    def _pinned_http_factory(h, **kwargs):
+        conn = _PinnedHTTPConnection(h, **kwargs)
+        conn._pinned_ip = pinned_ip
+        return conn
+
+    def _pinned_https_factory(h, **kwargs):
+        conn = _PinnedHTTPSConnection(h, **kwargs)
+        conn._pinned_ip = pinned_ip
+        return conn
+
+    return _PinnedHTTPHandler(), _PinnedHTTPSHandler()
+
+
+def _open_pinned_webhook(req: urllib.request.Request, *, timeout: int):
+    """Open an alert-webhook POST with the host pinned to a single validated IP.
+
+    Resolves the request host ONCE, validates the resolved IP(s) against the
+    SSRF deny-list, picks the first allowed IP, and dials THAT IP (preserving
+    Host header + TLS SNI). Closes the DNS-rebinding TOCTOU. Still refuses to
+    follow redirects. Raises UnsafeOutboundUrlError if the host resolves only to
+    disallowed addresses (fail closed).
+    """
+    host = urllib.parse.urlsplit(req.full_url).hostname or ""
+    allow_private = _allow_private_mcp_urls()
+
+    # IP literals were already validated by the pre-flight check; pin directly.
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+
+    if literal is not None:
+        pinned_ip = host
+    else:
+        try:
+            resolved = _resolve_host_ips(host)
+        except (_socket.gaierror, _socket.timeout, OSError) as exc:
+            raise UnsafeOutboundUrlError(
+                f"Alert webhook URL is not allowed: host could not be resolved ({host})"
+            ) from exc
+        if allow_private:
+            # Self-hoster opt-in: pin the first resolved IP without filtering.
+            safe_ips = list(resolved)
+        else:
+            safe_ips = [ip for ip in resolved if not _ip_is_disallowed(ip)]
+        if not safe_ips:
+            raise UnsafeOutboundUrlError(
+                "Alert webhook URL is not allowed: host resolves only to "
+                f"internal/loopback/link-local addresses ({host})"
+            )
+        pinned_ip = str(safe_ips[0])
+
+    http_handler, https_handler = _make_pinned_handler(host, pinned_ip)
+    opener = urllib.request.build_opener(
+        _NoRedirectHandler, http_handler, https_handler
+    )
+    return opener.open(req, timeout=timeout)
 
 
 def _send_email_notification(
@@ -220,10 +360,12 @@ def _fire_alert_webhooks(
             try:
                 req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
                 # Bounded timeout — a hostile/slow endpoint must not hang the
-                # alert daemon thread. Use the no-redirect opener so a 30x
-                # response can't bounce the POST to an internal/metadata target
-                # that bypasses the pre-flight SSRF validation above.
-                with _NO_REDIRECT_OPENER.open(req, timeout=5):
+                # alert daemon thread. `_open_pinned_webhook` resolves the host
+                # ONCE, validates the IP, and dials THAT pinned IP (closing the
+                # DNS-rebinding TOCTOU between the pre-flight check above and the
+                # connect) while still refusing to follow redirects so a 30x
+                # can't bounce the POST to an internal/metadata target.
+                with _open_pinned_webhook(req, timeout=5):
                     pass
                 logger.debug("Alert webhook delivered to %s for run %s (%s)", url, run_id, status)
             except Exception as exc:

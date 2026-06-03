@@ -242,3 +242,43 @@ def test_token_for_a_cannot_reject_b(monkeypatch):
 
     assert response.status_code == 401
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# 4. F3 — existence oracle: a NOT-FOUND approval and a PRESENT-but-bad-token
+#    approval must return the IDENTICAL response, so an attacker can't enumerate
+#    which approval ids exist by diffing 404-vs-401.
+# ---------------------------------------------------------------------------
+
+
+def test_not_found_and_bad_token_return_identical_response():
+    main.app.dependency_overrides[main.get_repos] = lambda: _Repos()
+    bad_token = "0" * 32
+    try:
+        client = TestClient(main.app)
+        # apr_A EXISTS but the token is wrong.
+        present_bad = client.get(f"/approvals/public/apr_A?token={bad_token}")
+        # apr_NOPE does NOT exist at all.
+        missing = client.get(f"/approvals/public/apr_NOPE?token={bad_token}")
+    finally:
+        main.app.dependency_overrides.clear()
+
+    # Same status code...
+    assert present_bad.status_code == missing.status_code == 401
+    # ...and the SAME body — no field distinguishes existence.
+    assert present_bad.json() == missing.json()
+
+
+def test_approve_not_found_and_bad_token_identical(monkeypatch):
+    client, calls = _client_and_calls(monkeypatch)
+    bad_token = "0" * 32
+    try:
+        present_bad = client.post(f"/approvals/public/apr_A/approve?token={bad_token}")
+        missing = client.post(f"/approvals/public/apr_NOPE/approve?token={bad_token}")
+    finally:
+        main.app.dependency_overrides.clear()
+
+    assert present_bad.status_code == missing.status_code == 401
+    assert present_bad.json() == missing.json()
+    # Neither reached the decision logic.
+    assert calls == []
