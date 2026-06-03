@@ -50,13 +50,14 @@ create table if not exists public.workspace_invitations (
     created_at timestamptz not null default now(),
     expires_at timestamptz not null,
     accepted_at timestamptz,
-    accepted_by_user_id uuid references public.users (id),
-    -- Only one pending invite per (workspace, email). Revoked/accepted ones
-    -- are kept for audit; new invites use a fresh row.
-    constraint workspace_invitations_pending_unique
-        unique nulls not distinct (workspace_id, email)
-        deferrable initially deferred
+    accepted_by_user_id uuid references public.users (id)
 );
+
+-- One pending invite per (workspace, email). Revoked/accepted rows are kept
+-- for audit; the partial index allows re-inviting after revoke or accept.
+create unique index if not exists workspace_invitations_pending_unique
+    on public.workspace_invitations (workspace_id, email)
+    where status = 'pending';
 
 create index if not exists idx_workspace_invitations_workspace
     on public.workspace_invitations (workspace_id, status);
