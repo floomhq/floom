@@ -1,5 +1,5 @@
-import { LandingBody } from "@/components/LandingBody";
+import { LandingRef } from "@/components/landing-ref/LandingRef";
 
 export default function HomePage() {
-  return <LandingBody />;
+  return <LandingRef />;
 }
