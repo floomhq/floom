@@ -681,9 +681,12 @@ export const api = {
         `/integrations/catalog?${qs.toString()}`
       );
     },
-    catalogTools: (slug: string) =>
-      fetchJson<import("./types").CatalogToolItem[]>(
-        `/integrations/catalog/${encodeURIComponent(slug)}/tools`
-      ),
+    catalogTools: (slug: string, limit = 100) => {
+      const qs = new URLSearchParams();
+      qs.set("limit", String(limit));
+      return fetchJson<import("./types").CatalogToolItem[]>(
+        `/integrations/catalog/${encodeURIComponent(slug)}/tools?${qs.toString()}`
+      );
+    },
   },
 };
