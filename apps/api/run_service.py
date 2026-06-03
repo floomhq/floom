@@ -1469,6 +1469,7 @@ def create_run(
     *,
     status: str | None = None,
     user_id: str | None = None,
+    trigger_ref: str | None = None,
     repos: Repositories | None = None,
 ) -> str:
     repos_obj = _repos(repos)
@@ -1497,6 +1498,7 @@ def create_run(
         runner=runner,
         input_json=effective_inputs,
         created_at=_now_iso(),
+        trigger_ref=trigger_ref,
     )
     logger.info("Created run %s for worker %s (runner=%s)", run_id, worker_id, runner)
     return run_id
