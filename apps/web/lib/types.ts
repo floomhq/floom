@@ -415,6 +415,43 @@ export interface ApprovalRow {
   artifacts?: Artifact[];
   /** Standalone signed review URL (?id=&token=) the owner can copy/share or open full-page. Set by the API for the authenticated owner. */
   public_link?: string;
+  /** X4: structured reviewer feedback attached with the decision (highlight+comment on text, screenshot pins). */
+  annotations?: ApprovalAnnotations | null;
+}
+
+/** X4: a comment attached to a highlighted span of a text/markdown artifact. */
+export interface TextAnnotation {
+  quote: string;
+  comment: string;
+}
+
+/** X4: a pin (normalized 0..1 coords) + comment placed on an uploaded screenshot. */
+export interface ImagePin {
+  x: number;
+  y: number;
+  comment: string;
+}
+
+/** X4: an uploaded review screenshot with a caption + optional comment pins. */
+export interface ImageAnnotation {
+  /** Content-addressed ref into our upload store (/uploads/<sha256>?download_token=...). */
+  url: string;
+  caption: string;
+  pins: ImagePin[];
+}
+
+export interface ApprovalAnnotations {
+  text: TextAnnotation[];
+  images: ImageAnnotation[];
+}
+
+/** Response shape from the approval-scoped screenshot upload endpoints. */
+export interface ApprovalUploadResponse {
+  id: string;
+  sha256: string;
+  size: number;
+  media_type: string;
+  url: string;
 }
 
 export interface SystemInfo {
