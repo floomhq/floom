@@ -799,6 +799,11 @@ export interface IntegrationCatalogResponse {
   categories: string[];
 }
 
+export interface CatalogToolItem {
+  name: string;
+  description: string;
+}
+
 export interface VersionSummary {
   id: string;
   asset_type: string;

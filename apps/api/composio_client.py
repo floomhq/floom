@@ -28,6 +28,10 @@ _CATALOG_TTL_SECONDS = 60 * 60
 _catalog_cache: Dict[tuple, tuple[float, Dict[str, Any]]] = {}
 _catalog_cache_lock = threading.Lock()
 
+_TOOLKIT_TOOLS_TTL_SECONDS = 60 * 60
+_toolkit_tools_cache: Dict[str, tuple[float, List[Dict[str, Any]]]] = {}
+_toolkit_tools_cache_lock = threading.Lock()
+
 load_dotenv("/root/.config/workeros/api.env", override=False)
 
 SUPPORTED_APPS: Dict[str, str] = {
@@ -220,6 +224,39 @@ def list_catalog_apps(
 
     with _catalog_cache_lock:
         _catalog_cache[cache_key] = (now, result)
+    return result
+
+
+def list_toolkit_tools(slug: str, *, limit: int = 8) -> List[Dict[str, Any]]:
+    """Return the top N tools for a Composio toolkit slug, cached for 1 hour.
+
+    Returns a list of dicts with keys: name, description.
+    Falls back to [] on any error so the UI degrades gracefully.
+    """
+    normalized = slug.strip().lower()
+    now = time.monotonic()
+    with _toolkit_tools_cache_lock:
+        cached = _toolkit_tools_cache.get(normalized)
+        if cached and now - cached[0] < _TOOLKIT_TOOLS_TTL_SECONDS:
+            return cached[1]
+
+    try:
+        data = _get_with_retry("/tools", toolkit_slug=normalized, limit=limit)
+        items = data.get("items") or []
+        result: List[Dict[str, Any]] = [
+            {
+                "name": item.get("name") or item.get("slug") or "",
+                "description": (item.get("description") or "")[:120],
+            }
+            for item in items
+            if item.get("name") or item.get("slug")
+        ]
+    except Exception as exc:
+        logger.warning("Failed to fetch tools for toolkit %s: %s", slug, exc)
+        result = []
+
+    with _toolkit_tools_cache_lock:
+        _toolkit_tools_cache[normalized] = (now, result)
     return result
 
 

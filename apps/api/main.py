@@ -11357,6 +11357,27 @@ def integrations_catalog(
     return IntegrationCatalogResponse(**result)
 
 
+class CatalogToolItem(BaseModel):
+    name: str
+    description: str
+
+
+@app.get("/integrations/catalog/{slug}/tools", response_model=List[CatalogToolItem])
+def integrations_catalog_tools(slug: str) -> List[CatalogToolItem]:
+    """Return the top 8 tools for a Composio toolkit slug, cached 1 h.
+
+    Designed for the Browse card tool-preview popover. Returns [] when
+    Composio is unreachable so the UI degrades gracefully.
+    """
+    from composio_client import list_toolkit_tools
+    try:
+        items = list_toolkit_tools(slug, limit=8)
+    except Exception as exc:
+        logger.warning("Failed to fetch toolkit tools for %s: %s", slug, exc)
+        items = []
+    return [CatalogToolItem(**item) for item in items]
+
+
 def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
     """Parse a JSON-encoded scopes list from the DB; return [] on any error."""
     if not scopes_json:
