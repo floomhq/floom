@@ -637,6 +637,33 @@ export const api = {
     shareLink: () =>
       fetchJson<import("./types").WorkspaceShareLink>("/workspace/share-link"),
   },
+  // Workspace members (STEP 2). Engine-owned membership: the OSS engine is the
+  // single-owner degenerate case (you = Owner); Cloud serves the same shape with
+  // real members. The role matrix is enforced server-side; the UI only gates
+  // affordances on `my_role`.
+  members: {
+    list: () =>
+      fetchJson<import("./types").WorkspaceMembersResponse>("/workspace/members"),
+    invite: (email: string, role: "admin" | "member") =>
+      fetchJson<import("./types").WorkspaceMember>("/workspace/members", {
+        method: "POST",
+        body: JSON.stringify({ email, role }),
+      }),
+    setRole: (userId: string, role: "admin" | "member") =>
+      fetchJson<import("./types").WorkspaceMember>(
+        `/workspace/members/${encodeURIComponent(userId)}`,
+        { method: "PATCH", body: JSON.stringify({ role }) }
+      ),
+    remove: (userId: string) =>
+      fetchJson<null>(`/workspace/members/${encodeURIComponent(userId)}`, {
+        method: "DELETE",
+      }),
+    transferOwner: (newOwnerId: string) =>
+      fetchJson<import("./types").WorkspaceMember>(
+        "/workspace/members/transfer-owner",
+        { method: "POST", body: JSON.stringify({ new_owner_id: newOwnerId }) }
+      ),
+  },
   integrations: {
     triggers: () =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),

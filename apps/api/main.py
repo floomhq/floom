@@ -107,7 +107,7 @@ try:
 except Exception:  # pragma: no cover - fallback only used when dependency is absent locally
     _slowapi_get_remote_address = None
 
-from db import DB_PATH, Repositories, get_db, get_repos, get_repositories, init_db, now_iso, sqlite_runtime_settings
+from db import DB_PATH, Repositories, WorkspaceMemberRepository, get_db, get_repos, get_repositories, init_db, now_iso, sqlite_runtime_settings
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from secret_scan import scan_bytes
 from models import (
@@ -583,6 +583,266 @@ def duplicate_workspace(
         base_user_id, _duplicate_workspace_name(source.get("name") or "")
     )
     return _local_workspace_out(created)
+
+
+# ---------------------------------------------------------------------------
+# Workspace members (STEP 2 — Codex members design, build-order step 2).
+#
+# Engine-owned membership endpoints calling the step-1
+# ``WorkspaceMemberRepository``. ONE model for BOTH products: the OSS engine is
+# the single-owner degenerate case (one active owner = the local user), Cloud
+# implements the same Protocol against Supabase. The role matrix lives in the
+# repository layer (owner-only role/transfer; owner+admin invite/remove; admin
+# cannot target owner/admin); these endpoints map repository PermissionError /
+# ValueError to 403 / 400 and never trust the client for authority.
+# ---------------------------------------------------------------------------
+
+class WorkspaceMemberOut(BaseModel):
+    workspace_id: str
+    user_id: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Literal["owner", "admin", "member"]
+    status: Literal["active", "invited", "removed"] = "active"
+    invited_by: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class WorkspaceMembersResponse(BaseModel):
+    """Members list + the caller's own identity/role so the web UI gates the
+    invite / change-role / remove / transfer affordances without re-deriving
+    authority from member rows."""
+
+    members: List[WorkspaceMemberOut]
+    workspace_id: str
+    my_user_id: str
+    my_role: Optional[Literal["owner", "admin", "member"]] = None
+
+
+class WorkspaceMemberInviteRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    # ``owner`` is rejected (use transfer ownership); default to the least
+    # privileged role, matching Notion/Linear invite defaults.
+    role: Literal["admin", "member"] = "member"
+
+
+class WorkspaceMemberRoleUpdate(BaseModel):
+    role: Literal["admin", "member"]
+
+
+class WorkspaceTransferOwnerRequest(BaseModel):
+    new_owner_id: str = Field(..., min_length=1)
+
+
+def _member_out(row: Dict[str, Any]) -> WorkspaceMemberOut:
+    return WorkspaceMemberOut(
+        workspace_id=str(row.get("workspace_id") or ""),
+        user_id=str(row.get("user_id") or ""),
+        email=row.get("email"),
+        display_name=row.get("display_name"),
+        role=str(row.get("role") or "member"),  # type: ignore[arg-type]
+        status=str(row.get("status") or "active"),  # type: ignore[arg-type]
+        invited_by=row.get("invited_by"),
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
+    )
+
+
+def _require_members_repo(repos: Repositories) -> WorkspaceMemberRepository:
+    members = getattr(repos, "members", None)
+    if members is None:
+        raise HTTPException(status_code=501, detail="Membership not available")
+    return members
+
+
+def _ensure_owner_membership(
+    repos: Repositories, *, workspace_id: str, auth: AuthContext
+) -> None:
+    """Idempotently guarantee the caller has an active owner row in this workspace.
+
+    OS degenerate case: the local user is the single owner. The step-1 migration
+    backfills an owner row per local workspace keyed by ``owner_user_id`` (the
+    base user) — but a freshly created (non-default) workspace, or a workspace
+    with no workers, may not have a row keyed by the *scoped* request identity
+    (``auth.user_id``). Without this, the Members page would render empty on the
+    very instance that is supposed to always show "you = Owner". So we upsert the
+    owner row keyed by the request identity, carrying the caller's email when the
+    auth context has one. Cloud overrides membership via its own repo + RLS, so
+    this no-ops there (cloud deploy short-circuits before calling it).
+    """
+    if _is_cloud_deploy():
+        return
+    try:
+        existing = repos.members.get(workspace_id=workspace_id, user_id=auth.user_id)
+    except Exception:
+        return
+    if existing is not None:
+        # Backfill a missing email once the auth context carries one, so the row
+        # the UI shows isn't a bare id. Never downgrade an existing value.
+        if auth.email and not existing.get("email"):
+            try:
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE workspace_members SET email = ?, updated_at = ? "
+                        "WHERE workspace_id = ? AND user_id = ? AND (email IS NULL OR email = '')",
+                        (auth.email, now_iso(), workspace_id, auth.user_id),
+                    )
+            except Exception:
+                logger.debug("could not backfill owner email", exc_info=True)
+        return
+    # No row for this identity yet: insert the owner row. The partial unique
+    # index forbids a second active owner, so guard with INSERT OR IGNORE and
+    # only when no active owner exists for the workspace.
+    try:
+        with get_db() as conn:
+            owner = conn.execute(
+                "SELECT 1 FROM workspace_members "
+                "WHERE workspace_id = ? AND role = 'owner' AND status = 'active' LIMIT 1",
+                (workspace_id,),
+            ).fetchone()
+            if owner is not None:
+                return
+            now = now_iso()
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO workspace_members
+                    (workspace_id, user_id, email, display_name, role,
+                     status, invited_by, created_at, updated_at)
+                VALUES (?, ?, ?, NULL, 'owner', 'active', NULL, ?, ?)
+                """,
+                (workspace_id, auth.user_id, auth.email, now, now),
+            )
+    except Exception:
+        logger.debug("could not ensure owner membership", exc_info=True)
+
+
+@app.get("/workspace/members", response_model=WorkspaceMembersResponse)
+def list_workspace_members(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceMembersResponse:
+    """List the active members of the caller's current workspace + their role.
+
+    OS single-owner: returns one row (you = Owner). The invite affordance is
+    gated client-side on ``my_role`` (owner/admin), and the page renders
+    identically to what Cloud will show with real members — one model, no fork.
+    """
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    rows = members_repo.list(workspace_id=workspace_id)
+    me = members_repo.get(workspace_id=workspace_id, user_id=auth.user_id)
+    return WorkspaceMembersResponse(
+        members=[_member_out(r) for r in rows],
+        workspace_id=workspace_id,
+        my_user_id=auth.user_id,
+        my_role=(me.get("role") if me else None),  # type: ignore[arg-type]
+    )
+
+
+@app.post("/workspace/members", response_model=WorkspaceMemberOut, status_code=201)
+def invite_workspace_member(
+    payload: WorkspaceMemberInviteRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceMemberOut:
+    """Invite a member by email (owner/admin only). The repository enforces the
+    matrix and rejects a second owner; we map its errors to 403/400."""
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    try:
+        row = members_repo.invite(
+            workspace_id=workspace_id,
+            email=payload.email.strip(),
+            role=payload.role,
+            invited_by=auth.user_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _member_out(row)
+
+
+@app.patch("/workspace/members/{user_id}", response_model=WorkspaceMemberOut)
+def set_workspace_member_role(
+    user_id: str,
+    payload: WorkspaceMemberRoleUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceMemberOut:
+    """Promote/demote a member between admin and member (owner only). Owner role
+    is changed only via transfer-owner; the repository rejects it."""
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    try:
+        row = members_repo.set_role(
+            workspace_id=workspace_id,
+            actor_id=auth.user_id,
+            user_id=user_id,
+            role=payload.role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return _member_out(row)
+
+
+@app.delete("/workspace/members/{user_id}", status_code=204)
+def remove_workspace_member(
+    user_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Remove a member (owner/admin only; admins can't remove owner/admins; the
+    owner can't be removed — transfer ownership first)."""
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    try:
+        removed = members_repo.remove(
+            workspace_id=workspace_id,
+            actor_id=auth.user_id,
+            user_id=user_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return Response(status_code=204)
+
+
+@app.post("/workspace/members/transfer-owner", response_model=WorkspaceMemberOut)
+def transfer_workspace_owner(
+    payload: WorkspaceTransferOwnerRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceMemberOut:
+    """Transfer ownership to another active member (current owner only). The
+    current owner is demoted to admin; the partial unique index keeps exactly
+    one active owner per workspace."""
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    try:
+        row = members_repo.transfer_owner(
+            workspace_id=workspace_id,
+            actor_id=auth.user_id,
+            new_owner_id=payload.new_owner_id.strip(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _member_out(row)
 
 
 def _connection_row_for_user(

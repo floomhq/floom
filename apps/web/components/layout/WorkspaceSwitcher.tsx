@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronsUpDown, Copy, Download, Link2, Plus, Upload } from "lucide-react";
+import Link from "next/link";
+import { Check, ChevronsUpDown, Copy, Download, Link2, Plus, Settings2, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
@@ -23,6 +24,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -272,57 +276,65 @@ export function WorkspaceSwitcher() {
               <Plus className="size-4" />
               New workspace
             </DropdownMenuItem>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator className="-mx-1 my-1" />
-          {/* W9 (Federico 2026-06-02): the export/import template actions were
-              not discoverable. A labeled "Workspace actions" header makes it
-              obvious to a first-time user that exporting (sharing) and
-              importing a workspace template exist, without re-bloating the main
-              chrome with standalone buttons. */}
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--ink-mute)]">
-              Workspace actions
-            </DropdownMenuLabel>
+            {/* G10 (Federico 2026-06-03): Members lives in the workspace cluster,
+                peer to "New workspace". One model both products: on the OS it
+                shows you as Owner; Cloud shows real members. */}
             <DropdownMenuItem
-              closeOnClick={false}
-              disabled={exporting}
-              onClick={() => void handleExport()}
+              render={<Link href="/members" />}
               className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
             >
-              <Download className="size-4" />
-              {exporting ? "Exporting…" : "Export / share as template"}
+              <Users className="size-4" />
+              Members
             </DropdownMenuItem>
-            <DropdownMenuItem
-              closeOnClick={false}
-              disabled={importing}
-              onClick={() => importInputRef.current?.click()}
-              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-            >
-              <Upload className="size-4" />
-              {importing ? "Importing…" : "Import template…"}
-            </DropdownMenuItem>
-            {/* W9b (Federico 2026-06-03): Duplicate workspace + Share template
-                link, alongside Export/Import. Duplicate mints a "<name> (copy)"
-                sibling; Share copies a signed login-free download link (no
-                secret values) the recipient imports on their own instance. */}
-            <DropdownMenuItem
-              closeOnClick={false}
-              disabled={duplicating}
-              onClick={() => void handleDuplicate()}
-              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-            >
-              <Copy className="size-4" />
-              {duplicating ? "Duplicating…" : "Duplicate workspace"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              closeOnClick={false}
-              disabled={sharingLink}
-              onClick={() => void handleShareLink()}
-              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-            >
-              <Link2 className="size-4" />
-              {sharingLink ? "Creating link…" : "Share template link"}
-            </DropdownMenuItem>
+            {/* G1 (Federico 2026-06-03, img #91/#94): the four template actions
+                are collapsed into ONE "Workspace actions" row that reveals them
+                on hover — peer to "New workspace" — instead of a flat list. */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="flex items-center gap-2 text-[var(--ink-soft)] data-popup-open:bg-[var(--active-nav-bg)] data-popup-open:text-ink">
+                <Settings2 className="size-4" />
+                Workspace actions
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-56 p-1">
+                <DropdownMenuItem
+                  closeOnClick={false}
+                  disabled={exporting}
+                  onClick={() => void handleExport()}
+                  className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                >
+                  <Download className="size-4" />
+                  {exporting ? "Exporting…" : "Export / share as template"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  closeOnClick={false}
+                  disabled={importing}
+                  onClick={() => importInputRef.current?.click()}
+                  className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                >
+                  <Upload className="size-4" />
+                  {importing ? "Importing…" : "Import template…"}
+                </DropdownMenuItem>
+                {/* W9b: Duplicate mints a "<name> (copy)" sibling; Share copies a
+                    signed login-free download link (no secret values). */}
+                <DropdownMenuItem
+                  closeOnClick={false}
+                  disabled={duplicating}
+                  onClick={() => void handleDuplicate()}
+                  className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                >
+                  <Copy className="size-4" />
+                  {duplicating ? "Duplicating…" : "Duplicate workspace"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  closeOnClick={false}
+                  disabled={sharingLink}
+                  onClick={() => void handleShareLink()}
+                  className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                >
+                  <Link2 className="size-4" />
+                  {sharingLink ? "Creating link…" : "Share template link"}
+                </DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
