@@ -75,8 +75,19 @@ alter table public.workers
     -- Set when visibility first changes to 'shared'. Shared run history
     -- starts from this timestamp; private history is never exposed.
 
+alter table public.workers
+    add column if not exists clone_token_hash text;
+    -- SHA-256 hash of the one-time wct_* clone token. NULL means no active token.
+
+alter table public.workers
+    add column if not exists clone_token_expires_at timestamptz;
+
 create index if not exists idx_workers_workspace_visibility
     on public.workers (workspace_id, visibility);
+
+create index if not exists idx_workers_clone_token
+    on public.workers (clone_token_hash)
+    where clone_token_hash is not null;
 
 -- 4. admin_access_log ----------------------------------------------------
 -- Silent audit trail: every time an admin reads a private member resource

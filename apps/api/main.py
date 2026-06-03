@@ -330,6 +330,129 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
     )
 
 
+@app.get("/workers/{worker_id}")
+@app.get("/api/workers/{worker_id}")
+async def cloud_get_worker(worker_id: str, request: Request) -> Any:
+    """Cloud override for GET /workers/{id}.
+
+    Delegates to the engine's _build_worker_detail then augments the response
+    with cloud-only fields: visibility and published_at (from Supabase).
+    """
+    import asyncio as _asyncio
+
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from auth.context import AuthContext as _AuthContext
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    repos = engine_main.get_repositories()
+    engine_auth = _AuthContext(
+        user_id=auth.user_id,
+        email=getattr(auth, "email", None),
+        scopes=getattr(auth, "scopes", ()),
+    )
+    result = await _asyncio.to_thread(
+        engine_main._build_worker_detail, worker_id,
+        user_id=auth.user_id, repos=repos
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+
+    result_dict = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+    raw = repos.workers.get_any(worker_id=worker_id) or {}
+    result_dict["visibility"] = raw.get("visibility") or "private"
+    result_dict["published_at"] = raw.get("published_at")
+    return result_dict
+
+
+@app.patch("/workers/{worker_id}/visibility")
+@app.patch("/api/workers/{worker_id}/visibility")
+async def cloud_set_worker_visibility(worker_id: str, request: Request) -> Any:
+    """Cloud override: PATCH /workers/{id}/visibility.
+
+    Sets visibility to 'private' or 'shared'. Stamps published_at once on
+    first share — it is immutable thereafter (cycling shared→private→shared
+    keeps the original timestamp so member run-history is preserved).
+    """
+    import secrets as _secrets
+
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    visibility = body.get("visibility")
+    if visibility not in ("private", "shared"):
+        raise HTTPException(status_code=422, detail="visibility must be 'private' or 'shared'")
+
+    repos = engine_main.get_repositories()
+    worker = repos.workers.get_any(worker_id=worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="worker not found")
+    if str(worker.get("user_id", "")) != str(auth.user_id):
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    repos.workers.set_visibility(worker_id=worker_id, visibility=visibility)
+    updated = repos.workers.get_any(worker_id=worker_id) or {}
+    return {
+        "visibility": updated.get("visibility") or "private",
+        "published_at": updated.get("published_at"),
+    }
+
+
+@app.post("/workers/{worker_id}/clone-link")
+@app.post("/api/workers/{worker_id}/clone-link")
+async def cloud_generate_clone_link(worker_id: str, request: Request) -> Any:
+    """Cloud override: POST /workers/{id}/clone-link.
+
+    Generates a one-time wct_* token (7-day expiry), stores its SHA-256 hash,
+    returns the raw token once. Secrets, run history, and brain data are NOT
+    copied when the link is used.
+    """
+    import hashlib as _hashlib
+    import secrets as _secrets
+    from datetime import datetime, timedelta, timezone
+
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    repos = engine_main.get_repositories()
+    worker = repos.workers.get_any(worker_id=worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="worker not found")
+    if str(worker.get("user_id", "")) != str(auth.user_id):
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    raw_token = "wct_" + _secrets.token_urlsafe(32)
+    token_hash = _hashlib.sha256(raw_token.encode()).hexdigest()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    repos.workers.set_clone_token(worker_id=worker_id, token_hash=token_hash, expires_at=expires_at)
+    return {"token": raw_token, "expires_at": expires_at}
+
+
 @app.post("/workers/clone/{token}", status_code=201)
 @app.post("/api/workers/clone/{token}", status_code=201)
 async def cloud_clone_worker(token: str, request: Request) -> Any:
