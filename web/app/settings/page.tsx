@@ -2,6 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
+import Link from "next/link";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -913,9 +914,9 @@ function WorkspaceSettingsTab() {
               </p>
             )}
           </div>
-          <a href="/members" className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+          <Link href="/members" className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
             Manage →
-          </a>
+          </Link>
         </div>
       </section>
     </div>

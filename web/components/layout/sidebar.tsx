@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Menu, X, Search, Settings, Users, LogOut } from "lucide-react";
+import { Menu, X, Search, Settings, LogOut, Plus } from "lucide-react";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
@@ -16,8 +16,43 @@ import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import {
   FloomMark,
   NavLinks,
-  SidebarPrimaryActions,
 } from "@/components/layout/sidebar.engine";
+
+// Cloud override of SidebarPrimaryActions: platform-aware keyboard shortcut label.
+function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void }) {
+  const [isMac, setIsMac] = useState(true);
+  useEffect(() => {
+    setIsMac(/Mac|iPhone|iPad/i.test(navigator.platform ?? navigator.userAgent));
+  }, []);
+  const onSearch = () => { onNavigate?.(); openCommandPalette(); };
+  return (
+    <div className="px-3 pb-3 space-y-1.5">
+      <Link
+        href="/workers/new"
+        onClick={onNavigate}
+        className="flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-2.5 text-sm font-medium text-[var(--primary-text)] shadow-[var(--shadow-btn)] hover:bg-[var(--solid-2)] transition-colors duration-150"
+      >
+        <Plus className="w-4 h-4" />
+        New worker
+      </Link>
+      <button
+        type="button"
+        onClick={onSearch}
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--active-nav-bg)] hover:text-ink transition-colors duration-150"
+        aria-label="Open command palette"
+      >
+        <Search className="w-4 h-4 opacity-70" />
+        <span>Search...</span>
+        <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] tracking-widest text-[var(--ink-faint)]">
+          <kbd className="rounded border border-[var(--border-soft)] bg-[var(--bg-2)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>
+            {isMac ? "⌘" : "Ctrl"}
+          </kbd>
+          <kbd className="rounded border border-[var(--border-soft)] bg-[var(--bg-2)] px-1 py-0.5 font-mono">K</kbd>
+        </span>
+      </button>
+    </div>
+  );
+}
 
 export { FloomMark };
 import { cn } from "@/lib/utils";
@@ -34,27 +69,6 @@ function activeWorkspaceHeaders(headers?: HeadersInit): Headers {
   return next;
 }
 
-// Cloud-only nav link added below the engine's NavLinks.
-function MembersNavLink({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
-  const active = pathname === "/members" || pathname.startsWith("/members/");
-  return (
-    <div className="px-3">
-      <Link
-        href="/members"
-        onClick={onNavigate}
-        className={cn(
-          "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
-          active
-            ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
-            : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
-        )}
-      >
-        <Users className="w-4 h-4" />
-        Members
-      </Link>
-    </div>
-  );
-}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -105,7 +119,6 @@ export function Sidebar() {
         </div>
         <SidebarPrimaryActions />
         <NavLinks pathname={pathname} />
-        <MembersNavLink pathname={pathname} />
         <div className="mt-auto pt-3 border-t border-[var(--border-soft)]">
           <WorkspaceSwitcher />
         </div>
@@ -138,7 +151,6 @@ export function Sidebar() {
             <div className="py-3 flex-1 overflow-auto">
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
-              <MembersNavLink pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
             <div className="pt-3 border-t border-[var(--border-soft)]">
               <WorkspaceSwitcher />

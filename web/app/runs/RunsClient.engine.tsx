@@ -265,67 +265,62 @@ export default function RunsClient({
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Single unified container — one border, one set of rounded corners, no per-group cards */}
-          <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
-            {/* Column headers — shown once at the top of the whole list */}
-            <div className="hidden md:grid grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-2 border-b border-[var(--border-default)] text-[11px] font-medium text-muted-foreground">
-              <span>Worker</span>
-              <span>Trigger</span>
-              <span>Duration</span>
-              <span>Status</span>
-              <span>Started</span>
-            </div>
-            {groupedRuns.map((group, groupIdx) => (
-              <section key={group.key}>
-                {/* Group header: inset row, no rounded corners, straight full-width divider */}
-                <div className={`flex items-center justify-between gap-3 px-4 py-2 border-b border-[var(--border-default)] bg-[var(--bg-2)]${groupIdx > 0 ? " border-t" : ""}`}>
-                  <h2 className="text-xs font-semibold uppercase text-muted-foreground">
-                    {group.label}
-                  </h2>
-                  <span className="text-[11px] text-muted-foreground">
-                    {formatRunCountSummary(group.runs)}
-                  </span>
-                </div>
-                {group.runs.map((r) => (
-                  <Link
-                    key={r.id}
-                    href={`/runs/${r.id}`}
-                    title={r.id}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-3 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors items-center cursor-pointer"
-                  >
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-2.5 min-w-0">
-                        <WorkerAvatar seed={r.worker_id} name={r.worker_name || r.worker_id} size="size-6" />
-                        <span className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</span>
+          {groupedRuns.map((group) => (
+            <section key={group.key} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[var(--border-default)] bg-[var(--bg-2)]">
+                <h2 className="text-xs font-semibold uppercase text-muted-foreground">
+                  {group.label}
+                </h2>
+                <span className="text-[11px] text-muted-foreground">
+                  {formatRunCountSummary(group.runs)}
+                </span>
+              </div>
+              <div className="hidden md:grid grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-2 border-b border-[var(--border-default)] text-[11px] font-medium text-muted-foreground">
+                <span>Worker</span>
+                <span>Trigger</span>
+                <span>Duration</span>
+                <span>Status</span>
+                <span>Started</span>
+              </div>
+              {group.runs.map((r) => (
+                <Link
+                  key={r.id}
+                  href={`/runs/${r.id}`}
+                  title={r.id}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_120px_110px_150px_160px] gap-4 px-4 py-3 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors items-center cursor-pointer"
+                >
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <WorkerAvatar seed={r.worker_id} name={r.worker_name || r.worker_id} size="size-6" />
+                      <span className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</span>
+                    </span>
+                    {r.error && (
+                      <span className="mt-1 block truncate text-[11px] text-error/80">
+                        {summarizeError(r.error)}
                       </span>
-                      {r.error && (
-                        <span className="mt-1 block truncate text-[11px] text-error/80">
-                          {summarizeError(r.error)}
-                        </span>
-                      )}
-                    </span>
-                    <span className="hidden md:inline text-xs text-muted-foreground truncate">
-                      {formatTrigger(r.trigger_source)}
-                    </span>
-                    <span className="hidden md:inline text-xs text-muted-foreground tabular-nums">
-                      {formatDuration(r.duration_ms)}
-                    </span>
-                    <span className="hidden md:inline-flex">
-                      <RunStatusCell status={r.status} />
-                    </span>
-                    <span className="hidden md:flex flex-col text-xs text-muted-foreground leading-tight">
-                      <span className="text-foreground tabular-nums">{formatStartedTime(r)}</span>
-                      <span>{formatRelative(getRunTimestamp(r))}</span>
-                    </span>
-                    <span className="md:hidden flex flex-col items-end gap-1 justify-end">
-                      <RunStatusCell status={r.status} />
-                      <span className="text-xs text-muted-foreground">{formatRelative(getRunTimestamp(r))}</span>
-                    </span>
-                  </Link>
-                ))}
-              </section>
-            ))}
-          </div>
+                    )}
+                  </span>
+                  <span className="hidden md:inline text-xs text-muted-foreground truncate">
+                    {formatTrigger(r.trigger_source)}
+                  </span>
+                  <span className="hidden md:inline text-xs text-muted-foreground tabular-nums">
+                    {formatDuration(r.duration_ms)}
+                  </span>
+                  <span className="hidden md:inline-flex">
+                    <RunStatusCell status={r.status} />
+                  </span>
+                  <span className="hidden md:flex flex-col text-xs text-muted-foreground leading-tight">
+                    <span className="text-foreground tabular-nums">{formatStartedTime(r)}</span>
+                    <span>{formatRelative(getRunTimestamp(r))}</span>
+                  </span>
+                  <span className="md:hidden flex flex-col items-end gap-1 justify-end">
+                    <RunStatusCell status={r.status} />
+                    <span className="text-xs text-muted-foreground">{formatRelative(getRunTimestamp(r))}</span>
+                  </span>
+                </Link>
+              ))}
+            </section>
+          ))}
           {(hasMore || currentPage > 1) && (
             <div className="flex items-center justify-between gap-3 px-1 py-2">
               <Button
