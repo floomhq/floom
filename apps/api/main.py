@@ -11730,15 +11730,17 @@ class CatalogToolItem(BaseModel):
 
 
 @app.get("/integrations/catalog/{slug}/tools", response_model=List[CatalogToolItem])
-def integrations_catalog_tools(slug: str) -> List[CatalogToolItem]:
-    """Return the top 8 tools for a Composio toolkit slug, cached 1 h.
+def integrations_catalog_tools(slug: str, limit: int = 100) -> List[CatalogToolItem]:
+    """Return up to `limit` tools for a Composio toolkit slug, cached 1 h.
 
-    Designed for the Browse card tool-preview popover. Returns [] when
-    Composio is unreachable so the UI degrades gracefully.
+    Designed for the Browse catalog tools modal. Default limit raised to 100
+    so the modal can show the full tool list (e.g. Gmail has 85+ tools).
+    Returns [] when Composio is unreachable so the UI degrades gracefully.
     """
     from composio_client import list_toolkit_tools
+    effective_limit = max(1, min(200, limit))
     try:
-        items = list_toolkit_tools(slug, limit=8)
+        items = list_toolkit_tools(slug, limit=effective_limit)
     except Exception as exc:
         logger.warning("Failed to fetch toolkit tools for %s: %s", slug, exc)
         items = []
