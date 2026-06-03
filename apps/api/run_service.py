@@ -2112,11 +2112,34 @@ def get_secrets_for_worker(
     into the result, including all platform secrets above. Audit 2026-05-26
     flagged it as P0. The `_PLATFORM_SECRET_NAMES` denylist now blocks them
     regardless of whether they appear in the worker manifest or the DB.
+
+    SECRET-SCOPING GUARD (Members STEP 1, Codex top risk): secrets ALWAYS resolve
+    to the WORKER'S OWNER, never to whoever happens to be running it. When a member
+    runs a ``workspace``-visibility worker shared by another owner, the caller
+    passes the RUNNER's id as ``user_id``; using that to resolve secrets would (a)
+    leak the runner's OWN private secrets into someone else's worker, and (b) fail
+    the run because the owner's declared secrets live under the owner's id, not the
+    runner's. So we resolve the owner from the worker row and ignore a passed
+    ``user_id`` that does NOT match it. The passed ``user_id`` is only used as a
+    fallback when the worker has no DB owner (filesystem-only stock workers, where
+    owner == caller by construction). On the OSS single-owner engine owner == the
+    local user, so behaviour is unchanged.
     """
     repos_obj = _repos(repos)
-    owner_id = user_id or _worker_owner_id(worker_id, repos_obj)
+    true_owner_id = _worker_owner_id(worker_id, repos_obj)
+    # Resolve strictly against the worker's real owner. Only fall back to the
+    # passed user_id when the worker has no owner row at all (stock/FS workers).
+    owner_id = true_owner_id or user_id
     if not owner_id:
         return {}
+    if true_owner_id and user_id and user_id != true_owner_id:
+        logger.info(
+            "Secret scoping: worker %s run by %s resolves secrets to owner %s "
+            "(runner's own secrets are NOT used).",
+            worker_id,
+            user_id,
+            true_owner_id,
+        )
     _load_runtime_env_files()
     config = _get_worker_config_for_run(worker_id, repos_obj)
     names = set(config.secrets if config else [])

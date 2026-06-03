@@ -156,6 +156,11 @@ export const api = {
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" }),
+    setVisibility: (id: string, visibility: import("./types").AssetVisibility) =>
+      fetchJson<import("./types").WorkerDetail>(`/workers/${id}/visibility`, {
+        method: "PUT",
+        body: JSON.stringify({ visibility }),
+      }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
     run: (id: string, inputs: Record<string, unknown>) =>

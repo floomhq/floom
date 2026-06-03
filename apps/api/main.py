@@ -111,7 +111,9 @@ from db import DB_PATH, Repositories, get_db, get_repos, get_repositories, init_
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from secret_scan import scan_bytes
 from models import (
+    AssetPermissions,
     RunCreate,
+    WorkerVisibilityUpdate,
     WorkerSummary,
     WorkerDetail,
     PublicWorker,
@@ -5119,6 +5121,9 @@ def list_workers(
                 inputs=_inputs,
                 runtime=_runtime_type,
                 public_link=_worker_public_link(w),
+                owner_id=w.get("owner_id"),
+                visibility=str(w.get("visibility") or "private"),
+                permissions=_worker_permissions(w, user_id=auth.user_id, repos=repos),
             )
         )
     return result
@@ -5152,6 +5157,56 @@ def _worker_public_link(worker: Dict[str, Any]) -> Optional[str]:
         return None
     token = _worker_public_token(worker)
     return f"{_frontend_base_url()}/w/{worker_id}?token={token}"
+
+
+def _worker_permissions(
+    worker: Dict[str, Any],
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> AssetPermissions:
+    """Compute the requesting user's access matrix for a worker.
+
+    Delegates to the AssetAccessRepository when available (the engine-owned,
+    Cloud-mirrorable rule). Falls back to an owner-permissive default for
+    filesystem/stock workers that have no DB row (the caller is the de-facto
+    owner of a stock worker they can see), so the OSS single-owner UX is
+    unchanged. Never raises — a permission probe must not break a list/detail.
+    """
+    asset_access = getattr(repos, "asset_access", None)
+    worker_id = str(worker.get("id") or "")
+    owner_id = worker.get("owner_id")
+    visibility = str(worker.get("visibility") or "private")
+    if asset_access is not None and worker_id and owner_id:
+        try:
+            perms = asset_access.get_permissions(
+                workspace_id=str(worker.get("workspace_id") or "local-default"),
+                user_id=user_id,
+                asset_type="worker",
+                asset_id=worker_id,
+            )
+            return AssetPermissions(
+                is_owner=bool(perms.get("is_owner", owner_id == user_id)),
+                can_view=bool(perms.get("can_view", True)),
+                can_edit=bool(perms.get("can_edit", True)),
+                can_run=bool(perms.get("can_run", True)),
+                can_delete=bool(perms.get("can_delete", True)),
+                can_share=bool(perms.get("can_share", True)),
+            )
+        except Exception:
+            logger.debug("permission probe failed for worker %s", worker_id, exc_info=True)
+    # Fallback: stock/FS worker (no DB row) — the viewer who can see it is the
+    # de-facto owner on the single-owner engine.
+    is_owner = (not owner_id) or owner_id == user_id
+    shared = visibility == "workspace"
+    return AssetPermissions(
+        is_owner=is_owner,
+        can_view=is_owner or shared,
+        can_edit=is_owner,
+        can_run=is_owner or shared,
+        can_delete=is_owner,
+        can_share=is_owner,
+    )
 
 
 def _public_connection_labels(config: WorkerConfig) -> List[str]:
@@ -5344,6 +5399,9 @@ def _build_worker_detail(
         webhook_url=webhook_url,
         triggers_spec=triggers_spec,
         public_link=_worker_public_link(worker),
+        owner_id=worker.get("owner_id"),
+        visibility=str(worker.get("visibility") or "private"),
+        permissions=_worker_permissions(worker, user_id=user_id, repos=repos),
     )
 
 
@@ -5397,6 +5455,55 @@ def get_worker_detail(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+@app.put("/workers/{worker_id}/visibility", response_model=WorkerDetail)
+def set_worker_visibility(
+    worker_id: str,
+    payload: WorkerVisibilityUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """Set a worker's visibility (Private <-> Shared with workspace).
+
+    Owner/admin only. The AssetAccessRepository enforces ``can_share`` and the
+    enum; a non-owner without share rights gets 403. On the OSS single-owner
+    engine the local user owns their workers, so this always succeeds for them
+    and is a no-op-shaped toggle for the one-member workspace. 404 for an
+    invisible/unknown worker (never reveals another owner's private worker).
+    """
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    asset_access = getattr(repos, "asset_access", None)
+    if asset_access is None:
+        raise HTTPException(status_code=501, detail="Visibility control not available")
+
+    owner_id = worker.get("owner_id")
+    if not owner_id:
+        # Stock/filesystem worker with no DB row — not an editable asset.
+        raise HTTPException(
+            status_code=409,
+            detail="This worker is read-only and its visibility cannot be changed.",
+        )
+
+    try:
+        result = asset_access.set_visibility(
+            workspace_id=str(worker.get("workspace_id") or "local-default"),
+            actor_id=auth.user_id,
+            asset_type="worker",
+            asset_id=worker_id,
+            visibility=payload.visibility,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 

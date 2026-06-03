@@ -1502,6 +1502,11 @@ class RunCreate(BaseModel):
     trigger_source: str = "manual"
 
 
+class WorkerVisibilityUpdate(BaseModel):
+    """Set a worker's visibility. ``specific_people`` is reserved (UI hides it)."""
+    visibility: Literal["private", "workspace", "specific_people"]
+
+
 class PaginationParams(BaseModel):
     limit: int = Field(50, ge=1, le=500)
     offset: int = Field(0, ge=0)
@@ -1601,6 +1606,23 @@ class TriggerSpec(BaseModel):
     composio: Optional[Dict[str, Any]] = None
 
 
+class AssetPermissions(BaseModel):
+    """Computed access matrix for the requesting user against an asset.
+
+    Returned inline on worker list/detail so the web UI never infers access from
+    role names. ``can_share`` gates the visibility (Share) control; ``can_edit``/
+    ``can_delete`` gate the edit/delete affordances; ``can_run`` gates Run. On the
+    OSS single-owner engine the local user owns their assets, so all are true for
+    their own workers and a non-owned private worker is simply not returned.
+    """
+    is_owner: bool = True
+    can_view: bool = True
+    can_edit: bool = True
+    can_run: bool = True
+    can_delete: bool = True
+    can_share: bool = True
+
+
 class WorkerSummaryInput(BaseModel):
     """Lightweight input descriptor for worker list cards."""
     name: str
@@ -1641,6 +1663,10 @@ class WorkerSummary(BaseModel):
     # (/w/<id>?token=<hmac>). Lets the worker card render a Share affordance
     # without a second fetch. Same deterministic HMAC as WorkerDetail.public_link.
     public_link: Optional[str] = None
+    # Members STEP 1: ownership + per-asset visibility + computed permissions.
+    owner_id: Optional[str] = None
+    visibility: str = "private"
+    permissions: AssetPermissions = Field(default_factory=AssetPermissions)
 
 
 class WorkerFile(BaseModel):
@@ -1695,6 +1721,10 @@ class WorkerDetail(BaseModel):
     # the operator to the new worker (whose `id` differs from the URL they were
     # on). None for a normal in-place edit.
     cloned_from: Optional[str] = None
+    # Members STEP 1: ownership + per-asset visibility + computed permissions.
+    owner_id: Optional[str] = None
+    visibility: str = "private"
+    permissions: AssetPermissions = Field(default_factory=AssetPermissions)
 
 
 class PublicWorkerInput(BaseModel):
