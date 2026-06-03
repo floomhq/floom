@@ -229,6 +229,23 @@ export interface WorkerSummary {
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
   public_link?: string;   // owner-only signed share link to /w/<id>?token=
+  // Members STEP 1: ownership + per-asset visibility + computed permissions.
+  owner_id?: string | null;
+  visibility?: AssetVisibility;
+  permissions?: AssetPermissions;
+}
+
+/** Per-asset visibility. `specific_people` is reserved (hidden in the UI). */
+export type AssetVisibility = "private" | "workspace" | "specific_people";
+
+/** Computed access matrix for the requesting user against an asset. */
+export interface AssetPermissions {
+  is_owner: boolean;
+  can_view: boolean;
+  can_edit: boolean;
+  can_run: boolean;
+  can_delete: boolean;
+  can_share: boolean;
 }
 
 export interface WorkerFile {
@@ -275,6 +292,10 @@ export interface WorkerDetail {
   // user-owned editable copy (clone-on-edit). Carries the source stock worker id;
   // the returned `id` is the NEW copy, so the UI redirects to it.
   cloned_from?: string;
+  // Members STEP 1: ownership + per-asset visibility + computed permissions.
+  owner_id?: string | null;
+  visibility?: AssetVisibility;
+  permissions?: AssetPermissions;
 }
 
 // Read-only allow-list projection of a worker returned by
@@ -344,6 +365,10 @@ export interface ContextSummary {
   system?: boolean;
   /** True when the operator cannot edit or delete this pack. */
   read_only?: boolean;
+  // Members STEP 4: ownership + per-asset visibility + computed permissions.
+  owner_id?: string | null;
+  visibility?: AssetVisibility;
+  permissions?: AssetPermissions;
 }
 
 export interface ContextWorkerRef {
@@ -531,6 +556,11 @@ export interface WorkspaceAgentInfo {
       allowed_team_ids_configured?: boolean;
     };
   };
+  // Members STEP 5: ownership + per-asset visibility + computed permissions.
+  // The assistant is a shared workspace tool — default visibility 'workspace'.
+  owner_id?: string | null;
+  visibility?: AssetVisibility;
+  permissions?: AssetPermissions;
 }
 
 export interface WorkspaceImportResult {
@@ -558,6 +588,28 @@ export interface LocalWorkspaceListResponse {
 export interface WorkspaceShareLink {
   url: string;
   token: string;
+}
+
+export type WorkspaceRole = "owner" | "admin" | "member";
+export type WorkspaceMemberStatus = "active" | "invited" | "removed";
+
+export interface WorkspaceMember {
+  workspace_id: string;
+  user_id: string;
+  email: string | null;
+  display_name: string | null;
+  role: WorkspaceRole;
+  status: WorkspaceMemberStatus;
+  invited_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface WorkspaceMembersResponse {
+  members: WorkspaceMember[];
+  workspace_id: string;
+  my_user_id: string;
+  my_role: WorkspaceRole | null;
 }
 
 export interface SystemOverviewStats {
@@ -797,6 +849,11 @@ export interface IntegrationCatalogResponse {
   total_pages: number;
   next_page: number | null;
   categories: string[];
+}
+
+export interface CatalogToolItem {
+  name: string;
+  description: string;
 }
 
 export interface VersionSummary {

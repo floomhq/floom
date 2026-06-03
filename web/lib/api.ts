@@ -156,6 +156,11 @@ export const api = {
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" }),
+    setVisibility: (id: string, visibility: import("./types").AssetVisibility) =>
+      fetchJson<import("./types").WorkerDetail>(`/workers/${id}/visibility`, {
+        method: "PUT",
+        body: JSON.stringify({ visibility }),
+      }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
     run: (id: string, inputs: Record<string, unknown>) =>
@@ -418,6 +423,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ writeable }),
       }),
+    // Members STEP 4: Private <-> Shared with workspace.
+    setVisibility: (name: string, visibility: import("./types").AssetVisibility) =>
+      fetchJson<import("./types").ContextDetail>(
+        `/contexts/${encodeURIComponent(name)}/visibility`,
+        { method: "PUT", body: JSON.stringify({ visibility }) }
+      ),
     delete: (name: string, force = false) =>
       fetchJson<{ status: string; referenced_by: string[] }>(
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
@@ -504,6 +515,12 @@ export const api = {
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("./types").WorkspaceAgentInfo>("/system/workspace-agent"),
+    // Members STEP 5: assistant Private <-> Shared with workspace.
+    setAssistantVisibility: (visibility: import("./types").AssetVisibility) =>
+      fetchJson<import("./types").WorkspaceAgentInfo>(
+        "/system/workspace-agent/visibility",
+        { method: "PUT", body: JSON.stringify({ visibility }) }
+      ),
     workspaceInstructions: () =>
       fetchText("/workspace"),
     updateWorkspaceInstructions: (content: string) =>
@@ -554,21 +571,14 @@ export const api = {
       }),
   },
   slack: {
+    // Read-only status (configured: true/false + installed workspaces). Slack
+    // app credentials are platform env, not user-entered; the only install path
+    // is "Add to Slack" (one-app OAuth) surfaced on the Assistant page.
     setupStatus: () =>
       fetchJson<import("./types").SlackSetupStatus>("/slack/setup/status", {
         cache: "no-store",
       }),
-    updateSetupConfig: (payload: {
-      client_id?: string;
-      client_secret?: string;
-      signing_secret?: string;
-      events_enabled?: boolean;
-    }) =>
-      fetchJson<import("./types").SlackSetupConfigResponse>("/slack/setup/config", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      }),
-    installUrl: (return_to = "/connections/slack") =>
+    installUrl: (return_to = "/assistant") =>
       fetchJson<import("./types").SlackInstallUrlResponse>("/slack/oauth/install", {
         method: "POST",
         body: JSON.stringify({ return_to }),
@@ -632,6 +642,33 @@ export const api = {
     shareLink: () =>
       fetchJson<import("./types").WorkspaceShareLink>("/workspace/share-link"),
   },
+  // Workspace members (STEP 2). Engine-owned membership: the OSS engine is the
+  // single-owner degenerate case (you = Owner); Cloud serves the same shape with
+  // real members. The role matrix is enforced server-side; the UI only gates
+  // affordances on `my_role`.
+  members: {
+    list: () =>
+      fetchJson<import("./types").WorkspaceMembersResponse>("/workspace/members"),
+    invite: (email: string, role: "admin" | "member") =>
+      fetchJson<import("./types").WorkspaceMember>("/workspace/members", {
+        method: "POST",
+        body: JSON.stringify({ email, role }),
+      }),
+    setRole: (userId: string, role: "admin" | "member") =>
+      fetchJson<import("./types").WorkspaceMember>(
+        `/workspace/members/${encodeURIComponent(userId)}`,
+        { method: "PATCH", body: JSON.stringify({ role }) }
+      ),
+    remove: (userId: string) =>
+      fetchJson<null>(`/workspace/members/${encodeURIComponent(userId)}`, {
+        method: "DELETE",
+      }),
+    transferOwner: (newOwnerId: string) =>
+      fetchJson<import("./types").WorkspaceMember>(
+        "/workspace/members/transfer-owner",
+        { method: "POST", body: JSON.stringify({ new_owner_id: newOwnerId }) }
+      ),
+  },
   integrations: {
     triggers: () =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),
@@ -647,6 +684,13 @@ export const api = {
       if (params?.category) qs.set("category", params.category);
       return fetchJson<import("./types").IntegrationCatalogResponse>(
         `/integrations/catalog?${qs.toString()}`
+      );
+    },
+    catalogTools: (slug: string, limit = 100) => {
+      const qs = new URLSearchParams();
+      qs.set("limit", String(limit));
+      return fetchJson<import("./types").CatalogToolItem[]>(
+        `/integrations/catalog/${encodeURIComponent(slug)}/tools?${qs.toString()}`
       );
     },
   },

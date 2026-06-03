@@ -44,6 +44,7 @@ import {
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { ShareWorkerButton } from "@/components/ShareWorkerButton";
+import { WorkerVisibilityControl } from "@/components/WorkerVisibilityControl";
 import type {
   WorkerDetail,
   WorkerInput,
@@ -1696,16 +1697,30 @@ export default function WorkerDetailPage() {
               size="sm"
               onClick={() => setVersionsOpen(true)}
               aria-label="Versions"
+              /* P2 touch-target: >=44px tall on mobile (coarse pointers),
+                 compact on desktop. */
+              className="min-h-11 sm:min-h-0"
             >
               <History className="size-3.5" />
               Versions
               <ChevronDown className="size-3.5 text-muted-foreground" />
             </Button>
-            <ShareWorkerButton publicLink={worker.public_link} />
+            {/* Visibility (Share) control: Private <-> Shared with workspace.
+                Private default; renders on the OSS single-owner engine too. */}
+            <span className="[&_button]:min-h-11 sm:[&_button]:min-h-0">
+              <WorkerVisibilityControl
+                worker={worker}
+                onChange={(updated) => setWorker(updated)}
+              />
+            </span>
+            <span className="[&_button]:min-h-11 sm:[&_button]:min-h-0">
+              <ShareWorkerButton publicLink={worker.public_link} />
+            </span>
             <Button
               variant="outline"
               size="sm"
               onClick={enterEditMode}
+              className="min-h-11 sm:min-h-0"
             >
               <Pencil className="w-4 h-4 mr-1.5" />
               Edit
@@ -1716,7 +1731,7 @@ export default function WorkerDetailPage() {
             {!worker.is_example && (
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-button)] border border-input bg-background text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                  className="inline-flex h-11 w-11 sm:h-8 sm:w-8 items-center justify-center rounded-[var(--radius-button)] border border-input bg-background text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
                   aria-label="Worker actions"
                 >
                   <MoreVertical className="w-4 h-4" />
