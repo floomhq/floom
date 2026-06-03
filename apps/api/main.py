@@ -15347,11 +15347,17 @@ async def put_workspace(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Response:
-    """Update workspace.md (replaces entire content)."""
-    from chat_service import set_workspace_md
+    """Update workspace.md (replaces entire content).
+
+    Accepts BOTH a raw ``text/markdown`` body (the OSS contract) AND a JSON
+    ``{"content": "..."}`` envelope (sent by the Downstream host / some clients).
+    The envelope is unwrapped to its inner markdown so a JSON PUT can no longer
+    corrupt the stored instructions (N3-1).
+    """
+    from chat_service import set_workspace_md, unwrap_workspace_body
 
     body = await request.body()
-    content = body.decode("utf-8", errors="replace")
+    content = unwrap_workspace_body(body.decode("utf-8", errors="replace"))
     if not content.strip():
         raise HTTPException(status_code=400, detail="workspace.md content cannot be empty")
     set_workspace_md(content)
