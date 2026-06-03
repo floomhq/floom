@@ -2,7 +2,7 @@ import Link from "next/link";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
 
 export const metadata = {
-  title: "Sign in · Workeros",
+  title: "Sign in · Floom",
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_WORKEROS_API_BASE ?? "https://workeros-api.floom.dev";
@@ -38,7 +38,7 @@ export default async function LoginPage({
         <div className="w-full max-w-[400px]">
           <div className="rounded-[var(--radius-card)] border border-[var(--line)] bg-[var(--paper)] shadow-[var(--shadow-pop)] p-8">
             <div className="text-center space-y-1.5 mb-7">
-              <h1 className="text-[22px] font-semibold tracking-tight leading-tight">Sign in to Workeros</h1>
+              <h1 className="text-[22px] font-semibold tracking-tight leading-tight">Sign in to Floom</h1>
               <p className="text-[13px] text-[var(--ink-soft)] leading-relaxed">AI workers that actually run</p>
             </div>
 
