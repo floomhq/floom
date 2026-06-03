@@ -1,0 +1,70 @@
+name: /app rewrite guard
+
+# Durable guard against re-introducing ade0ec7-style regressions.
+#
+# The root vercel.json MUST rewrite /app and /app/:path* to the isolated
+# dashboard project (workeros-cloud-dashboard.vercel.app). Pointing /app at any
+# other host (e.g. the shared web/marketing project that also serves
+# flyfast.app + sky.buildingopen.org) couples the dashboard to a stale build and
+# breaks the documented 2-project rewrite. This check fails the PR/push if the
+# /app rewrite destination drifts away from workeros-cloud-dashboard.vercel.app.
+
+on:
+  pull_request:
+    paths:
+      - "vercel.json"
+      - ".github/workflows/app-rewrite-guard.yml"
+  push:
+    branches: [main]
+    paths:
+      - "vercel.json"
+      - ".github/workflows/app-rewrite-guard.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Verify /app rewrite target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert /app rewrites point at workeros-cloud-dashboard
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, sys
+
+          EXPECTED_HOST = "workeros-cloud-dashboard.vercel.app"
+
+          with open("vercel.json") as f:
+              cfg = json.load(f)
+
+          rewrites = cfg.get("rewrites", [])
+          targets = {}
+          for r in rewrites:
+              src = r.get("source", "")
+              if src == "/app" or src == "/app/:path*":
+                  targets[src] = r.get("destination", "")
+
+          errors = []
+          for src in ("/app", "/app/:path*"):
+              dest = targets.get(src)
+              if dest is None:
+                  errors.append(f"missing rewrite for source {src!r}")
+                  continue
+              if EXPECTED_HOST not in dest:
+                  errors.append(
+                      f"rewrite for {src!r} points at {dest!r}; "
+                      f"it MUST target {EXPECTED_HOST} (see ade0ec7 regression)"
+                  )
+
+          if errors:
+              print("::error::vercel.json /app rewrite guard failed:")
+              for e in errors:
+                  print(f"::error::  - {e}")
+              sys.exit(1)
+
+          print(f"OK: /app and /app/:path* both rewrite to {EXPECTED_HOST}")
+          PY

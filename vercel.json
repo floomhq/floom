@@ -2,11 +2,11 @@
   "rewrites": [
     {
       "source": "/app",
-      "destination": "https://web-fedes-projects-5891bd50.vercel.app/app"
+      "destination": "https://workeros-cloud-dashboard.vercel.app/app"
     },
     {
       "source": "/app/:path*",
-      "destination": "https://web-fedes-projects-5891bd50.vercel.app/app/:path*"
+      "destination": "https://workeros-cloud-dashboard.vercel.app/app/:path*"
     }
   ]
 }
