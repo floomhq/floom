@@ -1,70 +1,72 @@
 /**
- * Auth setup — run ONCE with `npx playwright test --project=setup --headed`
+ * Auth setup — run ONCE with:
+ *   npx playwright test --project=setup --headed
  *
- * Opens two browser windows. Log in with Google in each:
- *   1. Admin window  → log in as Frederico (workspace owner)
- *   2. Member window → log in as vivekbs.10@gmail.com
+ * Two browser windows open sequentially.
+ * Log in with Google in each — Playwright saves the session.
  *
- * Playwright saves the session cookies + localStorage to:
- *   tests/e2e/.auth/admin.json
- *   tests/e2e/.auth/member.json
+ * Saved to:
+ *   tests/e2e/.auth/admin.json   (Frederico — workspace owner)
+ *   tests/e2e/.auth/member.json  (vivekbs.10@gmail.com — workspace member)
  *
- * Rerun setup only when sessions expire (typically 7-30 days).
+ * Re-run only when sessions expire.
  */
 import { test as setup, expect } from "@playwright/test";
 import path from "path";
 
 const BASE = "https://workeros.floom.dev";
 const WORKSPACE_ID = "ws_8bdb2e8127db4f";
-
-const ADMIN_STATE = path.join(__dirname, ".auth/admin.json");
+const ADMIN_STATE  = path.join(__dirname, ".auth/admin.json");
 const MEMBER_STATE = path.join(__dirname, ".auth/member.json");
 
-// ---------------------------------------------------------------------------
-// Admin login
-// ---------------------------------------------------------------------------
-setup("authenticate as admin", async ({ page }) => {
+async function loginAndSave(page: any, label: string, statePath: string) {
+  console.log(`\n=== ${label} ===`);
+  console.log(`Opening login page — click "Continue with Google" and sign in.`);
+  console.log(`Waiting up to 2 minutes for you to complete Google sign-in...\n`);
+
   await page.goto(`${BASE}/app/login`);
 
-  // Click Google sign-in
-  await page.getByRole("button", { name: /google/i }).click();
+  // The Google button is an <a> tag, not a <button>
+  const googleLink = page.locator("a").filter({ hasText: /continue with google/i });
+  await expect(googleLink).toBeVisible({ timeout: 10_000 });
+  await googleLink.click();
 
-  // Wait for Google OAuth to complete and redirect back to the app.
-  // This gives you 60 seconds to complete the Google login flow.
-  await page.waitForURL(`${BASE}/app/**`, { timeout: 60_000 });
+  // Wait for Google OAuth to complete and land back on the app.
+  // This can take up to 2 minutes depending on Google's flow.
+  await page.waitForFunction(
+    () => {
+      const url = window.location.href;
+      return (
+        url.includes("workeros.floom.dev/app") &&
+        !url.includes("/login") &&
+        !url.includes("accounts.google") &&
+        !url.includes("oauth") &&
+        !url.includes("callback")
+      );
+    },
+    { timeout: 120_000, polling: 1000 }
+  );
 
-  // Set the active workspace in localStorage so the app starts in Nova Search
-  await page.evaluate((wsId) => {
+  console.log(`✓ Logged in — landed at: ${page.url()}`);
+
+  // Set active workspace
+  await page.evaluate((wsId: string) => {
     localStorage.setItem("workeros.activeWorkspaceId", wsId);
   }, WORKSPACE_ID);
 
-  // Verify we're actually logged in (sidebar should show workers nav)
-  await expect(page.getByRole("link", { name: /workers/i }).first()).toBeVisible({ timeout: 10_000 });
+  // Wait for the main UI to be ready
+  await page.waitForSelector('nav, aside, [class*="sidebar" i]', { timeout: 15_000 });
 
-  // Save session
-  await page.context().storageState({ path: ADMIN_STATE });
-  console.log("✓ Admin session saved to", ADMIN_STATE);
+  // Save session state
+  await page.context().storageState({ path: statePath });
+  console.log(`✓ Session saved to ${statePath}\n`);
+}
+
+setup("authenticate as admin", async ({ page }) => {
+  await loginAndSave(page, "ADMIN LOGIN (Frederico — workspace owner)", ADMIN_STATE);
 });
 
-// ---------------------------------------------------------------------------
-// Member login
-// ---------------------------------------------------------------------------
 setup("authenticate as member", async ({ page }) => {
-  await page.goto(`${BASE}/app/login`);
-
-  // NOTE: After clicking Google sign-in, make sure to select the MEMBER
-  // account (vivekbs.10@gmail.com), not the admin account.
-  await page.getByRole("button", { name: /google/i }).click();
-
-  await page.waitForURL(`${BASE}/app/**`, { timeout: 60_000 });
-
-  // Set the active workspace to Nova Search
-  await page.evaluate((wsId) => {
-    localStorage.setItem("workeros.activeWorkspaceId", wsId);
-  }, WORKSPACE_ID);
-
-  await expect(page.getByRole("link", { name: /workers/i }).first()).toBeVisible({ timeout: 10_000 });
-
-  await page.context().storageState({ path: MEMBER_STATE });
-  console.log("✓ Member session saved to", MEMBER_STATE);
+  console.log("\n>>> IMPORTANT: In this window, sign in as vivekbs.10@gmail.com (the MEMBER account) <<<\n");
+  await loginAndSave(page, "MEMBER LOGIN (vivekbs.10@gmail.com)", MEMBER_STATE);
 });
