@@ -201,6 +201,18 @@ def create(*, owner_user_id: str, name: str) -> dict[str, Any]:
     return created
 
 
+def rename(*, workspace_id: str, name: str) -> dict[str, Any]:
+    """Rename a workspace. Returns the updated row."""
+    client = get_supabase_service_client()
+    client.table("workspaces").update(
+        {"name": (name or "").strip() or "Untitled"}
+    ).eq("id", workspace_id).execute()
+    updated = get(workspace_id=workspace_id)
+    if updated is None:
+        raise RuntimeError(f"workspace {workspace_id} not found after rename")
+    return updated
+
+
 def revoke_workspace_api_tokens(*, workspace_id: str) -> int:
     """Delete all PATs scoped to a workspace and return the number found."""
     client = get_supabase_service_client()

@@ -61,6 +61,10 @@ class CreateShareLinkRequest(BaseModel):
     max_uses: int | None = Field(default=None, ge=1, le=100)
 
 
+class UpdateWorkspaceRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+
+
 class TransferWorkspaceRequest(BaseModel):
     recipient_user_id: str | None = Field(default=None, min_length=1)
     recipient_email: str | None = Field(default=None, min_length=3, max_length=320)
@@ -275,6 +279,19 @@ async def select_workspace(
     response = JSONResponse(_to_out(workspace, role=role).model_dump())
     _set_active_cookie(response, workspace_id)
     return response
+
+
+@router.patch("/{workspace_id}", response_model=WorkspaceOut)
+async def update_workspace(
+    workspace_id: str,
+    payload: UpdateWorkspaceRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> WorkspaceOut:
+    workspace = workspace_repo.get(workspace_id=workspace_id)
+    if workspace is None or str(workspace["owner_user_id"]) != auth.user_id:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    updated = workspace_repo.rename(workspace_id=workspace_id, name=payload.name.strip())
+    return _to_out(updated)
 
 
 @router.post("/{workspace_id}/transfer", response_model=WorkspaceTransferResponse)
