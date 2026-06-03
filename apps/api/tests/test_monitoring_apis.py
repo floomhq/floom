@@ -551,7 +551,7 @@ class TestAlertWebhookFiring:
         run_svc = importlib.import_module("run_service")
         with patch("models.socket.getaddrinfo",
                    return_value=[(2, 1, 6, "", ("93.184.216.34", 0))]):
-            with patch.object(run_svc._NO_REDIRECT_OPENER, "open", side_effect=mock_urlopen):
+            with patch.object(run_svc, "_open_pinned_webhook", side_effect=mock_urlopen):
                 run_svc._fire_alert_webhooks(
                     run_id=run_id,
                     worker_id=_WORKER_ID,
@@ -573,7 +573,7 @@ class TestAlertWebhookFiring:
 
         calls = []
         run_svc = importlib.import_module("run_service")
-        with patch.object(run_svc._NO_REDIRECT_OPENER, "open", side_effect=lambda *a, **kw: calls.append(a)):
+        with patch.object(run_svc, "_open_pinned_webhook", side_effect=lambda *a, **kw: calls.append(a)):
             run_svc._fire_alert_webhooks(
                 run_id=run_id,
                 worker_id=_WORKER_ID,
