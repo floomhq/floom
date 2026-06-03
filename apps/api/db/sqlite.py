@@ -37,14 +37,102 @@ _SECRET_PREFIX = "__WORKEROS_SECRET__"
 _FLOOM_USER_ID = "federico"
 
 
-def _env_path() -> Path:
+def _legacy_source_relative_env_path() -> Path:
+    """The historical, source-tree-relative secret env file (``apps/api/.env``).
+
+    THIS PATH IS THE N4-1 BUG. Because it is resolved relative to this source
+    file, two processes serving the SAME shared DB but running from different
+    checkouts/deploy directories (e.g. ``/root/workeros`` vs
+    ``/opt/workeros-live`` vs a ``/tmp`` worktree) resolve it to DIFFERENT
+    files. A secret set by one process writes its value into that process's
+    tree, while the DB row (anchored to the ABSOLUTE ``WORKEROS_DB``/``FLOOM_DB``
+    path) is shared — so the secret reads back as "set" in the DB but its value
+    is invisible (orphaned in the other tree's ``.env``), and every scheduled
+    run fails ``missing_secret``.
+
+    It is retained ONLY as a read-time fallback so secrets written before this
+    fix are not lost. New writes go to ``secret_store_env_path()``.
+    """
+    return Path(__file__).resolve().parents[1] / ".env"
+
+
+def _db_anchored_env_path() -> Path | None:
+    """Stable secret env file co-located with the DB, deploy-dir-independent.
+
+    The DB path (``WORKEROS_DB`` / ``FLOOM_DB``) is the one piece of state that
+    is already shared across deploy directories. Anchoring the secret-value
+    store to the SAME directory (``<db_dir>/secrets.env``) guarantees the write
+    path and every run-time read path resolve to the same file regardless of
+    which checkout the serving process runs from. Returns ``None`` when the DB
+    path is not configured to an absolute location (pure local dev), so we fall
+    back to the legacy source-relative file.
+    """
+    db_path = (
+        os.environ.get("WORKEROS_DB")
+        or os.environ.get("FLOOM_DB")
+    )
+    if not db_path:
+        return None
+    db_path_obj = Path(db_path)
+    if not db_path_obj.is_absolute():
+        return None
+    return db_path_obj.resolve().parent / "secrets.env"
+
+
+def secret_store_env_path() -> Path:
+    """Canonical path to the env file that backs user-managed secret VALUES.
+
+    Single source of truth for WHERE a secret value is written. Both the write
+    path (``SqliteSecretRepository.set`` -> ``_upsert_env_var``) and the
+    run-time read paths (manual / scheduled / webhook / composio, via
+    ``get_secrets_for_worker``) resolve through here, so a secret set under the
+    worker's owner is always found at run time.
+
+    Resolution order:
+      1. ``WORKEROS_API_ENV_FILE`` / ``FLOOM_API_ENV_FILE`` (explicit config /
+         tests).
+      2. ``<db_dir>/secrets.env`` — stable, co-located with the DB, immune to
+         deploy-directory swaps (the N4-1 fix).
+      3. ``apps/api/.env`` relative to this source file (local-dev default,
+         only when no absolute DB path is configured).
+    """
     configured = (
         os.environ.get("WORKEROS_API_ENV_FILE")
         or os.environ.get("FLOOM_API_ENV_FILE")
     )
     if configured:
         return Path(configured)
-    return Path(__file__).resolve().parents[1] / ".env"
+    anchored = _db_anchored_env_path()
+    if anchored is not None:
+        return anchored
+    return _legacy_source_relative_env_path()
+
+
+def secret_store_read_paths() -> list[Path]:
+    """All env files consulted when READING a secret value, in priority order.
+
+    The canonical write target comes first, then legacy locations so that
+    values written before the N4-1 fix (orphaned in a prior deploy tree's
+    ``apps/api/.env``) still resolve. De-duplicated, existing-files only.
+    """
+    candidates = [secret_store_env_path(), _legacy_source_relative_env_path()]
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+    for path in candidates:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        ordered.append(path)
+    return ordered
+
+
+# Back-compat alias (kept so existing private callers don't break).
+def _env_path() -> Path:
+    return secret_store_env_path()
 
 
 def _json_dump(value: Any) -> str:
@@ -68,8 +156,9 @@ def _user_secret_key(user_id: str, name: str) -> str:
     return f"{_SECRET_PREFIX}_{safe_user}_{name}"
 
 
-def _read_env_lines() -> list[str]:
-    env_path = _env_path()
+def _read_env_lines(path: Path | None = None) -> list[str]:
+    """Read lines from a secret env file (defaults to the canonical write path)."""
+    env_path = path if path is not None else _env_path()
     if not env_path.exists():
         return []
     return env_path.read_text().splitlines(keepends=True)
@@ -124,10 +213,14 @@ def _read_env_var(name: str) -> str | None:
     value = os.environ.get(name)
     if value is not None:
         return value
-    for line in _read_env_lines():
-        stripped = line.rstrip("\n")
-        if stripped.startswith(f"{name}="):
-            return stripped.split("=", 1)[1]
+    # Scan the canonical store first, then legacy locations, so secrets written
+    # before the N4-1 fix (orphaned in a prior deploy tree's apps/api/.env)
+    # still resolve. First match wins.
+    for env_path in secret_store_read_paths():
+        for line in _read_env_lines(env_path):
+            stripped = line.rstrip("\n")
+            if stripped.startswith(f"{name}="):
+                return stripped.split("=", 1)[1]
     return None
 
 
