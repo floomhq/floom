@@ -889,6 +889,223 @@ class SqliteWorkerRepository:
             )
             return cursor.rowcount > 0
 
+    # -- worker_triggers (normalized multi-trigger rows) ---------------------
+
+    @staticmethod
+    def _trigger_config_for(trigger: dict[str, Any]) -> dict[str, Any]:
+        """Strip the redundant ``type`` key; keep the per-trigger config payload."""
+        return {k: v for k, v in trigger.items() if k != "type" and v is not None}
+
+    @staticmethod
+    def reconcile_triggers_conn(
+        conn: sqlite3.Connection,
+        *,
+        worker_id: str,
+        triggers: list[dict[str, Any]],
+        external_trigger_id: str | None = None,
+        enabled: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Connection-bound reconcile used when a write transaction is already
+        open (e.g. startup registration writes everything through one ``conn``
+        to avoid a second-connection ``database is locked``)."""
+        now = now_iso()
+        kept_ids: list[str] = []
+        existing = {
+            row["id"]: _row_dict(row)
+            for row in conn.execute(
+                "SELECT * FROM worker_triggers WHERE worker_id = ?",
+                (worker_id,),
+            ).fetchall()
+        }
+        for position, trigger in enumerate(triggers):
+            if not isinstance(trigger, dict):
+                continue
+            t_type = str(trigger.get("type") or "manual").strip().lower()
+            if t_type in {"cron", "scheduled"}:
+                t_type = "schedule"
+            if t_type == "composio":
+                t_type = "composio_event"
+            trigger_id = f"trg_{worker_id}_{position}"
+            kept_ids.append(trigger_id)
+            config_json = json.dumps(SqliteWorkerRepository._trigger_config_for(trigger))
+            ext_id = external_trigger_id if t_type == "composio_event" else None
+            webhook_path = worker_id if t_type == "webhook" else None
+            enabled_int = 1 if enabled else 0
+            prior = existing.get(trigger_id)
+            # Preserve next_run_at/last_fired_at across reconciles when the
+            # schedule config is unchanged, so the scheduler slot is stable.
+            next_run_at = None
+            last_fired_at = None
+            if prior:
+                prior_config = prior.get("config_json")
+                if t_type == "schedule" and prior_config == config_json:
+                    next_run_at = prior.get("next_run_at")
+                last_fired_at = prior.get("last_fired_at")
+            conn.execute(
+                """
+                INSERT INTO worker_triggers
+                    (id, worker_id, type, config_json, enabled, next_run_at,
+                     external_trigger_id, webhook_path, last_fired_at, position,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    type=excluded.type,
+                    config_json=excluded.config_json,
+                    enabled=excluded.enabled,
+                    next_run_at=excluded.next_run_at,
+                    external_trigger_id=excluded.external_trigger_id,
+                    webhook_path=excluded.webhook_path,
+                    position=excluded.position,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    trigger_id,
+                    worker_id,
+                    t_type,
+                    config_json,
+                    enabled_int,
+                    next_run_at,
+                    ext_id,
+                    webhook_path,
+                    last_fired_at,
+                    position,
+                    (prior or {}).get("created_at") or now,
+                    now,
+                ),
+            )
+        # Delete rows for triggers that no longer exist.
+        if kept_ids:
+            placeholders = ",".join("?" for _ in kept_ids)
+            conn.execute(
+                f"DELETE FROM worker_triggers WHERE worker_id = ? AND id NOT IN ({placeholders})",
+                (worker_id, *kept_ids),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM worker_triggers WHERE worker_id = ?",
+                (worker_id,),
+            )
+        return [
+            _row_dict(row)
+            for row in conn.execute(
+                "SELECT * FROM worker_triggers WHERE worker_id = ? ORDER BY position, id",
+                (worker_id,),
+            ).fetchall()
+        ]
+
+    def reconcile_triggers(
+        self,
+        *,
+        worker_id: str,
+        triggers: list[dict[str, Any]],
+        external_trigger_id: str | None = None,
+        enabled: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Sync worker_triggers rows to exactly match the declared triggers.
+
+        One row per declared trigger. Row identity is stable across
+        re-reconciliations (id = ``trg_<worker_id>_<position>``) so updating a
+        worker's triggers in place updates the same rows instead of churning
+        them, and a removed trigger deletes its row.
+
+        ``external_trigger_id`` is the Composio registration id (a worker has at
+        most one composio trigger today); it is stamped onto the composio row so
+        an incoming event resolves back to the specific trigger.
+        """
+        with get_db() as conn:
+            return self.reconcile_triggers_conn(
+                conn,
+                worker_id=worker_id,
+                triggers=triggers,
+                external_trigger_id=external_trigger_id,
+                enabled=enabled,
+            )
+
+    def list_trigger_rows(self, *, worker_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM worker_triggers WHERE worker_id = ? ORDER BY position, id",
+                (worker_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def list_due_schedule_triggers(self, *, now_iso: str) -> list[dict[str, Any]]:
+        """Return enabled schedule trigger rows (joined to an enabled worker).
+
+        next_run_at filtering / due-comparison is done by the caller, since the
+        scheduler also handles NULL next_run_at (uninitialized) rows.
+        """
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.id, t.worker_id, t.config_json, t.next_run_at,
+                       t.last_fired_at, w.owner_id
+                FROM worker_triggers t
+                JOIN workers w ON w.id = t.worker_id
+                WHERE t.type = 'schedule'
+                  AND t.enabled = 1
+                  AND w.enabled = 1
+                ORDER BY t.worker_id, t.position, t.id
+                """
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def set_trigger_next_run_at(self, *, trigger_id: str, next_run_at: str | None) -> None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE worker_triggers SET next_run_at = ?, updated_at = ? WHERE id = ?",
+                (next_run_at, now_iso(), trigger_id),
+            )
+
+    def mark_trigger_fired(
+        self,
+        *,
+        trigger_id: str,
+        last_fired_at: str,
+        next_run_at: str | None,
+    ) -> None:
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE worker_triggers
+                SET last_fired_at = ?, next_run_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (last_fired_at, next_run_at, now_iso(), trigger_id),
+            )
+
+    def find_trigger_by_external_id(self, *, external_trigger_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM worker_triggers
+                WHERE external_trigger_id = ? AND enabled = 1
+                LIMIT 1
+                """,
+                (external_trigger_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def find_trigger_for_webhook(self, *, worker_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM worker_triggers
+                WHERE worker_id = ? AND type = 'webhook' AND enabled = 1
+                ORDER BY position, id
+                LIMIT 1
+                """,
+                (worker_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def count_schedule_trigger_rows(self) -> int:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM worker_triggers WHERE type = 'schedule'"
+            ).fetchone()
+        return int(row["cnt"] or 0) if row else 0
+
 
 class SqliteRunRepository:
     def list_for_worker(
@@ -971,7 +1188,7 @@ class SqliteRunRepository:
                        r.status, r.trigger_source, r.runner, r.input_json, r.output_json,
                        r.error, r.error_code, r.started_at, r.completed_at, r.duration_ms, r.created_at,
                        r.cancel_requested, r.cancelled_at, r.bundle_snapshot_path,
-                       r.quality_warning
+                       r.quality_warning, r.trigger_ref
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
@@ -1010,8 +1227,8 @@ class SqliteRunRepository:
                 INSERT INTO runs
                     (id, worker_id, status, trigger_source, runner, input_json, output_json,
                      approval_status, error, started_at, completed_at, duration_ms,
-                     created_at, bundle_snapshot_path, quality_warning)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, bundle_snapshot_path, quality_warning, trigger_ref)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -1029,6 +1246,7 @@ class SqliteRunRepository:
                     fields.get("created_at") or now_iso(),
                     fields.get("bundle_snapshot_path"),
                     fields.get("quality_warning"),
+                    fields.get("trigger_ref"),
                 ),
             )
         created = self.get(user_id=user_id, run_id=run_id)
@@ -1053,6 +1271,7 @@ class SqliteRunRepository:
             "cancelled_at",
             "bundle_snapshot_path",
             "quality_warning",
+            "trigger_ref",
         }
         updates: list[str] = []
         params: list[Any] = []
