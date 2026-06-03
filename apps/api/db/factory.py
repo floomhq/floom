@@ -4,9 +4,12 @@ import os
 from functools import lru_cache
 from typing import Callable, NamedTuple
 
+from typing import Optional
+
 from .interface import (
     AlertRepository,
     ApprovalRepository,
+    AssetAccessRepository,
     CliAuthRepository,
     ConnectionRepository,
     McpToolRepository,
@@ -14,10 +17,12 @@ from .interface import (
     SecretRepository,
     VersionRepository,
     WorkerRepository,
+    WorkspaceMemberRepository,
 )
 from .sqlite import (
     SqliteAlertRepository,
     SqliteApprovalRepository,
+    SqliteAssetAccessRepository,
     SqliteCliAuthRepository,
     SqliteConnectionRepository,
     SqliteMcpToolRepository,
@@ -25,6 +30,7 @@ from .sqlite import (
     SqliteSecretRepository,
     SqliteVersionRepository,
     SqliteWorkerRepository,
+    SqliteWorkspaceMemberRepository,
 )
 
 
@@ -38,6 +44,12 @@ class Repositories(NamedTuple):
     alerts: AlertRepository
     versions: VersionRepository
     mcp_tools: McpToolRepository
+    # Members + per-asset visibility (Members STEP 1). Optional with defaults so a
+    # downstream factory (e.g. workeros-cloud) that predates these fields keeps
+    # constructing Repositories(...) without them; it can register its own impls
+    # when it ships member/visibility support.
+    members: Optional[WorkspaceMemberRepository] = None
+    asset_access: Optional[AssetAccessRepository] = None
 
 
 def _local_repositories() -> Repositories:
@@ -51,6 +63,8 @@ def _local_repositories() -> Repositories:
         alerts=SqliteAlertRepository(),
         versions=SqliteVersionRepository(),
         mcp_tools=SqliteMcpToolRepository(),
+        members=SqliteWorkspaceMemberRepository(),
+        asset_access=SqliteAssetAccessRepository(),
     )
 
 

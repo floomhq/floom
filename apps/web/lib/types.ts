@@ -229,6 +229,23 @@ export interface WorkerSummary {
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
   public_link?: string;   // owner-only signed share link to /w/<id>?token=
+  // Members STEP 1: ownership + per-asset visibility + computed permissions.
+  owner_id?: string | null;
+  visibility?: AssetVisibility;
+  permissions?: AssetPermissions;
+}
+
+/** Per-asset visibility. `specific_people` is reserved (hidden in the UI). */
+export type AssetVisibility = "private" | "workspace" | "specific_people";
+
+/** Computed access matrix for the requesting user against an asset. */
+export interface AssetPermissions {
+  is_owner: boolean;
+  can_view: boolean;
+  can_edit: boolean;
+  can_run: boolean;
+  can_delete: boolean;
+  can_share: boolean;
 }
 
 export interface WorkerFile {
@@ -275,6 +292,10 @@ export interface WorkerDetail {
   // user-owned editable copy (clone-on-edit). Carries the source stock worker id;
   // the returned `id` is the NEW copy, so the UI redirects to it.
   cloned_from?: string;
+  // Members STEP 1: ownership + per-asset visibility + computed permissions.
+  owner_id?: string | null;
+  visibility?: AssetVisibility;
+  permissions?: AssetPermissions;
 }
 
 // Read-only allow-list projection of a worker returned by
