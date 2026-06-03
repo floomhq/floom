@@ -365,6 +365,10 @@ export interface ContextSummary {
   system?: boolean;
   /** True when the operator cannot edit or delete this pack. */
   read_only?: boolean;
+  // Members STEP 4: ownership + per-asset visibility + computed permissions.
+  owner_id?: string | null;
+  visibility?: AssetVisibility;
+  permissions?: AssetPermissions;
 }
 
 export interface ContextWorkerRef {
@@ -552,6 +556,11 @@ export interface WorkspaceAgentInfo {
       allowed_team_ids_configured?: boolean;
     };
   };
+  // Members STEP 5: ownership + per-asset visibility + computed permissions.
+  // The assistant is a shared workspace tool — default visibility 'workspace'.
+  owner_id?: string | null;
+  visibility?: AssetVisibility;
+  permissions?: AssetPermissions;
 }
 
 export interface WorkspaceImportResult {

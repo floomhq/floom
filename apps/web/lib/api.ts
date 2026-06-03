@@ -423,6 +423,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ writeable }),
       }),
+    // Members STEP 4: Private <-> Shared with workspace.
+    setVisibility: (name: string, visibility: import("./types").AssetVisibility) =>
+      fetchJson<import("./types").ContextDetail>(
+        `/contexts/${encodeURIComponent(name)}/visibility`,
+        { method: "PUT", body: JSON.stringify({ visibility }) }
+      ),
     delete: (name: string, force = false) =>
       fetchJson<{ status: string; referenced_by: string[] }>(
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
@@ -509,6 +515,12 @@ export const api = {
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("./types").WorkspaceAgentInfo>("/system/workspace-agent"),
+    // Members STEP 5: assistant Private <-> Shared with workspace.
+    setAssistantVisibility: (visibility: import("./types").AssetVisibility) =>
+      fetchJson<import("./types").WorkspaceAgentInfo>(
+        "/system/workspace-agent/visibility",
+        { method: "PUT", body: JSON.stringify({ visibility }) }
+      ),
     workspaceInstructions: () =>
       fetchText("/workspace"),
     updateWorkspaceInstructions: (content: string) =>
