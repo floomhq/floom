@@ -1877,6 +1877,7 @@ class SqliteApprovalRepository:
             "id", "run_id", "worker_id", "status", "label", "preview",
             "created_at", "decided_at", "reason",
             "decision_input_json", "edited_output_json", "follow_up_run_id",
+            "annotations_json",
         }
         cols = list(allowed & fields.keys())
         cols_str = ", ".join(cols + ["owner_id"])
@@ -1949,6 +1950,7 @@ class SqliteApprovalRepository:
         decided_at: str,
         edited_output_json: str | None = None,
         follow_up_run_id: str | None = None,
+        annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
         with get_db() as conn:
             conn.execute(
@@ -1957,10 +1959,11 @@ class SqliteApprovalRepository:
                 SET status = 'approved',
                     decided_at = ?,
                     edited_output_json = ?,
-                    follow_up_run_id = ?
+                    follow_up_run_id = ?,
+                    annotations_json = COALESCE(?, annotations_json)
                 WHERE run_id = ? AND owner_id = ? AND status = 'pending'
                 """,
-                (decided_at, edited_output_json, follow_up_run_id, run_id, owner_id),
+                (decided_at, edited_output_json, follow_up_run_id, annotations_json, run_id, owner_id),
             )
         return self.get_by_run_id(run_id=run_id)
 
@@ -1971,15 +1974,19 @@ class SqliteApprovalRepository:
         run_id: str,
         decided_at: str,
         reason: str | None = None,
+        annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
         with get_db() as conn:
             conn.execute(
                 """
                 UPDATE approvals
-                SET status = 'rejected', decided_at = ?, reason = ?
+                SET status = 'rejected',
+                    decided_at = ?,
+                    reason = ?,
+                    annotations_json = COALESCE(?, annotations_json)
                 WHERE run_id = ? AND owner_id = ? AND status = 'pending'
                 """,
-                (decided_at, reason, run_id, owner_id),
+                (decided_at, reason, annotations_json, run_id, owner_id),
             )
         return self.get_by_run_id(run_id=run_id)
 

@@ -42,7 +42,12 @@ async function handler(
   const accept = req.headers.get("accept");
   if (accept) forwardHeaders["accept"] = accept;
 
-  const isUpload = upstreamPath === "/uploads";
+  // Stream multipart uploads (no buffering in the Next function): the generic
+  // /uploads route plus the X4 approval-scoped screenshot upload endpoints
+  // (authed owner + signed-link public reviewer).
+  const isUpload =
+    upstreamPath === "/uploads" ||
+    (/^\/approvals\/(public\/)?[^/]+\/uploads$/.test(upstreamPath.split("?")[0]));
   let body: BodyInit | null | undefined;
   if (req.method !== "GET" && req.method !== "HEAD") {
     body = isUpload ? req.body : await req.arrayBuffer();

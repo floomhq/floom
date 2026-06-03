@@ -9,6 +9,22 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { FloomMark } from "@/components/layout/sidebar";
 import type { ApprovalRow, Artifact } from "@/lib/types";
+import {
+  AnnotationsViewer,
+  ScreenshotAnnotator,
+  TextHighlightAnnotator,
+  serializeAnnotations,
+  type ScreenshotDraft,
+  type TextItem,
+} from "./annotations";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
+
+/** Persisted screenshot refs are /uploads/<sha> relative to the API proxy. */
+function resolveUploadUrl(ref: string): string {
+  if (/^https?:\/\//.test(ref)) return ref;
+  return `${API_BASE}${ref.startsWith("/") ? "" : "/"}${ref}`;
+}
 
 const TABLE_PREVIEW_ROWS = 100;
 const TABLE_PREVIEW_COLS = 12;
@@ -682,6 +698,10 @@ function ReviewContent() {
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [reason, setReason] = useState("");
   const [showReason, setShowReason] = useState(false);
+  // X4: structured reviewer annotations collected alongside the decision.
+  const [textNotes, setTextNotes] = useState<TextItem[]>([]);
+  const [screenshots, setScreenshots] = useState<ScreenshotDraft[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -720,6 +740,43 @@ function ReviewContent() {
   );
   const isDestructiveDelete = decisionInput.kind === "destructive_delete";
 
+  // Text the reviewer can highlight: the rendered proposed output (approval.preview)
+  // or the inline file text when present. Highlighting is a v1 pass over this
+  // string; large binary/image artifacts get screenshot annotation instead.
+  const highlightableText = useMemo(() => {
+    const candidate = approval?.preview || previewFile?.text || "";
+    return candidate.length > TEXT_PREVIEW_LIMIT ? candidate.slice(0, TEXT_PREVIEW_LIMIT) : candidate;
+  }, [approval?.preview, previewFile?.text]);
+
+  // Reset collected annotations whenever the active approval changes so feedback
+  // never bleeds from one item to the next in the owner's queue.
+  useEffect(() => {
+    setTextNotes([]);
+    setScreenshots([]);
+    setReason("");
+    setShowReason(false);
+  }, [approval?.id]);
+
+  const uploadScreenshot = useCallback(
+    async (file: File) => {
+      if (!approval) return null;
+      setUploading(true);
+      try {
+        const result =
+          isSignedLink && token
+            ? await api.approvals.uploadScreenshotPublic(approval.id, token, file, file.name)
+            : await api.approvals.uploadScreenshot(approval.id, file, file.name);
+        return { url: result.url, previewUrl: URL.createObjectURL(file) };
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Screenshot upload failed");
+        return null;
+      } finally {
+        setUploading(false);
+      }
+    },
+    [approval, isSignedLink, token]
+  );
+
   const removeCurrent = useCallback(() => {
     setRows((current) => {
       const next = current.filter((row) => row.id !== approval?.id);
@@ -728,16 +785,21 @@ function ReviewContent() {
     });
   }, [approval?.id]);
 
+  const annotationsPayload = useMemo(() => {
+    const serialized = serializeAnnotations(textNotes, screenshots);
+    return serialized.text.length > 0 || serialized.images.length > 0 ? serialized : null;
+  }, [textNotes, screenshots]);
+
   const approve = useCallback(async () => {
     if (!approval) return;
     setBusy("approve");
     try {
       if (isSignedLink && token) {
-        await api.approvals.publicApprove(approval.id, token);
+        await api.approvals.publicApprove(approval.id, token, undefined, annotationsPayload);
       } else if (isDestructiveDelete) {
-        await api.approvals.approveAction(approval.id);
+        await api.approvals.approveAction(approval.id, annotationsPayload);
       } else {
-        await api.runs.approve(approval.run_id);
+        await api.runs.approve(approval.run_id, undefined, annotationsPayload);
       }
       toast.success("Approved");
       removeCurrent();
@@ -746,18 +808,18 @@ function ReviewContent() {
     } finally {
       setBusy(null);
     }
-  }, [approval, isDestructiveDelete, isSignedLink, removeCurrent, token]);
+  }, [annotationsPayload, approval, isDestructiveDelete, isSignedLink, removeCurrent, token]);
 
   const reject = useCallback(async () => {
     if (!approval) return;
     setBusy("reject");
     try {
       if (isSignedLink && token) {
-        await api.approvals.publicReject(approval.id, token, reason || undefined);
+        await api.approvals.publicReject(approval.id, token, reason || undefined, annotationsPayload);
       } else if (isDestructiveDelete) {
-        await api.approvals.rejectAction(approval.id, reason || undefined);
+        await api.approvals.rejectAction(approval.id, reason || undefined, annotationsPayload);
       } else {
-        await api.runs.reject(approval.run_id, reason || undefined);
+        await api.runs.reject(approval.run_id, reason || undefined, annotationsPayload);
       }
       toast.success("Rejected");
       setReason("");
@@ -768,7 +830,7 @@ function ReviewContent() {
     } finally {
       setBusy(null);
     }
-  }, [approval, isDestructiveDelete, isSignedLink, reason, removeCurrent, token]);
+  }, [annotationsPayload, approval, isDestructiveDelete, isSignedLink, reason, removeCurrent, token]);
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-6 sm:px-6 sm:py-10">
@@ -891,16 +953,58 @@ function ReviewContent() {
               </details>
             )}
 
-            {showReason && (
-              <label className="block">
-                <span className="text-sm font-medium text-[var(--ink)]">Reason for rejection</span>
-                <textarea
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                  className="mt-2 min-h-24 w-full rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
-                  placeholder="Tell the worker what to change."
+            {/* Owner reopening an already-annotated approval sees the persisted
+                reviewer feedback read-only (e.g. an external approver's notes). */}
+            {approval.annotations &&
+              (approval.annotations.text?.length > 0 || approval.annotations.images?.length > 0) && (
+                <AnnotationsViewer
+                  annotations={approval.annotations}
+                  resolveImageUrl={resolveUploadUrl}
                 />
-              </label>
+              )}
+
+            {showReason && (
+              <div className="space-y-5">
+                <label className="block">
+                  <span className="text-sm font-medium text-[var(--ink)]">Reason for rejection</span>
+                  <textarea
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    className="mt-2 min-h-24 w-full rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-3 py-2 text-sm text-[var(--ink)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                    placeholder="Tell the worker what to change."
+                  />
+                </label>
+
+                {/* X4: highlight + comment on the proposed text. Only shown when
+                    there is reviewable text and this is not a bare delete request. */}
+                {!isDestructiveDelete && highlightableText.trim().length > 0 && (
+                  <div>
+                    <h2 className="text-sm font-medium text-[var(--ink)]">Comment on the text</h2>
+                    <p className="mb-2 mt-0.5 text-xs text-[var(--ink-soft)]">
+                      Select any part of the proposed output to attach a specific comment.
+                    </p>
+                    <TextHighlightAnnotator
+                      text={highlightableText}
+                      items={textNotes}
+                      onChange={setTextNotes}
+                    />
+                  </div>
+                )}
+
+                {/* X4: screenshot upload + pin-comment annotation. */}
+                <div>
+                  <h2 className="text-sm font-medium text-[var(--ink)]">Screenshots</h2>
+                  <p className="mb-2 mt-0.5 text-xs text-[var(--ink-soft)]">
+                    Attach a screenshot and click it to pin comments on specific spots.
+                  </p>
+                  <ScreenshotAnnotator
+                    images={screenshots}
+                    onChange={setScreenshots}
+                    onUpload={uploadScreenshot}
+                    uploading={uploading}
+                  />
+                </div>
+              </div>
             )}
           </div>
 
