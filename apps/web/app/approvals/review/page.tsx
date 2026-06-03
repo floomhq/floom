@@ -794,7 +794,10 @@ function ReviewContent() {
             </Link>
           )}
         </div>
-        {rows.length > 0 && (
+        {/* The "N of M" counter only makes sense when stepping through a queue.
+            A signed single-approval link renders exactly one item, so the
+            counter is hidden there to keep the external reviewer's page clean. */}
+        {!isSignedLink && rows.length > 0 && (
           <span className="text-sm text-[var(--ink-soft)]">
             {index + 1} of {rows.length}
           </span>
@@ -932,26 +935,31 @@ function ReviewContent() {
                 Reject
               </button>
             )}
-            <div className="ml-auto flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIndex((current) => Math.max(0, current - 1))}
-                disabled={index === 0 || !!busy}
-                aria-label="Previous approval"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-soft)] disabled:opacity-40"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setIndex((current) => Math.min(rows.length - 1, current + 1))}
-                disabled={index >= rows.length - 1 || !!busy}
-                aria-label="Next approval"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-soft)] disabled:opacity-40"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
+            {/* Queue navigation is only meaningful for the internal owner stepping
+                through every pending item. A signed single-approval link shows
+                exactly one approval, so the prev/next arrows are hidden there. */}
+            {!isSignedLink && (
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIndex((current) => Math.max(0, current - 1))}
+                  disabled={index === 0 || !!busy}
+                  aria-label="Previous approval"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-soft)] disabled:opacity-40"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIndex((current) => Math.min(rows.length - 1, current + 1))}
+                  disabled={index >= rows.length - 1 || !!busy}
+                  aria-label="Next approval"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-soft)] disabled:opacity-40"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
           </div>
         </section>
       )}
