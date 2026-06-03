@@ -1,0 +1,109 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { NextRequest } from "next/server";
+
+// Fake fixture value, not a real credential. gitleaks:allow
+const SECRET = "fake-test-secret-not-real";
+
+async function validCookie(): Promise<string> {
+  const { deriveSessionToken, SESSION_COOKIE } = await import("@/lib/web-session");
+  const token = await deriveSessionToken();
+  return `${SESSION_COOKIE}=${token}`;
+}
+
+function req(path: string, cookie?: string): NextRequest {
+  const headers: Record<string, string> = {};
+  if (cookie) headers.cookie = cookie;
+  return new NextRequest(`https://workers.floom.dev${path}`, { headers });
+}
+
+describe("middleware auth gate", () => {
+  beforeEach(() => {
+    process.env.FLOOM_API_SECRET = SECRET;
+  });
+  afterEach(() => {
+    delete process.env.FLOOM_API_SECRET;
+  });
+
+  it("blocks anonymous /api/proxy/* with 401 JSON", async () => {
+    const { middleware } = await import("@/middleware");
+    for (const p of [
+      "/api/proxy/connections",
+      "/api/proxy/secrets",
+      "/api/proxy/workers",
+      "/api/proxy/approvals",
+    ]) {
+      const res = await middleware(req(p));
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.detail).toMatch(/Authentication required/i);
+    }
+  });
+
+  it("forwards /api/proxy/* when a valid session cookie is present", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(req("/api/proxy/connections", await validCookie()));
+    // NextResponse.next() carries the rewrite header and is NOT a 401/redirect.
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("rejects /api/proxy/* with a tampered cookie", async () => {
+    const { middleware } = await import("@/middleware");
+    const { SESSION_COOKIE } = await import("@/lib/web-session");
+    const res = await middleware(req("/api/proxy/secrets", `${SESSION_COOKIE}=deadbeef`));
+    expect(res.status).toBe(401);
+  });
+
+  it("keeps the PUBLIC approvals proxy reachable for signed-link approvers", async () => {
+    const { middleware } = await import("@/middleware");
+    const paths = [
+      "/api/proxy/approvals/public/abc-123?token=xyz",
+      "/api/proxy/approvals/public/abc-123/approve?token=xyz",
+      "/api/proxy/approvals/public/abc-123/reject?token=xyz",
+      "/api/proxy/approvals/public/abc-123/artifacts/a1/download?token=xyz",
+    ];
+    for (const p of paths) {
+      const res = await middleware(req(p));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+    }
+  });
+
+  it("does NOT leak the authed approvals proxy through the public prefix", async () => {
+    const { middleware } = await import("@/middleware");
+    // The plain /api/proxy/approvals list is NOT public.
+    const res = await middleware(req("/api/proxy/approvals"));
+    expect(res.status).toBe(401);
+  });
+
+  it("lets the auth endpoints through unauthenticated", async () => {
+    const { middleware } = await import("@/middleware");
+    for (const p of ["/api/auth/login", "/api/auth/logout"]) {
+      const res = await middleware(req(p));
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+    }
+  });
+
+  it("redirects anonymous app pages to /login with next param", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(req("/connections"));
+    expect(res.status).toBe(307);
+    const location = res.headers.get("location")!;
+    expect(location).toContain("/login");
+    expect(location).toContain("next=%2Fconnections");
+  });
+
+  it("keeps public pages reachable without login", async () => {
+    const { middleware } = await import("@/middleware");
+    for (const p of ["/login", "/approvals/review?id=x&token=y", "/w/abc?token=y"]) {
+      const res = await middleware(req(p));
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+    }
+  });
+
+  it("allows authed users into app pages", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(req("/connections", await validCookie()));
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+  });
+});
