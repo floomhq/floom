@@ -34,6 +34,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ContextDetail, ContextFileItem, ContextSummary, SecretWarning, VersionSummary } from "@/lib/types";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
+import { AssetVisibilityControl, AssetVisibilityIndicator } from "@/components/AssetVisibilityControl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -897,6 +898,7 @@ function ContextsPage() {
             onOpenFile={openFile}
             onDeleteFile={deleteFile}
             onAddFile={() => fileInputRef.current?.click()}
+            onVisibilityChange={(updated) => setDetail(updated)}
             dropHandlers={dropHandlers}
           />
         ) : (
@@ -1102,8 +1104,14 @@ function PackRow({
           <span className="block truncate text-xs text-muted-foreground mt-0.5">{ctx.description}</span>
         )}
         {!compact && (
-          <span className="block text-xs text-muted-foreground mt-0.5">
-            {ctx.file_count} {ctx.file_count === 1 ? "file" : "files"} · {ctx.worker_count} {ctx.worker_count === 1 ? "worker" : "workers"}
+          <span className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+            <span>
+              {ctx.file_count} {ctx.file_count === 1 ? "file" : "files"} · {ctx.worker_count} {ctx.worker_count === 1 ? "worker" : "workers"}
+            </span>
+            {/* Shared-with-workspace indicator (operator packs only). STEP 4. */}
+            {!ctx.read_only && ctx.visibility === "workspace" && (
+              <AssetVisibilityIndicator visibility={ctx.visibility} noun="brain pack" />
+            )}
           </span>
         )}
       </span>
@@ -1144,6 +1152,7 @@ function PackDetailPane({
   onOpenFile,
   onDeleteFile,
   onAddFile,
+  onVisibilityChange,
   dropHandlers,
 }: {
   detail: ContextDetail;
@@ -1157,6 +1166,7 @@ function PackDetailPane({
   onOpenFile: (path: string) => void;
   onDeleteFile: (path: string) => void;
   onAddFile: () => void;
+  onVisibilityChange: (updated: ContextDetail) => void;
   dropHandlers: Partial<{
     onDragEnter: React.DragEventHandler<HTMLElement>;
     onDragOver: React.DragEventHandler<HTMLElement>;
@@ -1204,14 +1214,31 @@ function PackDetailPane({
               </span>
             )}
           </h2>
-          <button
-            type="button"
-            onClick={copyPackLink}
-            className="p-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground transition-colors shrink-0"
-            title="Copy link to this pack"
-          >
-            {packLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Visibility (Share) control: Private <-> Shared with workspace.
+                Hidden for read-only system packs. Members STEP 4. */}
+            {!readOnly && (
+              <AssetVisibilityControl
+                visibility={detail.visibility}
+                canShare={detail.permissions?.can_share ?? Boolean(detail.owner_id)}
+                noun="brain pack"
+                titleLabel="Brain pack visibility"
+                onApply={async (next) => {
+                  const updated = await api.contexts.setVisibility(detail.name, next);
+                  onVisibilityChange(updated);
+                  return updated.visibility;
+                }}
+              />
+            )}
+            <button
+              type="button"
+              onClick={copyPackLink}
+              className="p-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground transition-colors shrink-0"
+              title="Copy link to this pack"
+            >
+              {packLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
+            </button>
+          </div>
         </div>
         {readOnly && (
           <p className="mt-2 text-xs text-muted-foreground">

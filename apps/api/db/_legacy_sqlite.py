@@ -693,6 +693,137 @@ def _migrate_workspace_members_backfill(conn: sqlite3.Connection) -> None:
             )
 
 
+def _migrate_brain_pack_assistant_visibility(conn: sqlite3.Connection) -> None:
+    """Normalize brain packs + assistants for per-asset visibility (engine STEP 4-5).
+
+    Brain packs (the /contexts feature) and the workspace assistant are not SQL
+    rows in the engine: brain packs are filesystem directories + a JSON metadata
+    sidecar, and the assistant is the ``workspace.md`` instructions. To bring them
+    under the SAME ``AssetAccessRepository`` access model that STEP 1 gave workers,
+    we add two access-control mirror tables. Each row carries exactly the columns
+    the generic ``SqliteAssetAccessRepository`` reads (``id, owner_id,
+    workspace_id, visibility``) so the repo works with zero new logic — the asset
+    type is just registered in ``_ASSET_TABLES``.
+
+    The filesystem metadata (``.workeros-contexts.json``) and ``workspace.md``
+    remain the content source of truth; these rows are the access-control mirror,
+    written through the same repository on create + visibility change so they never
+    drift (design top-risk: "writes go through one repository").
+
+    Defaults per the design: brain packs ``private`` (knowledge can carry
+    credentials/PII); assistant ``workspace`` (it is a shared workspace tool).
+
+    Idempotent: IF NOT EXISTS / re-runnable.
+    """
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS brain_packs (
+            id           TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            owner_id     TEXT NOT NULL,
+            visibility   TEXT NOT NULL DEFAULT 'private',
+            name         TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_brain_packs_workspace_id
+            ON brain_packs(workspace_id);
+        CREATE INDEX IF NOT EXISTS idx_brain_packs_owner_id
+            ON brain_packs(owner_id);
+
+        CREATE TABLE IF NOT EXISTS assistants (
+            id           TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            owner_id     TEXT NOT NULL,
+            visibility   TEXT NOT NULL DEFAULT 'workspace',
+            name         TEXT NOT NULL,
+            config_json  TEXT NOT NULL DEFAULT '{}',
+            instructions_md TEXT,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_assistants_workspace_id
+            ON assistants(workspace_id);
+        CREATE INDEX IF NOT EXISTS idx_assistants_owner_id
+            ON assistants(owner_id);
+        """
+    )
+
+
+def _migrate_brain_pack_assistant_backfill(conn: sqlite3.Connection) -> None:
+    """Backfill brain_packs + assistants rows from existing engine state.
+
+    Backwards-safe + idempotent (INSERT OR IGNORE):
+      1. One ``assistants`` row per local workspace (id ``workspace-agent``,
+         owner = workspace owner, visibility ``workspace``). The assistant is a
+         shared workspace tool so it is workspace-visible by default; on the OSS
+         single-owner engine the owner IS the local user, so chat is unchanged.
+
+    Brain packs are NOT backfilled here because their owner_id already lives in
+    the per-workspace ``.workeros-contexts.json`` (which the SQLite DB cannot see
+    in cloud's per-workspace FS layout). Instead the API lazily upserts a
+    ``brain_packs`` row the first time a pack's visibility is read/changed (see
+    ``ensure_brain_pack_row`` in contexts.py), defaulting to ``private`` — the
+    secure default that matches the existing owner-only behaviour. This keeps the
+    mirror correct without a migration reading customer FS state.
+    """
+    now = now_iso()
+    if _table_exists(conn, "local_workspaces") and _table_exists(conn, "assistants"):
+        rows = conn.execute(
+            "SELECT id, owner_user_id FROM local_workspaces"
+        ).fetchall()
+        for row in rows:
+            ws_id = row["id"]
+            owner = row["owner_user_id"]
+            if not ws_id or not owner:
+                continue
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO assistants
+                    (id, workspace_id, owner_id, visibility, name,
+                     config_json, instructions_md, created_at, updated_at)
+                VALUES (?, ?, ?, 'workspace', 'Workspace assistant',
+                        '{}', NULL, ?, ?)
+                """,
+                (_assistant_row_id(ws_id), ws_id, owner, now, now),
+            )
+
+    # Every distinct worker owner that lacks a local_workspaces row still gets an
+    # assistant row for their derived workspace (mirrors the members backfill).
+    if _table_exists(conn, "workers") and _table_exists(conn, "assistants"):
+        owner_rows = conn.execute(
+            "SELECT DISTINCT owner_id FROM workers WHERE owner_id IS NOT NULL"
+        ).fetchall()
+        for row in owner_rows:
+            owner = row["owner_id"]
+            if not owner:
+                continue
+            ws_id = _derive_workspace_id_from_owner(owner)
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO assistants
+                    (id, workspace_id, owner_id, visibility, name,
+                     config_json, instructions_md, created_at, updated_at)
+                VALUES (?, ?, ?, 'workspace', 'Workspace assistant',
+                        '{}', NULL, ?, ?)
+                """,
+                (_assistant_row_id(ws_id), ws_id, owner, now, now),
+            )
+
+
+def _assistant_row_id(workspace_id: str) -> str:
+    """Stable per-workspace assistant row id.
+
+    One assistant per workspace, keyed by workspace so the OSS default workspace
+    and each derived/cloud workspace get exactly one ``assistants`` row.
+    """
+    ws = (workspace_id or "local-default").strip() or "local-default"
+    return f"workspace-agent:{ws}"
+
+
 def _make_worker_alerts_url_nullable(conn: sqlite3.Connection) -> None:
     """Allow email-only worker alerts in SQLite databases created before email alerts."""
     if not _table_exists(conn, "worker_alerts"):
@@ -1313,6 +1444,15 @@ MIGRATIONS: list[Migration] = [
     # existing workers get derived workspace_id + visibility='private'. Idempotent
     # + backwards-safe (single-tenant behaviour unchanged).
     _migrate_workspace_members_backfill,
+    # -- migration 53: brain_packs + assistants tables (Members STEP 4-5) -------
+    # Access-control mirror rows for brain packs (/contexts) + the workspace
+    # assistant so the generic AssetAccessRepository covers them too. brain packs
+    # default private; assistant defaults workspace (shared tool). Idempotent.
+    _migrate_brain_pack_assistant_visibility,
+    # -- migration 54: backfill assistants per workspace -----------------------
+    # One assistant row per local workspace + per distinct worker owner. Brain
+    # packs are lazily upserted by the API (owner lives in FS metadata, not the DB).
+    _migrate_brain_pack_assistant_backfill,
 ]
 
 
