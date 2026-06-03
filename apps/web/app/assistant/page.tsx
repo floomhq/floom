@@ -2,10 +2,9 @@
 
 export const dynamic = "force-dynamic";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowUpRight, Edit3, Save, X } from "lucide-react";
+import { AlertTriangle, Edit3, Save, X } from "lucide-react";
 
 import { api } from "@/lib/api";
 import type { VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
@@ -18,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
+import { SlackConnect } from "@/components/assistant/SlackConnect";
 
 type TabKey = "instructions" | "prompt";
 
@@ -310,16 +310,7 @@ export default function AssistantPage() {
 
       </Tabs>
 
-      <Link
-        href="/connections/slack"
-        className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] border border-line bg-card px-4 py-3 text-sm transition-colors hover:bg-muted/40"
-      >
-        <span className="text-muted-foreground">
-          Channels (Slack workspace, events, and bot wiring) are managed under{" "}
-          <span className="font-medium text-foreground">Connections → Slack</span>.
-        </span>
-        <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
-      </Link>
+      <SlackConnect />
     </div>
   );
 }
