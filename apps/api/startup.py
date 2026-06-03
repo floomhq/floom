@@ -163,10 +163,11 @@ def _register_contexts_scope_resolver() -> None:
 def _override_create_run_for_members() -> None:
     """Patch engine_main.create_run so members can trigger shared workers.
 
-    The runs table has a composite FK (worker_id, user_id) → workers(id, user_id).
-    When a member triggers a shared worker the member's user_id doesn't appear in
-    workers, so the insert would violate the FK. We substitute the worker owner's
-    user_id before the insert so the constraint is satisfied.
+    Substitutes the worker owner's user_id when a non-admin member triggers a run
+    so that runs are attributed to the owner rather than the member. The composite
+    FK (worker_id, user_id) that originally required this was replaced by a simple
+    worker_id FK in migration 0024_runs_member_trigger (applied 2026-06-03), but
+    the substitution is kept for correct run attribution.
 
     Must patch engine_main directly (not run_service) because engine/main.py
     imports create_run into its own namespace at module load time.
