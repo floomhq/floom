@@ -88,6 +88,37 @@ class WorkerRepository(Protocol):
 
     def delete_webhook_secret(self, *, worker_id: str) -> bool: ...
 
+    # -- worker_triggers (normalized multi-trigger rows) ---------------------
+
+    def reconcile_triggers(
+        self,
+        *,
+        worker_id: str,
+        triggers: list[dict[str, Any]],
+        external_trigger_id: str | None = None,
+        enabled: bool = True,
+    ) -> list[RowDict]: ...
+
+    def list_trigger_rows(self, *, worker_id: str) -> list[RowDict]: ...
+
+    def list_due_schedule_triggers(self, *, now_iso: str) -> list[RowDict]: ...
+
+    def set_trigger_next_run_at(self, *, trigger_id: str, next_run_at: str | None) -> None: ...
+
+    def mark_trigger_fired(
+        self,
+        *,
+        trigger_id: str,
+        last_fired_at: str,
+        next_run_at: str | None,
+    ) -> None: ...
+
+    def find_trigger_by_external_id(self, *, external_trigger_id: str) -> RowDict | None: ...
+
+    def find_trigger_for_webhook(self, *, worker_id: str) -> RowDict | None: ...
+
+    def count_schedule_trigger_rows(self) -> int: ...
+
 
 class RunRepository(Protocol):
     def list_for_worker(
