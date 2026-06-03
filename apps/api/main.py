@@ -636,6 +636,13 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
         return WORKSPACE_IMPORT_BODY_LIMIT_BYTES
     if path.startswith("/uploads"):
         return None
+    # X4: approval-scoped screenshot uploads stream a multipart image body; the
+    # /uploads handler enforces its own size + quota caps, so exempt them from
+    # the small JSON default here (authed owner + signed-link public reviewer).
+    if path.endswith("/uploads") and (
+        path.startswith("/approvals/") or path.startswith("/approvals/public/")
+    ):
+        return None
     if path.startswith("/contexts"):
         return None
     return DEFAULT_JSON_BODY_LIMIT_BYTES
@@ -3890,14 +3897,23 @@ def _user_owns_uploaded_file(conn: sqlite3.Connection, file_id: str, user_id: st
     return legacy_row is not None
 
 
-@app.post("/uploads")
-async def upload_file(
+async def _store_uploaded_blob(
     request: Request,
-    file: UploadFile = File(...),
-    max_size_mb: Optional[float] = Form(None),
-    accepts: Optional[str] = Form(None),
-    auth: AuthContext = Depends(get_auth_context),
+    file: UploadFile,
+    uploaded_by: str,
+    *,
+    max_size_mb: Optional[float] = None,
+    accepts: Optional[str] = None,
+    allowed_media_prefixes: Optional[tuple[str, ...]] = None,
 ) -> Dict[str, Any]:
+    """Validate + content-address one uploaded file under `uploaded_by`.
+
+    Shared by the authed `/uploads` route and the approval-scoped upload routes
+    (authed owner + signed-link public reviewer). The same extension allowlist,
+    size/quota caps, and content-addressed dedup apply on every path, so the
+    public no-auth reviewer cannot smuggle in an executable or oversized blob.
+    `allowed_media_prefixes` further restricts the upload to e.g. image/* only.
+    """
     if max_size_mb is not None and max_size_mb <= 0:
         raise HTTPException(status_code=400, detail="max_size_mb must be greater than 0")
 
@@ -3907,12 +3923,6 @@ async def upload_file(
     media_type = normalize_media_type(
         file.content_type or mimetypes.guess_type(raw_filename)[0]
     )
-    # The extension allowlist (enforced above, with executables blocked) is the
-    # authoritative gate, and downloads are always served as attachments with
-    # nosniff, so stored files can't execute. Browsers send code/data files
-    # (.py, .ts, .toml, .go) as application/octet-stream or text/*, so we defer
-    # to the extension for those — EXCEPT for explicitly dangerous declared
-    # media types, which we reject as defense-in-depth regardless of extension.
     suffix = Path(raw_filename).suffix.lower()
     if media_type in _UPLOAD_DANGEROUS_MEDIA_TYPES:
         raise HTTPException(
@@ -3931,6 +3941,14 @@ async def upload_file(
             detail=f"Upload media type {media_type!r} is not allowed",
         )
 
+    if allowed_media_prefixes is not None and not any(
+        media_type.startswith(prefix) for prefix in allowed_media_prefixes
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload media type {media_type!r} is not accepted here",
+        )
+
     accepted = _parse_accepts(accepts)
     if accepted and media_type not in accepted:
         raise HTTPException(
@@ -3946,9 +3964,6 @@ async def upload_file(
 
     hasher = hashlib.sha256()
     size = 0
-    # Stream directly to a temp file to avoid memory buffering.
-    # Use BLOBS_DIR from files.py (already env-resolved) so the temp file is on
-    # the same filesystem as the final target, making os.replace atomic.
     from files import BLOBS_DIR as _BLOBS_DIR
     _BLOBS_DIR.mkdir(parents=True, exist_ok=True)
     tmp_upload = None
@@ -3998,10 +4013,8 @@ async def upload_file(
             final_tmp.unlink(missing_ok=True)
             tmp_upload.unlink(missing_ok=True)
     else:
-        # Blob already exists — dedup; remove the temp file.
         tmp_upload.unlink(missing_ok=True)
 
-    uploaded_by = auth.user_id or "anonymous"
     uploaded_at = now_iso()
     filename = file.filename or sha256
     with get_db() as conn:
@@ -4038,6 +4051,23 @@ async def upload_file(
         "media_type": media_type,
         "url": upload_url,
     }
+
+
+@app.post("/uploads")
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    max_size_mb: Optional[float] = Form(None),
+    accepts: Optional[str] = Form(None),
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    return await _store_uploaded_blob(
+        request,
+        file,
+        auth.user_id or "anonymous",
+        max_size_mb=max_size_mb,
+        accepts=accepts,
+    )
 
 
 @app.get("/uploads/{file_id}")
@@ -8479,12 +8509,121 @@ def cancel_run(
 # S47 HITL — approval endpoints
 # ---------------------------------------------------------------------------
 
+# --- X4: structured reviewer annotations -----------------------------------
+# Caps keep a malicious/fat-fingered reviewer from persisting an unbounded blob
+# onto the approval row. These are deliberately generous for a review pass but
+# hard ceilings.
+_ANNOTATION_MAX_TEXT_ITEMS = 200
+_ANNOTATION_MAX_IMAGE_ITEMS = 30
+_ANNOTATION_MAX_PINS_PER_IMAGE = 50
+_ANNOTATION_MAX_STR = 8000
+_ANNOTATION_MAX_JSON_BYTES = 256 * 1024
+
+
+def _clean_annotation_str(value: Any, *, limit: int = _ANNOTATION_MAX_STR) -> str:
+    if not isinstance(value, str):
+        return ""
+    # Strip control chars (defense-in-depth — this text is rendered back to the
+    # owner) but keep newlines/tabs which are legitimate in a comment.
+    cleaned = "".join(ch for ch in value if ch in "\n\t" or ord(ch) >= 32)
+    return cleaned[:limit].strip()
+
+
+def _safe_annotation_image_url(value: Any) -> Optional[str]:
+    """Only accept image refs that point at OUR content-addressed upload store.
+
+    The reviewer can only attach images they uploaded through the approval-scoped
+    upload endpoints, which return `/uploads/<sha256>?download_token=...`. We
+    refuse arbitrary http(s) URLs so a persisted annotation can never become an
+    SSRF vector or an off-site beacon when the owner later views the feedback.
+    """
+    if not isinstance(value, str):
+        return None
+    ref = value.strip()
+    if not ref.startswith("/uploads/"):
+        return None
+    path_part = ref.split("?", 1)[0]
+    file_id = path_part[len("/uploads/"):]
+    if not is_sha256(file_id):
+        return None
+    return ref[:_ANNOTATION_MAX_STR]
+
+
+def _sanitize_annotations(raw: Any) -> Optional[Dict[str, Any]]:
+    """Coerce reviewer-supplied annotations into a bounded, safe shape.
+
+    Returns None when there is no usable content (so we don't persist `{}`).
+    Shape:
+      {"text":  [{"quote", "comment"}],
+       "images":[{"url", "caption", "pins":[{"x","y","comment"}]}]}
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    text_out: list[Dict[str, Any]] = []
+    for item in (raw.get("text") or [])[:_ANNOTATION_MAX_TEXT_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        quote = _clean_annotation_str(item.get("quote"))
+        comment = _clean_annotation_str(item.get("comment"))
+        if not quote and not comment:
+            continue
+        text_out.append({"quote": quote, "comment": comment})
+
+    images_out: list[Dict[str, Any]] = []
+    for item in (raw.get("images") or [])[:_ANNOTATION_MAX_IMAGE_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        url = _safe_annotation_image_url(item.get("url"))
+        if not url:
+            continue
+        caption = _clean_annotation_str(item.get("caption"))
+        pins_out: list[Dict[str, Any]] = []
+        for pin in (item.get("pins") or [])[:_ANNOTATION_MAX_PINS_PER_IMAGE]:
+            if not isinstance(pin, dict):
+                continue
+            try:
+                x = float(pin.get("x"))
+                y = float(pin.get("y"))
+            except (TypeError, ValueError):
+                continue
+            # Pins are normalized 0..1 coordinates over the image.
+            x = min(1.0, max(0.0, x))
+            y = min(1.0, max(0.0, y))
+            pins_out.append({
+                "x": round(x, 4),
+                "y": round(y, 4),
+                "comment": _clean_annotation_str(pin.get("comment")),
+            })
+        images_out.append({"url": url, "caption": caption, "pins": pins_out})
+
+    if not text_out and not images_out:
+        return None
+    return {"text": text_out, "images": images_out}
+
+
+def _annotations_json_or_none(raw: Any) -> Optional[str]:
+    """Sanitize + serialize annotations to a JSON string, or None.
+
+    Enforces a hard byte ceiling on the serialized blob as a final backstop.
+    """
+    sanitized = _sanitize_annotations(raw)
+    if sanitized is None:
+        return None
+    encoded = json.dumps(sanitized, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > _ANNOTATION_MAX_JSON_BYTES:
+        raise HTTPException(status_code=400, detail="Annotations payload is too large")
+    return encoded
+
+
 class ApproveRequest(BaseModel):
     edited_output: Optional[Dict[str, Any]] = None
+    annotations: Optional[Dict[str, Any]] = None
 
 
 class RejectRequest(BaseModel):
     reason: Optional[str] = None
+    annotations: Optional[Dict[str, Any]] = None
 
 
 @app.get("/approvals")
@@ -8565,6 +8704,17 @@ def _approval_response(
 ) -> Dict[str, Any]:
     response = dict(approval)
     response["artifacts"] = _approval_artifacts_for_response(response, repos)
+    # X4: surface the structured reviewer feedback (highlight+comment / screenshot
+    # pins) as a parsed object so the owner sees it on the run/approval, not just
+    # the free-text reason. The raw JSON column is dropped from the response.
+    raw_annotations = response.pop("annotations_json", None)
+    parsed_annotations: Optional[Dict[str, Any]] = None
+    if raw_annotations:
+        try:
+            parsed_annotations = json.loads(raw_annotations)
+        except Exception:
+            parsed_annotations = None
+    response["annotations"] = parsed_annotations
     # Standalone share/review link for the authenticated owner. The token is the
     # same deterministic HMAC the /approvals/public/* routes verify, so the owner
     # can copy this URL to open the approval full-page (no app chrome) or share it
@@ -8692,6 +8842,7 @@ def _artifact_file_response(row: Any) -> StreamingResponse:
 class PublicApprovalDecisionRequest(BaseModel):
     reason: str | None = None
     edited_output: Dict[str, Any] | None = None
+    annotations: Dict[str, Any] | None = None
 
 
 @app.get("/approvals/public/{approval_id}")
@@ -8745,11 +8896,16 @@ def approve_public_approval(
     except Exception:
         pass
     if decision_input.get("kind") == "destructive_delete":
-        result = approve_destructive_action(approval_id, auth, repos)
+        result = approve_destructive_action(
+            approval_id,
+            auth,
+            repos,
+            annotations=body.annotations,
+        )
         return ActionResponse(status=str(result.get("status") or "approved"), run_id=str(approval["run_id"]))
     return approve_run(
         str(approval["run_id"]),
-        ApproveRequest(edited_output=body.edited_output),
+        ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
         auth,
         repos,
     )
@@ -8773,16 +8929,65 @@ def reject_public_approval(
     if decision_input.get("kind") == "destructive_delete":
         result = reject_destructive_action(
             approval_id,
-            RejectRequest(reason=body.reason),
+            RejectRequest(reason=body.reason, annotations=body.annotations),
             auth,
             repos,
         )
         return ActionResponse(status=str(result.get("status") or "rejected"), run_id=str(approval["run_id"]))
     return reject_run(
         str(approval["run_id"]),
-        RejectRequest(reason=body.reason),
+        RejectRequest(reason=body.reason, annotations=body.annotations),
         auth,
         repos,
+    )
+
+
+# X4: screenshot uploads attached to a review. Both endpoints store the blob
+# under the APPROVAL OWNER's user_id so the resulting `/uploads/<sha>` ref is
+# readable by the owner when they later view the annotations on the run — even
+# when an external signed-link reviewer did the upload. The same extension /
+# size / quota gates as `/uploads` apply, and `allowed_media_prefixes` pins the
+# upload to images so a reviewer can't smuggle in a non-image blob here.
+@app.post("/approvals/{approval_id}/uploads")
+async def upload_approval_screenshot(
+    approval_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Authed owner uploads a review screenshot for one of their approvals."""
+    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return await _store_uploaded_blob(
+        request,
+        file,
+        auth.user_id or "anonymous",
+        allowed_media_prefixes=("image/",),
+    )
+
+
+@app.post("/approvals/public/{approval_id}/uploads")
+async def upload_public_approval_screenshot(
+    approval_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Signed-link (no-auth) reviewer uploads a review screenshot.
+
+    The link IS the credential: a valid per-approval HMAC token unlocks the
+    upload, and the blob is owned by the approval owner so they can read it back.
+    """
+    approval = _load_public_approval(approval_id, token, repos)
+    owner_id = str(approval.get("owner_id") or "")
+    return await _store_uploaded_blob(
+        request,
+        file,
+        owner_id or "anonymous",
+        allowed_media_prefixes=("image/",),
     )
 
 
@@ -8853,12 +9058,14 @@ def approve_run(
 
     decided_at = now_iso()
     edited_output_json = json.dumps(edited_output) if body.edited_output is not None else None
+    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.approve(
         owner_id=auth.user_id,
         run_id=run_id,
         decided_at=decided_at,
         edited_output_json=edited_output_json,
         follow_up_run_id=follow_up_run_id,
+        annotations_json=annotations_json,
     )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
@@ -8912,11 +9119,13 @@ def reject_run(
         raise HTTPException(status_code=409, detail="Approval already decided")
 
     decided_at = now_iso()
+    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.reject(
         owner_id=auth.user_id,
         run_id=run_id,
         decided_at=decided_at,
         reason=body.reason,
+        annotations_json=annotations_json,
     )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
@@ -8994,15 +9203,24 @@ def _execute_destructive_delete(path: str, owner_id: str, repos: Repositories) -
     )
 
 
+class ApproveActionRequest(BaseModel):
+    annotations: Optional[Dict[str, Any]] = None
+
+
 @app.post("/approvals/{approval_id}/approve-action")
 def approve_destructive_action(
     approval_id: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
+    body: ApproveActionRequest = Body(default_factory=ApproveActionRequest),
+    annotations: Optional[Dict[str, Any]] = None,
 ):
     """Approve and execute a sandboxed-worker DELETE request.
 
     Only works for approvals created by the run-token middleware (kind=destructive_delete).
+    The optional `annotations` keyword lets the public-link forwarder pass
+    reviewer feedback without a request body; the route body carries it for
+    authed callers.
     """
     approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
     if approval is None:
@@ -9024,10 +9242,14 @@ def approve_destructive_action(
     path = decision_input.get("path", "")
     description = _execute_destructive_delete(path, auth.user_id, repos)
 
+    annotations_json = _annotations_json_or_none(
+        annotations if annotations is not None else body.annotations
+    )
     repos.approvals.approve(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
         decided_at=now_iso(),
+        annotations_json=annotations_json,
     )
 
     _sse_publish(approval["run_id"], {
@@ -9065,11 +9287,13 @@ def reject_destructive_action(
             detail="This approval is not a destructive-action request. Use POST /runs/{run_id}/reject instead.",
         )
 
+    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.reject(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
         decided_at=now_iso(),
         reason=body.reason,
+        annotations_json=annotations_json,
     )
 
     _sse_publish(approval["run_id"], {
