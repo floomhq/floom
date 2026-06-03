@@ -618,6 +618,19 @@ export const api = {
       fetchJson<import("./types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}/select`, {
         method: "POST",
       }),
+    // Duplicate a workspace into a new "<name> (copy)" sibling. On the
+    // single-tenant OSS instance, workers/knowledge live in a shared pool, so
+    // this mints a new workspace that surfaces the same pool (use Export/Import
+    // to move workers between instances).
+    duplicate: (id: string) =>
+      fetchJson<import("./types").LocalWorkspace>(
+        `/workspaces/${encodeURIComponent(id)}/duplicate`,
+        { method: "POST" }
+      ),
+    // Mint a signed, login-free URL a recipient can open to download this
+    // workspace as an importable template .zip (no secret values).
+    shareLink: () =>
+      fetchJson<import("./types").WorkspaceShareLink>("/workspace/share-link"),
   },
   integrations: {
     triggers: () =>

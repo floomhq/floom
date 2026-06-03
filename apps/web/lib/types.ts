@@ -555,6 +555,11 @@ export interface LocalWorkspaceListResponse {
   active_id: string;
 }
 
+export interface WorkspaceShareLink {
+  url: string;
+  token: string;
+}
+
 export interface SystemOverviewStats {
   runs_24h: number;
   runs_24h_sparkline: number[];
