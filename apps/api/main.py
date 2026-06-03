@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time as _time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -151,6 +152,28 @@ async def member_write_guard(request: Request, call_next):
     return await call_next(request)
 
 
+# Cache user_id → email to avoid repeated auth.admin.get_user_by_id() calls.
+# Emails essentially never change; 10-minute TTL is safe.
+_email_cache: dict[str, tuple[str, float]] = {}
+_EMAIL_CACHE_TTL = 600.0
+
+
+def _resolve_email_cached(svc: Any, user_id: str) -> str | None:
+    now = _time.monotonic()
+    cached = _email_cache.get(user_id)
+    if cached and (now - cached[1]) < _EMAIL_CACHE_TTL:
+        return cached[0]
+    try:
+        resp = svc.auth.admin.get_user_by_id(user_id)
+        if resp and resp.user and resp.user.email:
+            email: str = resp.user.email
+            _email_cache[user_id] = (email, now)
+            return email
+    except Exception:
+        pass
+    return None
+
+
 @app.middleware("http")
 async def runs_trigger_member_middleware(request: Request, call_next):
     """Inject trigger_member_id and trigger_member_email into run responses.
@@ -192,12 +215,9 @@ async def runs_trigger_member_middleware(request: Request, call_next):
                 member_ids = list(set(id_to_mid.values()))
                 email_map: dict[str, str] = {}
                 for mid in member_ids:
-                    try:
-                        resp = svc.auth.admin.get_user_by_id(mid)
-                        if resp and resp.user and resp.user.email:
-                            email_map[mid] = resp.user.email
-                    except Exception:
-                        pass
+                    email = _resolve_email_cached(svc, mid)
+                    if email:
+                        email_map[mid] = email
                 return {run_id: {"trigger_member_id": mid, "trigger_member_email": email_map.get(mid)} for run_id, mid in id_to_mid.items()}
 
             enrichment = await _asyncio2.to_thread(_fetch_run_members)

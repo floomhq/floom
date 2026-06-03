@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -130,27 +132,59 @@ def new_supabase_service_client() -> Client:
     return _create_client_with_key(settings.supabase_service_role_key)
 
 
-# NOTE: NOT lru_cached. The httpx client inside maintains a long-lived
-# HTTP/2 connection pool to Supabase. If we cache the client, after a few
-# minutes of idle Supabase silently closes the connection, and the next
-# request fails with httpcore.RemoteProtocolError: ConnectionTerminated
-# (which Starlette's BaseHTTPMiddleware swallows into a useless
-# "No response returned" 500). Per-request clients eat ~50ms of TLS
-# handshake but stay reliable indefinitely.
+# TTL-cached Supabase clients.
+#
+# Problem: creating a new httpx Client per request requires a full TLS
+# handshake on every Supabase call. With 3-4 queries per page load and
+# cross-region latency this costs 5-7s per request in production.
+#
+# Why not lru_cache forever: after ~5 min of idle Supabase closes the
+# connection. The next request fails with httpcore.RemoteProtocolError:
+# ConnectionTerminated, which Starlette's middleware swallows into a
+# useless 500.
+#
+# Fix: cache the client with a 4-minute TTL. The warm client reuses the
+# existing HTTP/2 connection pool (< 5ms per query); a new client is only
+# created after 4 min of silence, accepting one ~50ms TLS handshake then.
+_CLIENT_TTL = 240  # seconds — refresh before Supabase's ~5 min idle timeout
+
+_anon_client: "Client | None" = None
+_anon_client_ts: float = 0.0
+_anon_lock = threading.Lock()
+
+_svc_client: "Client | None" = None
+_svc_client_ts: float = 0.0
+_svc_lock = threading.Lock()
+
+
 def get_supabase_anon_client() -> Client:
-    return new_supabase_anon_client()
+    global _anon_client, _anon_client_ts
+    now = time.monotonic()
+    if _anon_client is None or (now - _anon_client_ts) > _CLIENT_TTL:
+        with _anon_lock:
+            if _anon_client is None or (now - _anon_client_ts) > _CLIENT_TTL:
+                _anon_client = new_supabase_anon_client()
+                _anon_client_ts = now
+    return _anon_client
 
 
 def get_supabase_service_client() -> Client:
-    return new_supabase_service_client()
+    global _svc_client, _svc_client_ts
+    now = time.monotonic()
+    if _svc_client is None or (now - _svc_client_ts) > _CLIENT_TTL:
+        with _svc_lock:
+            if _svc_client is None or (now - _svc_client_ts) > _CLIENT_TTL:
+                _svc_client = new_supabase_service_client()
+                _svc_client_ts = now
+    return _svc_client
 
 
 def reset_cloud_caches() -> None:
+    global _anon_client, _anon_client_ts, _svc_client, _svc_client_ts
     get_cloud_settings.cache_clear()
-    # The supabase client factories are no longer @lru_cache'd (see comment
-    # above their definitions). cache_clear is a no-op for plain functions
-    # but we guard with getattr to keep this resilient to either shape.
-    for fn in (get_supabase_anon_client, get_supabase_service_client):
-        clear = getattr(fn, "cache_clear", None)
-        if clear:
-            clear()
+    with _anon_lock:
+        _anon_client = None
+        _anon_client_ts = 0.0
+    with _svc_lock:
+        _svc_client = None
+        _svc_client_ts = 0.0

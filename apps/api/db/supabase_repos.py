@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
@@ -9,6 +10,23 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+# Per-request caches populated by batch queries, consumed by per-item calls.
+# Each asyncio task / threadpool thread inherits a copy of the context so there
+# is no cross-request contamination.
+
+# Populated by stats_batch() → consumed by get_last_run()
+# Eliminates N × list_recent_runs() calls in the workers list loop.
+_last_run_batch: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_workeros_last_run_batch", default=None
+)
+
+# Populated by list() → consumed by get_recipe()
+# Eliminates N × (_worker_rows + _skill_versions_by_id) calls in get_worker_config_for_run().
+# Maps worker_id → (raw_worker_row, raw_skill_row | None)
+_recipe_cache: contextvars.ContextVar[dict[str, tuple[dict, dict | None]] | None] = contextvars.ContextVar(
+    "_workeros_recipe_cache", default=None
+)
 
 _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 
@@ -414,11 +432,33 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         return _response_rows(response)
 
     def _worker_name_map(self, worker_ids: Iterable[str]) -> dict[str, str]:
-        workers = self._worker_rows(worker_ids=worker_ids)
+        ids = [item for item in dict.fromkeys(str(wid) for wid in worker_ids) if item]
+        cache = _recipe_cache.get()
+        if cache is not None:
+            # Fast path: all rows already fetched and cached.
+            result: dict[str, str] = {}
+            uncached = [wid for wid in ids if wid not in cache]
+            for wid in ids:
+                if wid in cache:
+                    row, skill = cache[wid]
+                    manifest = _json_load(skill.get("manifest_json"), {}) if skill else {}
+                    result[wid] = str(manifest.get("title") or row.get("name") or wid)
+            if uncached:
+                workers = self._worker_rows(worker_ids=uncached)
+                sv_map = self._skill_versions_by_id(
+                    r.get("skill_version_id") for r in workers if r.get("skill_version_id")
+                )
+                for row in workers:
+                    skill = sv_map.get(row.get("skill_version_id"))
+                    manifest = _json_load(skill.get("manifest_json"), {}) if skill else {}
+                    result[str(row["id"])] = str(manifest.get("title") or row.get("name") or row["id"])
+            return result
+
+        workers = self._worker_rows(worker_ids=ids)
         skill_map = self._skill_versions_by_id(
             row.get("skill_version_id") for row in workers if row.get("skill_version_id")
         )
-        result: dict[str, str] = {}
+        result = {}
         for row in workers:
             skill = skill_map.get(row.get("skill_version_id"))
             manifest = _json_load(skill.get("manifest_json"), {}) if skill else {}
@@ -430,12 +470,28 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         skill_map = self._skill_versions_by_id(
             row.get("skill_version_id") for row in rows if row.get("skill_version_id")
         )
+        # Populate request-scoped recipe cache so get_recipe() can skip per-worker
+        # DB fetches during the engine's get_worker_config_for_run() loop.
+        cache: dict[str, tuple[dict, dict | None]] = {
+            str(row["id"]): (row, skill_map.get(row.get("skill_version_id")))
+            for row in rows
+            if row.get("id")
+        }
+        _recipe_cache.set(cache)
         return [
             _worker_record_from_rows(row, skill_map.get(row.get("skill_version_id")))
             for row in rows
         ]
 
     def get(self, *, user_id: str, worker_id: str) -> dict[str, Any] | None:
+        # Fast path: reuse the raw rows already fetched by list() in this request.
+        recipe_cache = _recipe_cache.get()
+        if recipe_cache is not None:
+            if worker_id not in recipe_cache:
+                return None
+            row, skill = recipe_cache[worker_id]
+            return _worker_record_from_rows(row, skill)
+
         rows = self._worker_rows(user_id=user_id, worker_id=worker_id)
         if not rows:
             return None
@@ -737,6 +793,9 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         return _response_rows(response)
 
     def get_last_run(self, *, user_id: str, worker_id: str) -> dict[str, Any] | None:
+        cache = _last_run_batch.get()
+        if cache is not None:
+            return cache.get(worker_id)
         runs = self.list_recent_runs(user_id=user_id, worker_id=worker_id, limit=1)
         return runs[0] if runs else None
 
@@ -748,6 +807,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         days: int = 7,
     ) -> dict[str, RecentStats]:
         if not worker_ids:
+            _last_run_batch.set({})
             return {}
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         builder = self._client.table("runs").select("worker_id,status,created_at")
@@ -771,6 +831,29 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                 runs_7d=total,
                 success_rate_7d=(completed / total) if total else None,
             )
+
+        # Batch-prefetch the last run for every worker into the request-scoped
+        # contextvar. This replaces N sequential get_last_run() calls (one DB
+        # round-trip per worker) with one DISTINCT ON query, cutting
+        # workers?shape=list from ~7 s to <1 s.
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            try:
+                rpc_resp = get_supabase_service_client().rpc(
+                    "get_last_run_per_worker",
+                    {"p_workspace_id": workspace_id, "p_worker_ids": worker_ids},
+                ).execute()
+                batch: dict[str, Any] = {}
+                for row in (rpc_resp.data or []):
+                    wid = str(row.get("worker_id", ""))
+                    if wid:
+                        batch[wid] = row
+                for wid in worker_ids:
+                    batch.setdefault(wid, None)
+                _last_run_batch.set(batch)
+            except Exception:
+                pass  # cache miss is fine — get_last_run falls back to per-worker queries
+
         return result
 
     def timeseries_batch(
@@ -926,11 +1009,16 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         worker_id: str,
         user_id: str | None = None,
     ) -> dict[str, Any] | None:
-        rows = self._worker_rows(user_id=user_id, worker_id=worker_id)
-        if not rows:
-            return None
-        worker = rows[0]
-        skill_map = self._skill_versions_by_id([worker.get("skill_version_id")])
+        cache = _recipe_cache.get()
+        if cache is not None and worker_id in cache:
+            worker, skill = cache[worker_id]
+            skill_map = {worker.get("skill_version_id"): skill} if skill else {}
+        else:
+            rows = self._worker_rows(user_id=user_id, worker_id=worker_id)
+            if not rows:
+                return None
+            worker = rows[0]
+            skill_map = self._skill_versions_by_id([worker.get("skill_version_id")])
         skill = skill_map.get(worker.get("skill_version_id"))
         if not skill:
             return None
@@ -1364,7 +1452,31 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             offset,
             offset + limit - 1,
         ).execute()
-        rows = self._decorate_run_rows(_response_rows(response))
+        raw_rows = _response_rows(response)
+
+        # Pre-populate recipe cache with visibility-scoped workers so the engine's
+        # per-run _run_visible_to_api check (repos.workers.get per run) is a cache
+        # hit instead of a separate DB round-trip. Use user_id so only workers
+        # visible to this user are cached — members cannot see private workers of
+        # other users even when those workers appear in the run list.
+        unique_worker_ids = list({str(r["worker_id"]) for r in raw_rows if r.get("worker_id")})
+        if unique_worker_ids:
+            try:
+                worker_repo = SupabaseWorkerRepository(self._client)
+                w_rows = worker_repo._worker_rows(user_id=user_id, worker_ids=unique_worker_ids)
+                sv_map = worker_repo._skill_versions_by_id(
+                    r.get("skill_version_id") for r in w_rows if r.get("skill_version_id")
+                )
+                vis_cache: dict[str, tuple[dict, dict | None]] = {
+                    str(r["id"]): (r, sv_map.get(r.get("skill_version_id")))
+                    for r in w_rows
+                    if r.get("id")
+                }
+                _recipe_cache.set(vis_cache)
+            except Exception:
+                pass
+
+        rows = self._decorate_run_rows(raw_rows)
         total = int(getattr(response, "count", 0) or 0)
         return rows, total
 
