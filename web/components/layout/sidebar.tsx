@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Menu, X, Search, Settings, Users } from "lucide-react";
+import { Menu, X, Search, Settings, Users, LogOut } from "lucide-react";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
@@ -20,14 +20,6 @@ import {
 } from "@/components/layout/sidebar.engine";
 
 export { FloomMark };
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
@@ -166,15 +158,16 @@ export function Sidebar() {
 //
 // V8 (Federico 2026-06-02, engine ef0ef36): Settings is a small gear-icon
 // button inline on the name row, NOT a separate full-width SidebarSettingsLink.
-// This mirrors the engine UserProfileFooter; the Cloud seam adds the Supabase
-// account wiring + sign-out confirm dialog on top.
+// Sign-out is a LogOut icon button next to the gear — IDENTICAL to the engine
+// UserProfileFooter's icon/size/placement/aria treatment (Federico 2026-06-03:
+// visual parity, drop the text link + confirm dialog). The ONLY Cloud seams are
+// the Supabase account email/initial display and the logout POST target
+// (cloud proxy path) + post-logout bounce to /app/login.
 function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const isLoginPath = pathname === "/login" || pathname.startsWith("/login/") || pathname === "/app/login" || pathname.startsWith("/app/login/");
   const [email, setEmail] = useState<string | null>(null);
-  const [signOutOpen, setSignOutOpen] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
   useEffect(() => {
     if (isLoginPath) return;
     let cancelled = false;
@@ -205,14 +198,16 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
     ? email.split("@")[0]?.slice(0, 2).toUpperCase() ?? "??"
     : "—";
 
-  const confirmSignOut = async () => {
-    setSigningOut(true);
+  async function logout() {
     try {
       await fetch("/app/api/proxy/auth/logout", { method: "POST" });
-    } finally {
-      window.location.replace("/app/login?next=/app");
+    } catch {
+      // Clearing the cookie is best-effort; navigate regardless.
     }
-  };
+    onNavigate?.();
+    window.location.replace("/app/login?next=/app");
+  }
+
   return (
     <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
       <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -223,13 +218,6 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
           <p className="text-xs font-medium text-foreground truncate">
             {email ?? "—"}
           </p>
-          <button
-            type="button"
-            onClick={() => setSignOutOpen(true)}
-            className="text-[10px] text-muted-foreground hover:text-foreground truncate"
-          >
-            Sign out
-          </button>
         </div>
       </div>
       <Link
@@ -246,59 +234,16 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
       >
         <Settings className="size-4" />
       </Link>
+      <button
+        type="button"
+        onClick={logout}
+        aria-label="Sign out"
+        title="Sign out"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+      >
+        <LogOut className="size-4" />
+      </button>
       <ThemeModeButton />
-      <SignOutDialog
-        open={signOutOpen}
-        onOpenChange={setSignOutOpen}
-        onConfirm={confirmSignOut}
-        loading={signingOut}
-        email={email}
-      />
     </div>
-  );
-}
-
-function SignOutDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-  loading,
-  email,
-}: {
-  open: boolean;
-  onOpenChange: (next: boolean) => void;
-  onConfirm: () => void | Promise<void>;
-  loading: boolean;
-  email: string | null;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[380px]">
-        <DialogHeader>
-          <DialogTitle>Sign out?</DialogTitle>
-          <DialogDescription>
-            You will be signed out of {email ?? "this account"} and returned to the sign-in page.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter className="gap-2 sm:gap-2">
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="inline-flex h-9 items-center justify-center rounded-md border border-line bg-card px-4 text-sm font-medium hover:bg-muted transition-colors"
-            disabled={loading}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void onConfirm()}
-            disabled={loading}
-            className="inline-flex h-9 items-center justify-center rounded-md bg-foreground px-4 text-sm font-medium text-background hover:opacity-90 disabled:opacity-60 transition-opacity"
-          >
-            {loading ? "Signing out…" : "Sign out"}
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
