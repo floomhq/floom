@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProviderLogos } from "@/components/connections/ProviderLogos";
+import type { ConnectedAccountSummary } from "@/lib/types";
 
 type AppMeta = {
   slug: string;
@@ -25,6 +26,9 @@ export default function ConnectAppPage() {
   const [meta, setMeta] = useState<AppMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  // X9 / N5-1: surface an existing connection so the user isn't silently
+  // re-OAuthing an app+account they already connected (which would dupe a row).
+  const [existingAccounts, setExistingAccounts] = useState<ConnectedAccountSummary[]>([]);
 
   useEffect(() => {
     if (!slug) return;
@@ -55,6 +59,23 @@ export default function ConnectAppPage() {
     };
   }, [slug]);
 
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const state = await api.connections.byApp(slug);
+        if (cancelled) return;
+        setExistingAccounts(state.connected ? state.accounts ?? [] : []);
+      } catch {
+        if (!cancelled) setExistingAccounts([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
   function handleConnect() {
     if (connecting) return;
     setConnecting(true);
@@ -64,6 +85,10 @@ export default function ConnectAppPage() {
   }
 
   const providerName = meta?.name || slug;
+  const alreadyConnected = existingAccounts.length > 0;
+  const primaryLabel = alreadyConnected
+    ? `Reconnect ${providerName}`
+    : `Connect to ${providerName}`;
 
   // PR S19 (I-31): primary button was rendering invisible because the
   // hardcoded bg-[var(--ink)] + text-[var(--surface)] tokens didn't survive
@@ -94,6 +119,31 @@ export default function ConnectAppPage() {
               </p>
             )}
 
+            {alreadyConnected && (
+              <div className="mt-6 rounded-lg border border-[color-mix(in_srgb,var(--positive)_30%,var(--border))] bg-[color-mix(in_srgb,var(--positive)_8%,transparent)] p-4">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[var(--positive)]" />
+                  <div className="text-sm">
+                    <p className="font-medium">
+                      {providerName} is already connected
+                    </p>
+                    <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                      {existingAccounts.map((acct) => (
+                        <li key={acct.id}>
+                          {acct.account_label || "Connected account"}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-muted-foreground">
+                      Reconnecting refreshes access for the same account — it
+                      won&apos;t create a duplicate. Connect a different account
+                      to add it alongside this one.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="mt-6 rounded-lg border bg-muted/40 p-4">
               <p className="text-sm font-medium">What this allows</p>
               <ul className="mt-2 space-y-1 text-sm text-muted-foreground list-disc list-inside">
@@ -116,7 +166,7 @@ export default function ConnectAppPage() {
                   Opening...
                 </>
               ) : (
-                `Connect to ${providerName}`
+                primaryLabel
               )}
             </Button>
 

@@ -15,8 +15,26 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
+import { ShareWorkerButton } from "@/components/ShareWorkerButton";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
+
+// Worker Author is the engine behind /workers/new (manifest system_worker:true),
+// not an employee, so it must never appear in the Workers list. The API already
+// excludes system_worker:true from the default /workers view; this is a
+// defensive display filter so a system/internal worker can never leak into the
+// list (e.g. from a DB-sourced row that bypassed the API filter).
+//
+// Primary signal is the `system` flag on the payload (added 2026-06-02). The
+// hardcoded id is a stopgap fallback for any worker whose payload predates the
+// flag. Worker Author stays fully FUNCTIONAL — this hides it from the list only.
+// (Codex: if a payload ever lacks `system`, that worker.yml is missing
+// system_worker:true upstream; the id fallback covers worker-author specifically.)
+const SYSTEM_WORKER_ID_FALLBACK = new Set(["worker-author"]);
+
+function isSystemWorker(w: WorkerSummary): boolean {
+  return w.system === true || SYSTEM_WORKER_ID_FALLBACK.has(w.id);
+}
 
 type WorkersTab = "all" | "starred" | "recent" | "archived";
 const TAB_KEYS: WorkersTab[] = ["all", "starred", "recent", "archived"];
@@ -44,7 +62,11 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   const searchParams = useSearchParams();
 
   // S44: start with server-fetched data — no loading flash for the initial render.
-  const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
+  // Strip system/engine workers (e.g. Worker Author) at every ingestion point so
+  // they never reach the list, folder counts, or empty-state logic.
+  const [workers, setWorkers] = useState<WorkerSummary[]>(() =>
+    initialWorkers.filter((w) => !isSystemWorker(w))
+  );
   const [archivedWorkers, setArchivedWorkers] = useState<WorkerSummary[]>([]);
   // Only show a loading state if initialWorkers is empty AND we're re-fetching
   const [loading, setLoading] = useState(false);
@@ -62,7 +84,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   // S44: update workers when initialWorkers changes (e.g. after RSC revalidation).
   useEffect(() => {
     if (initialWorkers.length > 0) {
-      setWorkers(initialWorkers);
+      setWorkers(initialWorkers.filter((w) => !isSystemWorker(w)));
     }
   }, [initialWorkers]);
 
@@ -80,7 +102,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     api.workers
       .list()
       .then((w) => {
-        if (!cancelled) setWorkers(w);
+        if (!cancelled) setWorkers(w.filter((x) => !isSystemWorker(x)));
       })
       .catch(() => {})
       .finally(() => {
@@ -105,7 +127,8 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     api.workers
       .list({ include_archived: true })
       .then((all) => {
-        if (!cancelled) setArchivedWorkers(all.filter((w) => w.archived));
+        if (!cancelled)
+          setArchivedWorkers(all.filter((w) => w.archived && !isSystemWorker(w)));
       })
       .catch(() => {})
       .finally(() => {
@@ -622,25 +645,31 @@ function WorkerCard({
             />
           )}
           {!worker.archived && (
-            // Favourite star (Federico 2026-05-30): hover-only to cut cognitive
-            // load — except an already-favourited worker keeps its filled star
-            // at rest. focus-visible keeps it reachable for keyboard users.
-            <button
-              type="button"
-              title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onFavoriteToggle(worker.id);
-              }}
-              className={`-my-1.5 -mr-1.5 flex size-9 shrink-0 items-center justify-center rounded transition-[color,opacity] focus-visible:opacity-100 sm:my-0 sm:-mr-1 sm:size-6 ${
-                isFavorite
-                  ? "text-[var(--accent)] hover:opacity-80"
-                  : "text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-[var(--accent)]"
-              }`}
-            >
-              <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
-            </button>
+            <div className="flex items-center gap-0.5 shrink-0">
+              {/* Share — hover-only, mirrors the favourite star treatment. */}
+              <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <ShareWorkerButton publicLink={worker.public_link} variant="icon" />
+              </span>
+              {/* Favourite star (Federico 2026-05-30): hover-only to cut cognitive
+                  load — except an already-favourited worker keeps its filled star
+                  at rest. focus-visible keeps it reachable for keyboard users. */}
+              <button
+                type="button"
+                title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onFavoriteToggle(worker.id);
+                }}
+                className={`-my-1.5 -mr-1.5 flex size-9 shrink-0 items-center justify-center rounded transition-[color,opacity] focus-visible:opacity-100 sm:my-0 sm:-mr-1 sm:size-6 ${
+                  isFavorite
+                    ? "text-[var(--accent)] hover:opacity-80"
+                    : "text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-[var(--accent)]"
+                }`}
+              >
+                <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
+              </button>
+            </div>
           )}
         </div>
 

@@ -21,6 +21,32 @@ export function setActiveWorkspaceId(workspaceId: string | null) {
   }
 }
 
+// Extract a human-readable string from a FastAPI error body. `detail` can be:
+//   - a string ("Worker not found")
+//   - an object ({ message, errors }) — our schema-validation 400s
+//   - a Pydantic validation array ([{ loc, msg, type }, ...])
+// `new Error(detail)` on a non-string coerces to "[object Object]", which is the
+// useless toast the X5 clone-on-edit 400 surfaced. Always resolve to a string.
+function extractApiErrorMessage(body: unknown): string {
+  if (body == null || typeof body !== "object") {
+    return typeof body === "string" ? body : "";
+  }
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object") {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+    if (Array.isArray(detail)) {
+      const msgs = detail
+        .map((d) => (d && typeof d === "object" ? (d as { msg?: unknown }).msg : d))
+        .filter((m): m is string => typeof m === "string" && m.length > 0);
+      if (msgs.length) return msgs.join("; ");
+    }
+    return JSON.stringify(detail);
+  }
+  return JSON.stringify(body);
+}
+
 function withWorkspaceHeaders(headers?: HeadersInit): Headers {
   const merged = new Headers(headers);
   const activeWorkspace = getActiveWorkspaceId();
@@ -52,7 +78,7 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     let err = "";
     try {
       const body = await res.json();
-      err = body.detail || JSON.stringify(body);
+      err = extractApiErrorMessage(body);
     } catch {
       err = "";
     }
@@ -89,7 +115,7 @@ async function fetchText(path: string, options?: RequestInit): Promise<string> {
     let err = "";
     try {
       const body = await res.json();
-      err = body.detail || JSON.stringify(body);
+      err = extractApiErrorMessage(body);
     } catch {
       err = "";
     }
@@ -108,7 +134,7 @@ async function fetchRaw(path: string, options?: RequestInit): Promise<Response> 
     let err = "";
     try {
       const body = await res.json();
-      err = body.detail || JSON.stringify(body);
+      err = extractApiErrorMessage(body);
     } catch {
       err = res.statusText || `HTTP ${res.status}`;
     }
@@ -169,7 +195,7 @@ export const api = {
         let err: string;
         try {
           const body = await res.json();
-          err = body.detail || JSON.stringify(body);
+          err = extractApiErrorMessage(body);
         } catch {
           err = res.statusText;
         }
@@ -225,15 +251,23 @@ export const api = {
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
       }),
-    approve: (id: string, editedOutput?: Record<string, unknown>) =>
+    approve: (
+      id: string,
+      editedOutput?: Record<string, unknown>,
+      annotations?: import("./types").ApprovalAnnotations | null
+    ) =>
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/approve`, {
         method: "POST",
-        body: JSON.stringify({ edited_output: editedOutput ?? null }),
+        body: JSON.stringify({ edited_output: editedOutput ?? null, annotations: annotations ?? null }),
       }),
-    reject: (id: string, reason?: string) =>
+    reject: (
+      id: string,
+      reason?: string,
+      annotations?: import("./types").ApprovalAnnotations | null
+    ) =>
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/reject`, {
         method: "POST",
-        body: JSON.stringify({ reason: reason ?? null }),
+        body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null }),
       }),
     replay: (workerId: string, runId: string) =>
       fetchJson<{ run_id: string }>(
@@ -253,17 +287,27 @@ export const api = {
       return fetchJson<import("./types").ApprovalRow[]>(`/approvals${qs}`);
     },
     count: () => fetchJson<{ pending: number }>("/approvals/count"),
-    approveAction: (approvalId: string) =>
+    approveAction: (
+      approvalId: string,
+      annotations?: import("./types").ApprovalAnnotations | null
+    ) =>
       fetchJson<{ status: string; executed: string; detail: string }>(
         `/approvals/${approvalId}/approve-action`,
-        { method: "POST" }
+        {
+          method: "POST",
+          body: JSON.stringify({ annotations: annotations ?? null }),
+        }
       ),
-    rejectAction: (approvalId: string, reason?: string) =>
+    rejectAction: (
+      approvalId: string,
+      reason?: string,
+      annotations?: import("./types").ApprovalAnnotations | null
+    ) =>
       fetchJson<{ status: string; path: string; reason?: string }>(
         `/approvals/${approvalId}/reject-action`,
         {
           method: "POST",
-          body: JSON.stringify({ reason }),
+          body: JSON.stringify({ reason, annotations: annotations ?? null }),
         }
       ),
     publicGet: (approvalId: string, token: string) =>
@@ -273,25 +317,81 @@ export const api = {
     publicApprove: (
       approvalId: string,
       token: string,
-      editedOutput?: Record<string, unknown>
+      editedOutput?: Record<string, unknown>,
+      annotations?: import("./types").ApprovalAnnotations | null
     ) =>
       fetchJson<import("./types").ActionResponse>(
         `/approvals/public/${encodeURIComponent(approvalId)}/approve?token=${encodeURIComponent(token)}`,
         {
           method: "POST",
-          body: JSON.stringify({ edited_output: editedOutput ?? null }),
+          body: JSON.stringify({ edited_output: editedOutput ?? null, annotations: annotations ?? null }),
         }
       ),
-    publicReject: (approvalId: string, token: string, reason?: string) =>
+    publicReject: (
+      approvalId: string,
+      token: string,
+      reason?: string,
+      annotations?: import("./types").ApprovalAnnotations | null
+    ) =>
       fetchJson<import("./types").ActionResponse>(
         `/approvals/public/${encodeURIComponent(approvalId)}/reject?token=${encodeURIComponent(token)}`,
         {
           method: "POST",
-          body: JSON.stringify({ reason: reason ?? null }),
+          body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null }),
         }
       ),
     publicArtifactUrl: (approvalId: string, artifactId: string, token: string) =>
       `${API_BASE}/approvals/public/${encodeURIComponent(approvalId)}/artifacts/${encodeURIComponent(artifactId)}/download?token=${encodeURIComponent(token)}`,
+    // X4: upload a review screenshot. Authed owner path + signed-link public
+    // reviewer path. Both return a content-addressed /uploads/<sha> ref to drop
+    // into an image annotation.
+    uploadScreenshot: async (
+      approvalId: string,
+      fileBlob: Blob,
+      filename: string
+    ): Promise<import("./types").ApprovalUploadResponse> => {
+      const form = new FormData();
+      form.append("file", fileBlob, filename);
+      const res = await fetch(
+        `${API_BASE}/approvals/${encodeURIComponent(approvalId)}/uploads`,
+        { method: "POST", headers: withWorkspaceHeaders(), body: form }
+      );
+      if (!res.ok) {
+        let err: string;
+        try {
+          const body = await res.json();
+          err = body.detail || JSON.stringify(body);
+        } catch {
+          err = res.statusText;
+        }
+        throw new Error(err);
+      }
+      return res.json() as Promise<import("./types").ApprovalUploadResponse>;
+    },
+    uploadScreenshotPublic: async (
+      approvalId: string,
+      token: string,
+      fileBlob: Blob,
+      filename: string
+    ): Promise<import("./types").ApprovalUploadResponse> => {
+      const form = new FormData();
+      form.append("file", fileBlob, filename);
+      const res = await fetch(
+        `${API_BASE}/approvals/public/${encodeURIComponent(approvalId)}/uploads?token=${encodeURIComponent(token)}`,
+        { method: "POST", body: form }
+      );
+      if (!res.ok) {
+        let err: string;
+        try {
+          const body = await res.json();
+          err = body.detail || JSON.stringify(body);
+        } catch {
+          err = res.statusText;
+        }
+        throw new Error(err);
+      }
+      return res.json() as Promise<import("./types").ApprovalUploadResponse>;
+    },
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),
@@ -352,7 +452,7 @@ export const api = {
         let err = "";
         try {
           const body = await res.json();
-          err = body.detail || JSON.stringify(body);
+          err = extractApiErrorMessage(body);
         } catch {
           err = res.statusText || `HTTP ${res.status}`;
         }
@@ -370,6 +470,12 @@ export const api = {
     },
     fileUrl: (name: string, path: string) =>
       `${API_BASE}${withWorkspaceQuery(`/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`)}`,
+    // Audit a pack's CURRENT files for stored live credentials (masked findings
+    // only). This is what catches secrets already sitting in a Brain pack.
+    secretScan: (name: string) =>
+      fetchJson<import("./types").ContextSecretScanResponse>(
+        `/contexts/${encodeURIComponent(name)}/secret-scan`
+      ),
     listVersions: (name: string, limit = 50) =>
       fetchJson<import("./types").VersionSummary[]>(`/contexts/${encodeURIComponent(name)}/versions?limit=${limit}`),
     getVersion: (name: string, versionId: string) =>
@@ -433,6 +539,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify(payload),
       }),
+    byApp: (app_name: string) =>
+      fetchJson<import("./types").AppConnectionState>(
+        `/connections/by-app/${encodeURIComponent(app_name)}`,
+        { cache: "no-store" }
+      ),
     status: (id: string) =>
       fetchJson<import("./types").ConnectionItem>(`/connections/${id}/status`),
     delete: (id: string) =>
@@ -489,7 +600,7 @@ export const api = {
         let err = "";
         try {
           const body = await res.json();
-          err = body.detail || JSON.stringify(body);
+          err = extractApiErrorMessage(body);
         } catch {
           err = res.statusText || `HTTP ${res.status}`;
         }

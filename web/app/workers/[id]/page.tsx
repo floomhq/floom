@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { Fragment, useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
@@ -14,14 +14,15 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
-  Play, Plug, Pencil, ClipboardCheck, ChevronRight,
-  Copy, Code2, Clock, Plug2, ListChecks,
+  Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
+  Copy, Code2, Clock, Plug2, ListChecks, History,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, Plus, GitFork, RotateCcw,
+  Brain as BrainIcon, Settings2, Plus, RotateCcw,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
@@ -42,6 +43,7 @@ import {
 } from "@/components/ui/dialog";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
+import { ShareWorkerButton } from "@/components/ShareWorkerButton";
 import type {
   WorkerDetail,
   WorkerInput,
@@ -52,6 +54,7 @@ import type {
   RunDetail,
   ContextSummary,
   WorkerConnectionSpec,
+  WorkerComposioConnection,
   WorkerContextSpec,
   WorkerMcpConnection,
   VersionSummary,
@@ -65,6 +68,9 @@ import {
   formatRelativeTime,
   formatScope,
   getSupportedApp,
+  maskAccountLabel,
+  normalizeAppSlug,
+  SUPPORTED_APPS,
 } from "@/components/connections/connection-data";
 import { formatRelative, formatDuration } from "@/lib/formatters";
 import { humanizeRunError } from "@/lib/run-format";
@@ -92,16 +98,21 @@ function isValidSection(s: string): s is Section {
 }
 
 // P2-3: the URL hash must match the visible tab label, not the internal
-// Section id. Labels: About / Run / Triggers / History / Connections / Source.
+// Section id. Labels: About / Run / Runs / Source / Settings / Brain / Tools.
 // Internal ids stay stable (runs/connections/code) for back-compat; only the
 // hash slug the user sees/links changes.
+// 2026-06-02: run-history hash is now `runs` (matches the "Runs" label set in
+// PR #359). The legacy `#history` deep-link still resolves to the Runs tab via
+// HASH_TO_SECTION below, so old links don't break.
 const SECTION_TO_HASH: Record<Section, string> = {
   about: "about",
   run: "run",
   settings: "settings",
   brain: "brain",
-  runs: "history",
-  connections: "connections",
+  runs: "runs",
+  // P2-3 / N2-1: canonical hash matches the visible "Tools" label. `#connections`
+  // stays a back-compat alias in HASH_TO_SECTION below so old links don't break.
+  connections: "tools",
   code: "source",
   versions: "versions",
 };
@@ -122,6 +133,9 @@ const HASH_TO_SECTION: Record<string, Section> = {
   code: "code",
   overview: "about",
   runs: "runs",
+  // N2-1: the tab is labelled "Tools"; `#tools` now resolves to it. The old
+  // `#connections` slug stays mapped for back-compat with existing links.
+  tools: "connections",
   connections: "connections",
   versions: "versions",
 };
@@ -134,21 +148,40 @@ interface NavItem {
   id: Section;
   label: string;
   icon: React.ReactNode;
+  // Tab grouping for visual rhythm: "view" = day-to-day/read tabs,
+  // "setup" = configuration tabs. A subtle gap+divider separates the two
+  // groups in the same row so the eye reads two short clusters instead of one
+  // long run of 7 tabs.
+  group: "view" | "setup";
 }
 
 // S34: Federico — "this page about this worker and run should be different
 // tabs. These are completely different content and it's confusing." Restored
 // About as a first-class tab (was inlined as <details> on the Run tab in S32).
+// Grouped so the bar reads as two short clusters, not one long run of 7 tabs:
+//   view group  → About · Run · Runs · Source   (what the worker is + does)
+//   setup group → Settings · Brain · Connections (how it's configured)
+// A subtle gap+divider sits between the groups in the same row. Every tab is
+// still one click away — no nesting, no hidden features.
 const NAV_ITEMS: NavItem[] = [
-  { id: "about", label: "About", icon: <BookOpen className="w-4 h-4" /> },
-  { id: "run", label: "Run", icon: <Play className="w-4 h-4" /> },
-  { id: "settings", label: "Settings", icon: <Settings2 className="w-4 h-4" /> },
-  { id: "brain", label: "Brain", icon: <BrainIcon className="w-4 h-4" /> },
-  { id: "runs", label: "History", icon: <ListChecks className="w-4 h-4" /> },
-  { id: "connections", label: "Connections", icon: <Plug2 className="w-4 h-4" /> },
-  { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" /> },
-  { id: "versions", label: "Versions", icon: <GitFork className="w-4 h-4" /> },
+  { id: "about", label: "About", icon: <BookOpen className="w-4 h-4" />, group: "view" },
+  { id: "run", label: "Run", icon: <Play className="w-4 h-4" />, group: "view" },
+  { id: "runs", label: "Runs", icon: <ListChecks className="w-4 h-4" />, group: "view" },
+  { id: "code", label: "Source", icon: <Code2 className="w-4 h-4" />, group: "view" },
+  { id: "settings", label: "Settings", icon: <Settings2 className="w-4 h-4" />, group: "setup" },
+  { id: "brain", label: "Brain", icon: <BrainIcon className="w-4 h-4" />, group: "setup" },
+  // Labelled "Tools" (not "Connections") to disambiguate from the GLOBAL
+  // Connections nav (account inventory). This per-worker tab shows the
+  // tools/connections THIS worker is allowed to use — its permission
+  // allowlist. Internal section id stays `connections` for hash/link
+  // back-compat (see HASH_TO_SECTION).
+  { id: "connections", label: "Tools", icon: <Plug2 className="w-4 h-4" />, group: "setup" },
 ];
+// Note: "Versions" is intentionally NOT a tab. Worker config-version history is
+// surfaced via a header "Versions" dropdown → dialog (VersionsSection), to match
+// the inline Versions dropdown on Agent (/assistant) and Brain (/contexts) and
+// to keep this bar from overflowing. `versions` stays a valid Section purely so
+// the legacy `#versions` deep-link opens that dialog (see the effect above).
 
 // ---------------------------------------------------------------------------
 // Source-file derivation
@@ -249,6 +282,56 @@ function patchBrainContexts(yaml: string, contexts: WorkerContextSpec[]): string
   return replaceTopLevelYamlBlock(yaml, "contexts", block);
 }
 
+// Mirror of patchBrainContexts for the connections block. Persists the worker's
+// connection specs (Composio app slugs + allowed_tools, MCP specs) back into
+// worker.yml via the same top-level-block replacement the Brain toggle uses.
+function patchWorkerConnections(yaml: string, connections: WorkerConnectionSpec[]): string {
+  const block = dumpYaml(
+    { connections: connections.length > 0 ? connections : [] },
+    { noRefs: true, lineWidth: -1, sortKeys: false },
+  ).trimEnd();
+  return replaceTopLevelYamlBlock(yaml, "connections", block);
+}
+
+// Produce a new connections list where the Composio entry for `slug` has its
+// allowlist set to `tools`, or cleared when `tools` is null.
+//
+// Empty-allowlist semantics (backend models.py declared_composio_connections +
+// main.py composio_execute gate, line ~9768): `allowed_tools is None` (the key
+// absent) means FULL app access; an explicit list — INCLUDING an empty [] —
+// RESTRICTS to exactly that set (an empty list blocks every tool). So clearing
+// the restriction MUST drop the key entirely (tools === null), never emit [].
+function setComposioAllowlist(
+  connections: WorkerConnectionSpec[],
+  slug: string,
+  tools: string[] | null,
+): WorkerConnectionSpec[] {
+  const slugKey = slug.toLowerCase();
+  let matched = false;
+  const next = connections.map((spec): WorkerConnectionSpec => {
+    const specApp = connectionSpecApp(spec);
+    if (!specApp || specApp.toLowerCase() !== slugKey) return spec;
+    matched = true;
+    // Preserve any extra composio fields (scope/scopes) when present.
+    const existingComposio =
+      typeof spec === "object" && "composio" in spec ? spec.composio : undefined;
+    const base: WorkerComposioConnection = {
+      ...(existingComposio ?? {}),
+      app: existingComposio?.app ?? specApp,
+    };
+    if (tools && tools.length > 0) {
+      base.allowed_tools = tools;
+    } else {
+      delete base.allowed_tools;
+    }
+    return { composio: base };
+  });
+  // A bare-string declaration that we never matched as object means the slug
+  // wasn't present at all; nothing to do.
+  if (!matched) return connections;
+  return next;
+}
+
 // ---------------------------------------------------------------------------
 // Main page component
 // ---------------------------------------------------------------------------
@@ -288,6 +371,8 @@ export default function WorkerDetailPage() {
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [brainPacks, setBrainPacks] = useState<ContextSummary[]>([]);
   const [savingBrain, setSavingBrain] = useState<string | null>(null);
+  // Keyed by lowercased app slug while its tool allowlist is being persisted.
+  const [savingAllowlist, setSavingAllowlist] = useState<string | null>(null);
   const [_selectedFile, setSelectedFile] = useState<string | null>(null);
   const activeRunStream = useRunStream(activeRunId);
 
@@ -357,6 +442,13 @@ export default function WorkerDetailPage() {
   const [archiving, setArchiving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Config-version history. Unified to a "Versions" affordance across
+  // Agent (/assistant), Brain (/contexts), and worker detail: instead of a
+  // dedicated tab, worker config versions now open from a header "Versions"
+  // dropdown trigger into a dialog that hosts the full list + diff + rollback
+  // (VersionsSection), preserving every capability the old tab had.
+  const [versionsOpen, setVersionsOpen] = useState(false);
+
   // Derived dirty flags
   const filesDirty = editFiles.some((f) => !f.binary && f.content !== (editFilesOriginal[f.path] ?? ""));
   const metaDirty =
@@ -377,21 +469,58 @@ export default function WorkerDetailPage() {
     window.history.pushState(null, "", url.toString());
   }, []);
 
+  // Versions is no longer a tab — it's a header dropdown that opens a dialog.
+  // Preserve the legacy `#versions` deep-link: if a section ever resolves to
+  // "versions" (initial hash, back/forward, pasted link), open the dialog and
+  // snap the visible tab back to a real one so the tab bar stays valid.
+  useEffect(() => {
+    if (activeSection === "versions") {
+      setVersionsOpen(true);
+      setActiveSection("about");
+    }
+  }, [activeSection]);
+
   // S30: useState initializer only runs once. When the URL hash changes
   // externally (back/forward navigation, deep link, direct paste), the
   // activeSection state stayed at its initial value and the tabs got out
   // of sync with the URL. Listen to hashchange + popstate to re-sync.
+  //
+  // N2-2 (2026-06-03): clicking an in-app link to /workers/<id>#runs while
+  // ALREADY on the worker page (e.g. from #about) didn't switch tabs. Next's
+  // App Router performs hash-only same-route navigation via history.pushState,
+  // which fires NEITHER `hashchange` NOR `popstate`, so the listeners below
+  // never saw it. Patch pushState/replaceState to emit a synthetic event so
+  // the live in-page switch works too. The patch is scoped to this effect and
+  // fully restored on unmount.
   useEffect(() => {
     const sync = () => {
       const h = window.location.hash.replace(/^#/, "");
       const next = hashToSection(h);
       if (next && next !== activeSection) setActiveSection(next);
     };
+    const EVT = "workeros:locationchange";
+    const origPush = window.history.pushState;
+    const origReplace = window.history.replaceState;
+    const emit = () => window.dispatchEvent(new Event(EVT));
+    window.history.pushState = function (...args) {
+      const r = origPush.apply(this, args as Parameters<typeof origPush>);
+      emit();
+      return r;
+    };
+    window.history.replaceState = function (...args) {
+      const r = origReplace.apply(this, args as Parameters<typeof origReplace>);
+      emit();
+      return r;
+    };
     window.addEventListener("hashchange", sync);
     window.addEventListener("popstate", sync);
+    window.addEventListener(EVT, sync);
     return () => {
+      window.history.pushState = origPush;
+      window.history.replaceState = origReplace;
       window.removeEventListener("hashchange", sync);
       window.removeEventListener("popstate", sync);
+      window.removeEventListener(EVT, sync);
     };
   }, [activeSection]);
 
@@ -687,6 +816,20 @@ export default function WorkerDetailPage() {
     router.push(url.toString());
   }
 
+  // Clone-on-edit: a PUT /workers/{id}/files against a read-only stock worker
+  // forks it into a user-owned copy. The response carries `cloned_from` + a new
+  // `id`. When that happens, redirect to the copy (the URL the operator was on
+  // points at the immutable stock worker) and stop the in-place refetch the
+  // caller would otherwise run. Returns true if a redirect was issued.
+  function maybeRedirectToClone(saved: WorkerDetail, hash?: string): boolean {
+    if (saved.cloned_from && worker && saved.id !== worker.id) {
+      toast.success("Editing created your copy of this worker");
+      router.replace(`/workers/${saved.id}${hash ? `#${hash}` : ""}`);
+      return true;
+    }
+    return false;
+  }
+
   // S42: save all edit-mode changes (metadata + files)
   async function handleSave() {
     if (!worker) return;
@@ -717,7 +860,8 @@ export default function WorkerDetailPage() {
         }
       }
 
-      await api.workers.updateFiles(worker.id, patchedFiles);
+      const saved = await api.workers.updateFiles(worker.id, patchedFiles);
+      if (maybeRedirectToClone(saved, "code")) return;
       toast.success("Worker saved");
       // Reload worker and reset dirty state
       const updated = await api.workers.get(worker.id);
@@ -749,7 +893,8 @@ export default function WorkerDetailPage() {
     if (!worker) return;
     setSaving(true);
     try {
-      await api.workers.updateFiles(worker.id, textSourceFiles(editFiles));
+      const saved = await api.workers.updateFiles(worker.id, textSourceFiles(editFiles));
+      if (maybeRedirectToClone(saved, "code")) return;
       toast.success("Worker saved");
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
@@ -813,7 +958,8 @@ export default function WorkerDetailPage() {
           patched = patchInputDefault(patched, name, value.trim());
         }
       }
-      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      const saved = await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      if (maybeRedirectToClone(saved)) return;
       toast.success("Defaults saved — scheduled runs will now use these values");
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
@@ -862,7 +1008,8 @@ export default function WorkerDetailPage() {
         ? sourceFiles.map((f) => (f.path === "worker.yml" ? { ...f, content: patched } : f))
         : [{ path: "worker.yml", content: patched }, ...sourceFiles];
 
-      await api.workers.updateFiles(worker.id, nextFiles);
+      const saved = await api.workers.updateFiles(worker.id, nextFiles);
+      if (maybeRedirectToClone(saved, "brain")) return;
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
       const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
@@ -875,6 +1022,117 @@ export default function WorkerDetailPage() {
       toast.error(e instanceof Error ? e.message : "Failed to update brain resources");
     } finally {
       setSavingBrain(null);
+    }
+  }
+
+  // Persist a Composio app's tool allowlist into worker.yml, reusing the exact
+  // save path the Brain toggle uses (yaml-block patch -> updateFiles -> refetch).
+  // `tools === null` clears the restriction (drops allowed_tools => full access).
+  async function handleSetComposioAllowlist(slug: string, tools: string[] | null) {
+    if (!worker || savingAllowlist) return;
+    const slugKey = slug.toLowerCase();
+    const currentConnections = worker.config.connections ?? [];
+    const nextConnections = setComposioAllowlist(currentConnections, slug, tools);
+
+    const currentYml =
+      editFiles.find((f) => f.path === "worker.yml")?.content ||
+      deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
+      worker.manifest_yaml ||
+      "";
+
+    if (!currentYml.trim()) {
+      toast.error("worker.yml is unavailable for this worker");
+      return;
+    }
+
+    setSavingAllowlist(slugKey);
+    try {
+      const patched = patchWorkerConnections(currentYml, nextConnections);
+      const sourceFiles =
+        editFiles.length > 0
+          ? textSourceFiles(editFiles)
+          : deriveSourceFiles(worker)
+              .filter((f) => !f.binary)
+              .map((f) => ({ path: f.path, content: f.content || "" }));
+      const nextFiles = sourceFiles.some((f) => f.path === "worker.yml")
+        ? sourceFiles.map((f) => (f.path === "worker.yml" ? { ...f, content: patched } : f))
+        : [{ path: "worker.yml", content: patched }, ...sourceFiles];
+
+      const saved = await api.workers.updateFiles(worker.id, nextFiles);
+      if (maybeRedirectToClone(saved, "connections")) return;
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+      toast.success("Tool allowlist updated");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to update tool allowlist");
+    } finally {
+      setSavingAllowlist(null);
+    }
+  }
+
+  // X6: ADD a brand-new tool/connection even when the worker declares none
+  // (connections: []). Appends the slug as a connections entry and persists via
+  // the same yaml-block patch -> updateFiles -> refetch path the allowlist editor
+  // uses. No-op (with a toast) if the slug is already declared.
+  async function handleAddConnection(rawSlug: string) {
+    if (!worker || savingAllowlist) return;
+    const slug = rawSlug.trim().toLowerCase();
+    if (!slug) return;
+    const currentConnections = worker.config.connections ?? [];
+    const alreadyDeclared = currentConnections.some(
+      (spec) => (connectionSpecApp(spec) || "").toLowerCase() === slug,
+    );
+    if (alreadyDeclared) {
+      toast.info("That tool is already added to this worker");
+      return;
+    }
+    // Append as a bare-string slug (full app access). The operator can then
+    // restrict tools via the per-app allowlist editor that now renders for it.
+    const nextConnections: WorkerConnectionSpec[] = [...currentConnections, slug];
+
+    const currentYml =
+      editFiles.find((f) => f.path === "worker.yml")?.content ||
+      deriveSourceFiles(worker).find((f) => f.path === "worker.yml")?.content ||
+      worker.manifest_yaml ||
+      "";
+
+    if (!currentYml.trim()) {
+      toast.error("worker.yml is unavailable for this worker");
+      return;
+    }
+
+    setSavingAllowlist(slug);
+    try {
+      const patched = patchWorkerConnections(currentYml, nextConnections);
+      const sourceFiles =
+        editFiles.length > 0
+          ? textSourceFiles(editFiles)
+          : deriveSourceFiles(worker)
+              .filter((f) => !f.binary)
+              .map((f) => ({ path: f.path, content: f.content || "" }));
+      const nextFiles = sourceFiles.some((f) => f.path === "worker.yml")
+        ? sourceFiles.map((f) => (f.path === "worker.yml" ? { ...f, content: patched } : f))
+        : [{ path: "worker.yml", content: patched }, ...sourceFiles];
+
+      const saved = await api.workers.updateFiles(worker.id, nextFiles);
+      if (maybeRedirectToClone(saved, "connections")) return;
+      const updated = await api.workers.get(worker.id);
+      setWorker(updated);
+      const updatedFiles = toEditableSourceFiles(deriveSourceFiles(updated));
+      setEditFiles(updatedFiles);
+      const newSnap: Record<string, string> = {};
+      for (const f of updatedFiles) newSnap[f.path] = f.content;
+      setEditFilesOriginal(newSnap);
+      toast.success("Tool added");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to add tool");
+    } finally {
+      setSavingAllowlist(null);
     }
   }
 
@@ -904,7 +1162,8 @@ export default function WorkerDetailPage() {
         patched = patchInputDefault(patched, name, value);
       }
 
-      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      const saved = await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      if (maybeRedirectToClone(saved, "settings")) return;
       toast.success("Worker saved");
       const updated = await api.workers.get(worker.id);
       setWorker(updated);
@@ -967,7 +1226,8 @@ export default function WorkerDetailPage() {
           : null
       );
 
-      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      const saved = await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: patched }]);
+      if (maybeRedirectToClone(saved, "settings")) return;
       toast.success("Settings saved");
       setTriggersDirty(false);
       const updated = await api.workers.get(worker.id);
@@ -1046,7 +1306,8 @@ export default function WorkerDetailPage() {
       }
 
       const newYaml = dumpYaml(parsed, { lineWidth: 120 });
-      await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: newYaml }]);
+      const saved = await api.workers.updateFiles(worker.id, [{ path: "worker.yml", content: newYaml }]);
+      if (maybeRedirectToClone(saved, "settings")) return;
       toast.success("Worker saved");
       setConfigDescOriginal(configDesc);
 
@@ -1302,7 +1563,12 @@ export default function WorkerDetailPage() {
       {/* U2 (Federico 2026-05-31): letter-avatar removed. The tool/connection
           icon strip (WorkerIconPills, below) + the title carry identity now —
           no initials circle anywhere. */}
-      <div className="flex items-start gap-4">
+      {/* Mobile (375): stack — title/description/icon-strip column gets the FULL
+          width, and the shrink-0 action cluster (Versions/Share/Edit/actions)
+          drops BELOW it instead of competing for width and starving the
+          flex-1 min-w-0 column to ~0px (one-word-per-line bug). From sm: up the
+          original `flex items-start gap-4` row layout is restored unchanged. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className={`text-xl font-semibold tracking-tight ${worker.archived ? "text-muted-foreground" : ""}`}>{worker.name}</h1>
@@ -1383,23 +1649,34 @@ export default function WorkerDetailPage() {
             </Button>
           </div>
         ) : worker.archived ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={async () => {
-              try {
-                const updated = await api.workers.restore(worker.id);
-                setWorker(updated);
-                toast.success("Worker restored");
-              } catch (e: unknown) {
-                toast.error(e instanceof Error ? e.message : "Failed to restore worker");
-              }
-            }}
-          >
-            <ArchiveRestore className="w-4 h-4 mr-1.5" />
-            Restore
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setVersionsOpen(true)}
+              aria-label="Versions"
+            >
+              <History className="size-3.5" />
+              Versions
+              <ChevronDown className="size-3.5 text-muted-foreground" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  const updated = await api.workers.restore(worker.id);
+                  setWorker(updated);
+                  toast.success("Worker restored");
+                } catch (e: unknown) {
+                  toast.error(e instanceof Error ? e.message : "Failed to restore worker");
+                }
+              }}
+            >
+              <ArchiveRestore className="w-4 h-4 mr-1.5" />
+              Restore
+            </Button>
+          </div>
         ) : (
           <div className="flex items-center gap-2 shrink-0">
             {/* FIX 2 (Federico 2026-05-29): "Example" tag relocated OFF the
@@ -1410,6 +1687,21 @@ export default function WorkerDetailPage() {
                 Example
               </span>
             )}
+            {/* Unified "Versions" affordance (matches the inline Versions
+                dropdown on Agent /assistant + Brain /contexts). Was a dedicated
+                tab; now a quiet header trigger that opens the full version
+                list + diff + rollback in a dialog (VersionsSection). */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setVersionsOpen(true)}
+              aria-label="Versions"
+            >
+              <History className="size-3.5" />
+              Versions
+              <ChevronDown className="size-3.5 text-muted-foreground" />
+            </Button>
+            <ShareWorkerButton publicLink={worker.public_link} />
             <Button
               variant="outline"
               size="sm"
@@ -1447,6 +1739,23 @@ export default function WorkerDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Versions dialog. Hosts the full config-version history (list +
+          per-version diff + rollback) that used to be a dedicated tab. Opened
+          from the header "Versions" trigger so the affordance matches Assistant
+          (/assistant) and Brain (/contexts) and the tab bar stays compact. */}
+      <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Versions</DialogTitle>
+            <DialogDescription>
+              A snapshot is saved on every edit. Click a version to preview the
+              diff and restore it.
+            </DialogDescription>
+          </DialogHeader>
+          <VersionsSection worker={worker} onRollback={(updated) => setWorker(updated)} />
+        </DialogContent>
+      </Dialog>
 
       {/* P1-C: destructive delete confirm. Archive is reversible so it acts
           immediately from the menu; Delete removes the worker and all of its
@@ -1579,19 +1888,36 @@ export default function WorkerDetailPage() {
           no scroll. Wrapping the `w-fit` list directly restores the swipe. */}
       <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
         <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
-          <TabsList>
-            {NAV_ITEMS.map((item) => (
-              <TabsTrigger key={item.id} value={item.id}>
-                {item.icon}
-                <span>{item.label}</span>
-                {item.id === "settings" && triggersCount > 1 && (
-                  <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
-                )}
-                {item.id === "runs" && runsCount > 0 && (
-                  <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
-                )}
-              </TabsTrigger>
-            ))}
+          {/* E2: the shared TabsList is h-8 (32px) — below the 44px touch
+              minimum. Bump the bar (and via h-full each trigger) to ≥44px on
+              mobile only; desktop keeps the tight 32px height. */}
+          <TabsList className="h-11 min-h-11 sm:h-8 sm:min-h-0">
+            {NAV_ITEMS.map((item, i) => {
+              // Divider at the view→setup group boundary: extra gap + a hairline
+              // rule so the 7 tabs read as two short clusters in one row. Every
+              // tab stays one click away; this is purely visual rhythm.
+              const startsNewGroup = i > 0 && NAV_ITEMS[i - 1].group !== item.group;
+              return (
+                <Fragment key={item.id}>
+                  {startsNewGroup && (
+                    <span
+                      aria-hidden
+                      className="mx-1 h-4 w-px shrink-0 self-center bg-border"
+                    />
+                  )}
+                  <TabsTrigger value={item.id}>
+                    {item.icon}
+                    <span>{item.label}</span>
+                    {item.id === "settings" && triggersCount > 1 && (
+                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
+                    )}
+                    {item.id === "runs" && runsCount > 0 && (
+                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
+                    )}
+                  </TabsTrigger>
+                </Fragment>
+              );
+            })}
           </TabsList>
         </div>
       </Tabs>
@@ -2106,6 +2432,9 @@ export default function WorkerDetailPage() {
             configuredMcpConnections={configuredMcpConnections}
             activeConnectionSlugs={activeConnectionSlugs}
             requiredSecrets={requiredSecrets}
+            savingAllowlist={savingAllowlist}
+            onSetComposioAllowlist={handleSetComposioAllowlist}
+            onAddConnection={handleAddConnection}
           />
         )}
 
@@ -2121,9 +2450,8 @@ export default function WorkerDetailPage() {
         {activeSection === "runs" && (
           <RunsSection worker={worker} />
         )}
-        {activeSection === "versions" && (
-          <VersionsSection worker={worker} onRollback={(updated) => setWorker(updated)} />
-        )}
+        {/* Versions is no longer a tab — it opens from the header "Versions"
+            dropdown into a dialog (see <Dialog open={versionsOpen}> above). */}
       </div>
     </div>
   );
@@ -2207,7 +2535,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
         <div className="space-y-2">
           <h2 className="text-base font-semibold text-foreground">How it works</h2>
           <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
-            {worker.how_it_works}
+            {worker.how_it_works.replace(/(^|\s)->(\s)/g, "$1→$2")}
           </p>
         </div>
       )}
@@ -2621,6 +2949,238 @@ function BrainSection({
 // Connections section
 // ---------------------------------------------------------------------------
 
+// Point-and-click editor for a single Composio app's worker-level tool
+// allowlist. Persists via the parent's onSet (yaml-block patch -> updateFiles).
+//
+// Empty-allowlist semantics preserved (backend gate main.py ~9768): no
+// allowed_tools => FULL app access; an explicit list => restricted. The
+// "Restrict tools" switch off => onSet(slug, null) drops the key (full access);
+// on => the worker is limited to the listed slugs.
+//
+// NOTE (Codex flag): there is no per-app tool-CATALOG endpoint exposed to the
+// client. /integrations/catalog only returns `tools_count`, and the backend has
+// no route that lists a toolkit's tool slugs (Composio v3 `/tools?toolkit_slug=`
+// is unwired). So we cannot render checkboxes against the full toolkit; we let
+// the user manage the existing entries + add by slug. Wiring a
+// GET /integrations/tools?app=<slug> proxy (Composio v3 /tools) would unlock a
+// real per-tool checklist here.
+function ComposioAllowlistEditor({
+  slug,
+  allowedTools,
+  saving,
+  disabled,
+  onSet,
+}: {
+  slug: string;
+  allowedTools: string[] | null;
+  saving: boolean;
+  disabled: boolean;
+  onSet: (slug: string, tools: string[] | null) => void | Promise<void>;
+}) {
+  const restricted = (allowedTools?.length ?? 0) > 0;
+  const [addValue, setAddValue] = useState("");
+  // Local intent so the user can switch "Restrict" on and see the add UI before
+  // any slug exists (we never persist an empty [] — see semantics note above).
+  const [localRestrictIntent, setLocalRestrictIntent] = useState(false);
+  const busy = saving || disabled;
+  const showRestricted = restricted || localRestrictIntent;
+
+  function handleToggleRestrict(next: boolean) {
+    if (busy) return;
+    if (next) {
+      // Reveal the add UI. We do NOT persist an empty [] (it would block all
+      // tools); persistence happens only once the first slug is added.
+      setAddValue("");
+      setLocalRestrictIntent(true);
+    } else {
+      setLocalRestrictIntent(false);
+      void onSet(slug, null);
+    }
+  }
+
+  function handleAdd() {
+    const slugToAdd = addValue.trim().toUpperCase();
+    if (!slugToAdd || busy) return;
+    const current = allowedTools ?? [];
+    if (current.some((t) => t.toUpperCase() === slugToAdd)) {
+      setAddValue("");
+      return;
+    }
+    setAddValue("");
+    void onSet(slug, [...current, slugToAdd]);
+  }
+
+  function handleRemove(tool: string) {
+    if (busy) return;
+    const current = allowedTools ?? [];
+    const next = current.filter((t) => t !== tool);
+    // Removing the last slug clears the restriction entirely (full access)
+    // rather than persisting an empty list that would block every tool.
+    if (next.length === 0) {
+      setLocalRestrictIntent(true); // keep the add UI visible after clearing
+      void onSet(slug, null);
+    } else {
+      void onSet(slug, next);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-foreground">Restrict tools</p>
+          <p className="text-[0.68rem] text-muted-foreground">
+            {showRestricted
+              ? "Worker can only use the tools listed below."
+              : "Worker can use every tool this app exposes."}
+          </p>
+        </div>
+        <Switch
+          checked={showRestricted}
+          disabled={busy}
+          onCheckedChange={handleToggleRestrict}
+          aria-label={`Restrict ${slug} tools`}
+        />
+      </div>
+
+      {showRestricted && (
+        <div className="space-y-2">
+          {allowedTools && allowedTools.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {allowedTools.map((tool) => (
+                <Badge
+                  key={tool}
+                  variant="outline"
+                  className="max-w-full items-center gap-1 border-line bg-muted px-2 font-mono text-[0.68rem]"
+                >
+                  <span className="max-w-[200px] truncate">{tool}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${tool}`}
+                    disabled={busy}
+                    onClick={() => handleRemove(tool)}
+                    className="ml-0.5 rounded-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[0.68rem] text-muted-foreground">
+              No tools allowed yet — add at least one slug below, or turn off
+              Restrict tools for full access.
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            <Input
+              value={addValue}
+              disabled={busy}
+              onChange={(e) => setAddValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAdd();
+                }
+              }}
+              placeholder="Tool slug e.g. GMAIL_FETCH_EMAILS"
+              className="h-8 flex-1 font-mono text-xs"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 border-line"
+              disabled={busy || !addValue.trim()}
+              onClick={handleAdd}
+            >
+              {saving ? "Saving…" : "Add"}
+            </Button>
+          </div>
+          <p className="text-[0.6rem] text-muted-foreground">
+            Tool slugs come from the app&apos;s Composio toolkit (uppercase, e.g.{" "}
+            <span className="font-mono">SLACK_SEND_MESSAGE</span>). A live per-app
+            tool picker is not available yet.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// X6: add a NEW tool/connection to a worker — works whether the worker already
+// declares connections or declares none (connections: []). Offers the supported
+// apps that are not already declared, plus a free-text slug fallback for apps not
+// in the curated list. The chosen slug is appended to worker.yml `connections`
+// via the parent's onAdd (yaml-block patch -> updateFiles -> refetch).
+function AddToolControl({
+  existingSlugs,
+  saving,
+  onAdd,
+}: {
+  existingSlugs: string[];
+  saving: string | null;
+  onAdd: (slug: string) => void | Promise<void>;
+}) {
+  const [selected, setSelected] = useState("");
+  const [customSlug, setCustomSlug] = useState("");
+  const existing = new Set(existingSlugs.map((s) => s.toLowerCase()));
+  const options = SUPPORTED_APPS.filter((app) => !existing.has(app.slug.toLowerCase()));
+  const busy = saving !== null;
+
+  const slugToAdd =
+    selected === "__custom__" ? normalizeAppSlug(customSlug) : selected;
+  const canAdd = !busy && !!slugToAdd && !existing.has(slugToAdd.toLowerCase());
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      <Select value={selected} onValueChange={(v) => setSelected(v ?? "")} disabled={busy}>
+        <SelectTrigger className="h-8 w-48 border-line text-xs">
+          <SelectValue placeholder="Add a tool…" />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((app) => (
+            <SelectItem key={app.slug} value={app.slug}>
+              {app.displayName}
+            </SelectItem>
+          ))}
+          <SelectItem value="__custom__">Other (enter slug)…</SelectItem>
+        </SelectContent>
+      </Select>
+      {selected === "__custom__" && (
+        <Input
+          value={customSlug}
+          disabled={busy}
+          onChange={(e) => setCustomSlug(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && canAdd) {
+              e.preventDefault();
+              void onAdd(slugToAdd);
+            }
+          }}
+          placeholder="App slug e.g. airtable"
+          className="h-8 w-40 font-mono text-xs"
+        />
+      )}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-8 border-line"
+        disabled={!canAdd}
+        onClick={() => {
+          void Promise.resolve(onAdd(slugToAdd)).then(() => {
+            setSelected("");
+            setCustomSlug("");
+          });
+        }}
+      >
+        {busy ? "Saving…" : "Add tool"}
+      </Button>
+    </div>
+  );
+}
+
 function ConnectionsSection({
   worker,
   connections,
@@ -2628,6 +3188,9 @@ function ConnectionsSection({
   configuredMcpConnections,
   activeConnectionSlugs,
   requiredSecrets,
+  savingAllowlist,
+  onSetComposioAllowlist,
+  onAddConnection,
 }: {
   worker: WorkerDetail;
   connections: ConnectionItem[];
@@ -2635,6 +3198,9 @@ function ConnectionsSection({
   configuredMcpConnections: WorkerMcpConnection[];
   activeConnectionSlugs: Set<string>;
   requiredSecrets: string[];
+  savingAllowlist: string | null;
+  onSetComposioAllowlist: (slug: string, tools: string[] | null) => void | Promise<void>;
+  onAddConnection: (slug: string) => void | Promise<void>;
 }) {
   const composioRequirements = (worker.config.connections ?? [])
     .map((spec) => {
@@ -2658,9 +3224,11 @@ function ConnectionsSection({
         <section className="space-y-3">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-foreground">Connection permissions</h2>
+              <h2 className="text-base font-semibold text-foreground">Tools this worker can use</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Worker-level allowlists limit tool execution even when an account grants broader OAuth scopes.
+                The connections and tools this worker is allowed to use. These are this worker&apos;s
+                permissions — separate from your account-wide Connections inventory. Worker-level
+                allowlists limit tool execution even when an account grants broader OAuth scopes.
               </p>
             </div>
             <Link href="/connections">
@@ -2692,10 +3260,6 @@ function ConnectionsSection({
                   : "");
               const latestStatus = appConnections[0]?.status;
               const grantedScopes = activeConnection?.scopes ?? [];
-              const visibleScopes = grantedScopes.slice(0, 4);
-              const hiddenScopes = Math.max(grantedScopes.length - visibleScopes.length, 0);
-              const visibleTools = (allowedTools ?? []).slice(0, 5);
-              const hiddenTools = Math.max((allowedTools?.length ?? 0) - visibleTools.length, 0);
               return (
                 <div key={slug} className="grid gap-4 border-b border-line p-4 last:border-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
                   <div className="min-w-0 space-y-2">
@@ -2721,7 +3285,7 @@ function ConnectionsSection({
                       )}
                     </div>
                     {connectionLabel ? (
-                      <p className="truncate text-xs text-muted-foreground">{connectionLabel}</p>
+                      <p className="truncate text-xs text-muted-foreground">{maskAccountLabel(connectionLabel)}</p>
                     ) : latestStatus ? (
                       <p className="truncate text-xs text-muted-foreground">Status: {latestStatus}</p>
                     ) : null}
@@ -2735,57 +3299,66 @@ function ConnectionsSection({
                   </div>
 
                   <div className="min-w-0 space-y-3">
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-foreground">Worker allowlist</p>
-                      {allowedTools?.length ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {visibleTools.map((tool) => (
-                            <Badge key={tool} variant="outline" className="max-w-full border-line bg-muted px-2 font-mono text-[0.68rem]">
-                              <span className="max-w-[220px] truncate">{tool}</span>
-                            </Badge>
-                          ))}
-                          {hiddenTools > 0 && (
-                            <Badge variant="outline" className="border-line bg-muted px-2 text-[0.68rem] text-muted-foreground">
-                              +{hiddenTools} more
-                            </Badge>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">No worker-level tool allowlist declared.</p>
-                      )}
-                    </div>
+                    <ComposioAllowlistEditor
+                      slug={slug}
+                      allowedTools={allowedTools}
+                      saving={savingAllowlist === slugKey}
+                      disabled={savingAllowlist !== null && savingAllowlist !== slugKey}
+                      onSet={onSetComposioAllowlist}
+                    />
 
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-foreground">Granted OAuth scopes</p>
-                      {visibleScopes.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {visibleScopes.map((scope) => (
-                            <Badge key={scope} variant="outline" className="max-w-full border-line bg-paper px-2 font-mono text-[0.68rem] text-muted-foreground">
+                    {/* N6-2: OAuth scopes can include sensitive personal-data
+                        grants (contacts, birthday, phone numbers). Show a count
+                        summary by default and collapse the raw scope slugs
+                        behind a disclosure so they aren't dumped in plain view. */}
+                    {grantedScopes.length > 0 ? (
+                      <details className="group overflow-hidden rounded-[var(--radius-button)] border border-line bg-paper">
+                        <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-foreground">
+                          <span>
+                            {grantedScopes.length} OAuth{" "}
+                            {grantedScopes.length === 1 ? "scope" : "scopes"} granted
+                          </span>
+                          <span className="text-[0.68rem] font-normal text-muted-foreground group-open:hidden">
+                            View scopes
+                          </span>
+                        </summary>
+                        <div className="flex flex-wrap gap-1.5 border-t border-line px-3 py-2">
+                          {grantedScopes.map((scope) => (
+                            <Badge key={scope} variant="outline" className="max-w-full border-line bg-card px-2 font-mono text-[0.68rem] text-muted-foreground">
                               <span className="max-w-[220px] truncate">{formatScope(scope)}</span>
                             </Badge>
                           ))}
-                          {hiddenScopes > 0 && (
-                            <Badge variant="outline" className="border-line bg-paper px-2 text-[0.68rem] text-muted-foreground">
-                              +{hiddenScopes} more
-                            </Badge>
-                          )}
                         </div>
-                      ) : (
+                      </details>
+                    ) : (
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-foreground">Granted OAuth scopes</p>
                         <p className="text-xs text-muted-foreground">Scopes not loaded yet.</p>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
+          <AddToolControl
+            existingSlugs={uniqueComposioRequirements.map((r) => r.slug.toLowerCase())}
+            saving={savingAllowlist}
+            onAdd={onAddConnection}
+          />
         </section>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          {requiredSecrets.length > 0
-            ? "This worker needs no app connections — it only requires the secrets listed below."
-            : "This worker needs no app connections."}
-        </p>
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Tools this worker can use</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {requiredSecrets.length > 0
+                ? "This worker declares no app connections yet — it only requires the secrets listed below. Add a tool to let it call a connected app."
+                : "This worker declares no app connections yet. Add a tool to let it call a connected app."}
+            </p>
+          </div>
+          <AddToolControl existingSlugs={[]} saving={savingAllowlist} onAdd={onAddConnection} />
+        </section>
       )}
 
       {configuredMcpConnections.length > 0 && (

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import type {
   ConnectionItem,
+  PublicWorker,
   RunSummary,
   SystemOverview,
   WorkerSummary,
@@ -109,4 +110,11 @@ export async function fetchConnections() {
   return serverFetch<ConnectionItem[]>("/connections", {
     next: { revalidate: 10 },
   });
+}
+
+export async function fetchPublicWorker(id: string, token: string) {
+  return serverFetch<PublicWorker>(
+    `/workers/public/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,
+    { next: { revalidate: 30 } }
+  );
 }

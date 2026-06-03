@@ -75,6 +75,8 @@ export interface WorkerMcpConnection {
 export interface WorkerComposioConnection {
   app: string;
   allowed_tools?: string[] | null;
+  scope?: string | null;
+  scopes?: string[] | null;
 }
 
 export type WorkerConnectionSpec =
@@ -207,6 +209,10 @@ export interface WorkerSummary {
   example_output?: string;
   how_it_works?: string;
   is_example?: boolean;
+  /** Engine/system worker (manifest system_worker:true, e.g. worker-author).
+   *  Hidden from the default Workers list — it's the engine behind /workers/new,
+   *  not an employee. */
+  system?: boolean;
   archived?: boolean;
   archive_reason?: string;
   tags: string[];
@@ -222,6 +228,7 @@ export interface WorkerSummary {
   connections: string[];  // Composio app slugs declared in worker.yml
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
+  public_link?: string;   // owner-only signed share link to /w/<id>?token=
 }
 
 export interface WorkerFile {
@@ -261,6 +268,47 @@ export interface WorkerDetail {
   webhook_url?: string;
   files: WorkerFile[];
   triggers_spec: TriggerSpec[];
+  // Owner-only signed share link to the standalone public worker page
+  // (/w/<id>?token=<hmac>). Only present on the owner's authenticated fetch.
+  public_link?: string;
+  // Set when an edit to a read-only stock worker transparently forked it into a
+  // user-owned editable copy (clone-on-edit). Carries the source stock worker id;
+  // the returned `id` is the NEW copy, so the UI redirects to it.
+  cloned_from?: string;
+}
+
+// Read-only allow-list projection of a worker returned by
+// GET /workers/public/{id}?token=. Strictly a subset of WorkerDetail: no
+// secrets, source files, run history, owner id, or webhook url.
+export interface PublicWorkerInput {
+  name: string;
+  label: string;
+  type: string;
+  required: boolean;
+  description?: string | null;
+  options?: string[] | null;
+}
+
+export interface PublicWorkerOutput {
+  name: string;
+  label: string;
+  type: string;
+}
+
+export interface PublicWorker {
+  id: string;
+  name: string;
+  description?: string | null;
+  long_description?: string | null;
+  use_cases?: string[] | null;
+  how_it_works?: string | null;
+  is_example?: boolean | null;
+  tags: string[];
+  trigger_type: string;
+  runtime?: string | null;
+  connections: string[];
+  inputs: PublicWorkerInput[];
+  outputs: PublicWorkerOutput[];
 }
 
 export interface WorkerSuggestion {
@@ -303,6 +351,12 @@ export interface ContextWorkerRef {
   worker_name: string;
 }
 
+export interface SecretWarning {
+  pattern: string;
+  line: number;
+  masked: string;
+}
+
 export interface ContextFileItem {
   path: string;
   size: number;
@@ -313,11 +367,24 @@ export interface ContextFileItem {
   display_type?: string;
   tags?: string[];
   metadata?: Record<string, string | number | boolean | null | undefined>;
+  has_secret_warning?: boolean;
+  secret_warnings?: SecretWarning[];
 }
 
 export interface ContextDetail extends ContextSummary {
   files: ContextFileItem[];
   used_by?: ContextWorkerRef[];
+}
+
+export interface ContextSecretScanFile {
+  path: string;
+  secret_warnings: SecretWarning[];
+}
+
+export interface ContextSecretScanResponse {
+  name: string;
+  scanned_files: number;
+  flagged_files: ContextSecretScanFile[];
 }
 
 export interface ReloadResponse {
@@ -346,6 +413,45 @@ export interface ApprovalRow {
   follow_up_run_id?: string;
   owner_id?: string;
   artifacts?: Artifact[];
+  /** Standalone signed review URL (?id=&token=) the owner can copy/share or open full-page. Set by the API for the authenticated owner. */
+  public_link?: string;
+  /** X4: structured reviewer feedback attached with the decision (highlight+comment on text, screenshot pins). */
+  annotations?: ApprovalAnnotations | null;
+}
+
+/** X4: a comment attached to a highlighted span of a text/markdown artifact. */
+export interface TextAnnotation {
+  quote: string;
+  comment: string;
+}
+
+/** X4: a pin (normalized 0..1 coords) + comment placed on an uploaded screenshot. */
+export interface ImagePin {
+  x: number;
+  y: number;
+  comment: string;
+}
+
+/** X4: an uploaded review screenshot with a caption + optional comment pins. */
+export interface ImageAnnotation {
+  /** Content-addressed ref into our upload store (/uploads/<sha256>?download_token=...). */
+  url: string;
+  caption: string;
+  pins: ImagePin[];
+}
+
+export interface ApprovalAnnotations {
+  text: TextAnnotation[];
+  images: ImageAnnotation[];
+}
+
+/** Response shape from the approval-scoped screenshot upload endpoints. */
+export interface ApprovalUploadResponse {
+  id: string;
+  sha256: string;
+  size: number;
+  media_type: string;
+  url: string;
 }
 
 export interface SystemInfo {
@@ -552,7 +658,9 @@ export type ConnectionStatus = "active" | "initiated" | "failed" | "expired" | "
 export interface ConnectionItem {
   id: string;
   app_name: string;
-  composio_connection_id: string;
+  // NEW-7 (2026-06-02): the API no longer returns the raw Composio `ca_*` id.
+  // Reference a connection by the internal Floom UUID `id`; the API resolves it
+  // to the raw `ca_*` server-side when wiring triggers / fetching account info.
   status: ConnectionStatus;
   created_at: string;
   updated_at: string;
@@ -584,6 +692,18 @@ export interface ConnectionInitResponse {
   app_name: string;
   redirect_url: string;
   composio_connection_id: string;
+}
+
+export interface ConnectedAccountSummary {
+  id: string;
+  account_label?: string | null;
+  status: string;
+}
+
+export interface AppConnectionState {
+  connected: boolean;
+  app_name?: string;
+  accounts?: ConnectedAccountSummary[];
 }
 
 export interface SupportedApp {

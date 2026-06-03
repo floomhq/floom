@@ -1,15 +1,16 @@
 "use client";
 
-import "highlight.js/styles/github.css";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  AlertTriangle,
   Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   Edit3,
   File as FileIcon,
@@ -31,13 +32,14 @@ import {
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ContextDetail, ContextFileItem, ContextSummary, VersionSummary } from "@/lib/types";
+import type { ContextDetail, ContextFileItem, ContextSummary, SecretWarning, VersionSummary } from "@/lib/types";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { CodeBlock } from "@/components/file-viewer/code-block";
 
 const TEXT_PREVIEW_LIMIT = 512 * 1024;
 const TABLE_PREVIEW_ROWS = 100;
@@ -349,6 +351,10 @@ function ContextsPage() {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [versionsKey, setVersionsKey] = useState(0);
+  // Secret-detection warnings from the most recent save/upload. Brain packs are
+  // readable by anyone with workspace access, so a live credential stored here
+  // is a leak — we surface it inline and nudge the operator to Secrets.
+  const [secretWarnings, setSecretWarnings] = useState<SecretWarning[]>([]);
 
   const [search, setSearch] = useState("");
   const [newContextName, setNewContextName] = useState("");
@@ -546,6 +552,7 @@ function ContextsPage() {
   }
 
   function openFile(path: string) {
+    setSecretWarnings([]);
     setSelectedFile(path);
     setMobilePane("file");
     // Drill folderPath to the file's parent so the column stack stays coherent
@@ -611,11 +618,21 @@ function ContextsPage() {
       return;
     }
     try {
-      await api.contexts.upload(selectedName, files, folderPath.length ? folderPath.join("/") : undefined);
+      const result = await api.contexts.upload(
+        selectedName,
+        files,
+        folderPath.length ? folderPath.join("/") : undefined,
+      );
       const refreshed = await api.contexts.get(selectedName);
       setDetail(refreshed);
       await loadContexts(selectedName);
-      toast.success("File added");
+      const warnings = (result.files ?? []).flatMap((f) => f.secret_warnings ?? []);
+      if (warnings.length) {
+        setSecretWarnings(warnings);
+        toast.warning("File added — but it looks like it contains a secret");
+      } else {
+        toast.success("File added");
+      }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to add file");
     }
@@ -666,13 +683,20 @@ function ContextsPage() {
   async function saveFile() {
     if (!fileObj) return;
     try {
-      await api.contexts.saveTextFile(selectedName, fileObj.path, editText);
+      const saved = await api.contexts.saveTextFile(selectedName, fileObj.path, editText);
       setFileText(editText);
       setEditing(false);
       const refreshed = await api.contexts.get(selectedName);
       setDetail(refreshed);
       setVersionsKey((k) => k + 1);
-      toast.success("File saved");
+      const warnings = saved.secret_warnings ?? [];
+      if (warnings.length) {
+        setSecretWarnings(warnings);
+        toast.warning("File saved — but it looks like it contains a secret");
+      } else {
+        setSecretWarnings([]);
+        toast.success("File saved");
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to save file");
     }
@@ -910,6 +934,12 @@ function ContextsPage() {
                 dragActive && !readOnly ? "bg-muted/30" : ""
               } ${mobilePane === "file" ? "flex" : "hidden lg:flex"}`}
             >
+              {secretWarnings.length > 0 && (
+                <SecretWarningBanner
+                  warnings={secretWarnings}
+                  onDismiss={() => setSecretWarnings([])}
+                />
+              )}
               <FilePane
                 file={fileObj}
                 kind={kind}
@@ -954,6 +984,63 @@ function ContextsPage() {
           }}
         />
       </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// Secret-detection warning banner.
+//
+// Brain packs are readable by anyone with workspace access, so a stored live
+// credential is a leak. When a save/upload returns secret_warnings we surface
+// this inline (masked findings only — the raw value is never returned) and
+// point the operator at Settings → Secrets.
+// ===========================================================================
+
+function SecretWarningBanner({
+  warnings,
+  onDismiss,
+}: {
+  warnings: SecretWarning[];
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="mx-3 mt-3 flex items-start gap-3 rounded-[var(--radius-card)] border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm"
+    >
+      <AlertTriangle className="size-4 shrink-0 text-amber-500 mt-0.5" />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <p className="font-medium text-[var(--ink)]">
+          This file looks like it contains a live API key or secret.
+        </p>
+        <p className="text-muted-foreground">
+          Brain packs are readable by anyone with workspace access. Move secrets
+          to{" "}
+          <Link href="/connections/secrets" className="underline underline-offset-2">
+            Secrets
+          </Link>{" "}
+          instead of storing them here.
+        </p>
+        <ul className="space-y-0.5 font-mono text-xs text-muted-foreground">
+          {warnings.slice(0, 5).map((w, i) => (
+            <li key={`${w.pattern}:${w.line}:${i}`} className="truncate">
+              line {w.line}: {w.pattern} — {w.masked}
+            </li>
+          ))}
+          {warnings.length > 5 && (
+            <li className="text-muted-foreground">+{warnings.length - 5} more</li>
+          )}
+        </ul>
+      </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="p-1 rounded-[var(--radius-button)] hover:bg-muted shrink-0"
+        aria-label="Dismiss warning"
+      >
+        <X className="size-3.5 text-muted-foreground" />
+      </button>
     </div>
   );
 }
@@ -1362,7 +1449,15 @@ function FolderColumn({
                 >
                   {displayTypeIcon(fileDisplayType(entry.file))}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-mono">{entry.name}</span>
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="block truncate text-sm font-mono">{entry.name}</span>
+                      {entry.file.has_secret_warning && (
+                        <AlertTriangle
+                          className="size-3.5 shrink-0 text-amber-500"
+                          aria-label="Possible secret detected"
+                        />
+                      )}
+                    </span>
                     {!compact && (
                       <>
                         <span className="block text-xs text-muted-foreground truncate">
@@ -1577,6 +1672,8 @@ function FileContent({
   }
 
   if (kind === "markdown") {
+    // Markdown is the one genuine rendered-vs-source case: Preview shows the
+    // formatted document, Raw shows the highlighted source.
     return (
       <PreviewRawTabs
         preview={
@@ -1584,17 +1681,23 @@ function FileContent({
             <MarkdownRenderer content={text} />
           </div>
         }
-        raw={<RawText text={text} />}
+        raw={<CodeBlock text={text} filePath={file.path} />}
       />
     );
   }
 
   if (kind === "code") {
+    // Single syntax-highlighted view — no redundant Preview-vs-Raw tabs.
+    // A .py/.ts/.json/.yaml/.txt file has one canonical rendering: the
+    // highlighted code block (with a copy affordance), shared with the
+    // worker-detail Source view.
     return (
-      <PreviewRawTabs
-        preview={<CodeBlock text={text} filePath={file.path} />}
-        raw={<RawText text={text} />}
-      />
+      <div className="flex h-full flex-col">
+        <CodeViewToolbar text={text} />
+        <div className="flex-1 overflow-auto">
+          <CodeBlock text={text} filePath={file.path} />
+        </div>
+      </div>
     );
   }
 
@@ -1620,7 +1723,7 @@ function FileContent({
     return (
       <PreviewRawTabs
         preview={<DelimitedTablePreview text={text} path={file.path} />}
-        raw={<RawText text={text} />}
+        raw={<CodeBlock text={text} filePath={file.path} />}
       />
     );
   }
@@ -1701,10 +1804,27 @@ function PreviewRawTabs({
   );
 }
 
-function RawText({ text }: { text: string }) {
+// A single "Copy" affordance for the code view — replaces the old redundant
+// Raw tab. One canonical highlighted block + a copy button, instead of a second
+// tab that showed the same content unhighlighted.
+function CodeViewToolbar({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
   return (
-    <div className="p-4">
-      <pre className="overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] p-3 font-mono text-xs leading-6 text-foreground dark:bg-[#1a1a1a]">{text}</pre>
+    <div className="flex shrink-0 items-center justify-end border-b border-[var(--border-default)] px-4 py-1.5">
+      <button
+        type="button"
+        onClick={copy}
+        className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <Copy className="size-3.5" />}
+        {copied ? "Copied" : "Copy"}
+      </button>
     </div>
   );
 }
@@ -1992,13 +2112,13 @@ function PreviewUnavailable({
   );
 }
 
-// Inline per-file "History ▾" dropdown. Each brain-pack file is snapshotted
+// Inline per-file "Versions ▾" dropdown. Each brain-pack file is snapshotted
 // independently on the backend (asset_type `brain_file`), so this lists the
 // revisions of ONE file and restores only THAT file — not the whole pack.
 // Restore fetches the chosen revision's snapshot and writes it back via the
 // normal save path (which records a new snapshot), so it is limited to text
 // files (the only kind that carries an inline content body here). This mirrors
-// the workspace-instructions History dropdown on /assistant so both surfaces
+// the workspace-instructions Versions dropdown on /assistant so both surfaces
 // feel like the same affordance.
 function FileHistoryMenu({
   packName,
@@ -2175,72 +2295,3 @@ function MarkdownRenderer({ content }: { content: string }) {
   );
 }
 
-function CodeBlock({ text, filePath }: { text: string; filePath: string }) {
-  const [highlighted, setHighlighted] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const language = detectLanguage(filePath);
-    if (language === "text") {
-      setHighlighted(null);
-      return;
-    }
-
-    import("highlight.js/lib/core").then(async (hljsCore) => {
-      const hljs = hljsCore.default;
-      const loaders: Record<string, () => Promise<{ default: unknown }>> = {
-        python: () => import("highlight.js/lib/languages/python"),
-        yaml: () => import("highlight.js/lib/languages/yaml"),
-        json: () => import("highlight.js/lib/languages/json"),
-        bash: () => import("highlight.js/lib/languages/bash"),
-        typescript: () => import("highlight.js/lib/languages/typescript"),
-        javascript: () => import("highlight.js/lib/languages/javascript"),
-        sql: () => import("highlight.js/lib/languages/sql"),
-        xml: () => import("highlight.js/lib/languages/xml"),
-        css: () => import("highlight.js/lib/languages/css"),
-        go: () => import("highlight.js/lib/languages/go"),
-        rust: () => import("highlight.js/lib/languages/rust"),
-      };
-
-      const loader = loaders[language];
-      if (loader && !hljs.getLanguage(language)) {
-        const mod = await loader();
-        hljs.registerLanguage(language, mod.default as Parameters<typeof hljs.registerLanguage>[1]);
-      }
-
-      if (!cancelled && hljs.getLanguage(language)) {
-        const result = hljs.highlight(text, { language });
-        if (!cancelled) setHighlighted(result.value);
-      }
-    }).catch(() => { /* fallback to plain */ });
-
-    return () => { cancelled = true; };
-  }, [text, filePath]);
-
-  return (
-    <div className="p-4">
-      <pre className="overflow-auto rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] p-3 font-mono text-xs leading-6 dark:bg-[#1a1a1a]">
-        {highlighted ? (
-          <code className={`hljs language-${detectLanguage(filePath)}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
-        ) : (
-          <code>{text}</code>
-        )}
-      </pre>
-    </div>
-  );
-}
-
-function detectLanguage(path: string): string {
-  if (path.endsWith(".py")) return "python";
-  if (path.endsWith(".yml") || path.endsWith(".yaml")) return "yaml";
-  if (path.endsWith(".json")) return "json";
-  if (path.endsWith(".sh")) return "bash";
-  if (path.endsWith(".ts") || path.endsWith(".tsx")) return "typescript";
-  if (path.endsWith(".js") || path.endsWith(".jsx")) return "javascript";
-  if (path.endsWith(".sql")) return "sql";
-  if (path.endsWith(".xml") || path.endsWith(".html") || path.endsWith(".htm")) return "xml";
-  if (path.endsWith(".css") || path.endsWith(".scss")) return "css";
-  if (path.endsWith(".go")) return "go";
-  if (path.endsWith(".rs")) return "rust";
-  return "text";
-}

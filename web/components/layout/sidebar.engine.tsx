@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, Bot, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Activity, Bot, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -37,10 +38,14 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
 // a surface.
+// `hint` is surfaced as a native title tooltip on hover — the flat single-row
+// nav has no room for a permanent subtitle without a redesign, so the
+// employee-model microcopy ("Assistant = the thing you talk to"; "Workers run
+// on triggers") lives in the tooltip instead (Federico 2026-06-02).
 const nav = [
   { href: "/overview", label: "Overview", icon: Activity },
-  { href: "/workers", label: "Workers", icon: Box },
-  { href: "/assistant", label: "Agent", icon: Bot },
+  { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
+  { href: "/assistant", label: "Assistant", icon: Bot, hint: "Chat, ask, delegate" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
@@ -65,6 +70,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
             key={item.href}
             href={item.href}
             onClick={onNavigate}
+            title={item.hint}
             className={cn(
               "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
               active
@@ -222,7 +228,20 @@ export function Sidebar() {
 // on the right.
 export function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
+  const router = useRouter();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Clearing the cookie is best-effort; navigate regardless.
+    }
+    onNavigate?.();
+    router.replace("/login");
+    router.refresh();
+  }
+
   return (
     <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
       <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -248,6 +267,15 @@ export function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = 
       >
         <Settings className="size-4" />
       </Link>
+      <button
+        type="button"
+        onClick={logout}
+        aria-label="Sign out"
+        title="Sign out"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+      >
+        <LogOut className="size-4" />
+      </button>
       <ThemeModeButton />
     </div>
   );
