@@ -3082,6 +3082,31 @@ def _persist_discovered_workers(
             ),
         )
 
+        # Reconcile the normalized worker_triggers rows so EVERY declared
+        # trigger (not just the primary one) becomes an independently
+        # schedulable / resolvable row. Existing single-trigger workers get
+        # exactly one row, preserving backward-compat. The composio
+        # registration id is stamped on the composio row for event resolution.
+        # Local SQLite writes through the already-open `conn` (a second
+        # connection here would deadlock with `database is locked`); the
+        # non-SQLite mirror happens in the canonical block below.
+        try:
+            from db.sqlite import SqliteWorkerRepository
+
+            SqliteWorkerRepository.reconcile_triggers_conn(
+                conn,
+                worker_id=worker_id,
+                triggers=triggers_list,
+                external_trigger_id=composio_trigger_id,
+                enabled=bool(enabled_value),
+            )
+        except Exception:
+            logger.exception(
+                "reconcile_triggers failed for worker %s — multi-trigger rows "
+                "may be stale (scheduler falls back to the worker scalar)",
+                worker_id,
+            )
+
         # Mirror to the canonical repository so non-local deployments
         # (e.g. workeros-cloud -> Supabase) actually persist the row.
         # Local SQLite already writes through `conn` above. Calling the
@@ -3114,6 +3139,25 @@ def _persist_discovered_workers(
                     composio_event=composio_event,
                     triggers_json=triggers_list,
                 )
+                # Non-SQLite (cloud) reconcile: SQLite already reconciled via
+                # the open `conn` above. Guarded separately so a cloud repo that
+                # has not yet shipped reconcile_triggers degrades to the legacy
+                # single-trigger behaviour instead of failing the worker upsert.
+                reconcile = getattr(canonical_workers, "reconcile_triggers", None)
+                if callable(reconcile):
+                    try:
+                        reconcile(
+                            worker_id=worker_id,
+                            triggers=triggers_list,
+                            external_trigger_id=composio_trigger_id,
+                            enabled=bool(enabled_value),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "cloud reconcile_triggers failed for worker %s — "
+                            "multi-trigger rows may be stale",
+                            worker_id,
+                        )
         except Exception:
             logger.exception(
                 "repos.workers.upsert failed for worker %s (user %s) — "
@@ -12429,7 +12473,23 @@ async def composio_events(request: Request) -> ActionResponse:
     else:
         payload = {}
 
-    worker_id = _find_worker_for_composio_event(payload, request)
+    # Resolve the specific worker_triggers row (by external/composio trigger id)
+    # so the run is tagged with WHICH trigger fired and dedupe is scoped to that
+    # trigger. Fall back to the worker-scalar lookup for legacy DBs.
+    repos = get_repositories()
+    trigger_ref: Optional[str] = None
+    worker_id: Optional[str] = None
+    for candidate in _candidate_composio_trigger_ids(payload, request):
+        try:
+            row = repos.workers.find_trigger_by_external_id(external_trigger_id=candidate)
+        except Exception:
+            row = None
+        if row:
+            trigger_ref = row["id"]
+            worker_id = row["worker_id"]
+            break
+    if not worker_id:
+        worker_id = _find_worker_for_composio_event(payload, request)
     if not worker_id:
         raise HTTPException(status_code=404, detail="No worker registered for Composio trigger")
 
@@ -12438,11 +12498,14 @@ async def composio_events(request: Request) -> ActionResponse:
         or (payload.get("id") if isinstance(payload, dict) else "")
         or ""
     )
-    if not _claim_webhook_delivery(f"composio:{worker_id}", str(delivery_id)):
+    # Dedupe by (trigger, delivery_id): a redelivery of the same event to the
+    # same trigger fires at most one run.
+    dedupe_key = f"composio:{trigger_ref or worker_id}"
+    if not _claim_webhook_delivery(dedupe_key, str(delivery_id)):
         return ActionResponse(status="duplicate_ignored")
 
     inputs = {"event": payload}
-    run_id = create_run(worker_id, inputs, trigger_source="composio")
+    run_id = create_run(worker_id, inputs, trigger_source="composio", trigger_ref=trigger_ref)
     start_run(run_id, worker_id, inputs)
     return ActionResponse(status="queued", run_id=run_id)
 
@@ -15391,6 +15454,31 @@ async def webhook_trigger(
             if not verify_signature(body, sig_header, secret_hash):
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
+    # Resolve the specific webhook trigger row so the run is tagged with WHICH
+    # trigger fired (multi-trigger workers can declare a webhook alongside other
+    # triggers). Falls back to None for legacy DBs without normalized rows.
+    trigger_ref: Optional[str] = None
+    try:
+        trigger_row = repos.workers.find_trigger_for_webhook(worker_id=worker_id)
+        if trigger_row:
+            trigger_ref = trigger_row["id"]
+    except Exception:
+        trigger_ref = None
+
+    # Dedupe by (trigger, delivery_id): a redelivery carrying the same delivery
+    # id fires at most one run. Senders that don't supply a delivery id are not
+    # deduped (delivery_id == "" → always allowed).
+    delivery_id = (
+        request.headers.get("webhook-id")
+        or request.headers.get("X-Delivery-Id")
+        or request.headers.get("X-GitHub-Delivery")
+        or ""
+    )
+    if delivery_id and not _claim_webhook_delivery(
+        f"webhook:{trigger_ref or worker_id}", str(delivery_id)
+    ):
+        return ActionResponse(status="duplicate_ignored")
+
     # Parse body as JSON inputs (or empty dict)
     inputs: Dict[str, Any] = {}
     if body:
@@ -15409,6 +15497,7 @@ async def webhook_trigger(
         inputs,
         trigger_source="webhook",
         user_id=user_id,
+        trigger_ref=trigger_ref,
         repos=repos,
     )
     start_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
