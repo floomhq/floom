@@ -590,6 +590,11 @@ class SkillRuntimeDriver(SandboxDriver):
         # Fail fast if the required Composio connection is not active — mirrors runner_utils.py:224.
         allowed_tools = declared_composio_connections(config).get(app_name)
         if allowed_tools is not None and tool_slug.upper() not in allowed_tools:
+            logger.warning(
+                "composio tool denied: worker=%s app=%s tool=%s blocked by allowlist",
+                worker_id, app_name, tool_slug.upper(),
+            )
+            log_fn(f"Tool {tool_slug} blocked by allowlist for connection {app_name}", "warning")
             return {
                 "ok": False,
                 "error": f"Tool {tool_slug} is not allowed for worker connection {app_name}",

@@ -466,6 +466,14 @@ class AgentDriver(SandboxDriver):
                     error=f"Output schema violation: {schema_error}",
                     error_code="schema_violation",
                 )
+            # Persist any edits the run made to writeable:true packs back to the
+            # local store before returning success (mirrors e2b_driver).
+            self._persist_writeable_contexts(
+                config=config,
+                context_root=context_root,
+                user_id=user_id,
+                log_fn=log_fn,
+            )
             return WorkerResult(status="success", outputs=outputs, artifacts=artifacts)
         except _MCPConnectionError as exc:
             log_fn(str(exc), level="error")
@@ -778,6 +786,72 @@ class AgentDriver(SandboxDriver):
                 staged.append(name)
                 log_fn(f"[agent] Staged context {name!r}", "debug")
         return staged
+
+    def _persist_writeable_contexts(
+        self,
+        *,
+        config: Optional[WorkerConfig],
+        context_root: Path,
+        user_id: str | None,
+        log_fn: Callable[[str, str], None],
+    ) -> None:
+        """Write back edits an agent-mode run made to ``writeable:true`` packs.
+
+        Mirrors ``E2BSandboxDriver._persist_writeable_contexts`` (N3-2 / #364):
+        agent-mode stages packs into ``context_root/<name>/...`` and the file
+        tools are read-only, but a worker can still mutate staged files via
+        ``run_command`` (shell). Without this, those edits are discarded on run
+        end. We copy each ``writeable:true`` local pack's staged tree back over
+        the canonical pack (``context_dir(name)``), owner-scoped — same scope,
+        same per-pack layout, same source rules as e2b. Git packs are skipped
+        (writeback target is the local store only). Only called on a successful
+        run, matching the e2b trigger (``status not in ("error","failed")``).
+        """
+        if not config or not config.contexts:
+            return
+
+        with use_context_scope(context_scope_for_user(user_id)):
+            for raw_context in config.contexts:
+                try:
+                    context = normalize_context_mount(raw_context)
+                except ValueError as exc:
+                    log_fn(f"[agent] Skipping invalid writeable context: {exc}", "warning")
+                    continue
+                if not context["writeable"]:
+                    continue
+                if context["source"] != "local":
+                    log_fn(
+                        f"[agent] Skipping writeback for git context {context['name']!r}",
+                        "warning",
+                    )
+                    continue
+
+                name = context["name"]
+                staged_pack = _safe_path(context_root, name)
+                if not staged_pack.is_dir():
+                    log_fn(f"[agent] Writeable context {name!r} missing in staging", "warning")
+                    continue
+
+                try:
+                    dest_root = context_dir(name)
+                    dest_root.mkdir(parents=True, exist_ok=True)
+                    # Mirror the staged tree onto the pack: write current staged
+                    # files (covers edits + new files) then prune pack files the
+                    # run deleted, so the persisted state matches the sandbox.
+                    staged_rels: set[str] = set()
+                    for fpath in iter_context_files(staged_pack):
+                        rel = fpath.relative_to(staged_pack).as_posix()
+                        staged_rels.add(rel)
+                        target = _safe_path(dest_root, rel)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(fpath.read_bytes())
+                    for existing in iter_context_files(dest_root):
+                        rel = existing.relative_to(dest_root).as_posix()
+                        if rel not in staged_rels:
+                            existing.unlink(missing_ok=True)
+                    log_fn(f"[agent] Persisted writeable context {name!r}", "info")
+                except Exception as exc:
+                    log_fn(f"[agent] Failed to persist writeable context {name!r}: {exc}", "warning")
 
     def _load_system_prompt(
         self,
@@ -1627,6 +1701,11 @@ class AgentDriver(SandboxDriver):
             return {"ok": False, "error": f"Worker did not declare connection to {app_name}", "error_code": "tool_outside_declared_connections"}
         allowed_tools = declared.get(app_name.lower())
         if allowed_tools is not None and tool.upper() not in allowed_tools:
+            logger.warning(
+                "composio tool denied: worker=%s app=%s tool=%s blocked by allowlist",
+                worker_id, app_name.lower(), tool.upper(),
+            )
+            log_fn(f"Tool {tool} blocked by allowlist for connection {app_name}", "warning")
             return {"ok": False, "error": f"Tool {tool} is not allowed for worker connection {app_name}", "error_code": "tool_outside_connection_scope"}
         connection_id = connection_ids.get(app_name.lower())
         if not connection_id and user_id:
