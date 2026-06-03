@@ -53,6 +53,12 @@ def driver_env(monkeypatch, tmp_path):
     import runner_utils as runner_utils_mod
     importlib.reload(contexts_mod)
     importlib.reload(runner_utils_mod)
+    # agent_capabilities holds the staging/writeback context helpers (context_dir,
+    # iter_context_files, …) bound at import time; reload it AFTER contexts so it
+    # picks up the env-driven CONTEXTS_DIR, then reload agent_driver which imports
+    # from it.
+    from runner_sandbox import agent_capabilities as agent_capabilities_mod
+    importlib.reload(agent_capabilities_mod)
     from runner_sandbox import agent_driver as agent_driver_mod
     importlib.reload(agent_driver_mod)
 
@@ -66,6 +72,7 @@ def driver_env(monkeypatch, tmp_path):
     # Restore module state for sibling tests.
     importlib.reload(contexts_mod)
     importlib.reload(runner_utils_mod)
+    importlib.reload(agent_capabilities_mod)
     importlib.reload(agent_driver_mod)
 
 
