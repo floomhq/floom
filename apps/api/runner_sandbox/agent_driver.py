@@ -20,6 +20,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from contexts import (
+    context_dir,
+    context_scope_for_user,
+    iter_context_files,
+    normalize_context_mount,
+    use_context_scope,
+)
 from models import (
     WorkerConfig,
     WorkerResult,

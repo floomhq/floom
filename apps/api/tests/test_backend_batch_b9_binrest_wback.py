@@ -234,10 +234,23 @@ def test_agent_writeback_persists_writeable_context(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
 
-    for name in ["contexts", "models", "runner_sandbox.agent_driver"]:
+    # agent_capabilities binds the staging/writeback context helpers (context_dir,
+    # iter_context_files, …) at import; drop it too so the fresh import picks up
+    # the env-driven CONTEXTS_DIR.
+    for name in [
+        "contexts",
+        "models",
+        "runner_sandbox.agent_capabilities",
+        "runner_sandbox.agent_driver",
+    ]:
         sys.modules.pop(name, None)
     contexts = importlib.import_module("contexts")
     importlib.reload(contexts)
+    # Reload agent_capabilities AFTER contexts so its bound context_dir /
+    # iter_context_files point at the env-driven CONTEXTS_DIR, then import the
+    # driver which delegates staging to it.
+    agent_capabilities = importlib.import_module("runner_sandbox.agent_capabilities")
+    importlib.reload(agent_capabilities)
     from runner_sandbox.agent_driver import AgentDriver
 
     # Seed two packs: one writeable, one read-only.
