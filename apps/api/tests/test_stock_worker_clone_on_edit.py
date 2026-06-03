@@ -53,6 +53,27 @@ exec:
   command: "python run.py"
 """
 
+# An UNDERSCORE-named stock worker (in PROTECTED_STOCK_WORKER_IDS). Its clone id
+# is `<id>-copy` = `weekly_update-copy`, which is NOT a valid SLUG_PATTERN id
+# (underscores forbidden) — the clone must slugify the base to `weekly-update`.
+# Carries `is_example: true` so the test can assert the copy clears it to false.
+_USCORE_STOCK_ID = "weekly_update"
+_USCORE_STOCK_WORKER_YML = """\
+schema_version: "0.3"
+name: "weekly-update"
+is_example: true
+title: "Weekly Update"
+description: "Stock weekly update worker."
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "run.py"
+  runtime: "python311"
+  runner: "e2b"
+  command: "python run.py"
+"""
+
 # A normal (non-stock) worker that declares NO connections.
 _PLAIN_ID = "plain-no-conns"
 _PLAIN_WORKER_YML = """\
@@ -97,6 +118,11 @@ class TestStockWorkerCloneOnEdit:
         stock_dir.mkdir()
         (stock_dir / "worker.yml").write_text(_STOCK_WORKER_YML)
         (stock_dir / "run.py").write_text(_RUN_PY)
+
+        uscore_dir = workers_dir / _USCORE_STOCK_ID
+        uscore_dir.mkdir()
+        (uscore_dir / "worker.yml").write_text(_USCORE_STOCK_WORKER_YML)
+        (uscore_dir / "run.py").write_text(_RUN_PY)
 
         plain_dir = workers_dir / _PLAIN_ID
         plain_dir.mkdir()
@@ -193,6 +219,75 @@ class TestStockWorkerCloneOnEdit:
         assert body["cloned_from"] == _STOCK_ID
         copy_cfg = pyyaml.safe_load((workers_dir / body["id"] / "worker.yml").read_text())
         assert copy_cfg.get("connections") == ["gmail"]
+
+    # ----- X5 regression: underscore-named stock worker ----------------------
+
+    def test_attach_brain_to_underscore_stock_worker_slugifies_copy_id(self, client):
+        """Underscore-named stock worker clone must slugify the copy id.
+
+        `weekly_update-copy` is NOT a valid SLUG_PATTERN id (underscore), so the
+        clone path must derive the base from a slugified id -> `weekly-update`
+        -> `weekly-update-copy`. Before the fix this 400'd.
+        """
+        c, workers_dir = client
+        assert c.post("/contexts/my-brain-pack", headers=HEADERS).status_code in (200, 201, 409)
+
+        stock_yml = (workers_dir / _USCORE_STOCK_ID / "worker.yml").read_text()
+        edited = pyyaml.safe_load(stock_yml)
+        edited["contexts"] = ["my-brain-pack"]
+        edited_yml = pyyaml.safe_dump(edited, sort_keys=False)
+
+        r = c.put(
+            f"/workers/{_USCORE_STOCK_ID}/files",
+            json={"files": [
+                {"path": "worker.yml", "content": edited_yml},
+                {"path": "run.py", "content": _RUN_PY},
+            ]},
+            headers=HEADERS,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+
+        # Forked into a user-owned copy with a SLUGIFIED id (no underscore).
+        assert body["cloned_from"] == _USCORE_STOCK_ID
+        assert body["id"] == "weekly-update-copy"
+        assert "_" not in body["id"]
+
+        # The copy is a real owned worker, not a stock example.
+        copy_dir = workers_dir / body["id"]
+        assert copy_dir.is_dir()
+        copy_cfg = pyyaml.safe_load((copy_dir / "worker.yml").read_text())
+        assert copy_cfg.get("is_example") is False
+        assert copy_cfg.get("contexts") == ["my-brain-pack"]
+
+        # The stock template on disk is UNCHANGED (still its example flag + id).
+        stock_after = pyyaml.safe_load(
+            (workers_dir / _USCORE_STOCK_ID / "worker.yml").read_text()
+        )
+        assert stock_after.get("is_example") is True
+        assert "contexts" not in stock_after
+
+    def test_underscore_stock_clone_collision_appends_suffix(self, client):
+        """A second clone of the same underscore stock worker gets a `-2` suffix."""
+        c, workers_dir = client
+        assert c.post("/contexts/my-brain-pack", headers=HEADERS).status_code in (200, 201, 409)
+
+        stock_yml = (workers_dir / _USCORE_STOCK_ID / "worker.yml").read_text()
+        edited = pyyaml.safe_load(stock_yml)
+        edited["contexts"] = ["my-brain-pack"]
+        edited_yml = pyyaml.safe_dump(edited, sort_keys=False)
+        files = {"files": [
+            {"path": "worker.yml", "content": edited_yml},
+            {"path": "run.py", "content": _RUN_PY},
+        ]}
+
+        first = c.put(f"/workers/{_USCORE_STOCK_ID}/files", json=files, headers=HEADERS)
+        assert first.status_code == 200, first.text
+        assert first.json()["id"] == "weekly-update-copy"
+
+        second = c.put(f"/workers/{_USCORE_STOCK_ID}/files", json=files, headers=HEADERS)
+        assert second.status_code == 200, second.text
+        assert second.json()["id"] == "weekly-update-copy-2"
 
     # ----- X6: add tool when none declared + two-way sync --------------------
 

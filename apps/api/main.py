@@ -6511,6 +6511,24 @@ class DraftAndCreateResponse(BaseModel):
     smoke_reason: Optional[str] = None
 
 
+def _slugify_worker_id(value: str) -> str:
+    """Coerce an arbitrary id into a SLUG_PATTERN-valid slug.
+
+    ``SLUG_PATTERN`` (``^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$``) forbids
+    underscores, uppercase, leading/trailing hyphens, and ids shorter than 3
+    chars. The 8 stock workers are underscore-named (``weekly_update`` etc.), so
+    a clone base of ``weekly_update-copy`` is NOT a valid slug and would be
+    rejected at registration with HTTP 400. Lowercase, replace every invalid
+    character with a hyphen, collapse runs of hyphens, and strip leading/trailing
+    hyphens so the result always matches SLUG_PATTERN (e.g. ``weekly_update`` ->
+    ``weekly-update``). A too-short result is padded so the min-length rule holds.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    if len(slug) < 3:
+        slug = (slug + "-worker").strip("-")
+    return slug
+
+
 def _free_worker_id(base_id: str, repos: "Repositories | None" = None) -> str:
     """Return a worker id that does not collide with an existing worker.
 
@@ -6589,6 +6607,22 @@ def _rewrite_worker_yml_id(worker_yml: str, new_id: str) -> str:
         raw["id"] = new_id
     else:
         raw["name"] = new_id
+    return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
+
+
+def _set_worker_yml_is_example(worker_yml: str, is_example: bool) -> str:
+    """Set the manifest ``is_example`` flag (used when forking a stock worker).
+
+    A clone-on-edit copy is a user-owned working worker, not a stock example,
+    so its manifest must carry ``is_example: false`` instead of inheriting the
+    stock source's ``is_example: true``.
+    """
+    import yaml as pyyaml
+
+    raw = pyyaml.safe_load(worker_yml)
+    if not isinstance(raw, dict):
+        return worker_yml
+    raw["is_example"] = is_example
     return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
 
 
@@ -7872,9 +7906,16 @@ def _clone_protected_worker_for_edit(
     # Allocate a free, non-protected id and rewrite the manifest identity so the
     # new dir + worker.yml + DB row all agree. _register_worker_from_files parses
     # the manifest id eagerly (and re-rejects protected ids), so the rewrite MUST
-    # happen before registration.
-    new_id = _free_worker_id(f"{worker_id}-copy", repos=repos)
-    base_files["worker.yml"] = _rewrite_worker_yml_id(worker_yml, new_id)
+    # happen before registration. The base MUST be slugified first: the 8 stock
+    # workers are underscore-named (``weekly_update`` ...), and ``<id>-copy`` is
+    # then NOT a valid SLUG_PATTERN id, so registration would 400. Slugify maps
+    # ``weekly_update`` -> ``weekly-update`` -> ``weekly-update-copy``.
+    new_id = _free_worker_id(f"{_slugify_worker_id(worker_id)}-copy", repos=repos)
+    rewritten_yml = _rewrite_worker_yml_id(worker_yml, new_id)
+    # A user's working copy is not a stock example: clear ``is_example`` so the
+    # copy renders as a real owned worker (not in the example gallery) — it would
+    # otherwise inherit ``is_example: true`` from the stock source manifest.
+    base_files["worker.yml"] = _set_worker_yml_is_example(rewritten_yml, False)
 
     draft_files = [DraftFile(path=path, content=content) for path, content in base_files.items()]
     created_id = _register_worker_from_files(
