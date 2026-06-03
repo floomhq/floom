@@ -405,7 +405,8 @@ async def cloud_set_worker_visibility(worker_id: str, request: Request) -> Any:
     worker = repos.workers.get_any(worker_id=worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="worker not found")
-    if str(worker.get("user_id", "")) != str(auth.user_id):
+    owner_id = worker.get("owner_id") or worker.get("user_id") or ""
+    if str(owner_id) != str(auth.user_id):
         raise HTTPException(status_code=403, detail="forbidden")
 
     repos.workers.set_visibility(worker_id=worker_id, visibility=visibility)
@@ -443,7 +444,8 @@ async def cloud_generate_clone_link(worker_id: str, request: Request) -> Any:
     worker = repos.workers.get_any(worker_id=worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="worker not found")
-    if str(worker.get("user_id", "")) != str(auth.user_id):
+    owner_id = worker.get("owner_id") or worker.get("user_id") or ""
+    if str(owner_id) != str(auth.user_id):
         raise HTTPException(status_code=403, detail="forbidden")
 
     raw_token = "wct_" + _secrets.token_urlsafe(32)
