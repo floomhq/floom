@@ -162,14 +162,48 @@ def list_catalog_apps(
         if cached and now - cached[0] < _CATALOG_TTL_SECONDS:
             return cached[1]
 
-    data = _get_with_retry(
-        "/toolkits",
-        limit=limit,
-        cursor=_catalog_cursor(page, limit),
-        search=normalized_search or None,
-        category=normalized_category or None,
-    )
+    # Composio /toolkits rejects a `search` shorter than 3 chars with a 400
+    # ("Search query must be at least 3 characters long"), which previously
+    # surfaced to the Browse grid as a dead-end 502. For 1-2 char queries we do
+    # NOT forward the term; we fetch the page unfiltered and substring-filter it
+    # locally so short queries still narrow without ever 400/502-ing upstream.
+    upstream_search = normalized_search if len(normalized_search) >= 3 else None
+    local_filter = normalized_search.lower() if normalized_search and upstream_search is None else None
+
+    try:
+        data = _get_with_retry(
+            "/toolkits",
+            limit=limit,
+            cursor=_catalog_cursor(page, limit),
+            search=upstream_search,
+            category=normalized_category or None,
+        )
+    except requests.exceptions.HTTPError as exc:
+        # Never dead-end the Browse grid on an upstream catalog error: degrade to
+        # an unfiltered fetch (+ local filter). If even that fails, return an
+        # empty page rather than bubbling a 502 — and don't cache the failure.
+        logger.warning("Composio catalog query failed (%s); degrading to unfiltered", exc)
+        try:
+            data = _get_with_retry(
+                "/toolkits",
+                limit=limit,
+                cursor=_catalog_cursor(page, limit),
+                search=None,
+                category=normalized_category or None,
+            )
+            local_filter = normalized_search.lower() or local_filter
+        except requests.exceptions.HTTPError:
+            return {
+                "items": [], "page": page, "limit": limit,
+                "total_items": 0, "total_pages": 1, "next_page": None, "categories": [],
+            }
+
     items = [_normalize_catalog_item(item) for item in data.get("items") or []]
+    if local_filter:
+        items = [
+            it for it in items
+            if local_filter in it["name"].lower() or local_filter in it["slug"].lower()
+        ]
     categories = sorted({cat for item in items for cat in item["categories"]})
     total_items = int(data.get("total_items") or len(items))
     total_pages = int(data.get("total_pages") or 1)
