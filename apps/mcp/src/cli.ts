@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join, resolve } from "node:path";
@@ -244,7 +244,19 @@ export async function main(argv = process.argv): Promise<void> {
   await program.parseAsync(argv);
 }
 
-const executedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+function resolveExecutedPath(argv1?: string): string {
+  if (!argv1) return "";
+  const absolute = resolve(argv1);
+  // npm installs bins as symlinks (node_modules/.bin/workeros -> ../@floomhq/workeros/dist/cli.js).
+  // import.meta.url is always the real module path, so compare against the resolved symlink target.
+  try {
+    return realpathSync(absolute);
+  } catch {
+    return absolute;
+  }
+}
+
+const executedPath = resolveExecutedPath(process.argv[1]);
 if (executedPath && fileURLToPath(import.meta.url) === executedPath) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
