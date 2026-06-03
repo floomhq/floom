@@ -5,7 +5,7 @@
  * - Members only see their own private workers + all shared workers
  */
 import { test, expect } from "@playwright/test";
-import { API, adminHeaders, memberHeaders, WORKSPACE_ID } from "./api.helpers";
+import { API, adminHeaders, memberHeaders, WORKSPACE_ID, MEMBER_USER_ID } from "./api.helpers";
 
 test.describe("Worker visibility field", () => {
   test("admin workers list includes visibility on all items", async ({ request }) => {
@@ -32,16 +32,16 @@ test.describe("Worker visibility field", () => {
     expect(shared.length).toBeGreaterThan(0);
   });
 
-  test("member cannot see admin private workers", async ({ request }) => {
-    const adminRes = await request.get(`${API}/workers?shape=list`, { headers: adminHeaders() });
+  test("member cannot see other users' private workers", async ({ request }) => {
     const memberRes = await request.get(`${API}/workers?shape=list`, { headers: memberHeaders() });
-    const adminWorkers = await adminRes.json() as { id: string; visibility: string }[];
-    const memberWorkers = await memberRes.json() as { id: string; visibility: string }[];
-    const adminPrivateIds = new Set(adminWorkers.filter(w => w.visibility === "private").map(w => w.id));
-    const memberIds = new Set(memberWorkers.map((w: { id: string }) => w.id));
-    // No admin-private worker should appear in member's list
-    for (const id of adminPrivateIds) {
-      expect(memberIds.has(id)).toBe(false);
+    expect(memberRes.status()).toBe(200);
+    const memberWorkers = await memberRes.json() as { id: string; visibility: string; owner_id?: string }[];
+    // Every private worker in member's list must belong to the member themselves.
+    // Members cannot see other users' private workers — only shared workers or their own.
+    for (const w of memberWorkers) {
+      if (w.visibility === "private") {
+        expect(w.owner_id).toBe(MEMBER_USER_ID);
+      }
     }
   });
 

@@ -183,18 +183,27 @@ def _override_create_run_for_members() -> None:
 
     def _cloud_create_run(worker_id, inputs, trigger_source="manual", *, status, user_id, repos, **kw):
         role = get_active_member_role()
+        # Pop trigger_member_id before forwarding — engine's create_run has no **kwargs.
+        trigger_member_id = kw.pop("trigger_member_id", None)
         if role and role != "admin":
             try:
                 svc = get_supabase_service_client()
                 row = svc.table("workers").select("user_id").eq("id", worker_id).limit(1).execute()
                 if row.data:
-                    # Record the original member's user_id for attribution before
-                    # substituting the owner's id to satisfy the runs FK.
-                    kw.setdefault("trigger_member_id", user_id)
+                    if trigger_member_id is None:
+                        trigger_member_id = user_id
                     user_id = row.data[0]["user_id"]
             except Exception:
                 pass
-        return _orig(worker_id, inputs, trigger_source, status=status, user_id=user_id, repos=repos, **kw)
+        run_id = _orig(worker_id, inputs, trigger_source, status=status, user_id=user_id, repos=repos, **kw)
+        # Post-create: stamp trigger_member_id on the run row (engine doesn't accept it).
+        if trigger_member_id and run_id:
+            try:
+                svc = get_supabase_service_client()
+                svc.table("runs").update({"trigger_member_id": trigger_member_id}).eq("id", run_id).execute()
+            except Exception:
+                pass
+        return run_id
 
     _cloud_create_run._workeros_cloud_patched = True  # type: ignore[attr-defined]
     engine_main.create_run = _cloud_create_run

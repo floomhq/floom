@@ -184,21 +184,21 @@ async def workers_list_visibility_middleware(request: Request, call_next):
                 def _fetch_vis():
                     from apps.api.config import get_supabase_service_client
                     svc = get_supabase_service_client()
-                    rows = svc.table("workers").select("id,visibility").in_("id", worker_ids).execute()
-                    return {r["id"]: r.get("visibility") or "private" for r in (rows.data or [])}
+                    rows = svc.table("workers").select("id,visibility,user_id").in_("id", worker_ids).execute()
+                    return {r["id"]: {"visibility": r.get("visibility") or "private", "owner_id": r.get("user_id")} for r in (rows.data or [])}
 
                 vis_map = await _asyncio.to_thread(_fetch_vis)
                 for w in data:
                     if isinstance(w, dict) and w.get("id"):
-                        w["visibility"] = vis_map.get(w["id"], "private")
+                        meta = vis_map.get(w["id"], {})
+                        w["visibility"] = meta.get("visibility", "private")
+                        w["owner_id"] = meta.get("owner_id")
                 body = _json.dumps(data).encode()
     except Exception:
         pass
 
     from starlette.responses import Response as _StResponse
-    headers = dict(response.headers)
-    headers["content-length"] = str(len(body))
-    return _StResponse(content=body, status_code=response.status_code, headers=headers, media_type="application/json")
+    return _StResponse(content=body, status_code=response.status_code, media_type="application/json")
 
 
 @app.middleware("http")

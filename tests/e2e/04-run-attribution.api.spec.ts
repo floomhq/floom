@@ -4,28 +4,17 @@
  * - Runs list should include trigger_member_email for those runs
  */
 import { test, expect } from "@playwright/test";
-import { API, adminHeaders, memberHeaders, WORKSPACE_ID } from "./api.helpers";
+import { API, adminHeaders, memberHeaders, WORKSPACE_ID, SHARED_WORKER_ID } from "./api.helpers";
 
 test.describe("Run attribution (trigger_member_id)", () => {
-  let sharedWorkerId: string | null = null;
   let triggeredRunId: string | null = null;
 
-  test.beforeAll(async ({ request }) => {
-    // Find a shared worker to trigger as member
-    const res = await request.get(`${API}/workers?shape=list`, { headers: memberHeaders() });
-    const workers = await res.json() as { id: string; visibility: string; name: string }[];
-    const shared = workers.find(w => w.visibility === "shared");
-    sharedWorkerId = shared?.id ?? null;
-  });
-
   test("member can trigger shared worker", async ({ request }) => {
-    if (!sharedWorkerId) { test.skip(); return; }
-
-    const res = await request.post(`${API}/workers/${sharedWorkerId}/run`, {
+    // Engine endpoint is /workers/{id}/runs (plural)
+    const res = await request.post(`${API}/workers/${SHARED_WORKER_ID}/runs`, {
       headers: memberHeaders(),
       data: { inputs: {} },
     });
-    // 200 or 201 means run was queued
     expect([200, 201]).toContain(res.status());
     const body = await res.json();
     expect(body).toHaveProperty("run_id");
