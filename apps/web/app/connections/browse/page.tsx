@@ -3,13 +3,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
   Loader2,
   Search,
+  Wrench,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
-import type { IntegrationCatalogItem, IntegrationCatalogResponse } from "@/lib/types";
+import type { CatalogToolItem, IntegrationCatalogItem, IntegrationCatalogResponse } from "@/lib/types";
 
 const PAGE_SIZE = 30;
 
@@ -78,7 +79,7 @@ function CatalogSkeleton() {
       {Array.from({ length: PAGE_SIZE }).map((_, index) => (
         <div
           key={index}
-          className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]"
+          className="flex min-h-[172px] flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]"
         >
           <div className="flex items-center gap-3">
             <Skeleton className="h-10 w-10 rounded-[var(--radius-button)]" />
@@ -87,16 +88,21 @@ function CatalogSkeleton() {
               <Skeleton className="h-3 w-14" />
             </div>
           </div>
-          <div className="pt-4">
+          <div className="flex-1 pt-4">
             <Skeleton className="h-3 w-full" />
             <Skeleton className="mt-2 h-3 w-2/3" />
           </div>
-          <Skeleton className="h-7 w-full rounded-[var(--radius-button)]" />
+          <div className="pt-4">
+            <Skeleton className="h-7 w-full rounded-[var(--radius-button)]" />
+          </div>
         </div>
       ))}
     </>
   );
 }
+
+// Cache fetched tools per slug to avoid re-fetching on re-render.
+const _toolsCache: Map<string, CatalogToolItem[]> = new Map();
 
 function CatalogCard({
   item,
@@ -107,8 +113,37 @@ function CatalogCard({
   connecting: boolean;
   onConnect: (slug: string) => void;
 }) {
+  const [showTools, setShowTools] = useState(false);
+  const [tools, setTools] = useState<CatalogToolItem[] | null>(null);
+  const [loadingTools, setLoadingTools] = useState(false);
+  const fetchedRef = useRef(false);
+
+  function handleToggleTools(e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = !showTools;
+    setShowTools(next);
+    // Fetch once on first open
+    if (next && !fetchedRef.current) {
+      fetchedRef.current = true;
+      const cached = _toolsCache.get(item.slug);
+      if (cached) {
+        setTools(cached);
+        return;
+      }
+      setLoadingTools(true);
+      api.integrations
+        .catalogTools(item.slug)
+        .then((data) => {
+          _toolsCache.set(item.slug, data);
+          setTools(data);
+        })
+        .catch(() => setTools([]))
+        .finally(() => setLoadingTools(false));
+    }
+  }
+
   return (
-    <article className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[border-color,box-shadow,transform] duration-150 ease-[var(--ease)] hover:-translate-y-px hover:border-[var(--accent-line)] hover:shadow-md">
+    <article className="flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[border-color,box-shadow,transform] duration-150 ease-[var(--ease)] hover:-translate-y-px hover:border-[var(--accent-line)] hover:shadow-md">
       <div className="flex min-w-0 items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-2)]">
           <img
@@ -121,36 +156,81 @@ function CatalogCard({
         </div>
         <div className="min-w-0">
           {/* P2-8 (audit 2026-05-29): dropped the dev-facing Composio toolkit
-              slug ("Gmail / gmail"). The slug is internal plumbing and only
-              added noise. The human name now gets two lines so it no longer
-              truncates ("Google Calen…" → "Google Calendar"). */}
+              slug. The human name now gets two lines so it no longer truncates. */}
           <h2 className="line-clamp-2 text-sm font-semibold text-ink">{item.name}</h2>
         </div>
       </div>
 
-      <div className="min-w-0 pt-4">
-        <p className="truncate text-sm text-[var(--ink-soft)]">{shortDescription(item)}</p>
-        {item.categories[0] ? (
-          <Badge variant="outline" className="mt-3 max-w-full truncate text-[11px]">
-            {item.categories[0].replaceAll("-", " ")}
-          </Badge>
-        ) : null}
+      <div className="min-w-0 flex-1 pt-3">
+        <p className="line-clamp-2 text-sm text-[var(--ink-soft)]">{shortDescription(item)}</p>
+
+        {/* Tool preview (G6) — shown when expanded */}
+        {showTools && (
+          <div className="mt-3 space-y-1.5">
+            {loadingTools ? (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Loading tools…
+              </div>
+            ) : tools && tools.length > 0 ? (
+              tools.map((tool) => (
+                <div key={tool.name} className="flex items-start gap-1.5">
+                  <Wrench className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="text-xs leading-snug text-[var(--ink-soft)]">
+                    <span className="font-medium text-ink">{tool.name}</span>
+                    {tool.description ? (
+                      <span className="ml-1 text-muted-foreground">
+                        — {tool.description.slice(0, 80)}{tool.description.length > 80 ? "…" : ""}
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+              ))
+            ) : tools !== null ? (
+              <p className="text-xs text-muted-foreground">No tool details available.</p>
+            ) : null}
+          </div>
+        )}
       </div>
 
-      {/* S29p: was variant=default (saturated blue). With 15+ apps on the
-          page that's 15 "primary actions" — ChatGPT principle 11 calls for
-          one. Now outline; the catalog grid IS the page, each tile a peer. */}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="w-full"
-        disabled={connecting}
-        onClick={() => onConnect(item.slug)}
-      >
-        {connecting ? <Loader2 className="animate-spin" /> : <ExternalLink />}
-        {connecting ? "Opening..." : "Connect"}
-      </Button>
+      {/* Footer: category badge + tools toggle + connect button */}
+      <div className="pt-3 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {item.categories[0] ? (
+            <Badge variant="outline" className="max-w-full truncate text-[11px]">
+              {item.categories[0].replaceAll("-", " ")}
+            </Badge>
+          ) : null}
+          {item.tools_count > 0 ? (
+            <button
+              type="button"
+              onClick={handleToggleTools}
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                showTools
+                  ? "border-[var(--accent-line)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                  : "border-[var(--border-default)] text-muted-foreground hover:border-[var(--accent-line)] hover:text-[var(--accent)]"
+              }`}
+              title={showTools ? "Hide tools" : "Preview tools"}
+            >
+              <Wrench className="h-2.5 w-2.5" />
+              {item.tools_count} tools
+            </button>
+          ) : null}
+        </div>
+
+        {/* S29p: outline variant keeps grid-of-peers visual weight balanced */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="w-full"
+          disabled={connecting}
+          onClick={() => onConnect(item.slug)}
+        >
+          {connecting ? <Loader2 className="animate-spin" /> : <ExternalLink />}
+          {connecting ? "Opening..." : "Connect"}
+        </Button>
+      </div>
     </article>
   );
 }
@@ -260,7 +340,7 @@ export default function ConnectionsBrowsePage() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search Gmail, Slack, Notion..."
-            className="h-9 pl-8 pr-8"
+            className="h-11 pl-8 pr-8 sm:h-9"
             aria-label="Search integrations"
           />
           {search ? (
@@ -296,7 +376,7 @@ export default function ConnectionsBrowsePage() {
         </div>
       </section>
 
-      <section className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-3">
+      <section className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] items-start gap-3">
         {loading ? (
           <CatalogSkeleton />
         ) : loadError ? (

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { KeyRound, TestTube2, Trash2, Plus, Check, X } from "lucide-react";
+import { KeyRound, TestTube2, Trash2, Plus, Check, X, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import type { SecretItem } from "@/lib/types";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
@@ -21,6 +21,9 @@ export default function SecretsPage() {
     </Suspense>
   );
 }
+
+// How many "used by" workers to show before truncating on mobile
+const USED_BY_INITIAL_COUNT = 2;
 
 function SecretsContent() {
   // S24: ?prefill=NAME from /connections/browse -> opens add form pre-filled.
@@ -37,6 +40,8 @@ function SecretsContent() {
   const [updatingName, setUpdatingName] = useState<string | null>(null);
   const [updatingValue, setUpdatingValue] = useState("");
   const [deletingName, setDeletingName] = useState<string | null>(null);
+  // Track which secrets have their "used by" list expanded on mobile
+  const [expandedUsedBy, setExpandedUsedBy] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     try {
@@ -153,32 +158,35 @@ function SecretsContent() {
             <CardTitle className="text-sm font-medium">Add new secret</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex gap-3 flex-wrap">
+            {/* Mobile-first: stack vertically, min h-11 (44px) touch targets */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Input
                 placeholder="SECRET_NAME"
                 value={addingName}
                 onChange={(e) => setAddingName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
-                className="font-mono text-sm w-[220px] border-border"
+                className="h-11 font-mono text-sm sm:h-9 sm:w-[220px] border-border"
               />
               <Input
                 type="password"
                 placeholder="Value (write-only)"
                 value={addingValue}
                 onChange={(e) => setAddingValue(e.target.value)}
-                className="text-sm flex-1 border-border"
+                className="h-11 text-sm sm:h-9 sm:flex-1 border-border"
                 onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
               />
-              <Button onClick={handleAdd} disabled={saving} size="sm" className="gap-1">
-                <Check className="w-4 h-4" />
-                {saving ? "Saving..." : "Save"}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => { setAddingOpen(false); setAddingName(""); setAddingValue(""); }}
-              >
-                <X className="w-4 h-4" />
-              </Button>
+              <div className="flex gap-2">
+                <Button onClick={handleAdd} disabled={saving} size="sm" className="h-11 flex-1 gap-1 sm:h-9 sm:flex-none">
+                  <Check className="w-4 h-4" />
+                  {saving ? "Saving..." : "Save"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-11 px-3 sm:h-9 sm:px-2"
+                  onClick={() => { setAddingOpen(false); setAddingName(""); setAddingValue(""); }}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -213,121 +221,164 @@ function SecretsContent() {
               </Button>
             </div>
           ) : (
-            secrets.map((s) => (
-              <div key={s.name} className="space-y-2">
-                <div className="flex items-center justify-between p-3 rounded-lg hover:bg-[var(--active-nav-bg)] transition-colors">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <KeyRound className="w-4 h-4 text-muted-foreground shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium font-mono">{s.name}</p>
-                      {s.used_by.length > 0 && (
-                        <p className="text-xs text-muted-foreground">Used by: {s.used_by.join(", ")}</p>
+            secrets.map((s) => {
+              const usedByExpanded = expandedUsedBy.has(s.name);
+              const usedByVisible = usedByExpanded
+                ? s.used_by
+                : s.used_by.slice(0, USED_BY_INITIAL_COUNT);
+              const usedByHidden = s.used_by.length - USED_BY_INITIAL_COUNT;
+
+              return (
+                <div key={s.name} className="space-y-2">
+                  {/* min-h-[44px] ensures the row itself is a comfortable touch target */}
+                  <div className="flex items-start justify-between gap-2 rounded-lg p-3 hover:bg-[var(--active-nav-bg)] transition-colors min-h-[44px]">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <KeyRound className="mt-0.5 w-4 h-4 text-muted-foreground shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium font-mono truncate">{s.name}</p>
+                        {s.used_by.length > 0 && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            <span className="opacity-70">Used by: </span>
+                            {usedByVisible.join(", ")}
+                            {!usedByExpanded && usedByHidden > 0 ? (
+                              <button
+                                type="button"
+                                className="ml-1 inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-foreground"
+                                onClick={() =>
+                                  setExpandedUsedBy((prev) => {
+                                    const next = new Set(prev);
+                                    next.add(s.name);
+                                    return next;
+                                  })
+                                }
+                              >
+                                +{usedByHidden} more
+                                <ChevronDown className="h-2.5 w-2.5" />
+                              </button>
+                            ) : usedByExpanded && s.used_by.length > USED_BY_INITIAL_COUNT ? (
+                              <button
+                                type="button"
+                                className="ml-1 inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-foreground"
+                                onClick={() =>
+                                  setExpandedUsedBy((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(s.name);
+                                    return next;
+                                  })
+                                }
+                              >
+                                show less
+                              </button>
+                            ) : null}
+                          </p>
+                        )}
+                        {s.last_checked_at && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Checked {formatRelativeTime(s.last_checked_at)}
+                            {s.last_check_status && (
+                              <span
+                                className={
+                                  s.last_check_status === "valid"
+                                    ? " text-emerald-600 font-medium"
+                                    : " text-red-500 font-medium"
+                                }
+                              >
+                                {" "}&middot; {s.last_check_status}
+                              </span>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {/* Action buttons: min 44px touch targets on mobile via padding */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {testResults[s.name] && (
+                        <Badge
+                          variant="outline"
+                          className={
+                            testResults[s.name].status === "valid"
+                              ? "text-emerald-600 border-emerald-200 bg-emerald-50 text-xs hidden sm:inline-flex"
+                              : "text-red-600 border-red-200 bg-red-50 text-xs hidden sm:inline-flex"
+                          }
+                          title={testResults[s.name].reason}
+                        >
+                          {testResults[s.name].status === "valid" ? "Valid" : "Invalid"}
+                        </Badge>
                       )}
-                      {s.last_checked_at && (
-                        <p className="text-xs text-muted-foreground">
-                          Checked {formatRelativeTime(s.last_checked_at)}
-                          {s.last_check_status && (
-                            <span
-                              className={
-                                s.last_check_status === "valid"
-                                  ? " text-emerald-600 font-medium"
-                                  : " text-red-500 font-medium"
-                              }
-                            >
-                              {" "}&middot; {s.last_check_status}
-                            </span>
-                          )}
-                        </p>
+                      {/* S29v: only show pill when state needs attention. */}
+                      {s.status !== "set" && (
+                        <Badge
+                          variant="outline"
+                          className="text-red-600 border-red-200 bg-red-50 text-xs"
+                        >
+                          Missing
+                        </Badge>
                       )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="min-h-[44px] min-w-[44px] px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-0 sm:min-w-0 sm:h-7"
+                        onClick={() => handleTest(s.name)}
+                        disabled={testingName === s.name}
+                        title="Test this secret"
+                      >
+                        <TestTube2 className="w-3.5 h-3.5 sm:mr-1" />
+                        <span className="hidden sm:inline">{testingName === s.name ? "Testing..." : "Test"}</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="min-h-[44px] px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-0 sm:h-7"
+                        onClick={() => {
+                          setUpdatingName(updatingName === s.name ? null : s.name);
+                          setUpdatingValue("");
+                        }}
+                        title="Update value"
+                      >
+                        <span className="hidden sm:inline">Update</span>
+                        <span className="sm:hidden text-xs">Edit</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="min-h-[44px] min-w-[44px] px-2 text-xs text-red-500 hover:text-red-700 sm:min-h-0 sm:min-w-0 sm:h-7"
+                        onClick={() => handleDelete(s.name)}
+                        disabled={deletingName === s.name}
+                        title="Remove secret"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {testResults[s.name] && (
-                      <Badge
-                        variant="outline"
-                        className={
-                          testResults[s.name].status === "valid"
-                            ? "text-emerald-600 border-emerald-200 bg-emerald-50 text-xs"
-                            : "text-red-600 border-red-200 bg-red-50 text-xs"
-                        }
-                        title={testResults[s.name].reason}
-                      >
-                        {testResults[s.name].status === "valid" ? "Valid" : "Invalid"}
-                      </Badge>
-                    )}
-                    {/* S29v: only show pill when state needs attention.
-                        Default-success ("Set") was decoration per
-                        ChatGPT audit P-2. */}
-                    {s.status !== "set" && (
-                      <Badge
-                        variant="outline"
-                        className="text-red-600 border-red-200 bg-red-50"
-                      >
-                        Missing
-                      </Badge>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() => handleTest(s.name)}
-                      disabled={testingName === s.name}
-                      title="Test this secret"
-                    >
-                      <TestTube2 className="w-3.5 h-3.5 mr-1" />
-                      {testingName === s.name ? "Testing..." : "Test"}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() => {
-                        setUpdatingName(updatingName === s.name ? null : s.name);
-                        setUpdatingValue("");
-                      }}
-                      title="Update value"
-                    >
-                      Update
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-red-500 hover:text-red-700"
-                      onClick={() => handleDelete(s.name)}
-                      disabled={deletingName === s.name}
-                      title="Remove secret"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
+                  {updatingName === s.name && (
+                    <div className="flex flex-col gap-2 pb-2 pl-7 sm:flex-row sm:pl-10">
+                      <Input
+                        type="password"
+                        placeholder="New value (write-only)"
+                        value={updatingValue}
+                        onChange={(e) => setUpdatingValue(e.target.value)}
+                        className="h-11 text-sm border-border sm:h-8 sm:flex-1"
+                        onKeyDown={(e) => { if (e.key === "Enter") handleUpdate(s.name); if (e.key === "Escape") setUpdatingName(null); }}
+                        autoFocus
+                      />
+                      <div className="flex gap-2">
+                        <Button onClick={() => handleUpdate(s.name)} disabled={saving} size="sm" className="h-11 flex-1 gap-1 sm:h-8 sm:flex-none">
+                          <Check className="w-3.5 h-3.5" />
+                          {saving ? "..." : "Save"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="h-11 px-3 sm:h-8 sm:px-2"
+                          onClick={() => { setUpdatingName(null); setUpdatingValue(""); }}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                {updatingName === s.name && (
-                  <div className="flex gap-2 pl-10 pb-2">
-                    <Input
-                      type="password"
-                      placeholder="New value (write-only)"
-                      value={updatingValue}
-                      onChange={(e) => setUpdatingValue(e.target.value)}
-                      className="text-sm flex-1 border-border h-8"
-                      onKeyDown={(e) => { if (e.key === "Enter") handleUpdate(s.name); if (e.key === "Escape") setUpdatingName(null); }}
-                      autoFocus
-                    />
-                    <Button onClick={() => handleUpdate(s.name)} disabled={saving} size="sm" className="h-8 gap-1">
-                      <Check className="w-3.5 h-3.5" />
-                      {saving ? "..." : "Save"}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8"
-                      onClick={() => { setUpdatingName(null); setUpdatingValue(""); }}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </section>
