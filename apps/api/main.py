@@ -7810,6 +7810,82 @@ def _validate_worker_file_path(path: str) -> None:
         raise HTTPException(status_code=400, detail=f"file path must be relative: {path!r}")
 
 
+def _clone_protected_worker_for_edit(
+    worker_id: str,
+    edited_files: List[WorkerFilePatch],
+    *,
+    user_id: str,
+    repos: "Repositories",
+) -> str:
+    """Fork a read-only stock worker into a user-owned editable copy (clone-on-edit).
+
+    Stock/example workers (``PROTECTED_STOCK_WORKER_IDS``) are git-tracked shared
+    templates: writing the operator's edit back into the stock worker dir would
+    corrupt the template for every user. Instead of erroring, the FIRST edit of a
+    stock worker transparently creates a copy the operator owns, applies the edit
+    to the copy, and returns the new id so the caller keeps working on "their"
+    version.
+
+    ``edited_files`` is the operator's already-mutated bundle (e.g. worker.yml
+    with the new ``contexts`` / ``connections`` block). It is overlaid on the
+    stock worker's source files (so files the editor did not send — run.py,
+    SKILL.md, lib/* — are carried over), the manifest identity is rewritten to a
+    free id (``<id>-copy``, ``-copy-2``, ...), and the bundle is registered via
+    the shared ``_register_worker_from_files`` path. The stock template on disk is
+    never touched.
+
+    Returns the new worker id.
+    """
+    from worker_registry import WORKERS_DIR
+
+    # Source-of-truth files for the stock worker (the bundle the editor was viewing).
+    stock = _get_visible_worker(worker_id, user_id=user_id, repos=repos)
+    if not stock:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    try:
+        stock_config = WorkerConfig(**(stock.get("config") or {}))
+    except Exception:
+        stock_config = None
+    base_files: Dict[str, str] = {}
+    if stock_config is not None:
+        try:
+            bundle_dir = _worker_bundle_dir(worker_id, stock_config)
+            for wf in _read_worker_files(bundle_dir):
+                if not wf.binary and wf.content is not None:
+                    base_files[wf.path] = wf.content
+        except Exception:
+            base_files = {}
+    if not base_files:
+        # DB-backed worker with no on-disk bundle: fall back to the manifest view.
+        for wf in _worker_files_from_manifest(stock):
+            if not wf.binary and wf.content is not None:
+                base_files[wf.path] = wf.content
+
+    # Overlay the operator's edited files on top of the stock bundle.
+    for item in edited_files:
+        base_files[item.path] = item.content
+
+    worker_yml = base_files.get("worker.yml")
+    if not worker_yml:
+        raise HTTPException(status_code=400, detail="files must include worker.yml")
+
+    # Allocate a free, non-protected id and rewrite the manifest identity so the
+    # new dir + worker.yml + DB row all agree. _register_worker_from_files parses
+    # the manifest id eagerly (and re-rejects protected ids), so the rewrite MUST
+    # happen before registration.
+    new_id = _free_worker_id(f"{worker_id}-copy", repos=repos)
+    base_files["worker.yml"] = _rewrite_worker_yml_id(worker_yml, new_id)
+
+    draft_files = [DraftFile(path=path, content=content) for path, content in base_files.items()]
+    created_id = _register_worker_from_files(
+        draft_files,
+        user_id=user_id,
+        repos=repos,
+        dedupe_id=True,
+    )
+    return created_id
+
+
 @app.put("/workers/{worker_id}/files", response_model=WorkerDetail)
 def update_worker_files(
     worker_id: str,
@@ -7828,10 +7904,38 @@ def update_worker_files(
     """
     from worker_registry import WORKERS_DIR
 
-    _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+
+    if not payload.files:
+        raise HTTPException(status_code=400, detail="files list must not be empty")
+
+    # Validate all paths upfront before touching the filesystem (also gates the
+    # clone-on-edit path below — a stock fork must not carry invalid paths).
+    seen_paths: set = set()
+    for item in payload.files:
+        _validate_worker_file_path(item.path)
+        if item.path in seen_paths:
+            raise HTTPException(status_code=400, detail=f"duplicate file path: {item.path!r}")
+        seen_paths.add(item.path)
+
+    # Stock/example workers are read-only shared templates: instead of erroring on
+    # a brain attach / tool add, transparently fork the worker into a user-owned
+    # editable copy and apply the edit there (clone-on-edit). The response carries
+    # `cloned_from` + a different `id` so the UI redirects to the new worker.
+    if worker_id in PROTECTED_STOCK_WORKER_IDS:
+        if "worker.yml" not in seen_paths:
+            raise HTTPException(status_code=400, detail="files must include worker.yml")
+        new_id = _clone_protected_worker_for_edit(
+            worker_id,
+            payload.files,
+            user_id=auth.user_id,
+            repos=repos,
+        )
+        detail = _build_worker_detail(new_id, user_id=auth.user_id, repos=repos)
+        detail.cloned_from = worker_id
+        return detail
 
     config_dict = worker.get("config") or {}
     try:
@@ -7848,17 +7952,6 @@ def update_worker_files(
             raise
         except Exception:
             target_dir = WORKERS_DIR / worker_id
-
-    if not payload.files:
-        raise HTTPException(status_code=400, detail="files list must not be empty")
-
-    # Validate all paths upfront before touching the filesystem
-    seen_paths: set = set()
-    for item in payload.files:
-        _validate_worker_file_path(item.path)
-        if item.path in seen_paths:
-            raise HTTPException(status_code=400, detail=f"duplicate file path: {item.path!r}")
-        seen_paths.add(item.path)
 
     # Must include worker.yml
     if "worker.yml" not in seen_paths:
