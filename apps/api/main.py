@@ -11129,6 +11129,52 @@ def list_connections(
     return result
 
 
+@app.get("/connections/by-app/{app_name}")
+def get_connection_for_app(
+    app_name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the live connection (if any) for ``app_name``.
+
+    Powers the "Already connected as <email>" state on the connect screen so a
+    user who re-clicks Connect on an app they already authorized is shown the
+    existing account + a Reconnect option, instead of silently kicking off a
+    fresh OAuth round-trip that would spawn a duplicate connected account.
+    """
+    slug = (app_name or "").lower().strip()
+    if not slug:
+        return {"connected": False}
+
+    def _is_live(status: object) -> bool:
+        return str(status or "").lower() in ("active", "valid", "connected")
+
+    rows = repos.connections.list(user_id=auth.user_id)
+    matches = [
+        r
+        for r in rows
+        if (r.get("kind") or "composio") == "composio"
+        and str(r.get("app_name") or "").lower() == slug
+        and _is_live(r.get("status"))
+    ]
+    if not matches:
+        return {"connected": False}
+
+    accounts = [
+        {
+            "id": r["id"],
+            "account_label": r.get("account_label") or None,
+            "status": str(r.get("status") or "").lower(),
+        }
+        for r in matches
+    ]
+    return {
+        "connected": True,
+        "app_name": slug,
+        "accounts": accounts,
+    }
+
+
 @app.post("/connections", response_model=ConnectionInitResponse)
 def initiate_connection(
     payload: ConnectionInitRequest,
@@ -11237,6 +11283,13 @@ def connections_callback(connection_id: str = "", status: str = ""):
     """
     from fastapi.responses import RedirectResponse
 
+    frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    # The floom UUID of the row the user should land on / see highlighted, plus
+    # the app slug, are forwarded to the connections page for post-connect
+    # feedback ("Connected <App> as <email>"). Filled in below once known.
+    landing_id = ""
+    landing_app = ""
+
     if connection_id:
         repos = get_repositories()
         existing = repos.connections.get_by_composio_connection_id(
@@ -11245,8 +11298,10 @@ def connections_callback(connection_id: str = "", status: str = ""):
 
         # Ignore unknown callback IDs; known IDs are validated by persisted state.
         if not existing:
-            frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
             return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
+
+        landing_id = existing["id"]
+        landing_app = existing.get("app_name") or ""
 
         # Try to refresh from Composio first
         try:
@@ -11269,8 +11324,88 @@ def connections_callback(connection_id: str = "", status: str = ""):
             updated_at=now,
         )
 
-    frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
-    return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
+        # N5-1 dedupe: now that the OAuth round-trip is complete we can learn the
+        # real account identity (e.g. the Gmail address) from Composio. If the
+        # user just re-authorized an app+account they had ALREADY connected, an
+        # older canonical row for the same (user, app, account_label) exists.
+        # Merge into it — repoint that row at the fresh composio_connection_id
+        # and refresh its status — then delete THIS freshly-created reconnect
+        # row, so the (app, account) pair always collapses to a single row.
+        landing_id, landing_app = _dedupe_connection_account(
+            repos=repos,
+            row=existing,
+            connection_id=connection_id,
+            final_status=final_status,
+            now=now,
+        )
+
+    redirect_qs = "connected=1"
+    if landing_app:
+        redirect_qs += f"&app={urllib.parse.quote(landing_app)}"
+    if landing_id:
+        redirect_qs += f"&connection_id={urllib.parse.quote(landing_id)}"
+    return RedirectResponse(url=f"{frontend_url}/connections?{redirect_qs}")
+
+
+def _dedupe_connection_account(
+    *,
+    repos: Any,
+    row: Dict[str, Any],
+    connection_id: str,
+    final_status: str,
+    now: str,
+) -> tuple[str, str]:
+    """Collapse a reconnect into the canonical (user, app, account) row.
+
+    Returns ``(landing_floom_id, app_name)`` — the floom UUID the connections
+    page should highlight (the surviving canonical row) and its app slug. On any
+    failure it degrades gracefully to the row that was passed in.
+    """
+    user_id = row["user_id"]
+    app_name = row.get("app_name") or ""
+    new_id = row["id"]
+    landing_id = new_id
+    try:
+        info = _fetch_composio_account_info(connection_id, user_id=user_id)
+        account_label = (info.get("email") or "").strip()
+        if not account_label:
+            return landing_id, app_name
+
+        # Cache the freshly learned identity on this row regardless of merge.
+        repos.connections.update(
+            user_id=user_id,
+            composio_id=new_id,
+            account_label=account_label,
+            scopes_json=info.get("scopes") or [],
+            updated_at=now,
+        )
+
+        canonical = repos.connections.find_by_app_account(
+            user_id=user_id,
+            app_name=app_name,
+            account_label=account_label,
+            exclude_id=new_id,
+        )
+        if not canonical:
+            # First time this (app, account) is seen — the new row IS canonical.
+            return new_id, app_name
+
+        # Re-point the older canonical row at the new live Composio account and
+        # refresh its status + scopes, then drop the duplicate just created.
+        repos.connections.update(
+            user_id=user_id,
+            composio_id=canonical["id"],
+            composio_connection_id=connection_id,
+            status=final_status,
+            account_label=account_label,
+            scopes_json=info.get("scopes") or [],
+            updated_at=now,
+        )
+        repos.connections.delete(user_id=user_id, composio_id=new_id)
+        landing_id = canonical["id"]
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Connection dedupe failed for %s: %s", connection_id, exc)
+    return landing_id, app_name
 
 
 @app.get(

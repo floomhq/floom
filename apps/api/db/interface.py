@@ -204,6 +204,15 @@ class ConnectionRepository(Protocol):
 
     def get_by_composio_connection_id(self, *, composio_connection_id: str) -> RowDict | None: ...
 
+    def find_by_app_account(
+        self,
+        *,
+        user_id: str,
+        app_name: str,
+        account_label: str,
+        exclude_id: str | None = None,
+    ) -> RowDict | None: ...
+
     def upsert(self, *, user_id: str, **fields: Any) -> RowDict: ...
 
     def update(self, *, user_id: str, composio_id: str, **fields: Any) -> RowDict | None: ...

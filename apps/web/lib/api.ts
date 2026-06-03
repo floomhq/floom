@@ -439,6 +439,11 @@ export const api = {
         method: "POST",
         body: JSON.stringify(payload),
       }),
+    byApp: (app_name: string) =>
+      fetchJson<import("./types").AppConnectionState>(
+        `/connections/by-app/${encodeURIComponent(app_name)}`,
+        { cache: "no-store" }
+      ),
     status: (id: string) =>
       fetchJson<import("./types").ConnectionItem>(`/connections/${id}/status`),
     delete: (id: string) =>

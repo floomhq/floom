@@ -1341,6 +1341,46 @@ class SqliteConnectionRepository:
             ).fetchone()
         return _row_dict(row) if row else None
 
+    def find_by_app_account(
+        self,
+        *,
+        user_id: str,
+        app_name: str,
+        account_label: str,
+        exclude_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the canonical composio connection for an (app, account) pair.
+
+        Dedupe key for N5-1: reconnecting the SAME app + SAME account (by
+        normalized account_label, e.g. the Gmail address) must reuse the
+        existing row rather than spawning a duplicate. Returns the OLDEST
+        matching row (the canonical one) so repeated reconnects always merge
+        into a single, stable connection id. ``exclude_id`` skips the freshly
+        created reconnect row so it is never matched against itself.
+        """
+        label = (account_label or "").strip().lower()
+        if not label:
+            return None
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {self._columns}
+                FROM composio_connections
+                WHERE user_id = ?
+                  AND LOWER(app_name) = LOWER(?)
+                  AND (kind IS NULL OR kind = 'composio')
+                  AND LOWER(TRIM(COALESCE(account_label, ''))) = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (user_id, app_name, label),
+            ).fetchall()
+        for row in rows:
+            record = _row_dict(row)
+            if exclude_id is not None and record.get("id") == exclude_id:
+                continue
+            return record
+        return None
+
     def upsert(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         connection_id = fields["id"]
         app_name = fields["app_name"]
