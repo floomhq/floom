@@ -657,6 +657,18 @@ export interface ConnectionInitResponse {
   composio_connection_id: string;
 }
 
+export interface ConnectedAccountSummary {
+  id: string;
+  account_label?: string | null;
+  status: string;
+}
+
+export interface AppConnectionState {
+  connected: boolean;
+  app_name?: string;
+  accounts?: ConnectedAccountSummary[];
+}
+
 export interface SupportedApp {
   slug: string;
   display_name: string;
