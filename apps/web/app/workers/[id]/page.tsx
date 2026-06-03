@@ -484,17 +484,43 @@ export default function WorkerDetailPage() {
   // externally (back/forward navigation, deep link, direct paste), the
   // activeSection state stayed at its initial value and the tabs got out
   // of sync with the URL. Listen to hashchange + popstate to re-sync.
+  //
+  // N2-2 (2026-06-03): clicking an in-app link to /workers/<id>#runs while
+  // ALREADY on the worker page (e.g. from #about) didn't switch tabs. Next's
+  // App Router performs hash-only same-route navigation via history.pushState,
+  // which fires NEITHER `hashchange` NOR `popstate`, so the listeners below
+  // never saw it. Patch pushState/replaceState to emit a synthetic event so
+  // the live in-page switch works too. The patch is scoped to this effect and
+  // fully restored on unmount.
   useEffect(() => {
     const sync = () => {
       const h = window.location.hash.replace(/^#/, "");
       const next = hashToSection(h);
       if (next && next !== activeSection) setActiveSection(next);
     };
+    const EVT = "workeros:locationchange";
+    const origPush = window.history.pushState;
+    const origReplace = window.history.replaceState;
+    const emit = () => window.dispatchEvent(new Event(EVT));
+    window.history.pushState = function (...args) {
+      const r = origPush.apply(this, args as Parameters<typeof origPush>);
+      emit();
+      return r;
+    };
+    window.history.replaceState = function (...args) {
+      const r = origReplace.apply(this, args as Parameters<typeof origReplace>);
+      emit();
+      return r;
+    };
     window.addEventListener("hashchange", sync);
     window.addEventListener("popstate", sync);
+    window.addEventListener(EVT, sync);
     return () => {
+      window.history.pushState = origPush;
+      window.history.replaceState = origReplace;
       window.removeEventListener("hashchange", sync);
       window.removeEventListener("popstate", sync);
+      window.removeEventListener(EVT, sync);
     };
   }, [activeSection]);
 
@@ -1862,7 +1888,10 @@ export default function WorkerDetailPage() {
           no scroll. Wrapping the `w-fit` list directly restores the swipe. */}
       <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
         <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
-          <TabsList>
+          {/* E2: the shared TabsList is h-8 (32px) — below the 44px touch
+              minimum. Bump the bar (and via h-full each trigger) to ≥44px on
+              mobile only; desktop keeps the tight 32px height. */}
+          <TabsList className="h-11 min-h-11 sm:h-8 sm:min-h-0">
             {NAV_ITEMS.map((item, i) => {
               // Divider at the view→setup group boundary: extra gap + a hairline
               // rule so the 7 tabs read as two short clusters in one row. Every

@@ -592,14 +592,14 @@ function ApprovalsContent() {
     // their full-width rhythm; the approval list keeps a comfortable reading
     // column internally below.
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--ink)]">Approvals</h1>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
             Workers waiting for your decision before executing.
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 sm:shrink-0">
           {/* Standalone full-page review of all pending approvals — the
               /approvals/review route renders chrome-free (no dashboard sidebar)
               and steps through every pending item. Opens in a new tab so it can
