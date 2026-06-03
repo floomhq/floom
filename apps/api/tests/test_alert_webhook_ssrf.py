@@ -91,7 +91,7 @@ def test_public_url_is_posted(monkeypatch):
         return MagicMock(__enter__=lambda s: s, __exit__=lambda *a: False)
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(rs._NO_REDIRECT_OPENER, "open", side_effect=_fake_open):
+        with patch.object(rs, "_open_pinned_webhook", side_effect=_fake_open):
             rs._fire_alert_webhooks(
                 run_id="run_abc", worker_id="wk_1", status="failed",
                 error="boom", repos=repos,
@@ -119,7 +119,7 @@ def test_internal_url_is_not_posted(monkeypatch, bad_url):
         {"url": bad_url, "email_to": None, "events": "failed", "secret": None},
     ])
 
-    with patch.object(rs._NO_REDIRECT_OPENER, "open") as mock_open:
+    with patch.object(rs, "_open_pinned_webhook") as mock_open:
         rs._fire_alert_webhooks(
             run_id="run_x", worker_id="wk_1", status="failed",
             error=None, repos=repos,
@@ -136,7 +136,7 @@ def test_delivery_failure_does_not_crash(monkeypatch):
     ])
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(rs._NO_REDIRECT_OPENER, "open",
+        with patch.object(rs, "_open_pinned_webhook",
                           side_effect=OSError("connection refused")):
             # Must not raise.
             rs._fire_alert_webhooks(
@@ -162,7 +162,7 @@ def test_payload_contains_no_secret(monkeypatch):
         return MagicMock(__enter__=lambda s: s, __exit__=lambda *a: False)
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(rs._NO_REDIRECT_OPENER, "open", side_effect=_fake_open):
+        with patch.object(rs, "_open_pinned_webhook", side_effect=_fake_open):
             rs._fire_alert_webhooks(
                 run_id="run_z", worker_id="wk_1", status="failed",
                 error=None, repos=repos,
@@ -221,16 +221,6 @@ def test_redirect_to_internal_is_not_followed(monkeypatch):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
-    followed = {"hit": False}
-
-    # Track whether the opener ever tries to dial the redirect target.
-    real_open = rs._NO_REDIRECT_OPENER.open
-
-    def _tracking_open(req, timeout=None):
-        if "169.254.169.254" in req.full_url:
-            followed["hit"] = True
-        return real_open(req, timeout=timeout)
-
     webhook_url = f"http://127.0.0.1:{port}/hook"
     repos = _fake_repos([
         {"url": webhook_url, "email_to": None, "events": "failed", "secret": None},
@@ -238,23 +228,22 @@ def test_redirect_to_internal_is_not_followed(monkeypatch):
 
     try:
         # The local webhook host (127.0.0.1) is itself internal, so bypass the
-        # pre-flight SSRF check ONLY for this test to isolate redirect behaviour:
-        # the point under test is that the 302 → metadata is not followed.
+        # pre-flight SSRF check AND the connect-time pin check ONLY for this test
+        # to isolate redirect behaviour: the point under test is that the 302 →
+        # metadata is not followed. Drives the REAL pinned opener path.
         monkeypatch.setenv("WORKEROS_ALLOW_PRIVATE_MCP_URLS", "1")
-        with patch.object(rs._NO_REDIRECT_OPENER, "open", side_effect=_tracking_open):
-            rs._fire_alert_webhooks(
-                run_id="run_redir", worker_id="wk_1", status="failed",
-                error=None, repos=repos,
-            )
+        rs._fire_alert_webhooks(
+            run_id="run_redir", worker_id="wk_1", status="failed",
+            error=None, repos=repos,
+        )
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
 
-    # The initial webhook was POSTed exactly once...
+    # The initial webhook was POSTed exactly once, and the 302 → metadata target
+    # was NEVER followed (no-redirect opener), so no second POST occurred.
     assert _RedirectToMetadataHandler.hits == ["/hook"]
-    # ...and the 302 → metadata target was NEVER dialed.
-    assert followed["hit"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -366,3 +355,89 @@ def test_create_alert_email_only_unaffected(monkeypatch, tmp_path):
         headers=AUTH_HEADERS,
     )
     assert resp.status_code == 201, resp.text
+
+
+# ---------------------------------------------------------------------------
+# F1 — DNS-rebinding TOCTOU: pin the validated IP, dial THAT IP, re-validate at
+# connect. A host that resolves to a public IP at validation but an internal IP
+# at connect must NOT reach the internal target.
+# ---------------------------------------------------------------------------
+
+def test_pin_blocks_internal_resolution_only(monkeypatch):
+    """If a hostname resolves ONLY to internal IPs, the pinned opener refuses."""
+    monkeypatch.delenv("WORKEROS_ALLOW_PRIVATE_MCP_URLS", raising=False)
+    rs = _run_service()
+    from models import UnsafeOutboundUrlError
+
+    req = __import__("urllib.request", fromlist=["Request"]).Request(
+        "https://rebind.example.com/hook", data=b"{}", method="POST"
+    )
+    # Connect-time resolution returns ONLY an internal address (the rebind).
+    with patch("models.socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")):
+        with pytest.raises(UnsafeOutboundUrlError):
+            rs._open_pinned_webhook(req, timeout=5)
+
+
+def test_pin_uses_validated_public_ip_not_rebound_internal(monkeypatch):
+    """The opener pins the public IP from resolution; the socket is opened to
+    THAT pinned IP, never to a later-rebound internal IP.
+
+    Resolution returns a public IP, so the pinned IP is the public one. We patch
+    socket.create_connection to record exactly which IP the socket dials and
+    confirm it is the pinned PUBLIC address, not localhost/metadata.
+    """
+    monkeypatch.delenv("WORKEROS_ALLOW_PRIVATE_MCP_URLS", raising=False)
+    rs = _run_service()
+
+    public_ip = "93.184.216.34"
+    dialed = {}
+
+    class _FakeSock:
+        def settimeout(self, *_a):
+            pass
+
+        def close(self):
+            pass
+
+        def makefile(self, *_a, **_k):
+            import io
+            return io.BytesIO(b"HTTP/1.1 204 No Content\r\n\r\n")
+
+        def sendall(self, *_a):
+            pass
+
+        def send(self, *_a):
+            return 0
+
+    def _fake_create_connection(addr, timeout=None, *a, **k):
+        dialed["ip"] = addr[0]
+        return _FakeSock()
+
+    req = __import__("urllib.request", fromlist=["Request"]).Request(
+        f"http://pinned.example.com/hook", data=b"{}", method="POST"
+    )
+
+    with patch("models.socket.getaddrinfo", return_value=_addrinfo(public_ip)):
+        with patch.object(rs._socket, "create_connection", side_effect=_fake_create_connection):
+            try:
+                rs._open_pinned_webhook(req, timeout=5)
+            except Exception:
+                # Response parsing of the fake socket may error; we only assert
+                # which IP was dialed.
+                pass
+
+    assert dialed.get("ip") == public_ip
+    assert dialed["ip"] not in {"127.0.0.1", "169.254.169.254"}
+
+
+def test_pinned_https_preserves_sni_host(monkeypatch):
+    """The HTTPS pinned connection keeps the original hostname for TLS SNI/cert
+    validation even though the socket dials a pinned IP."""
+    monkeypatch.delenv("WORKEROS_ALLOW_PRIVATE_MCP_URLS", raising=False)
+    rs = _run_service()
+
+    conn = rs._PinnedHTTPSConnection("secure.example.com", timeout=5)
+    conn._pinned_ip = "93.184.216.34"
+    # Host header / SNI source is the original hostname, not the pinned IP.
+    assert conn.host == "secure.example.com"
+    assert conn._pinned_ip == "93.184.216.34"

@@ -3663,28 +3663,23 @@ _ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifact
 
 
 def _increment_file_ref_counts(file_ids: List[str]) -> None:
-    """Increment file ref_counts in one short transaction tolerant of run bursts."""
+    """Increment file ref_counts in one short transaction tolerant of run bursts.
+
+    Uses ``get_db()`` so the DB path is resolved dynamically from the configured
+    ``WORKEROS_DB``/``FLOOM_DB`` env (the canonical resolution every other read
+    path uses), instead of the module-import-time ``DB_PATH`` global. The stale
+    global could diverge from the live path (deploy-dir swaps / test suites that
+    re-pin the DB), silently writing ref_count updates to the wrong database.
+    """
     if not file_ids:
         return
-    db_dir = os.path.dirname(DB_PATH)
-    if db_dir:
-        os.makedirs(db_dir, exist_ok=True)
     counts = collections.Counter(file_ids)
-    conn = sqlite3.connect(DB_PATH, timeout=30, detect_types=sqlite3.PARSE_DECLTYPES)
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 30000")
+    with get_db() as conn:
         for file_id, count in counts.items():
             conn.execute(
                 "UPDATE files SET ref_count = ref_count + ? WHERE id = ?",
                 (count, file_id),
             )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
 
 
 def _resolve_file_input_references(
@@ -4270,6 +4265,110 @@ def download_upload(
         media_type=media_type,
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.delete("/uploads/{file_id}", status_code=204)
+def delete_upload(
+    file_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """Owner-scoped delete of an uploaded blob.
+
+    F4 (2026-06-03): uploaded blobs (approval screenshots, file inputs) with
+    ``ref_count = 0`` previously lingered on disk forever — no cleanup route
+    existed, so orphaned blobs accumulated. This route lets an owner release a
+    blob and GCs it when it is truly unreferenced.
+
+    Semantics (blobs are content-addressed + can be shared across owners and
+    bound to runs):
+      - The caller MUST own the file (file_owners row, or legacy uploaded_by).
+      - The caller's ownership is dropped.
+      - The physical blob + files row are deleted ONLY when no owners remain AND
+        ``ref_count == 0`` (i.e. not bound to any run). If another owner holds it
+        or a run still references it, the blob is kept; the caller simply no
+        longer owns it.
+
+    Returns 204 on success (idempotent for the caller's own ownership);
+    404 if the caller does not own the file (no existence oracle for others'
+    files — same 404 as a genuinely-missing file).
+    """
+    if not is_sha256(file_id):
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+
+    user_id = auth.user_id or "anonymous"
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT ref_count FROM files WHERE id = ? LIMIT 1",
+            (file_id,),
+        ).fetchone()
+        if row is None or not _user_owns_uploaded_file(conn, file_id, user_id):
+            raise HTTPException(status_code=404, detail="Uploaded file not found")
+
+        # Drop the caller's ownership (both the explicit row and any legacy
+        # uploaded_by anchor that made them an owner).
+        conn.execute(
+            "DELETE FROM file_owners WHERE file_id = ? AND user_id = ?",
+            (file_id, user_id),
+        )
+        conn.execute(
+            "UPDATE files SET uploaded_by = NULL WHERE id = ? AND COALESCE(uploaded_by, 'anonymous') = ?",
+            (file_id, user_id),
+        )
+
+        remaining_owners = conn.execute(
+            "SELECT 1 FROM file_owners WHERE file_id = ? LIMIT 1",
+            (file_id,),
+        ).fetchone()
+        ref_count = int(row["ref_count"] or 0)
+
+        if remaining_owners is None and ref_count <= 0:
+            # No owners + not bound to any run → safe to GC the blob + row.
+            conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+            _delete_blob_file(file_id)
+
+    return Response(status_code=204)
+
+
+def _delete_blob_file(file_id: str) -> None:
+    """Best-effort removal of a content-addressed blob from disk."""
+    try:
+        path = blob_path(file_id)
+    except ValueError:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Failed to remove orphan blob %s: %s", file_id, exc)
+
+
+def _gc_orphan_blobs(*, limit: int = 500) -> int:
+    """Sweep ``ref_count = 0`` blobs that also have NO owners, deleting the row
+    and the on-disk blob. Returns the number of blobs reclaimed.
+
+    Idempotent + bounded. Safe to call from a periodic sweep. Blobs that are
+    still bound to a run (ref_count > 0) or still owned by anyone are left
+    untouched.
+    """
+    reclaimed = 0
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT f.id AS id
+            FROM files f
+            WHERE COALESCE(f.ref_count, 0) <= 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM file_owners o WHERE o.file_id = f.id
+              )
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        for row in rows:
+            fid = row["id"]
+            conn.execute("DELETE FROM files WHERE id = ?", (fid,))
+            _delete_blob_file(fid)
+            reclaimed += 1
+    return reclaimed
 
 
 # ---------------------------------------------------------------------------
@@ -9032,6 +9131,19 @@ def _approval_public_token(approval: Dict[str, Any]) -> str:
     ).hexdigest()
 
 
+# F3 (2026-06-03): the public approval endpoints must NOT leak which approval
+# ids exist. Returning 404 for "no such approval" but 401 for "exists but bad
+# token" is an existence oracle: an attacker can enumerate valid approval ids by
+# diffing the status codes. We return the SAME response for both — a missing
+# approval and a present-but-wrong-token approval are indistinguishable. We also
+# always run an HMAC comparison (against a dummy expected value when the row is
+# missing) so the two paths do roughly the same work and don't open a coarse
+# timing oracle either.
+_PUBLIC_APPROVAL_DENIED = HTTPException(
+    status_code=401, detail="Invalid or expired approval link"
+)
+
+
 def _load_public_approval(
     approval_id: str,
     token: str,
@@ -9039,10 +9151,14 @@ def _load_public_approval(
 ) -> Dict[str, Any]:
     approval = repos.approvals.get_public(approval_id=approval_id)
     if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
+        # Burn an equivalent HMAC compare so a missing approval and a
+        # present-but-wrong-token approval are indistinguishable (no oracle).
+        hmac.compare_digest(token or "", "0" * 64)
+        raise _PUBLIC_APPROVAL_DENIED
     expected = _approval_public_token(dict(approval))
     if not token or not hmac.compare_digest(token, expected):
-        raise HTTPException(status_code=401, detail="Invalid approval link")
+        # Identical response to the not-found case — no existence oracle.
+        raise _PUBLIC_APPROVAL_DENIED
     return dict(approval)
 
 
@@ -11840,6 +11956,30 @@ def connections_callback(connection_id: str = "", status: str = ""):
             composio_connection_id=connection_id,
         )
 
+        # F2 (2026-06-03) — connection-existence timing oracle: ACCEPTED.
+        #
+        # The lookup above is an indexed, parameterized SQL equality (`= ?`), not
+        # a per-character string comparison, so there is NO classic
+        # non-constant-time secret-compare oracle here. The only observable
+        # difference between a known and an unknown connection_id is control
+        # flow: a KNOWN id triggers a downstream Composio `check_status` network
+        # round-trip + DB writes (slow), while an UNKNOWN id returns immediately
+        # (fast). The RESPONSE is identical in both cases (the same
+        # `?connected=1` redirect below), so only a coarse timing signal remains.
+        #
+        # We accept this residual timing oracle rather than forcing constant time
+        # because:
+        #   1. The id space is unguessable — Composio connection ids are random
+        #      high-entropy `ca_*` handles, so an attacker cannot meaningfully
+        #      enumerate them via timing.
+        #   2. This is an intentionally UNAUTHENTICATED OAuth-callback landing
+        #      (Composio redirects the browser here); padding it to constant time
+        #      would mean either always doing the slow remote call (a DoS amp /
+        #      SSRF-ish lever for unauth callers) or never doing it (breaking the
+        #      legitimate post-OAuth status refresh). Both are worse than the
+        #      low-value timing leak they would close.
+        # If the id space ever becomes guessable, revisit and pad the hit path.
+        #
         # Ignore unknown callback IDs; known IDs are validated by persisted state.
         if not existing:
             return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
