@@ -385,6 +385,56 @@ class McpToolRepository(Protocol):
     def delete(self, *, user_id: str, tool_id: str) -> bool: ...
 
 
+class WorkspaceMemberRepository(Protocol):
+    """Workspace-level RBAC membership.
+
+    Roles: owner / admin / member. Status: active / invited / removed.
+    On the OSS single-owner engine this collapses to exactly one active owner
+    row per workspace; Cloud implements the same Protocol against Supabase with
+    RLS keyed off these rows. ``actor_id`` is the user performing a mutation, so
+    implementations enforce the permission matrix (only owner changes roles /
+    transfers ownership; owner+admin invite/remove members; admin cannot target
+    owner/admin) rather than trusting the caller.
+    """
+
+    def list(self, *, workspace_id: str) -> list[RowDict]: ...
+
+    def get(self, *, workspace_id: str, user_id: str) -> RowDict | None: ...
+
+    def invite(self, *, workspace_id: str, email: str, role: str, invited_by: str) -> RowDict: ...
+
+    def set_role(self, *, workspace_id: str, actor_id: str, user_id: str, role: str) -> RowDict | None: ...
+
+    def remove(self, *, workspace_id: str, actor_id: str, user_id: str) -> bool: ...
+
+    def transfer_owner(self, *, workspace_id: str, actor_id: str, new_owner_id: str) -> RowDict: ...
+
+
+class AssetAccessRepository(Protocol):
+    """Per-asset visibility + computed permissions.
+
+    ``get_permissions`` resolves the (can_edit/can_run/can_delete/can_share)
+    matrix for ``user_id`` against an asset, combining the asset's owner_id +
+    visibility with the user's workspace role. ``set_visibility`` flips an
+    asset between private / workspace (specific_people reserved). On the OSS
+    single-owner engine the actor is always the owner, so every permission is
+    granted for their own assets and private assets stay invisible to non-owners.
+    ``asset_type`` is currently ``"worker"`` (brain/assistant land in later steps).
+    """
+
+    def get_permissions(
+        self, *, workspace_id: str, user_id: str, asset_type: str, asset_id: str
+    ) -> RowDict: ...
+
+    def set_visibility(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, visibility: str
+    ) -> RowDict | None: ...
+
+    def transfer_asset_owner(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, new_owner_id: str
+    ) -> RowDict | None: ...
+
+
 class AlertRepository(Protocol):
     """Webhook and email alert registrations per-worker."""
 
