@@ -101,6 +101,56 @@ app = FastAPI(
 )
 
 
+import hashlib as _hashlib
+import re as _re
+_RE_WORKER_ID = _re.compile(r"^/api/workers/([^/]+)$")
+
+
+@app.middleware("http")
+async def member_write_guard(request: Request, call_next):
+    """Block member tokens from mutating workers they don't own (DELETE/PATCH)."""
+    import asyncio as _asyncio
+    if request.method in ("DELETE", "PATCH"):
+        m = _RE_WORKER_ID.match(request.url.path)
+        if m:
+            raw_token = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+            if raw_token:
+                worker_id = m.group(1)
+                token_hash = _hashlib.sha256(raw_token.encode()).hexdigest()
+
+                def _check():
+                    from apps.api.config import get_supabase_service_client
+                    from apps.api.db import workspaces as _ws_repo
+                    svc = get_supabase_service_client()
+                    tok_row = svc.table("api_tokens").select("user_id,workspace_id").eq("token_hash", token_hash).limit(1).execute()
+                    if not tok_row.data:
+                        return None  # let auth handle it
+                    user_id = tok_row.data[0]["user_id"]
+                    workspace_id = tok_row.data[0].get("workspace_id")
+                    if not workspace_id:
+                        return None
+                    ws = _ws_repo.get(workspace_id=workspace_id)
+                    if not ws or str(ws.get("owner_user_id")) == str(user_id):
+                        return None  # workspace owner — allow
+                    # Member: only allow if they own the worker
+                    w_row = svc.table("workers").select("user_id").eq("id", worker_id).eq("workspace_id", workspace_id).limit(1).execute()
+                    if not w_row.data:
+                        return None
+                    if str(w_row.data[0].get("user_id")) != str(user_id):
+                        return "403"
+                    return None
+
+                try:
+                    result = await _asyncio.to_thread(_check)
+                    if result == "403":
+                        from fastapi.responses import JSONResponse as _JSONResponse
+                        return _JSONResponse(status_code=403, content={"detail": "admin access required"})
+                except Exception:
+                    pass  # never block on unexpected errors
+
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def cloud_security_headers_middleware(request: Request, call_next):
     """Keep cloud-owned routes on the same security-header baseline as engine routes."""
