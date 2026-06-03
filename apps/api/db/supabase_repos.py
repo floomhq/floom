@@ -1257,12 +1257,37 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
 
 
 class SupabaseRunRepository(_BaseSupabaseRepository):
+    def _resolve_trigger_member_emails(self, user_ids: list[str]) -> dict[str, str]:
+        """Batch-look up emails for trigger_member_id values. Never raises."""
+        if not user_ids:
+            return {}
+        result: dict[str, str] = {}
+        try:
+            svc = get_supabase_service_client()
+            for uid in user_ids:
+                try:
+                    resp = svc.auth.admin.get_user_by_id(uid)
+                    if resp and resp.user and resp.user.email:
+                        result[uid] = resp.user.email
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return result
+
     def _decorate_run_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not rows:
             return []
         worker_name_map = SupabaseWorkerRepository(self._client)._worker_name_map(
             row["worker_id"] for row in rows
         )
+        # Batch-resolve trigger_member emails for attribution display.
+        member_ids = list({
+            str(row["trigger_member_id"])
+            for row in rows
+            if row.get("trigger_member_id")
+        })
+        member_email_map = self._resolve_trigger_member_emails(member_ids)
         result: list[dict[str, Any]] = []
         for row in rows:
             item = dict(row)
@@ -1271,6 +1296,8 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             if "output_json" in item:
                 item["output_json"] = _json_text(item.get("output_json"), {})
             item["worker_name"] = worker_name_map.get(str(item["worker_id"]))
+            mid = item.get("trigger_member_id")
+            item["trigger_member_email"] = member_email_map.get(str(mid)) if mid else None
             result.append(item)
         return result
 
@@ -1307,7 +1334,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
         builder = self._client.table("runs").select(
-            "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path",
+            "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id",
             count="exact",
         )
         builder = _scope_by_workspace(builder, user_id=user_id)
@@ -1329,7 +1356,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
 
     def get(self, *, user_id: str, run_id: str) -> dict[str, Any] | None:
         builder = self._client.table("runs").select(
-            "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path"
+            "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id"
         )
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.eq("id", run_id).limit(1).execute()
@@ -1374,30 +1401,31 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             explicit_workspace_id=fields.get("workspace_id"),
             worker_id=worker_id,
         )
-        self._client.table("runs").insert(
-            {
-                "id": run_id,
-                "user_id": user_id,
-                "workspace_id": workspace_id,
-                "worker_id": worker_id,
-                "status": fields.get("status") or RunStatus.QUEUED.value,
-                "trigger_source": fields.get("trigger_source") or "manual",
-                "runner": fields.get("runner") or "local",
-                "input_json": _json_storage_value(fields.get("input_json") or fields.get("inputs"), {}),
-                "output_json": _json_storage_value(fields.get("output_json"), {}),
-                "approval_status": fields.get("approval_status") or "not_required",
-                "error": fields.get("error"),
-                "started_at": fields.get("started_at"),
-                "completed_at": fields.get("completed_at"),
-                "duration_ms": fields.get("duration_ms"),
-                "created_at": fields.get("created_at") or datetime.now(timezone.utc).isoformat(),
-                "cancel_requested": bool(fields.get("cancel_requested", False)),
-                "cancelled_at": fields.get("cancelled_at"),
-                "bundle_snapshot_path": fields.get("bundle_snapshot_path"),
-                "retry_of_run_id": fields.get("retry_of_run_id"),
-                "retry_attempt": int(fields.get("retry_attempt") or 0),
-            }
-        ).execute()
+        insert_row: dict[str, Any] = {
+            "id": run_id,
+            "user_id": user_id,
+            "workspace_id": workspace_id,
+            "worker_id": worker_id,
+            "status": fields.get("status") or RunStatus.QUEUED.value,
+            "trigger_source": fields.get("trigger_source") or "manual",
+            "runner": fields.get("runner") or "local",
+            "input_json": _json_storage_value(fields.get("input_json") or fields.get("inputs"), {}),
+            "output_json": _json_storage_value(fields.get("output_json"), {}),
+            "approval_status": fields.get("approval_status") or "not_required",
+            "error": fields.get("error"),
+            "started_at": fields.get("started_at"),
+            "completed_at": fields.get("completed_at"),
+            "duration_ms": fields.get("duration_ms"),
+            "created_at": fields.get("created_at") or datetime.now(timezone.utc).isoformat(),
+            "cancel_requested": bool(fields.get("cancel_requested", False)),
+            "cancelled_at": fields.get("cancelled_at"),
+            "bundle_snapshot_path": fields.get("bundle_snapshot_path"),
+            "retry_of_run_id": fields.get("retry_of_run_id"),
+            "retry_attempt": int(fields.get("retry_attempt") or 0),
+        }
+        if fields.get("trigger_member_id"):
+            insert_row["trigger_member_id"] = fields["trigger_member_id"]
+        self._client.table("runs").insert(insert_row).execute()
         created = self.get(user_id=user_id, run_id=run_id)
         if created is None:
             raise RuntimeError(f"failed to create run {run_id}")

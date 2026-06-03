@@ -188,6 +188,9 @@ def _override_create_run_for_members() -> None:
                 svc = get_supabase_service_client()
                 row = svc.table("workers").select("user_id").eq("id", worker_id).limit(1).execute()
                 if row.data:
+                    # Record the original member's user_id for attribution before
+                    # substituting the owner's id to satisfy the runs FK.
+                    kw.setdefault("trigger_member_id", user_id)
                     user_id = row.data[0]["user_id"]
             except Exception:
                 pass
