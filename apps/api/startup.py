@@ -160,6 +160,42 @@ def _register_contexts_scope_resolver() -> None:
     engine_contexts.set_context_scope_resolver(get_active_workspace_id)
 
 
+def _override_create_run_for_members() -> None:
+    """Patch engine_main.create_run so members can trigger shared workers.
+
+    The runs table has a composite FK (worker_id, user_id) → workers(id, user_id).
+    When a member triggers a shared worker the member's user_id doesn't appear in
+    workers, so the insert would violate the FK. We substitute the worker owner's
+    user_id before the insert so the constraint is satisfied.
+
+    Must patch engine_main directly (not run_service) because engine/main.py
+    imports create_run into its own namespace at module load time.
+    """
+    from apps.api._engine import import_engine_module
+    from apps.api.auth.workspace_context import get_active_member_role
+    from apps.api.config import get_supabase_service_client
+
+    engine_main = import_engine_module("main")
+    if getattr(engine_main.create_run, "_workeros_cloud_patched", False):
+        return
+    _orig = engine_main.create_run
+
+    def _cloud_create_run(worker_id, inputs, trigger_source="manual", *, status, user_id, repos, **kw):
+        role = get_active_member_role()
+        if role and role != "admin":
+            try:
+                svc = get_supabase_service_client()
+                row = svc.table("workers").select("user_id").eq("id", worker_id).limit(1).execute()
+                if row.data:
+                    user_id = row.data[0]["user_id"]
+            except Exception:
+                pass
+        return _orig(worker_id, inputs, trigger_source, status=status, user_id=user_id, repos=repos, **kw)
+
+    _cloud_create_run._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    engine_main.create_run = _cloud_create_run
+
+
 def register_cloud_components() -> None:
     _activate_cloud_deploy()
     get_cloud_settings()
@@ -170,6 +206,7 @@ def register_cloud_components() -> None:
     apply_engine_overrides()
     apply_cloud_workspace_agent_overrides()
     _register_contexts_scope_resolver()
+    _override_create_run_for_members()
     # Run the real init_db() once so the engine's local SQLite DB has the
     # full schema. Several engine endpoints (draft_and_create_worker,
     # _persist_discovered_workers, etc.) bypass the Supabase repos and call
