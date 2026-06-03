@@ -3,15 +3,17 @@
 import { useEffect, useState } from "react";
 import { Lock, Users, ChevronDown, Check } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import type { AssetVisibility } from "@/lib/types";
 
 /**
@@ -128,36 +130,42 @@ export function AssetVisibilityControl({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={
-          <Button variant="outline" size="sm" disabled={saving} className="shrink-0">
-            <Icon className="size-3.5" />
-            {m.label}
-            <ChevronDown className="size-3.5 text-muted-foreground" />
-          </Button>
-        }
-      />
+        disabled={saving}
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          "shrink-0",
+        )}
+      >
+        <Icon className="size-3.5" />
+        {m.label}
+        <ChevronDown className="size-3.5 text-muted-foreground" />
+      </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel>{titleLabel ?? `${noun[0].toUpperCase()}${noun.slice(1)} visibility`}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {(["private", "workspace"] as const).map((key) => {
-          const im = VIS[key];
-          const ItemIcon = im.icon;
-          const active = value === key;
-          return (
-            <DropdownMenuItem
-              key={key}
-              onClick={() => void apply(key)}
-              className="flex-col items-start gap-0.5 py-2"
-            >
-              <span className="flex w-full items-center gap-1.5 text-sm font-medium">
-                <ItemIcon className="size-3.5" />
-                {im.label}
-                {active && <Check className="size-3.5 text-foreground ml-auto" />}
-              </span>
-              <span className="text-xs text-muted-foreground">{im.hint}</span>
-            </DropdownMenuItem>
-          );
-        })}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>
+            {titleLabel ?? `${noun[0].toUpperCase()}${noun.slice(1)} visibility`}
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {(["private", "workspace"] as const).map((key) => {
+            const im = VIS[key];
+            const ItemIcon = im.icon;
+            const active = value === key;
+            return (
+              <DropdownMenuItem
+                key={key}
+                onClick={() => void apply(key)}
+                className="flex-col items-start gap-0.5 py-2"
+              >
+                <span className="flex w-full items-center gap-1.5 text-sm font-medium">
+                  <ItemIcon className="size-3.5" />
+                  {im.label}
+                  {active && <Check className="size-3.5 text-foreground ml-auto" />}
+                </span>
+                <span className="text-xs text-muted-foreground">{im.hint}</span>
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
