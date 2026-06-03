@@ -64,25 +64,6 @@ function MembersNavLink({ pathname, onNavigate }: { pathname: string; onNavigate
   );
 }
 
-function SidebarSettingsLink({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
-  const active = pathname === "/settings" || pathname.startsWith("/settings/");
-  return (
-    <Link
-      href="/settings"
-      onClick={onNavigate}
-      className={cn(
-        "mx-3 mb-2 flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
-        active
-          ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
-          : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
-      )}
-    >
-      <Settings className="h-4 w-4" />
-      Settings
-    </Link>
-  );
-}
-
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -135,7 +116,6 @@ export function Sidebar() {
         <MembersNavLink pathname={pathname} />
         <div className="mt-auto pt-3 border-t border-[var(--border-soft)]">
           <WorkspaceSwitcher />
-          <SidebarSettingsLink pathname={pathname} />
         </div>
         <UserProfileFooter />
       </aside>
@@ -170,9 +150,8 @@ export function Sidebar() {
             </div>
             <div className="pt-3 border-t border-[var(--border-soft)]">
               <WorkspaceSwitcher />
-              <SidebarSettingsLink pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
-            <UserProfileFooter />
+            <UserProfileFooter onNavigate={() => setOpen(false)} />
           </aside>
         </div>
       )}
@@ -184,8 +163,14 @@ export function Sidebar() {
 // decodes the workeros_cloud_session cookie set by the cloud backend's
 // /auth/callback) and shows email + initial. Logout posts to the cloud
 // backend's /auth/logout (through the proxy) and bounces back to /login.
-function UserProfileFooter() {
+//
+// V8 (Federico 2026-06-02, engine ef0ef36): Settings is a small gear-icon
+// button inline on the name row, NOT a separate full-width SidebarSettingsLink.
+// This mirrors the engine UserProfileFooter; the Cloud seam adds the Supabase
+// account wiring + sign-out confirm dialog on top.
+function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
+  const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const isLoginPath = pathname === "/login" || pathname.startsWith("/login/") || pathname === "/app/login" || pathname.startsWith("/app/login/");
   const [email, setEmail] = useState<string | null>(null);
   const [signOutOpen, setSignOutOpen] = useState(false);
@@ -229,7 +214,7 @@ function UserProfileFooter() {
     }
   };
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-[var(--border-soft)] px-3 py-3">
+    <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
           {initial}
@@ -247,6 +232,20 @@ function UserProfileFooter() {
           </button>
         </div>
       </div>
+      <Link
+        href="/settings"
+        onClick={onNavigate}
+        aria-label="Settings"
+        title="Settings"
+        className={cn(
+          "inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150 ease-[var(--ease)]",
+          settingsActive
+            ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)]"
+            : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+        )}
+      >
+        <Settings className="size-4" />
+      </Link>
       <ThemeModeButton />
       <SignOutDialog
         open={signOutOpen}
