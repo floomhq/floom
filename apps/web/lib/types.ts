@@ -271,6 +271,10 @@ export interface WorkerDetail {
   // Owner-only signed share link to the standalone public worker page
   // (/w/<id>?token=<hmac>). Only present on the owner's authenticated fetch.
   public_link?: string;
+  // Set when an edit to a read-only stock worker transparently forked it into a
+  // user-owned editable copy (clone-on-edit). Carries the source stock worker id;
+  // the returned `id` is the NEW copy, so the UI redirects to it.
+  cloned_from?: string;
 }
 
 // Read-only allow-list projection of a worker returned by
