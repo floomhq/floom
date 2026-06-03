@@ -571,21 +571,14 @@ export const api = {
       }),
   },
   slack: {
+    // Read-only status (configured: true/false + installed workspaces). Slack
+    // app credentials are platform env, not user-entered; the only install path
+    // is "Add to Slack" (one-app OAuth) surfaced on the Assistant page.
     setupStatus: () =>
       fetchJson<import("./types").SlackSetupStatus>("/slack/setup/status", {
         cache: "no-store",
       }),
-    updateSetupConfig: (payload: {
-      client_id?: string;
-      client_secret?: string;
-      signing_secret?: string;
-      events_enabled?: boolean;
-    }) =>
-      fetchJson<import("./types").SlackSetupConfigResponse>("/slack/setup/config", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      }),
-    installUrl: (return_to = "/connections/slack") =>
+    installUrl: (return_to = "/assistant") =>
       fetchJson<import("./types").SlackInstallUrlResponse>("/slack/oauth/install", {
         method: "POST",
         body: JSON.stringify({ return_to }),

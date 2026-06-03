@@ -13861,33 +13861,23 @@ def slack_setup_config(
     payload: SlackSetupConfigRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> SlackSetupConfigResponse:
-    updates: Dict[str, str] = {}
-    if payload.client_id is not None:
-        updates["SLACK_CLIENT_ID"] = payload.client_id.strip()
-    if payload.client_secret is not None:
-        updates["SLACK_CLIENT_SECRET"] = payload.client_secret.strip()
-    if payload.signing_secret is not None:
-        updates["SLACK_SIGNING_SECRET"] = payload.signing_secret.strip()
-    if payload.events_enabled is not None:
-        updates["SLACK_EVENTS_ENABLED"] = "1" if payload.events_enabled else "0"
-
-    for name, value in updates.items():
-        if name not in SLACK_SETUP_ENV_ALLOWLIST:
-            raise HTTPException(status_code=400, detail=f"Unsupported Slack setup env var: {name}")
-        if not value and name != "SLACK_EVENTS_ENABLED":
-            raise HTTPException(status_code=400, detail=f"{name} cannot be empty")
-        _upsert_env_var(name, value)
-
-    return SlackSetupConfigResponse(
-        status="updated",
-        updated=sorted(updates),
-        setup=_slack_setup_status_for_user(auth.user_id),
+    # Locked: Slack app credentials (client id/secret/signing secret) are now
+    # provided by the platform as environment variables, not entered by users.
+    # The "Add to Slack" one-app OAuth flow (/slack/oauth/install ->
+    # /slack/oauth/callback) is the only supported install path. This endpoint
+    # is disabled to prevent per-user credential entry from the UI.
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Slack credentials are managed by the platform. Use 'Add to Slack' on "
+            "the Assistant to connect a workspace."
+        ),
     )
 
 
 @app.post("/slack/oauth/install", response_model=SlackInstallUrlResponse)
 def slack_oauth_install(
-    return_to: Optional[str] = Body(default="/connections/slack", embed=True),
+    return_to: Optional[str] = Body(default="/assistant", embed=True),
     auth: AuthContext = Depends(get_auth_context),
 ) -> SlackInstallUrlResponse:
     state, expires_at = _issue_slack_oauth_state(user_id=auth.user_id, return_to=return_to)
@@ -13903,9 +13893,9 @@ def slack_oauth_callback(code: str = "", state: str = "", error: str = ""):
 
     frontend_url = _frontend_base_url()
     if error:
-        return RedirectResponse(url=f"{frontend_url}/connections/slack?slack_error={urllib.parse.quote(error)}")
+        return RedirectResponse(url=f"{frontend_url}/assistant?slack_error={urllib.parse.quote(error)}")
     if not code or not state:
-        return RedirectResponse(url=f"{frontend_url}/connections/slack?slack_error=missing_code_or_state")
+        return RedirectResponse(url=f"{frontend_url}/assistant?slack_error=missing_code_or_state")
 
     state_payload = _consume_slack_oauth_state(state)
     installed_by_user_id = str(state_payload.get("user_id") or _bootstrap_user_id())
@@ -13940,8 +13930,8 @@ def slack_oauth_callback(code: str = "", state: str = "", error: str = ""):
         installed_by_user_id=installed_by_user_id,
     )
 
-    return_to = str(state_payload.get("return_to") or "/connections/slack")
-    safe_return_to = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/connections/slack"
+    return_to = str(state_payload.get("return_to") or "/assistant")
+    safe_return_to = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/assistant"
     return RedirectResponse(url=f"{frontend_url}{safe_return_to}?slack_connected=1&team_id={urllib.parse.quote(team_id)}")
 
 
