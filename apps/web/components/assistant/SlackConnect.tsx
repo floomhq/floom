@@ -75,7 +75,7 @@ export function SlackConnect() {
   async function addToSlack() {
     setConnecting(true);
     try {
-      const result = await api.slack.installUrl("/assistant");
+      const result = await api.slack.installUrl("/connections/slack");
       window.location.href = result.install_url;
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to start Slack install");
