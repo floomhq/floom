@@ -456,6 +456,55 @@ def test_canonicalize_preserves_command_only_node_worker_with_args_and_dotslash(
         assert out == cmd_yml, f"legit worker with command {cmd!r} was modified"
 
 
+def test_canonicalize_preserves_python_m_package_worker(booted):
+    """Codex P1 #6: a command-only worker 'python -m pkgworker' backed by
+    pkgworker/__main__.py (or pkgworker.py) must be recognised as legit and left
+    unchanged — not stripped into agent mode."""
+    chat_service = booted["chat_service"]
+    base = (
+        'schema_version: "0.3"\n'
+        'name: "pkgw"\n'
+        'title: "Pkg W"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  command: "python -m pkgworker"\n  runtime: "python311"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    # __main__.py layout
+    assert chat_service._canonicalize_emily_exec_command(
+        base, existing_files={"pkgworker/__main__.py"}
+    ) == base, "python -m pkg (__main__.py) worker was modified"
+    # module.py layout
+    assert chat_service._canonicalize_emily_exec_command(
+        base, existing_files={"pkgworker.py"}
+    ) == base, "python -m pkg (module.py) worker was modified"
+    # dotted module
+    dotted = base.replace("python -m pkgworker", "python -m pkg.worker")
+    assert chat_service._canonicalize_emily_exec_command(
+        dotted, existing_files={"pkg/worker.py"}
+    ) == dotted, "python -m pkg.worker worker was modified"
+
+
+def test_canonicalize_strips_python_m_when_module_absent(booted):
+    """A python -m command whose module is NOT on disk (orphaned / Emily heredoc-ish)
+    is still neutralised so the generated run.py executes."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+    base = (
+        'schema_version: "0.3"\n'
+        'name: "pkgorphan"\n'
+        'title: "Pkg Orphan"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  command: "python -m ghostmod"\n  runtime: "python311"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    parsed = _yaml.safe_load(
+        chat_service._canonicalize_emily_exec_command(base, existing_files=set())
+    )
+    assert "command" not in parsed["exec"], "orphaned python -m command survived"
+
+
 def test_canonicalize_preserves_legacy_runtime_entrypoint_node(booted):
     """Codex P1 #4: a legacy worker with runtime.entrypoint: run.js + runtime.command
     must be preserved when run.js is on disk (and _manifest_executes_run_py False)."""

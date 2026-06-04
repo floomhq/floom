@@ -988,6 +988,8 @@ def _canonicalize_emily_exec_command(
     if not isinstance(raw, dict):
         return yaml_text
 
+    import shlex as _shlex
+
     def _is_script_path(value: Any) -> bool:
         return isinstance(value, str) and value.strip().lower().endswith((".py", ".sh", ".js"))
 
@@ -996,42 +998,67 @@ def _canonicalize_emily_exec_command(
         v = value.strip()
         return v[2:] if v.startswith("./") else v
 
-    def _script_tokens(text: Any):
-        """Yield every script-looking token in a string (entry or command)."""
-        if not isinstance(text, str):
-            return
-        for tok in text.strip().split():
-            ref = _normalize_ref(tok)
-            if _is_script_path(ref):
-                yield ref
+    def _safe_split(text: str) -> list:
+        # shlex handles quoted paths; fall back to plain split on malformed quoting.
+        try:
+            return _shlex.split(text)
+        except Exception:
+            return text.split()
+
+    def _token_matches_source(tok: str) -> bool:
+        """A single command/entry token references real on-disk source."""
+        ref = _normalize_ref(tok)
+        if ref in existing:
+            return True
+        # `python -m pkg.mod` -> a token like "pkg.mod" backs onto pkg/mod.py or
+        # pkg/mod/__main__.py. Conservatively recognise both layouts so a legit
+        # package-entry worker is preserved (Codex P1: python -m pkgworker).
+        if ref and "/" not in ref and "." in ref:
+            mod_path = ref.replace(".", "/")
+            if f"{mod_path}.py" in existing or f"{mod_path}/__main__.py" in existing:
+                return True
+        elif ref and "/" not in ref:
+            if f"{ref}.py" in existing or f"{ref}/__main__.py" in existing:
+                return True
+        return False
 
     def _references_existing_source() -> bool:
-        """True iff ANY command/entry/entrypoint references a script file present on
-        disk — i.e. this is a legit authored worker we must leave alone."""
+        """True iff ANY command/entry/entrypoint references real source present on
+        disk — i.e. this is a legit authored worker we must leave entirely alone.
+        Handles bare entries, command-only (with args / ./ prefixes / quoting),
+        and `python -m <module>` package entries."""
         candidates: list = []
         for block_key in ("exec", "runtime"):
             block = raw.get(block_key)
             if isinstance(block, dict):
-                candidates.append(block.get("entry"))
-                candidates.append(block.get("entrypoint"))
-                candidates.append(block.get("command"))
-        candidates.append(raw.get("entrypoint"))
-        candidates.append(raw.get("command"))
-        for cand in candidates:
-            if not isinstance(cand, str):
+                candidates.append(("entry", block.get("entry")))
+                candidates.append(("entry", block.get("entrypoint")))
+                candidates.append(("command", block.get("command")))
+        candidates.append(("entry", raw.get("entrypoint")))
+        candidates.append(("command", raw.get("command")))
+        for kind, cand in candidates:
+            if not isinstance(cand, str) or not cand.strip():
                 continue
-            # A bare entry path, or any script token inside a command string.
-            ref = _normalize_ref(cand)
-            if _is_script_path(ref) and ref in existing:
-                return True
-            for tok in _script_tokens(cand):
-                if tok in existing:
+            if kind == "entry":
+                # A bare entry path references its own file directly.
+                if _token_matches_source(cand):
+                    return True
+                continue
+            # command: inspect every token (after the interpreter), incl. -m module.
+            tokens = _safe_split(cand)
+            for i, tok in enumerate(tokens):
+                # `-m <module>` form: check the following token as a module.
+                if tok == "-m" and i + 1 < len(tokens):
+                    if _token_matches_source(tokens[i + 1]):
+                        return True
+                if _token_matches_source(tok):
                     return True
         return False
 
     # LEGIT authored worker: its execution references real on-disk source. Do not
     # touch it — stripping/rewriting would break a hand-authored run.js / node /
-    # multi-file Python worker (Codex P1: command-only, args, ./run.js, runtime.*).
+    # multi-file / package Python worker (Codex P1: command-only, args, ./run.js,
+    # runtime.*, python -m pkg).
     if _references_existing_source():
         return yaml_text
 
