@@ -363,29 +363,10 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
   const content = file.content || "";
   const lang = file.language || detectLanguage(file.path);
 
-  // worker.yml: structured Summary vs raw YAML source — a real distinction.
-  if (hasWorkerYamlSummary(file.path, file.binary)) {
-    return (
-      <Tabs defaultValue="preview" className="bg-muted/20">
-        <div className="flex items-center justify-end gap-3 border-b border-line px-4 py-2">
-          <TabsList>
-            <TabsTrigger value="preview">Summary</TabsTrigger>
-            <TabsTrigger value="raw">Raw</TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent value="preview" className="m-0">
-          <RenderedFilePreview path={file.path} content={content} language={lang} />
-        </TabsContent>
-        <TabsContent value="raw" className="m-0">
-          <SourcePreviewToolbar path={file.path} content={content} label="Raw" />
-          <SyntaxHighlightedCode content={content} path={file.path} language={lang} />
-        </TabsContent>
-      </Tabs>
-    );
-  }
-
-  // markdown / html / table: rendered document vs source — a real distinction.
-  if (supportsRenderedPreview(file.path, file.binary)) {
+  // worker.yml and other rendered kinds (markdown / html / table): Preview + Raw.
+  // All source files with a rendered view use the same two-tab pattern — "Summary"
+  // was removed (Federico: "same as brain, fully aligned, consistent").
+  if (hasWorkerYamlSummary(file.path, file.binary) || supportsRenderedPreview(file.path, file.binary)) {
     return (
       <Tabs defaultValue="preview" className="bg-muted/20">
         <div className="flex items-center justify-end gap-3 border-b border-line px-4 py-2">
