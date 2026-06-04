@@ -124,9 +124,32 @@ def _fake_uppercase_driver(monkeypatch, run_service):
     monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _FakeDriver())
 
 
-def test_emily_created_worker_materializes_files_on_disk(booted):
+def _stub_smoke_gate(monkeypatch, run_service, workers_dir):
+    """Stub the codegen+E2B smoke/repair gate (network-bound, out of unit-test
+    scope). It mirrors what the real gate does for a placeholder worker: replace
+    the no-op run.py with real code, then report a clean verdict. ``_tool_workers_create``
+    imports ``smoke_and_gate_generated_worker`` from ``run_service`` lazily, so we
+    patch it on that module."""
+    def _fake_gate(worker_id, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        run_py = workers_dir / worker_id / "run.py"
+        run_py.write_text(
+            "import json\n"
+            "from pathlib import Path\n"
+            "inputs = json.loads(Path('inputs/input.json').read_text())\n"
+            "Path('result.json').write_text(json.dumps({'status': 'success', "
+            "'outputs': {'result': str(inputs.get('text', '')).upper()}, 'artifacts': []}))\n",
+            encoding="utf-8",
+        )
+        return {"status": "passed", "reason": None, "repairs": 1}
+
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _fake_gate)
+
+
+def test_emily_created_worker_materializes_files_on_disk(booted, monkeypatch):
     chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
     workers_dir = booted["workers_dir"]
+    _stub_smoke_gate(monkeypatch, run_service, workers_dir)
 
     result = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
     assert result["ok"] is True, result
@@ -145,6 +168,8 @@ def test_emily_created_worker_materializes_files_on_disk(booted):
 def test_emily_created_worker_runs_to_completion(booted, monkeypatch):
     chat_service = booted["chat_service"]
     run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_smoke_gate(monkeypatch, run_service, workers_dir)
     _fake_uppercase_driver(monkeypatch, run_service)
 
     created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
@@ -170,9 +195,11 @@ def test_emily_created_worker_runs_to_completion(booted, monkeypatch):
     assert output.get("result") == "HELLO WORLD", output
 
 
-def test_emily_update_writes_manifest_to_disk_and_keeps_run_py(booted):
+def test_emily_update_writes_manifest_to_disk_and_keeps_run_py(booted, monkeypatch):
     chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
     workers_dir = booted["workers_dir"]
+    _stub_smoke_gate(monkeypatch, run_service, workers_dir)
 
     created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
     assert created["ok"] is True, created
@@ -196,3 +223,27 @@ def test_emily_update_writes_manifest_to_disk_and_keeps_run_py(booted):
     # run.py must be preserved, not deleted by the update.
     assert run_py_path.is_file(), "run.py was deleted by update"
     assert "EMILY-MARKER" in run_py_path.read_text(encoding="utf-8")
+
+
+def test_emily_create_invokes_codegen_smoke_gate(booted, monkeypatch):
+    """Create must run the codegen smoke+repair gate so a real run.py is generated
+    from the manifest (a manifest with declared outputs + a no-op run.py fails at
+    run time with "Output schema violation" — this gate is what prevents that)."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+
+    calls: list = []
+
+    def _spy_gate(worker_id, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        calls.append({"worker_id": worker_id, "allow_code_repair": allow_code_repair})
+        return {"status": "passed", "reason": None, "repairs": 0}
+
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _spy_gate)
+
+    result = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    assert result["ok"] is True, result
+    assert len(calls) == 1, "smoke+repair gate was not invoked on create"
+    # Must allow run.py code repair (Path B behavior): the manifest carries no code.
+    assert calls[0]["allow_code_repair"] is True
+    assert calls[0]["worker_id"] == result["worker_id"]
+    assert result.get("smoke_status") == "passed"
