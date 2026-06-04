@@ -888,6 +888,143 @@ class TestApprovalRunLifecycle(unittest.TestCase):
 
 
 # ===========================================================================
+# Round-8 P2 hardening
+# ===========================================================================
+
+def _make_schedule_worker_yml(name: str, cron: str) -> str:
+    """Schedule-triggered worker YAML carrying a cron expression."""
+    return f"""schema_version: "0.3"
+name: {name}
+title: Test Schedule Worker {name}
+description: Auto-generated schedule worker for cron-validation tests.
+version: 0.1.0
+exec:
+  command: python run.py
+  runtime: python311
+  runner: local
+  inputs: []
+  outputs: []
+trigger:
+  type: schedule
+  cron: "{cron}"
+"""
+
+
+class TestRound8CronValidateAtCreate(unittest.TestCase):
+    """Fix 3: invalid cron in worker.yml is rejected at CREATE, not just PATCH."""
+
+    def setUp(self):
+        os.environ.pop("FLOOM_SECRET", None)
+
+    def test_invalid_cron_at_create_returns_422(self):
+        name = _unique_name("r8p2-cron-bad")
+        r = client.post(
+            "/workers",
+            json={"worker_yml": _make_schedule_worker_yml(name, "invalid"), "run_py": _RUN_PY},
+        )
+        # Pydantic ValidationError on the trigger.cron field -> 400 (schema
+        # validation) or 422; the create path maps schema errors to 400.
+        self.assertIn(r.status_code, (400, 422), r.text)
+        self.assertNotEqual(r.status_code, 200, "invalid cron must NOT be accepted")
+
+    def test_valid_cron_at_create_accepted(self):
+        name = _unique_name("r8p2-cron-ok")
+        r = client.post(
+            "/workers",
+            json={"worker_yml": _make_schedule_worker_yml(name, "0 9 * * 1"), "run_py": _RUN_PY},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["id"], name)
+        client.delete(f"/workers/{name}")
+
+
+class TestRound8ContextHtmlXss(unittest.TestCase):
+    """Fix 1: uploaded text/html context file must not render inline (stored XSS)."""
+
+    def setUp(self):
+        os.environ.pop("FLOOM_SECRET", None)
+
+    def _create_context(self, name: str) -> None:
+        r = client.post(f"/contexts/{name}", json={"writeable": True})
+        assert r.status_code == 200, r.text
+
+    def test_html_context_file_served_as_attachment_neutralized(self):
+        name = _unique_name("r8p2-ctx")
+        self._create_context(name)
+        try:
+            payload = b"<script>alert(document.domain)</script><h1>x</h1>"
+            put = client.put(f"/contexts/{name}/files/evil.html", content=payload)
+            self.assertEqual(put.status_code, 200, put.text)
+
+            r = client.get(f"/contexts/{name}/files/evil.html")
+            self.assertEqual(r.status_code, 200, r.text)
+            ctype = r.headers.get("content-type", "").lower()
+            disp = r.headers.get("content-disposition", "").lower()
+            # Must NOT be served as active text/html in our origin.
+            self.assertNotIn("text/html", ctype, f"html served inline as {ctype!r}")
+            # Either force-download OR neutralized to text/plain (we do both).
+            self.assertTrue(
+                "attachment" in disp or ctype.startswith("text/plain"),
+                f"html not neutralized: ctype={ctype!r} disp={disp!r}",
+            )
+            # Body is preserved (download), just not executable.
+            self.assertEqual(r.content, payload)
+        finally:
+            client.delete(f"/contexts/{name}?force=true")
+
+    def test_markdown_and_txt_still_serve_inline(self):
+        name = _unique_name("r8p2-ctx")
+        self._create_context(name)
+        try:
+            md = client.put(f"/contexts/{name}/files/readme.md", content=b"# Title\n")
+            self.assertEqual(md.status_code, 200, md.text)
+            txt = client.put(f"/contexts/{name}/files/notes.txt", content=b"hello")
+            self.assertEqual(txt.status_code, 200, txt.text)
+
+            r_md = client.get(f"/contexts/{name}/files/readme.md")
+            r_txt = client.get(f"/contexts/{name}/files/notes.txt")
+            self.assertEqual(r_md.status_code, 200, r_md.text)
+            self.assertEqual(r_txt.status_code, 200, r_txt.text)
+            # Inline (no forced attachment) for safe-preview text types.
+            self.assertNotIn("attachment", r_md.headers.get("content-disposition", "").lower())
+            self.assertNotIn("attachment", r_txt.headers.get("content-disposition", "").lower())
+            self.assertEqual(r_md.content, b"# Title\n")
+            self.assertEqual(r_txt.content, b"hello")
+        finally:
+            client.delete(f"/contexts/{name}?force=true")
+
+
+class TestRound8ApprovalMisconfigDiagnostic(unittest.TestCase):
+    """Fix 4: approvals.required worker that never emits decision_required
+    surfaces a clear diagnostic in the run log."""
+
+    def setUp(self):
+        os.environ.pop("FLOOM_SECRET", None)
+
+    def test_misconfigured_approval_worker_logs_clear_diagnostic(self):
+        from models import WorkerResult
+        import run_service
+
+        worker = _create_approval_worker()
+        run_id = run_service.create_run(worker["id"], {})
+
+        class FakeDriver:
+            def run(self, **_kwargs):
+                # Misconfiguration: approvals.required:true but NO decision_required.
+                return WorkerResult(status="success", outputs={"message": "done"})
+
+        with patch.object(run_service, "get_sandbox_driver", return_value=FakeDriver()):
+            run_service.execute_run(run_id, worker["id"], {})
+
+        logs = client.get(f"/runs/{run_id}/logs")
+        self.assertEqual(logs.status_code, 200, logs.text)
+        messages = " ".join(row["message"] for row in logs.json())
+        self.assertIn("approvals.required", messages)
+        self.assertIn("decision_required", messages)
+        self.assertIn("cannot pause for approval", messages)
+
+
+# ===========================================================================
 # /healthz endpoint
 # ===========================================================================
 
