@@ -947,11 +947,17 @@ def _canonicalize_emily_exec_command(yaml_text: str) -> str:
     (it lives only in the codegen prompt), so it writes the wrong shape and every
     real run fails validation, while the generated ``run.py`` is silently ignored.
 
-    The fix: for the Emily-authored path, ``exec.command`` is NOT an authoring
-    surface. We strip any caller-supplied ``exec.command`` and let the schema
-    re-derive the canonical ``python <entry>`` (``models._default_command_from_entry``)
-    so the executed script is ALWAYS the generated ``run.py``. Agent/skill-mode
-    workers (``entry: SKILL.md``) carry no command and are untouched.
+    The fix has TWO parts, both closing a divergent-execution vector for the
+    Emily-authored path (where the executed code is ALWAYS the generated run.py):
+      1. ``exec.command`` is stripped (it is not an authoring surface). The schema
+         re-derives the canonical ``python run.py`` (``_default_command_from_entry``).
+      2. A non-``run.py`` script ENTRY (``run.sh`` / ``run.js``) is normalised to
+         ``run.py``. Codegen only ever emits ``run.py``; a ``run.sh`` entry makes
+         the schema derive ``bash run.sh`` and every run dies with
+         "run.sh: No such file or directory". Forcing the entry to ``run.py`` keeps
+         the generated code the single executed script.
+    Agent/skill-mode workers (``entry: SKILL.md`` / any ``.md``) carry no run.py and
+    are LEFT UNTOUCHED.
 
     Returns the (possibly rewritten) YAML text. Best-effort: on any parse error
     the original text is returned unchanged (the downstream parser will surface a
@@ -975,6 +981,32 @@ def _canonicalize_emily_exec_command(yaml_text: str) -> str:
     if "command" in raw and isinstance(raw.get("command"), str):
         raw.pop("command", None)
         changed = True
+
+    # Normalise the script ENTRY too. Codegen only ever produces ``run.py``
+    # (``_generate_run_py_from_manifest`` writes run.py), but Emily sometimes
+    # authors ``entry: run.sh`` / ``run.js``. The schema then re-derives
+    # ``command: bash run.sh`` from that entry, the runner tries to execute a
+    # file that does not exist, and every run dies with
+    # "run.sh: No such file or directory" — a SECOND divergent-execution vector
+    # the command-strip alone does not close. Force a script entry to ``run.py``
+    # so the generated code is always the executed script. Agent/skill workers
+    # (``entry: SKILL.md`` / any ``.md``) are LEFT ALONE — they have no run.py.
+    def _is_script_entry(value: Any) -> bool:
+        return isinstance(value, str) and value.strip().lower().endswith((".py", ".sh", ".js"))
+
+    exec_block = raw.get("exec") if isinstance(raw.get("exec"), dict) else None
+    exec_entry = exec_block.get("entry") if exec_block else None
+    top_entrypoint = raw.get("entrypoint")
+    # Only touch workers that are script-mode (a script entry somewhere) — never
+    # agent/skill workers (entry/entrypoint is SKILL.md / *.md / absent->agent).
+    is_script_worker = _is_script_entry(exec_entry) or _is_script_entry(top_entrypoint)
+    if is_script_worker:
+        if exec_block is not None and _is_script_entry(exec_entry) and exec_entry.strip() != "run.py":
+            exec_block["entry"] = "run.py"
+            changed = True
+        if _is_script_entry(top_entrypoint) and top_entrypoint.strip() != "run.py":
+            raw["entrypoint"] = "run.py"
+            changed = True
 
     if not changed:
         return yaml_text

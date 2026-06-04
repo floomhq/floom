@@ -332,6 +332,53 @@ def test_canonicalize_noop_when_no_command(booted):
     assert chat_service._canonicalize_emily_exec_command(agent_yml) == agent_yml
 
 
+def test_canonicalize_normalizes_run_sh_entry_to_run_py(booted):
+    """Second divergent-execution vector: a `run.sh` entry makes the schema derive
+    `bash run.sh`, but codegen only emits run.py -> every run dies with
+    'run.sh: No such file or directory'. The entry must be forced to run.py."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    sh_yml = (
+        'schema_version: "0.3"\n'
+        'name: "shworker"\n'
+        'title: "Sh Worker"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "run.sh"\n'
+        'trigger:\n  type: "manual"\n'
+        'exec:\n  entry: "run.sh"\n  runtime: "python311"\n  runner: "e2b"\n'
+        '  command: "bash run.sh"\n'
+        '  outputs:\n  - name: "result"\n    type: file\n    required: true\n'
+    )
+    parsed = _yaml.safe_load(chat_service._canonicalize_emily_exec_command(sh_yml))
+    assert parsed["exec"]["entry"] == "run.py", parsed["exec"]
+    assert parsed.get("entrypoint") == "run.py", parsed
+    assert "command" not in parsed["exec"], "stale bash run.sh command survived"
+
+
+def test_canonicalize_leaves_agent_entry_untouched(booted):
+    """An agent worker (entry: SKILL.md) must NOT be rewritten to run.py — it has
+    no run.py and codegen does not generate one for it."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    # Add a command to force a rewrite path, and assert entry stays SKILL.md.
+    agent_yml = (
+        'schema_version: "0.3"\n'
+        'name: "agent-y"\n'
+        'title: "Agent Y"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "SKILL.md"\n'
+        'trigger:\n  type: "manual"\n'
+        'exec:\n  entry: "SKILL.md"\n  runtime: "skill"\n  runner: "e2b"\n'
+    )
+    parsed = _yaml.safe_load(chat_service._canonicalize_emily_exec_command(agent_yml))
+    assert parsed["exec"]["entry"] == "SKILL.md"
+    assert parsed.get("entrypoint") == "SKILL.md"
+
+
 def test_emily_create_strips_divergent_command_before_persist(booted, monkeypatch):
     """End-to-end: creating with a divergent exec.command persists a manifest that
     does NOT carry the heredoc, so the generated run.py is the executed script."""
