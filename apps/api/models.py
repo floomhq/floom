@@ -302,6 +302,17 @@ class WorkerTrigger(BaseModel):
             return "schedule"
         return normalized
 
+    @field_validator("cron")
+    @classmethod
+    def validate_cron(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return value
+        from cron_utils import is_valid_cron_expr
+
+        if not is_valid_cron_expr(value):
+            raise ValueError(f"invalid cron expression: {value!r}")
+        return value
+
 
 class WorkerMCPConnection(BaseModel):
     label: str
@@ -1030,6 +1041,17 @@ class WorkerContractTrigger(BaseModel):
         if normalized in {"cron", "scheduled"}:
             return "schedule"
         return normalized
+
+    @field_validator("cron")
+    @classmethod
+    def validate_cron(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not value.strip():
+            return value
+        from cron_utils import is_valid_cron_expr
+
+        if not is_valid_cron_expr(value):
+            raise ValueError(f"invalid cron expression: {value!r}")
+        return value
 
     @model_validator(mode="after")
     def validate_composio(self) -> "WorkerContractTrigger":
