@@ -933,6 +933,175 @@ def _generate_run_py_from_manifest(
     return True
 
 
+def _canonicalize_emily_exec_command(yaml_text: str) -> str:
+    """Force a manifest-authored (Emily) worker onto a SINGLE execution path.
+
+    Root cause of "Emily-created workers fail every real run despite the smoke
+    gate reporting passed" (ISSUES.md #E1): Emily authors a *manifest*, not code.
+    The runnable code is the generated ``run.py``. But ``exec.command`` OVERRIDES
+    ``run.py`` in the E2B driver (``e2b_driver.py``: ``command = config.runtime.command``).
+    When Emily — trying to self-repair a failing worker via ``workers__update`` —
+    writes an inline ``exec.command`` heredoc, that heredoc becomes a SECOND,
+    conflicting execution definition that wins over the generated ``run.py``. Her
+    heredoc does not know the ``{status, outputs, artifacts}`` result.json contract
+    (it lives only in the codegen prompt), so it writes the wrong shape and every
+    real run fails validation, while the generated ``run.py`` is silently ignored.
+
+    The fix: for the Emily-authored path, ``exec.command`` is NOT an authoring
+    surface. We strip any caller-supplied ``exec.command`` and let the schema
+    re-derive the canonical ``python <entry>`` (``models._default_command_from_entry``)
+    so the executed script is ALWAYS the generated ``run.py``. Agent/skill-mode
+    workers (``entry: SKILL.md``) carry no command and are untouched.
+
+    Returns the (possibly rewritten) YAML text. Best-effort: on any parse error
+    the original text is returned unchanged (the downstream parser will surface a
+    clean validation error).
+    """
+    import yaml as _yaml
+
+    try:
+        raw = _yaml.safe_load(yaml_text)
+    except Exception:
+        return yaml_text
+    if not isinstance(raw, dict):
+        return yaml_text
+
+    changed = False
+    for block_key in ("exec", "runtime"):
+        block = raw.get(block_key)
+        if isinstance(block, dict) and "command" in block:
+            block.pop("command", None)
+            changed = True
+    if "command" in raw and isinstance(raw.get("command"), str):
+        raw.pop("command", None)
+        changed = True
+
+    if not changed:
+        return yaml_text
+    try:
+        return _yaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
+    except Exception:
+        return yaml_text
+
+
+def _smoke_gate_emily_worker(
+    worker_id: str,
+    manifest: Dict[str, Any],
+    user_id: str,
+) -> tuple[Optional[str], Optional[str]]:
+    """Synthesise run.py from the manifest, then smoke-gate against the REAL run path.
+
+    Shared by ``workers__create`` and ``workers__update`` so a worker can never be
+    persisted by EITHER tool while it silently fails every real run. The gate uses
+    the SAME ``driver.run`` + ``_validate_run_outputs`` path a real run uses
+    (``run_service.smoke_and_gate_generated_worker``), so a ``passed`` verdict
+    means the next real run passes too (gate == runtime). A ``failed`` verdict
+    DISABLES the worker (kept editable) and is surfaced to the operator.
+
+    Returns ``(smoke_status, smoke_reason)``. ``smoke_status`` is one of
+    ``"passed" | "failed" | "skipped" | "errored"`` — never ``None``, so the
+    caller can NEVER report "verified runnable" for a worker whose runtime
+    validation did not actually run (``errored`` = the smoke infra raised;
+    ``skipped`` = the gate could not prove the worker, e.g. missing
+    secret/connection). Both are reported honestly, not as verified. Never raises.
+    """
+    smoke_status: str = "errored"
+    smoke_reason: Optional[str] = None
+    try:
+        from run_service import smoke_and_gate_generated_worker
+        from main import get_worker_config_for_run
+        from db import get_repositories
+
+        repos = get_repositories()
+
+        sample_input = None
+        try:
+            cfg = get_worker_config_for_run(worker_id)
+            sample_input = getattr(cfg, "example_input", None)
+        except Exception:
+            sample_input = None
+        bundle: Dict[str, Any] = {}
+        if isinstance(sample_input, dict):
+            bundle["example_input"] = sample_input
+
+        def _smoke_log(msg: str, level: str = "info") -> None:
+            logger.info("emily worker smoke %s: %s", worker_id, msg)
+
+        # Emily authors a MANIFEST, not code, so the bundle ships the no-op
+        # placeholder run.py. Synthesise real run.py FROM THE MANIFEST first
+        # (codegen, the same engine the smoke-repair uses), persist it through the
+        # canonical editor path, and only THEN smoke. On update, the existing
+        # run.py is carried over; the placeholder check inside
+        # _generate_run_py_from_manifest no-ops when real code already exists, so
+        # the gate validates whatever code currently backs the worker.
+        _generate_run_py_from_manifest(worker_id, manifest, user_id, _smoke_log)
+
+        smoke = smoke_and_gate_generated_worker(
+            worker_id,
+            bundle,
+            user_id=user_id,
+            repos=repos,
+            log_fn=_smoke_log,
+            allow_code_repair=True,
+        )
+        if isinstance(smoke, dict):
+            smoke_status = smoke.get("status") or "errored"
+            smoke_reason = smoke.get("reason")
+    except Exception:
+        logger.exception("emily worker smoke+gate failed for %s", worker_id)
+        smoke_status = "errored"
+        smoke_reason = "could not run the verification test for this worker"
+    return smoke_status, smoke_reason
+
+
+def _emily_worker_result_message(
+    worker_id: str, verb: str, smoke_status: Optional[str], smoke_reason: Optional[str]
+) -> Dict[str, Any]:
+    """Build the tool result for a create/update, HONEST about whether the worker
+    was actually proven runnable.
+
+    Only a ``"passed"`` smoke means "verified runnable". A ``"failed"`` worker is
+    DISABLED. A ``"skipped"`` / ``"errored"`` worker was NOT validated at runtime,
+    so we must NOT claim it is verified — that is exactly the passing-gate-that-
+    lies failure mode. We surface the honest state so Emily tells the operator the
+    truth (e.g. "created, but I could not test it yet because it needs a secret").
+    """
+    base = {"ok": True, "worker_id": worker_id, "smoke_status": smoke_status}
+    if smoke_status == "failed":
+        return {
+            **base,
+            "message": (
+                f"Worker '{worker_id}' was {verb} but its test run failed "
+                f"({smoke_reason or 'unknown'}); it is disabled until it runs clean. "
+                "Adjust the worker, then re-run."
+            ),
+        }
+    if smoke_status == "passed":
+        return {**base, "message": f"Worker '{worker_id}' {verb} and verified runnable."}
+    if smoke_status == "skipped":
+        # A skip can mean "intentionally off" (paused/disabled) or "can't prove
+        # yet" (needs a secret/connection). In both cases runtime validation did
+        # NOT run, so never claim verified. Don't assert "enabled" — a disabled
+        # worker's skip reason already explains it is off.
+        return {
+            **base,
+            "message": (
+                f"Worker '{worker_id}' was {verb}, but I could NOT verify it runs yet "
+                f"({smoke_reason or 'verification was skipped'}). It is untested — "
+                "run it once to confirm it works."
+            ),
+        }
+    # errored / unknown: the verification machinery itself failed; do not claim runnable.
+    return {
+        **base,
+        "message": (
+            f"Worker '{worker_id}' was {verb}, but the verification test could not be run "
+            f"({smoke_reason or 'verification error'}). It is enabled but UNVERIFIED — "
+            "run it once and check the result before relying on it."
+        ),
+    }
+
+
 def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """Create a RUNNABLE worker from a worker.yml manifest — same path as the API.
 
@@ -963,6 +1132,10 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     yaml_text = str(args.get("yaml_text") or "")
     if not yaml_text:
         return {"ok": False, "error": "yaml_text is required"}
+    # Single execution path: Emily authors a manifest, not code. Strip any
+    # caller-supplied exec.command so the generated run.py is the ONLY executed
+    # script (a divergent exec.command silently shadows run.py — ISSUES.md #E1).
+    yaml_text = _canonicalize_emily_exec_command(yaml_text)
     try:
         manifest = _yaml.safe_load(yaml_text)
     except Exception as exc:
@@ -976,7 +1149,7 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     # a colliding id to a free one (matches the worker-author hook) so a create
     # never dead-ends on a taken slug.
     from db import get_repositories
-    from main import _register_worker_from_files, DraftFile, get_worker_config_for_run
+    from main import _register_worker_from_files, DraftFile
     from fastapi import HTTPException as _HTTPException
 
     repos = get_repositories()
@@ -992,69 +1165,13 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
-    # Step 2: generate real run.py + smoke-gate — same as draft-and-create Path B.
+    # Step 2: generate real run.py + smoke-gate — same as draft-and-create Path B,
+    # shared verbatim with workers__update so create and update gate identically.
     # Best-effort: a generation/smoke failure must not undo a successful create
     # (the worker stays editable), but it IS surfaced so Emily can tell the user
     # the worker is not yet runnable instead of presenting a dead worker as ready.
-    smoke_status: Optional[str] = None
-    smoke_reason: Optional[str] = None
-    try:
-        from run_service import smoke_and_gate_generated_worker
-
-        sample_input = None
-        try:
-            cfg = get_worker_config_for_run(worker_id)
-            sample_input = getattr(cfg, "example_input", None)
-        except Exception:
-            sample_input = None
-        bundle: Dict[str, Any] = {}
-        if isinstance(sample_input, dict):
-            bundle["example_input"] = sample_input
-
-        def _smoke_log(msg: str, level: str = "info") -> None:
-            logger.info("workers__create smoke %s: %s", worker_id, msg)
-
-        # Emily authors a MANIFEST, not code, so the bundle ships the no-op
-        # placeholder run.py. The smoke gate short-circuits a placeholder to
-        # "failed — no real code" (run_service:_PLACEHOLDER_RUN_PY_MARKER) WITHOUT
-        # generating anything, because that path assumes the LLM author already
-        # produced run.py (draft-and-create Path B). So here we synthesise real
-        # run.py FROM THE MANIFEST first (codegen, the same engine the smoke-repair
-        # uses), persist it through the canonical editor path, and only THEN smoke.
-        # This is what makes a manifest-only create runnable to completion.
-        _generate_run_py_from_manifest(worker_id, manifest, user_id, _smoke_log)
-
-        smoke = smoke_and_gate_generated_worker(
-            worker_id,
-            bundle,
-            user_id=user_id,
-            repos=repos,
-            log_fn=_smoke_log,
-            allow_code_repair=True,
-        )
-        if isinstance(smoke, dict):
-            smoke_status = smoke.get("status")
-            smoke_reason = smoke.get("reason")
-    except Exception:
-        logger.exception("workers__create smoke+gate failed for %s", worker_id)
-
-    if smoke_status == "failed":
-        return {
-            "ok": True,
-            "worker_id": worker_id,
-            "smoke_status": "failed",
-            "message": (
-                f"Worker '{worker_id}' was created but its first test run failed "
-                f"({smoke_reason or 'unknown'}); it is disabled until edited. "
-                "Edit run.py, then re-run."
-            ),
-        }
-    return {
-        "ok": True,
-        "worker_id": worker_id,
-        "smoke_status": smoke_status,
-        "message": f"Worker '{worker_id}' created and verified runnable.",
-    }
+    smoke_status, smoke_reason = _smoke_gate_emily_worker(worker_id, manifest, user_id)
+    return _emily_worker_result_message(worker_id, "created", smoke_status, smoke_reason)
 
 
 def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -1074,6 +1191,13 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     yaml_text = str(args.get("yaml_text") or "")
     if not worker_id or not yaml_text:
         return {"ok": False, "error": "id and yaml_text are required"}
+    # Single execution path (ISSUES.md #E1): Emily's most common self-repair move
+    # on a failing worker is to inject an inline exec.command heredoc, which
+    # silently shadows the generated run.py with the wrong result.json schema and
+    # makes EVERY real run fail. exec.command is not an authoring surface for the
+    # manifest-author path — strip it so the generated run.py stays the only
+    # executed script.
+    yaml_text = _canonicalize_emily_exec_command(yaml_text)
     try:
         manifest = _yaml.safe_load(yaml_text)
     except Exception as exc:
@@ -1132,7 +1256,15 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": str(exc.detail)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
-    return {"ok": True, "worker_id": worker_id, "message": f"Worker '{worker_id}' updated."}
+
+    # Gate == runtime (ISSUES.md #E1): an update that would break every real run
+    # must NOT be persisted as a silent success. Run the SAME smoke gate create
+    # uses — it validates via the real driver.run + _validate_run_outputs path,
+    # so a `passed` verdict means real runs pass and a `failed` verdict DISABLES
+    # the worker (kept editable) and is surfaced. This closes the gap where the
+    # update path wrote a manifest with zero validation.
+    smoke_status, smoke_reason = _smoke_gate_emily_worker(worker_id, manifest, user_id)
+    return _emily_worker_result_message(worker_id, "updated", smoke_status, smoke_reason)
 
 
 def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
