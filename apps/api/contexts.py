@@ -405,6 +405,40 @@ def is_binary_file(path: str, mime_type: str) -> bool:
     return is_binary_mime(mime_type)
 
 
+# Extensions/MIME types that a browser will execute (script, markup) if served
+# inline. These are "text" (so not binary) but must NOT be rendered in the
+# browser's origin — otherwise an uploaded .html context file is stored XSS.
+# Served as attachment (force download) so the script never runs in-origin.
+_ACTIVE_MARKUP_EXTENSIONS = {
+    ".html",
+    ".htm",
+    ".xhtml",
+    ".svg",
+    ".xml",
+    ".xsl",
+    ".xslt",
+    ".mathml",
+}
+_ACTIVE_MARKUP_MIME_TYPES = {
+    "text/html",
+    "application/xhtml+xml",
+    "image/svg+xml",
+    "application/xml",
+    "text/xml",
+}
+
+
+def is_active_markup(path: str, mime_type: str) -> bool:
+    """Return True for non-binary content a browser would execute inline.
+
+    Such files (html, svg, xhtml, xml) must be force-downloaded, never
+    rendered inline, to avoid stored-XSS from uploaded context files.
+    """
+    if PurePosixPath(path).suffix.lower() in _ACTIVE_MARKUP_EXTENSIONS:
+        return True
+    return (mime_type or "").split(";", 1)[0].strip().lower() in _ACTIVE_MARKUP_MIME_TYPES
+
+
 def iter_context_files(root: Path) -> Iterable[Path]:
     if not root.is_dir():
         return []

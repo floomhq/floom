@@ -178,6 +178,50 @@ class TestFromBundleEndpoint(unittest.TestCase):
         self.assertEqual(r.status_code, 400, r.text)
         self.assertIn("zip", r.json()["detail"].lower())
 
+    # --- Zip-bomb guards (round-8 P2) ---
+
+    def test_oversized_bundle_uncompressed_rejected(self):
+        """A zip-bomb (tiny on disk, >50MB uncompressed) is rejected (413)."""
+        name = _unique_name()
+        # 60MB of highly-compressible zeros: tiny on disk under DEFLATE, huge
+        # uncompressed — the classic zip-bomb shape. Build with compression so
+        # the upload itself is small, proving the cap fires on UNCOMPRESSED size.
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("worker.yml", _make_worker_yml(name, "agent"))
+            zf.writestr("SKILL.md", SKILL_MD)
+            zf.writestr("big.txt", "0" * (60 * 1024 * 1024))
+        zip_bytes = buf.getvalue()
+        self.assertLess(len(zip_bytes), 1 * 1024 * 1024, "compressed zip should be small")
+        r = self._post_bundle(zip_bytes)
+        self.assertEqual(r.status_code, 413, r.text)
+        self.assertIn("too large", r.json()["detail"].lower())
+
+    def test_too_many_entries_rejected(self):
+        """A bundle with > 2000 entries is rejected (413)."""
+        name = _unique_name()
+        files = {
+            "worker.yml": _make_worker_yml(name, "agent"),
+            "SKILL.md": SKILL_MD,
+        }
+        for i in range(2100):
+            files[f"f{i}.txt"] = "x"
+        r = self._post_bundle(_make_zip(files))
+        self.assertEqual(r.status_code, 413, r.text)
+        self.assertIn("many entries", r.json()["detail"].lower())
+
+    def test_normal_small_bundle_still_imports(self):
+        """Regression: a normal bundle well under the caps still imports (200)."""
+        name = _unique_name()
+        files = {
+            "worker.yml": _make_worker_yml(name, "agent"),
+            "SKILL.md": SKILL_MD,
+            "notes.txt": "x" * 1024,  # 1KB, far under 50MB
+        }
+        r = self._post_bundle(_make_zip(files))
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["id"], name)
+
 
 if __name__ == "__main__":
     unittest.main()

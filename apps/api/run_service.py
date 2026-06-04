@@ -2639,6 +2639,26 @@ def execute_run(
         _materialize_declared_file_outputs(run_id, config, outputs, artifacts)
         _store_run_artifacts(run_id, artifacts, log_fn, user_id=owner_id, repos=repos_obj)
 
+        # DX diagnostic: a worker that declares approvals.required: true but
+        # whose run.py never emits a `decision_required` event can NEVER pause
+        # for approval (the gate below needs BOTH). Without this line the run
+        # just completes/fails with no hint that the approval wiring is broken.
+        # Surface a clear, actionable message in the run log so the author can
+        # fix the manifest/run.py. Does not change the gate behavior.
+        if (
+            config
+            and getattr(config, "approvals", None)
+            and config.approvals.required
+            and not result.decision_required
+        ):
+            log_fn(
+                "This worker declares approvals.required: true but its run.py "
+                "never emitted a decision_required event, so it cannot pause for "
+                "approval. Emit a decision_required event (e.g. write it to "
+                "result.json) before exiting. See docs/AUTHORING.md (Approvals).",
+                level="warning",
+            )
+
         # Both "error" and "failed" terminal statuses map to a failed run
         if result.status in ("error", "failed"):
             result_error = result.error
