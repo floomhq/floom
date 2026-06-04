@@ -14,7 +14,9 @@ export function ConnectionsTabs() {
     { href: "/connections/browse", label: "Browse", match: (p: string) => p.startsWith("/connections/browse") },
     { href: "/connections/mcp", label: "MCP", match: (p: string) => p.startsWith("/connections/mcp") },
     { href: "/connections/secrets", label: "Secrets", match: (p: string) => p.startsWith("/connections/secrets") || p.startsWith("/secrets") },
-    { href: "/connections/slack", label: "Slack", match: (p: string) => p.startsWith("/connections/slack") },
+    // Slack is the HUMAN INTERFACE (DM assistant, @mention, approvals) —
+    // NOT a worker OAuth connection. It lives at Settings → Slack (#slack).
+    // /connections/slack redirects there. DO NOT add a Slack tab here.
   ];
 
   return (
