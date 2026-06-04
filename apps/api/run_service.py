@@ -1116,26 +1116,31 @@ def _smoke_and_repair_generated_worker(
     if not is_script:
         return {"status": "skipped", "reason": "not a script-mode worker"}
 
-    # A script worker whose run.py is the placeholder stub does nothing: the stub
+    # A run.py worker whose run.py is the placeholder stub does nothing: the stub
     # writes a success result.json with empty outputs, so a plain smoke run would
     # report PASSED. Catch it BEFORE running (and before the secret/connection
     # skip gates) and surface as failed — the operator must re-generate or edit,
-    # never see a green-but-empty worker.
-    try:
-        if _PLACEHOLDER_RUN_PY_MARKER in (WORKERS_DIR / worker_id / "run.py").read_text(
-            encoding="utf-8"
-        ):
-            log_fn(
-                "Smoke failed — generated worker has only the placeholder stub, no real code",
-                level="warning",
-            )
-            return {
-                "status": "failed",
-                "reason": "generation produced no script code — re-generate or edit the worker",
-                "repairs": 0,
-            }
-    except OSError:
-        pass
+    # never see a green-but-empty worker. Only when the EXECUTED entry is run.py:
+    # a run.js / run.sh / multi-file Python worker executes its own entry, and a
+    # stale placeholder run.py on disk must NOT fail it (Codex P1 — that would
+    # disable a perfectly good Node/shell worker that never runs run.py).
+    executes_run_py = entry.strip().lower() == "run.py"
+    if executes_run_py:
+        try:
+            if _PLACEHOLDER_RUN_PY_MARKER in (WORKERS_DIR / worker_id / "run.py").read_text(
+                encoding="utf-8"
+            ):
+                log_fn(
+                    "Smoke failed — generated worker has only the placeholder stub, no real code",
+                    level="warning",
+                )
+                return {
+                    "status": "failed",
+                    "reason": "generation produced no script code — re-generate or edit the worker",
+                    "repairs": 0,
+                }
+        except OSError:
+            pass
 
     secrets = get_secrets_for_worker(worker_id, user_id=user_id, repos=repos_obj)
     missing = [s for s in config.secrets if s not in secrets]
