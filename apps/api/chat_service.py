@@ -37,6 +37,32 @@ WORKSPACE_MD_TEMPLATE = Path(__file__).resolve().parents[3] / "workspace.md.temp
 
 
 # ---------------------------------------------------------------------------
+# Em-dash / en-dash filter (deterministic, code-level guarantee)
+# ---------------------------------------------------------------------------
+
+def strip_em_dashes(text: str) -> str:
+    """Replace em dashes (U+2014) and en dashes (U+2013) with ASCII equivalents.
+
+    Federico requires zero em dashes in Emily's output. A system-prompt
+    instruction alone is unreliable because the model occasionally emits them
+    anyway. This filter is applied to every text chunk at emission time so the
+    guarantee is unconditional.
+
+    Replacement rules (safest readable substitution):
+      " — " (spaced em dash)  → ", "
+      "—"   (unspaced)        → ", "
+      " – " (spaced en dash)  → ", "
+      "–"   (unspaced)        → "-"
+    """
+    # Spaced variants first (more context, cleaner replacement)
+    text = text.replace(" — ", ", ")   # spaced em dash → comma-space
+    text = text.replace("—", ", ")     # bare em dash → comma-space
+    text = text.replace(" – ", ", ")   # spaced en dash → comma-space
+    text = text.replace("–", "-")      # bare en dash → hyphen
+    return text
+
+
+# ---------------------------------------------------------------------------
 # workspace.md helpers
 # ---------------------------------------------------------------------------
 
@@ -1543,7 +1569,7 @@ async def stream_chat(
             args = json.loads(raw_args or "{}")
         except json.JSONDecodeError:
             args = {}
-        reply = str(args.get("reply") or "")
+        reply = strip_em_dashes(str(args.get("reply") or ""))
         final_reply_box["reply"] = reply
         # Emit as text part if the agent didn't stream text deltas
         if reply and not assistant_text_parts:
@@ -1598,7 +1624,7 @@ async def stream_chat(
                 data_type = str(getattr(data, "type", "") or "")
                 delta = getattr(data, "delta", None)
                 if delta and data_type.endswith("output_text.delta"):
-                    text = str(delta)
+                    text = strip_em_dashes(str(delta))
                     assistant_text_parts.append(text)
                     part = {"type": "text", "text": text}
                     emitted_text_delta = True
@@ -1624,7 +1650,7 @@ async def stream_chat(
                     t = _get(c, "text")
                     if t:
                         texts.append(str(t))
-                full_text = "".join(texts)
+                full_text = strip_em_dashes("".join(texts))
                 if full_text:
                     assistant_text_parts.append(full_text)
                     await part_queue.put({"type": "text", "text": full_text})
