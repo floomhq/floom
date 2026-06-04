@@ -410,6 +410,59 @@ def test_canonicalize_preserves_legitimate_run_js_worker(booted):
     assert "command" not in parsed["exec"]
 
 
+def test_canonicalize_preserves_command_only_node_worker(booted):
+    """Codex P1 #3: a command-only authored worker (exec.command: 'node run.js',
+    runtime: node22, NO entry) uses the command as its only execution signal. When
+    run.js source is present, the derived entry must be lifted into exec.entry so
+    stripping the command does not collapse it to agent mode / python run.py."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    cmd_only_yml = (
+        'schema_version: "0.3"\n'
+        'name: "cmdnode"\n'
+        'title: "Cmd Node"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  command: "node run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    parsed = _yaml.safe_load(
+        chat_service._canonicalize_emily_exec_command(
+            cmd_only_yml, existing_files={"run.js", "package.json"}
+        )
+    )
+    # entry derived from the command and preserved (source present).
+    assert parsed["exec"]["entry"] == "run.js", parsed["exec"]
+    assert "command" not in parsed["exec"], "divergent command not stripped"
+
+
+def test_canonicalize_command_only_orphaned_falls_back_to_run_py(booted):
+    """A command-only worker whose target file is ABSENT (e.g. a divergent heredoc
+    or a 'node run.js' with no run.js) is NOT preserved — the command is stripped
+    and the worker falls back to the generated run.py."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    # Heredoc-style command with no script file (the original E1 bug shape).
+    cmd_only_yml = (
+        'schema_version: "0.3"\n'
+        'name: "cmdorphan"\n'
+        'title: "Cmd Orphan"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  command: "python -c \\"print(1)\\""\n  runtime: "python311"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    parsed = _yaml.safe_load(
+        chat_service._canonicalize_emily_exec_command(cmd_only_yml, existing_files=set())
+    )
+    assert "command" not in parsed["exec"], "divergent heredoc command survived"
+    # No entry was derivable (target not a script file present) -> falls back to
+    # the schema default (run.py). exec.entry stays unset here; the schema fills it.
+    assert parsed["exec"].get("entry") in (None, "run.py")
+
+
 def test_canonicalize_redirects_orphaned_js_entry(booted):
     """An orphaned run.js entry (no source file) IS redirected to run.py (codegen
     backfills run.py). This is the create case where the tool supplies no source."""

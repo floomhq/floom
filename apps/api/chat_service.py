@@ -983,6 +983,37 @@ def _canonicalize_emily_exec_command(
     if not isinstance(raw, dict):
         return yaml_text
 
+    def _is_script_entry(value: Any) -> bool:
+        return isinstance(value, str) and value.strip().lower().endswith((".py", ".sh", ".js"))
+
+    def _entry_from_command(cmd: Any) -> Optional[str]:
+        # A command's last whitespace token is the script file (e.g.
+        # "node run.js" -> "run.js", "python scripts/main.py" -> "scripts/main.py").
+        if not isinstance(cmd, str) or not cmd.strip():
+            return None
+        last = cmd.strip().split()[-1]
+        return last if _is_script_entry(last) else None
+
+    # Preserve a LEGITIMATE command-only authored worker BEFORE stripping its
+    # command (Codex P1 #3). A manifest like `exec: {command: "node run.js",
+    # runtime: node22}` with NO `entry` uses the command as its ONLY execution
+    # signal (the schema derives the entry from the command's last token). If we
+    # strip the command without first capturing that entry, the worker collapses
+    # to agent mode and E2B falls back to `python run.py`, ignoring the real
+    # run.js. So: when exec has a command but no entry AND the command's target
+    # file is present on disk, lift the derived entry into exec.entry first. A
+    # divergent heredoc (its target file absent) yields no derivable existing
+    # entry, so it is dropped and the worker falls back to the generated run.py.
+    exec_block = raw.get("exec") if isinstance(raw.get("exec"), dict) else None
+    if (
+        exec_block is not None
+        and not exec_block.get("entry")
+        and not raw.get("entrypoint")
+    ):
+        derived = _entry_from_command(exec_block.get("command"))
+        if derived and derived.strip() in existing:
+            exec_block["entry"] = derived
+
     changed = False
     for block_key in ("exec", "runtime"):
         block = raw.get(block_key)
@@ -992,9 +1023,6 @@ def _canonicalize_emily_exec_command(
     if "command" in raw and isinstance(raw.get("command"), str):
         raw.pop("command", None)
         changed = True
-
-    def _is_script_entry(value: Any) -> bool:
-        return isinstance(value, str) and value.strip().lower().endswith((".py", ".sh", ".js"))
 
     def _orphaned(entry: str) -> bool:
         # An entry is orphaned (safe to redirect to the generated run.py) when its
