@@ -34,6 +34,13 @@ oauth_config:
       - commands
       - im:history
       - im:write
+      # Channel reading (consent = invite). The bot can only read channels it
+      # has been invited to (/invite @Emily). These scopes let the workspace
+      # agent list its memberships and read a channel's recent history on demand.
+      - channels:read
+      - channels:history
+      - groups:read
+      - groups:history
 
 settings:
   event_subscriptions:
