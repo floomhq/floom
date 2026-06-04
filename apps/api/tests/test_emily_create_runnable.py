@@ -124,25 +124,37 @@ def _fake_uppercase_driver(monkeypatch, run_service):
     monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _FakeDriver())
 
 
-def _stub_smoke_gate(monkeypatch, run_service, workers_dir):
-    """Stub the codegen+E2B smoke/repair gate (network-bound, out of unit-test
-    scope). It mirrors what the real gate does for a placeholder worker: replace
-    the no-op run.py with real code, then report a clean verdict. ``_tool_workers_create``
-    imports ``smoke_and_gate_generated_worker`` from ``run_service`` lazily, so we
-    patch it on that module."""
-    def _fake_gate(worker_id, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
-        run_py = workers_dir / worker_id / "run.py"
-        run_py.write_text(
-            "import json\n"
-            "from pathlib import Path\n"
-            "inputs = json.loads(Path('inputs/input.json').read_text())\n"
-            "Path('result.json').write_text(json.dumps({'status': 'success', "
-            "'outputs': {'result': str(inputs.get('text', '')).upper()}, 'artifacts': []}))\n",
-            encoding="utf-8",
-        )
-        return {"status": "passed", "reason": None, "repairs": 1}
+_REAL_RUN_PY = (
+    "import json\n"
+    "from pathlib import Path\n"
+    "inputs = json.loads(Path('inputs/input.json').read_text())\n"
+    "Path('result.json').write_text(json.dumps({'status': 'success', "
+    "'outputs': {'result': str(inputs.get('text', '')).upper()}, 'artifacts': []}))\n"
+)
 
+
+def _stub_codegen_and_smoke(monkeypatch, run_service, workers_dir):
+    """Stub the network-bound codegen + E2B smoke/repair (out of unit-test scope).
+
+    `_tool_workers_create` (a) generates run.py from the manifest via
+    `run_service._repair_run_py`, then (b) gates it via
+    `run_service.smoke_and_gate_generated_worker`. Both are lazily imported from
+    `run_service`, so we patch them there. The fake `_repair_run_py` returns real
+    working code (what codegen would produce); the fake gate reports a clean
+    verdict (the dir/code already exist after generation)."""
+    def _fake_repair(*, run_code, failure, secrets, log_fn, intent=""):
+        return _REAL_RUN_PY
+
+    def _fake_gate(worker_id, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        return {"status": "passed", "reason": None, "repairs": 0}
+
+    monkeypatch.setattr(run_service, "_repair_run_py", _fake_repair)
     monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _fake_gate)
+
+
+def _stub_smoke_gate(monkeypatch, run_service, workers_dir):
+    """Backwards-compatible alias: stub both codegen + smoke gate."""
+    _stub_codegen_and_smoke(monkeypatch, run_service, workers_dir)
 
 
 def test_emily_created_worker_materializes_files_on_disk(booted, monkeypatch):
@@ -225,25 +237,44 @@ def test_emily_update_writes_manifest_to_disk_and_keeps_run_py(booted, monkeypat
     assert "EMILY-MARKER" in run_py_path.read_text(encoding="utf-8")
 
 
-def test_emily_create_invokes_codegen_smoke_gate(booted, monkeypatch):
-    """Create must run the codegen smoke+repair gate so a real run.py is generated
-    from the manifest (a manifest with declared outputs + a no-op run.py fails at
-    run time with "Output schema violation" — this gate is what prevents that)."""
+def test_emily_create_generates_runpy_and_gates(booted, monkeypatch):
+    """Create must (1) generate a real run.py from the manifest via codegen — a
+    manifest with declared outputs + a no-op run.py fails at run time with
+    "Output schema violation" — and (2) gate it via the smoke+repair path."""
     chat_service = booted["chat_service"]
     run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
 
-    calls: list = []
+    repair_calls: list = []
+    gate_calls: list = []
+
+    def _spy_repair(*, run_code, failure, secrets, log_fn, intent=""):
+        # The codegen MUST receive the placeholder code + the worker's intent so it
+        # can implement the declared outputs.
+        repair_calls.append({"intent": intent, "had_placeholder": "# Placeholder worker" in run_code})
+        return _REAL_RUN_PY
 
     def _spy_gate(worker_id, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
-        calls.append({"worker_id": worker_id, "allow_code_repair": allow_code_repair})
+        gate_calls.append({"worker_id": worker_id, "allow_code_repair": allow_code_repair})
         return {"status": "passed", "reason": None, "repairs": 0}
 
+    monkeypatch.setattr(run_service, "_repair_run_py", _spy_repair)
     monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _spy_gate)
 
     result = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
     assert result["ok"] is True, result
-    assert len(calls) == 1, "smoke+repair gate was not invoked on create"
-    # Must allow run.py code repair (Path B behavior): the manifest carries no code.
-    assert calls[0]["allow_code_repair"] is True
-    assert calls[0]["worker_id"] == result["worker_id"]
+    worker_id = result["worker_id"]
+
+    # run.py was generated from the manifest (placeholder replaced with real code).
+    assert len(repair_calls) == 1, "codegen was not invoked to generate run.py"
+    assert repair_calls[0]["had_placeholder"] is True
+    assert repair_calls[0]["intent"], "codegen did not receive the worker intent"
+    run_py = (workers_dir / worker_id / "run.py").read_text(encoding="utf-8")
+    assert "# Placeholder worker" not in run_py, "placeholder run.py was not replaced"
+    assert "result" in run_py
+
+    # The smoke+repair gate ran with code-repair allowed (Path B behavior).
+    assert len(gate_calls) == 1, "smoke+repair gate was not invoked on create"
+    assert gate_calls[0]["allow_code_repair"] is True
+    assert gate_calls[0]["worker_id"] == worker_id
     assert result.get("smoke_status") == "passed"
