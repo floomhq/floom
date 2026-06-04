@@ -17,7 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
-import { SlackConnect } from "@/components/assistant/SlackConnect";
+import Link from "next/link";
 
 type TabKey = "instructions" | "prompt";
 
@@ -310,7 +310,13 @@ export default function AssistantPage() {
 
       </Tabs>
 
-      <SlackConnect />
+      <p className="text-xs text-muted-foreground">
+        Use the assistant from Slack?{" "}
+        <Link href="/connections/slack" className="underline underline-offset-2 hover:text-foreground">
+          Connect your Slack workspace
+        </Link>
+        .
+      </p>
     </div>
   );
 }

@@ -1,23 +1,220 @@
-import { redirect } from "next/navigation";
+"use client";
 
-// Slack redesign Phase 1: the credential-paste UI and the Connections → Slack
-// tab were removed. Slack app credentials are now platform env (not
-// user-entered), and the assistant-Slack interface ("Add to Slack" +
-// read-only installed-workspace status) lives on the Assistant page. This stub
-// preserves old links and any OAuth callback that still targets
-// /connections/slack by forwarding to /assistant with the query string intact
-// (slack_connected / slack_error / team_id).
-export default async function LegacySlackConnectionsRedirect({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const params = await searchParams;
-  const qs = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (typeof value === "string") qs.set(key, value);
-    else if (Array.isArray(value) && value[0]) qs.set(key, value[0]);
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
+import { api } from "@/lib/api";
+import type { SlackSetupStatus } from "@/lib/types";
+
+// Official Slack mark (4-colour) matching Slack brand guidelines.
+function SlackMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 122.8 122.8" className={className} aria-hidden="true" focusable="false">
+      <path d="M25.8 77.6c0 7.1-5.8 12.9-12.9 12.9S0 84.7 0 77.6s5.8-12.9 12.9-12.9h12.9v12.9zm6.5 0c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9v32.3c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V77.6z" fill="#E01E5A" />
+      <path d="M45.2 25.8c-7.1 0-12.9-5.8-12.9-12.9S38.1 0 45.2 0s12.9 5.8 12.9 12.9v12.9H45.2zm0 6.5c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H12.9C5.8 58.1 0 52.3 0 45.2s5.8-12.9 12.9-12.9h32.3z" fill="#36C5F0" />
+      <path d="M97 45.2c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9-5.8 12.9-12.9 12.9H97V45.2zm-6.5 0c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V12.9C64.7 5.8 70.5 0 77.6 0s12.9 5.8 12.9 12.9v32.3z" fill="#2EB67D" />
+      <path d="M77.6 97c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9-12.9-5.8-12.9-12.9V97h12.9zm0-6.5c-7.1 0-12.9-5.8-12.9-12.9s5.8-12.9 12.9-12.9h32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H77.6z" fill="#ECB22E" />
+    </svg>
+  );
+}
+
+export default function SlackConnectionPage() {
+  const [status, setStatus] = useState<SlackSetupStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
+
+  const loadStatus = useCallback(async () => {
+    setLoading(true);
+    try {
+      setStatus(await api.slack.setupStatus());
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Failed to load Slack status");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  // Surface the post-install / error redirect from the OAuth callback once.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("slack_connected");
+    const slackError = params.get("slack_error");
+    if (connected) {
+      toast.success("Slack workspace connected");
+    } else if (slackError) {
+      toast.error(`Slack connection failed: ${slackError}`);
+    }
+    if (connected || slackError) {
+      params.delete("slack_connected");
+      params.delete("slack_error");
+      params.delete("team_id");
+      const qs = params.toString();
+      window.history.replaceState(null, "", `/connections/slack${qs ? `?${qs}` : ""}`);
+    }
+  }, []);
+
+  const installedTeams = useMemo(() => status?.installed_teams ?? [], [status]);
+  const connected = installedTeams.length > 0;
+  const platformReady = Boolean(status?.configured);
+
+  const workspaceSummary = useMemo(() => {
+    if (installedTeams.length === 0) return null;
+    return installedTeams.map((team) => team.team_name || team.team_id).join(", ");
+  }, [installedTeams]);
+
+  async function addToSlack() {
+    setConnecting(true);
+    try {
+      const result = await api.slack.installUrl("/connections/slack");
+      window.location.href = result.install_url;
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Failed to start Slack install");
+      setConnecting(false);
+    }
   }
-  const query = qs.toString();
-  redirect(`/assistant${query ? `?${query}` : ""}`);
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+        <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
+          Connect apps via OAuth so workers can read and write on your behalf.
+        </p>
+      </header>
+
+      <ConnectionsTabs />
+
+      <div className="max-w-lg space-y-5">
+        {/* Page header */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <SlackMark className="size-8 shrink-0" />
+            <div>
+              <h2 className="text-base font-semibold">Slack</h2>
+              <p className="text-sm text-muted-foreground">
+                DM your assistant, @mention it in a channel, or receive approval requests — all in
+                Slack.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => void loadStatus()}
+            disabled={loading}
+            title="Refresh Slack status"
+          >
+            {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          </Button>
+        </div>
+
+        {/* Official "Add to Slack" button — always at the top, no scrolling */}
+        <div>
+          {loading && !status ? (
+            <Skeleton className="h-11 w-48" />
+          ) : (
+            <button
+              type="button"
+              onClick={() => void addToSlack()}
+              disabled={connecting}
+              className="inline-flex h-11 items-center gap-2 rounded-md border border-[#4A154B] bg-[#4A154B] px-4 text-[15px] font-semibold text-white transition-colors hover:bg-[#3d1140] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4A154B]/50 disabled:pointer-events-none disabled:opacity-60"
+            >
+              {connecting ? (
+                <Loader2 className="size-5 animate-spin" />
+              ) : (
+                <SlackMark className="size-5" />
+              )}
+              {connected ? "Add another workspace" : "Add to Slack"}
+            </button>
+          )}
+
+          {connected ? (
+            <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <CheckCircle2 className="size-3.5 text-emerald-500" />
+              Connected to {workspaceSummary}
+            </p>
+          ) : null}
+
+          {!platformReady && !connected && !loading ? (
+            <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+              Slack is not fully configured on this workspace yet. The button may error until the
+              platform Slack app is enabled.
+            </p>
+          ) : null}
+        </div>
+
+        {/* How it works */}
+        {!loading && (
+          <div className="rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-4">
+            <h3 className="mb-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              How it works
+            </h3>
+            <ol className="space-y-1.5 text-sm text-muted-foreground">
+              <li>
+                1. Click <span className="font-medium text-foreground">Add to Slack</span> and pick a
+                workspace.
+              </li>
+              <li>2. Approve the requested permissions.</li>
+              <li>
+                3.{" "}
+                <span className="font-medium text-foreground">DM the bot</span> or{" "}
+                <span className="font-medium text-foreground">@mention it</span> in a channel — e.g.{" "}
+                <span className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+                  show my pending approvals
+                </span>
+                .
+              </li>
+            </ol>
+          </div>
+        )}
+
+        {/* Connected workspaces */}
+        {connected ? (
+          <div>
+            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Connected workspaces
+            </h3>
+            <div className="overflow-hidden rounded-[var(--radius-button)] border border-[var(--border-default)]">
+              {installedTeams.map((team) => (
+                <div
+                  key={team.team_id}
+                  className="flex items-center justify-between gap-2 border-b border-[var(--border-default)] px-3 py-2.5 last:border-b-0"
+                >
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium text-foreground">
+                      {team.team_name || team.team_id}
+                    </span>
+                    <p className="truncate text-[11px] text-muted-foreground">{team.team_id}</p>
+                  </div>
+                  <Badge variant={team.status === "active" ? "default" : "outline"}>
+                    {team.status}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Link back to assistant */}
+        <p className="text-xs text-muted-foreground">
+          The assistant is also available directly in{" "}
+          <Link href="/assistant" className="underline underline-offset-2 hover:text-foreground">
+            the browser
+          </Link>
+          .
+        </p>
+      </div>
+    </div>
+  );
 }
