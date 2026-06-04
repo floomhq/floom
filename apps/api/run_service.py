@@ -1188,9 +1188,14 @@ def _smoke_and_repair_generated_worker(
             if result is not None and result.status not in ("error", "failed"):
                 # The worker reported success — but "success" with an empty or
                 # missing declared output is a silent no-op (green-but-empty),
-                # the worst failure mode for the operator. Validate substance
-                # with the SAME gate a real run uses; an empty/missing required
-                # output is a CODE-class bug worth a repair attempt, not a pass.
+                # the worst failure mode for the operator. Validate with the
+                # EXACT SAME two-stage gate a real run uses (execute_run): first
+                # _validate_output_schema (scalar type/CSV-column/json_required_keys
+                # contracts), then _validate_run_outputs (file existence/substance).
+                # Running ONLY _validate_run_outputs here let a scalar `type: json`
+                # output that is non-empty but not valid JSON pass smoke and then
+                # fail every real run with schema_violation — the exact gate-vs-
+                # runtime lie this fix exists to kill. Both stages, same order.
                 result_outputs = dict(result.outputs or {})
                 result_artifacts = list(result.artifacts or [])
                 try:
@@ -1199,9 +1204,13 @@ def _smoke_and_repair_generated_worker(
                     )
                 except Exception:
                     pass
-                substance_error, _smoke_warnings = _validate_run_outputs(
-                    smoke_run_id, config, result_outputs, result_artifacts
+                substance_error = _validate_output_schema(
+                    worker_id, result_outputs, _smoke_log, config=config
                 )
+                if substance_error is None:
+                    substance_error, _smoke_warnings = _validate_run_outputs(
+                        smoke_run_id, config, result_outputs, result_artifacts
+                    )
                 if substance_error is None:
                     # A required output that parses as JSON but is an EMPTY
                     # container (``[]`` / ``{}`` / ``""`` / null) is the

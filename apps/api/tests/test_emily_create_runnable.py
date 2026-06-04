@@ -409,3 +409,98 @@ def test_emily_update_gate_failure_surfaces_and_disables(booted, monkeypatch):
     assert res["ok"] is True, res
     assert res.get("smoke_status") == "failed", res
     assert "disabled" in res.get("message", "").lower()
+
+
+def test_skipped_smoke_is_not_reported_as_verified(booted, monkeypatch):
+    """Blocker (Codex review): a 'skipped' gate (e.g. needs a secret) means runtime
+    validation did NOT run — the tool must NOT claim the worker is verified runnable."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_codegen_and_smoke(monkeypatch, run_service, workers_dir)
+
+    def _skip_gate(wid, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        return {"status": "skipped", "reason": "needs a credential before it can run (X_API_KEY)"}
+
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _skip_gate)
+
+    res = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    assert res["ok"] is True, res
+    assert res.get("smoke_status") == "skipped", res
+    msg = res.get("message", "").lower()
+    assert "verified runnable" not in msg, f"skipped worker falsely reported verified: {msg}"
+    assert "untested" in msg or "could not verify" in msg, msg
+
+
+def test_errored_smoke_is_not_reported_as_verified(booted, monkeypatch):
+    """Blocker (Codex review): when the smoke infra itself raises, status must be
+    'errored' and the tool must NOT claim the worker is verified runnable."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_codegen_and_smoke(monkeypatch, run_service, workers_dir)
+
+    def _boom_gate(wid, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        raise RuntimeError("e2b sandbox unreachable")
+
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _boom_gate)
+
+    res = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    assert res["ok"] is True, res
+    assert res.get("smoke_status") == "errored", res
+    msg = res.get("message", "").lower()
+    assert "verified runnable" not in msg, f"errored worker falsely reported verified: {msg}"
+    assert "unverified" in msg or "could not be run" in msg, msg
+
+
+def test_smoke_runs_output_schema_contract_like_a_real_run(booted, monkeypatch):
+    """Blocker (Codex review): smoke must validate the SAME two-stage gate a real
+    run uses — _validate_output_schema (scalar type/json contract) THEN
+    _validate_run_outputs. A scalar `type: json` output that is non-empty but not
+    valid JSON must FAIL smoke, not pass it and then fail every real run with
+    schema_violation. This drives the real _smoke_and_repair_generated_worker."""
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+
+    # A worker declaring a scalar JSON output, with a driver that returns a
+    # NON-JSON string for it. The real-run gate rejects this (schema_violation);
+    # smoke must reject it too.
+    json_yml = (
+        'schema_version: "0.3"\n'
+        'name: "jsonout"\n'
+        'title: "JSON Out"\n'
+        'description: "Returns a JSON scalar."\n'
+        'version: "0.1.0"\n'
+        'trigger:\n  type: "manual"\n'
+        'exec:\n'
+        '  entry: "run.py"\n  runtime: "python311"\n  runner: "e2b"\n'
+        '  inputs:\n  - name: "text"\n    kind: scalar\n    type: string\n    required: true\n'
+        '  outputs:\n  - name: "data"\n    kind: scalar\n    type: json\n    required: true\n'
+    )
+    main = booted["main"]
+    from main import _register_worker_from_files, DraftFile
+    from db import get_repositories
+
+    worker_id = _register_worker_from_files(
+        [DraftFile(path="worker.yml", content=json_yml),
+         DraftFile(path="run.py", content="print('hi')\n")],
+        user_id="federico",
+        repos=get_repositories(),
+        dedupe_id=True,
+    )
+
+    from models import WorkerResult
+
+    class _BadJsonDriver:
+        def run(self, *, worker_id, run_id, inputs, config=None, **kwargs):  # noqa: ANN001
+            return WorkerResult(status="success", outputs={"data": "not json at all"}, artifacts=[])
+
+    monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _BadJsonDriver())
+    # No code repair so we get the raw verdict, not a codegen rewrite.
+    smoke = run_service._smoke_and_repair_generated_worker(
+        worker_id, {}, user_id="federico", repos=get_repositories(),
+        log_fn=lambda *a, **k: None, allow_code_repair=False,
+    )
+    assert smoke["status"] == "failed", (
+        f"smoke passed a worker that fails real-run schema validation: {smoke}"
+    )

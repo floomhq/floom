@@ -998,9 +998,14 @@ def _smoke_gate_emily_worker(
     means the next real run passes too (gate == runtime). A ``failed`` verdict
     DISABLES the worker (kept editable) and is surfaced to the operator.
 
-    Returns ``(smoke_status, smoke_reason)``. Never raises.
+    Returns ``(smoke_status, smoke_reason)``. ``smoke_status`` is one of
+    ``"passed" | "failed" | "skipped" | "errored"`` — never ``None``, so the
+    caller can NEVER report "verified runnable" for a worker whose runtime
+    validation did not actually run (``errored`` = the smoke infra raised;
+    ``skipped`` = the gate could not prove the worker, e.g. missing
+    secret/connection). Both are reported honestly, not as verified. Never raises.
     """
-    smoke_status: Optional[str] = None
+    smoke_status: str = "errored"
     smoke_reason: Optional[str] = None
     try:
         from run_service import smoke_and_gate_generated_worker
@@ -1040,11 +1045,57 @@ def _smoke_gate_emily_worker(
             allow_code_repair=True,
         )
         if isinstance(smoke, dict):
-            smoke_status = smoke.get("status")
+            smoke_status = smoke.get("status") or "errored"
             smoke_reason = smoke.get("reason")
     except Exception:
         logger.exception("emily worker smoke+gate failed for %s", worker_id)
+        smoke_status = "errored"
+        smoke_reason = "could not run the verification test for this worker"
     return smoke_status, smoke_reason
+
+
+def _emily_worker_result_message(
+    worker_id: str, verb: str, smoke_status: Optional[str], smoke_reason: Optional[str]
+) -> Dict[str, Any]:
+    """Build the tool result for a create/update, HONEST about whether the worker
+    was actually proven runnable.
+
+    Only a ``"passed"`` smoke means "verified runnable". A ``"failed"`` worker is
+    DISABLED. A ``"skipped"`` / ``"errored"`` worker was NOT validated at runtime,
+    so we must NOT claim it is verified — that is exactly the passing-gate-that-
+    lies failure mode. We surface the honest state so Emily tells the operator the
+    truth (e.g. "created, but I could not test it yet because it needs a secret").
+    """
+    base = {"ok": True, "worker_id": worker_id, "smoke_status": smoke_status}
+    if smoke_status == "failed":
+        return {
+            **base,
+            "message": (
+                f"Worker '{worker_id}' was {verb} but its test run failed "
+                f"({smoke_reason or 'unknown'}); it is disabled until it runs clean. "
+                "Adjust the worker, then re-run."
+            ),
+        }
+    if smoke_status == "passed":
+        return {**base, "message": f"Worker '{worker_id}' {verb} and verified runnable."}
+    if smoke_status == "skipped":
+        return {
+            **base,
+            "message": (
+                f"Worker '{worker_id}' was {verb}, but I could NOT verify it runs yet "
+                f"({smoke_reason or 'verification was skipped'}). It is enabled but untested — "
+                "run it once to confirm it works."
+            ),
+        }
+    # errored / unknown: the verification machinery itself failed; do not claim runnable.
+    return {
+        **base,
+        "message": (
+            f"Worker '{worker_id}' was {verb}, but the verification test could not be run "
+            f"({smoke_reason or 'verification error'}). It is enabled but UNVERIFIED — "
+            "run it once and check the result before relying on it."
+        ),
+    }
 
 
 def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -1116,24 +1167,7 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     # (the worker stays editable), but it IS surfaced so Emily can tell the user
     # the worker is not yet runnable instead of presenting a dead worker as ready.
     smoke_status, smoke_reason = _smoke_gate_emily_worker(worker_id, manifest, user_id)
-
-    if smoke_status == "failed":
-        return {
-            "ok": True,
-            "worker_id": worker_id,
-            "smoke_status": "failed",
-            "message": (
-                f"Worker '{worker_id}' was created but its first test run failed "
-                f"({smoke_reason or 'unknown'}); it is disabled until edited. "
-                "Edit run.py, then re-run."
-            ),
-        }
-    return {
-        "ok": True,
-        "worker_id": worker_id,
-        "smoke_status": smoke_status,
-        "message": f"Worker '{worker_id}' created and verified runnable.",
-    }
+    return _emily_worker_result_message(worker_id, "created", smoke_status, smoke_reason)
 
 
 def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -1226,23 +1260,7 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     # the worker (kept editable) and is surfaced. This closes the gap where the
     # update path wrote a manifest with zero validation.
     smoke_status, smoke_reason = _smoke_gate_emily_worker(worker_id, manifest, user_id)
-    if smoke_status == "failed":
-        return {
-            "ok": True,
-            "worker_id": worker_id,
-            "smoke_status": "failed",
-            "message": (
-                f"Worker '{worker_id}' was updated but its test run failed "
-                f"({smoke_reason or 'unknown'}); it is disabled until it runs clean. "
-                "Adjust the worker, then re-run."
-            ),
-        }
-    return {
-        "ok": True,
-        "worker_id": worker_id,
-        "smoke_status": smoke_status,
-        "message": f"Worker '{worker_id}' updated and verified runnable.",
-    }
+    return _emily_worker_result_message(worker_id, "updated", smoke_status, smoke_reason)
 
 
 def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
