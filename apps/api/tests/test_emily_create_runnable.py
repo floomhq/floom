@@ -566,6 +566,71 @@ def test_update_preserves_real_run_js_worker_entry(booted, monkeypatch):
     assert (workers_dir / worker_id / "run.js").is_file(), "run.js source was deleted"
 
 
+def test_manifest_executes_run_py_classification(booted):
+    """Unit: _manifest_executes_run_py must be POSITIVE (entry == run.py), never
+    'absence of a non-script entry'. Agent SKILL.md must be False (Codex P1 #5)."""
+    cs = booted["chat_service"]
+    assert cs._manifest_executes_run_py({"exec": {"entry": "run.py"}}) is True
+    assert cs._manifest_executes_run_py({"exec": {"entry": "SKILL.md"}}) is False
+    assert cs._manifest_executes_run_py({"entrypoint": "SKILL.md"}) is False
+    assert cs._manifest_executes_run_py({"exec": {"entry": "run.js"}}) is False
+    assert cs._manifest_executes_run_py({"runtime": {"entrypoint": "run.js"}}) is False
+    assert cs._manifest_executes_run_py({"exec": {"command": "node run.js"}}) is False
+    # No entry/command at all -> schema default run.py (the Emily create case).
+    assert cs._manifest_executes_run_py({"trigger": {"type": "manual"}}) is True
+
+
+def test_agent_skill_md_worker_not_codegen_or_backfilled_on_update(booted, monkeypatch):
+    """Codex P1 #5: updating a real SKILL.md agent worker must NOT backfill run.py
+    nor invoke run.py codegen — its executable entry is SKILL.md."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+
+    from main import _register_worker_from_files, DraftFile
+    from db import get_repositories
+
+    agent_yml = (
+        'schema_version: "0.3"\n'
+        'name: "agentw"\n'
+        'title: "Agent W"\n'
+        'description: "agent worker"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "SKILL.md"\n'
+        'exec:\n  entry: "SKILL.md"\n  runtime: "skill"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    worker_id = _register_worker_from_files(
+        [DraftFile(path="worker.yml", content=agent_yml),
+         DraftFile(path="SKILL.md", content="You are a helpful agent.\n")],
+        user_id="federico", repos=get_repositories(), dedupe_id=True,
+    )
+
+    codegen_calls: list = []
+    orig = chat_service._generate_run_py_from_manifest
+    def _spy(wid, manifest, uid, log_fn):
+        codegen_calls.append(wid)
+        return orig(wid, manifest, uid, log_fn)
+    monkeypatch.setattr(chat_service, "_generate_run_py_from_manifest", _spy)
+
+    # Gate returns skipped for an agent worker (not a script-mode worker) — fine.
+    def _gate(wid, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        return {"status": "skipped", "reason": "not a script-mode worker"}
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _gate)
+
+    updated = agent_yml.replace("agent worker", "agent worker v2")
+    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "federico")
+    assert res["ok"] is True, res
+    # The meaningful invariant: the run.py-specific machinery (codegen) is NOT
+    # applied to an agent worker. (A benign run.py stub from the shared
+    # registration helper may exist on disk, but it is never executed nor codegen'd
+    # for a SKILL.md worker, and the placeholder preflight only fires when the entry
+    # IS run.py.) The update reports the skipped smoke verdict honestly.
+    assert codegen_calls == [], f"agent worker was codegen'd into run.py: {codegen_calls}"
+    assert res.get("smoke_status") == "skipped", res
+    assert "generation produced no script code" not in (res.get("message") or "")
+
+
 def test_run_js_worker_not_codegen_or_placeholder_gated(booted, monkeypatch):
     """Codex P1 (2nd): a real run.js worker updated via workers__update must NOT be
     codegen'd into run.py nor failed by the run.py placeholder preflight, even when

@@ -1089,35 +1089,49 @@ def _manifest_executes_run_py(manifest: Dict[str, Any]) -> bool:
     perfectly good worker (Codex P1). We treat the worker as a run.py worker only
     when NO command/entry signals a non-run.py script.
     """
-    def _is_script_path(v: Any) -> bool:
-        return isinstance(v, str) and v.strip().lower().endswith((".py", ".sh", ".js"))
-
-    def _non_run_py(v: Any) -> bool:
-        if not _is_script_path(v):
-            return False
+    def _norm(v: Any) -> Optional[str]:
+        if not isinstance(v, str) or not v.strip():
+            return None
         ref = v.strip()
-        ref = ref[2:] if ref.startswith("./") else ref
-        return ref != "run.py"
+        return ref[2:] if ref.startswith("./") else ref
 
-    signals: list = []
-    for block_key in ("exec", "runtime"):
-        block = manifest.get(block_key)
-        if isinstance(block, dict):
-            signals.append(block.get("entry"))
-            signals.append(block.get("entrypoint"))
-            # command: any non-run.py script token signals a different executable.
-            cmd = block.get("command")
-            if isinstance(cmd, str):
-                for tok in cmd.strip().split():
-                    signals.append(tok)
-    signals.append(manifest.get("entrypoint"))
-    cmd = manifest.get("command")
-    if isinstance(cmd, str):
-        for tok in cmd.strip().split():
-            signals.append(tok)
+    def _is_script_path(v: Optional[str]) -> bool:
+        return isinstance(v, str) and v.lower().endswith((".py", ".sh", ".js"))
 
-    # If ANY signal points at a non-run.py script, this is not a run.py worker.
-    return not any(_non_run_py(s) for s in signals)
+    # Resolve the EFFECTIVE entry exactly like the schema's precedence: an explicit
+    # entry (exec/runtime/top-level) wins; else a command's script token; else the
+    # canonical script default run.py. The worker is a run.py worker ONLY when that
+    # resolved entry is literally run.py. An agent worker (entry: SKILL.md / any
+    # non-script entry) is NOT a run.py worker (a missing extension / .md must never
+    # fall through to "run.py" — Codex P1).
+    # Precedence: exec.entry (canonical schema signal, S11) -> top-level entrypoint
+    # -> runtime.entry/entrypoint.
+    exec_block = manifest.get("exec") if isinstance(manifest.get("exec"), dict) else {}
+    runtime_block = manifest.get("runtime") if isinstance(manifest.get("runtime"), dict) else {}
+    explicit_entries = [
+        _norm(exec_block.get("entry")),
+        _norm(manifest.get("entrypoint")),
+        _norm(exec_block.get("entrypoint")),
+        _norm(runtime_block.get("entry")),
+        _norm(runtime_block.get("entrypoint")),
+    ]
+    for e in explicit_entries:
+        if e is not None:
+            # First explicit entry signal decides (any non-run.py entry, incl.
+            # SKILL.md/*.md, means NOT a run.py worker).
+            return e == "run.py"
+
+    # No explicit entry: fall back to a command's script token.
+    for src in (manifest.get("exec"), manifest.get("runtime"), manifest):
+        cmd = src.get("command") if isinstance(src, dict) else None
+        if isinstance(cmd, str):
+            for tok in cmd.strip().split():
+                ref = _norm(tok)
+                if _is_script_path(ref):
+                    return ref == "run.py"
+
+    # Nothing specified: the schema default for a script worker is run.py.
+    return True
 
 
 def _smoke_gate_emily_worker(
