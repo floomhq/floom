@@ -846,6 +846,93 @@ def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     }
 
 
+def _generate_run_py_from_manifest(
+    worker_id: str,
+    manifest: Dict[str, Any],
+    user_id: str,
+    log_fn,
+) -> bool:
+    """Synthesise a real run.py for a manifest-only worker, replacing the no-op stub.
+
+    Emily produces a worker.yml but no code, so the registered bundle carries the
+    placeholder run.py (``_DEFAULT_RUN_PY_STUB``). This drives the SAME codegen
+    engine the smoke-repair loop uses (``run_service._repair_run_py``) with the
+    worker's description as intent and the manifest as context, then persists the
+    generated code through the canonical editor path (``main.persist_worker_run_py``)
+    so the next run executes it. Returns True if real code was written.
+
+    Best-effort: returns False on any failure (no OPENAI_API_KEY, codegen error,
+    no placeholder present) — the caller still runs the smoke gate, which will
+    disable the worker and surface the reason if it remains a no-op.
+    """
+    try:
+        from worker_registry import WORKERS_DIR
+        from run_service import _repair_run_py, _PLACEHOLDER_RUN_PY_MARKER
+        from main import persist_worker_run_py
+    except Exception:
+        return False
+
+    run_py_path = WORKERS_DIR / worker_id / "run.py"
+    try:
+        current = run_py_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    # Only generate when the file is the no-op placeholder. A worker that already
+    # carries real code (e.g. a future create path that supplies run.py) is left
+    # untouched — the smoke gate validates/repairs it.
+    if _PLACEHOLDER_RUN_PY_MARKER not in current:
+        return False
+
+    import yaml as _yaml
+    import json as _json
+
+    intent_parts = [
+        str(manifest.get("description") or "").strip(),
+        str(manifest.get("long_description") or "").strip(),
+    ]
+    intent = "\n".join(p for p in intent_parts if p) or str(
+        manifest.get("title") or manifest.get("name") or worker_id
+    )
+    # Give the generator the full manifest so it implements EVERY declared input
+    # and output, not just the description prose.
+    try:
+        manifest_yaml = _yaml.safe_dump(manifest, sort_keys=False)
+    except Exception:
+        manifest_yaml = _json.dumps(manifest, default=str)
+    failure = (
+        "The worker has only a placeholder run.py that returns empty outputs, so "
+        "it produces none of its declared outputs. Implement the worker from its "
+        "manifest below. Read inputs from inputs/input.json and write result.json "
+        "with {\"status\",\"outputs\",\"artifacts\"}, filling EVERY declared "
+        f"output.\n\nWorker manifest:\n{manifest_yaml[:4000]}"
+    )
+
+    secrets: Dict[str, str] = {}
+    try:
+        from run_service import get_secrets_for_worker
+        secrets = get_secrets_for_worker(worker_id, user_id=user_id) or {}
+    except Exception:
+        secrets = {}
+
+    fixed = _repair_run_py(
+        run_code=current,
+        failure=failure,
+        secrets=secrets,
+        log_fn=log_fn,
+        intent=intent,
+    )
+    if not fixed:
+        log_fn("run.py generation produced no code; smoke gate will disable worker", "warning")
+        return False
+    try:
+        persist_worker_run_py(worker_id, fixed, user_id=user_id)
+    except Exception as exc:
+        log_fn(f"could not persist generated run.py: {exc}", "warning")
+        return False
+    log_fn("generated real run.py from manifest", "info")
+    return True
+
+
 def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """Create a RUNNABLE worker from a worker.yml manifest — same path as the API.
 
@@ -926,6 +1013,16 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
         def _smoke_log(msg: str, level: str = "info") -> None:
             logger.info("workers__create smoke %s: %s", worker_id, msg)
+
+        # Emily authors a MANIFEST, not code, so the bundle ships the no-op
+        # placeholder run.py. The smoke gate short-circuits a placeholder to
+        # "failed — no real code" (run_service:_PLACEHOLDER_RUN_PY_MARKER) WITHOUT
+        # generating anything, because that path assumes the LLM author already
+        # produced run.py (draft-and-create Path B). So here we synthesise real
+        # run.py FROM THE MANIFEST first (codegen, the same engine the smoke-repair
+        # uses), persist it through the canonical editor path, and only THEN smoke.
+        # This is what makes a manifest-only create runnable to completion.
+        _generate_run_py_from_manifest(worker_id, manifest, user_id, _smoke_log)
 
         smoke = smoke_and_gate_generated_worker(
             worker_id,
