@@ -1727,3 +1727,31 @@ Doc: `docs/audits/workspace-duplicate-2026-05-29.md`.
 **Verification (real `/workers/new/from-prompt` flow, 10 diverse prompts, live on :8011):** 10/10 GREEN, 0 repairs (pure first-pass), 0 gated, 0 silently-broken; each worker produced correct real output on a fresh run; multi-output workers fully implemented. New `tests/test_codegen_model.py` passes. 10 test workers cleaned up (scoped DELETE); runs floor held (595→605). Full table: `docs/audits/generator-quality-2026-05-29.md`.
 
 **Status:** SHIPPED + VERIFIED.
+
+---
+
+## Feature — Emily can read Slack channels she's invited to (consent = invite) (2026-06-04)
+
+### #SC1 On-demand Slack channel reading, invite-gated
+
+**What Federico asked:** "be able to read the channels if the user wants to. Full power."
+
+**Consent model (decided + implemented):**
+- **Invite = consent.** Slack only lets the bot read a channel it is a MEMBER of, so the operator controls access per-channel by inviting Emily (`/invite @Emily`). Default access stays DM + @mention only.
+- **On-demand only.** Emily reads a channel's recent history WHEN the operator asks ("summarize #launch"). No firehose, no proactive ingestion, no event subscription to all channel messages.
+- **Privacy:** reading a channel ingests everyone's messages there. Emily is matter-of-fact about that (`privacy_note` on every read).
+
+**Where:** `apps/api/chat_service.py` — two new workspace tools in `_workspace_tools`:
+- `slack__list_channels` — `users.conversations` (the bot's own memberships) → name + id + is_private + is_member. Reuses `main._slack_bot_token_for_team(None)` (multi-team aware) with `SLACK_BOT_TOKEN` fallback.
+- `slack__read_channel(channel, limit?)` — resolves a name (or bare id) to a channel id, then `conversations.history` (limit clamped 1–100, default 50). Returns cleaned messages (author + text + ts), system-join noise dropped, oldest-first.
+
+**Graceful failure (never crashes):** `_slack_friendly_error` maps Slack errors to Emily-voice messages —
+- `missing_scope`/`invalid_scope` → "channel access isn't enabled yet; owner adds channels:read/channels:history/groups:read/groups:history and reinstalls."
+- `not_in_channel`/`channel_not_found` → "I'm not in that channel yet. Invite me with /invite @Emily."
+- no bot token → "Slack isn't connected."
+
+**Scope dependency:** reading needs `channels:history`, `channels:read`, `groups:history`, `groups:read` bot scopes (added to `docs/slack-app-manifest.example.yml`; reinstall required). Tools WORK once granted and degrade gracefully until then. Guidance added to `workers/workspace-agent/SKILL.md` + `docs/slack-self-test.md`.
+
+**Tests:** `tests/test_emily_slack_channels.py` — 12 tests (list/read happy paths, name resolution, bare-id, limit clamp, and the graceful missing_scope / not_in_channel / no-token paths). All green.
+
+**Status:** SHIPPED (live-verified pre-scope-grant: Emily responds gracefully, telling the operator how to enable channel access).
