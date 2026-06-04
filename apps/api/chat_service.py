@@ -1333,6 +1333,48 @@ def _build_system_prompt(user_id: str) -> str:
     return "\n\n".join(part for part in [workspace_content, skill_md] if part)
 
 
+# Per-call environment notes. The personality (workspace.md) is shared and
+# identical everywhere; only this short, env-aware context is injected per call
+# so the assistant knows HOW it is being reached and adapts shape accordingly.
+# Keep these short, a few lines. Do NOT move personality here.
+ENVIRONMENT_NOTES: Dict[str, str] = {
+    "slack": (
+        "## Current environment: Slack\n"
+        "You are currently being reached in Slack (a chat). Keep replies short and "
+        "chat-shaped. The person is DMing you or mentioned you in a channel. When "
+        "something needs the screen, give a workers.floom.dev link they can tap."
+    ),
+    "mcp": (
+        "## Current environment: MCP (another AI agent)\n"
+        "You are currently being driven by another AI agent via MCP, not a human. Be "
+        "precise and structured, skip the warm small-talk and onboarding pleasantries, "
+        "return clean actionable results the calling agent can use."
+    ),
+    "web": (
+        "## Current environment: Workeros web assistant\n"
+        "You are in the Workeros web assistant. The person can click links and see the "
+        "dashboard alongside this chat."
+    ),
+}
+
+
+def _environment_note(source: str) -> str:
+    """Return the short env-aware note for a source, defaulting to web."""
+    return ENVIRONMENT_NOTES.get(source, ENVIRONMENT_NOTES["web"])
+
+
+def build_system_prompt_for_source(user_id: str, source: str = "web") -> str:
+    """Shared personality (workspace.md) plus a short per-call environment note.
+
+    The persona stays in workspace.md (warmth, proactivity, no em dashes, the
+    swarm-of-workers framing) and is identical for every source. Only the
+    appended environment note differs, so the assistant is aware of whether it
+    is reached via Slack, MCP, or the web assistant.
+    """
+    base = _build_system_prompt(user_id)
+    return f"{base}\n\n{_environment_note(source)}"
+
+
 def workspace_agent_tool_metadata(user_id: str) -> List[Dict[str, str]]:
     """Return [{name, description}] for the workspace agent's tools.
 
@@ -1401,6 +1443,7 @@ async def stream_chat(
     user_id: str,
     conversation_id: Optional[str],
     part_queue: asyncio.Queue,
+    source: str = "web",
 ) -> None:
     """Run the workspace agent and push SSE parts into part_queue.
 
@@ -1450,7 +1493,7 @@ async def stream_chat(
     else:
         input_messages.append({"role": "user", "content": message})
 
-    system_prompt = _build_system_prompt(user_id)
+    system_prompt = build_system_prompt_for_source(user_id, source)
     workspace_tools = _workspace_tools(user_id)
 
     # ------------------------------------------------------------------
