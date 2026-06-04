@@ -17,7 +17,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
-import Link from "next/link";
 
 type TabKey = "instructions" | "prompt";
 
@@ -311,10 +310,10 @@ export default function AssistantPage() {
       </Tabs>
 
       <p className="text-xs text-muted-foreground">
-        Use the assistant from Slack?{" "}
-        <Link href="/connections/slack" className="underline underline-offset-2 hover:text-foreground">
-          Connect your Slack workspace
-        </Link>
+        To use this assistant from Slack, go to{" "}
+        <a href="/settings#slack" className="font-medium text-foreground underline-offset-2 hover:underline">
+          Settings &rarr; Slack
+        </a>
         .
       </p>
     </div>
