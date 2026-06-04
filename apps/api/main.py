@@ -88,6 +88,7 @@ from contexts import (
     delete_context_metadata,
     ensure_contexts_dir,
     guess_mime_type,
+    is_active_markup,
     is_binary_file,
     iter_context_files,
     load_context_metadata,
@@ -5358,6 +5359,19 @@ def get_context_file(
     if is_binary_file(rel, mime_type):
         headers["Content-Disposition"] = f'attachment; filename="{Path(rel).name}"'
         return FileResponse(target, media_type=mime_type, headers=headers)
+    # Active markup (html, svg, xhtml, xml) is "text" but a browser would
+    # EXECUTE it inline — that is stored XSS for an uploaded context file.
+    # Force download AND neutralize the content-type so it can never run in
+    # our origin. Safe-preview text (md/txt/json/py/yaml/...) still serves
+    # inline below.
+    if is_active_markup(rel, mime_type):
+        headers["Content-Disposition"] = f'attachment; filename="{Path(rel).name}"'
+        headers["X-Content-Type-Options"] = "nosniff"
+        return Response(
+            content=target.read_bytes(),
+            media_type="text/plain; charset=utf-8",
+            headers=headers,
+        )
     return Response(content=target.read_bytes(), media_type=mime_type, headers=headers)
 
 
@@ -6335,21 +6349,14 @@ def update_worker(
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    # Validate cron expression if provided
+    # Validate cron expression if provided. Shares the exact same validator
+    # the create path (WorkerTrigger/WorkerContractTrigger) uses — single
+    # source of truth in cron_utils.is_valid_cron_expr.
     new_cron_expr = payload.cron_expr
     if new_cron_expr is not None:
-        try:
-            from scheduler import compute_next_run_at
-            from datetime import datetime, timezone
-            test_dt = datetime.now(timezone.utc)
-            if compute_next_run_at(new_cron_expr, test_dt) is None:
-                raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
-        except ImportError:
-            # croniter not available — try basic validation via regex
-            # Standard cron has 5 space-separated fields
-            import re as _re
-            if not _re.fullmatch(r"[\d\*\-\,\/]+(?: [\d\*\-\,\/]+){4}", new_cron_expr.strip()):
-                raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
+        from cron_utils import is_valid_cron_expr
+        if not is_valid_cron_expr(new_cron_expr):
+            raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
 
     updates: Dict[str, Any] = {}
 
@@ -8190,10 +8197,33 @@ async def create_worker_from_bundle(
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=400, detail=f"Not a valid zip file: {exc}")
 
-    for info in zf.infolist():
+    # Zip-bomb guards: cap total uncompressed size and entry count BEFORE
+    # extracting so a tiny zip cannot exhaust memory/disk. ZipInfo.file_size
+    # is the declared uncompressed size; we pre-check the sum, then re-guard
+    # the running total during extraction in case a header lies.
+    _MAX_BUNDLE_UNCOMPRESSED_BYTES = 50 * 1024 * 1024  # 50 MB
+    _MAX_BUNDLE_ENTRIES = 2000
+
+    infolist = zf.infolist()
+    if len(infolist) > _MAX_BUNDLE_ENTRIES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Bundle has too many entries ({len(infolist)} > {_MAX_BUNDLE_ENTRIES})",
+        )
+    declared_total = 0
+    for info in infolist:
         file_type = (info.external_attr >> 16) & 0o170000
         if file_type == 0o120000:
             raise HTTPException(status_code=400, detail=f"Bundle contains unsupported symlink: {info.filename!r}")
+        declared_total += info.file_size
+        if declared_total > _MAX_BUNDLE_UNCOMPRESSED_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Bundle too large: uncompressed size exceeds "
+                    f"{_MAX_BUNDLE_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                ),
+            )
 
     names = zf.namelist()
 
@@ -8228,6 +8258,7 @@ async def create_worker_from_bundle(
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists") from exc
     try:
+        extracted_total = 0
         for zip_name in names:
             if not zip_name.startswith(prefix):
                 continue
@@ -8238,11 +8269,23 @@ async def create_worker_from_bundle(
             parts = rel.split("/")
             if any(p in ("", "..") for p in parts):
                 raise HTTPException(status_code=400, detail=f"Invalid path in bundle: {rel!r}")
+            data = zf.read(zip_name)
+            # Re-guard the running total in case a ZipInfo header under-reported
+            # the real uncompressed size (defends against a lying header).
+            extracted_total += len(data)
+            if extracted_total > _MAX_BUNDLE_UNCOMPRESSED_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"Bundle too large: uncompressed size exceeds "
+                        f"{_MAX_BUNDLE_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                    ),
+                )
             dest = target_dir
             for part in parts[:-1]:
                 dest = dest / part
                 dest.mkdir(exist_ok=True)
-            (dest / parts[-1]).write_bytes(zf.read(zip_name))
+            (dest / parts[-1]).write_bytes(data)
     except HTTPException:
         import shutil
         shutil.rmtree(target_dir, ignore_errors=True)
