@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 
 from contexts import context_scope_for_user, use_context_scope
 from db.factory import Repositories, get_repositories
-from runner_utils import ARTIFACTS_DIR
+from runner_utils import ARTIFACTS_DIR, _validate_output_schema
 from worker_registry import WORKERS_DIR, get_worker_config
 from runner_sandbox import get_driver as get_sandbox_driver
 from models import (
@@ -2775,6 +2775,32 @@ def execute_run(
             })
             publish_run_part(run_id, {"type": "finish", "status": "pending_approval"})
             log_fn(f"Run awaiting approval: {label}")
+            return
+
+        # Output-schema enforcement — the SINGLE convergence point for ALL
+        # three drivers (Agent / Skill / E2B script). Previously only the Agent
+        # and Skill drivers called _validate_output_schema internally; the E2B
+        # script driver (.py/.sh/.js — the common case) skipped it entirely, so
+        # declared output `type` (json/csv/markdown/text), CSV `columns`, and
+        # `json_required_keys` were silently unenforced (Vivek's P0). Validating
+        # here, on the path every driver flows through, makes the contract
+        # enforcement DRY and uniform. A hard type/column/key mismatch FAILS the
+        # run (the whole point) rather than surfacing garbage as COMPLETED.
+        schema_error = _validate_output_schema(worker_id, outputs, log_fn, config=config)
+        if schema_error:
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error=f"Output schema violation: {schema_error}",
+                error_code="schema_violation",
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+            publish_run_part(
+                run_id,
+                {"type": "finish", "status": "failed", "error": f"Output schema violation: {schema_error}"},
+            )
+            log_fn(f"Output schema violation: {schema_error}", level="error")
             return
 
         quality_error, quality_warnings = _validate_run_outputs(run_id, config, outputs, artifacts)

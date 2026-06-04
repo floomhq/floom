@@ -26,6 +26,11 @@ from worker_registry import WORKERS_DIR
 logger = logging.getLogger("floom.runner_sandbox.e2b")
 
 MAX_E2B_SANDBOX_LIFETIME_SECONDS = 3600
+# Hard cap on the raw result.json the worker writes. Read + json.loads +
+# persist into the run `output_json` DB column all happen on this blob, so an
+# unbounded multi-MB output bloats the DB row and the run-detail response.
+# Reject above this with a clear error instead of silently ingesting it.
+MAX_RESULT_JSON_BYTES = 5 * 1024 * 1024  # 5 MiB
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
     "code 137",
@@ -41,6 +46,119 @@ _OOM_MARKERS = (
 )
 _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
+
+
+def _read_result_json(
+    sandbox: Any,
+    result_path: str,
+    log_fn: Callable,
+) -> "tuple[Optional[Dict[str, Any]], Optional[WorkerResult]]":
+    """Read and parse the worker's result.json from the sandbox.
+
+    Returns ``(result_data, None)`` on success, or ``(None, WorkerResult)`` with
+    a distinct, actionable error when the read/parse fails. Each failure mode is
+    a separate branch (audit P1) instead of one generic "didn't produce a
+    result" message:
+
+      * missing file        -> ``missing_result``
+      * oversized           -> ``output_too_large`` (size cap before parse+persist)
+      * invalid/undecodable -> ``invalid_result_json``
+      * non-object top-level-> ``invalid_result_json``
+      * non-dict ``outputs``-> ``invalid_outputs_shape`` (was silently coerced to {})
+
+    Operator detail (full sandbox path) is logged; user-facing messages never
+    leak the sandbox internal path.
+    """
+    # 1. Read. A read failure means the worker exited 0 but never wrote the file.
+    try:
+        result_raw = sandbox.files.read(result_path)
+    except Exception as exc:
+        log_fn(f"[e2b] No result.json at {result_path}: {exc}", "error")
+        return None, WorkerResult(
+            status="error",
+            error=(
+                "Worker did not write a result. Check run.py wrote "
+                "result.json before exiting (the file is missing)."
+            ),
+            error_code="missing_result",
+        )
+
+    # 2. Size cap BEFORE json.loads + persist, to protect the DB row and the
+    #    run-detail response from multi-MB outputs.
+    raw_bytes = (
+        result_raw
+        if isinstance(result_raw, (bytes, bytearray))
+        else str(result_raw).encode("utf-8", errors="ignore")
+    )
+    if len(raw_bytes) > MAX_RESULT_JSON_BYTES:
+        log_fn(
+            f"[e2b] result.json at {result_path} is {len(raw_bytes)} bytes "
+            f"(> {MAX_RESULT_JSON_BYTES} cap)",
+            "error",
+        )
+        return None, WorkerResult(
+            status="error",
+            error=(
+                f"Worker output is too large ({len(raw_bytes) // 1024} KiB). "
+                f"result.json must be under "
+                f"{MAX_RESULT_JSON_BYTES // (1024 * 1024)} MiB. Write large data "
+                "to an artifact file instead."
+            ),
+            error_code="output_too_large",
+        )
+
+    # 3. Parse. A failure here means a file WAS written but is not valid JSON
+    #    (or wrong encoding) — distinct from "no file written".
+    try:
+        result_data = json.loads(raw_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        log_fn(f"[e2b] result.json at {result_path} is not valid JSON: {exc}", "error")
+        return None, WorkerResult(
+            status="error",
+            error=(
+                "Worker wrote a result.json that is not valid JSON: "
+                f"{exc}. Ensure run.py serializes a JSON object."
+            ),
+            error_code="invalid_result_json",
+        )
+
+    # 4. Top-level must be an object.
+    if not isinstance(result_data, dict):
+        log_fn(
+            f"[e2b] result.json at {result_path} top-level is "
+            f"{type(result_data).__name__}, expected object",
+            "error",
+        )
+        return None, WorkerResult(
+            status="error",
+            error=(
+                "Worker result.json must be a JSON object, got "
+                f"{type(result_data).__name__}. Wrap your data in an "
+                '"outputs" object.'
+            ),
+            error_code="invalid_result_json",
+        )
+
+    # 5. `outputs` must be a dict. A worker returning a list/string/number was
+    #    previously coerced to {} and silently completed green (audit P1).
+    outputs = result_data.get("outputs", {})
+    if not isinstance(outputs, dict):
+        log_fn(
+            f"[e2b] result.json 'outputs' is {type(outputs).__name__}, "
+            "expected object",
+            "error",
+        )
+        return None, WorkerResult(
+            status="error",
+            error=(
+                "Worker 'outputs' must be a JSON object, got "
+                f"{type(outputs).__name__}. Return outputs as a mapping, e.g. "
+                '{"outputs": {"name": value}}.'
+            ),
+            error_code="invalid_outputs_shape",
+        )
+
+    return result_data, None
 
 def _register_sandbox(run_id: str, sandbox: Any) -> None:
     with _active_sandboxes_lock:
@@ -632,28 +750,15 @@ class E2BSandboxDriver(SandboxDriver):
                     retryable=False,
                 )
 
-            # Read result.json
-            try:
-                result_raw = sandbox.files.read(f"{workdir}/result.json")
-                result_data = json.loads(result_raw)
-            except Exception as exc:
-                # Log the full sandbox path (operator detail) but return a
-                # user-friendly error that does not leak the sandbox internal
-                # path. Audit 2026-05-26 flagged the path leak.
-                log_fn(f"[e2b] Failed to read result.json from {workdir}: {exc}", "error")
-                user_msg = (
-                    "Worker did not produce a result. Check run.py wrote "
-                    "result.json with the required schema before exiting."
-                )
-                return WorkerResult(
-                    status="error",
-                    error=user_msg,
-                    error_code="missing_result",
-                )
+            # Read + parse result.json. Distinct, actionable errors for each
+            # failure mode (missing file / oversized / invalid JSON / not-a-dict
+            # / non-dict outputs) — see _read_result_json (audit P1).
+            result_path = f"{workdir}/result.json"
+            result_data, parse_error = _read_result_json(sandbox, result_path, log_fn)
+            if parse_error is not None:
+                return parse_error
 
             outputs = result_data.get("outputs", {})
-            if not isinstance(outputs, dict):
-                outputs = {}
             result_status = result_data.get("status", "success")
             result_artifacts = result_data.get("artifacts", [])
             if not isinstance(result_artifacts, list):

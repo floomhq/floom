@@ -169,6 +169,18 @@ def _validate_output_schema(
         name = declared.name
         output_type = declared.type
 
+        # File-backed outputs (kind: file) are validated by _validate_run_outputs
+        # (the run-outputs gate): it checks the actual file exists, is non-empty,
+        # and — for application/json media — parses. The scalar `type` contract
+        # below does NOT apply: a file output's value is a path string or absent,
+        # not the JSON/CSV content itself. Skip them here so we don't reject
+        # legitimate file-mode workers (e.g. `kind: file, media_type:
+        # application/json, path: out/result.json`) that store a path in the
+        # output value. The two validators are mutually exclusive by `kind`.
+        kind = declared.kind or ("file" if output_type == "file" else "scalar")
+        if kind == "file":
+            continue
+
         if name not in outputs:
             if declared.required:
                 return f"Missing declared output '{name}'"
