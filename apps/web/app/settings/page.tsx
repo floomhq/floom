@@ -19,25 +19,25 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
+import { SlackConnect } from "@/components/assistant/SlackConnect";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 // S22f: Notifications tab is currently hidden. The TabKey type still includes
 // it (plus the now-removed "assistant") so old URLs (?tab=assistant /
 // #assistant) don't blow up; we silently fall back to "api" for any tab not in
 // VISIBLE_TAB_KEYS.
-type TabKey = "api" | "system" | "assistant" | "notifications" | "appearance" | "danger";
+// Phase 2 (Slack→Settings): Slack is the human interface for Floom Worker OS
+// (DM the assistant, @mention, approvals) — NOT a worker OAuth connection. It
+// belongs in Settings, not Connections.
+type TabKey = "api" | "system" | "slack" | "assistant" | "notifications" | "appearance" | "danger";
 
-// V4: Settings uses the same top-bar tab strip as the rest of the app (e.g. the
-// worker-detail page). The "Workspace agent" tab was dropped from Settings — the
-// editable agent instructions live on the Agent page (/assistant), so surfacing
-// it here was confusing. Notifications stays hidden until outbound email ships
-// (S22f). "assistant" stays in TAB_KEYS only for legacy deep-link tolerance.
-const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "appearance", "danger"];
-const TAB_KEYS: TabKey[] = ["api", "system", "assistant", "notifications", "appearance", "danger"];
+const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "slack", "appearance", "danger"];
+const TAB_KEYS: TabKey[] = ["api", "system", "slack", "assistant", "notifications", "appearance", "danger"];
 
 const NAV_ITEMS: { key: TabKey; label: string }[] = [
   { key: "api", label: "API access" },
   { key: "system", label: "System" },
+  { key: "slack", label: "Slack" },
   { key: "appearance", label: "Appearance" },
   { key: "danger", label: "Danger zone" },
 ];
@@ -270,6 +270,10 @@ function SettingsContent() {
               )}
             </div>
           </section>
+        </TabsContent>
+
+        <TabsContent value="slack" className="pt-6">
+          <SlackConnect />
         </TabsContent>
 
         <TabsContent value="notifications" className="space-y-4 pt-6">
