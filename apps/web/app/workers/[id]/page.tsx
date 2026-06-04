@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
-  Copy, Code2, Clock, Plug2, ListChecks, History,
+  Copy, Code2, Clock, Plug2, ListChecks, History, Share2,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
   Brain as BrainIcon, Settings2, Plus, RotateCcw,
 } from "lucide-react";
@@ -31,6 +31,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -41,7 +42,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { ShareWorkerButton } from "@/components/ShareWorkerButton";
 import { WorkerVisibilityControl } from "@/components/WorkerVisibilityControl";
@@ -1530,7 +1530,6 @@ export default function WorkerDetailPage() {
   // Summary counts for rail
   const runsCount = worker.recent_runs?.length ?? 0;
   const triggersCount = (worker.triggers_spec || []).length || 1;
-  const lastRunAt = worker.recent_runs?.[0]?.created_at;
   const _triggerSummary = worker.trigger_type || "manual";
 
   // ---------------------------------------------------------------------------
@@ -1618,24 +1617,26 @@ export default function WorkerDetailPage() {
                 Example
               </span>
             )}
+            {/* Versions — hidden on mobile, shown in ⋮ menu instead */}
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setVersionsOpen(true)}
               aria-label="Versions"
-              className="min-h-11 sm:min-h-0"
+              className="hidden sm:inline-flex"
             >
               <History className="size-3.5" />
-              <span className="hidden sm:inline ml-1">Versions</span>
+              <span className="ml-1">Versions</span>
               <ChevronDown className="size-3.5 text-muted-foreground" />
             </Button>
             <span className="[&_button]:min-h-11 sm:[&_button]:min-h-0">
               <WorkerVisibilityControl worker={worker} onChange={(updated) => setWorker(updated)} />
             </span>
-            <span className="[&_button]:min-h-11 sm:[&_button]:min-h-0">
+            {/* Share — hidden on mobile, shown in ⋮ menu instead */}
+            <span className="hidden sm:inline-flex [&_button]:min-h-0">
               <ShareWorkerButton publicLink={worker.public_link} />
             </span>
-            {/* Quiet Edit affordance — text-only on desktop, icon+text on mobile */}
+            {/* Quiet Edit affordance */}
             <Button
               variant="ghost"
               size="sm"
@@ -1645,26 +1646,46 @@ export default function WorkerDetailPage() {
               <Pencil className="w-3.5 h-3.5" />
               <span className="sr-only sm:not-sr-only sm:ml-1">Edit</span>
             </Button>
-            {!worker.is_example && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  className="inline-flex h-11 w-11 sm:h-8 sm:w-8 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-                  aria-label="Worker actions"
-                >
-                  <MoreVertical className="w-4 h-4" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+            {/* ⋮ overflow menu — always visible; on mobile also holds Versions + Share */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="inline-flex h-11 w-11 sm:h-8 sm:w-8 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                aria-label="Worker actions"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {/* Mobile-only: Versions + Share collapsed into ⋮ */}
+                <DropdownMenuItem className="sm:hidden" onClick={() => setVersionsOpen(true)}>
+                  <History className="w-4 h-4 mr-2" />
+                  Versions
+                </DropdownMenuItem>
+                {worker.public_link && (
+                  <DropdownMenuItem
+                    className="sm:hidden"
+                    onClick={() => { navigator.clipboard.writeText(worker.public_link!); }}
+                  >
+                    <Share2 className="w-4 h-4 mr-2" />
+                    Copy share link
+                  </DropdownMenuItem>
+                )}
+                {(!worker.is_example) && (
+                  <DropdownMenuSeparator className="sm:hidden" />
+                )}
+                {!worker.is_example && (
                   <DropdownMenuItem onClick={handleArchive} disabled={archiving}>
                     <Archive className="w-4 h-4 mr-2" />
                     {archiving ? "Archiving..." : "Archive"}
                   </DropdownMenuItem>
+                )}
+                {!worker.is_example && (
                   <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
                     <Trash2 className="w-4 h-4 mr-2" />
                     Delete
                   </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
       </div>
@@ -2426,39 +2447,16 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
       triggerType={worker.trigger_type || worker.config.trigger?.type}
     />
   );
-  // Metadata cluster: icon pills + tags + last-run (moved from header)
-  const lastRunAt = worker.recent_runs?.[0]?.created_at;
+  // Metadata cluster: description + quiet tags line (no icon pills, no last-run)
   const metaCluster = (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {worker.description && (
         <p className="text-sm text-muted-foreground leading-relaxed">{worker.description}</p>
       )}
-      {!worker.archived && (
-        <WorkerIconPills
-          worker={{
-            id: worker.id,
-            name: worker.name,
-            description: worker.description,
-            folder: worker.folder,
-            tags: worker.tags,
-            connections: workerConnections,
-          }}
-          inputs={worker.config.inputs}
-          connections={workerConnections}
-          triggerType={worker.trigger_type || worker.config.trigger?.type}
-          size="md"
-          max={8}
-        />
-      )}
       {(worker.tags || []).length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {(worker.tags || []).map((tag) => (
-            <Badge key={tag} variant="outline" className="text-xs font-normal">{tag}</Badge>
-          ))}
-        </div>
-      )}
-      {lastRunAt && (
-        <p className="text-xs text-muted-foreground">Last run {formatRelativeTime(lastRunAt)}</p>
+        <p className="text-xs text-muted-foreground">
+          {(worker.tags || []).join(" · ")}
+        </p>
       )}
     </div>
   );
@@ -2562,10 +2560,15 @@ function RunSection({
   const isMultilineText = (inp: WorkerInput) =>
     (inp.type === "text" || inp.type === "string") &&
     (MULTILINE_HINT.test(inp.name) || MULTILINE_HINT.test(inp.label || ""));
-  // S29t (score walk): short inputs (select/string/number/boolean) pair
-  // side-by-side; long inputs (textarea/file/csv/multiline) span both columns.
+  // S29t (score walk): short inputs (select/number/boolean) pair side-by-side;
+  // long inputs (textarea/file/csv/text/string) span full width — free-text
+  // fields must not be squeezed into the narrow right rail (FIX 3, Federico).
   const isLongInput = (inp: WorkerInput) =>
-    inp.type === "textarea" || inp.type === "file" || isMultilineText(inp);
+    inp.type === "textarea" ||
+    inp.type === "file" ||
+    inp.type === "text" ||
+    inp.type === "string" ||
+    isMultilineText(inp);
   // S34: About content moved to its own tab (Federico — "different content,
   // different tabs"). Run tab is now form-only.
   // Layout-cleanup: description moved from header to a quiet one-line info note
