@@ -1024,6 +1024,23 @@ def _canonicalize_emily_exec_command(
         return yaml_text
 
 
+def _manifest_executes_run_py(manifest: Dict[str, Any]) -> bool:
+    """True iff the worker's EXECUTED entry is ``run.py``.
+
+    The run.py-specific machinery (stub backfill, codegen-from-manifest, the
+    placeholder-marker smoke preflight) only makes sense for a manifest-only
+    Python worker whose executed script IS ``run.py``. A worker whose entry is
+    ``run.js`` / ``run.sh`` / a multi-file Python entry / ``SKILL.md`` must NOT get
+    a run.py stub backfilled or be codegen'd/placeholder-gated on run.py — that
+    would disable a perfectly good worker (Codex P1). Resolve the effective entry
+    the same way the schema does: ``exec.entry`` wins, else top-level
+    ``entrypoint``, else default ``run.py`` (the canonical script default).
+    """
+    exec_block = manifest.get("exec") if isinstance(manifest.get("exec"), dict) else {}
+    entry = (exec_block.get("entry") or manifest.get("entrypoint") or "run.py")
+    return isinstance(entry, str) and entry.strip().lower() == "run.py"
+
+
 def _smoke_gate_emily_worker(
     worker_id: str,
     manifest: Dict[str, Any],
@@ -1067,14 +1084,16 @@ def _smoke_gate_emily_worker(
         def _smoke_log(msg: str, level: str = "info") -> None:
             logger.info("emily worker smoke %s: %s", worker_id, msg)
 
-        # Emily authors a MANIFEST, not code, so the bundle ships the no-op
-        # placeholder run.py. Synthesise real run.py FROM THE MANIFEST first
-        # (codegen, the same engine the smoke-repair uses), persist it through the
-        # canonical editor path, and only THEN smoke. On update, the existing
-        # run.py is carried over; the placeholder check inside
-        # _generate_run_py_from_manifest no-ops when real code already exists, so
-        # the gate validates whatever code currently backs the worker.
-        _generate_run_py_from_manifest(worker_id, manifest, user_id, _smoke_log)
+        # Emily authors a MANIFEST, not code, so a manifest-only PYTHON worker
+        # (entry: run.py) ships the no-op placeholder run.py. Synthesise real
+        # run.py FROM THE MANIFEST first (codegen, the same engine the smoke-repair
+        # uses), persist it through the canonical editor path, and only THEN smoke.
+        # The placeholder check inside _generate_run_py_from_manifest no-ops when
+        # real code already exists. Skip this for non-run.py workers (run.js /
+        # run.sh / multi-file Python / SKILL.md): they have their OWN entry source
+        # and must NOT be codegen'd into a run.py they do not execute (Codex P1).
+        if _manifest_executes_run_py(manifest):
+            _generate_run_py_from_manifest(worker_id, manifest, user_id, _smoke_log)
 
         smoke = smoke_and_gate_generated_worker(
             worker_id,
@@ -1288,9 +1307,12 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             continue
         files.append(WorkerFilePatch(path=wf.path, content=wf.content))
         seen.add(wf.path)
-    if "run.py" not in seen:
-        # Legacy worker materialized without a run.py: backfill the runnable stub so
-        # the update yields a runnable bundle rather than re-creating the gap.
+    if "run.py" not in seen and _manifest_executes_run_py(manifest):
+        # Legacy run.py worker materialized without a run.py: backfill the runnable
+        # stub so the update yields a runnable bundle. Only for workers that
+        # EXECUTE run.py — a run.js / SKILL.md worker must not get an unused run.py
+        # stub (the placeholder-marker smoke preflight would then disable a good
+        # worker — Codex P1).
         files.append(WorkerFilePatch(path="run.py", content=_DEFAULT_RUN_PY_STUB))
 
     auth = AuthContext(user_id=user_id)

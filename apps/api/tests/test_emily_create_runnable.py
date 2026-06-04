@@ -472,6 +472,65 @@ def test_update_preserves_real_run_js_worker_entry(booted, monkeypatch):
     assert (workers_dir / worker_id / "run.js").is_file(), "run.js source was deleted"
 
 
+def test_run_js_worker_not_codegen_or_placeholder_gated(booted, monkeypatch):
+    """Codex P1 (2nd): a real run.js worker updated via workers__update must NOT be
+    codegen'd into run.py nor failed by the run.py placeholder preflight, even when
+    codegen would return no code. The smoke must run its OWN entry (node run.js)."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+
+    from main import _register_worker_from_files, DraftFile
+    from db import get_repositories
+    from models import WorkerResult
+
+    js_yml = (
+        'schema_version: "0.3"\n'
+        'name: "noderun"\n'
+        'title: "Node Run"\n'
+        'description: "node worker"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "run.js"\n'
+        'exec:\n  entry: "run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        '  command: "node run.js"\n'
+        '  outputs:\n  - name: "result"\n    kind: scalar\n    type: string\n    required: true\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    worker_id = _register_worker_from_files(
+        [DraftFile(path="worker.yml", content=js_yml),
+         DraftFile(path="run.js", content="console.log('hi')\n"),
+         DraftFile(path="package.json", content='{"name":"noderun"}\n')],
+        user_id="federico", repos=get_repositories(), dedupe_id=True,
+    )
+
+    # codegen returns NO code (Codex's failure trigger). If the run.py machinery
+    # were wrongly applied, this would fail the worker.
+    monkeypatch.setattr(run_service, "_repair_run_py", lambda **k: None)
+
+    codegen_calls: list = []
+    orig_gen = chat_service._generate_run_py_from_manifest
+    def _spy_gen(wid, manifest, uid, log_fn):
+        codegen_calls.append(wid)
+        return orig_gen(wid, manifest, uid, log_fn)
+    monkeypatch.setattr(chat_service, "_generate_run_py_from_manifest", _spy_gen)
+
+    # Driver runs node run.js successfully.
+    class _NodeDriver:
+        def run(self, *, worker_id, run_id, inputs, config=None, **kwargs):  # noqa: ANN001
+            return WorkerResult(status="success", outputs={"result": "ok"}, artifacts=[])
+    monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _NodeDriver())
+
+    import yaml as _yaml
+    updated = js_yml.replace('node worker', 'node worker v2')
+    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "federico")
+    assert res["ok"] is True, res
+    # codegen must NOT have been called for a run.js worker.
+    assert codegen_calls == [], f"run.js worker was codegen'd into run.py: {codegen_calls}"
+    # And it must NOT be failed by the run.py placeholder preflight.
+    assert res.get("smoke_status") in ("passed", "skipped"), res
+    assert "generation produced no script code" not in (res.get("message") or "")
+
+
 def test_emily_create_strips_divergent_command_before_persist(booted, monkeypatch):
     """End-to-end: creating with a divergent exec.command persists a manifest that
     does NOT carry the heredoc, so the generated run.py is the executed script."""
