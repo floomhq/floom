@@ -949,24 +949,29 @@ def _canonicalize_emily_exec_command(
     (it lives only in the codegen prompt), so it writes the wrong shape and every
     real run fails validation, while the generated ``run.py`` is silently ignored.
 
-    The fix has TWO parts, both closing a divergent-execution vector for the
-    Emily-authored path (where the executed code is ALWAYS the generated run.py):
-      1. ``exec.command`` is stripped (it is not an authoring surface). The schema
-         re-derives the canonical command from the real ``entry`` so a divergent
-         heredoc cannot shadow the entry's script.
-      2. A non-``run.py`` script ENTRY (``run.sh`` / ``run.js``) is normalised to
-         ``run.py`` ONLY WHEN ITS SOURCE FILE IS ABSENT (an orphaned entry).
-         Codegen only ever emits ``run.py``; an orphaned ``run.sh`` entry makes the
-         schema derive ``bash run.sh`` and every run dies with
-         "run.sh: No such file or directory". But a LEGITIMATE hand-authored
-         ``run.js`` / multi-file Python worker (its source IS present on disk) must
-         be PRESERVED — rewriting its entry to ``run.py`` would break it. So we only
-         redirect an entry whose file is not in ``existing_files``. On create the
-         tool supplies no script source (``existing_files`` empty), so an orphaned
-         ``.sh``/``.js`` entry is always redirected; on update we pass the worker's
-         actual on-disk file set so real code is never clobbered.
-    Agent/skill-mode workers (``entry: SKILL.md`` / any ``.md``) carry no run.py and
+    The discriminator is "does the worker's execution reference a REAL authored
+    source file present on disk?":
+
+      * LEGIT authored worker — any command or entry (in ``exec``, ``runtime``, or
+        the legacy top-level ``entrypoint``) references a script file that EXISTS in
+        ``existing_files`` (e.g. ``command: node run.js`` / ``entry: run.js`` with
+        run.js on disk, with or without args, with ``./`` prefixes). The manifest is
+        returned UNCHANGED — we never strip or rewrite a worker that has its own
+        real code. This is robust to every authored shape (entry-based, command-only,
+        runtime.command, args, ``./run.js``, multi-file Python).
+      * MANIFEST-ONLY / DIVERGENT worker — no command or entry references an existing
+        script file (the create case where Emily supplies only worker.yml, OR an
+        Emily ``workers__update`` heredoc whose target file does not exist). Here we
+        STRIP every ``command`` (an inline heredoc that would shadow the generated
+        run.py) and redirect every ORPHANED non-run.py script entry to ``run.py`` so
+        the generated run.py is the single executed script.
+
+    Agent/skill-mode workers (``entry: SKILL.md`` / any ``.md``) carry no script and
     are LEFT UNTOUCHED.
+
+    ``existing_files`` is the worker's actual on-disk file set on update (so real
+    code is detected and preserved) and empty on create (the tool supplies no script
+    source, so an orphaned heredoc/entry is always neutralised).
 
     Returns the (possibly rewritten) YAML text. Best-effort: on any parse error
     the original text is returned unchanged (the downstream parser will surface a
@@ -983,37 +988,56 @@ def _canonicalize_emily_exec_command(
     if not isinstance(raw, dict):
         return yaml_text
 
-    def _is_script_entry(value: Any) -> bool:
+    def _is_script_path(value: Any) -> bool:
         return isinstance(value, str) and value.strip().lower().endswith((".py", ".sh", ".js"))
 
-    def _entry_from_command(cmd: Any) -> Optional[str]:
-        # A command's last whitespace token is the script file (e.g.
-        # "node run.js" -> "run.js", "python scripts/main.py" -> "scripts/main.py").
-        if not isinstance(cmd, str) or not cmd.strip():
-            return None
-        last = cmd.strip().split()[-1]
-        return last if _is_script_entry(last) else None
+    def _normalize_ref(value: str) -> str:
+        # Strip a leading "./" so "./run.js" matches the on-disk "run.js".
+        v = value.strip()
+        return v[2:] if v.startswith("./") else v
 
-    # Preserve a LEGITIMATE command-only authored worker BEFORE stripping its
-    # command (Codex P1 #3). A manifest like `exec: {command: "node run.js",
-    # runtime: node22}` with NO `entry` uses the command as its ONLY execution
-    # signal (the schema derives the entry from the command's last token). If we
-    # strip the command without first capturing that entry, the worker collapses
-    # to agent mode and E2B falls back to `python run.py`, ignoring the real
-    # run.js. So: when exec has a command but no entry AND the command's target
-    # file is present on disk, lift the derived entry into exec.entry first. A
-    # divergent heredoc (its target file absent) yields no derivable existing
-    # entry, so it is dropped and the worker falls back to the generated run.py.
-    exec_block = raw.get("exec") if isinstance(raw.get("exec"), dict) else None
-    if (
-        exec_block is not None
-        and not exec_block.get("entry")
-        and not raw.get("entrypoint")
-    ):
-        derived = _entry_from_command(exec_block.get("command"))
-        if derived and derived.strip() in existing:
-            exec_block["entry"] = derived
+    def _script_tokens(text: Any):
+        """Yield every script-looking token in a string (entry or command)."""
+        if not isinstance(text, str):
+            return
+        for tok in text.strip().split():
+            ref = _normalize_ref(tok)
+            if _is_script_path(ref):
+                yield ref
 
+    def _references_existing_source() -> bool:
+        """True iff ANY command/entry/entrypoint references a script file present on
+        disk — i.e. this is a legit authored worker we must leave alone."""
+        candidates: list = []
+        for block_key in ("exec", "runtime"):
+            block = raw.get(block_key)
+            if isinstance(block, dict):
+                candidates.append(block.get("entry"))
+                candidates.append(block.get("entrypoint"))
+                candidates.append(block.get("command"))
+        candidates.append(raw.get("entrypoint"))
+        candidates.append(raw.get("command"))
+        for cand in candidates:
+            if not isinstance(cand, str):
+                continue
+            # A bare entry path, or any script token inside a command string.
+            ref = _normalize_ref(cand)
+            if _is_script_path(ref) and ref in existing:
+                return True
+            for tok in _script_tokens(cand):
+                if tok in existing:
+                    return True
+        return False
+
+    # LEGIT authored worker: its execution references real on-disk source. Do not
+    # touch it — stripping/rewriting would break a hand-authored run.js / node /
+    # multi-file Python worker (Codex P1: command-only, args, ./run.js, runtime.*).
+    if _references_existing_source():
+        return yaml_text
+
+    # MANIFEST-ONLY / DIVERGENT: no real source backs the declared execution.
+    # Strip every command (heredoc shadow) and redirect orphaned script entries to
+    # the generated run.py.
     changed = False
     for block_key in ("exec", "runtime"):
         block = raw.get(block_key)
@@ -1024,23 +1048,22 @@ def _canonicalize_emily_exec_command(
         raw.pop("command", None)
         changed = True
 
-    def _orphaned(entry: str) -> bool:
-        # An entry is orphaned (safe to redirect to the generated run.py) when its
-        # source file is NOT present. A run.py entry is never "orphaned" — codegen
-        # backfills it. A legitimate run.js / scripts/main.py whose source exists is
-        # preserved.
-        name = entry.strip()
-        if name == "run.py":
+    def _orphaned_script_entry(value: Any) -> bool:
+        if not _is_script_path(value):
             return False
-        return name not in existing
+        ref = _normalize_ref(value)
+        return ref != "run.py" and ref not in existing
 
-    exec_block = raw.get("exec") if isinstance(raw.get("exec"), dict) else None
-    exec_entry = exec_block.get("entry") if exec_block else None
-    top_entrypoint = raw.get("entrypoint")
-    if exec_block is not None and _is_script_entry(exec_entry) and _orphaned(exec_entry):
-        exec_block["entry"] = "run.py"
-        changed = True
-    if _is_script_entry(top_entrypoint) and _orphaned(top_entrypoint):
+    for block_key in ("exec", "runtime"):
+        block = raw.get(block_key)
+        if isinstance(block, dict):
+            if _orphaned_script_entry(block.get("entry")):
+                block["entry"] = "run.py"
+                changed = True
+            if _orphaned_script_entry(block.get("entrypoint")):
+                block["entrypoint"] = "run.py"
+                changed = True
+    if _orphaned_script_entry(raw.get("entrypoint")):
         raw["entrypoint"] = "run.py"
         changed = True
 
@@ -1053,20 +1076,48 @@ def _canonicalize_emily_exec_command(
 
 
 def _manifest_executes_run_py(manifest: Dict[str, Any]) -> bool:
-    """True iff the worker's EXECUTED entry is ``run.py``.
+    """True iff the worker's EXECUTED entry is ``run.py`` (and nothing else signals
+    a different executable).
 
     The run.py-specific machinery (stub backfill, codegen-from-manifest, the
     placeholder-marker smoke preflight) only makes sense for a manifest-only
     Python worker whose executed script IS ``run.py``. A worker whose entry is
-    ``run.js`` / ``run.sh`` / a multi-file Python entry / ``SKILL.md`` must NOT get
-    a run.py stub backfilled or be codegen'd/placeholder-gated on run.py — that
-    would disable a perfectly good worker (Codex P1). Resolve the effective entry
-    the same way the schema does: ``exec.entry`` wins, else top-level
-    ``entrypoint``, else default ``run.py`` (the canonical script default).
+    ``run.js`` / ``run.sh`` / a multi-file Python entry / ``SKILL.md`` — declared in
+    ``exec``, ``runtime`` (incl. legacy ``runtime.entrypoint`` / ``runtime.command``),
+    or the top-level ``entrypoint`` / ``command`` — must NOT get a run.py stub
+    backfilled or be codegen'd/placeholder-gated on run.py; that would disable a
+    perfectly good worker (Codex P1). We treat the worker as a run.py worker only
+    when NO command/entry signals a non-run.py script.
     """
-    exec_block = manifest.get("exec") if isinstance(manifest.get("exec"), dict) else {}
-    entry = (exec_block.get("entry") or manifest.get("entrypoint") or "run.py")
-    return isinstance(entry, str) and entry.strip().lower() == "run.py"
+    def _is_script_path(v: Any) -> bool:
+        return isinstance(v, str) and v.strip().lower().endswith((".py", ".sh", ".js"))
+
+    def _non_run_py(v: Any) -> bool:
+        if not _is_script_path(v):
+            return False
+        ref = v.strip()
+        ref = ref[2:] if ref.startswith("./") else ref
+        return ref != "run.py"
+
+    signals: list = []
+    for block_key in ("exec", "runtime"):
+        block = manifest.get(block_key)
+        if isinstance(block, dict):
+            signals.append(block.get("entry"))
+            signals.append(block.get("entrypoint"))
+            # command: any non-run.py script token signals a different executable.
+            cmd = block.get("command")
+            if isinstance(cmd, str):
+                for tok in cmd.strip().split():
+                    signals.append(tok)
+    signals.append(manifest.get("entrypoint"))
+    cmd = manifest.get("command")
+    if isinstance(cmd, str):
+        for tok in cmd.strip().split():
+            signals.append(tok)
+
+    # If ANY signal points at a non-run.py script, this is not a run.py worker.
+    return not any(_non_run_py(s) for s in signals)
 
 
 def _smoke_gate_emily_worker(

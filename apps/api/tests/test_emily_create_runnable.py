@@ -397,17 +397,16 @@ def test_canonicalize_preserves_legitimate_run_js_worker(booted):
         'exec:\n  entry: "run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
         '  command: "node run.js"\n'
     )
-    # run.js source IS present -> the entry must be preserved.
-    parsed = _yaml.safe_load(
-        chat_service._canonicalize_emily_exec_command(
-            js_yml, existing_files={"run.js", "package.json"}
-        )
+    # run.js source IS present -> the worker is legit and returned UNCHANGED
+    # (entry preserved, command preserved — we never touch a real authored worker).
+    out = chat_service._canonicalize_emily_exec_command(
+        js_yml, existing_files={"run.js", "package.json"}
     )
+    assert out == js_yml, "legit run.js worker was modified"
+    parsed = _yaml.safe_load(out)
     assert parsed["exec"]["entry"] == "run.js", "legit run.js entry was clobbered"
     assert parsed.get("entrypoint") == "run.js"
-    # The divergent command is still stripped; the schema re-derives `node run.js`
-    # from the preserved entry, so execution stays correct.
-    assert "command" not in parsed["exec"]
+    assert parsed["exec"]["command"] == "node run.js", "legit command was stripped"
 
 
 def test_canonicalize_preserves_command_only_node_worker(booted):
@@ -427,14 +426,56 @@ def test_canonicalize_preserves_command_only_node_worker(booted):
         'exec:\n  command: "node run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
         'trigger:\n  type: "manual"\n'
     )
-    parsed = _yaml.safe_load(
-        chat_service._canonicalize_emily_exec_command(
-            cmd_only_yml, existing_files={"run.js", "package.json"}
-        )
+    # The command references real on-disk run.js -> legit, returned UNCHANGED so the
+    # command stays the execution signal (no entry collapse to agent / python run.py).
+    out = chat_service._canonicalize_emily_exec_command(
+        cmd_only_yml, existing_files={"run.js", "package.json"}
     )
-    # entry derived from the command and preserved (source present).
-    assert parsed["exec"]["entry"] == "run.js", parsed["exec"]
-    assert "command" not in parsed["exec"], "divergent command not stripped"
+    assert out == cmd_only_yml, "legit command-only node worker was modified"
+    parsed = _yaml.safe_load(out)
+    assert parsed["exec"]["command"] == "node run.js"
+
+
+def test_canonicalize_preserves_command_only_node_worker_with_args_and_dotslash(booted):
+    """Codex P1 #4: command with args ('node run.js --mode test') or a './run.js'
+    prefix must still be recognised as legit when run.js is on disk."""
+    chat_service = booted["chat_service"]
+    for cmd in ("node run.js --mode test", "node ./run.js"):
+        cmd_yml = (
+            'schema_version: "0.3"\n'
+            'name: "cmdargs"\n'
+            'title: "Cmd Args"\n'
+            'description: "x"\n'
+            'version: "0.1.0"\n'
+            f'exec:\n  command: "{cmd}"\n  runtime: "node22"\n  runner: "e2b"\n'
+            'trigger:\n  type: "manual"\n'
+        )
+        out = chat_service._canonicalize_emily_exec_command(
+            cmd_yml, existing_files={"run.js"}
+        )
+        assert out == cmd_yml, f"legit worker with command {cmd!r} was modified"
+
+
+def test_canonicalize_preserves_legacy_runtime_entrypoint_node(booted):
+    """Codex P1 #4: a legacy worker with runtime.entrypoint: run.js + runtime.command
+    must be preserved when run.js is on disk (and _manifest_executes_run_py False)."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+    legacy_yml = (
+        'schema_version: "0.3"\n'
+        'name: "legacynode"\n'
+        'title: "Legacy Node"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'runtime:\n  type: "node22"\n  entrypoint: "run.js"\n  command: "node run.js"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    out = chat_service._canonicalize_emily_exec_command(legacy_yml, existing_files={"run.js"})
+    assert out == legacy_yml, "legacy runtime.entrypoint node worker was modified"
+    parsed = _yaml.safe_load(out)
+    assert chat_service._manifest_executes_run_py(parsed) is False, (
+        "legacy run.js worker wrongly treated as a run.py worker"
+    )
 
 
 def test_canonicalize_command_only_orphaned_falls_back_to_run_py(booted):
