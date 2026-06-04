@@ -1597,6 +1597,12 @@ ENVIRONMENT_NOTES: Dict[str, str] = {
         "chat-shaped. The person is DMing you or mentioned you in a channel. When "
         "something needs the screen, give a workers.floom.dev link they can tap."
     ),
+    "whatsapp": (
+        "## Current environment: WhatsApp\n"
+        "You are reached on WhatsApp, a personal text chat. Keep it short and "
+        "conversational. When something needs the screen, give a workers.floom.dev "
+        "link they can tap."
+    ),
     "mcp": (
         "## Current environment: MCP (another AI agent)\n"
         "You are currently being driven by another AI agent via MCP, not a human. Be "
