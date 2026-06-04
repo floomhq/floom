@@ -296,7 +296,13 @@ export default function RunsClient({
                     <span className="min-w-0">
                       <span className="flex items-center gap-2.5 min-w-0">
                         <WorkerAvatar seed={r.worker_id} name={r.worker_name || r.worker_id} size="size-6" />
-                        <span className="text-sm font-medium truncate">{r.worker_name || r.worker_id}</span>
+                        <Link
+                          href={`/workers/${r.worker_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-sm font-medium truncate hover:underline"
+                        >
+                          {r.worker_name || r.worker_id}
+                        </Link>
                       </span>
                       {r.error && (
                         <span className="mt-1 block truncate text-[11px] text-error/80">
