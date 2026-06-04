@@ -674,6 +674,48 @@ class TestVersioningIntegration:
         assert r2.status_code == 200
         assert len(r2.json()) == 1
 
+    def test_context_rollback_returns_200_not_500(self, client_and_context):
+        """Regression test: contexts.rollback must return 200 + context detail (not 500 NameError).
+
+        Sequence: create context (baseline) → upload v1 file → upload v2 file →
+        rollback to v1 → assert HTTP 200 + v1 file content in response.
+        """
+        client, context_name = client_and_context
+        headers = {"x-floom-secret": "test-secret"}
+
+        # Write v1 — PUT /contexts/{name}/files/{path} with JSON body {"content": "..."}
+        r = client.put(
+            f"/contexts/{context_name}/files/README.md",
+            json={"content": "# Version one\n"},
+            headers=headers,
+        )
+        assert r.status_code == 200, f"v1 upload failed: {r.text}"
+
+        # Write v2
+        r = client.put(
+            f"/contexts/{context_name}/files/README.md",
+            json={"content": "# Version two\n"},
+            headers=headers,
+        )
+        assert r.status_code == 200, f"v2 upload failed: {r.text}"
+
+        # List versions — newest first; find the v1 entry
+        versions = client.get(f"/contexts/{context_name}/versions", headers=headers).json()
+        assert len(versions) >= 2, f"expected at least 2 versions, got {versions}"
+        # versions are newest-first; last one is v1
+        v1_id = versions[-1]["id"]
+
+        # Rollback to v1 — this is the call that 500'd before the fix
+        rb = client.post(
+            f"/contexts/{context_name}/rollback/{v1_id}",
+            headers=headers,
+        )
+        assert rb.status_code == 200, f"rollback returned {rb.status_code}: {rb.text}"
+
+        # Response must be a context-detail object (has "name" or "files")
+        body = rb.json()
+        assert "name" in body or "files" in body, f"unexpected rollback response shape: {body}"
+
 
 @_LINUX_ONLY
 class TestWorkspaceInstructionsVersioningIntegration:

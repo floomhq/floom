@@ -2935,7 +2935,7 @@ def rollback_context(
         except Exception as _exc:
             logger.warning("version snapshot after context rollback failed: %s", _exc)
 
-        return _context_detail(safe_name, metadata, repos=repos, user_id=auth.user_id)
+        return _context_detail(safe_name, _metadata, repos=repos, user_id=auth.user_id)
 
     except HTTPException:
         for orig, bak in reversed(backed_up):
