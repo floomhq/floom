@@ -847,6 +847,17 @@ def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
 
 def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    """Create a worker from a worker.yml manifest — runnable, same path as the API.
+
+    Emily's create MUST materialize the worker on disk (``WORKERS_DIR/<id>/`` with
+    worker.yml + run.py + requirements.txt), not just write DB rows. A worker that
+    only exists in the DB has no bundle on disk, so at run time the E2B runner fails
+    with "worker directory not found" (run_service._snapshot_worker_bundle /
+    _worker_dir_for_run). To stay DRY, this routes through the SAME shared helper the
+    HTTP/MCP create paths use (``main._register_worker_from_files``), which writes the
+    files, backfills a runnable run.py stub when absent, invalidates the cache,
+    re-discovers, and persists the worker to the DB.
+    """
     import yaml as _yaml
     yaml_text = str(args.get("yaml_text") or "")
     if not yaml_text:
@@ -857,67 +868,45 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": f"Invalid YAML: {exc}"}
     if not isinstance(manifest, dict):
         return {"ok": False, "error": "YAML must be a mapping"}
-    from models import parse_worker_manifest, WorkerContract, worker_contract_to_worker_config
-    try:
-        parsed = parse_worker_manifest(manifest)
-    except Exception as exc:
-        return {"ok": False, "error": f"Invalid worker manifest: {exc}"}
-    worker_name = manifest.get("name") or ""
-    if not worker_name:
+    if not (manifest.get("name") or manifest.get("id")):
         return {"ok": False, "error": "worker name is required in YAML"}
-    # Sanitise to a safe ID
-    worker_id = worker_name.lower().replace(" ", "-").replace("_", "-")
-    import re as _re
-    worker_id = _re.sub(r"[^a-z0-9-]", "", worker_id)[:64]
-    if not worker_id:
-        return {"ok": False, "error": "Could not derive a valid worker_id from name"}
 
-    if isinstance(parsed, WorkerContract):
-        config = worker_contract_to_worker_config(parsed, worker_id)
-    else:
-        config = parsed
-
+    # Converge onto the proven materialization path. ``_register_worker_from_files``
+    # writes WORKERS_DIR/<id>/worker.yml, backfills run.py + requirements.txt, and
+    # registers the worker so it is immediately runnable. dedupe_id rewrites a
+    # colliding id to a free one (matches the worker-author hook) so a create never
+    # dead-ends on a taken slug.
     from db import get_repositories
+    from main import _register_worker_from_files, DraftFile
+    from fastapi import HTTPException as _HTTPException
+
     repos = get_repositories()
     try:
-        import uuid as _uuid
-        sv_id = f"sv_{worker_id}_{_uuid.uuid4().hex[:8]}"
-        from db import get_db as _get_db, now_iso as _now_iso
-        ts = _now_iso()
-        with _get_db() as conn:
-            conn.execute(
-                """
-                INSERT INTO skill_versions (id, name, version, manifest_json, bundle_path, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    sv_id,
-                    worker_id,
-                    manifest.get("version") or "0.1.0",
-                    json.dumps(manifest),
-                    f"workers/{worker_id}",
-                    ts,
-                ),
-            )
-            conn.execute(
-                """
-                INSERT INTO workers
-                    (id, skill_version_id, name, trigger_type, grants_json,
-                     input_values_json, enabled, created_at, owner_id)
-                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-                """,
-                (
-                    worker_id, sv_id, worker_id,
-                    config.trigger.type if config and config.trigger else "manual",
-                    json.dumps({}), json.dumps({}), ts, user_id,
-                ),
-            )
-        return {"ok": True, "worker_id": worker_id, "message": f"Worker '{worker_id}' created."}
+        worker_id = _register_worker_from_files(
+            [DraftFile(path="worker.yml", content=yaml_text)],
+            user_id=user_id,
+            repos=repos,
+            dedupe_id=True,
+        )
+    except _HTTPException as exc:
+        return {"ok": False, "error": str(exc.detail)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+    return {"ok": True, "worker_id": worker_id, "message": f"Worker '{worker_id}' created."}
 
 
 def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    """Update a worker's manifest — writes worker.yml to disk, same path as the editor.
+
+    The previous implementation only inserted a new ``skill_versions`` row and
+    re-pointed the FK; it never wrote the new worker.yml to the worker's directory.
+    The runner reads ``worker.yml``/``run.py`` from ``WORKERS_DIR/<id>/`` on every
+    run (run_service), so a DB-only update was silently ignored at run time — the
+    same parallel-implementation gap as create. This converges onto the proven
+    editor path (``main.update_worker_files``): it writes the new worker.yml to disk,
+    preserves the existing run.py and other bundle files, then re-discovers and
+    re-persists the worker so the manifest, disk, and DB stay in sync.
+    """
     import yaml as _yaml
     worker_id = str(args.get("id") or "")
     yaml_text = str(args.get("yaml_text") or "")
@@ -929,38 +918,59 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": f"Invalid YAML: {exc}"}
     if not isinstance(manifest, dict):
         return {"ok": False, "error": "YAML must be a mapping"}
-    from db import get_db as _get_db, now_iso as _now_iso
-    import uuid as _uuid
-    ts = _now_iso()
-    sv_id = f"sv_{worker_id}_{_uuid.uuid4().hex[:8]}"
+
+    from db import get_db as _get_db
+    with _get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM workers WHERE id = ? AND owner_id = ?",
+            (worker_id, user_id),
+        ).fetchone()
+        if not row:
+            return {"ok": False, "error": f"Worker not found or not owned by you: {worker_id}"}
+
+    # Build the full new bundle: replace worker.yml, carry over every existing file
+    # (run.py, SKILL.md, lib/*, ...) so the editor path does not delete them. The
+    # editor endpoint removes any on-disk file absent from the payload, so we must
+    # resend the rest verbatim.
+    from main import (
+        update_worker_files,
+        WorkerFilesUpdateRequest,
+        WorkerFilePatch,
+        AuthContext,
+        _read_worker_files,
+        _DEFAULT_RUN_PY_STUB,
+        get_repositories,
+    )
+    from fastapi import HTTPException as _HTTPException
+    from worker_registry import WORKERS_DIR
+
+    worker_dir = WORKERS_DIR / worker_id
+    files: list = [WorkerFilePatch(path="worker.yml", content=yaml_text)]
+    seen = {"worker.yml"}
+    if worker_dir.is_dir():
+        for wf in _read_worker_files(worker_dir):
+            if wf.path in seen or wf.binary or wf.content is None:
+                continue
+            files.append(WorkerFilePatch(path=wf.path, content=wf.content))
+            seen.add(wf.path)
+    if "run.py" not in seen:
+        # Legacy worker materialized without a run.py: backfill the runnable stub so
+        # the update yields a runnable bundle rather than re-creating the gap.
+        files.append(WorkerFilePatch(path="run.py", content=_DEFAULT_RUN_PY_STUB))
+
+    auth = AuthContext(user_id=user_id)
     try:
-        with _get_db() as conn:
-            row = conn.execute(
-                "SELECT id FROM workers WHERE id = ? AND owner_id = ?",
-                (worker_id, user_id),
-            ).fetchone()
-            if not row:
-                return {"ok": False, "error": f"Worker not found or not owned by you: {worker_id}"}
-            conn.execute(
-                """
-                INSERT INTO skill_versions (id, name, version, manifest_json, bundle_path, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    sv_id, worker_id,
-                    manifest.get("version") or "0.1.0",
-                    json.dumps(manifest),
-                    f"workers/{worker_id}",
-                    ts,
-                ),
-            )
-            conn.execute(
-                "UPDATE workers SET skill_version_id = ? WHERE id = ? AND owner_id = ?",
-                (sv_id, worker_id, user_id),
-            )
-        return {"ok": True, "worker_id": worker_id, "message": f"Worker '{worker_id}' updated."}
+        update_worker_files(
+            worker_id,
+            WorkerFilesUpdateRequest(files=files),
+            auth=auth,
+            repos=get_repositories(),
+        )
+    except _HTTPException as exc:
+        return {"ok": False, "error": str(exc.detail)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+    return {"ok": True, "worker_id": worker_id, "message": f"Worker '{worker_id}' updated."}
 
 
 def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
