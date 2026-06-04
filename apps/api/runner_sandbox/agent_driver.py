@@ -31,7 +31,7 @@ from models import (
     WorkerConfig,
     WorkerResult,
 )
-from runner_utils import ARTIFACTS_DIR, _validate_output_schema
+from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR
 
 from . import agent_capabilities
@@ -457,16 +457,11 @@ class AgentDriver(SandboxDriver):
             if last_result is not None:
                 transcript.append({"type": "final_output", "content": str(getattr(last_result, "final_output", ""))})
             self._persist_transcript(output_dir, transcript, artifacts)
-            schema_error = _validate_output_schema(worker_id, outputs, log_fn, config=config)
-            if schema_error:
-                log_fn(f"Schema validation failed: {schema_error}", level="error")
-                return WorkerResult(
-                    status="failed",
-                    outputs=outputs,
-                    artifacts=artifacts,
-                    error=f"Output schema violation: {schema_error}",
-                    error_code="schema_violation",
-                )
+            # Output-schema enforcement is now centralized at the common
+            # completion gate in run_service.execute_run (one path for all three
+            # drivers). The driver returns success with the outputs; the gate
+            # validates declared type/columns/required-keys and FAILS the run on
+            # a mismatch. See run_service.py (_validate_output_schema call).
             # Persist any edits the run made to writeable:true packs back to the
             # local store before returning success (mirrors e2b_driver).
             self._persist_writeable_contexts(
