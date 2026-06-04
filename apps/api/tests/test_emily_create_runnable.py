@@ -278,3 +278,263 @@ def test_emily_create_generates_runpy_and_gates(booted, monkeypatch):
     assert gate_calls[0]["allow_code_repair"] is True
     assert gate_calls[0]["worker_id"] == worker_id
     assert result.get("smoke_status") == "passed"
+
+
+# ---------------------------------------------------------------------------
+# ISSUES.md #E1: Emily-created workers fail every real run despite smoke passed.
+# Root cause: a divergent ``exec.command`` (Emily's self-repair heredoc) silently
+# shadows the generated ``run.py`` with the wrong result.json schema, AND the
+# update path had NO smoke gate so it shipped the break as a success.
+# ---------------------------------------------------------------------------
+
+# A manifest with a custom exec.command heredoc writing the WRONG result.json
+# schema ({"result": x} — no status, no outputs wrapper). This is exactly the
+# shape Emily injected via workers__update during the failing runs; it OVERRIDES
+# run.py in the E2B driver and makes every real run fail validation.
+_DIVERGENT_COMMAND_YML = (
+    _UPPERCASE_YML.replace(
+        '  command: "python run.py"',
+        '  command: |\n'
+        '    python -c "import json,sys; '
+        'data=json.load(open(\'inputs/input.json\')); '
+        'open(\'result.json\',\'w\').write(json.dumps({\'result\': '
+        'data.get(\'text\',\'\').upper()}))"',
+    )
+)
+
+
+def test_canonicalize_strips_divergent_exec_command(booted):
+    """The single-execution-path guard: a caller-supplied exec.command is stripped
+    so the generated run.py is the only executed script."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    cleaned = chat_service._canonicalize_emily_exec_command(_DIVERGENT_COMMAND_YML)
+    parsed = _yaml.safe_load(cleaned)
+    assert "command" not in (parsed.get("exec") or {}), (
+        "exec.command was not stripped — run.py would be shadowed by the heredoc"
+    )
+    # The canonical command is re-derived by the schema (python run.py); the manifest
+    # must NOT carry a divergent one. Other fields are preserved.
+    assert parsed["exec"]["entry"] == "run.py"
+    assert parsed["name"] == "emilyfix-uppercase"
+
+
+def test_canonicalize_noop_when_no_command(booted):
+    """Agent/skill-mode manifests (no command) pass through unchanged."""
+    chat_service = booted["chat_service"]
+    agent_yml = (
+        'schema_version: "0.3"\n'
+        'name: "agent-x"\n'
+        'trigger:\n  type: "manual"\n'
+        'exec:\n  entry: "SKILL.md"\n  runtime: "skill"\n  runner: "e2b"\n'
+    )
+    assert chat_service._canonicalize_emily_exec_command(agent_yml) == agent_yml
+
+
+def test_emily_create_strips_divergent_command_before_persist(booted, monkeypatch):
+    """End-to-end: creating with a divergent exec.command persists a manifest that
+    does NOT carry the heredoc, so the generated run.py is the executed script."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_smoke_gate(monkeypatch, run_service, workers_dir)
+
+    result = chat_service._tool_workers_create(
+        {"yaml_text": _DIVERGENT_COMMAND_YML}, "federico"
+    )
+    assert result["ok"] is True, result
+    worker_id = result["worker_id"]
+
+    yml_on_disk = (workers_dir / worker_id / "worker.yml").read_text(encoding="utf-8")
+    # The persisted manifest must NOT carry the divergent heredoc command.
+    assert "result.json" not in yml_on_disk or "import json,sys" not in yml_on_disk, (
+        "divergent exec.command heredoc was persisted — it would shadow run.py"
+    )
+
+
+def test_emily_update_runs_smoke_gate(booted, monkeypatch):
+    """The update path MUST run the same smoke gate as create — previously it
+    wrote the manifest with zero validation, so an Emily self-repair that broke
+    every real run shipped as a silent success."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_smoke_gate(monkeypatch, run_service, workers_dir)
+
+    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    assert created["ok"] is True, created
+    worker_id = created["worker_id"]
+
+    gate_calls: list = []
+
+    def _spy_gate(wid, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        gate_calls.append(wid)
+        return {"status": "passed", "reason": None, "repairs": 0}
+
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _spy_gate)
+
+    res = chat_service._tool_workers_update(
+        {"id": worker_id, "yaml_text": _DIVERGENT_COMMAND_YML}, "federico"
+    )
+    assert res["ok"] is True, res
+    assert gate_calls == [worker_id], "update did not run the smoke gate"
+    assert res.get("smoke_status") == "passed"
+
+
+def test_emily_update_gate_failure_surfaces_and_disables(booted, monkeypatch):
+    """When the post-update smoke gate FAILS, the tool must surface the failure
+    (smoke_status=failed) and not present the worker as a clean update."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_smoke_gate(monkeypatch, run_service, workers_dir)
+
+    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    assert created["ok"] is True, created
+    worker_id = created["worker_id"]
+
+    def _fail_gate(wid, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        return {"status": "failed", "reason": "result didn't pass validation", "repairs": 3}
+
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _fail_gate)
+
+    updated_yml = _UPPERCASE_YML.replace(
+        'description: "Uppercases a text input."',
+        'description: "Uppercases a text input. (v2)"',
+    )
+    res = chat_service._tool_workers_update(
+        {"id": worker_id, "yaml_text": updated_yml}, "federico"
+    )
+    assert res["ok"] is True, res
+    assert res.get("smoke_status") == "failed", res
+    assert "disabled" in res.get("message", "").lower()
+
+
+def test_skipped_smoke_is_not_reported_as_verified(booted, monkeypatch):
+    """Blocker (Codex review): a 'skipped' gate (e.g. needs a secret) means runtime
+    validation did NOT run — the tool must NOT claim the worker is verified runnable."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_codegen_and_smoke(monkeypatch, run_service, workers_dir)
+
+    def _skip_gate(wid, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        return {"status": "skipped", "reason": "needs a credential before it can run (X_API_KEY)"}
+
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _skip_gate)
+
+    res = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    assert res["ok"] is True, res
+    assert res.get("smoke_status") == "skipped", res
+    msg = res.get("message", "").lower()
+    assert "verified runnable" not in msg, f"skipped worker falsely reported verified: {msg}"
+    assert "untested" in msg or "could not verify" in msg, msg
+
+
+def test_errored_smoke_is_not_reported_as_verified(booted, monkeypatch):
+    """Blocker (Codex review): when the smoke infra itself raises, status must be
+    'errored' and the tool must NOT claim the worker is verified runnable."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_codegen_and_smoke(monkeypatch, run_service, workers_dir)
+
+    def _boom_gate(wid, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        raise RuntimeError("e2b sandbox unreachable")
+
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _boom_gate)
+
+    res = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    assert res["ok"] is True, res
+    assert res.get("smoke_status") == "errored", res
+    msg = res.get("message", "").lower()
+    assert "verified runnable" not in msg, f"errored worker falsely reported verified: {msg}"
+    assert "unverified" in msg or "could not be run" in msg, msg
+
+
+def test_smoke_runs_output_schema_contract_like_a_real_run(booted, monkeypatch):
+    """Blocker (Codex review): smoke must validate the SAME two-stage gate a real
+    run uses — _validate_output_schema (scalar type/json contract) THEN
+    _validate_run_outputs. A scalar `type: json` output that is non-empty but not
+    valid JSON must FAIL smoke, not pass it and then fail every real run with
+    schema_violation. This drives the real _smoke_and_repair_generated_worker."""
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+
+    # A worker declaring a scalar JSON output, with a driver that returns a
+    # NON-JSON string for it. The real-run gate rejects this (schema_violation);
+    # smoke must reject it too.
+    json_yml = (
+        'schema_version: "0.3"\n'
+        'name: "jsonout"\n'
+        'title: "JSON Out"\n'
+        'description: "Returns a JSON scalar."\n'
+        'version: "0.1.0"\n'
+        'trigger:\n  type: "manual"\n'
+        'exec:\n'
+        '  entry: "run.py"\n  runtime: "python311"\n  runner: "e2b"\n'
+        '  inputs:\n  - name: "text"\n    kind: scalar\n    type: string\n    required: true\n'
+        '  outputs:\n  - name: "data"\n    kind: scalar\n    type: json\n    required: true\n'
+    )
+    main = booted["main"]
+    from main import _register_worker_from_files, DraftFile
+    from db import get_repositories
+
+    worker_id = _register_worker_from_files(
+        [DraftFile(path="worker.yml", content=json_yml),
+         DraftFile(path="run.py", content="print('hi')\n")],
+        user_id="federico",
+        repos=get_repositories(),
+        dedupe_id=True,
+    )
+
+    from models import WorkerResult
+
+    class _BadJsonDriver:
+        def run(self, *, worker_id, run_id, inputs, config=None, **kwargs):  # noqa: ANN001
+            return WorkerResult(status="success", outputs={"data": "not json at all"}, artifacts=[])
+
+    monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _BadJsonDriver())
+    # No code repair so we get the raw verdict, not a codegen rewrite.
+    smoke = run_service._smoke_and_repair_generated_worker(
+        worker_id, {}, user_id="federico", repos=get_repositories(),
+        log_fn=lambda *a, **k: None, allow_code_repair=False,
+    )
+    assert smoke["status"] == "failed", (
+        f"smoke passed a worker that fails real-run schema validation: {smoke}"
+    )
+
+
+def test_disabled_worker_smoke_is_not_reported_verified(booted, monkeypatch):
+    """Blocker (Codex review #3): a manifest with paused:true is rejected by
+    create_run ('Worker is disabled'), so smoke must NOT report it 'verified
+    runnable'. The gate must surface it as skipped, and the tool must say untested."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    # Use the REAL smoke gate (only stub codegen so no network), so the disabled
+    # short-circuit inside _smoke_and_repair_generated_worker is exercised.
+    def _fake_repair(*, run_code, failure, secrets, log_fn, intent=""):
+        return _REAL_RUN_PY
+    monkeypatch.setattr(run_service, "_repair_run_py", _fake_repair)
+
+    paused_yml = _UPPERCASE_YML.replace(
+        'trigger:\n  type: "manual"\n',
+        'paused: true\ntrigger:\n  type: "manual"\n',
+    )
+    res = chat_service._tool_workers_create({"yaml_text": paused_yml}, "federico")
+    assert res["ok"] is True, res
+    # Must be skipped (intentionally off), never passed/verified.
+    assert res.get("smoke_status") == "skipped", res
+    msg = res.get("message", "").lower()
+    assert "verified runnable" not in msg, f"disabled worker falsely reported verified: {msg}"
+
+    # And the worker is genuinely disabled at the runtime boundary (the mismatch
+    # Codex repro'd): create_run rejects it.
+    worker_id = res["worker_id"]
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="disabled"):
+        run_service.create_run(
+            worker_id, {"text": "x"}, trigger_source="workspace-agent", user_id="federico"
+        )
