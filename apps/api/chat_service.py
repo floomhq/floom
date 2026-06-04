@@ -1079,11 +1079,15 @@ def _emily_worker_result_message(
     if smoke_status == "passed":
         return {**base, "message": f"Worker '{worker_id}' {verb} and verified runnable."}
     if smoke_status == "skipped":
+        # A skip can mean "intentionally off" (paused/disabled) or "can't prove
+        # yet" (needs a secret/connection). In both cases runtime validation did
+        # NOT run, so never claim verified. Don't assert "enabled" — a disabled
+        # worker's skip reason already explains it is off.
         return {
             **base,
             "message": (
                 f"Worker '{worker_id}' was {verb}, but I could NOT verify it runs yet "
-                f"({smoke_reason or 'verification was skipped'}). It is enabled but untested — "
+                f"({smoke_reason or 'verification was skipped'}). It is untested — "
                 "run it once to confirm it works."
             ),
         }
