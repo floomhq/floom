@@ -933,7 +933,9 @@ def _generate_run_py_from_manifest(
     return True
 
 
-def _canonicalize_emily_exec_command(yaml_text: str) -> str:
+def _canonicalize_emily_exec_command(
+    yaml_text: str, existing_files: Optional[set] = None
+) -> str:
     """Force a manifest-authored (Emily) worker onto a SINGLE execution path.
 
     Root cause of "Emily-created workers fail every real run despite the smoke
@@ -950,12 +952,19 @@ def _canonicalize_emily_exec_command(yaml_text: str) -> str:
     The fix has TWO parts, both closing a divergent-execution vector for the
     Emily-authored path (where the executed code is ALWAYS the generated run.py):
       1. ``exec.command`` is stripped (it is not an authoring surface). The schema
-         re-derives the canonical ``python run.py`` (``_default_command_from_entry``).
+         re-derives the canonical command from the real ``entry`` so a divergent
+         heredoc cannot shadow the entry's script.
       2. A non-``run.py`` script ENTRY (``run.sh`` / ``run.js``) is normalised to
-         ``run.py``. Codegen only ever emits ``run.py``; a ``run.sh`` entry makes
-         the schema derive ``bash run.sh`` and every run dies with
-         "run.sh: No such file or directory". Forcing the entry to ``run.py`` keeps
-         the generated code the single executed script.
+         ``run.py`` ONLY WHEN ITS SOURCE FILE IS ABSENT (an orphaned entry).
+         Codegen only ever emits ``run.py``; an orphaned ``run.sh`` entry makes the
+         schema derive ``bash run.sh`` and every run dies with
+         "run.sh: No such file or directory". But a LEGITIMATE hand-authored
+         ``run.js`` / multi-file Python worker (its source IS present on disk) must
+         be PRESERVED — rewriting its entry to ``run.py`` would break it. So we only
+         redirect an entry whose file is not in ``existing_files``. On create the
+         tool supplies no script source (``existing_files`` empty), so an orphaned
+         ``.sh``/``.js`` entry is always redirected; on update we pass the worker's
+         actual on-disk file set so real code is never clobbered.
     Agent/skill-mode workers (``entry: SKILL.md`` / any ``.md``) carry no run.py and
     are LEFT UNTOUCHED.
 
@@ -964,6 +973,8 @@ def _canonicalize_emily_exec_command(yaml_text: str) -> str:
     clean validation error).
     """
     import yaml as _yaml
+
+    existing = {str(f).strip() for f in (existing_files or set())}
 
     try:
         raw = _yaml.safe_load(yaml_text)
@@ -982,31 +993,28 @@ def _canonicalize_emily_exec_command(yaml_text: str) -> str:
         raw.pop("command", None)
         changed = True
 
-    # Normalise the script ENTRY too. Codegen only ever produces ``run.py``
-    # (``_generate_run_py_from_manifest`` writes run.py), but Emily sometimes
-    # authors ``entry: run.sh`` / ``run.js``. The schema then re-derives
-    # ``command: bash run.sh`` from that entry, the runner tries to execute a
-    # file that does not exist, and every run dies with
-    # "run.sh: No such file or directory" — a SECOND divergent-execution vector
-    # the command-strip alone does not close. Force a script entry to ``run.py``
-    # so the generated code is always the executed script. Agent/skill workers
-    # (``entry: SKILL.md`` / any ``.md``) are LEFT ALONE — they have no run.py.
     def _is_script_entry(value: Any) -> bool:
         return isinstance(value, str) and value.strip().lower().endswith((".py", ".sh", ".js"))
+
+    def _orphaned(entry: str) -> bool:
+        # An entry is orphaned (safe to redirect to the generated run.py) when its
+        # source file is NOT present. A run.py entry is never "orphaned" — codegen
+        # backfills it. A legitimate run.js / scripts/main.py whose source exists is
+        # preserved.
+        name = entry.strip()
+        if name == "run.py":
+            return False
+        return name not in existing
 
     exec_block = raw.get("exec") if isinstance(raw.get("exec"), dict) else None
     exec_entry = exec_block.get("entry") if exec_block else None
     top_entrypoint = raw.get("entrypoint")
-    # Only touch workers that are script-mode (a script entry somewhere) — never
-    # agent/skill workers (entry/entrypoint is SKILL.md / *.md / absent->agent).
-    is_script_worker = _is_script_entry(exec_entry) or _is_script_entry(top_entrypoint)
-    if is_script_worker:
-        if exec_block is not None and _is_script_entry(exec_entry) and exec_entry.strip() != "run.py":
-            exec_block["entry"] = "run.py"
-            changed = True
-        if _is_script_entry(top_entrypoint) and top_entrypoint.strip() != "run.py":
-            raw["entrypoint"] = "run.py"
-            changed = True
+    if exec_block is not None and _is_script_entry(exec_entry) and _orphaned(exec_entry):
+        exec_block["entry"] = "run.py"
+        changed = True
+    if _is_script_entry(top_entrypoint) and _orphaned(top_entrypoint):
+        raw["entrypoint"] = "run.py"
+        changed = True
 
     if not changed:
         return yaml_text
@@ -1223,19 +1231,6 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     yaml_text = str(args.get("yaml_text") or "")
     if not worker_id or not yaml_text:
         return {"ok": False, "error": "id and yaml_text are required"}
-    # Single execution path (ISSUES.md #E1): Emily's most common self-repair move
-    # on a failing worker is to inject an inline exec.command heredoc, which
-    # silently shadows the generated run.py with the wrong result.json schema and
-    # makes EVERY real run fail. exec.command is not an authoring surface for the
-    # manifest-author path — strip it so the generated run.py stays the only
-    # executed script.
-    yaml_text = _canonicalize_emily_exec_command(yaml_text)
-    try:
-        manifest = _yaml.safe_load(yaml_text)
-    except Exception as exc:
-        return {"ok": False, "error": f"Invalid YAML: {exc}"}
-    if not isinstance(manifest, dict):
-        return {"ok": False, "error": "YAML must be a mapping"}
 
     from db import get_db as _get_db
     with _get_db() as conn:
@@ -1263,14 +1258,36 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from worker_registry import WORKERS_DIR
 
     worker_dir = WORKERS_DIR / worker_id
-    files: list = [WorkerFilePatch(path="worker.yml", content=yaml_text)]
-    seen = {"worker.yml"}
+    # Read the EXISTING on-disk file set FIRST so the entry-normalisation can
+    # preserve a legitimate hand-authored run.js / multi-file Python worker (its
+    # source is present) and only redirect an orphaned script entry to run.py.
+    existing_files: set = set()
+    carried: list = []
     if worker_dir.is_dir():
         for wf in _read_worker_files(worker_dir):
-            if wf.path in seen or wf.binary or wf.content is None:
+            if wf.path == "worker.yml" or wf.binary or wf.content is None:
                 continue
-            files.append(WorkerFilePatch(path=wf.path, content=wf.content))
-            seen.add(wf.path)
+            carried.append(wf)
+            existing_files.add(wf.path)
+
+    # Single execution path (ISSUES.md #E1): strip a divergent exec.command and
+    # redirect an ORPHANED non-run.py script entry (run.sh/run.js with no source)
+    # to the generated run.py — but never clobber a real authored entry file.
+    yaml_text = _canonicalize_emily_exec_command(yaml_text, existing_files=existing_files)
+    try:
+        manifest = _yaml.safe_load(yaml_text)
+    except Exception as exc:
+        return {"ok": False, "error": f"Invalid YAML: {exc}"}
+    if not isinstance(manifest, dict):
+        return {"ok": False, "error": "YAML must be a mapping"}
+
+    files: list = [WorkerFilePatch(path="worker.yml", content=yaml_text)]
+    seen = {"worker.yml"}
+    for wf in carried:
+        if wf.path in seen:
+            continue
+        files.append(WorkerFilePatch(path=wf.path, content=wf.content))
+        seen.add(wf.path)
     if "run.py" not in seen:
         # Legacy worker materialized without a run.py: backfill the runnable stub so
         # the update yields a runnable bundle rather than re-creating the gap.

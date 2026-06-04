@@ -379,6 +379,99 @@ def test_canonicalize_leaves_agent_entry_untouched(booted):
     assert parsed.get("entrypoint") == "SKILL.md"
 
 
+def test_canonicalize_preserves_legitimate_run_js_worker(booted):
+    """Codex blocker: a LEGITIMATE hand-authored run.js worker (its source IS on
+    disk) must NOT have its entry rewritten to run.py — that would break it. Only
+    ORPHANED script entries (no source file) are redirected."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    js_yml = (
+        'schema_version: "0.3"\n'
+        'name: "nodeworker"\n'
+        'title: "Node Worker"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "run.js"\n'
+        'trigger:\n  type: "manual"\n'
+        'exec:\n  entry: "run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        '  command: "node run.js"\n'
+    )
+    # run.js source IS present -> the entry must be preserved.
+    parsed = _yaml.safe_load(
+        chat_service._canonicalize_emily_exec_command(
+            js_yml, existing_files={"run.js", "package.json"}
+        )
+    )
+    assert parsed["exec"]["entry"] == "run.js", "legit run.js entry was clobbered"
+    assert parsed.get("entrypoint") == "run.js"
+    # The divergent command is still stripped; the schema re-derives `node run.js`
+    # from the preserved entry, so execution stays correct.
+    assert "command" not in parsed["exec"]
+
+
+def test_canonicalize_redirects_orphaned_js_entry(booted):
+    """An orphaned run.js entry (no source file) IS redirected to run.py (codegen
+    backfills run.py). This is the create case where the tool supplies no source."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    js_yml = (
+        'schema_version: "0.3"\n'
+        'name: "orphanjs"\n'
+        'title: "Orphan JS"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  entry: "run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    parsed = _yaml.safe_load(
+        chat_service._canonicalize_emily_exec_command(js_yml, existing_files=set())
+    )
+    assert parsed["exec"]["entry"] == "run.py", "orphaned run.js was not redirected"
+
+
+def test_update_preserves_real_run_js_worker_entry(booted, monkeypatch):
+    """End-to-end Codex-blocker regression: updating an existing real run.js worker
+    via workers__update must keep entry: run.js (source is on disk), not rewrite to
+    run.py."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_codegen_and_smoke(monkeypatch, run_service, workers_dir)
+
+    from main import _register_worker_from_files, DraftFile
+    from db import get_repositories
+
+    js_yml = (
+        'schema_version: "0.3"\n'
+        'name: "realnode"\n'
+        'title: "Real Node"\n'
+        'description: "A genuine node worker."\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "run.js"\n'
+        'exec:\n  entry: "run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        '  command: "node run.js"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    worker_id = _register_worker_from_files(
+        [DraftFile(path="worker.yml", content=js_yml),
+         DraftFile(path="run.js", content="console.log('hi')\n"),
+         DraftFile(path="package.json", content='{"name":"realnode"}\n')],
+        user_id="federico", repos=get_repositories(), dedupe_id=True,
+    )
+
+    updated = js_yml.replace('A genuine node worker.', 'A genuine node worker. (v2)')
+    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "federico")
+    assert res["ok"] is True, res
+
+    yml_on_disk = (workers_dir / worker_id / "worker.yml").read_text(encoding="utf-8")
+    import yaml as _yaml
+    parsed = _yaml.safe_load(yml_on_disk)
+    assert parsed["exec"]["entry"] == "run.js", f"real run.js entry was clobbered: {parsed['exec']}"
+    assert (workers_dir / worker_id / "run.js").is_file(), "run.js source was deleted"
+
+
 def test_emily_create_strips_divergent_command_before_persist(booted, monkeypatch):
     """End-to-end: creating with a divergent exec.command persists a manifest that
     does NOT carry the heredoc, so the generated run.py is the executed script."""
