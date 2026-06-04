@@ -28,6 +28,29 @@ Do not paste Slack tokens or signing secrets into chat. Add them through the ser
 5. Confirm Interactivity is enabled for `https://workers-api.floom.dev/slack/events`.
 6. Confirm `/floom` points to `https://workers-api.floom.dev/slack/events`.
 
+## Channel reading (consent = invite)
+
+Emily can read a channel's recent history on demand, but only channels she has
+been **invited** to. The invite is the consent: Slack only lets the bot read a
+channel it is a member of. Default access stays DM + @mention only; there is no
+firehose ingestion.
+
+Required bot scopes (already in `docs/slack-app-manifest.example.yml`):
+
+- `channels:read`, `channels:history` (public channels)
+- `groups:read`, `groups:history` (private channels)
+
+After adding these scopes you MUST **reinstall** the app so the new bot token
+carries them. Until then, channel-read requests degrade gracefully: Emily tells
+the operator that channel access isn't enabled yet and how the owner enables it
+(she does not crash).
+
+To grant Emily access to a specific channel, run in that channel:
+
+```text
+/invite @Workeros
+```
+
 ## Smoke Test
 
 1. In a channel where the bot is present, send:
@@ -73,6 +96,27 @@ Expected: Workeros sets assistant status and replies in the thread.
 6. Click Approve and Reject on a real pending approval card.
 
 Expected: the Slack message is replaced with the decision result, and the corresponding Workeros run leaves `pending_approval`.
+
+7. In the Workeros app DM or AI App thread, send:
+
+```text
+List the Slack channels you can read
+```
+
+Expected: Emily calls `slack__list_channels`. With channel scopes granted, she
+lists the channels she's been invited to. Without the scopes, she replies that
+channel access isn't enabled yet and how the owner enables it (no error).
+
+8. In a channel where Emily is invited, ask her to summarize it:
+
+```text
+@Workeros summarize #launch
+```
+
+Expected: Emily calls `slack__read_channel` and summarizes the recent messages.
+If she isn't in the channel, she replies "Invite me with /invite @Workeros in
+#launch and I'll read it." If scopes aren't granted, she explains how the owner
+enables channel access.
 
 ## Evidence To Capture
 
