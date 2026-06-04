@@ -504,3 +504,37 @@ def test_smoke_runs_output_schema_contract_like_a_real_run(booted, monkeypatch):
     assert smoke["status"] == "failed", (
         f"smoke passed a worker that fails real-run schema validation: {smoke}"
     )
+
+
+def test_disabled_worker_smoke_is_not_reported_verified(booted, monkeypatch):
+    """Blocker (Codex review #3): a manifest with paused:true is rejected by
+    create_run ('Worker is disabled'), so smoke must NOT report it 'verified
+    runnable'. The gate must surface it as skipped, and the tool must say untested."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    # Use the REAL smoke gate (only stub codegen so no network), so the disabled
+    # short-circuit inside _smoke_and_repair_generated_worker is exercised.
+    def _fake_repair(*, run_code, failure, secrets, log_fn, intent=""):
+        return _REAL_RUN_PY
+    monkeypatch.setattr(run_service, "_repair_run_py", _fake_repair)
+
+    paused_yml = _UPPERCASE_YML.replace(
+        'trigger:\n  type: "manual"\n',
+        'paused: true\ntrigger:\n  type: "manual"\n',
+    )
+    res = chat_service._tool_workers_create({"yaml_text": paused_yml}, "federico")
+    assert res["ok"] is True, res
+    # Must be skipped (intentionally off), never passed/verified.
+    assert res.get("smoke_status") == "skipped", res
+    msg = res.get("message", "").lower()
+    assert "verified runnable" not in msg, f"disabled worker falsely reported verified: {msg}"
+
+    # And the worker is genuinely disabled at the runtime boundary (the mismatch
+    # Codex repro'd): create_run rejects it.
+    worker_id = res["worker_id"]
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="disabled"):
+        run_service.create_run(
+            worker_id, {"text": "x"}, trigger_source="workspace-agent", user_id="federico"
+        )

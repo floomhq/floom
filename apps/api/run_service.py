@@ -1094,6 +1094,19 @@ def _smoke_and_repair_generated_worker(
         return {"status": "skipped", "reason": "worker recipe not found"}
     config = loaded[1]
 
+    # Gate == runtime (Codex P1, 2026-06-04): a DISABLED worker (manifest
+    # ``paused: true`` / ``enabled: false``) is REJECTED by create_run with
+    # "Worker is disabled" — so we must NOT smoke it green and let the caller
+    # report it "verified runnable". The recipe's instance row carries the
+    # effective enabled flag (the manifest's ``paused`` is projected into it).
+    # Surface as skipped (not failed): the worker is intentionally off, not broken.
+    instance = loaded[2] if len(loaded) > 2 else None
+    if isinstance(instance, dict) and instance.get("enabled") is False:
+        return {
+            "status": "skipped",
+            "reason": "worker is disabled (paused) — enable it before it can run",
+        }
+
     runtime = config.runtime
     mode = runtime.mode if runtime else "pure-script"
     entry = (runtime.entrypoint if runtime else "") or ""
