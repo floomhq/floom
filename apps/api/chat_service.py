@@ -1148,16 +1148,25 @@ def _manifest_executes_run_py(manifest: Dict[str, Any]) -> bool:
             # SKILL.md/*.md, means NOT a run.py worker).
             return e == "run.py"
 
-    # No explicit entry: fall back to a command's script token.
+    # No explicit entry: the COMMAND defines the executable. A run.py worker's
+    # canonical command is exactly "python run.py". Any other command — a script
+    # token that is not run.py (node run.js), OR a non-script invocation
+    # (python -m pkgworker, ./bin/start) — means this is NOT a run.py worker, so the
+    # run.py machinery must not touch it (Codex P1: python -m package gate==runtime).
     for src in (manifest.get("exec"), manifest.get("runtime"), manifest):
         cmd = src.get("command") if isinstance(src, dict) else None
-        if isinstance(cmd, str):
-            for tok in cmd.strip().split():
-                ref = _norm(tok)
-                if _is_script_path(ref):
-                    return ref == "run.py"
+        if not isinstance(cmd, str) or not cmd.strip():
+            continue
+        toks = cmd.strip().split()
+        # A script token decides directly.
+        script_tok = next((_norm(t) for t in toks if _is_script_path(_norm(t))), None)
+        if script_tok is not None:
+            return script_tok == "run.py"
+        # No script token (e.g. python -m module): a run.py worker would never
+        # author this, so treat it as a non-run.py executable.
+        return False
 
-    # Nothing specified: the schema default for a script worker is run.py.
+    # Nothing specified at all: the schema default for a script worker is run.py.
     return True
 
 

@@ -627,6 +627,12 @@ def test_manifest_executes_run_py_classification(booted):
     assert cs._manifest_executes_run_py({"exec": {"command": "node run.js"}}) is False
     # No entry/command at all -> schema default run.py (the Emily create case).
     assert cs._manifest_executes_run_py({"trigger": {"type": "manual"}}) is True
+    # Command-only python -m package: NOT a run.py worker (Codex P1 #6 follow-up).
+    assert cs._manifest_executes_run_py({"exec": {"command": "python -m pkgworker"}}) is False
+    assert cs._manifest_executes_run_py({"exec": {"command": "python -m pkg.worker"}}) is False
+    assert cs._manifest_executes_run_py({"exec": {"command": "./bin/start"}}) is False
+    # Explicit canonical run.py command -> run.py worker.
+    assert cs._manifest_executes_run_py({"exec": {"command": "python run.py"}}) is True
 
 
 def test_agent_skill_md_worker_not_codegen_or_backfilled_on_update(booted, monkeypatch):
