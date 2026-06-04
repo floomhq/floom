@@ -847,16 +847,30 @@ def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
 
 def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    """Create a worker from a worker.yml manifest — runnable, same path as the API.
+    """Create a RUNNABLE worker from a worker.yml manifest — same path as the API.
 
-    Emily's create MUST materialize the worker on disk (``WORKERS_DIR/<id>/`` with
-    worker.yml + run.py + requirements.txt), not just write DB rows. A worker that
-    only exists in the DB has no bundle on disk, so at run time the E2B runner fails
-    with "worker directory not found" (run_service._snapshot_worker_bundle /
-    _worker_dir_for_run). To stay DRY, this routes through the SAME shared helper the
-    HTTP/MCP create paths use (``main._register_worker_from_files``), which writes the
-    files, backfills a runnable run.py stub when absent, invalidates the cache,
-    re-discovers, and persists the worker to the DB.
+    Two things must happen for an Emily-created worker to actually RUN to
+    completion, and the old implementation did neither:
+
+    1. MATERIALIZE THE BUNDLE ON DISK. The old code only wrote the workers +
+       skill_versions DB rows. A worker that exists only in the DB has no bundle
+       on disk, so at run time the E2B runner failed with "worker directory not
+       found" (run_service._snapshot_worker_bundle / e2b_driver). This now routes
+       through the SAME shared helper the HTTP/MCP create paths use
+       (``main._register_worker_from_files``), which writes worker.yml, backfills
+       run.py + requirements.txt, invalidates the cache, re-discovers, and
+       persists the worker.
+
+    2. GENERATE REAL run.py CODE. Emily authors a *manifest* (yaml only, no code),
+       so the backfilled run.py is a no-op placeholder. A worker whose manifest
+       declares an output but whose run.py produces nothing fails at run time with
+       "Output schema violation". So, exactly like ``/workers/draft-and-create``
+       Path B, this runs ``smoke_and_gate_generated_worker`` with
+       ``allow_code_repair=True``: it detects the placeholder stub, synthesises a
+       real run.py from the manifest via the codegen model, smokes it in E2B, and
+       gates the worker (a smoke-failed worker is DISABLED, never deleted, and the
+       verdict is surfaced to Emily). This is the proven create path — Emily's
+       tool is no longer a weaker parallel implementation of it.
     """
     import yaml as _yaml
     yaml_text = str(args.get("yaml_text") or "")
@@ -871,13 +885,11 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     if not (manifest.get("name") or manifest.get("id")):
         return {"ok": False, "error": "worker name is required in YAML"}
 
-    # Converge onto the proven materialization path. ``_register_worker_from_files``
-    # writes WORKERS_DIR/<id>/worker.yml, backfills run.py + requirements.txt, and
-    # registers the worker so it is immediately runnable. dedupe_id rewrites a
-    # colliding id to a free one (matches the worker-author hook) so a create never
-    # dead-ends on a taken slug.
+    # Step 1: converge onto the proven materialization path. ``dedupe_id`` rewrites
+    # a colliding id to a free one (matches the worker-author hook) so a create
+    # never dead-ends on a taken slug.
     from db import get_repositories
-    from main import _register_worker_from_files, DraftFile
+    from main import _register_worker_from_files, DraftFile, get_worker_config_for_run
     from fastapi import HTTPException as _HTTPException
 
     repos = get_repositories()
@@ -892,7 +904,60 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": str(exc.detail)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
-    return {"ok": True, "worker_id": worker_id, "message": f"Worker '{worker_id}' created."}
+
+    # Step 2: generate real run.py + smoke-gate — same as draft-and-create Path B.
+    # Best-effort: a generation/smoke failure must not undo a successful create
+    # (the worker stays editable), but it IS surfaced so Emily can tell the user
+    # the worker is not yet runnable instead of presenting a dead worker as ready.
+    smoke_status: Optional[str] = None
+    smoke_reason: Optional[str] = None
+    try:
+        from run_service import smoke_and_gate_generated_worker
+
+        sample_input = None
+        try:
+            cfg = get_worker_config_for_run(worker_id)
+            sample_input = getattr(cfg, "example_input", None)
+        except Exception:
+            sample_input = None
+        bundle: Dict[str, Any] = {}
+        if isinstance(sample_input, dict):
+            bundle["example_input"] = sample_input
+
+        def _smoke_log(msg: str, level: str = "info") -> None:
+            logger.info("workers__create smoke %s: %s", worker_id, msg)
+
+        smoke = smoke_and_gate_generated_worker(
+            worker_id,
+            bundle,
+            user_id=user_id,
+            repos=repos,
+            log_fn=_smoke_log,
+            allow_code_repair=True,
+        )
+        if isinstance(smoke, dict):
+            smoke_status = smoke.get("status")
+            smoke_reason = smoke.get("reason")
+    except Exception:
+        logger.exception("workers__create smoke+gate failed for %s", worker_id)
+
+    if smoke_status == "failed":
+        return {
+            "ok": True,
+            "worker_id": worker_id,
+            "smoke_status": "failed",
+            "message": (
+                f"Worker '{worker_id}' was created but its first test run failed "
+                f"({smoke_reason or 'unknown'}); it is disabled until edited. "
+                "Edit run.py, then re-run."
+            ),
+        }
+    return {
+        "ok": True,
+        "worker_id": worker_id,
+        "smoke_status": smoke_status,
+        "message": f"Worker '{worker_id}' created and verified runnable.",
+    }
 
 
 def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
