@@ -332,6 +332,419 @@ def test_canonicalize_noop_when_no_command(booted):
     assert chat_service._canonicalize_emily_exec_command(agent_yml) == agent_yml
 
 
+def test_canonicalize_normalizes_run_sh_entry_to_run_py(booted):
+    """Second divergent-execution vector: a `run.sh` entry makes the schema derive
+    `bash run.sh`, but codegen only emits run.py -> every run dies with
+    'run.sh: No such file or directory'. The entry must be forced to run.py."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    sh_yml = (
+        'schema_version: "0.3"\n'
+        'name: "shworker"\n'
+        'title: "Sh Worker"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "run.sh"\n'
+        'trigger:\n  type: "manual"\n'
+        'exec:\n  entry: "run.sh"\n  runtime: "python311"\n  runner: "e2b"\n'
+        '  command: "bash run.sh"\n'
+        '  outputs:\n  - name: "result"\n    type: file\n    required: true\n'
+    )
+    parsed = _yaml.safe_load(chat_service._canonicalize_emily_exec_command(sh_yml))
+    assert parsed["exec"]["entry"] == "run.py", parsed["exec"]
+    assert parsed.get("entrypoint") == "run.py", parsed
+    assert "command" not in parsed["exec"], "stale bash run.sh command survived"
+
+
+def test_canonicalize_leaves_agent_entry_untouched(booted):
+    """An agent worker (entry: SKILL.md) must NOT be rewritten to run.py — it has
+    no run.py and codegen does not generate one for it."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    # Add a command to force a rewrite path, and assert entry stays SKILL.md.
+    agent_yml = (
+        'schema_version: "0.3"\n'
+        'name: "agent-y"\n'
+        'title: "Agent Y"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "SKILL.md"\n'
+        'trigger:\n  type: "manual"\n'
+        'exec:\n  entry: "SKILL.md"\n  runtime: "skill"\n  runner: "e2b"\n'
+    )
+    parsed = _yaml.safe_load(chat_service._canonicalize_emily_exec_command(agent_yml))
+    assert parsed["exec"]["entry"] == "SKILL.md"
+    assert parsed.get("entrypoint") == "SKILL.md"
+
+
+def test_canonicalize_preserves_legitimate_run_js_worker(booted):
+    """Codex blocker: a LEGITIMATE hand-authored run.js worker (its source IS on
+    disk) must NOT have its entry rewritten to run.py — that would break it. Only
+    ORPHANED script entries (no source file) are redirected."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    js_yml = (
+        'schema_version: "0.3"\n'
+        'name: "nodeworker"\n'
+        'title: "Node Worker"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "run.js"\n'
+        'trigger:\n  type: "manual"\n'
+        'exec:\n  entry: "run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        '  command: "node run.js"\n'
+    )
+    # run.js source IS present -> the worker is legit and returned UNCHANGED
+    # (entry preserved, command preserved — we never touch a real authored worker).
+    out = chat_service._canonicalize_emily_exec_command(
+        js_yml, existing_files={"run.js", "package.json"}
+    )
+    assert out == js_yml, "legit run.js worker was modified"
+    parsed = _yaml.safe_load(out)
+    assert parsed["exec"]["entry"] == "run.js", "legit run.js entry was clobbered"
+    assert parsed.get("entrypoint") == "run.js"
+    assert parsed["exec"]["command"] == "node run.js", "legit command was stripped"
+
+
+def test_canonicalize_preserves_command_only_node_worker(booted):
+    """Codex P1 #3: a command-only authored worker (exec.command: 'node run.js',
+    runtime: node22, NO entry) uses the command as its only execution signal. When
+    run.js source is present, the derived entry must be lifted into exec.entry so
+    stripping the command does not collapse it to agent mode / python run.py."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    cmd_only_yml = (
+        'schema_version: "0.3"\n'
+        'name: "cmdnode"\n'
+        'title: "Cmd Node"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  command: "node run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    # The command references real on-disk run.js -> legit, returned UNCHANGED so the
+    # command stays the execution signal (no entry collapse to agent / python run.py).
+    out = chat_service._canonicalize_emily_exec_command(
+        cmd_only_yml, existing_files={"run.js", "package.json"}
+    )
+    assert out == cmd_only_yml, "legit command-only node worker was modified"
+    parsed = _yaml.safe_load(out)
+    assert parsed["exec"]["command"] == "node run.js"
+
+
+def test_canonicalize_preserves_command_only_node_worker_with_args_and_dotslash(booted):
+    """Codex P1 #4: command with args ('node run.js --mode test') or a './run.js'
+    prefix must still be recognised as legit when run.js is on disk."""
+    chat_service = booted["chat_service"]
+    for cmd in ("node run.js --mode test", "node ./run.js"):
+        cmd_yml = (
+            'schema_version: "0.3"\n'
+            'name: "cmdargs"\n'
+            'title: "Cmd Args"\n'
+            'description: "x"\n'
+            'version: "0.1.0"\n'
+            f'exec:\n  command: "{cmd}"\n  runtime: "node22"\n  runner: "e2b"\n'
+            'trigger:\n  type: "manual"\n'
+        )
+        out = chat_service._canonicalize_emily_exec_command(
+            cmd_yml, existing_files={"run.js"}
+        )
+        assert out == cmd_yml, f"legit worker with command {cmd!r} was modified"
+
+
+def test_canonicalize_preserves_python_m_package_worker(booted):
+    """Codex P1 #6: a command-only worker 'python -m pkgworker' backed by
+    pkgworker/__main__.py (or pkgworker.py) must be recognised as legit and left
+    unchanged — not stripped into agent mode."""
+    chat_service = booted["chat_service"]
+    base = (
+        'schema_version: "0.3"\n'
+        'name: "pkgw"\n'
+        'title: "Pkg W"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  command: "python -m pkgworker"\n  runtime: "python311"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    # __main__.py layout
+    assert chat_service._canonicalize_emily_exec_command(
+        base, existing_files={"pkgworker/__main__.py"}
+    ) == base, "python -m pkg (__main__.py) worker was modified"
+    # module.py layout
+    assert chat_service._canonicalize_emily_exec_command(
+        base, existing_files={"pkgworker.py"}
+    ) == base, "python -m pkg (module.py) worker was modified"
+    # dotted module
+    dotted = base.replace("python -m pkgworker", "python -m pkg.worker")
+    assert chat_service._canonicalize_emily_exec_command(
+        dotted, existing_files={"pkg/worker.py"}
+    ) == dotted, "python -m pkg.worker worker was modified"
+
+
+def test_canonicalize_strips_python_m_when_module_absent(booted):
+    """A python -m command whose module is NOT on disk (orphaned / Emily heredoc-ish)
+    is still neutralised so the generated run.py executes."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+    base = (
+        'schema_version: "0.3"\n'
+        'name: "pkgorphan"\n'
+        'title: "Pkg Orphan"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  command: "python -m ghostmod"\n  runtime: "python311"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    parsed = _yaml.safe_load(
+        chat_service._canonicalize_emily_exec_command(base, existing_files=set())
+    )
+    assert "command" not in parsed["exec"], "orphaned python -m command survived"
+
+
+def test_canonicalize_preserves_legacy_runtime_entrypoint_node(booted):
+    """Codex P1 #4: a legacy worker with runtime.entrypoint: run.js + runtime.command
+    must be preserved when run.js is on disk (and _manifest_executes_run_py False)."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+    legacy_yml = (
+        'schema_version: "0.3"\n'
+        'name: "legacynode"\n'
+        'title: "Legacy Node"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'runtime:\n  type: "node22"\n  entrypoint: "run.js"\n  command: "node run.js"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    out = chat_service._canonicalize_emily_exec_command(legacy_yml, existing_files={"run.js"})
+    assert out == legacy_yml, "legacy runtime.entrypoint node worker was modified"
+    parsed = _yaml.safe_load(out)
+    assert chat_service._manifest_executes_run_py(parsed) is False, (
+        "legacy run.js worker wrongly treated as a run.py worker"
+    )
+
+
+def test_canonicalize_command_only_orphaned_falls_back_to_run_py(booted):
+    """A command-only worker whose target file is ABSENT (e.g. a divergent heredoc
+    or a 'node run.js' with no run.js) is NOT preserved — the command is stripped
+    and the worker falls back to the generated run.py."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    # Heredoc-style command with no script file (the original E1 bug shape).
+    cmd_only_yml = (
+        'schema_version: "0.3"\n'
+        'name: "cmdorphan"\n'
+        'title: "Cmd Orphan"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  command: "python -c \\"print(1)\\""\n  runtime: "python311"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    parsed = _yaml.safe_load(
+        chat_service._canonicalize_emily_exec_command(cmd_only_yml, existing_files=set())
+    )
+    assert "command" not in parsed["exec"], "divergent heredoc command survived"
+    # No entry was derivable (target not a script file present) -> falls back to
+    # the schema default (run.py). exec.entry stays unset here; the schema fills it.
+    assert parsed["exec"].get("entry") in (None, "run.py")
+
+
+def test_canonicalize_redirects_orphaned_js_entry(booted):
+    """An orphaned run.js entry (no source file) IS redirected to run.py (codegen
+    backfills run.py). This is the create case where the tool supplies no source."""
+    chat_service = booted["chat_service"]
+    import yaml as _yaml
+
+    js_yml = (
+        'schema_version: "0.3"\n'
+        'name: "orphanjs"\n'
+        'title: "Orphan JS"\n'
+        'description: "x"\n'
+        'version: "0.1.0"\n'
+        'exec:\n  entry: "run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    parsed = _yaml.safe_load(
+        chat_service._canonicalize_emily_exec_command(js_yml, existing_files=set())
+    )
+    assert parsed["exec"]["entry"] == "run.py", "orphaned run.js was not redirected"
+
+
+def test_update_preserves_real_run_js_worker_entry(booted, monkeypatch):
+    """End-to-end Codex-blocker regression: updating an existing real run.js worker
+    via workers__update must keep entry: run.js (source is on disk), not rewrite to
+    run.py."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+    _stub_codegen_and_smoke(monkeypatch, run_service, workers_dir)
+
+    from main import _register_worker_from_files, DraftFile
+    from db import get_repositories
+
+    js_yml = (
+        'schema_version: "0.3"\n'
+        'name: "realnode"\n'
+        'title: "Real Node"\n'
+        'description: "A genuine node worker."\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "run.js"\n'
+        'exec:\n  entry: "run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        '  command: "node run.js"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    worker_id = _register_worker_from_files(
+        [DraftFile(path="worker.yml", content=js_yml),
+         DraftFile(path="run.js", content="console.log('hi')\n"),
+         DraftFile(path="package.json", content='{"name":"realnode"}\n')],
+        user_id="federico", repos=get_repositories(), dedupe_id=True,
+    )
+
+    updated = js_yml.replace('A genuine node worker.', 'A genuine node worker. (v2)')
+    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "federico")
+    assert res["ok"] is True, res
+
+    yml_on_disk = (workers_dir / worker_id / "worker.yml").read_text(encoding="utf-8")
+    import yaml as _yaml
+    parsed = _yaml.safe_load(yml_on_disk)
+    assert parsed["exec"]["entry"] == "run.js", f"real run.js entry was clobbered: {parsed['exec']}"
+    assert (workers_dir / worker_id / "run.js").is_file(), "run.js source was deleted"
+
+
+def test_manifest_executes_run_py_classification(booted):
+    """Unit: _manifest_executes_run_py must be POSITIVE (entry == run.py), never
+    'absence of a non-script entry'. Agent SKILL.md must be False (Codex P1 #5)."""
+    cs = booted["chat_service"]
+    assert cs._manifest_executes_run_py({"exec": {"entry": "run.py"}}) is True
+    assert cs._manifest_executes_run_py({"exec": {"entry": "SKILL.md"}}) is False
+    assert cs._manifest_executes_run_py({"entrypoint": "SKILL.md"}) is False
+    assert cs._manifest_executes_run_py({"exec": {"entry": "run.js"}}) is False
+    assert cs._manifest_executes_run_py({"runtime": {"entrypoint": "run.js"}}) is False
+    assert cs._manifest_executes_run_py({"exec": {"command": "node run.js"}}) is False
+    # No entry/command at all -> schema default run.py (the Emily create case).
+    assert cs._manifest_executes_run_py({"trigger": {"type": "manual"}}) is True
+    # Command-only python -m package: NOT a run.py worker (Codex P1 #6 follow-up).
+    assert cs._manifest_executes_run_py({"exec": {"command": "python -m pkgworker"}}) is False
+    assert cs._manifest_executes_run_py({"exec": {"command": "python -m pkg.worker"}}) is False
+    assert cs._manifest_executes_run_py({"exec": {"command": "./bin/start"}}) is False
+    # Explicit canonical run.py command -> run.py worker.
+    assert cs._manifest_executes_run_py({"exec": {"command": "python run.py"}}) is True
+
+
+def test_agent_skill_md_worker_not_codegen_or_backfilled_on_update(booted, monkeypatch):
+    """Codex P1 #5: updating a real SKILL.md agent worker must NOT backfill run.py
+    nor invoke run.py codegen — its executable entry is SKILL.md."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+
+    from main import _register_worker_from_files, DraftFile
+    from db import get_repositories
+
+    agent_yml = (
+        'schema_version: "0.3"\n'
+        'name: "agentw"\n'
+        'title: "Agent W"\n'
+        'description: "agent worker"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "SKILL.md"\n'
+        'exec:\n  entry: "SKILL.md"\n  runtime: "skill"\n  runner: "e2b"\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    worker_id = _register_worker_from_files(
+        [DraftFile(path="worker.yml", content=agent_yml),
+         DraftFile(path="SKILL.md", content="You are a helpful agent.\n")],
+        user_id="federico", repos=get_repositories(), dedupe_id=True,
+    )
+
+    codegen_calls: list = []
+    orig = chat_service._generate_run_py_from_manifest
+    def _spy(wid, manifest, uid, log_fn):
+        codegen_calls.append(wid)
+        return orig(wid, manifest, uid, log_fn)
+    monkeypatch.setattr(chat_service, "_generate_run_py_from_manifest", _spy)
+
+    # Gate returns skipped for an agent worker (not a script-mode worker) — fine.
+    def _gate(wid, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
+        return {"status": "skipped", "reason": "not a script-mode worker"}
+    monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _gate)
+
+    updated = agent_yml.replace("agent worker", "agent worker v2")
+    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "federico")
+    assert res["ok"] is True, res
+    # The meaningful invariant: the run.py-specific machinery (codegen) is NOT
+    # applied to an agent worker. (A benign run.py stub from the shared
+    # registration helper may exist on disk, but it is never executed nor codegen'd
+    # for a SKILL.md worker, and the placeholder preflight only fires when the entry
+    # IS run.py.) The update reports the skipped smoke verdict honestly.
+    assert codegen_calls == [], f"agent worker was codegen'd into run.py: {codegen_calls}"
+    assert res.get("smoke_status") == "skipped", res
+    assert "generation produced no script code" not in (res.get("message") or "")
+
+
+def test_run_js_worker_not_codegen_or_placeholder_gated(booted, monkeypatch):
+    """Codex P1 (2nd): a real run.js worker updated via workers__update must NOT be
+    codegen'd into run.py nor failed by the run.py placeholder preflight, even when
+    codegen would return no code. The smoke must run its OWN entry (node run.js)."""
+    chat_service = booted["chat_service"]
+    run_service = booted["run_service"]
+    workers_dir = booted["workers_dir"]
+
+    from main import _register_worker_from_files, DraftFile
+    from db import get_repositories
+    from models import WorkerResult
+
+    js_yml = (
+        'schema_version: "0.3"\n'
+        'name: "noderun"\n'
+        'title: "Node Run"\n'
+        'description: "node worker"\n'
+        'version: "0.1.0"\n'
+        'entrypoint: "run.js"\n'
+        'exec:\n  entry: "run.js"\n  runtime: "node22"\n  runner: "e2b"\n'
+        '  command: "node run.js"\n'
+        '  outputs:\n  - name: "result"\n    kind: scalar\n    type: string\n    required: true\n'
+        'trigger:\n  type: "manual"\n'
+    )
+    worker_id = _register_worker_from_files(
+        [DraftFile(path="worker.yml", content=js_yml),
+         DraftFile(path="run.js", content="console.log('hi')\n"),
+         DraftFile(path="package.json", content='{"name":"noderun"}\n')],
+        user_id="federico", repos=get_repositories(), dedupe_id=True,
+    )
+
+    # codegen returns NO code (Codex's failure trigger). If the run.py machinery
+    # were wrongly applied, this would fail the worker.
+    monkeypatch.setattr(run_service, "_repair_run_py", lambda **k: None)
+
+    codegen_calls: list = []
+    orig_gen = chat_service._generate_run_py_from_manifest
+    def _spy_gen(wid, manifest, uid, log_fn):
+        codegen_calls.append(wid)
+        return orig_gen(wid, manifest, uid, log_fn)
+    monkeypatch.setattr(chat_service, "_generate_run_py_from_manifest", _spy_gen)
+
+    # Driver runs node run.js successfully.
+    class _NodeDriver:
+        def run(self, *, worker_id, run_id, inputs, config=None, **kwargs):  # noqa: ANN001
+            return WorkerResult(status="success", outputs={"result": "ok"}, artifacts=[])
+    monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _NodeDriver())
+
+    import yaml as _yaml
+    updated = js_yml.replace('node worker', 'node worker v2')
+    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "federico")
+    assert res["ok"] is True, res
+    # codegen must NOT have been called for a run.js worker.
+    assert codegen_calls == [], f"run.js worker was codegen'd into run.py: {codegen_calls}"
+    # And it must NOT be failed by the run.py placeholder preflight.
+    assert res.get("smoke_status") in ("passed", "skipped"), res
+    assert "generation produced no script code" not in (res.get("message") or "")
+
+
 def test_emily_create_strips_divergent_command_before_persist(booted, monkeypatch):
     """End-to-end: creating with a divergent exec.command persists a manifest that
     does NOT carry the heredoc, so the generated run.py is the executed script."""
