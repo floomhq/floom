@@ -14025,6 +14025,7 @@ async def _collect_workspace_agent_reply_for_slack(
     message: str,
     user_id: str,
     conversation_id: Optional[str],
+    source: str = "slack",
 ) -> str:
     from chat_service import stream_chat
 
@@ -14035,6 +14036,7 @@ async def _collect_workspace_agent_reply_for_slack(
             user_id=user_id,
             conversation_id=conversation_id,
             part_queue=queue,
+            source=source,
         )
     )
     text_parts: list[str] = []
@@ -14871,6 +14873,7 @@ async def _collect_workspace_agent_reply_for_langdock(
         message=message,
         user_id=user_id,
         conversation_id=conversation_id,
+        source="mcp",
     )
 
 
@@ -16940,6 +16943,7 @@ async def post_chat(
                 user_id=auth.user_id,
                 conversation_id=payload.conversation_id,
                 part_queue=part_queue,
+                source="web",
             )
         except Exception as exc:
             logger.exception("chat background task failed")
