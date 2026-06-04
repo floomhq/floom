@@ -1416,22 +1416,15 @@ export default function WorkerDetailPage() {
     // (header → tabs row → Run-form card). Was a stale left-rail layout
     // that hadn't been updated since the S22 redesign.
     return (
-      <div className="space-y-6">
-        {/* Header: name + status pill + description + tags + Edit button */}
-        <div className="flex items-start gap-3">
-          <div className="flex-1 min-w-0 space-y-2">
-            <div className="flex items-center gap-2">
-              <Skeleton className="h-6 w-48 rounded" />
-              <Skeleton className="h-5 w-16 rounded-full" />
-            </div>
-            <Skeleton className="h-4 w-72 rounded" />
-            <div className="flex items-center gap-1.5 pt-1">
-              <Skeleton className="h-5 w-16 rounded" />
-              <Skeleton className="h-5 w-14 rounded" />
-              <Skeleton className="h-5 w-12 rounded" />
-            </div>
-          </div>
-          <Skeleton className="h-8 w-16 shrink-0 rounded" />
+      <div className="space-y-3">
+        {/* Thin header row: breadcrumb + status + actions */}
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-4 w-16 rounded" />
+          <Skeleton className="h-3 w-3 rounded" />
+          <Skeleton className="h-4 w-40 rounded" />
+          <div className="flex-1" />
+          <Skeleton className="h-7 w-16 rounded" />
+          <Skeleton className="h-7 w-7 rounded" />
         </div>
         {/* Tabs row */}
         <div className="flex gap-2 border-b border-[var(--border-default)] pb-px">
@@ -1547,118 +1540,58 @@ export default function WorkerDetailPage() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="space-y-4">
-      {/* S34: Federico — "where is the arrow back to workers here?" Restored
-          a quiet back-link above the worker title. Cmd-K + sidebar exist but
-          a direct one-click "back to list" is what users expect on a detail
-          page. */}
-      <Link
-        href="/workers"
-        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="size-3.5" />
-        <span>Workers</span>
-      </Link>
-      {/* Worker header. Status dot replaced with a labelled pill so users
-          can read the state at a glance. */}
-      {/* U2 (Federico 2026-05-31): letter-avatar removed. The tool/connection
-          icon strip (WorkerIconPills, below) + the title carry identity now —
-          no initials circle anywhere. */}
-      {/* Mobile (375): stack — title/description/icon-strip column gets the FULL
-          width, and the shrink-0 action cluster (Versions/Share/Edit/actions)
-          drops BELOW it instead of competing for width and starving the
-          flex-1 min-w-0 column to ~0px (one-word-per-line bug). From sm: up the
-          original `flex items-start gap-4` row layout is restored unchanged. */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className={`text-xl font-semibold tracking-tight ${worker.archived ? "text-muted-foreground" : ""}`}>{worker.name}</h1>
-            {worker.archived ? (
-              <span className="inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-                <Archive className="size-2.5" />
-                Archived
-              </span>
-            ) : (
-              <StatusPill status={worker.status} />
-            )}
-          </div>
-          {worker.archived && worker.archive_reason && (
-            <p className="text-muted-foreground text-xs mt-1 italic">{worker.archive_reason}</p>
-          )}
-          {worker.description && (
-            <p className="text-muted-foreground text-sm mt-1">{worker.description}</p>
-          )}
-          {/* FIX 1 (Federico 2026-05-29): Langdock-grade icon-pill row near the
-              title — input-type glyphs (text/person/web/…) + real brand logos
-              for declared connections + a trigger glyph, as squircle pills with
-              +N overflow. Same WorkerIconPills as the /workers cards. Hidden in
-              edit mode (the metadata form owns that surface). Renders nothing
-              when the worker has no inputs/connections/trigger. */}
-          {!worker.archived && !isEditMode && (
-            <WorkerIconPills
-              worker={{
-                id: worker.id,
-                name: worker.name,
-                description: worker.description,
-                folder: worker.folder,
-                tags: worker.tags,
-                connections: (worker.config.connections ?? [])
-                  .map(connectionSpecApp)
-                  .filter((c): c is string => Boolean(c)),
-              }}
-              inputs={worker.config.inputs}
-              connections={(worker.config.connections ?? [])
-                .map(connectionSpecApp)
-                .filter((c): c is string => Boolean(c))}
-              triggerType={worker.trigger_type || worker.config.trigger?.type}
-              size="md"
-              max={8}
-              className="mt-2.5"
-            />
-          )}
-          {(worker.tags || []).length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 mt-2">
-              {(worker.tags || []).map((tag) => (
-                <Badge key={tag} variant="outline" className="text-xs font-normal">{tag}</Badge>
-              ))}
-            </div>
-          )}
-          {lastRunAt && (
-            <p className="text-xs text-muted-foreground mt-2">Last run {formatRelativeTime(lastRunAt)}</p>
-          )}
-        </div>
+    <div className="space-y-3">
+      {/* Thin top row: Workers › {name} breadcrumb + small status pill + action cluster.
+          Replaces the old heavy header block (title h1 + description paragraph +
+          WorkerIconPills strip + tags badges + lastRunAt line). Goal: get the tabs
+          and the Run form into view without scrolling. */}
+      <div className="flex items-center gap-2 min-w-0">
+        {/* Breadcrumb: Workers › name */}
+        <Link
+          href="/workers"
+          className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Workers
+        </Link>
+        <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" />
+        <span className={`text-xs font-medium truncate min-w-0 ${worker.archived ? "text-muted-foreground" : "text-foreground"}`}>
+          {worker.name}
+        </span>
+        {/* Inline status — only for states requiring attention */}
+        {worker.archived ? (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
+            <Archive className="size-2.5" />
+            Archived
+          </span>
+        ) : (
+          <span className="shrink-0"><StatusPill status={worker.status} /></span>
+        )}
+        {/* Archive reason — shown inline when archived */}
+        {worker.archived && worker.archive_reason && (
+          <span className="text-muted-foreground text-xs italic truncate min-w-0">{worker.archive_reason}</span>
+        )}
+        {/* Spacer */}
+        <div className="flex-1 min-w-0" />
+        {/* Action cluster — right-aligned */}
         {isEditMode ? (
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             {anyDirty && (
-              <span className="text-xs text-muted-foreground">Unsaved changes</span>
+              <span className="text-xs text-muted-foreground hidden sm:inline">Unsaved changes</span>
             )}
-            <Button
-              size="sm"
-              onClick={handleSave}
-              disabled={saving || !anyDirty}
-            >
-              <Save className="w-4 h-4 mr-1.5" />
+            <Button size="sm" onClick={handleSave} disabled={saving || !anyDirty}>
+              <Save className="w-3.5 h-3.5 mr-1" />
               {saving ? "Saving..." : "Save"}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => exitEditMode()}
-            >
-              <X className="w-4 h-4 mr-1.5" />
+            <Button variant="outline" size="sm" onClick={() => exitEditMode()}>
+              <X className="w-3.5 h-3.5 mr-1" />
               {anyDirty ? "Discard" : "Done"}
             </Button>
           </div>
         ) : worker.archived ? (
-          <div className="flex items-center gap-2 shrink-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setVersionsOpen(true)}
-              aria-label="Versions"
-            >
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Button variant="ghost" size="sm" onClick={() => setVersionsOpen(true)} aria-label="Versions">
               <History className="size-3.5" />
-              Versions
+              <span className="hidden sm:inline ml-1">Versions</span>
               <ChevronDown className="size-3.5 text-muted-foreground" />
             </Button>
             <Button
@@ -1674,64 +1607,48 @@ export default function WorkerDetailPage() {
                 }
               }}
             >
-              <ArchiveRestore className="w-4 h-4 mr-1.5" />
+              <ArchiveRestore className="w-3.5 h-3.5 mr-1" />
               Restore
             </Button>
           </div>
         ) : (
-          <div className="flex items-center gap-2 shrink-0">
-            {/* FIX 2 (Federico 2026-05-29): "Example" tag relocated OFF the
-                title row to the quiet top-right cluster next to Edit, so the
-                title reads clean. Same treatment as the /workers card chip. */}
+          <div className="flex items-center gap-1.5 shrink-0">
             {worker.is_example && (
-              <span className="inline-flex items-center rounded-[var(--radius-button)] border border-[var(--line-soft)] bg-[var(--bg-2)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--ink-mute)]">
+              <span className="inline-flex items-center rounded-[var(--radius-button)] border border-[var(--line-soft)] bg-[var(--bg-2)] px-1.5 py-0.5 text-[10px] font-normal leading-none text-[var(--ink-mute)] hidden sm:inline-flex">
                 Example
               </span>
             )}
-            {/* Unified "Versions" affordance (matches the inline Versions
-                dropdown on Agent /assistant + Brain /contexts). Was a dedicated
-                tab; now a quiet header trigger that opens the full version
-                list + diff + rollback in a dialog (VersionsSection). */}
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setVersionsOpen(true)}
               aria-label="Versions"
-              /* P2 touch-target: >=44px tall on mobile (coarse pointers),
-                 compact on desktop. */
               className="min-h-11 sm:min-h-0"
             >
               <History className="size-3.5" />
-              Versions
+              <span className="hidden sm:inline ml-1">Versions</span>
               <ChevronDown className="size-3.5 text-muted-foreground" />
             </Button>
-            {/* Visibility (Share) control: Private <-> Shared with workspace.
-                Private default; renders on the OSS single-owner engine too. */}
             <span className="[&_button]:min-h-11 sm:[&_button]:min-h-0">
-              <WorkerVisibilityControl
-                worker={worker}
-                onChange={(updated) => setWorker(updated)}
-              />
+              <WorkerVisibilityControl worker={worker} onChange={(updated) => setWorker(updated)} />
             </span>
             <span className="[&_button]:min-h-11 sm:[&_button]:min-h-0">
               <ShareWorkerButton publicLink={worker.public_link} />
             </span>
+            {/* Quiet Edit affordance — text-only on desktop, icon+text on mobile */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={enterEditMode}
-              className="min-h-11 sm:min-h-0"
+              className="min-h-11 sm:min-h-0 text-muted-foreground hover:text-foreground"
             >
-              <Pencil className="w-4 h-4 mr-1.5" />
-              Edit
+              <Pencil className="w-3.5 h-3.5" />
+              <span className="sr-only sm:not-sr-only sm:ml-1">Edit</span>
             </Button>
-            {/* P1-C: worker actions (Archive / Delete). Hidden for example
-                workers — those are read-only stock workers the backend rejects
-                mutating (403), so we don't offer a dead-end control. */}
             {!worker.is_example && (
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  className="inline-flex h-11 w-11 sm:h-8 sm:w-8 items-center justify-center rounded-[var(--radius-button)] border border-input bg-background text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                  className="inline-flex h-11 w-11 sm:h-8 sm:w-8 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
                   aria-label="Worker actions"
                 >
                   <MoreVertical className="w-4 h-4" />
@@ -1741,10 +1658,7 @@ export default function WorkerDetailPage() {
                     <Archive className="w-4 h-4 mr-2" />
                     {archiving ? "Archiving..." : "Archive"}
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => setDeleteOpen(true)}
-                  >
+                  <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
                     <Trash2 className="w-4 h-4 mr-2" />
                     Delete
                   </DropdownMenuItem>
@@ -2479,6 +2393,9 @@ export default function WorkerDetailPage() {
 // S34: dedicated About tab — long_description + use_cases + how_it_works.
 // Federico — "this page about this worker and run should be different tabs.
 // These are completely different content and it's confusing."
+// Layout-cleanup: the About tab now also carries the elements demoted from the
+// header — description summary, WorkerIconPills, tags, and last-run time. These
+// don't earn top-of-page space in a narrow thin-header row.
 function AboutSection({ worker }: { worker: WorkerDetail }) {
   const hasContent = !!(
     worker.long_description ||
@@ -2489,6 +2406,9 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
   // worker's pipeline (inputs → worker → outputs + connection logos). Built
   // deterministically from the config; renders for every worker (handles
   // 0-input / 0-output / 0-connection gracefully).
+  const workerConnections = (worker.config.connections ?? [])
+    .map(connectionSpecApp)
+    .filter((c): c is string => Boolean(c));
   const diagram = (
     <WorkerAsciiDiagram
       workerName={worker.name}
@@ -2498,17 +2418,49 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
         description: worker.description,
         folder: worker.folder,
         tags: worker.tags,
-        connections: (worker.config.connections ?? [])
-                  .map(connectionSpecApp)
-                  .filter((c): c is string => Boolean(c)),
+        connections: workerConnections,
       }}
       inputs={worker.config.inputs}
       outputs={worker.config.outputs}
-      connections={(worker.config.connections ?? [])
-                .map(connectionSpecApp)
-                .filter((c): c is string => Boolean(c))}
+      connections={workerConnections}
       triggerType={worker.trigger_type || worker.config.trigger?.type}
     />
+  );
+  // Metadata cluster: icon pills + tags + last-run (moved from header)
+  const lastRunAt = worker.recent_runs?.[0]?.created_at;
+  const metaCluster = (
+    <div className="space-y-2">
+      {worker.description && (
+        <p className="text-sm text-muted-foreground leading-relaxed">{worker.description}</p>
+      )}
+      {!worker.archived && (
+        <WorkerIconPills
+          worker={{
+            id: worker.id,
+            name: worker.name,
+            description: worker.description,
+            folder: worker.folder,
+            tags: worker.tags,
+            connections: workerConnections,
+          }}
+          inputs={worker.config.inputs}
+          connections={workerConnections}
+          triggerType={worker.trigger_type || worker.config.trigger?.type}
+          size="md"
+          max={8}
+        />
+      )}
+      {(worker.tags || []).length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(worker.tags || []).map((tag) => (
+            <Badge key={tag} variant="outline" className="text-xs font-normal">{tag}</Badge>
+          ))}
+        </div>
+      )}
+      {lastRunAt && (
+        <p className="text-xs text-muted-foreground">Last run {formatRelativeTime(lastRunAt)}</p>
+      )}
+    </div>
   );
   if (!hasContent) {
     // The Flow diagram is a fixed-width monospace grid that can be wider than
@@ -2517,15 +2469,17 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
     // Prose stays at max-w-2xl for readability.
     return (
       <div className="space-y-6">
+        {metaCluster}
         {diagram}
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          {worker.description || "No description provided."}
-        </p>
+        {!worker.description && (
+          <p className="max-w-2xl text-sm text-muted-foreground">No description provided.</p>
+        )}
       </div>
     );
   }
   return (
     <div className="space-y-6">
+      {metaCluster}
       {diagram}
       <div className="max-w-2xl space-y-6">
       {worker.long_description && (
@@ -2614,11 +2568,21 @@ function RunSection({
     inp.type === "textarea" || inp.type === "file" || isMultilineText(inp);
   // S34: About content moved to its own tab (Federico — "different content,
   // different tabs"). Run tab is now form-only.
+  // Layout-cleanup: description moved from header to a quiet one-line info note
+  // at the top of the Run section (neutral bg, hairline border, not a heavy slab).
+  // Input rows rendered as flat full-width rows separated by hairline dividers —
+  // no nested bordered cards.
   return (
-    <div className="max-w-xl space-y-6">
+    <div className="max-w-xl space-y-4">
+      {/* Quiet description info line — only shown when description exists */}
+      {worker.description && (
+        <p className="text-xs text-muted-foreground border-b border-[var(--border-default)] pb-3">
+          {worker.description}
+        </p>
+      )}
       <div className="space-y-4">
         {hasInputs && (canApplySample || inputsFilled) && (
-            <div className="flex items-center gap-2 pb-1">
+            <div className="flex items-center gap-2">
               {canApplySample && (
                 <Button
                   variant="outline"
@@ -2644,9 +2608,15 @@ function RunSection({
               )}
             </div>
           )}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Flat input rows — label left, control right for short fields;
+            full-width for multiline/file/csv. Separated by hairline dividers.
+            No nested bordered cards. */}
+        {worker.config.inputs.length > 0 && (
+          <div className="divide-y divide-[var(--border-default)]">
           {worker.config.inputs.map((inp: WorkerInput) => (
-            <div key={inp.name} className={`space-y-1.5 ${isLongInput(inp) ? "sm:col-span-2" : ""}`}>
+            isLongInput(inp) ? (
+            /* Long inputs (textarea / file / csv) span full width, stacked */
+            <div key={inp.name} className="py-3 space-y-1.5 first:pt-0 last:pb-0">
               <Label className="text-sm">
                 {inp.label}
                 {inp.required && <span className="text-red-500 ml-0.5">*</span>}
@@ -2661,37 +2631,6 @@ function RunSection({
                   onChange={(e) => onInputChange(inp.name, e.target.value)}
                   className="min-h-[100px] border-border"
                 />
-              ) : inp.type === "select" ? (
-                <Select
-                  value={(inputs[inp.name] as string) || (inp.default as string) || ""}
-                  onValueChange={(val) => onInputChange(inp.name, val)}
-                >
-                  <SelectTrigger className="border-border w-full">
-                    <SelectValue placeholder={inp.placeholder || "Select an option"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(inp.options || []).map((opt) => (
-                      // S29a: humanize raw enum values for display (e.g.
-                      // "branded_markdown" -> "Branded markdown"). Federico
-                      // saw the raw enum keys in the dropdown and they read
-                      // as developer leftovers. Value sent to API stays raw.
-                      <SelectItem key={opt} value={opt}>{humanizeOptionLabel(opt)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : inp.type === "boolean" ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id={`inp-${inp.name}`}
-                    checked={inputs[inp.name] === true || inputs[inp.name] === "true"}
-                    onChange={(e) => onInputChange(inp.name, e.target.checked)}
-                    className="w-4 h-4 rounded border-border accent-black cursor-pointer"
-                  />
-                  <label htmlFor={`inp-${inp.name}`} className="text-sm text-muted-foreground cursor-pointer select-none">
-                    {inp.placeholder || inp.label}
-                  </label>
-                </div>
               ) : inp.type === "file" && (inp as WorkerInput & { accept_csv?: boolean }).accept_csv ? (
                 <CsvColumnMapper
                   requiredColumns={worker.config.csv_required_columns || []}
@@ -2717,12 +2656,65 @@ function RunSection({
                 />
               )}
             </div>
+            ) : (
+            /* Short inputs (text / number / select / boolean) — label left, control right */
+            <div key={inp.name} className="flex items-center justify-between gap-4 py-2.5 first:pt-0 last:pb-0">
+              <div className="min-w-0 shrink-0 max-w-[50%]">
+                <Label className="text-sm leading-snug">
+                  {inp.label}
+                  {inp.required && <span className="text-red-500 ml-0.5">*</span>}
+                </Label>
+                {inp.description && (
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{inp.description}</p>
+                )}
+              </div>
+              <div className="min-w-0 shrink-0 max-w-[50%] w-48">
+                {inp.type === "select" ? (
+                  <Select
+                    value={(inputs[inp.name] as string) || (inp.default as string) || ""}
+                    onValueChange={(val) => onInputChange(inp.name, val)}
+                  >
+                    <SelectTrigger className="border-border w-full">
+                      <SelectValue placeholder={inp.placeholder || "Select…"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(inp.options || []).map((opt) => (
+                        <SelectItem key={opt} value={opt}>{humanizeOptionLabel(opt)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : inp.type === "boolean" ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id={`inp-${inp.name}`}
+                      checked={inputs[inp.name] === true || inputs[inp.name] === "true"}
+                      onChange={(e) => onInputChange(inp.name, e.target.checked)}
+                      className="w-4 h-4 rounded border-border accent-black cursor-pointer"
+                    />
+                    <label htmlFor={`inp-${inp.name}`} className="text-sm text-muted-foreground cursor-pointer select-none">
+                      {inp.placeholder || ""}
+                    </label>
+                  </div>
+                ) : (
+                  <Input
+                    type={inp.type === "number" ? "number" : "text"}
+                    placeholder={inp.placeholder}
+                    value={(inputs[inp.name] as string) || ""}
+                    onChange={(e) => onInputChange(inp.name, e.target.value)}
+                    className="border-border w-full"
+                  />
+                )}
+              </div>
+            </div>
+            )
           ))}
-        </div>
+          </div>
+        )}
 
-          {worker.config.inputs.length === 0 && (
-            <p className="text-sm text-muted-foreground">This worker has no inputs.</p>
-          )}
+        {worker.config.inputs.length === 0 && (
+          <p className="text-sm text-muted-foreground">This worker has no inputs.</p>
+        )}
 
           {missingConnections.length > 0 && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
