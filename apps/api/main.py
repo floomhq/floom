@@ -14051,7 +14051,8 @@ async def _collect_workspace_agent_reply_for_slack(
     finally:
         if not task.done():
             task.cancel()
-    return "".join(text_parts).strip()
+    from chat_service import strip_em_dashes
+    return strip_em_dashes("".join(text_parts).strip())
 
 
 def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str, bot_token: Optional[str] = None) -> None:
