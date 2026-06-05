@@ -1790,6 +1790,8 @@ class PublicWorker(BaseModel):
     how_it_works: Optional[str] = None
     is_example: Optional[bool] = None
     tags: List[str] = Field(default_factory=list)
+    example_input: Optional[Dict[str, Any]] = None
+    example_output: Optional[str] = None
     trigger_type: str
     runtime: Optional[str] = None
     # Tool/connection display only: Composio app slugs + MCP server LABELS.
