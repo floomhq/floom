@@ -101,6 +101,40 @@ def test_retries_on_max_completion_tokens_400():
     assert "max_completion_tokens" in calls[1]
 
 
+def test_retries_without_temperature_when_model_rejects_non_default_temperature():
+    """gpt-5.5 accepts only default temperature; retry without that parameter."""
+    calls = []
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise RuntimeError(
+                    "Unsupported value: 'temperature' does not support 0.2 "
+                    "with this model. Only the default (1) value is supported."
+                )
+            return "ok"
+
+    class _FakeClient:
+        def __init__(self):
+            self.chat = type("C", (), {"completions": _FakeCompletions()})()
+
+    out = cm.chat_completion_codegen(
+        _FakeClient(),
+        messages=[],
+        max_output_tokens=700,
+        model="gpt-5.5",
+        temperature=0.2,
+    )
+
+    assert out == "ok"
+    assert len(calls) == 2
+    assert calls[0]["temperature"] == 0.2
+    assert "temperature" not in calls[1]
+    assert calls[1]["model"] == "gpt-5.5"
+    assert calls[1]["max_completion_tokens"] == 700
+
+
 def test_non_param_error_propagates():
     class _FakeCompletions:
         def create(self, **kwargs):
