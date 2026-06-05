@@ -6632,22 +6632,45 @@ def update_worker(
         or payload.cron_timezone is not None
     )
     if trigger_changed:
+        base_trigger = (worker.get("config") or {}).get("trigger") or {}
+        effective_type = (
+            payload.trigger_type
+            or worker.get("trigger_type")
+            or base_trigger.get("type")
+            or "manual"
+        )
+        effective_type = "schedule" if effective_type == "cron" else effective_type
+        effective_cron = (
+            new_cron_expr
+            if new_cron_expr is not None
+            else (worker.get("cron_expr") or base_trigger.get("cron"))
+        )
+        effective_tz = (
+            payload.cron_timezone
+            if payload.cron_timezone is not None
+            else (worker.get("cron_timezone") or base_trigger.get("timezone") or "UTC")
+        )
+        declared_trigger: Dict[str, Any] = {"type": effective_type}
+        if effective_type == "schedule":
+            declared_trigger["cron"] = effective_cron or "0 9 * * *"
+            declared_trigger["timezone"] = effective_tz or "UTC"
+        declared_triggers = [declared_trigger]
+        repos.workers.update(
+            user_id=auth.user_id,
+            worker_id=worker_id,
+            triggers_json=declared_triggers,
+        )
+        repos.workers.reconcile_triggers(
+            worker_id=worker_id,
+            triggers=declared_triggers,
+            enabled=bool(worker.get("enabled", True)),
+        )
+
         from worker_registry import WORKERS_DIR
         worker_yml_path = WORKERS_DIR / worker_id / "worker.yml"
         if worker_yml_path.exists():
             try:
                 existing_yml = worker_yml_path.read_text(encoding='utf-8')
-                # Build the updated trigger block from DB state so the single
-                # source of truth (DB) is serialised back to disk.
-                effective_type = payload.trigger_type or (
-                    worker.get("config", {}).get("trigger", {}).get("type", "manual")
-                )
-                effective_cron = new_cron_expr or (
-                    worker.get("config", {}).get("trigger", {}).get("cron")
-                )
-                effective_tz = payload.cron_timezone or (
-                    worker.get("config", {}).get("trigger", {}).get("timezone", "UTC")
-                )
                 trigger_lines = [f"trigger:", f"  type: {effective_type}"]
                 if effective_type == "schedule":
                     cron_val = effective_cron or "0 9 * * *"
