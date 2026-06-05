@@ -10930,6 +10930,7 @@ async def stream_run_events(
                         "status": final_row["status"],
                         "error": final_row["error"],
                         "completed_at": final_row["completed_at"],
+                        "duration_ms": final_row["duration_ms"],
                     })
                     yield f"data: {json.dumps(evt)}\n\n"
                 yield "data: {\"type\": \"close\"}\n\n"
@@ -11579,8 +11580,48 @@ def _public_error_field(raw_error: Any, error_code: Any = None) -> str:
     return redacted
 
 
+def _run_event_metadata(run_id: Any) -> Dict[str, Any]:
+    run_id_text = str(run_id or "").strip()
+    if not run_id_text:
+        return {}
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT r.worker_id, r.completed_at, r.duration_ms,
+                       COALESCE(w.name, r.worker_id) AS worker_name
+                FROM runs r
+                LEFT JOIN workers w ON w.id = r.worker_id
+                WHERE r.id = ?
+                """,
+                (run_id_text,),
+            ).fetchone()
+        return dict(row) if row else {}
+    except Exception:
+        return {}
+
+
 def _public_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
     public_event = dict(event)
+    run_id = public_event.get("run_id")
+    run_meta = _run_event_metadata(run_id)
+    if run_meta:
+        public_event.setdefault("worker_id", run_meta.get("worker_id"))
+        public_event.setdefault("worker_name", run_meta.get("worker_name"))
+        if public_event.get("type") == "status" and public_event.get("status") in _TERMINAL_STATUSES:
+            public_event.setdefault("completed_at", run_meta.get("completed_at"))
+            public_event.setdefault("duration_ms", run_meta.get("duration_ms"))
+    artifact = public_event.get("artifact")
+    if isinstance(artifact, dict) and run_id:
+        artifact_id = artifact.get("id")
+        if artifact_id:
+            artifact.setdefault(
+                "download_url",
+                f"/runs/{run_id}/artifacts/{artifact_id}/download",
+            )
+        if run_meta:
+            artifact.setdefault("worker_id", run_meta.get("worker_id"))
+            artifact.setdefault("worker_name", run_meta.get("worker_name"))
     if "message" in public_event:
         public_event["message"] = _redact_public_log_message(str(public_event.get("message") or ""))
     if public_event.get("error") is not None:
@@ -17878,12 +17919,13 @@ async def get_conversation_detail(
     auth: AuthContext = Depends(get_auth_context),
 ) -> Dict[str, Any]:
     """Get a conversation with its messages."""
-    from chat_service import get_conversation, list_conversation_messages
+    from chat_service import get_conversation, list_conversation_messages, list_conversation_tool_cards
     conv = get_conversation(conversation_id, auth.user_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = list_conversation_messages(conversation_id, auth.user_id)
-    return {**conv, "messages": messages}
+    tool_cards = list_conversation_tool_cards(conversation_id, auth.user_id)
+    return {**conv, "messages": messages, "tool_cards": tool_cards}
 
 
 # ---------------------------------------------------------------------------
