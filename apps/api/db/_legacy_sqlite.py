@@ -1496,6 +1496,45 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_whatsapp_sender_bindings_claim_token
         ON whatsapp_sender_bindings(claim_token);
     """,
+    # -- migration 58: Emily chat Phase 1 tool cards + idempotency ------------
+    """
+    CREATE TABLE IF NOT EXISTS conversation_tool_calls (
+        id                  TEXT PRIMARY KEY,
+        user_id             TEXT NOT NULL,
+        conversation_id     TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        call_id             TEXT NOT NULL,
+        tool_name           TEXT NOT NULL,
+        status              TEXT NOT NULL,
+        card_json           TEXT NOT NULL,
+        resource_json       TEXT,
+        streams_json        TEXT,
+        actions_json        TEXT,
+        args_preview_json   TEXT,
+        result_preview_json TEXT,
+        run_id              TEXT,
+        worker_id           TEXT,
+        created_at          TEXT NOT NULL,
+        updated_at          TEXT NOT NULL,
+        UNIQUE(conversation_id, call_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversation_tool_calls_conv
+        ON conversation_tool_calls(conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_conversation_tool_calls_run
+        ON conversation_tool_calls(run_id);
+
+    CREATE TABLE IF NOT EXISTS chat_tool_idempotency (
+        user_id         TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        tool_name       TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        run_id          TEXT,
+        worker_id       TEXT,
+        created_at      TEXT NOT NULL,
+        PRIMARY KEY (user_id, conversation_id, tool_name, idempotency_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_tool_idempotency_run
+        ON chat_tool_idempotency(run_id);
+    """,
 ]
 
 
