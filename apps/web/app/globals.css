@@ -195,7 +195,11 @@
   --secondary-foreground: var(--ink);
   --muted: var(--bg-2);
   --muted-foreground: var(--ink-soft);
-  --accent-foreground: var(--ink);
+  /* fix(light-mode-hover): --accent is #181818 (near-black) in light mode, so
+     accent-foreground MUST be white (--solid-fg) for legible hover text on
+     focus:bg-accent in dropdown-menu, select, and similar interactive items.
+     Dark mode keeps --ink because --accent is the blue hue there. */
+  --accent-foreground: var(--solid-fg);
   --destructive: var(--warning);
   --border: var(--line);
   --input: var(--line-strong);
