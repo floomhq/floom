@@ -28,6 +28,7 @@ async function handler(
   // Preserve query string
   const search = req.nextUrl.search;
   const upstreamUrl = `${API_BASE}${upstreamPath}${search}`;
+  const isConnectionCallback = upstreamPath === "/connections/callback";
 
   // Forward relevant request headers, injecting the secret
   const forwardHeaders: Record<string, string> = {
@@ -57,6 +58,7 @@ async function handler(
     method: req.method,
     headers: forwardHeaders,
     body: body ? body : undefined,
+    redirect: isConnectionCallback ? "manual" : "follow",
   };
   if (isUpload && body) {
     fetchOptions.duplex = "half";
@@ -74,6 +76,8 @@ async function handler(
   if (cl) responseHeaders.set("content-length", cl);
   const cacheControl = upstream.headers.get("cache-control");
   if (cacheControl) responseHeaders.set("cache-control", cacheControl);
+  const location = upstream.headers.get("location");
+  if (location) responseHeaders.set("location", location);
 
   return new NextResponse(upstream.body, {
     status: upstream.status,
