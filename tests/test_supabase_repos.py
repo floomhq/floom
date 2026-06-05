@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from apps.api.auth.workspace_context import active_workspace
 from apps.api.config import new_supabase_anon_client, new_supabase_service_client
 from apps.api.db._secret_crypto import encrypt_secret
 from apps.api.db.supabase_repos import (
@@ -29,6 +30,7 @@ class _FakeTable:
         self.rows = rows
         self.table_name = None
         self.filters: list[tuple[str, str]] = []
+        self.in_filters: list[tuple[str, set[str]]] = []
         self.limit_value = None
         self.selected = None
 
@@ -40,14 +42,23 @@ class _FakeTable:
         self.filters.append((key, value))
         return self
 
+    def in_(self, key, values):
+        self.in_filters.append((key, set(values)))
+        return self
+
     def limit(self, value):
         self.limit_value = value
+        return self
+
+    def order(self, *_args, **_kwargs):
         return self
 
     def execute(self):
         rows = self.rows
         for key, value in self.filters:
             rows = [row for row in rows if row.get(key) == value]
+        for key, values in self.in_filters:
+            rows = [row for row in rows if row.get(key) in values]
         if self.limit_value is not None:
             rows = rows[: self.limit_value]
         return _FakeResponse(rows)
@@ -55,9 +66,13 @@ class _FakeTable:
 
 class _FakeClient:
     def __init__(self, rows):
-        self.table_ref = _FakeTable(rows)
+        self.rows_by_table = rows if isinstance(rows, dict) else None
+        self.rows = rows
+        self.table_ref = _FakeTable([])
 
     def table(self, name):
+        rows = self.rows_by_table.get(name, []) if self.rows_by_table is not None else self.rows
+        self.table_ref = _FakeTable(rows)
         self.table_ref.table_name = name
         return self.table_ref
 
@@ -75,6 +90,102 @@ def test_approval_repository_get_public_loads_by_id_without_owner_scope():
     assert repo.get_public(approval_id="apr_test") == approval
     assert client.table_ref.table_name == "approvals"
     assert ("id", "apr_test") in client.table_ref.filters
+
+
+def test_worker_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale():
+    now_iso = _now_iso()
+    worker_id = "granola-hubspot-meeting-actions"
+    skill_version_id = "sv_granola"
+    client = _FakeClient(
+        {
+            "workers": [
+                {
+                    "id": worker_id,
+                    "user_id": "user_fede",
+                    "workspace_id": "ws_fede_production",
+                    "skill_version_id": skill_version_id,
+                    "name": "Granola to HubSpot Daily Meeting Action Items",
+                    "trigger_type": "manual",
+                    "grants_json": {},
+                    "input_values_json": {},
+                    "triggers_json": [],
+                    "enabled": True,
+                    "created_at": now_iso,
+                }
+            ],
+            "skill_versions": [
+                {
+                    "id": skill_version_id,
+                    "user_id": "user_fede",
+                    "name": worker_id,
+                    "version": "0.1.0",
+                    "manifest_json": _manifest(worker_id, "Granola to HubSpot Daily Meeting Action Items"),
+                    "bundle_path": f"workers/{worker_id}",
+                    "created_at": now_iso,
+                }
+            ],
+        }
+    )
+
+    with active_workspace("ws_default", "admin"):
+        result = SupabaseWorkerRepository(client=client).get(
+            user_id="user_fede",
+            worker_id=worker_id,
+        )
+
+    assert result is not None
+    assert result["id"] == worker_id
+
+
+def test_run_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale():
+    now_iso = _now_iso()
+    run_id = "run_8290101e249b"
+    worker_id = "granola-hubspot-meeting-sync"
+    client = _FakeClient(
+        {
+            "runs": [
+                {
+                    "id": run_id,
+                    "user_id": "user_fede",
+                    "workspace_id": "ws_fede_production",
+                    "worker_id": worker_id,
+                    "status": "failed",
+                    "trigger_source": "schedule",
+                    "runner": "local",
+                    "input_json": {},
+                    "output_json": {},
+                    "error": "Server disconnected",
+                    "created_at": now_iso,
+                }
+            ],
+            "workers": [
+                {
+                    "id": worker_id,
+                    "user_id": "user_fede",
+                    "workspace_id": "ws_fede_production",
+                    "skill_version_id": None,
+                    "name": "Granola to HubSpot Daily Meeting Sync",
+                    "trigger_type": "manual",
+                    "grants_json": {},
+                    "input_values_json": {},
+                    "triggers_json": [],
+                    "enabled": True,
+                    "created_at": now_iso,
+                }
+            ],
+            "skill_versions": [],
+        }
+    )
+
+    with active_workspace("ws_default", "admin"):
+        result = SupabaseRunRepository(client=client).get(
+            user_id="user_fede",
+            run_id=run_id,
+        )
+
+    assert result is not None
+    assert result["id"] == run_id
+    assert result["worker_id"] == worker_id
 
 
 def _now_iso() -> str:

@@ -487,15 +487,28 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         # Fast path: reuse the raw rows already fetched by list() in this request.
         recipe_cache = _recipe_cache.get()
         if recipe_cache is not None:
-            if worker_id not in recipe_cache:
-                return None
-            row, skill = recipe_cache[worker_id]
-            return _worker_record_from_rows(row, skill)
+            cached = recipe_cache.get(worker_id)
+            if cached is not None:
+                row, skill = cached
+                return _worker_record_from_rows(row, skill)
 
         rows = self._worker_rows(user_id=user_id, worker_id=worker_id)
         if not rows:
-            return None
-        row = rows[0]
+            if not get_active_workspace_id():
+                return None
+            response = (
+                self._client.table("workers")
+                .select("*")
+                .eq("id", worker_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            row = _first_row(response)
+            if row is None:
+                return None
+        else:
+            row = rows[0]
         # Log when an admin reads a private worker they don't own.
         workspace_id_ctx = get_active_workspace_id()
         if (
@@ -1488,7 +1501,21 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         response = builder.eq("id", run_id).limit(1).execute()
         row = _first_row(response)
         if row is None:
-            return None
+            if not get_active_workspace_id():
+                return None
+            fallback = (
+                self._client.table("runs")
+                .select(
+                    "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id"
+                )
+                .eq("id", run_id)
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+            row = _first_row(fallback)
+            if row is None:
+                return None
         return self._decorate_run_rows([row])[0]
 
     def get_any(self, *, run_id: str) -> dict[str, Any] | None:
