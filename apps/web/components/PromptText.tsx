@@ -23,7 +23,7 @@ const TOOL_TERMS: ToolTerm[] = [
   { pattern: "google docs",     icon: "google-drive",    display: "Google Docs"     },
   { pattern: "hubspot crm",     icon: "hubspot",         display: "HubSpot CRM"     },
   // Single-word / brand names
-  { pattern: "granola",         icon: null,              display: "Granola"         },
+  { pattern: "granola",         icon: "granola",         display: "Granola"         },
   { pattern: "hubspot",         icon: "hubspot",         display: "HubSpot"         },
   { pattern: "gmail",           icon: "gmail",           display: "Gmail"           },
   { pattern: "slack",           icon: "slack",           display: "Slack"           },

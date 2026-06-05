@@ -10,17 +10,41 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { PromptText } from "@/components/PromptText";
+import { BrandLogo } from "@/components/connections/BrandLogo";
 
 // ---------------------------------------------------------------------------
 // Example chips shown below the hero card
 // ---------------------------------------------------------------------------
 
+// App logo slugs are derived from the prompt text — same tool names PromptText
+// highlights. Kept as a co-located parallel array so any prompt edit is a
+// reminder to sync the logos.
 const EXAMPLES = [
-  { label: "Granola → HubSpot daily", prompt: "Summarise my Granola meetings and post action items to HubSpot CRM daily" },
-  { label: "GitHub PR digest 9am", prompt: "Every morning at 9am, send me a digest of my unread GitHub PRs and open issues" },
-  { label: "Invoice → Sheets", prompt: "Process any new email in label 'invoices', extract total amount, and add a row to Google Sheets" },
-  { label: "HubSpot deal → Slack", prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel" },
-  { label: "Granola → email drafts", prompt: "Fetch last week's Granola meeting notes and draft follow-up emails via Gmail" },
+  {
+    label: "Granola → HubSpot daily",
+    prompt: "Summarise my Granola meetings and post action items to HubSpot CRM daily",
+    apps: ["granola", "hubspot"],
+  },
+  {
+    label: "GitHub PR digest 9am",
+    prompt: "Every morning at 9am, send me a digest of my unread GitHub PRs and open issues",
+    apps: ["github"],
+  },
+  {
+    label: "Invoice → Sheets",
+    prompt: "Process any new email in label 'invoices', extract total amount, and add a row to Google Sheets",
+    apps: ["gmail", "google-sheets"],
+  },
+  {
+    label: "HubSpot deal → Slack",
+    prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel",
+    apps: ["hubspot", "slack"],
+  },
+  {
+    label: "Granola → email drafts",
+    prompt: "Fetch last week's Granola meeting notes and draft follow-up emails via Gmail",
+    apps: ["granola", "gmail"],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -588,6 +612,18 @@ function NewWorkerContent() {
               onClick={() => setPrompt(ex.prompt)}
               className="group flex flex-col items-start gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-3 text-left hover:bg-[var(--active-nav-bg)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
+              {/* Compact logo row — derived from the apps the example touches */}
+              <div className="flex items-center gap-1" aria-hidden="true">
+                {ex.apps.map((slug) => (
+                  <span
+                    key={slug}
+                    className="inline-flex items-center justify-center size-[18px] rounded-[3px] bg-[var(--bg-2)]"
+                    title={slug}
+                  >
+                    <BrandLogo icon={slug} className="size-3" />
+                  </span>
+                ))}
+              </div>
               <span className="text-sm font-medium text-foreground">{ex.label}</span>
               <span className="text-xs text-muted-foreground line-clamp-2">
                 <PromptText>{ex.prompt}</PromptText>
