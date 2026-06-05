@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Download, ExternalLink, FileText, Layers, Package, RotateCcw } from "lucide-react";
+import { Check, Copy, Download, FileText, Layers, Package, RotateCcw } from "lucide-react";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import type { PublicShareFile, StandaloneShare } from "@/lib/types";
 
