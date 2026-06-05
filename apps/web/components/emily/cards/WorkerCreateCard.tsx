@@ -1,7 +1,6 @@
 "use client";
 
 import { CheckCircle2, Circle, Loader2, XCircle, Play, ExternalLink } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { WorkerCreateCard as WorkerCreateCardType } from "@/lib/emily-chat-types";
@@ -94,13 +93,15 @@ export function WorkerCreateCard({ card }: { card: WorkerCreateCardType }) {
       {isReady && card.actions && card.actions.length > 0 && (
         <div className="flex gap-2 px-3.5 pb-3">
           {card.actions.map((action) => (
-            <Button key={action.id} size="sm" variant="outline" asChild className="h-7 text-xs gap-1.5 font-normal">
-              <a href={action.href}>
-                {action.id === "run_worker" && <Play className="size-3" />}
-                {action.id === "open_worker" && <ExternalLink className="size-3" />}
-                {action.label ?? action.id}
-              </a>
-            </Button>
+            <a
+              key={action.id}
+              href={action.href}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
+            >
+              {action.id === "run_worker" && <Play className="size-3" />}
+              {action.id === "open_worker" && <ExternalLink className="size-3" />}
+              {action.label ?? action.id}
+            </a>
           ))}
         </div>
       )}
