@@ -286,7 +286,10 @@ html.dark .ln-cta:hover { background: var(--solid-2) !important; }
   text-wrap: balance;
 }
 .ln-h1 em {
-  font-style: normal;
+  font-style: italic;
+  font-family: var(--font-serif), "Iowan Old Style", "Apple Garamond", Baskerville, Georgia, serif;
+  font-weight: 500;
+  letter-spacing: -.01em;
   color: var(--accent);
 }
 

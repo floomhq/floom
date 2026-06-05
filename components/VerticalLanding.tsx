@@ -176,14 +176,9 @@ export function VerticalLanding({ slug }: { slug: string }) {
           </span>
         </Link>
         <div className="ln-right">
-          <a
-            href="https://github.com/floomhq/workeros"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="ln-link"
-          >
-            Docs
-          </a>
+          <Link href="/templates" className="ln-link">
+            Templates
+          </Link>
           <a
             href="https://github.com/floomhq/workeros"
             target="_blank"

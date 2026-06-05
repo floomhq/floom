@@ -1,4 +1,7 @@
+"use client";
+
 import { Hash, Lock, Plus, Send, Star, Users } from "lucide-react";
+import { motion, useReducedMotion, type Transition } from "motion/react";
 import { RunCard } from "./RunCard";
 import { ApprovalCard } from "./ApprovalCard";
 
@@ -45,7 +48,7 @@ function Message({
   );
 }
 
-/** Compact email preview embedded inside the hero run card. */
+/** Compact email preview: 1-2 line teaser, no full body. */
 function EmailPreview() {
   return (
     <div className="rounded-[12px] border border-border bg-secondary/50 px-3 py-2.5">
@@ -53,16 +56,46 @@ function EmailPreview() {
         Subject: Next steps from today&apos;s call
       </div>
       <p className="mt-1 text-[12.5px] leading-relaxed text-foreground/85">
-        Hi Sarah — thanks for the call today. Based on what you shared, I&apos;d suggest starting
-        with the onboarding workflow and CRM cleanup first. I&apos;ve added the call notes to HubSpot
-        and drafted the next-step task.
+        Hi Sarah, thanks for the call today. Based on what you shared, I&apos;d suggest starting
+        with the onboarding workflow and CRM cleanup first…
       </p>
-      <div className="mt-1.5 text-[11.5px] text-muted-foreground">— Maya</div>
+      <div className="mt-1.5 text-[11.5px] text-muted-foreground">Maya</div>
     </div>
   );
 }
 
+/** Inline status pill used in place of the chatty Floom acknowledgment message. */
+function WorkingPill() {
+  return (
+    <div className="flex gap-3">
+      <Avatar initial="F" color="#181818" />
+      <span className="inline-flex items-center gap-1.5 self-center rounded-full border border-border bg-[oklch(0.96_0.07_80)] px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-[oklch(0.45_0.13_80)]">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[oklch(0.45_0.13_80)]" />
+        Floom is working…
+      </span>
+    </div>
+  );
+}
+
+const EASE_OUT: Transition["ease"] = [0.22, 1, 0.36, 1];
+
 export function SlackHero() {
+  const reduceMotion = useReducedMotion();
+
+  // Centralise motion props so each bubble stays identical except for delay.
+  const bubble = (index: number) =>
+    reduceMotion
+      ? {}
+      : {
+          initial: { opacity: 0, y: 8 },
+          animate: { opacity: 1, y: 0 },
+          transition: {
+            duration: 0.42,
+            delay: 0.4 + index * 0.25,
+            ease: EASE_OUT,
+          } as Transition,
+        };
+
   return (
     <div className="overflow-hidden rounded-[18px] border border-border bg-card shadow-md">
       {/* Restrained Slack chrome: aubergine titlebar */}
@@ -95,40 +128,49 @@ export function SlackHero() {
 
       {/* Thread */}
       <div className="space-y-5 px-4 py-5 sm:px-5">
-        <Message who="Maya" color="#7C3AED" time="2:14 PM">
-          Run <span className="font-semibold">Client Follow-up Worker</span> for the Acme call.
-        </Message>
-        <Message who="Floom" color="#181818" time="2:14 PM" app>
-          On it. I&apos;ll check the meeting notes, CRM context, and past follow-ups.
-        </Message>
+        <motion.div {...bubble(0)}>
+          <Message who="Maya" color="#7C3AED" time="2:14 PM">
+            Run <span className="font-semibold">Client Follow-up Worker</span> for the Acme call.
+          </Message>
+        </motion.div>
+
+        <motion.div {...bubble(1)}>
+          <WorkingPill />
+        </motion.div>
 
         <div className="sm:pl-12">
-          <RunCard
-            id="Run #1042"
-            worker="Client Follow-up Worker"
-            statusLabel="Output ready"
-            trigger="Slack request"
-            tools={["Google Calendar", "Gmail", "HubSpot", "Slack"]}
-            brain={["Tone guide", "Pricing", "CRM rules", "Past follow-ups"]}
-            output="Follow-up email draft to Sarah at Acme"
-            approval="Send this email?"
-            fields={["trigger", "tools", "brain"]}
-          >
-            <div className="space-y-2">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                Output · email draft
-              </div>
-              <EmailPreview />
-            </div>
-          </RunCard>
+          <motion.div {...bubble(2)}>
+            <RunCard
+              id="Run #1042"
+              worker="Client Follow-up Worker"
+              statusLabel="Output ready"
+              trigger="Slack request"
+              tools={["Google Calendar", "Gmail", "HubSpot", "Slack"]}
+              brain={["Tone guide", "Pricing", "CRM rules", "Past follow-ups"]}
+              output="Follow-up email draft to Sarah at Acme"
+              approval="Send this email?"
+              fields={["trigger", "tools", "brain"]}
+            >
+              <motion.div {...bubble(3)} className="space-y-2">
+                <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Output · email draft
+                </div>
+                <EmailPreview />
+              </motion.div>
+            </RunCard>
+          </motion.div>
 
-          <div id="approvals" className="mt-3 scroll-mt-24">
+          <motion.div
+            id="approvals"
+            className="mt-3 scroll-mt-24"
+            {...bubble(4)}
+          >
             <ApprovalCard
               question="Send this email?"
               action="Floom asks before sending external emails."
               primaryLabel="Send email"
             />
-          </div>
+          </motion.div>
         </div>
       </div>
 

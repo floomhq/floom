@@ -223,7 +223,7 @@ export function getTemplateDetail(t: Template): TemplateDetail {
         to: "your team",
         subject: t.output,
         body: `${t.name} prepared ${t.output.toLowerCase()} using your tools and company brain. Review the result, then approve or edit before it ships.`,
-        signoff: "— Floom",
+        signoff: "Floom",
       },
     },
   };

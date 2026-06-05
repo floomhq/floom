@@ -1,4 +1,7 @@
-import { Check } from "lucide-react";
+"use client";
+
+import { Brain, Check } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { StatusPill } from "./StatusPill";
 
 const SOURCES = [
@@ -38,6 +41,7 @@ function Connector() {
 }
 
 export function BrainVisual() {
+  const reduce = useReducedMotion();
   return (
     <div className="flex flex-col items-stretch gap-1 lg:flex-row lg:items-center lg:gap-1">
       {/* Sources */}
@@ -59,23 +63,43 @@ export function BrainVisual() {
 
       <Connector />
 
-      {/* Company Brain — focal card */}
-      <div className="shrink-0 rounded-[18px] border border-border bg-card p-5 shadow-md lg:w-[260px]">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="text-[14px] font-semibold text-foreground">Company Brain</div>
-          <StatusPill tone="success">Live</StatusPill>
+      {/* Company Brain — focal card with literal brain illustration behind */}
+      <div className="relative shrink-0 lg:w-[260px]">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute left-1/2 top-1/2 z-0 size-[300px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#3a6ea5]/[0.10] blur-3xl lg:size-[380px]"
+        />
+        <motion.div
+          aria-hidden="true"
+          className="pointer-events-none absolute left-1/2 top-1/2 z-0 -translate-x-1/2 -translate-y-1/2"
+          animate={reduce ? undefined : { scale: [1, 1.04, 1], opacity: [0.85, 1, 0.85] }}
+          transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <Brain
+            strokeWidth={1.2}
+            className="size-[380px] text-[#3a6ea5]/25 lg:size-[460px]"
+          />
+        </motion.div>
+        <div className="relative z-10 rounded-[18px] border border-border bg-card p-5 shadow-md">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-[14px] font-semibold text-foreground">
+              <Brain className="h-4 w-4 text-[#3a6ea5]" strokeWidth={2} />
+              Company Brain
+            </div>
+            <StatusPill tone="success">Live</StatusPill>
+          </div>
+          <ul className="space-y-2">
+            {KNOWS.map((k) => (
+              <li
+                key={k}
+                className="flex items-center gap-2 rounded-[9px] border border-border bg-secondary/50 px-2.5 py-1.5 text-[12.5px]"
+              >
+                <Check className="h-3.5 w-3.5 shrink-0 text-[#3a6ea5]" strokeWidth={2.5} />
+                <span className="text-foreground">{k}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <ul className="space-y-2">
-          {KNOWS.map((k) => (
-            <li
-              key={k}
-              className="flex items-center gap-2 rounded-[9px] border border-border bg-secondary/50 px-2.5 py-1.5 text-[12.5px]"
-            >
-              <Check className="h-3.5 w-3.5 shrink-0 text-foreground" strokeWidth={2.5} />
-              <span className="text-foreground">{k}</span>
-            </li>
-          ))}
-        </ul>
       </div>
 
       <Connector />

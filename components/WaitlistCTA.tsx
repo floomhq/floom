@@ -5,7 +5,8 @@ import { useState } from "react";
 /* Shared primary-CTA control for the marketing landing + verticals.
  *
  * NEXT_PUBLIC_WAITLIST_MODE (default OFF):
- *   - OFF  -> renders the normal "Get your first worker" link to /login.
+ *   - OFF  -> renders the normal "Get your first worker" link to /templates
+ *             so prospects can browse worker templates before signing in.
  *   - ON   -> renders "Join the waitlist" which reveals an inline email
  *             capture that POSTs to /api/waitlist (anon-key Supabase insert).
  *
@@ -17,7 +18,7 @@ const WAITLIST_ON =
   (process.env.NEXT_PUBLIC_WAITLIST_MODE ?? "").toLowerCase() === "1" ||
   (process.env.NEXT_PUBLIC_WAITLIST_MODE ?? "").toLowerCase() === "true";
 
-const SIGN_IN_HREF = "/login";
+const SIGN_IN_HREF = "/templates";
 
 type Status = "idle" | "loading" | "success" | "error";
 

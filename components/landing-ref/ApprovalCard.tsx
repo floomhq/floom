@@ -33,10 +33,10 @@ export function ApprovalCard({
         </div>
       </div>
       <div className="mt-2 flex w-full flex-wrap gap-1.5 sm:mt-0 sm:w-auto">
-        <button className="inline-flex h-11 items-center gap-1 rounded-[12px] border border-border bg-card px-3 text-[11.5px] font-medium text-foreground transition hover:bg-accent">
+        <button className="inline-flex h-11 items-center gap-1 rounded-[12px] border border-border bg-card px-3 text-[11.5px] font-medium text-foreground transition hover:border-foreground/30 hover:bg-secondary/60">
           <ExternalLink className="h-3 w-3" /> Open run
         </button>
-        <button className="inline-flex h-11 items-center gap-1 rounded-[12px] border border-border bg-card px-3 text-[11.5px] font-medium text-foreground transition hover:bg-accent">
+        <button className="inline-flex h-11 items-center gap-1 rounded-[12px] border border-border bg-card px-3 text-[11.5px] font-medium text-foreground transition hover:border-foreground/30 hover:bg-secondary/60">
           <Edit3 className="h-3 w-3" /> Edit draft
         </button>
         <button className="inline-flex h-11 items-center gap-1 rounded-[12px] bg-primary px-3.5 text-[11.5px] font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90">

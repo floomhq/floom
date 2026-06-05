@@ -1,26 +1,48 @@
 import Link from "next/link";
-import { ThemeModeButton } from "../ThemeModeButton";
-
-const TEMPLATES_HREF = "/templates";
-const ASK_HREF = "/assistant";
 
 const LINKS: Array<{ label: string; href: string }> = [
   { label: "Templates", href: "/templates" },
-  { label: "Brain", href: "/#brain" },
-  { label: "Runs", href: "/#runs" },
-  { label: "Approvals", href: "/#approvals" },
-  { label: "Connections", href: "/#connections" },
+  { label: "How it works", href: "/#see-how-it-works" },
+  { label: "Integrations", href: "/#connections" },
 ];
 
+function FloomMark({ size = 24 }: { size?: number }) {
+  // Near-black variant for product-level chrome. The canonical green Floom
+  // mark lives on floom.dev; sub-products use this monochrome treatment so
+  // the parent attribution stays quiet.
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 100 100"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="Floom"
+      style={{ borderRadius: "22%" }}
+    >
+      <rect width="100" height="100" rx="22" fill="var(--ink)" />
+      <path
+        d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z"
+        fill="var(--paper)"
+      />
+    </svg>
+  );
+}
+
 function Wordmark() {
-  // Clean text-only lockup. No invented decorative mark.
   return (
     <Link
       href="/"
-      className="text-[15px] font-semibold tracking-tight text-foreground"
-      aria-label="Floom Workers home"
+      className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-foreground"
+      aria-label="Workeros home"
     >
-      Floom <span className="font-medium text-muted-foreground">Workers</span>
+      <FloomMark size={24} />
+      <span className="flex items-baseline gap-1.5">
+        Workeros
+        <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          by Floom
+        </span>
+      </span>
     </Link>
   );
 }
@@ -35,25 +57,18 @@ export function Nav() {
             <Link
               key={l.label}
               href={l.href}
-              className="rounded-[12px] px-3 py-1.5 hover:bg-accent hover:text-foreground"
+              className="rounded-[12px] border border-transparent px-3 py-1.5 transition-colors hover:border-foreground/15 hover:bg-secondary/60 hover:text-foreground"
             >
               {l.label}
             </Link>
           ))}
         </nav>
         <div className="flex items-center gap-1.5">
-          <ThemeModeButton className="hidden sm:inline-flex" />
           <Link
-            href={ASK_HREF}
-            className="hidden h-11 items-center rounded-[12px] px-3 text-[13px] font-medium text-foreground hover:bg-accent sm:inline-flex"
+            href="/login"
+            className="inline-flex h-8 items-center rounded-[8px] border border-border/70 bg-card px-3 text-[12.5px] font-medium text-foreground/85 transition hover:border-foreground/30 hover:text-foreground"
           >
-            Ask Floom
-          </Link>
-          <Link
-            href={TEMPLATES_HREF}
-            className="inline-flex h-11 items-center rounded-[12px] bg-primary px-4 text-[13px] font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90"
-          >
-            Browse templates
+            Sign in
           </Link>
         </div>
       </div>
@@ -69,15 +84,7 @@ const FOOTER_COLS: Array<{
     title: "Product",
     links: [
       { label: "Templates", href: "/templates" },
-      { label: "Ask Floom", href: "/assistant" },
       { label: "Sign in", href: "/login" },
-      { label: "Docs", href: "https://github.com/floomhq/workeros", external: true },
-      { label: "GitHub", href: "https://github.com/floomhq/workeros", external: true },
-    ],
-  },
-  {
-    title: "For your team",
-    links: [
       { label: "Marketing", href: "/marketing" },
       { label: "Sales", href: "/sales" },
       { label: "Recruiting", href: "/recruiting" },
@@ -85,24 +92,20 @@ const FOOTER_COLS: Array<{
     ],
   },
   {
-    title: "Floom",
+    title: "Resources",
     links: [
-      { label: "Skills", href: "https://skills.floom.dev", external: true },
+      { label: "GitHub", href: "https://github.com/floomhq/workeros", external: true },
+      { label: "Floom Skills", href: "https://skills.floom.dev", external: true },
       { label: "Floom", href: "https://floom.dev", external: true },
     ],
   },
   {
-    title: "Legal",
-    links: [
-      { label: "Terms", href: "/terms" },
-      { label: "Privacy", href: "/privacy" },
-    ],
-  },
-  {
-    title: "Connect",
+    title: "Company",
     links: [
       { label: "LinkedIn", href: "https://www.linkedin.com/company/floomhq/", external: true },
       { label: "X", href: "https://x.com/floomhq", external: true },
+      { label: "Terms", href: "/terms" },
+      { label: "Privacy", href: "/privacy" },
     ],
   },
 ];
@@ -110,13 +113,19 @@ const FOOTER_COLS: Array<{
 export function Footer() {
   return (
     <footer className="border-t border-border/70 px-6 py-12">
-      <div className="mx-auto grid max-w-6xl gap-8 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-        <div className="lg:col-span-1">
-          <div className="text-[15px] font-semibold text-foreground">
-            Floom <span className="font-medium text-muted-foreground">Workers</span>
+      <div className="mx-auto grid max-w-6xl gap-8 sm:grid-cols-2 md:grid-cols-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <FloomMark size={22} />
+            <div className="flex items-baseline gap-1.5 text-[15px] font-semibold text-foreground">
+              Workeros
+              <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                by Floom
+              </span>
+            </div>
           </div>
           <p className="mt-2 text-[11.5px] text-muted-foreground">
-            © 2026 Floom · Built with care in San Francisco
+            © 2026 Floom
           </p>
         </div>
         {FOOTER_COLS.map((col) => (
@@ -131,7 +140,7 @@ export function Footer() {
                   href={l.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[13px] text-foreground/80 hover:text-foreground"
+                  className="block py-1.5 text-[13px] text-foreground/80 transition-colors hover:text-foreground"
                 >
                   {l.label}
                 </a>
@@ -139,7 +148,7 @@ export function Footer() {
                 <Link
                   key={l.label}
                   href={l.href}
-                  className="text-[13px] text-foreground/80 hover:text-foreground"
+                  className="block py-1.5 text-[13px] text-foreground/80 transition-colors hover:text-foreground"
                 >
                   {l.label}
                 </Link>

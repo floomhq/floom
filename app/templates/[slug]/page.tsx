@@ -83,13 +83,15 @@ export default async function TemplateDetailPage({
               <div className="mt-6 flex flex-wrap gap-2">
                 <Link
                   href={USE_HREF}
-                  className="inline-flex h-11 items-center gap-1.5 rounded-[12px] bg-primary px-5 text-[14px] font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90"
+                  className="group/cta inline-flex h-11 items-center gap-1.5 rounded-[12px] px-5 text-[14px] font-semibold text-white shadow-[0_8px_24px_-8px_rgba(58,110,165,0.45)] transition hover:-translate-y-px hover:shadow-[0_12px_32px_-10px_rgba(58,110,165,0.55)]"
+                  style={{ background: "#3a6ea5" }}
                 >
-                  Use this template <ArrowRight className="h-4 w-4" />
+                  Hire this worker
+                  <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover/cta:translate-x-0.5" />
                 </Link>
                 <Link
                   href={ASK_HREF}
-                  className="inline-flex h-11 items-center rounded-[12px] border border-border bg-card px-5 text-[14px] font-medium text-foreground shadow-sm transition hover:bg-accent"
+                  className="inline-flex h-11 items-center rounded-[12px] border border-border bg-card px-5 text-[14px] font-medium text-foreground shadow-sm transition hover:border-foreground/30 hover:bg-secondary/60"
                 >
                   Ask Floom
                 </Link>
@@ -185,9 +187,11 @@ export default async function TemplateDetailPage({
             <div className="mt-6 flex justify-center">
               <Link
                 href={USE_HREF}
-                className="inline-flex h-11 items-center gap-1.5 rounded-[12px] bg-primary px-5 text-[14px] font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90"
+                className="group/cta inline-flex h-11 items-center gap-1.5 rounded-[12px] px-5 text-[14px] font-semibold text-white shadow-[0_8px_24px_-8px_rgba(58,110,165,0.45)] transition hover:-translate-y-px hover:shadow-[0_12px_32px_-10px_rgba(58,110,165,0.55)]"
+                style={{ background: "#3a6ea5" }}
               >
-                Use this template <ArrowRight className="h-4 w-4" />
+                Hire this worker
+                <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover/cta:translate-x-0.5" />
               </Link>
             </div>
           </div>

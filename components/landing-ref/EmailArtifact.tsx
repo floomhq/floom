@@ -81,7 +81,7 @@ export function EmailArtifact({
 
       {showActions && (
         <div className="flex items-center justify-end gap-1.5 border-t border-border px-4 py-2.5">
-          <button className="inline-flex h-11 items-center gap-1 rounded-[12px] border border-border bg-card px-3.5 text-[12.5px] font-medium text-foreground transition hover:bg-accent">
+          <button className="inline-flex h-11 items-center gap-1 rounded-[12px] border border-border bg-card px-3.5 text-[12.5px] font-medium text-foreground transition hover:border-foreground/30 hover:bg-secondary/60">
             <Edit3 className="h-3.5 w-3.5" /> Edit draft
           </button>
           <button className="inline-flex h-11 items-center gap-1 rounded-[12px] bg-primary px-3.5 text-[12.5px] font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90">

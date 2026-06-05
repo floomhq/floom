@@ -2,4 +2,7 @@ engine/
 apps/
 supabase/
 tests/
+web/
 *.py
+*.pdf
+data/
