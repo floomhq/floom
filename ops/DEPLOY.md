@@ -7,7 +7,7 @@ cd /root/workeros
 ./ops/deploy-api.sh
 ```
 
-That is the complete command. It handles everything: DB backup, source sync, service restart, health gate, schema check.
+That is the complete command. It handles everything: DB backup, source sync, dependency install into the service venv, service restart, health gate, schema check.
 
 ### Dry-run first (recommended on first use)
 
@@ -34,11 +34,22 @@ Prints every step with "DRY-RUN: would…" — no changes made.
 4. Checks for active runs (`status IN ('running','queued')`). If found, waits up to 80 s for them to drain. Aborts if drain times out (use `--skip-drain` to override).
 5. `git checkout origin/main -- apps/api apps/mcp workers docs` — syncs only tracked source files. Does NOT touch `data/`, `.env`, `workspace.md`, `contexts/`, or any other runtime state.
 6. Removes `*.rej` and `*.bak` patch-failed cruft under `apps/`.
-7. `systemctl restart workeros-api`.
-8. Polls `/health` every 2 s until `status=ok` or 90 s timeout. Fails loudly on timeout.
-9. Asserts HTTP 200 on: `/healthz`, `/health`, `/workspace`, `/conversations`, `/approvals`, `/workers`.
-10. Runs `ops/verify-schema.py` — fails deploy if any expected table is missing.
-11. Prints `DEPLOY SUCCESS` with deployed SHA and migration version.
+7. Installs `$WORKEROS_ROOT/apps/api/requirements.txt` into the actual service venv at `$WORKEROS_ROOT/apps/api/venv` using `$WORKEROS_ROOT/apps/api/venv/bin/python -m pip install -r ...`, then runs `pip check`.
+8. `systemctl restart workeros-api`.
+9. Polls `/health` every 2 s until `status=ok` or 90 s timeout. Fails loudly on timeout.
+10. Asserts HTTP 200 on: `/healthz`, `/health`, `/workspace`, `/conversations`, `/approvals`, `/workers`.
+11. Runs `ops/verify-schema.py` — fails deploy if any expected table is missing.
+12. Prints `DEPLOY SUCCESS` with deployed SHA, service venv, requirements path, and migration version.
+
+### API dependency install path
+
+The production service runs from `/root/workeros/apps/api/venv`. The deploy script installs the tracked deployed requirements file `/root/workeros/apps/api/requirements.txt` into that venv before restart, so dependency changes take effect without a manual pip install. Operators can override the paths for a different host with:
+
+```bash
+WORKEROS_API_VENV=/path/to/apps/api/venv \
+WORKEROS_API_REQUIREMENTS=/path/to/apps/api/requirements.txt \
+./ops/deploy-api.sh
+```
 
 ---
 
@@ -122,6 +133,7 @@ This is the brutally-simple fix: detect drift immediately, fail deploy, restore 
 - `data/artifacts/` — run artifact files
 - `apps/api/.env` — may exist as an override
 - `workspace.md` — live operator workspace
+- `workspace.base.md` — optional live Emily base persona override
 - `contexts/` — operator context files
 
 `git reset --hard` would delete none of these (they are untracked), but it WOULD reset `HEAD` and potentially clobber staged/tracked changes. More importantly: other concurrent agents also work in this repo via `git worktree`. A reset in the canonical checkout clobbers other branches.
