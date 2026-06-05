@@ -3,7 +3,7 @@
 // fetch() calls are NOT auto-prefixed by basePath, so Cloud sets
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
 // Downstream host consume this file unmodified (no fork).
-const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
+export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
 
 export function getActiveWorkspaceId(): string | null {
@@ -61,6 +61,10 @@ function withWorkspaceQuery(path: string): string {
   if (!activeWorkspace) return path;
   const separator = path.includes("?") ? "&" : "?";
   return `${path}${separator}workspace_id=${encodeURIComponent(activeWorkspace)}`;
+}
+
+export function apiProxyPath(path: string, includeWorkspaceQuery = false): string {
+  return `${API_BASE}${includeWorkspaceQuery ? withWorkspaceQuery(path) : path}`;
 }
 
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {

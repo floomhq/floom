@@ -4,6 +4,40 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 ---
 
+## P0 bug pass M73/M74/M75 (2026-06-05)
+
+**Scope:** live Workeros product paths on `workeros.floom.dev` (Downstream host) and `workers.floom.dev` (open-source surface), both backed by the Workeros engine.
+
+**Status:** FIXING
+
+### M73 — worker creation times out
+
+**Root cause:** the prompt create UI already had an async engine endpoint, `POST /workers/new/from-prompt`, that starts the `worker-author` run and returns a `run_id`. The page still fell back to the legacy synchronous `POST /workers/draft-and-create` path whenever the async start failed before a run id. That synchronous path performs LLM codegen and smoke/gate work inside the HTTP request. The binding limit on the frontend proxy path is 60 seconds (`apps/web/app/api/proxy/[...path]/route.ts`, `maxDuration = 60`; Cloud overlay has the same value), while uvicorn has no shorter request cap in the service unit and only a graceful shutdown timeout of 85 seconds. A slow `gpt-5.5` codegen attempt can therefore exceed the proxy budget and surface `Request timed out. The server took too long to respond.` The same create page also hardcoded `/api/proxy` for SSE, bypassing Cloud's configured `/app/api/proxy` base path.
+
+**Fix:** the prompt create flow is now async-only after `newFromPrompt`; it no longer re-enters `draft-and-create` for prompt generation. Run SSE URLs now use the configured API proxy base and include the active workspace query parameter for EventSource clients.
+
+**Evidence:** local web verification passed: `npm test` (`27 passed`), `npm run lint` (`0 errors`, existing warnings only), and `npm run build` (`Compiled successfully`, TypeScript complete). Live verification will be appended after merge/deploy.
+
+### M74 — worker detail infinite loop / stale workspace detail miss
+
+**Root cause:** unauthenticated `curl -I` to the reported Cloud URL returned a login redirect, not Vercel `x-vercel-error: INFINITE_LOOP`. The worker id `granola-hubspot-meeting-actions` exists in Cloud Supabase as an exact `workers.id`, owned by Federico's user in workspace `ws_b79e570aad8349` (`fede-production`). Federico also has an older/default workspace `ws_aac663b43cb542`. The Cloud Supabase repository scoped exact `workers.get()` by the active workspace context first. When a stale/default workspace cookie was active, the exact slug deep link missed the row and returned `Worker not found` even though the user owned the worker.
+
+**Fix:** Cloud-only repository patch: on a workspace-scoped miss, `SupabaseWorkerRepository.get()` retries by exact worker id plus owner `user_id`. This does not widen cross-user access and leaves list queries workspace-scoped.
+
+**Evidence:** targeted Cloud tests passed (`python3 -m pytest tests/test_supabase_repos.py -q`, `4 passed`). Patched local Cloud repository lookup with active workspace forced to `ws_aac663b43cb542` returned `worker_found=True` for `granola-hubspot-meeting-actions`. Live verification will be appended after merge/deploy.
+
+### M75 — run detail says Run not found
+
+**Root cause:** the failed run exists in Cloud Supabase: `run_8290101e249b`, worker `granola-hubspot-meeting-sync`, workspace `ws_b79e570aad8349`, status `failed`, duration `4436ms`, error `Server disconnected`. The run appears in workspace-scoped activity lists when the browser sends the active workspace header, but an exact run detail lookup scoped to a stale/default workspace cookie misses the row and returns `Run not found`.
+
+**Fix:** Cloud-only repository patch: on a workspace-scoped miss, `SupabaseRunRepository.get()` retries by exact run id plus owner `user_id`. This mirrors the worker deep-link fix and does not expose other users' runs.
+
+**Evidence:** targeted Cloud tests passed (`python3 -m pytest tests/test_supabase_repos.py -q`, `4 passed`). Patched local Cloud repository lookup with active workspace forced to `ws_aac663b43cb542` returned `run_found=True`, `run_id=run_8290101e249b`, `run_status=failed`. Live verification will be appended after merge/deploy.
+
+**Audit:** `docs/P0_BUGPASS_2026-06-05.md`
+
+---
+
 ## Backend pass 3 - multi-tenant, capabilities, codegen self-check (2026-06-05)
 
 **Scope:** M31 persona-global, M32/M33 brain and connection write permissions, M39 WhatsApp per-sender routing, #E2 generated-worker example self-check, and M41 Slack greeting copy.

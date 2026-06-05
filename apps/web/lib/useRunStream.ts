@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { api, apiProxyPath } from "@/lib/api";
 import type { RunDetail, RunPart } from "@/lib/types";
 
 export function useRunStream(runId: string | null | undefined) {
@@ -19,7 +19,9 @@ export function useRunStream(runId: string | null | undefined) {
     let closed = false;
     let sawEvent = false;
     let sawFinish = false;
-    const source = new EventSource(`/api/proxy/runs/${encodeURIComponent(runId)}/stream`);
+    const source = new EventSource(
+      apiProxyPath(`/runs/${encodeURIComponent(runId)}/stream`, true),
+    );
 
     source.addEventListener("open", () => {
       if (!closed) setConnected(true);
