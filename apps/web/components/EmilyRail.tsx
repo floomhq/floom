@@ -4,19 +4,16 @@
  * Emily Rail — Chief of Staff AI chat prototype
  *
  * Built with REAL Vercel AI Elements components:
- *   - Conversation + ConversationContent + ConversationScrollButton (use-stick-to-bottom)
+ *   - Conversation + ConversationContent + ConversationScrollButton
  *   - Message + MessageContent + MessageResponse
- *   - Tool + ToolHeader + ToolContent + ToolInput + ToolOutput (from ai-elements/tool.tsx)
- *   - Task (from ai-elements/task.tsx)
+ *   - AiTool + ToolHeader + ToolContent + ToolInput + ToolOutput (collapsed by default)
+ *   - Task (worker-creation steps)
  *
- * Mock data illustrates the full agentic flow:
- *   Worker creation (Drafting → Generating → Smoke → Ready)
- *   Run card with output + artifact
- *   Approval card
- *   Connect-Gmail card
- *
- * Emily branding: #59AAF8 avatar, "Chief of Staff" identity.
- * Respects Workeros tokens (--background, --foreground, --border, --muted, --primary, etc.)
+ * v2 changes:
+ *   - More digestible cards: extra breathing room, quieter hierarchy
+ *   - Tool calls collapsed by default (expand on click)
+ *   - File attachment: Paperclip button + file chip previews above input
+ *   - File validation: max 10 MB, common types only
  *
  * Panel behaviour:
  *   Desktop: ~460px / ~32% right rail, collapsible to 48px strip
@@ -32,16 +29,15 @@ import {
   ChevronRight,
   ChevronLeft,
   SendHorizonal,
-  X,
   CheckCircle2,
   Clock,
-  Loader2,
-  Circle,
   Sparkles,
   Mail,
   Play,
   FileText,
   ExternalLink,
+  Paperclip,
+  X,
 } from "lucide-react";
 import {
   Conversation,
@@ -67,7 +63,7 @@ import { Task } from "@/components/ai-elements/task";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type Msg =
-  | { id: string; role: "user"; text: string }
+  | { id: string; role: "user"; text: string; files?: AttachedFile[] }
   | { id: string; role: "assistant"; parts: MsgPart[] };
 
 type MsgPart =
@@ -77,6 +73,44 @@ type MsgPart =
   | { type: "run-card"; workerName: string; duration: string; lines: number; artifact?: string }
   | { type: "approval-card"; workerName: string; action: string; approved: boolean | null }
   | { type: "connect-gmail" };
+
+interface AttachedFile {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+}
+
+// ── File helpers ──────────────────────────────────────────────────────────────
+
+const ACCEPTED_TYPES = [
+  "image/*",
+  "text/*",
+  "application/pdf",
+  "application/json",
+  "application/zip",
+  "application/vnd.openxmlformats-officedocument.*",
+  "application/msword",
+];
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getFileIcon(type: string): React.ReactNode {
+  if (type.startsWith("image/")) {
+    return (
+      <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide">
+        IMG
+      </span>
+    );
+  }
+  return <FileText className="size-3 text-muted-foreground" />;
+}
 
 // ── Mock conversation ─────────────────────────────────────────────────────────
 
@@ -92,7 +126,7 @@ const MOCK_MESSAGES: Msg[] = [
     parts: [
       {
         type: "text",
-        text: "On it. I'm drafting a Weekly GitHub Digest worker for you. This will pull your open PRs every Monday morning and email you a summary.",
+        text: "On it. I'm drafting a Weekly GitHub Digest worker for you — it'll pull your open PRs every Monday morning and email you a summary.",
       },
       {
         type: "worker-creation",
@@ -152,7 +186,7 @@ const MOCK_MESSAGES: Msg[] = [
     parts: [
       {
         type: "text",
-        text: "I'd like to connect to your Stripe account to set up that worker. I'll also need your Slack workspace connected — let me check.",
+        text: "I need to connect to your Stripe account first. I'll also check Slack.",
       },
       {
         type: "approval-card",
@@ -171,7 +205,7 @@ const MOCK_MESSAGES: Msg[] = [
     id: "8",
     role: "assistant",
     parts: [
-      { type: "text", text: "Sure — I just need you to connect Gmail first:" },
+      { type: "text", text: "Sure — connect Gmail first:" },
       { type: "connect-gmail" },
     ],
   },
@@ -186,7 +220,7 @@ const MOCK_MESSAGES: Msg[] = [
     parts: [
       {
         type: "text",
-        text: "You have 3 active workers:\n\n1. **Weekly GitHub Digest** — runs every Monday at 9am, sends email\n2. **Stripe Failure Monitor** — waiting for approval to connect Stripe\n3. **Daily Standup** — posts to Slack at 8:30am weekdays\n\nAll are healthy. Last run: 4 hours ago.",
+        text: "You have 3 active workers:\n\n1. **Weekly GitHub Digest** — runs every Monday at 9am\n2. **Stripe Failure Monitor** — waiting for Stripe approval\n3. **Daily Standup** — posts to Slack at 8:30am weekdays\n\nAll healthy. Last run: 4 hours ago.",
       },
     ],
   },
@@ -205,7 +239,7 @@ function WorkerCreationCard({
     { key: "drafting", label: "Drafting manifest", status: step === "drafting" ? "running" : "completed" },
     {
       key: "generating",
-      label: "Generating worker code",
+      label: "Generating code",
       status: step === "drafting" ? "pending" : step === "generating" ? "running" : "completed",
     },
     {
@@ -221,27 +255,30 @@ function WorkerCreationCard({
   ];
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <Sparkles className="size-4 text-[#59AAF8]" />
-        <span className="font-medium text-sm">{workerName}</span>
+    <div className="rounded-xl border border-border bg-card/60 overflow-hidden">
+      {/* Card header */}
+      <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/50">
+        <Sparkles className="size-3.5 text-[#59AAF8] shrink-0" />
+        <span className="text-sm font-medium flex-1 min-w-0 truncate">{workerName}</span>
         {step === "ready" && (
-          <Badge variant="secondary" className="ml-auto text-xs bg-green-500/10 text-green-600 border-green-500/20">
+          <Badge variant="secondary" className="text-[11px] px-2 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 font-normal">
             Ready
           </Badge>
         )}
       </div>
-      <div className="space-y-1">
+      {/* Steps */}
+      <div className="px-3 py-3 space-y-1.5">
         {steps.map((s) => (
           <Task key={s.key} title={s.label} status={s.status} />
         ))}
       </div>
+      {/* Actions */}
       {step === "ready" && (
-        <div className="flex gap-2 pt-1">
-          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+        <div className="flex gap-2 px-3 pb-3">
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 font-normal">
             <Play className="size-3" /> Run now
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 font-normal">
             <ExternalLink className="size-3" /> Open
           </Button>
         </div>
@@ -262,24 +299,24 @@ function RunCard({
   artifact?: string;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <CheckCircle2 className="size-4 text-green-600" />
-        <span className="font-medium text-sm">{workerName}</span>
-        <span className="ml-auto text-xs text-muted-foreground">{duration}</span>
+    <div className="rounded-xl border border-border bg-card/60 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-4 py-3">
+        <CheckCircle2 className="size-3.5 text-green-600 shrink-0" />
+        <span className="text-sm font-medium flex-1 min-w-0 truncate">{workerName}</span>
+        <span className="text-xs text-muted-foreground shrink-0">{duration}</span>
       </div>
-      <div className="text-xs text-muted-foreground">
-        {lines} log lines · Run completed
+      <div className="px-4 pb-3 space-y-2">
+        <p className="text-xs text-muted-foreground">{lines} log lines · Run completed</p>
+        {artifact && (
+          <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
+            <FileText className="size-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs font-mono flex-1 min-w-0 truncate text-foreground/80">{artifact}</span>
+            <Button size="sm" variant="ghost" className="h-5 w-5 p-0 shrink-0 ml-auto">
+              <ExternalLink className="size-3" />
+            </Button>
+          </div>
+        )}
       </div>
-      {artifact && (
-        <div className="flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5">
-          <FileText className="size-3.5 text-muted-foreground shrink-0" />
-          <span className="text-xs font-mono truncate">{artifact}</span>
-          <Button size="sm" variant="ghost" className="ml-auto h-5 w-5 p-0 shrink-0">
-            <ExternalLink className="size-3" />
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
@@ -300,40 +337,42 @@ function ApprovalCard({
   return (
     <div
       className={cn(
-        "rounded-lg border p-3 space-y-2",
+        "rounded-xl border overflow-hidden",
         approved === null
-          ? "border-amber-500/30 bg-amber-500/5"
+          ? "border-amber-400/30 bg-amber-50/40 dark:bg-amber-950/20"
           : approved
-          ? "border-green-500/30 bg-green-500/5"
-          : "border-red-500/30 bg-red-500/5"
+          ? "border-green-500/30 bg-green-50/40 dark:bg-green-950/20"
+          : "border-red-500/30 bg-red-50/40 dark:bg-red-950/20"
       )}
     >
-      <div className="flex items-center gap-2">
-        <Clock className="size-4 text-amber-600 shrink-0" />
-        <div className="min-w-0">
-          <p className="font-medium text-sm">{workerName}</p>
-          <p className="text-xs text-muted-foreground truncate">{action}</p>
+      <div className="flex items-start gap-2.5 px-4 py-3">
+        <Clock className="size-3.5 text-amber-600 mt-0.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{workerName}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{action}</p>
         </div>
       </div>
       {approved === null ? (
-        <div className="flex gap-2">
-          <Button size="sm" className="h-7 text-xs" onClick={onApprove}>
+        <div className="flex gap-2 px-4 pb-3">
+          <Button size="sm" className="h-7 text-xs font-normal" onClick={onApprove}>
             Approve
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onDeny}>
+          <Button size="sm" variant="outline" className="h-7 text-xs font-normal" onClick={onDeny}>
             Deny
           </Button>
         </div>
       ) : (
-        <Badge
-          variant="secondary"
-          className={cn(
-            "text-xs",
-            approved ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-600"
-          )}
-        >
-          {approved ? "Approved" : "Denied"}
-        </Badge>
+        <div className="px-4 pb-3">
+          <Badge
+            variant="secondary"
+            className={cn(
+              "text-xs font-normal",
+              approved ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-600"
+            )}
+          >
+            {approved ? "Approved" : "Denied"}
+          </Badge>
+        </div>
       )}
     </div>
   );
@@ -343,35 +382,35 @@ function ConnectGmailCard() {
   const [connected, setConnected] = useState(false);
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <Mail className="size-4 text-[#59AAF8]" />
-        <span className="font-medium text-sm">Connect Gmail</span>
+    <div className="rounded-xl border border-border bg-card/60 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-4 py-3">
+        <Mail className="size-3.5 text-[#59AAF8] shrink-0" />
+        <span className="text-sm font-medium flex-1">Connect Gmail</span>
         {connected && (
-          <Badge variant="secondary" className="ml-auto text-xs bg-green-500/10 text-green-600 border-green-500/20">
+          <Badge variant="secondary" className="text-[11px] px-2 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 font-normal">
             Connected
           </Badge>
         )}
       </div>
-      {!connected ? (
-        <>
-          <p className="text-xs text-muted-foreground">
-            Allow Emily to send emails from your Gmail account.
-          </p>
-          <Button
-            size="sm"
-            className="h-7 text-xs gap-1.5"
-            onClick={() => setConnected(true)}
-          >
-            <Mail className="size-3" />
-            Connect Gmail
-          </Button>
-        </>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          depontefede@gmail.com — ready to send
-        </p>
-      )}
+      <div className="px-4 pb-3 space-y-2">
+        {!connected ? (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Allow Emily to send emails from your Gmail account.
+            </p>
+            <Button
+              size="sm"
+              className="h-7 text-xs gap-1.5 font-normal"
+              onClick={() => setConnected(true)}
+            >
+              <Mail className="size-3" />
+              Connect Gmail
+            </Button>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">depontefede@gmail.com — ready to send</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -380,7 +419,7 @@ function MsgParts({ parts, msgId }: { parts: MsgPart[]; msgId: string }) {
   const [approvalStates, setApprovalStates] = useState<Record<string, boolean | null>>({});
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       {parts.map((part, i) => {
         const key = `${msgId}-${i}`;
         if (part.type === "text") {
@@ -391,12 +430,11 @@ function MsgParts({ parts, msgId }: { parts: MsgPart[]; msgId: string }) {
           );
         }
         if (part.type === "tool") {
+          // Completed tools collapsed by default; in-progress open
+          const defaultOpen = part.state !== "output-available";
           return (
-            <AiTool key={key} defaultOpen={part.state !== "output-available"}>
-              <ToolHeader
-                title={part.name}
-                state={part.state}
-              />
+            <AiTool key={key} defaultOpen={defaultOpen}>
+              <ToolHeader title={part.name} state={part.state} />
               <ToolContent>
                 {part.input !== undefined && <ToolInput input={part.input} />}
                 <ToolOutput output={part.output} />
@@ -464,25 +502,47 @@ function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
   );
 }
 
-// ── PromptInput ───────────────────────────────────────────────────────────────
-// Minimal but real — textarea + send button. The full AI Elements PromptInput
-// requires InputGroup which isn't in this project's shadcn install yet; this
-// matches its visual contract with the real deps (Button, Textarea).
+// ── File chip ─────────────────────────────────────────────────────────────────
+
+function FileChip({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) {
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 pl-2.5 pr-1.5 py-1 text-xs max-w-[200px]">
+      {getFileIcon(file.type)}
+      <span className="truncate flex-1 min-w-0 text-foreground/80">{file.name}</span>
+      <span className="text-muted-foreground shrink-0">{formatBytes(file.size)}</span>
+      <button
+        type="button"
+        onClick={onRemove}
+        className="shrink-0 rounded-full p-0.5 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+        aria-label={`Remove ${file.name}`}
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+// ── PromptInput with file attachment ─────────────────────────────────────────
 
 function PromptInput({
   value,
   onChange,
   onSubmit,
+  onFilesChange,
+  attachedFiles,
   placeholder,
   disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
+  onFilesChange: (files: AttachedFile[]) => void;
+  attachedFiles: AttachedFile[];
   placeholder?: string;
   disabled?: boolean;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -492,34 +552,92 @@ function PromptInput({
   };
 
   useEffect(() => {
-    if (ref.current) {
-      ref.current.style.height = "auto";
-      ref.current.style.height = `${Math.min(ref.current.scrollHeight, 140)}px`;
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
     }
   }, [value]);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newFiles = Array.from(e.target.files ?? []);
+    const valid: AttachedFile[] = [];
+
+    for (const f of newFiles) {
+      if (f.size > MAX_FILE_SIZE) continue; // skip oversized
+      valid.push({ id: `${f.name}-${f.size}-${Date.now()}`, name: f.name, size: f.size, type: f.type });
+    }
+
+    onFilesChange([...attachedFiles, ...valid]);
+    // reset so same file can be re-added after removal
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeFile = (id: string) => {
+    onFilesChange(attachedFiles.filter((f) => f.id !== id));
+  };
+
   return (
-    <div className="flex items-end gap-2 rounded-lg border border-border bg-background px-3 py-2.5 shadow-sm focus-within:ring-1 focus-within:ring-[#59AAF8]/40">
-      <textarea
-        ref={ref}
-        className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[140px] overflow-auto"
-        placeholder={placeholder || "Message Emily..."}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKey}
-        rows={1}
-        disabled={disabled}
-      />
-      <Button
-        size="sm"
-        className="h-7 w-7 p-0 shrink-0"
-        onClick={onSubmit}
-        disabled={!value.trim() || disabled}
-        style={{ background: "#59AAF8", color: "white" }}
-        type="button"
-      >
-        <SendHorizonal className="size-3.5" />
-      </Button>
+    <div className="space-y-2">
+      {/* File chips */}
+      {attachedFiles.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-1">
+          {attachedFiles.map((f) => (
+            <FileChip key={f.id} file={f} onRemove={() => removeFile(f.id)} />
+          ))}
+        </div>
+      )}
+
+      {/* Input row */}
+      <div className="flex items-end gap-2 rounded-xl border border-border bg-background px-3 py-2.5 shadow-sm focus-within:ring-1 focus-within:ring-[#59AAF8]/40 transition-shadow">
+        {/* Attach button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled}
+          className="shrink-0 mb-0.5 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+          title="Attach file"
+          aria-label="Attach file"
+        >
+          <Paperclip className="size-4" />
+        </button>
+
+        {/* Hidden real file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ACCEPTED_TYPES.join(",")}
+          className="hidden"
+          onChange={handleFileChange}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+
+        {/* Textarea */}
+        <textarea
+          ref={textareaRef}
+          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[140px] overflow-auto"
+          placeholder={placeholder || "Message Emily..."}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKey}
+          rows={1}
+          disabled={disabled}
+        />
+
+        {/* Send button */}
+        <Button
+          size="sm"
+          className="h-7 w-7 p-0 shrink-0 mb-0.5"
+          onClick={onSubmit}
+          disabled={(!value.trim() && attachedFiles.length === 0) || disabled}
+          style={{ background: "#59AAF8", color: "white" }}
+          type="button"
+          aria-label="Send message"
+        >
+          <SendHorizonal className="size-3.5" />
+        </Button>
+      </div>
     </div>
   );
 }
@@ -538,6 +656,7 @@ export function EmilyRail({ className }: { className?: string }) {
   const [open, setOpen] = useState(true);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isTyping, setIsTyping] = useState(false);
 
   // Load mock conversation after mount (simulates streamed history)
@@ -551,10 +670,17 @@ export function EmilyRail({ className }: { className?: string }) {
   const sendMessage = useCallback(
     (text?: string) => {
       const content = (text ?? input).trim();
-      if (!content) return;
+      if (!content && attachedFiles.length === 0) return;
       setInput("");
+      const files = [...attachedFiles];
+      setAttachedFiles([]);
 
-      const userMsg: Msg = { id: `u-${Date.now()}`, role: "user", text: content };
+      const userMsg: Msg = {
+        id: `u-${Date.now()}`,
+        role: "user",
+        text: content,
+        ...(files.length > 0 ? { files } : {}),
+      };
       setMessages((m) => [...m, userMsg]);
       setIsTyping(true);
 
@@ -565,7 +691,9 @@ export function EmilyRail({ className }: { className?: string }) {
           parts: [
             {
               type: "text",
-              text: `Got it. I'm on it — "${content}". Give me a moment to work on this.`,
+              text: content
+                ? `Got it — "${content}". Give me a moment.`
+                : `Got it — I'll look at ${files.length === 1 ? "that file" : "those files"} now.`,
             },
           ],
         };
@@ -573,7 +701,7 @@ export function EmilyRail({ className }: { className?: string }) {
         setIsTyping(false);
       }, 1200);
     },
-    [input]
+    [input, attachedFiles]
   );
 
   // ── Collapsed strip ──────────────────────────────────────────────────────
@@ -616,7 +744,7 @@ export function EmilyRail({ className }: { className?: string }) {
         </div>
         <Badge
           variant="secondary"
-          className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 shrink-0"
+          className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 shrink-0 font-normal"
         >
           Online
         </Badge>
@@ -631,7 +759,7 @@ export function EmilyRail({ className }: { className?: string }) {
         </Button>
       </div>
 
-      {/* Conversation — real AI Elements component */}
+      {/* Conversation */}
       {messages.length === 0 ? (
         <div className="flex-1 flex flex-col">
           <ConversationEmptyState
@@ -642,12 +770,29 @@ export function EmilyRail({ className }: { className?: string }) {
         </div>
       ) : (
         <Conversation className="flex-1">
-          <ConversationContent>
+          <ConversationContent className="gap-5 py-5 px-4">
             {messages.map((msg) =>
               msg.role === "user" ? (
                 <Message key={msg.id} from="user">
                   <MessageContent>
-                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                    <div className="space-y-2">
+                      {msg.text && (
+                        <p className="whitespace-pre-wrap text-sm">{msg.text}</p>
+                      )}
+                      {msg.files && msg.files.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {msg.files.map((f) => (
+                            <div
+                              key={f.id}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/50 pl-2.5 pr-3 py-1 text-xs"
+                            >
+                              {getFileIcon(f.type)}
+                              <span className="truncate max-w-[140px]">{f.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </MessageContent>
                 </Message>
               ) : (
@@ -662,16 +807,17 @@ export function EmilyRail({ className }: { className?: string }) {
               )
             )}
 
+            {/* Typing indicator */}
             {isTyping && (
               <Message from="assistant">
                 <div className="flex items-start gap-2.5">
                   <EmilyAvatar size="sm" />
                   <MessageContent>
-                    <div className="flex gap-1 py-1">
+                    <div className="flex gap-1 py-1.5 px-1">
                       {[0, 1, 2].map((i) => (
                         <div
                           key={i}
-                          className="size-1.5 rounded-full bg-muted-foreground animate-bounce"
+                          className="size-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
                           style={{ animationDelay: `${i * 150}ms` }}
                         />
                       ))}
@@ -685,15 +831,15 @@ export function EmilyRail({ className }: { className?: string }) {
         </Conversation>
       )}
 
-      {/* Suggestions */}
+      {/* Suggestion pills — only when no messages */}
       {messages.length === 0 && (
-        <div className="px-4 pb-2 flex flex-wrap gap-1.5">
+        <div className="px-4 pb-3 flex flex-wrap gap-1.5">
           {SUGGESTIONS.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => sendMessage(s)}
-              className="rounded-full border border-border bg-muted/50 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
               {s}
             </button>
@@ -709,6 +855,8 @@ export function EmilyRail({ className }: { className?: string }) {
           value={input}
           onChange={setInput}
           onSubmit={() => sendMessage()}
+          onFilesChange={setAttachedFiles}
+          attachedFiles={attachedFiles}
           disabled={isTyping}
         />
         <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
