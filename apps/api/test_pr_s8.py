@@ -10,6 +10,7 @@ import os
 import sqlite3
 import tempfile
 from contextlib import contextmanager
+from types import SimpleNamespace
 from typing import Generator, Dict, List, Any
 from unittest.mock import patch, MagicMock
 
@@ -25,6 +26,12 @@ def _make_in_memory_db_with_runs() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:", detect_types=sqlite3.PARSE_DECLTYPES)
     conn.row_factory = sqlite3.Row
     conn.execute("""
+        CREATE TABLE workers (
+            id TEXT PRIMARY KEY,
+            owner_id TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
         CREATE TABLE runs (
             id TEXT PRIMARY KEY,
             worker_id TEXT NOT NULL,
@@ -32,6 +39,8 @@ def _make_in_memory_db_with_runs() -> sqlite3.Connection:
             created_at TEXT NOT NULL
         )
     """)
+    conn.execute("INSERT INTO workers VALUES (?, ?)", ("worker-a", "test-user"))
+    conn.execute("INSERT INTO workers VALUES (?, ?)", ("worker-b", "test-user"))
 
     today = datetime.date.today()
 
@@ -70,6 +79,12 @@ def _ctx_manager_from_conn(conn: sqlite3.Connection):
     yield conn
 
 
+def _repos():
+    from db.sqlite import SqliteWorkerRepository
+
+    return SimpleNamespace(workers=SqliteWorkerRepository())
+
+
 # ---------------------------------------------------------------------------
 # Import main after DB init is already done (it runs at module load time
 # in the real app). We patch get_db ONLY for the function under test.
@@ -93,8 +108,14 @@ def test_timeseries_zero_fill_14_days() -> None:
     def fake_get_db():
         return _ctx_manager_from_conn(conn)
 
-    with patch("main.get_db", fake_get_db):
-        result = _main_module._get_timeseries_batch(["worker-a", "worker-b"], days=14)
+    repos = _repos()
+    with patch("db.sqlite.get_db", fake_get_db):
+        result = _main_module._get_timeseries_batch(
+            ["worker-a", "worker-b"],
+            user_id="test-user",
+            repos=repos,
+            days=14,
+        )
 
     assert "worker-a" in result
     assert "worker-b" in result
@@ -142,8 +163,14 @@ def test_timeseries_unknown_worker_returns_all_zeros() -> None:
     def fake_get_db():
         return _ctx_manager_from_conn(conn)
 
-    with patch("main.get_db", fake_get_db):
-        result = _main_module._get_timeseries_batch(["nonexistent-worker"], days=14)
+    repos = _repos()
+    with patch("db.sqlite.get_db", fake_get_db):
+        result = _main_module._get_timeseries_batch(
+            ["nonexistent-worker"],
+            user_id="test-user",
+            repos=repos,
+            days=14,
+        )
 
     assert "nonexistent-worker" in result
     days = result["nonexistent-worker"]
@@ -153,7 +180,12 @@ def test_timeseries_unknown_worker_returns_all_zeros() -> None:
 
 def test_timeseries_empty_worker_ids() -> None:
     """Empty worker_ids returns empty dict without hitting DB."""
-    result = _main_module._get_timeseries_batch([], days=14)
+    result = _main_module._get_timeseries_batch(
+        [],
+        user_id="test-user",
+        repos=SimpleNamespace(workers=object()),
+        days=14,
+    )
     assert result == {}
 
 
@@ -164,9 +196,20 @@ def test_timeseries_days_param() -> None:
     def fake_get_db():
         return _ctx_manager_from_conn(conn)
 
-    with patch("main.get_db", fake_get_db):
-        result7 = _main_module._get_timeseries_batch(["worker-a"], days=7)
-        result30 = _main_module._get_timeseries_batch(["worker-a"], days=30)
+    repos = _repos()
+    with patch("db.sqlite.get_db", fake_get_db):
+        result7 = _main_module._get_timeseries_batch(
+            ["worker-a"],
+            user_id="test-user",
+            repos=repos,
+            days=7,
+        )
+        result30 = _main_module._get_timeseries_batch(
+            ["worker-a"],
+            user_id="test-user",
+            repos=repos,
+            days=30,
+        )
 
     assert len(result7["worker-a"]) == 7
     assert len(result30["worker-a"]) == 30
