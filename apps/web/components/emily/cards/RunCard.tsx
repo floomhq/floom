@@ -2,7 +2,6 @@
 
 import { CheckCircle2, Loader2, XCircle, FileText, ExternalLink, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
 import type { RunCard as RunCardType } from "@/lib/emily-chat-types";
 
 export function RunCard({ card }: { card: RunCardType }) {
