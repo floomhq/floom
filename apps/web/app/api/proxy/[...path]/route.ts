@@ -85,8 +85,24 @@ async function handler(
   });
 }
 
-export const GET = handler;
-export const POST = handler;
-export const PUT = handler;
-export const PATCH = handler;
-export const DELETE = handler;
+type RouteContext = { params: Promise<{ path: string[] }> };
+
+export async function GET(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}
+
+export async function POST(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}
+
+export async function PUT(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}
+
+export async function PATCH(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}
+
+export async function DELETE(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}
