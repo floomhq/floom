@@ -656,7 +656,7 @@ function WorkerCard({
               )}
               {/* Share — hover-only, mirrors the favourite star treatment. */}
               <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                <ShareWorkerButton publicLink={worker.public_link} variant="icon" />
+                <ShareWorkerButton publicLink={worker.public_link} workerName={worker.name} variant="icon" />
               </span>
               {/* Favourite star (Federico 2026-05-30): hover-only to cut cognitive
                   load — except an already-favourited worker keeps its filled star
