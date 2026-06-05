@@ -328,6 +328,60 @@ class TestConnectionsListProjection:
         assert item["status"] == "pending"
 
 
+class TestConnectionCallbackAndComposio503:
+    def test_callback_accepts_connected_account_id_alias_and_persists_status(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="gmail")
+
+        with patch("composio_client.check_status", return_value="valid"):
+            resp = client.get(
+                f"/connections/callback?connected_account_id={conn['composio_connection_id']}&status=success",
+                follow_redirects=False,
+            )
+
+        assert resp.status_code in {302, 307}
+        assert resp.headers["location"].startswith("https://workers.floom.dev/connections?connected=1")
+        listed = client.get("/connections", headers=AUTH_HEADERS)
+        item = next(c for c in listed.json() if c["id"] == conn["id"])
+        assert item["status"] == "active"
+
+    def test_missing_composio_api_key_returns_503_for_connect_and_account_info(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="gmail")
+        monkeypatch.setenv("COMPOSIO_API_KEY", "")
+
+        connect = client.post(
+            "/connections",
+            json={"app_name": "gmail"},
+            headers=AUTH_HEADERS,
+        )
+        assert connect.status_code == 503
+        assert "Composio is not configured" in connect.json()["detail"]
+
+        account_info = client.get(f"/connections/{conn['id']}/account-info", headers=AUTH_HEADERS)
+        assert account_info.status_code == 503
+        assert "Composio" in account_info.json()["detail"]
+
+    def test_missing_composio_api_key_returns_503_for_catalog_and_triggers(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        monkeypatch.setenv("COMPOSIO_API_KEY", "")
+
+        catalog = client.get("/integrations/catalog", headers=AUTH_HEADERS)
+        assert catalog.status_code == 503
+        assert "Composio is not configured" in catalog.json()["detail"]
+
+        multi_category_catalog = client.get("/integrations/catalog?category=a,b", headers=AUTH_HEADERS)
+        assert multi_category_catalog.status_code == 503
+        assert "Composio is not configured" in multi_category_catalog.json()["detail"]
+
+        triggers = client.get("/integrations/triggers", headers=AUTH_HEADERS)
+        assert triggers.status_code == 503
+        assert "Composio is not configured" in triggers.json()["detail"]
+
+
 class TestMCPConnections:
     def test_create_list_status_test_and_delete_mcp_connection(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
@@ -506,6 +560,37 @@ class TestMCPConnections:
                 scopes_json TEXT,
                 account_label TEXT,
                 user_id TEXT NOT NULL DEFAULT 'federico'
+            );
+            CREATE TABLE skill_versions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                manifest_json TEXT NOT NULL,
+                bundle_path TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(name, version)
+            );
+            CREATE TABLE workers (
+                id TEXT PRIMARY KEY,
+                skill_version_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                trigger_type TEXT NOT NULL DEFAULT 'manual',
+                cron_expr TEXT,
+                cron_timezone TEXT,
+                next_run_at TEXT,
+                last_scheduled_run_at TEXT,
+                webhook_secret_hash TEXT,
+                notify_email INTEGER DEFAULT 0 NOT NULL,
+                notify_webhook_url TEXT,
+                grants_json TEXT,
+                input_values_json TEXT,
+                enabled INTEGER DEFAULT 1 NOT NULL,
+                created_at TEXT NOT NULL,
+                owner_id TEXT NOT NULL DEFAULT 'federico',
+                composio_trigger_id TEXT,
+                composio_event TEXT,
+                triggers_json TEXT,
+                FOREIGN KEY(skill_version_id) REFERENCES skill_versions(id)
             );
             CREATE TABLE runs (
                 id TEXT PRIMARY KEY
