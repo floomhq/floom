@@ -670,6 +670,60 @@ async def cloud_set_worker_visibility(worker_id: str, request: Request) -> Any:
     }
 
 
+async def _cloud_set_worker_archived(worker_id: str, request: Request, *, archived: bool) -> Any:
+    """Cloud-native archive/restore for DB-backed workers.
+
+    The engine archive route edits worker.yml first, but Cloud-created workers
+    can be DB-only because Supabase manifest_json is the source of truth.
+    """
+    import asyncio as _asyncio
+    from datetime import datetime, timezone
+
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    engine_main._raise_if_protected_worker_mutation(worker_id)
+    repos = engine_main.get_repositories()
+    worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    manifest = dict(worker.get("manifest") or worker.get("manifest_json") or {})
+    if archived:
+        manifest["archived"] = True
+        manifest.setdefault("archive_reason", f"Archived {datetime.now(timezone.utc).date().isoformat()}")
+    else:
+        manifest.pop("archived", None)
+        manifest.pop("archive_reason", None)
+    repos.workers.update(user_id=auth.user_id, worker_id=worker_id, manifest_json=manifest)
+
+    return await _asyncio.to_thread(
+        engine_main._build_worker_detail,
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+    )
+
+
+@app.post("/workers/{worker_id}/archive")
+@app.post("/api/workers/{worker_id}/archive")
+async def cloud_archive_worker(worker_id: str, request: Request) -> Any:
+    return await _cloud_set_worker_archived(worker_id, request, archived=True)
+
+
+@app.post("/workers/{worker_id}/restore")
+@app.post("/api/workers/{worker_id}/restore")
+async def cloud_restore_worker(worker_id: str, request: Request) -> Any:
+    return await _cloud_set_worker_archived(worker_id, request, archived=False)
+
+
 @app.post("/workers/{worker_id}/clone-link")
 @app.post("/api/workers/{worker_id}/clone-link")
 async def cloud_generate_clone_link(worker_id: str, request: Request) -> Any:

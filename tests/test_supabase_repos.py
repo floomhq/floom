@@ -137,6 +137,54 @@ def test_worker_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale(
     assert result["id"] == worker_id
 
 
+def test_worker_get_exposes_archive_fields_from_manifest_json():
+    now_iso = _now_iso()
+    worker_id = "archive-ready-worker"
+    skill_version_id = "sv_archive_ready"
+    manifest = _manifest(worker_id, "Archive Ready Worker")
+    manifest["archived"] = True
+    manifest["archive_reason"] = "No longer needed"
+    client = _FakeClient(
+        {
+            "workers": [
+                {
+                    "id": worker_id,
+                    "user_id": "user_fede",
+                    "workspace_id": "ws_fede_production",
+                    "skill_version_id": skill_version_id,
+                    "name": "Archive Ready Worker",
+                    "trigger_type": "manual",
+                    "grants_json": {},
+                    "input_values_json": {},
+                    "triggers_json": [],
+                    "enabled": True,
+                    "created_at": now_iso,
+                }
+            ],
+            "skill_versions": [
+                {
+                    "id": skill_version_id,
+                    "user_id": "user_fede",
+                    "name": worker_id,
+                    "version": "0.1.0",
+                    "manifest_json": manifest,
+                    "bundle_path": f"workers/{worker_id}",
+                    "created_at": now_iso,
+                }
+            ],
+        }
+    )
+
+    result = SupabaseWorkerRepository(client=client).get(
+        user_id="user_fede",
+        worker_id=worker_id,
+    )
+
+    assert result is not None
+    assert result["archived"] is True
+    assert result["archive_reason"] == "No longer needed"
+
+
 def test_run_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale():
     now_iso = _now_iso()
     run_id = "run_8290101e249b"

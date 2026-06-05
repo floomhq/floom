@@ -188,6 +188,8 @@ def _worker_record_from_rows(
         "config": config.model_dump(mode="json") if config else {},
         "manifest": manifest,
         "manifest_json": manifest,
+        "archived": bool(manifest.get("archived", False)),
+        "archive_reason": manifest.get("archive_reason"),
         "bundle_path": skill_version_row.get("bundle_path") if skill_version_row else None,
         "triggers_json": _json_load(worker_row.get("triggers_json"), []),
         "skill_version_id": worker_row.get("skill_version_id"),

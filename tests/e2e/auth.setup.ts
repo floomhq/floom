@@ -8,7 +8,7 @@
  *
  * Saves sessions to tests/e2e/.auth/ — rerun only when sessions expire.
  */
-import { test as setup } from "@playwright/test";
+import { test as setup, type Page } from "@playwright/test";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
@@ -20,7 +20,7 @@ const WORKSPACE_ID = "ws_8bdb2e8127db4f";
 const ADMIN_STATE  = path.join(__dirname, ".auth/admin.json");
 const MEMBER_STATE = path.join(__dirname, ".auth/member.json");
 
-async function loginAndSave(page: any, email: string, password: string, stateFile: string) {
+async function loginAndSave(page: Page, email: string, password: string, stateFile: string) {
   if (!email || !password) throw new Error(`Missing credentials for ${stateFile}`);
 
   // ?mode=signin renders the password field immediately — no tab click needed
