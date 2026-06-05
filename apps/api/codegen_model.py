@@ -4,7 +4,7 @@ The prompt-to-worker wedge depends on three OpenAI calls that all generate or
 repair Python ``run.py`` code:
 
   1. ``workers/worker-author/run.py`` — the meta-worker that drafts the bundle
-     (runs in an E2B sandbox, see ``WORKER_AUTHOR_DEFAULT_MODEL`` there).
+     (runs in an E2B sandbox; ``WORKEROS_CODEGEN_MODEL`` is propagated there).
   2. ``apps/api/run_service.py`` ``_repair_run_py`` — the bounded smoke-repair.
   3. ``apps/api/main.py`` ``_call_draft_llm`` — ``/workers/draft-from-prompt``.
 

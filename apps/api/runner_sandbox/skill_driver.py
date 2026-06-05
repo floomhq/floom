@@ -76,6 +76,31 @@ def _object_get(value: Any, key: str, default: Any = None) -> Any:
     return getattr(value, key, default)
 
 
+def _is_unsupported_temperature_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return (
+        "temperature" in msg
+        and (
+            "unsupported" in msg
+            or "does not support" in msg
+            or "only the default" in msg
+            or "only temperature=1" in msg
+        )
+    )
+
+
+def _chat_completions_create_temperature_safe(client: Any, **kwargs: Any) -> Any:
+    """Retry once without non-default temperature for models that reject it."""
+    try:
+        return client.chat.completions.create(**kwargs)
+    except Exception as exc:  # noqa: BLE001 - inspect the provider error, then retry once
+        if "temperature" in kwargs and _is_unsupported_temperature_error(exc):
+            retry_kwargs = dict(kwargs)
+            retry_kwargs.pop("temperature", None)
+            return client.chat.completions.create(**retry_kwargs)
+        raise
+
+
 def _message_to_dict(message: Any) -> Dict[str, Any]:
     if isinstance(message, dict):
         return dict(message)
@@ -254,7 +279,8 @@ class SkillRuntimeDriver(SandboxDriver):
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             try:
-                completion = client.chat.completions.create(
+                completion = _chat_completions_create_temperature_safe(
+                    client,
                     model=model,
                     messages=messages,
                     tools=tools,
