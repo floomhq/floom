@@ -38,6 +38,7 @@ export type ConnectionView = ConnectionRecord & {
 };
 
 export const SUPPORTED_APPS: SupportedConnectionApp[] = [
+  { slug: "granola", displayName: "Granola", icon: "granola" },
   { slug: "gmail", displayName: "Gmail", icon: "gmail" },
   { slug: "googlecalendar", displayName: "Google Calendar", icon: "google-calendar" },
   { slug: "googledrive", displayName: "Google Drive", icon: "google-drive" },

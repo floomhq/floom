@@ -157,6 +157,11 @@ const CATEGORY_RULES: { test: RegExp; Icon: LucideIcon }[] = [
   { test: /\b(list|array|items?)\b/, Icon: ListChecks },
   // Summarize / text summary.
   { test: /\b(summar|tldr)\b/, Icon: AlignLeft },
+  // Granola meeting-notes worker — matched by brand name. The brand icon is
+  // rendered via workerIcon's firstKnownBrand() path (connections slug), but
+  // when only name-matching is available (e.g. WorkerRowIcon in overview) this
+  // rule surfaces the right category glyph.
+  { test: /\bgranola\b/, Icon: BookOpen },
   // Pull request / git.
   { test: /\b(pull[- ]?request|\bpr\b|git)\b/, Icon: GitPullRequest },
   // Web / url / scrape.

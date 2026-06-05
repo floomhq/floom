@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 
 // Brand colors keyed by normalized (hyphenated) slug. SimpleIcons hex values.
 const BRAND_COLORS: Record<string, string> = {
+  granola: "text-[#1E1E1E]",
   composio: "text-[#111111]",
   github: "text-[#181717]",
   gmail: "text-[#EA4335]",
@@ -49,6 +50,7 @@ const ICON_PREFIX_SLUGS = new Set(["anthropic", "cursor", "windsurf", "continue"
 // Exported so workerIcon() can lead a card with a real logo only when one
 // exists (otherwise it prefers a meaningful category glyph).
 export const KNOWN_BRAND_SLUGS = new Set([
+  "granola",
   "composio",
   "github",
   "gmail",
