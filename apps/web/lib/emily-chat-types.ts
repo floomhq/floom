@@ -99,8 +99,12 @@ export interface ToolCallEvent {
   message_id?: string;
   callId: string;
   toolName: string;
+  /** args is the raw (possibly redacted) args object as emitted by the backend. */
+  args?: Record<string, unknown>;
   card?: CardMeta;
   resource?: Resource;
+  streams?: { events: string; parts: string };
+  actions?: CardAction[];
   args_preview?: Record<string, unknown>;
   redaction?: { args_redacted: boolean };
 }
@@ -124,11 +128,17 @@ export interface ToolResultEvent {
 /** Bridge event for live progress before the run stream connects. */
 export interface ToolProgressEvent {
   type: "tool-progress";
-  version: 2;
+  version?: 2;
   conversation_id?: string;
+  toolName?: string;
   callId: string;
-  card_id: string;
+  /** card_id is present when emitted by the enriched v2 protocol. */
+  card_id?: string;
+  /** card is present in the live backend shape; card.id == card_id. */
+  card?: Partial<CardMeta>;
   resource?: Resource;
+  streams?: { events: string; parts: string };
+  actions?: CardAction[];
   status: CardStatus;
   stage?: string;
   label?: string;
@@ -138,27 +148,36 @@ export interface ToolProgressEvent {
 /** Late-bound resource (e.g., worker created by worker-author after run starts). */
 export interface ToolResourceEvent {
   type: "tool-resource";
-  version: 2;
+  version?: 2;
   conversation_id?: string;
+  toolName?: string;
   callId: string;
-  card_id: string;
+  /** card_id is present when emitted by the enriched v2 protocol. */
+  card_id?: string;
+  /** card is present in the live backend shape; card.id == card_id. */
+  card?: Partial<CardMeta>;
   resource: Resource & {
     created_by_run_id?: string;
     smoke_status?: "passed" | "failed" | "skipped";
     smoke_reason?: string | null;
   };
+  streams?: { events: string; parts: string };
   actions?: CardAction[];
 }
 
 /** Approval, missing secret, or missing connection requiring user action. */
 export interface ToolActionRequiredEvent {
   type: "tool-action-required";
-  version: 2;
+  version?: 2;
   conversation_id?: string;
+  toolName?: string;
   callId: string;
-  card_id: string;
-  reason: "missing_connection" | "missing_secret" | "approval_required";
-  resource: Resource;
+  /** card_id is present when emitted by the enriched v2 protocol. */
+  card_id?: string;
+  /** card is present in the live backend shape; card.id == card_id. */
+  card?: Partial<CardMeta>;
+  reason?: "missing_connection" | "missing_secret" | "approval_required";
+  resource?: Resource;
   actions?: CardAction[];
 }
 
@@ -166,8 +185,11 @@ export interface ToolActionRequiredEvent {
 export interface FinishEvent {
   type: "finish";
   version?: 2;
-  conversation_id: string;
-  message_id: string;
+  conversation_id: string | null;
+  /** message_id is the persisted assistant message id (live backend field). */
+  message_id?: string | null;
+  /** assistant_message_id is the v2 protocol alias for message_id. */
+  assistant_message_id?: string | null;
   cards?: Array<{
     id: string;
     callId: string;
