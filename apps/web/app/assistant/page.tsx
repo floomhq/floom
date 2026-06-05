@@ -17,10 +17,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
+import { EmilyChat } from "@/components/EmilyChat";
 
-type TabKey = "instructions" | "prompt";
+type TabKey = "chat" | "instructions" | "prompt";
 
-const TABS: TabKey[] = ["instructions", "prompt"];
+const TABS: TabKey[] = ["chat", "instructions", "prompt"];
 
 function validTab(value: string): value is TabKey {
   return TABS.includes(value as TabKey);
@@ -97,7 +98,7 @@ export default function AssistantPage() {
   const initial =
     typeof window !== "undefined" && validTab(window.location.hash.replace(/^#/, ""))
       ? (window.location.hash.replace(/^#/, "") as TabKey)
-      : "instructions";
+      : "chat";
   const [tab, setTab] = useState<TabKey>(initial);
   const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
   const [instructions, setInstructions] = useState("");
@@ -175,17 +176,16 @@ export default function AssistantPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Page header */}
       <div>
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">Assistant</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Chief of Staff</h1>
           {agent?.model ? (
             <Badge variant="outline" className="font-mono text-xs">
               {agent.model}
             </Badge>
           ) : null}
-          {/* Visibility (Share) control: Private <-> Shared with workspace.
-              The assistant is a shared workspace tool (default Shared). STEP 5. */}
           {agent ? (
             <span className="ml-auto">
               <AssetVisibilityControl
@@ -203,10 +203,7 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Your interactive workspace assistant — chat with it to get help and orchestrate your
-          workers. It reads the same Brain your workers use and can use your Connections read-only;
-          actions that would change a live connection need your approval. Workers run autonomously
-          on triggers; the assistant is interactive.
+          Emily — your AI Chief of Staff. Chat to orchestrate agents, surface approvals, and manage your workspace.
         </p>
       </div>
 
@@ -221,10 +218,16 @@ export default function AssistantPage() {
       <Tabs value={tab} onValueChange={changeTab}>
         <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <TabsList>
+            <TabsTrigger value="chat">Chat</TabsTrigger>
             <TabsTrigger value="instructions">Instructions</TabsTrigger>
             <TabsTrigger value="prompt">Final prompt</TabsTrigger>
           </TabsList>
         </div>
+
+        {/* Chat tab — Emily streaming chat */}
+        <TabsContent value="chat" className="mt-0">
+          <EmilyChat />
+        </TabsContent>
 
         <TabsContent value="instructions" className="space-y-3">
           {loading ? (
@@ -309,13 +312,15 @@ export default function AssistantPage() {
 
       </Tabs>
 
-      <p className="text-xs text-muted-foreground">
-        To use this assistant from Slack, go to{" "}
-        <a href="/settings#slack" className="font-medium text-foreground underline-offset-2 hover:underline">
-          Settings &rarr; Slack
-        </a>
-        .
-      </p>
+      {tab !== "chat" ? (
+        <p className="text-xs text-muted-foreground">
+          To use Emily from Slack, go to{" "}
+          <a href="/settings#slack" className="font-medium text-foreground underline-offset-2 hover:underline">
+            Settings &rarr; Slack
+          </a>
+          .
+        </p>
+      ) : null}
     </div>
   );
 }
