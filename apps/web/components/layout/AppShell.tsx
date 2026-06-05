@@ -19,12 +19,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
 
+  // /prototype: sidebar present but no max-w padding — Emily rail stretches full-height
+  const isPrototype = pathname === "/prototype" || pathname.startsWith("/prototype/");
+
   if (standalone) {
     return (
       <>
         <IconSprite />
         <Ambient />
         <main className="relative z-10 min-h-screen w-full">{children}</main>
+        <Toaster position="bottom-right" />
+      </>
+    );
+  }
+
+  if (isPrototype) {
+    return (
+      <>
+        <IconSprite />
+        <Ambient />
+        <Sidebar />
+        <main className="relative z-10 flex flex-1 min-w-0 overflow-hidden" style={{ height: "100dvh" }}>
+          {children}
+        </main>
+        <CommandPalette />
         <Toaster position="bottom-right" />
       </>
     );

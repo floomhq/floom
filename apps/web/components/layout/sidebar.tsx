@@ -77,6 +77,7 @@ const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
   { href: "/assistant", label: "Assistant", icon: null, emilyDot: true, hint: "Chat, ask, delegate" },
+  { href: "/prototype", label: "Emily Prototype", icon: null, emilyDot: true, hint: "Emily chat prototype — Vercel AI Elements" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
