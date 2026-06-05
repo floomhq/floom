@@ -489,6 +489,14 @@ class LocalWorkspaceListResponse(BaseModel):
     active_id: str
 
 
+class CurrentUserResponse(BaseModel):
+    user_id: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    workspace_id: Optional[str] = None
+    scopes: List[str] = []
+
+
 class WorkspaceAgentSettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -519,6 +527,17 @@ def _active_local_workspace_id(auth: AuthContext) -> str:
 def _require_local_workspace_mode() -> None:
     if _is_cloud_deploy():
         raise HTTPException(status_code=404, detail="not found")
+
+
+@app.get("/me", response_model=CurrentUserResponse)
+def get_current_user(auth: AuthContext = Depends(get_auth_context)) -> CurrentUserResponse:
+    return CurrentUserResponse(
+        user_id=auth.user_id,
+        email=auth.email,
+        display_name=auth.email or auth.user_id,
+        workspace_id=_active_local_workspace_id(auth) if not _is_cloud_deploy() else None,
+        scopes=list(auth.scopes or ()),
+    )
 
 
 @app.get("/workspaces", response_model=LocalWorkspaceListResponse)

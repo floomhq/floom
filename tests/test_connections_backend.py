@@ -70,6 +70,30 @@ def _seed_connection(client: TestClient, app_name: str = "gmail") -> dict:
 # ---------------------------------------------------------------------------
 
 class TestAccountInfoEndpoint:
+    def test_me_returns_auth_context_identity(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+
+        from auth import AuthContext
+
+        async def fake_auth_context():
+            return AuthContext(
+                user_id="user_123",
+                email="fed@example.com",
+                scopes=("admin", "cloud"),
+            )
+
+        main.app.dependency_overrides[main.get_auth_context] = fake_auth_context
+        client = TestClient(main.app, raise_server_exceptions=True)
+        resp = client.get("/me", headers=AUTH_HEADERS)
+        main.app.dependency_overrides.clear()
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["user_id"] == "user_123"
+        assert body["email"] == "fed@example.com"
+        assert body["display_name"] == "fed@example.com"
+        assert body["scopes"] == ["admin", "cloud"]
+
     def test_account_info_returns_email_and_scopes(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)

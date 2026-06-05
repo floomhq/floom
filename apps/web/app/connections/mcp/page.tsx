@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertCircle,
   Check,
+  CheckCircle2,
   ChevronDown,
   Copy,
   Loader2,
@@ -27,6 +29,20 @@ type McpConnection = ConnectionItem & {
   mcp_label: string;
 };
 
+type McpTransport = "streamable_http" | "sse" | "stdio";
+
+type McpConfigPayload = {
+  label: string;
+  transport?: McpTransport;
+  url?: string | null;
+  command?: string | null;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string | null;
+  auth_secret?: string | null;
+  allowed_tools?: string[];
+};
+
 const MCP_INSTALL_TARGETS = [
   { label: "Codex / Generic", target: "generic", command: "workeros mcp install --target generic" },
   { label: "Claude", target: "claude", command: "workeros mcp install --target claude" },
@@ -37,13 +53,20 @@ const MCP_INSTALL_TARGETS = [
 ] as const;
 
 const IMPORT_CONFIG_COMMAND = "workeros connections import-mcp-config ~/.claude/settings.json";
+const DEFAULT_MCP_JSON = `{
+  "label": "github",
+  "transport": "streamable_http",
+  "url": "https://example.com/mcp",
+  "auth_secret": "GITHUB_PAT",
+  "allowed_tools": []
+}`;
 
 // Subset of Claude Desktop / VS Code / Cursor mcpServers shape
 interface ParsedMcpServer {
   key: string;
   label: string;
   url: string | null;
-  transport: "streamable_http" | "sse" | "stdio";
+  transport: McpTransport;
   command: string | null;
   args: string[];
   env: Record<string, string>;
@@ -92,6 +115,114 @@ function parseMcpClientConfig(raw: string): ParsedMcpServer[] {
   });
 }
 
+function validateMcpJsonConfig(raw: string): { payload?: McpConfigPayload; error?: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Invalid JSON" };
+  }
+  return validateMcpPayload(parsed);
+}
+
+function validateMcpPayload(raw: unknown): { payload?: McpConfigPayload; error?: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { error: "Config must be a JSON object" };
+  }
+  const record = raw as Record<string, unknown>;
+  const label = typeof record.label === "string" ? record.label.trim() : "";
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(label)) {
+    return { error: "label must be 1-64 letters, digits, underscores, or hyphens" };
+  }
+
+  const transport = normalizeTransport(record.transport);
+  if (!transport) {
+    return { error: "transport must be streamable_http, sse, or stdio" };
+  }
+
+  const url = typeof record.url === "string" && record.url.trim() ? record.url.trim() : null;
+  const command = typeof record.command === "string" && record.command.trim() ? record.command.trim() : null;
+  if (transport === "stdio") {
+    if (!command) return { error: "stdio configs must include command" };
+    if (url) return { error: "stdio configs cannot include url" };
+  } else {
+    if (!url) return { error: "HTTP and SSE configs must include url" };
+    if (!/^https?:\/\//i.test(url)) return { error: "url must start with http:// or https://" };
+    if (command) return { error: "HTTP and SSE configs cannot include command" };
+  }
+
+  const args = normalizeStringArray(record.args, "args");
+  if (typeof args === "string") return { error: args };
+  const allowedTools = normalizeStringArray(record.allowed_tools, "allowed_tools");
+  if (typeof allowedTools === "string") return { error: allowedTools };
+  const env = normalizeEnv(record.env);
+  if (typeof env === "string") return { error: env };
+
+  const authSecret =
+    typeof record.auth_secret === "string" && record.auth_secret.trim() ? record.auth_secret.trim() : null;
+  if (authSecret && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(authSecret)) {
+    return { error: "auth_secret must be a valid secret name" };
+  }
+  if (authSecret && transport === "stdio") {
+    return { error: "stdio configs cannot include auth_secret" };
+  }
+
+  const cwd = typeof record.cwd === "string" && record.cwd.trim() ? record.cwd.trim() : null;
+  return {
+    payload: {
+      label,
+      transport,
+      url,
+      command,
+      args,
+      env,
+      cwd,
+      auth_secret: authSecret,
+      allowed_tools: allowedTools,
+    },
+  };
+}
+
+function normalizeTransport(value: unknown): McpTransport | null {
+  if (value === undefined || value === null || value === "") return "streamable_http";
+  if (value === "streamable_http" || value === "sse" || value === "stdio") return value;
+  return null;
+}
+
+function normalizeStringArray(value: unknown, field: string): string[] | string {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) return `${field} must be an array`;
+  const cleaned: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !item.trim()) {
+      return `${field} entries must be non-empty strings`;
+    }
+    cleaned.push(item.trim());
+  }
+  return cleaned;
+}
+
+function normalizeEnv(value: unknown): Record<string, string> | string {
+  if (value === undefined || value === null) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "env must be an object";
+  const env: Record<string, string> = {};
+  for (const [key, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    const name = key.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      return "env keys must be valid environment variable names";
+    }
+    if (typeof rawValue !== "string" || !rawValue.trim()) {
+      return "env values must be non-empty secret references";
+    }
+    const secretRef = rawValue.trim();
+    if (!/^secret:[A-Za-z_][A-Za-z0-9_]*$/.test(secretRef)) {
+      return "env values must use secret:SECRET_NAME";
+    }
+    env[name] = secretRef;
+  }
+  return env;
+}
+
 function serverSummary(item: ParsedMcpServer): string {
   if (item.transport === "stdio") {
     return [item.command, ...item.args].filter(Boolean).join(" ");
@@ -132,14 +263,14 @@ export default function McpConnectionsPage() {
   const [installTarget, setInstallTarget] = useState<(typeof MCP_INSTALL_TARGETS)[number]["target"]>("generic");
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
 
-  // Concept B: add an MCP server for workers — single add flow, with an
-  // "Import from JSON" toggle folded inside the same panel.
+  // Concept B: add an MCP server for workers, JSON first.
   const [formOpen, setFormOpen] = useState(false);
-  const [mode, setMode] = useState<"manual" | "import">("manual");
+  const [mode, setMode] = useState<"json" | "form" | "import">("json");
+  const [serverJson, setServerJson] = useState(DEFAULT_MCP_JSON);
 
   // Manual add-form state
   const [label, setLabel] = useState("");
-  const [transport, setTransport] = useState<"streamable_http" | "sse" | "stdio">("streamable_http");
+  const [transport, setTransport] = useState<McpTransport>("streamable_http");
   const [url, setUrl] = useState("");
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
@@ -154,6 +285,7 @@ export default function McpConnectionsPage() {
   const [importParsed, setImportParsed] = useState<ParsedMcpServer[] | null>(null);
   const [importError, setImportError] = useState("");
   const [importing, setImporting] = useState(false);
+  const serverJsonValidation = useMemo(() => validateMcpJsonConfig(serverJson), [serverJson]);
 
   const load = useCallback(async () => {
     try {
@@ -174,10 +306,11 @@ export default function McpConnectionsPage() {
   function resetForm() {
     setLabel(""); setTransport("streamable_http"); setUrl(""); setCommand("");
     setArgs(""); setEnv(""); setCwd(""); setAuthSecret(""); setAllowedTools("");
+    setServerJson(DEFAULT_MCP_JSON);
     setImportRaw(""); setImportParsed(null); setImportError("");
   }
 
-  function openForm(initialMode: "manual" | "import") {
+  function openForm(initialMode: "json" | "form" | "import") {
     resetForm();
     setMode(initialMode);
     setFormOpen(true);
@@ -188,7 +321,26 @@ export default function McpConnectionsPage() {
     resetForm();
   }
 
-  async function handleCreate() {
+  async function handleCreateFromJson() {
+    const { payload, error } = serverJsonValidation;
+    if (error || !payload) {
+      toast.error(error || "MCP config is invalid");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.connections.createMcp(payload);
+      toast.success(`MCP server "${payload.label}" saved`);
+      closeForm();
+      await load();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCreateFromForm() {
     if (!label.trim()) {
       toast.error("Label is required");
       return;
@@ -201,19 +353,31 @@ export default function McpConnectionsPage() {
       toast.error("URL is required for HTTP/SSE MCP servers");
       return;
     }
+    let parsedEnv: Record<string, string> = {};
+    try {
+      parsedEnv = transport === "stdio" ? parseEnv(env) : {};
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Environment is invalid");
+      return;
+    }
+    const validation = validateMcpPayload({
+      label: label.trim(),
+      transport,
+      url: transport === "stdio" ? null : url.trim(),
+      command: transport === "stdio" ? command.trim() : null,
+      args: transport === "stdio" ? parseArgs(args) : [],
+      env: parsedEnv,
+      cwd: transport === "stdio" ? cwd.trim() || null : null,
+      auth_secret: transport === "stdio" ? null : authSecret || null,
+      allowed_tools: parseTools(allowedTools),
+    });
+    if (validation.error || !validation.payload) {
+      toast.error(validation.error || "MCP config is invalid");
+      return;
+    }
     setSaving(true);
     try {
-      await api.connections.createMcp({
-        label: label.trim(),
-        transport,
-        url: transport === "stdio" ? null : url.trim(),
-        command: transport === "stdio" ? command.trim() : null,
-        args: transport === "stdio" ? parseArgs(args) : [],
-        env: transport === "stdio" ? parseEnv(env) : {},
-        cwd: transport === "stdio" ? cwd.trim() || null : null,
-        auth_secret: transport === "stdio" ? null : authSecret || null,
-        allowed_tools: parseTools(allowedTools),
-      });
+      await api.connections.createMcp(validation.payload);
       toast.success(`MCP server "${label.trim()}" saved`);
       closeForm();
       await load();
@@ -295,7 +459,7 @@ export default function McpConnectionsPage() {
         // Extract bearer token from Authorization header if present
         const authHeader = item.headers["Authorization"] ?? item.headers["authorization"] ?? "";
         const bearerMatch = authHeader.match(/^Bearer\s+(.+)/i);
-        const secretName = bearerMatch ? null : null; // We can't create secrets automatically — user must pick
+        const secretName = bearerMatch ? null : null; // We cannot create secrets automatically; user must pick.
         await api.connections.createMcp({
           label: item.label,
           transport: item.transport,
@@ -401,28 +565,45 @@ export default function McpConnectionsPage() {
           </p>
         </div>
         {!formOpen && (
-          <Button type="button" size="sm" onClick={() => openForm("manual")}>
+          <Button type="button" size="sm" onClick={() => openForm("json")}>
             <Plus className="size-4" />
             Add MCP server
           </Button>
         )}
       </div>
 
-      {/* Single add flow: manual form + "Import from JSON" toggle */}
+      {/* Single add flow: JSON config first, with form and bulk import as secondary paths. */}
       {formOpen && (
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4">
-          {/* Mode toggle */}
-          <div className="mb-4 inline-flex rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)] p-0.5">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-medium text-foreground">Add MCP server</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Paste a JSON config. Use secret names, not secret values.
+              </p>
+            </div>
+          <div className="inline-flex rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)] p-0.5">
             <button
               type="button"
-              onClick={() => setMode("manual")}
+              onClick={() => setMode("json")}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === "manual"
+                mode === "json"
                   ? "bg-[var(--bg-card)] text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Enter details
+              JSON config
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("form")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                mode === "form"
+                  ? "bg-[var(--bg-card)] text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Form
             </button>
             <button
               type="button"
@@ -436,8 +617,53 @@ export default function McpConnectionsPage() {
               Import from JSON
             </button>
           </div>
+          </div>
 
-          {mode === "manual" ? (
+          {mode === "json" ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="mcp-server-json" className="text-xs text-muted-foreground">
+                  Server JSON
+                </Label>
+                <span
+                  className={`inline-flex items-center gap-1 text-xs ${
+                    serverJsonValidation.error ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"
+                  }`}
+                >
+                  {serverJsonValidation.error ? (
+                    <AlertCircle className="size-3.5" />
+                  ) : (
+                    <CheckCircle2 className="size-3.5" />
+                  )}
+                  {serverJsonValidation.error || "Valid JSON config"}
+                </span>
+              </div>
+              <Textarea
+                id="mcp-server-json"
+                value={serverJson}
+                onChange={(e) => setServerJson(e.target.value)}
+                spellCheck={false}
+                className="min-h-64 font-mono text-xs leading-5"
+              />
+              <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+                <p>HTTP/SSE: label, transport, url, auth_secret, allowed_tools.</p>
+                <p>Stdio: label, transport, command, args, env, cwd.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleCreateFromJson}
+                  disabled={saving || Boolean(serverJsonValidation.error)}
+                >
+                  {saving ? <><Loader2 className="size-3.5 animate-spin" /> Saving...</> : "Save MCP server"}
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={closeForm} disabled={saving}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : mode === "form" ? (
             <>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1.5">
@@ -454,7 +680,7 @@ export default function McpConnectionsPage() {
                   <select
                     id="mcp-transport"
                     value={transport}
-                    onChange={(e) => setTransport(e.target.value as "streamable_http" | "sse" | "stdio")}
+                    onChange={(e) => setTransport(e.target.value as McpTransport)}
                     className="flex h-9 w-full rounded-lg border border-line-strong bg-paper px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
                   >
                     <option value="streamable_http">HTTP</option>
@@ -537,7 +763,7 @@ export default function McpConnectionsPage() {
                 <div className="space-y-1.5 md:col-span-2">
                   <Label htmlFor="mcp-tools" className="text-xs text-muted-foreground">
                     Allowed tools{" "}
-                    <span className="text-muted-foreground/60">(optional — comma-separated, empty = all tools)</span>
+                    <span className="text-muted-foreground/60">(optional, comma-separated, empty = all tools)</span>
                   </Label>
                   <Textarea
                     id="mcp-tools"
@@ -552,7 +778,7 @@ export default function McpConnectionsPage() {
                 <Button
                   type="button"
                   size="sm"
-                  onClick={handleCreate}
+                  onClick={handleCreateFromForm}
                   disabled={saving || !label.trim() || (transport === "stdio" ? !command.trim() : !url.trim())}
                 >
                   {saving ? <><Loader2 className="size-3.5 animate-spin" /> Saving...</> : "Save MCP server"}
@@ -591,7 +817,7 @@ export default function McpConnectionsPage() {
               {importParsed && (
                 <div className="space-y-2">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Detected servers — select to import
+                    Detected servers: select to import
                   </p>
                   <div className="space-y-1">
                     {importParsed.map((item) => (
@@ -615,7 +841,7 @@ export default function McpConnectionsPage() {
                             {item.transport === "stdio" ? serverSummary(item) : truncateUrl(item.url ?? "")}
                           </span>
                           {item.transport !== "stdio" && !item.url && (
-                            <span className="text-xs italic text-muted-foreground">no url field — cannot import</span>
+                            <span className="text-xs italic text-muted-foreground">no url field, cannot import</span>
                           )}
                         </div>
                       </div>
@@ -683,7 +909,7 @@ export default function McpConnectionsPage() {
               </p>
             </div>
             {!formOpen && (
-              <Button type="button" size="sm" variant="outline" onClick={() => openForm("manual")}>
+              <Button type="button" size="sm" variant="outline" onClick={() => openForm("json")}>
                 <Plus className="size-4" />
                 Add MCP server
               </Button>
@@ -707,7 +933,7 @@ export default function McpConnectionsPage() {
         MCP servers declared in a worker&apos;s{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono">worker.yml</code>{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono">connections</code> list are
-        connected at run time. Auth secrets are resolved by name — their values are never
+        connected at run time. Auth secrets are resolved by name, their values are never
         stored here. Prefer the terminal? Run{" "}
         <code className="rounded bg-muted px-1 py-0.5 font-mono">{IMPORT_CONFIG_COMMAND}</code>.
       </p>
