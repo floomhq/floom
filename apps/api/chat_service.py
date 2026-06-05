@@ -2531,15 +2531,9 @@ ENVIRONMENT_NOTES: Dict[str, str] = {
         "## Current environment: Slack\n"
         "You are currently being reached in Slack (a chat). Keep replies short and "
         "chat-shaped. The person is DMing you or mentioned you in a channel. When "
-        "something needs the screen, give a workers.floom.dev link they can tap.\n\n"
-        "Formatting rules for Slack (mrkdwn):\n"
-        "- Use *bold* for emphasis, not **bold**.\n"
-        "- Wrap ALL YAML, JSON, and code in triple backticks so Slack renders it as "
-        "a code block. Never paste raw YAML inline.\n"
-        "- Use emoji to signal state: :white_check_mark: done, :hammer_and_wrench: "
-        "building/creating, :rocket: running, :warning: warning, :x: error. "
-        "Lead the first line of every response with a relevant emoji.\n"
-        "- Keep prose under 3 short lines. Let the code block speak for itself."
+        "something needs the screen, give a workers.floom.dev link they can tap.\n"
+        "Use Slack mrkdwn: *bold* for emphasis, and triple-backtick YAML, JSON, "
+        "and code blocks."
     ),
     "whatsapp": (
         "## Current environment: WhatsApp\n"
