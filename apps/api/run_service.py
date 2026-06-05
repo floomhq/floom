@@ -2316,6 +2316,7 @@ def get_secrets_for_worker(
 INTERRUPTED_RUN_ERROR = "Run was interrupted by an API restart before completion."
 INTERRUPTED_RUN_ERROR_CODE = "interrupted_by_restart"
 WORKER_DELETED_RUN_ERROR = "Worker deleted before run completed."
+_SCHEDULE_MISSING_SECRET_PAUSE_AFTER = 3
 
 
 @dataclass
@@ -2340,6 +2341,97 @@ def _unregister_active_run(run_id: str) -> None:
     with _active_runs_lock:
         _active_runs.pop(run_id, None)
         _shutdown_cancelled_runs.discard(run_id)
+
+
+def _schedule_missing_secret_pause_threshold() -> int:
+    raw = os.environ.get("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "")
+    if not raw:
+        return _SCHEDULE_MISSING_SECRET_PAUSE_AFTER
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _SCHEDULE_MISSING_SECRET_PAUSE_AFTER
+
+
+def _persist_worker_paused_flag(worker_id: str, *, repos: Repositories, user_id: str | None) -> None:
+    if not user_id:
+        return
+    worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
+    manifest = dict((worker or {}).get("manifest") or {})
+    if manifest:
+        manifest["paused"] = True
+        manifest["enabled"] = False
+        manifest["archive_reason"] = (
+            manifest.get("archive_reason")
+            or "Paused automatically after repeated scheduled setup failures."
+        )
+        repos.workers.update(
+            user_id=user_id,
+            worker_id=worker_id,
+            enabled=False,
+            manifest_json=manifest,
+        )
+    else:
+        repos.workers.update(user_id=user_id, worker_id=worker_id, enabled=False)
+
+    worker_yml = WORKERS_DIR / worker_id / "worker.yml"
+    if not worker_yml.exists():
+        return
+    try:
+        raw = worker_yml.read_text(encoding="utf-8")
+        updated = raw
+        if re.search(r"(?m)^paused:\s*(true|false)\s*$", updated):
+            updated = re.sub(r"(?m)^(paused:\s*)(true|false)\s*$", r"\1true", updated)
+        else:
+            if not updated.endswith("\n"):
+                updated += "\n"
+            updated += "paused: true\n"
+        if re.search(r"(?m)^enabled:\s*(true|false)\s*$", updated):
+            updated = re.sub(r"(?m)^(enabled:\s*)(true|false)\s*$", r"\1false", updated)
+        if updated != raw:
+            worker_yml.write_text(updated, encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Failed to persist auto-pause flag for %s: %s", worker_id, exc)
+
+
+def _maybe_pause_scheduled_worker_after_setup_failure(
+    *,
+    worker_id: str,
+    run_id: str,
+    user_id: str | None,
+    error_code: str,
+    repos: Repositories,
+) -> bool:
+    """Pause a scheduled worker after repeated deterministic setup failures."""
+    if error_code != "missing_secret" or not user_id:
+        return False
+
+    threshold = _schedule_missing_secret_pause_threshold()
+    if threshold <= 0:
+        return False
+
+    current = repos.runs.get(user_id=user_id, run_id=run_id)
+    if not current or current.get("trigger_source") != "schedule":
+        return False
+
+    rows, _ = repos.runs.list(user_id=user_id, worker_id=worker_id, limit=threshold, offset=0)
+    if len(rows) < threshold:
+        return False
+    for row in rows:
+        if row.get("trigger_source") != "schedule":
+            return False
+        if row.get("status") != RunStatus.FAILED.value:
+            return False
+        if row.get("error_code") != "missing_secret":
+            return False
+
+    _persist_worker_paused_flag(worker_id, repos=repos, user_id=user_id)
+    logger.warning(
+        "Auto-paused scheduled worker %s after %d consecutive missing-secret failures",
+        worker_id,
+        threshold,
+    )
+    return True
 
 
 def active_run_count() -> int:
@@ -2730,6 +2822,17 @@ def execute_run(
             update_run_status(run_id, RunStatus.FAILED.value, error=err, error_code="missing_secret", user_id=owner_id, repos=repos_obj)
             publish_run_part(run_id, {"type": "finish", "status": "failed", "error": err})
             log_fn(err, level="error")
+            if _maybe_pause_scheduled_worker_after_setup_failure(
+                worker_id=worker_id,
+                run_id=run_id,
+                user_id=owner_id,
+                error_code="missing_secret",
+                repos=repos_obj,
+            ):
+                log_fn(
+                    "Paused scheduled worker after repeated missing-secret setup failures",
+                    level="warning",
+                )
             return
 
         # Resolve Composio connections declared in worker.yml.
