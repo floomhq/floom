@@ -230,17 +230,14 @@ export function EmilyDock({ className }: { className?: string }) {
           Online
         </Badge>
         {/* Full-page link */}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="size-7 p-0 text-muted-foreground hover:text-foreground"
+        <Link
+          href="/chat"
           title="Full-page chat"
-          asChild
+          aria-label="Open full-page Emily chat"
+          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
         >
-          <Link href="/chat">
-            <Maximize2 className="size-3.5" />
-          </Link>
-        </Button>
+          <Maximize2 className="size-3.5" />
+        </Link>
         {/* Collapse button */}
         <Button
           size="sm"
