@@ -12,6 +12,7 @@ import { Reveal, RevealItem, RevealStagger } from "./Reveal";
 import { HeroPromptComposer } from "./HeroPromptComposer";
 import { HeroV3Collage } from "../hero-variants/HeroV3Collage";
 import { ScrollToHeroButton } from "./ScrollToHeroButton";
+import { InterfaceMockups } from "./InterfaceMockups";
 import { getTemplate } from "./data";
 
 const TEMPLATES_HREF = "/templates";
@@ -25,6 +26,7 @@ export function LandingRef() {
         <HeroV3Collage />
         <PopularTemplates />
         <OutputSection />
+        <InterfaceMockups />
         <KnowsYourCompany />
         <RunsSection />
         <ConnectionsSection />
