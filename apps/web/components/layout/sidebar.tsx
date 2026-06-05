@@ -173,7 +173,7 @@ export function Sidebar() {
   return (
     <>
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-app)] px-4 md:hidden">
-        <Link href="/" className="flex items-center gap-2">
+        <Link href="/overview" className="flex items-center gap-2">
           <FloomMark size={22} />
           <span className="font-semibold text-base tracking-tight">Floom</span>
         </Link>
@@ -201,7 +201,7 @@ export function Sidebar() {
       <aside className="sticky top-0 z-20 hidden h-screen w-60 flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] md:flex">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
         <div className="px-5 pt-6 pb-8">
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/overview" className="flex items-center gap-2">
             <FloomMark size={22} />
             <span className="font-semibold text-base tracking-tight">Floom</span>
           </Link>
@@ -224,7 +224,7 @@ export function Sidebar() {
           <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] shadow-pop">
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
             <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-5 py-4">
-              <Link href="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
+              <Link href="/overview" className="flex items-center gap-2" onClick={() => setOpen(false)}>
                 <FloomMark size={22} />
                 <span className="font-semibold text-base tracking-tight">Floom</span>
               </Link>

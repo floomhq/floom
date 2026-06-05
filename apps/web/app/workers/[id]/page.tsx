@@ -1590,6 +1590,16 @@ export default function WorkerDetailPage() {
             ) : (
               <StatusPill status={worker.status} />
             )}
+            {/* N7: when a secret is missing, surface a quick-fix CTA so the user
+                doesn't have to hunt for where to add the secret. */}
+            {worker.status === "missing_secret" && (
+              <Link
+                href="/secrets"
+                className="inline-flex items-center gap-1 rounded-[var(--radius-button)] px-2 py-0.5 text-[11px] font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
+              >
+                Add secret →
+              </Link>
+            )}
           </div>
           {worker.archived && worker.archive_reason && (
             <p className="text-muted-foreground text-xs mt-1 italic">{worker.archive_reason}</p>
@@ -2108,7 +2118,7 @@ export default function WorkerDetailPage() {
                 <Input
                   type="url"
                   className="text-sm"
-                  placeholder="https://hooks.example.com/run-events"
+                  placeholder="e.g. https://hooks.example.com/run-events"
                   value={notifyUrl}
                   onChange={(e) => setNotifyUrl(e.target.value)}
                 />
@@ -2419,11 +2429,13 @@ export default function WorkerDetailPage() {
             )}
             />
             {/* YAML code save — only visible when code has been edited */}
-            <div className="flex items-center gap-3 pt-1">
-              <Button size="sm" onClick={handleSaveAdvanced} disabled={saving || !filesDirty}>
-                {saving ? "Saving…" : "Save"}
-              </Button>
-              {filesDirty && (
+            {/* N25: only show Save+Discard when the YAML has been edited —
+                never show Save in a pristine (no-edits-pending) state. */}
+            {filesDirty && (
+              <div className="flex items-center gap-3 pt-1">
+                <Button size="sm" onClick={handleSaveAdvanced} disabled={saving}>
+                  {saving ? "Saving…" : "Save"}
+                </Button>
                 <Button
                   size="sm"
                   variant="ghost"
@@ -2440,11 +2452,9 @@ export default function WorkerDetailPage() {
                 >
                   Discard
                 </Button>
-              )}
-              {filesDirty && (
-                <span className="text-xs text-muted-foreground">Unsaved changes in code</span>
-              )}
-            </div>
+                <span className="text-xs text-muted-foreground">Unsaved changes</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -2494,6 +2504,11 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
     (worker.use_cases && worker.use_cases.length > 0) ||
     worker.how_it_works
   );
+  // N18: surface the needs-attention reason directly on the About tab instead
+  // of burying it. The Run tab shows "Connect X" inline; the About tab shows
+  // "Missing secret: <NAME>" with a quick link to /secrets.
+  const requiredSecrets: string[] = worker.config.secrets ?? [];
+  const isMissingSecret = worker.status === "missing_secret";
   // FIX (Federico 2026-05-29): polished box-drawing flow diagram of the
   // worker's pipeline (inputs → worker → outputs + connection logos). Built
   // deterministically from the config; renders for every worker (handles
@@ -2519,6 +2534,24 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
       triggerType={worker.trigger_type || worker.config.trigger?.type}
     />
   );
+  // N18: attention banner shared between both return paths.
+  const attentionBanner = isMissingSecret && requiredSecrets.length > 0 ? (
+    <div className="max-w-2xl rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20 px-4 py-3 flex items-start gap-3">
+      <span className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400">⚠</span>
+      <div className="space-y-1 min-w-0">
+        <p className="text-sm font-medium text-amber-900 dark:text-amber-200">Missing secret</p>
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          This worker requires{" "}
+          <span className="font-mono font-semibold">{requiredSecrets.join(", ")}</span>{" "}
+          to run.{" "}
+          <Link href="/secrets" className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200">
+            Add it in Secrets →
+          </Link>
+        </p>
+      </div>
+    </div>
+  ) : null;
+
   if (!hasContent) {
     // The Flow diagram is a fixed-width monospace grid that can be wider than
     // the prose column; it spans the full content width (with its own internal
@@ -2526,6 +2559,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
     // Prose stays at max-w-2xl for readability.
     return (
       <div className="space-y-6">
+        {attentionBanner}
         {diagram}
         <p className="max-w-2xl text-sm text-muted-foreground">
           {worker.description || "No description provided."}
@@ -2535,6 +2569,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
   }
   return (
     <div className="space-y-6">
+      {attentionBanner}
       {diagram}
       <div className="max-w-2xl space-y-6">
       {worker.long_description && (
@@ -2846,7 +2881,9 @@ function BrainSection({
         <div>
           <h2 className="text-base font-semibold text-foreground">Brain resources</h2>
           <p className="text-sm text-muted-foreground">
-            {selectedNames.size} brain {selectedNames.size === 1 ? "resource" : "resources"} attached to this worker.
+            {selectedNames.size === 0
+              ? "No brain resources attached — toggle any pack below to attach it."
+              : `${selectedNames.size} brain ${selectedNames.size === 1 ? "pack" : "packs"} attached. Toggle to add or remove.`}
           </p>
         </div>
         <Link href="/brain">
@@ -2942,8 +2979,10 @@ function BrainSection({
                           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{pack.description}</p>
                         )}
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {pack.file_count} {pack.file_count === 1 ? "file" : "files"}
-                          {pack.worker_count !== undefined ? ` · ${pack.worker_count} workers` : ""}
+                          {pack.file_count === 0
+                            ? <span className="italic">Empty pack (no files yet)</span>
+                            : <>{pack.file_count} {pack.file_count === 1 ? "file" : "files"}</>}
+                          {pack.worker_count !== undefined && pack.worker_count > 0 ? ` · used by ${pack.worker_count} ${pack.worker_count === 1 ? "worker" : "workers"}` : ""}
                           {pack.updated_at ? ` · Updated ${formatRelative(pack.updated_at)}` : ""}
                         </p>
                       </div>
