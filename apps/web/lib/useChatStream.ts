@@ -197,8 +197,221 @@ import type {
   ChatSSEEvent,
   MsgPart,
   GenericToolCard,
-  ToolCard as ToolCardType,
 } from "./emily-chat-types";
+
+type ToolLabel = {
+  running: string;
+  completed: string;
+  failed?: string;
+};
+
+const INTERNAL_TOOL_NAMES = new Set([
+  "finish_with_outputs",
+  "finish",
+  "final",
+  "finalize",
+  "submit_final",
+  "submit_final_answer",
+]);
+
+const TOOL_LABELS: Record<string, ToolLabel> = {
+  "approvals.list_pending": {
+    running: "Checking approvals",
+    completed: "Checked approvals",
+  },
+  "brain.list": {
+    running: "Listing brain packs",
+    completed: "Listed brain packs",
+  },
+  "brain.read": {
+    running: "Reading brain pack",
+    completed: "Read brain pack",
+  },
+  "brain.write": {
+    running: "Updating brain pack",
+    completed: "Updated brain pack",
+  },
+  "connections.add_mcp": {
+    running: "Adding MCP connection",
+    completed: "Added MCP connection",
+  },
+  "connections.list": {
+    running: "Checking connections",
+    completed: "Checked connections",
+  },
+  "contexts.list": {
+    running: "Listing brain packs",
+    completed: "Listed brain packs",
+  },
+  "contexts.read": {
+    running: "Reading brain pack",
+    completed: "Read brain pack",
+  },
+  "contexts.write": {
+    running: "Updating brain pack",
+    completed: "Updated brain pack",
+  },
+  "mcp_tools.delete": {
+    running: "Removing custom tool",
+    completed: "Removed custom tool",
+  },
+  "mcp_tools.list": {
+    running: "Listing custom tools",
+    completed: "Listed custom tools",
+  },
+  "mcp_tools.register": {
+    running: "Registering custom tool",
+    completed: "Registered custom tool",
+  },
+  "mcp_tools.update": {
+    running: "Updating custom tool",
+    completed: "Updated custom tool",
+  },
+  "runs.cancel": {
+    running: "Cancelling run",
+    completed: "Cancelled run",
+  },
+  "runs.get": {
+    running: "Opening run details",
+    completed: "Opened run details",
+  },
+  "runs.list": {
+    running: "Reviewing runs",
+    completed: "Reviewed runs",
+  },
+  "runs.watch": {
+    running: "Watching run progress",
+    completed: "Watched run progress",
+  },
+  "secrets.list": {
+    running: "Checking secrets",
+    completed: "Checked secrets",
+  },
+  "secrets.list_names": {
+    running: "Checking secrets",
+    completed: "Checked secrets",
+  },
+  "secrets.set": {
+    running: "Saving secret",
+    completed: "Saved secret",
+  },
+  "slack.list_channels": {
+    running: "Checking Slack channels",
+    completed: "Checked Slack channels",
+  },
+  "slack.read_channel": {
+    running: "Reading Slack",
+    completed: "Read Slack",
+  },
+  "web.search": {
+    running: "Searching the web",
+    completed: "Searched the web",
+  },
+  web_search: {
+    running: "Searching the web",
+    completed: "Searched the web",
+  },
+  web_search_call: {
+    running: "Searching the web",
+    completed: "Searched the web",
+  },
+  "workers.create": {
+    running: "Creating worker",
+    completed: "Created worker",
+  },
+  "workers.get": {
+    running: "Opening worker details",
+    completed: "Opened worker details",
+  },
+  "workers.list": {
+    running: "Listing your workers",
+    completed: "Listed your workers",
+  },
+  "workers.list_all": {
+    running: "Listing your workers",
+    completed: "Listed your workers",
+  },
+  "workers.run": {
+    running: "Starting worker run",
+    completed: "Started worker run",
+  },
+  "workers.update": {
+    running: "Updating worker",
+    completed: "Updated worker",
+  },
+};
+
+const FALLBACK_VERBS: Record<
+  string,
+  { running: string; completed: string }
+> = {
+  add: { running: "Adding", completed: "Added" },
+  cancel: { running: "Cancelling", completed: "Cancelled" },
+  create: { running: "Creating", completed: "Created" },
+  delete: { running: "Deleting", completed: "Deleted" },
+  fetch: { running: "Fetching", completed: "Fetched" },
+  get: { running: "Reviewing", completed: "Reviewed" },
+  list: { running: "Listing", completed: "Listed" },
+  read: { running: "Reading", completed: "Read" },
+  register: { running: "Registering", completed: "Registered" },
+  run: { running: "Starting", completed: "Started" },
+  search: { running: "Searching", completed: "Searched" },
+  set: { running: "Saving", completed: "Saved" },
+  update: { running: "Updating", completed: "Updated" },
+  watch: { running: "Watching", completed: "Watched" },
+  write: { running: "Writing", completed: "Wrote" },
+};
+
+export function normalizeToolName(toolName: string): string {
+  return toolName
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/__+/g, ".")
+    .replace(/-+/g, "_");
+}
+
+export function isInternalToolName(toolName: string): boolean {
+  return INTERNAL_TOOL_NAMES.has(normalizeToolName(toolName));
+}
+
+function sentenceCase(value: string): string {
+  if (!value) return "Working";
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function humanizeToolName(toolName: string): string {
+  const normalized = normalizeToolName(toolName);
+  const slug = normalized.split(".").pop() || normalized;
+  const words = slug.replace(/_+/g, " ").trim();
+  return sentenceCase(words);
+}
+
+function fallbackToolLabel(toolName: string, done: boolean): string {
+  const normalized = normalizeToolName(toolName);
+  const slug = normalized.split(".").pop() || normalized;
+  const [verb, ...rest] = slug.split("_").filter(Boolean);
+  const inflection = FALLBACK_VERBS[verb];
+  if (!inflection || rest.length === 0) {
+    return humanizeToolName(toolName);
+  }
+  const object = rest.join(" ");
+  return `${done ? inflection.completed : inflection.running} ${object}`;
+}
+
+export function getToolCardTitle(toolName: string, status: ToolCard["status"]): string {
+  const normalized = normalizeToolName(toolName);
+  const labels = TOOL_LABELS[normalized];
+  const done = status === "completed";
+  const failed = status === "failed" || status === "error";
+
+  if (labels) {
+    if (failed && labels.failed) return labels.failed;
+    return done ? labels.completed : labels.running;
+  }
+
+  return fallbackToolLabel(toolName, done);
+}
 
 /**
  * Extract the effective card_id from any tool event.
@@ -268,18 +481,20 @@ export function reduceSSEEvent(
 
     case "tool-call": {
       if (!event.callId) return prev;
+      if (isInternalToolName(event.toolName)) return prev;
 
       // Use card metadata from the event if available, otherwise synthesise.
       const cardId = resolveCardId(event) ?? event.callId;
       const cardMeta = event.card;
+      const status = cardMeta?.status ?? "running";
       const card: GenericToolCard = {
         kind: "generic",
         callId: event.callId,
         card_id: cardId,
         toolName: event.toolName,
-        title: cardMeta?.title ?? event.toolName.replace(/__/g, ".").replace(/_/g, " "),
+        title: getToolCardTitle(event.toolName, status),
         preview: event.args_preview as Record<string, unknown> | undefined,
-        status: cardMeta?.status ?? "running",
+        status,
         ...(event.resource ? {} : {}),
         ...(event.streams ? { streams: event.streams } : {}),
         ...(event.actions ? { actions: event.actions } : {}),
@@ -314,6 +529,9 @@ export function reduceSSEEvent(
           const updatedCard: ToolCard = {
             ...p.card,
             ...(newStatus !== undefined ? { status: newStatus } : {}),
+            ...(newStatus !== undefined && "toolName" in p.card
+              ? { title: getToolCardTitle(p.card.toolName, newStatus) }
+              : {}),
             ...(event.actions ? { actions: event.actions } : {}),
             ...(event.type === "tool-resource" && event.streams
               ? { streams: event.streams }
@@ -334,9 +552,13 @@ export function reduceSSEEvent(
         if (m.role !== "assistant" || !m.parts) return m;
         const updatedParts = m.parts.map((p) => {
           if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+          const status = event.card?.status ?? (event.isError ? "failed" : "completed");
           const updatedCard: ToolCard = {
             ...p.card,
-            status: event.card?.status ?? (event.isError ? "failed" : "completed"),
+            status,
+            ...("toolName" in p.card
+              ? { title: getToolCardTitle(p.card.toolName, status) }
+              : {}),
             ...(event.actions ? { actions: event.actions } : {}),
             ...(event.streams ? { streams: event.streams } : {}),
           } as ToolCard;
@@ -361,7 +583,13 @@ export function reduceSSEEvent(
             if (reconciled) {
               return {
                 type: "tool-card" as const,
-                card: { ...p.card, status: reconciled.status } as ToolCard,
+                card: {
+                  ...p.card,
+                  status: reconciled.status,
+                  ...("toolName" in p.card
+                    ? { title: getToolCardTitle(p.card.toolName, reconciled.status) }
+                    : {}),
+                } as ToolCard,
               };
             }
           }
