@@ -1,7 +1,6 @@
 "use client";
 
 import { CheckCircle2, Loader2, XCircle, FileText, ExternalLink, Clock } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { RunCard as RunCardType } from "@/lib/emily-chat-types";
@@ -50,11 +49,13 @@ export function RunCard({ card }: { card: RunCardType }) {
                 {artifact.name}
               </span>
               {actions?.find((a) => a.id === "download") && (
-                <Button size="sm" variant="ghost" className="h-5 w-5 p-0 shrink-0 ml-auto" asChild>
-                  <a href={actions.find((a) => a.id === "download")!.href} download>
-                    <ExternalLink className="size-3" />
-                  </a>
-                </Button>
+                <a
+                  href={actions.find((a) => a.id === "download")!.href}
+                  download
+                  className="inline-flex h-5 w-5 shrink-0 ml-auto items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  <ExternalLink className="size-3" />
+                </a>
               )}
             </div>
           )}
@@ -64,9 +65,13 @@ export function RunCard({ card }: { card: RunCardType }) {
       {actions && actions.filter((a) => a.id !== "download").length > 0 && (
         <div className="flex gap-2 px-3.5 pb-3">
           {actions.filter((a) => a.id !== "download").map((action) => (
-            <Button key={action.id} size="sm" variant="outline" asChild className="h-7 text-xs font-normal">
-              <a href={action.href}>{action.label ?? action.id}</a>
-            </Button>
+            <a
+              key={action.id}
+              href={action.href}
+              className="inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
+            >
+              {action.label ?? action.id}
+            </a>
           ))}
         </div>
       )}
