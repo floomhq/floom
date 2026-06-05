@@ -2323,6 +2323,7 @@ def delete_worker_alert(
 # ---------------------------------------------------------------------------
 
 _WORKSPACE_INSTRUCTIONS_ASSET_TYPE = "workspace_instructions"
+_WORKSPACE_BASE_PERSONA_ASSET_TYPE = "workspace_base_persona"
 
 
 def _workspace_instructions_asset_id(request: Request | None = None) -> str:
@@ -2332,6 +2333,11 @@ def _workspace_instructions_asset_id(request: Request | None = None) -> str:
         if workspace_id and workspace_id != "local-default":
             return workspace_id
     return "default"
+
+
+def _workspace_base_persona_asset_id(request: Request | None = None) -> str:
+    """Scope base-persona version history per cloud workspace."""
+    return _workspace_instructions_asset_id(request)
 
 
 def _snapshot_workspace_instructions(
@@ -2364,6 +2370,38 @@ def _snapshot_workspace_instructions(
         )
     except Exception as _exc:
         logger.warning("version snapshot failed for workspace instructions: %s", _exc)
+
+
+def _snapshot_workspace_base_persona(
+    *,
+    user_id: str,
+    repos: Repositories,
+    asset_id: str,
+    content: str | None = None,
+    change_source: str = "user",
+) -> None:
+    """Create a version snapshot of workspace.base.md."""
+    import json as _json
+
+    from chat_service import get_workspace_base_persona
+
+    try:
+        md = content if content is not None else get_workspace_base_persona()
+        snapshot = {"content": md}
+        repos.versions.create(
+            asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE,
+            asset_id=asset_id,
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(
+            asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE,
+            asset_id=asset_id,
+            keep=20,
+        )
+    except Exception as _exc:
+        logger.warning("version snapshot failed for workspace base persona: %s", _exc)
 
 
 def _snapshot_worker_version(
@@ -12180,7 +12218,13 @@ def _raise_composio_unavailable(exc: Exception) -> None:
 
     if isinstance(exc, ComposioConfigurationError):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "Unable to reach the integration provider right now. "
+            "Try again later or use an API-key connection if this app does not support OAuth."
+        ),
+    ) from exc
 
 
 @app.get("/integrations/catalog", response_model=IntegrationCatalogResponse)
@@ -17513,6 +17557,124 @@ async def get_workspace(auth: AuthContext = Depends(get_auth_context)) -> PlainT
     """Return the current workspace.md content."""
     from chat_service import get_workspace_md
     return PlainTextResponse(get_workspace_md(), media_type="text/markdown")
+
+
+@app.get("/workspace/base")
+async def get_workspace_base_persona(auth: AuthContext = Depends(get_auth_context)) -> PlainTextResponse:
+    """Return the resolved editable base persona.
+
+    If no override has been saved, this returns the built-in Emily base persona.
+    Workspace custom instructions remain on /workspace.
+    """
+    from chat_service import get_workspace_base_persona
+
+    return PlainTextResponse(get_workspace_base_persona(), media_type="text/markdown")
+
+
+@app.get("/workspace/base/versions", response_model=List[VersionSummary])
+def list_workspace_base_persona_versions(
+    request: Request,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions of the editable base persona (newest first)."""
+    asset_id = _workspace_base_persona_asset_id(request)
+    rows = repos.versions.list(
+        asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE,
+        asset_id=asset_id,
+        limit=min(limit, 100),
+    )
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.get("/workspace/base/versions/{version_id}")
+def get_workspace_base_persona_version(
+    version_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the content snapshot for a base-persona version."""
+    import json as _json
+
+    asset_id = _workspace_base_persona_asset_id(request)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != _WORKSPACE_BASE_PERSONA_ASSET_TYPE
+        or version.get("asset_id") != asset_id
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"content": snapshot.get("content") or ""}
+
+
+@app.post("/workspace/base/rollback/{version_id}")
+async def rollback_workspace_base_persona(
+    version_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> PlainTextResponse:
+    """Restore workspace.base.md to a previous version snapshot."""
+    import json as _json
+
+    from chat_service import set_workspace_base_persona
+
+    asset_id = _workspace_base_persona_asset_id(request)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != _WORKSPACE_BASE_PERSONA_ASSET_TYPE
+        or version.get("asset_id") != asset_id
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    content = snapshot.get("content")
+    if content is None or not str(content).strip():
+        raise HTTPException(status_code=422, detail="Version snapshot contains no content")
+
+    set_workspace_base_persona(str(content))
+    _snapshot_workspace_base_persona(
+        user_id=auth.user_id,
+        repos=repos,
+        asset_id=asset_id,
+        content=str(content),
+        change_source=f"rollback:{version_id}",
+    )
+    return PlainTextResponse(str(content), media_type="text/markdown")
+
+
+@app.put("/workspace/base", status_code=204)
+async def put_workspace_base_persona(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Update workspace.base.md, the editable base persona override.
+
+    Accepts raw markdown or the same ``{"content": "..."}`` JSON envelope as
+    /workspace. This file is layered before workspace custom instructions and
+    the workspace-agent SKILL.md.
+    """
+    from chat_service import set_workspace_base_persona, unwrap_workspace_body
+
+    body = await request.body()
+    content = unwrap_workspace_body(body.decode("utf-8", errors="replace"))
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="workspace base persona cannot be empty")
+    set_workspace_base_persona(content)
+    change_source = "ai" if request.headers.get("x-workeros-run-token") else "user"
+    _snapshot_workspace_base_persona(
+        user_id=auth.user_id,
+        repos=repos,
+        asset_id=_workspace_base_persona_asset_id(request),
+        content=content,
+        change_source=change_source,
+    )
+    return Response(status_code=204)
 
 
 @app.get("/workspace/versions", response_model=List[VersionSummary])
