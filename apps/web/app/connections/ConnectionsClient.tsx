@@ -17,13 +17,7 @@ import {
   type ConnectionView,
 } from "@/components/connections/connection-data";
 import { api } from "@/lib/api";
-import type { ConnectionItem, WorkerDetail } from "@/lib/types";
-
-type ConnectedAccountMetadata = {
-  connected_at?: string;
-  email?: string;
-  scopes?: string[];
-};
+import type { ConnectedAccountMetadata, ConnectionItem, WorkerDetail } from "@/lib/types";
 
 export default function ConnectionsClient({
   initialConnections,
@@ -256,6 +250,7 @@ export default function ConnectionsClient({
   const oauthConnections = filteredConnections.filter((connection) => (connection.kind ?? "composio") === "composio");
 
   function handleConnect(slug: string) {
+    setConnecting(slug);
     window.location.href = `/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`;
   }
 
@@ -295,6 +290,10 @@ export default function ConnectionsClient({
   }
 
   async function handleDelete(connection: ConnectionView) {
+    const confirmed = window.confirm(
+      `Disconnect ${connection.displayName}${connection.accountLabel ? ` (${connection.accountLabel})` : ""}?`
+    );
+    if (!confirmed) return;
     setDeleting(connection.id);
     try {
       await api.connections.delete(connection.id);
@@ -412,16 +411,12 @@ async function fetchToolsCount(appSlug: string): Promise<number> {
 
 async function fetchConnectedAccount(id: string): Promise<ConnectedAccountMetadata | undefined> {
   try {
-    const response = await fetch(`/connections/connected-accounts/${encodeURIComponent(id)}`, {
-      cache: "no-store",
-    });
-    if (response.status === 503) {
+    return await api.connections.accountInfo(id);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("Composio is not configured")) {
       toast.error("Connections backend not configured on this server");
-      return undefined;
     }
-    if (!response.ok) return undefined;
-    return (await response.json()) as ConnectedAccountMetadata;
-  } catch {
     return undefined;
   }
 }
