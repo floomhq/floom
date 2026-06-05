@@ -88,8 +88,9 @@ export function SlackConnect() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-medium">Connect to Slack</h2>
+          {/* M41: Emily is a personal Chief-of-Staff, not a workspace admin. */}
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Talk to your assistant from Slack — DM the bot or @mention it in a channel.
+            Your personal AI assistant — DM Emily or @mention her in a channel. She can run workers, surface approvals, and answer questions.
           </p>
         </div>
         <Button
@@ -107,23 +108,7 @@ export function SlackConnect() {
         <Skeleton className="h-24 w-full" />
       ) : (
         <>
-          {/* Tutorial / empty-state explainer. */}
-          <ol className="space-y-1.5 text-xs text-muted-foreground">
-            <li>
-              1. Click <span className="font-medium text-foreground">Add to Slack</span> and pick a
-              workspace.
-            </li>
-            <li>2. Approve the requested permissions.</li>
-            <li>
-              3. Then <span className="font-medium text-foreground">DM the bot</span> or{" "}
-              <span className="font-medium text-foreground">@mention it</span> in a channel — e.g.{" "}
-              <span className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
-                show my pending approvals
-              </span>
-              .
-            </li>
-          </ol>
-
+          {/* M44: CTA first — visible without scrolling. Tutorial follows below. */}
           <div className="flex flex-wrap items-center gap-3">
             {/* Official "Add to Slack" button styling (Slack Aubergine #4A154B). */}
             <button
@@ -154,6 +139,23 @@ export function SlackConnect() {
               platform Slack app is enabled.
             </p>
           ) : null}
+
+          {/* M45: Step-by-step tutorial for non-technical users. */}
+          <ol className="space-y-1.5 text-xs text-muted-foreground">
+            <li>
+              1. Click <span className="font-medium text-foreground">Add to Slack</span> and pick a
+              workspace.
+            </li>
+            <li>2. Approve the requested permissions.</li>
+            <li>
+              3. <span className="font-medium text-foreground">DM Emily</span> or{" "}
+              <span className="font-medium text-foreground">@mention her</span> in a channel — e.g.{" "}
+              <span className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+                show my pending approvals
+              </span>
+              .
+            </li>
+          </ol>
 
           {connected ? (
             <div className="space-y-3">
