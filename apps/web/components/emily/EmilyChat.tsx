@@ -1,0 +1,282 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronRight, ChevronLeft, Maximize2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
+import Link from "next/link";
+
+import { EmilyAvatar } from "./EmilyAvatar";
+import { MarkdownText } from "./MarkdownText";
+import { PromptInput } from "./PromptInput";
+import { FileChip } from "./FileChip";
+import { ToolCardRenderer } from "./cards/ToolCardRenderer";
+import { useChatStream } from "@/lib/useChatStream";
+import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
+
+// ── Suggestion pills ──────────────────────────────────────────────────────────
+
+const SUGGESTIONS = [
+  "What workers do I have?",
+  "Create a Stripe alert worker",
+  "Show me yesterday's runs",
+];
+
+// ── Typing indicator ──────────────────────────────────────────────────────────
+
+function TypingIndicator() {
+  return (
+    <div className="flex items-start gap-2.5">
+      <EmilyAvatar size="sm" />
+      <div className="flex gap-1 py-2 px-1">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="size-1.5 rounded-full bg-muted-foreground/40 animate-bounce"
+            style={{ animationDelay: `${i * 150}ms` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Message renderer ──────────────────────────────────────────────────────────
+
+function MessageRow({ msg }: { msg: ChatMessage }) {
+  if (msg.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] space-y-1.5">
+          {msg.text && (
+            <div className="rounded-2xl rounded-tr-sm bg-muted/60 px-3.5 py-2.5 text-sm text-foreground">
+              <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+            </div>
+          )}
+          {msg.files && msg.files.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 justify-end">
+              {msg.files.map((f) => (
+                <FileChip key={f.id} file={f} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // assistant
+  return (
+    <div className="flex items-start gap-2.5">
+      <EmilyAvatar size="sm" />
+      <div className="flex-1 min-w-0 space-y-2.5">
+        {msg.parts?.map((part, i) => {
+          if (part.type === "text") {
+            return <MarkdownText key={i} text={part.text} />;
+          }
+          if (part.type === "tool-card") {
+            return <ToolCardRenderer key={i} card={part.card} />;
+          }
+          return null;
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+
+function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-4 px-6 text-center">
+      <EmilyAvatar size="md" />
+      <div>
+        <p className="text-sm font-medium">I am Emily, your Chief of Staff</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Ask me to create workers, check runs, or manage connections.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-1.5 justify-center">
+        {SUGGESTIONS.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onSuggest(s)}
+            className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── EmilyChat core (shared by dock and full-page) ────────────────────────────
+
+interface EmilyChatCoreProps {
+  fullPage?: boolean;
+}
+
+function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
+  const { messages, isStreaming, sendMessage } = useChatStream();
+  const [input, setInput] = useState("");
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isStreaming]);
+
+  const handleSubmit = useCallback(() => {
+    const text = input.trim();
+    if (!text && attachedFiles.length === 0) return;
+    sendMessage(text, attachedFiles.length > 0 ? attachedFiles : undefined);
+    setInput("");
+    setAttachedFiles([]);
+  }, [input, attachedFiles, sendMessage]);
+
+  return (
+    <div className={cn("flex flex-col h-full", fullPage && "max-w-2xl mx-auto w-full")}>
+      {/* Message list */}
+      <div className="flex-1 overflow-y-auto">
+        {messages.length === 0 ? (
+          <EmptyState onSuggest={(text) => { setInput(text); }} />
+        ) : (
+          <div className={cn("py-5 space-y-5", fullPage ? "px-6" : "px-4")}>
+            {messages.map((msg) => (
+              <MessageRow key={msg.id} msg={msg} />
+            ))}
+            {isStreaming && <TypingIndicator />}
+            <div ref={bottomRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
+        <Separator className="mb-3" />
+        <PromptInput
+          value={input}
+          onChange={setInput}
+          onSubmit={handleSubmit}
+          onFilesChange={setAttachedFiles}
+          attachedFiles={attachedFiles}
+          disabled={isStreaming}
+          placeholder="Message Emily..."
+        />
+        <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
+          Emily can make mistakes. Verify important results.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Dock component (right-side persistent rail) ───────────────────────────────
+
+export function EmilyDock({ className }: { className?: string }) {
+  const [open, setOpen] = useState(true);
+
+  // Collapsed: 48px strip
+  if (!open) {
+    return (
+      <div
+        className={cn(
+          "flex h-full w-12 shrink-0 flex-col items-center justify-start border-l border-border bg-background pt-4 gap-3",
+          className
+        )}
+        aria-label="Emily dock (collapsed)"
+      >
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex flex-col items-center gap-1.5 group"
+          title="Open Emily"
+          aria-label="Open Emily"
+        >
+          <EmilyAvatar size="sm" />
+          <ChevronLeft className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        // Fixed right rail: 380px on md+, full-width on mobile.
+        // shrink-0 prevents flex-squeeze. w-full on mobile renders as overlay handled by parent.
+        "flex h-full flex-col border-l border-border bg-background",
+        "shrink-0 w-full md:w-[380px] md:max-w-[30vw]",
+        className
+      )}
+      aria-label="Emily dock"
+    >
+      {/* Header */}
+      <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
+        <EmilyAvatar size="sm" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold leading-none truncate">Emily</p>
+          <p className="text-[11px] text-muted-foreground leading-none mt-0.5">Chief of Staff</p>
+        </div>
+        <Badge
+          variant="secondary"
+          className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 shrink-0 font-normal"
+        >
+          Online
+        </Badge>
+        {/* Full-page link */}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="size-7 p-0 text-muted-foreground hover:text-foreground"
+          title="Full-page chat"
+          asChild
+        >
+          <Link href="/chat">
+            <Maximize2 className="size-3.5" />
+          </Link>
+        </Button>
+        {/* Collapse button */}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="size-7 p-0"
+          onClick={() => setOpen(false)}
+          title="Collapse Emily"
+          aria-label="Collapse Emily"
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
+
+      {/* Chat content */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <EmilyChatCore />
+      </div>
+    </div>
+  );
+}
+
+// ── Full-page chat (used by /chat route) ──────────────────────────────────────
+
+export function EmilyChatPage() {
+  return (
+    <div className="flex h-[calc(100vh-4rem)] flex-col">
+      <div className="flex items-center gap-3 border-b border-border px-6 py-4">
+        <EmilyAvatar size="md" />
+        <div>
+          <p className="text-base font-semibold leading-none">Emily</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Chief of Staff</p>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <EmilyChatCore fullPage />
+      </div>
+    </div>
+  );
+}
