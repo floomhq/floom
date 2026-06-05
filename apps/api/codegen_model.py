@@ -13,12 +13,14 @@ awkward plain-English prompts on the first pass. They now share ONE strong
 code-capable model via ``codegen_model()`` so generation + draft + repair agree
 and the choice is tunable from one place (env ``WORKEROS_CODEGEN_MODEL``).
 
-gpt-5.x calling differences (verified 2026-05-29 against the prod key):
+gpt-5.x calling differences (verified 2026-05-29 against the prod key and
+again on 2026-06-05 for ``gpt-5.5``):
   - The chat-completions param is ``max_completion_tokens``, NOT ``max_tokens``
     (gpt-5.1 returns HTTP 400 for ``max_tokens``).
   - ``gpt-5.1-codex`` is NOT a chat model (v1/chat/completions rejects it); the
     strongest chat-capable coder reachable on this key is ``gpt-5.1``.
-  - ``temperature`` and ``response_format={"type":"json_object"}`` are accepted.
+  - Some gpt-5.x models accept only default temperature, so this helper retries
+    once without ``temperature`` when the API rejects a non-default value.
 
 ``chat_completion_codegen`` wraps ``client.chat.completions.create`` so callers
 never have to know whether the configured model wants ``max_tokens`` or
@@ -75,13 +77,14 @@ def chat_completion_codegen(
         "max_completion_tokens" if _uses_max_completion_tokens(chosen) else "max_tokens"
     )
 
-    def _create(token_param: str) -> Any:
+    def _create(token_param: str, *, include_temperature: bool = True) -> Any:
         kwargs: Dict[str, Any] = {
             "model": chosen,
             "messages": messages,
-            "temperature": temperature,
             token_param: max_output_tokens,
         }
+        if include_temperature:
+            kwargs["temperature"] = temperature
         if response_format is not None:
             kwargs["response_format"] = response_format
         return client.chat.completions.create(**kwargs)
@@ -94,4 +97,13 @@ def chat_completion_codegen(
             return _create("max_completion_tokens")
         if "max_tokens" in msg and token_kwarg == "max_completion_tokens":
             return _create("max_tokens")
+        if (
+            "temperature" in msg
+            and (
+                "unsupported" in msg
+                or "does not support" in msg
+                or "only the default" in msg
+            )
+        ):
+            return _create(token_kwarg, include_temperature=False)
         raise
