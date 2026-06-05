@@ -4,8 +4,8 @@ Implements POST /chat: a streaming SSE endpoint that routes user messages
 through the workspace-agent worker (system_worker: true) and persists
 conversation history.
 
-Conversation eviction: after 50 messages, the conversation is summarised
-and the oldest messages are pruned, keeping the summary + last 20 verbatim.
+Conversation context is bounded to the latest 50 messages for the model, but
+the persisted raw conversation history is never pruned.
 
 Tool truncation: tool results >2048 bytes are truncated before persisting
 to conversation_messages.
@@ -30,8 +30,8 @@ logger = logging.getLogger("floom.chat")
 WORKSPACE_AGENT_ID = "workspace-agent"
 DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-5-mini"
 TOOL_RESULT_MAX_BYTES = 2048
-CONVERSATION_WINDOW = 50       # summarise after this many messages
-CONVERSATION_KEEP_VERBATIM = 20  # keep this many after summarisation
+CONVERSATION_WINDOW = 50       # LLM context window; stored rows are permanent
+CONVERSATION_KEEP_VERBATIM = 20  # retained for legacy summary compatibility
 WORKSPACE_MD_PATH = Path(__file__).resolve().parents[3] / "workspace.md"
 WORKSPACE_MD_TEMPLATE = Path(__file__).resolve().parents[3] / "workspace.md.template"
 
@@ -269,59 +269,8 @@ def load_conversation_history(conv_id: str, limit: int = CONVERSATION_WINDOW) ->
 
 
 def _maybe_evict_conversation(conv_id: str, user_id: str) -> None:
-    """If conversation has >CONVERSATION_WINDOW messages, summarise and prune."""
-    with get_db() as conn:
-        count_row = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM conversation_messages WHERE conversation_id = ?",
-            (conv_id,),
-        ).fetchone()
-        if count_row["cnt"] <= CONVERSATION_WINDOW:
-            return
-        # Load all messages to summarise
-        rows = conn.execute(
-            """
-            SELECT id, role, content, created_at
-            FROM conversation_messages
-            WHERE conversation_id = ?
-            ORDER BY created_at ASC
-            """,
-            (conv_id,),
-        ).fetchall()
-
-    messages = [dict(r) for r in rows]
-    to_summarise = messages[:-CONVERSATION_KEEP_VERBATIM]
-    to_keep = messages[-CONVERSATION_KEEP_VERBATIM:]
-
-    summary_lines = ["[CONVERSATION SUMMARY]", ""]
-    for m in to_summarise:
-        role = m["role"]
-        content = m["content"][:200]
-        summary_lines.append(f"{role.upper()}: {content}")
-    summary = "\n".join(summary_lines)
-
-    summary_id = f"msg_{uuid.uuid4().hex[:16]}"
-    ts = now_iso()
-    ids_to_delete = [m["id"] for m in to_summarise]
-
-    with get_db() as conn:
-        # Delete summarised messages
-        conn.executemany(
-            "DELETE FROM conversation_messages WHERE id = ?",
-            [(mid,) for mid in ids_to_delete],
-        )
-        # Insert summary before the kept messages using the conversation's created_at
-        # which predates all messages.
-        conv_row = conn.execute(
-            "SELECT created_at FROM conversations WHERE id = ?", (conv_id,)
-        ).fetchone()
-        summary_ts = conv_row["created_at"] if conv_row else ts
-        conn.execute(
-            """
-            INSERT INTO conversation_messages (id, conversation_id, role, content, created_at)
-            VALUES (?, ?, 'assistant', ?, ?)
-            """,
-            (summary_id, conv_id, summary, summary_ts),
-        )
+    """Compatibility hook retained for callers; raw chat rows are permanent."""
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -713,6 +662,55 @@ def _workspace_tools(user_id: str) -> List[Any]:
                 "required": ["label", "url"],
             },
             _tool_connections_add_mcp,
+        ),
+        _make_tool(
+            "mcp_tools__list",
+            "List custom MCP tools registered for this workspace.",
+            {"type": "object", "properties": {}, "required": []},
+            _tool_mcp_tools_list,
+        ),
+        _make_tool(
+            "mcp_tools__register",
+            (
+                "Register a custom MCP tool backed by an existing worker. "
+                "The tool becomes callable through the Workeros MCP server."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "worker_id": {"type": "string"},
+                    "input_schema": {"type": "object"},
+                },
+                "required": ["name", "description", "worker_id"],
+            },
+            _tool_mcp_tools_register,
+        ),
+        _make_tool(
+            "mcp_tools__update",
+            "Update a custom MCP tool by name.",
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "worker_id": {"type": "string"},
+                    "input_schema": {"type": "object"},
+                },
+                "required": ["name"],
+            },
+            _tool_mcp_tools_update,
+        ),
+        _make_tool(
+            "mcp_tools__delete",
+            "Delete a custom MCP tool by name.",
+            {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+            _tool_mcp_tools_delete,
         ),
         _make_tool(
             "contexts__list",
@@ -1642,20 +1640,12 @@ def _tool_secrets_set(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     import re as _re
     if not _re.fullmatch(r"[A-Z_][A-Z0-9_]*", name.upper()):
         return {"ok": False, "error": "Secret name must be alphanumeric with underscores"}
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        return {"ok": False, "error": "Secret value must not contain newline or control characters"}
     env_key = name.upper()
-    os.environ[env_key] = value
-    # Persist metadata to DB (value is stored only in env, not in DB)
-    from db import get_db as _get_db, now_iso as _now_iso
-    ts = _now_iso()
-    with _get_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO secrets (user_id, name, status, created_at, updated_at)
-            VALUES (?, ?, 'set', ?, ?)
-            ON CONFLICT(user_id, name) DO UPDATE SET status='set', updated_at=excluded.updated_at
-            """,
-            (user_id, env_key, ts, ts),
-        )
+    from db import get_repositories
+    repos = get_repositories()
+    repos.secrets.set(user_id=user_id, name=env_key, value=value, status="set")
     return {"ok": True, "message": f"Secret '{env_key}' set."}
 
 
@@ -1729,6 +1719,128 @@ def _tool_connections_add_mcp(args: Dict[str, Any], user_id: str) -> Dict[str, A
         return {"ok": True, "connection_id": conn_id, "message": f"MCP connection '{label}' added."}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _mcp_tool_input_schema_from_worker(worker: Dict[str, Any]) -> Dict[str, Any]:
+    config = worker.get("config") or {}
+    inputs = config.get("inputs") if isinstance(config, dict) else []
+    if not isinstance(inputs, list):
+        return {"type": "object", "properties": {}}
+    properties: Dict[str, Any] = {}
+    required: List[str] = []
+    type_map = {
+        "string": "string",
+        "text": "string",
+        "markdown": "string",
+        "number": "number",
+        "integer": "integer",
+        "boolean": "boolean",
+        "bool": "boolean",
+        "object": "object",
+        "json": "object",
+        "array": "array",
+    }
+    for item in inputs:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        raw_type = str(item.get("type") or item.get("kind") or "string").lower()
+        schema_type = type_map.get(raw_type, "string")
+        prop: Dict[str, Any] = {"type": schema_type}
+        if item.get("description"):
+            prop["description"] = str(item["description"])
+        if isinstance(item.get("options"), list):
+            prop["enum"] = [str(option) for option in item["options"]]
+        properties[name] = prop
+        if item.get("required"):
+            required.append(name)
+    schema: Dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+    return schema
+
+
+def _resolve_mcp_tool_worker(worker_ref: str, user_id: str) -> Dict[str, Any] | None:
+    from db import get_repositories
+    repos = get_repositories()
+    worker = repos.workers.get(user_id=user_id, worker_id=worker_ref)
+    if worker:
+        return worker
+    for candidate in repos.workers.list(user_id=user_id):
+        if candidate.get("name") == worker_ref:
+            return candidate
+    return None
+
+
+def _tool_mcp_tools_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    from db import get_repositories
+    repos = get_repositories()
+    return {"ok": True, "tools": repos.mcp_tools.list(user_id=user_id)}
+
+
+def _tool_mcp_tools_register(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    name = str(args.get("name") or "").strip()
+    description = str(args.get("description") or "").strip()
+    worker_ref = str(args.get("worker_id") or "").strip()
+    input_schema = args.get("input_schema") or {}
+    if not name or not description or not worker_ref:
+        return {"ok": False, "error": "name, description, and worker_id are required"}
+    from db import get_repositories
+    repos = get_repositories()
+    if repos.mcp_tools.get_by_name(user_id=user_id, name=name):
+        return {"ok": False, "error": f"Tool {name!r} already exists"}
+    worker = _resolve_mcp_tool_worker(worker_ref, user_id)
+    if not worker:
+        return {"ok": False, "error": f"Worker {worker_ref!r} not found"}
+    if not isinstance(input_schema, dict) or not input_schema:
+        input_schema = _mcp_tool_input_schema_from_worker(worker)
+    tool = repos.mcp_tools.create(
+        user_id=user_id,
+        name=name,
+        description=description,
+        input_schema=input_schema,
+        worker_id=str(worker["id"]),
+    )
+    return {"ok": True, "tool": tool}
+
+
+def _tool_mcp_tools_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    name = str(args.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "name is required"}
+    from db import get_repositories
+    repos = get_repositories()
+    tool = repos.mcp_tools.get_by_name(user_id=user_id, name=name)
+    if not tool:
+        return {"ok": False, "error": f"Tool {name!r} not found"}
+    updates: Dict[str, Any] = {}
+    if args.get("description"):
+        updates["description"] = str(args["description"])
+    if isinstance(args.get("input_schema"), dict):
+        updates["input_schema"] = args["input_schema"]
+    if args.get("worker_id"):
+        worker_ref = str(args["worker_id"])
+        worker = _resolve_mcp_tool_worker(worker_ref, user_id)
+        if not worker:
+            return {"ok": False, "error": f"Worker {worker_ref!r} not found"}
+        updates["worker_id"] = str(worker["id"])
+    updated = repos.mcp_tools.update(user_id=user_id, tool_id=str(tool["id"]), **updates)
+    return {"ok": True, "tool": updated}
+
+
+def _tool_mcp_tools_delete(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    name = str(args.get("name") or "").strip()
+    if not name:
+        return {"ok": False, "error": "name is required"}
+    from db import get_repositories
+    repos = get_repositories()
+    tool = repos.mcp_tools.get_by_name(user_id=user_id, name=name)
+    if not tool:
+        return {"ok": False, "error": f"Tool {name!r} not found"}
+    repos.mcp_tools.delete(user_id=user_id, tool_id=str(tool["id"]))
+    return {"ok": True, "message": f"Tool {name!r} deleted"}
 
 
 def _tool_contexts_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
