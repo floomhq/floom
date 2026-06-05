@@ -157,6 +157,8 @@ def _ensure_bare_greeting_identity(message: str, reply: str) -> str:
         if text.startswith(prefix):
             text = text[len(prefix):].lstrip()
             break
+    if text.startswith("- "):
+        return f"I'm Emily. Workspace state:\n\n{text}"
     return f"I'm Emily. {text}" if text else "I'm Emily."
 
 
