@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Box, Check, Copy, Download, ExternalLink, FileText, Layers, Package, RotateCcw } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, FileText, Layers, Package, RotateCcw } from "lucide-react";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import type { PublicShareFile, StandaloneShare } from "@/lib/types";
 
@@ -28,18 +28,126 @@ function previewText(share: StandaloneShare): string {
   return share.file?.content_text || "Preview is unavailable. Use the file list to inspect available files.";
 }
 
-function fileTitle(file?: PublicShareFile | null): string {
-  if (!file) return "Preview";
-  return file.path;
+function fileTitle(file?: PublicShareFile | null, entityType?: StandaloneShare["entity_type"]): string {
+  if (entityType === "worker") return "WORKER PREVIEW";
+  if (!file) return "PREVIEW";
+  const base = file.path.split("/").pop() || file.path;
+  return `${base.toUpperCase()} PREVIEW`;
 }
 
-function ShareIcon({ type }: { type: StandaloneShare["entity_type"] }) {
-  const Icon = type === "worker" ? Box : type === "brain_pack" ? Package : FileText;
-  return <Icon className="size-5" />;
+function previewLabel(files: StandaloneShare["files"]): string {
+  if (files.length > 0) return `Preview all ${files.length} file${files.length === 1 ? "" : "s"} before installing`;
+  return "Preview details";
 }
+
+// Layered stack icon matching Floom's share mark
+function ShareIconTile({ type }: { type: StandaloneShare["entity_type"] }) {
+  if (type === "brain_pack") {
+    return (
+      <div
+        style={{
+          width: 48,
+          height: 48,
+          borderRadius: 10,
+          border: "1px solid #e2e2e0",
+          background: "#f0f0ee",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#555",
+        }}
+      >
+        <Package size={22} />
+      </div>
+    );
+  }
+  if (type === "brain_file") {
+    return (
+      <div
+        style={{
+          width: 48,
+          height: 48,
+          borderRadius: 10,
+          border: "1px solid #e2e2e0",
+          background: "#f0f0ee",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#555",
+        }}
+      >
+        <FileText size={22} />
+      </div>
+    );
+  }
+  // Worker: layered stack mark like Floom's package/share icon
+  return (
+    <div
+      style={{
+        width: 48,
+        height: 48,
+        borderRadius: 10,
+        border: "1px solid #e2e2e0",
+        background: "#f0f0ee",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#444",
+      }}
+    >
+      {/* SVG approximating Floom's layered stack/share icon */}
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+        <path d="M2 17l10 5 10-5" />
+        <path d="M2 12l10 5 10-5" />
+      </svg>
+    </div>
+  );
+}
+
+// Sender avatar: initials or "W"
+function SenderAvatar({ name }: { name?: string }) {
+  const initials = name
+    ? name.trim().split(/\s+/).slice(0, 2).map((w) => w[0].toUpperCase()).join("")
+    : "W";
+  return (
+    <span
+      style={{
+        display: "grid",
+        placeItems: "center",
+        width: 32,
+        height: 32,
+        minWidth: 32,
+        borderRadius: "50%",
+        background: "#e8e8e5",
+        fontSize: 11,
+        fontWeight: 600,
+        color: "#333",
+        letterSpacing: 0,
+        flexShrink: 0,
+      }}
+    >
+      {initials}
+    </span>
+  );
+}
+
+// Share-specific neutral surface palette — overrides the app's warm beige
+const SHARE_VARS = {
+  "--s-bg": "#f5f5f3",
+  "--s-card": "#ffffff",
+  "--s-surface": "#f0f0ee",
+  "--s-border": "#e2e2e0",
+  "--s-border-soft": "#eaeae8",
+  "--s-ink": "#141414",
+  "--s-ink-soft": "#6b6b68",
+  "--s-ink-mute": "#9c9c98",
+  "--s-mono": '"Geist Mono", "SF Mono", ui-monospace, monospace',
+} as React.CSSProperties;
 
 export function StandaloneShareCard({ share, token }: { share: StandaloneShare; token: string }) {
   const [copied, setCopied] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [activePath, setActivePath] = useState(share.file?.path || share.files[0]?.path || "");
   const [shareUrl, setShareUrl] = useState(`/s/${token}`);
@@ -50,14 +158,20 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
   const text = previewText(share);
   const worker = share.worker;
   const files = share.files || [];
+  const isWorker = share.entity_type === "worker";
+  const isFile = share.entity_type === "brain_file";
+
+  // The install command uses the token directly, not the full URL
+  const installCmd = `npx -y @floomhq/floom add ${token}`;
+
   const primaryHref =
-    share.entity_type === "worker" && worker?.id
+    isWorker && worker?.id
       ? `/workers/${encodeURIComponent(worker.id)}`
       : share.entity_type === "brain_pack"
         ? "/contexts"
         : `/s/${encodeURIComponent(token)}/download`;
   const primaryLabel =
-    share.entity_type === "worker"
+    isWorker
       ? "Run this worker"
       : share.entity_type === "brain_pack"
         ? "View pack"
@@ -73,49 +187,135 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
     window.setTimeout(() => setCopied(false), 1500);
   }
 
+  async function copyInstallCmd() {
+    await navigator.clipboard.writeText(installCmd);
+    setCopiedCmd(true);
+    window.setTimeout(() => setCopiedCmd(false), 1500);
+  }
+
+  // Sender info — PublicWorker has no owner_name; fall back to generic label
+  const senderName: string | undefined = undefined;
+
   return (
-    <main className="min-h-[calc(100vh-56px)] px-3 py-8 sm:px-5 sm:py-10 grid place-items-center">
-      <div className="w-[min(452px,100%)]">
-        <section className="relative h-auto min-h-[720px] overflow-hidden rounded-[13px] border border-[var(--border-default)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)] sm:h-[760px]">
+    <main
+      style={{
+        minHeight: "calc(100vh - 56px)",
+        padding: "40px 12px 40px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        background: "var(--s-bg, #f5f5f3)",
+        ...SHARE_VARS,
+      }}
+    >
+      <div style={{ width: "min(452px, 100%)" }}>
+        <section
+          style={{
+            position: "relative",
+            overflow: "hidden",
+            borderRadius: 13,
+            border: "1px solid var(--s-border)",
+            background: "var(--s-card)",
+            boxShadow: "0 16px 36px hsl(0 0% 0% / 0.10), 0 0 0 1px var(--s-border)",
+          }}
+        >
           {!showFiles ? (
-            <div className="flex h-full flex-col">
-              <div className="flex items-start gap-3 border-b border-[var(--border-soft)] bg-[var(--bg-2)] px-5 py-4">
-                <span className="grid size-8 shrink-0 place-items-center rounded-full bg-[var(--bg-3)] text-[11px] font-semibold text-[var(--ink)]">
-                  W
-                </span>
-                <div className="min-w-0 text-[12.5px] leading-relaxed">
-                  <strong className="block font-semibold text-[var(--ink)]">A Workeros operator shared this with you</strong>
-                  <span className="text-[var(--ink-mute)]">Shared via Workeros / noindex</span>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {/* Sender strip */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  borderBottom: "1px solid var(--s-border-soft)",
+                  background: "var(--s-surface)",
+                  padding: "14px 20px",
+                }}
+              >
+                <SenderAvatar name={senderName} />
+                <div style={{ minWidth: 0, fontSize: 12.5, lineHeight: 1.5 }}>
+                  <strong style={{ display: "block", fontWeight: 600, color: "var(--s-ink)" }}>
+                    {senderName ? `${senderName} shared this with you` : "A Workeros operator shared this with you"}
+                  </strong>
+                  <span style={{ color: "var(--s-ink-soft)" }}>
+                    Shared via Workeros
+                  </span>
                 </div>
               </div>
 
-              <div className="flex flex-1 flex-col overflow-y-auto px-6 py-5">
-                <div className="mb-4 flex items-center justify-between">
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-card)] px-2.5 py-1 font-mono text-[11px] text-[var(--ink-soft)]">
-                    <span className="size-1.5 rounded-full bg-[var(--success)]" />
+              {/* Content area */}
+              <div style={{ display: "flex", flexDirection: "column", padding: "20px 24px" }}>
+                {/* Shared via link badge */}
+                <div style={{ marginBottom: 16 }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      borderRadius: 999,
+                      border: "1px solid var(--s-border)",
+                      background: "var(--s-card)",
+                      padding: "4px 10px",
+                      fontFamily: "var(--s-mono)",
+                      fontSize: 11,
+                      color: "var(--s-ink-soft)",
+                    }}
+                  >
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#2f8f5b", flexShrink: 0 }} />
                     Shared via link
                   </span>
                 </div>
 
-                <div className="mb-3 grid size-12 place-items-center rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-2)] text-[var(--ink)]">
-                  <ShareIcon type={share.entity_type} />
+                {/* Icon tile */}
+                <div style={{ marginBottom: 12 }}>
+                  <ShareIconTile type={share.entity_type} />
                 </div>
 
-                <h1 className="mb-2 text-[26px] font-semibold leading-tight tracking-normal text-[var(--ink)]">
+                {/* Title */}
+                <h1
+                  style={{
+                    margin: "0 0 8px 0",
+                    fontSize: 26,
+                    fontWeight: 600,
+                    lineHeight: 1.15,
+                    color: "var(--s-ink)",
+                    letterSpacing: "-0.01em",
+                  }}
+                >
                   {share.title}
                 </h1>
+
+                {/* Description */}
                 {share.description && (
-                  <p className="mb-4 text-[13.5px] leading-relaxed text-[var(--ink-soft)]">
+                  <p
+                    style={{
+                      margin: "0 0 16px 0",
+                      fontSize: 13.5,
+                      lineHeight: 1.6,
+                      color: "var(--s-ink-soft)",
+                    }}
+                  >
                     {share.description}
                   </p>
                 )}
 
+                {/* Connection pills — for worker */}
                 {worker?.connections && worker.connections.length > 0 && (
-                  <div className="mb-4 flex flex-wrap gap-2">
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
                     {worker.connections.map((slug) => (
                       <span
                         key={slug}
-                        className="inline-flex items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-2)] px-2 py-1 text-[11px] text-[var(--ink-soft)]"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                          borderRadius: 7,
+                          border: "1px solid var(--s-border)",
+                          background: "var(--s-surface)",
+                          padding: "4px 8px",
+                          fontSize: 11,
+                          color: "var(--s-ink-soft)",
+                        }}
                       >
                         <BrandLogo icon={slug} className="size-3.5" />
                         {slug.replace(/[-_]/g, " ")}
@@ -124,138 +324,434 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
                   </div>
                 )}
 
-                {worker && (
-                  <div className="mb-4 grid grid-cols-2 gap-2">
-                    <div className="rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-2)] px-3 py-2">
-                      <div className="font-mono text-[10px] uppercase text-[var(--ink-mute)]">Trigger</div>
-                      <div className="mt-0.5 text-[12px] text-[var(--ink)]">{worker.trigger_type}</div>
-                    </div>
-                    <div className="rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-2)] px-3 py-2">
-                      <div className="font-mono text-[10px] uppercase text-[var(--ink-mute)]">Runtime</div>
-                      <div className="mt-0.5 text-[12px] text-[var(--ink)]">{worker.runtime || "worker"}</div>
-                    </div>
-                  </div>
-                )}
-
+                {/* Preview toggle button — matches reference "Preview all N files before installing" */}
                 <button
                   type="button"
                   onClick={() => setShowFiles(true)}
-                  className="mb-3 flex w-full items-center justify-between gap-3 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-2)] px-3 py-2.5 text-left font-mono text-[11px] text-[var(--ink)] hover:border-[var(--ink-mute)]"
+                  style={{
+                    marginBottom: 8,
+                    display: "flex",
+                    width: "100%",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    borderRadius: 7,
+                    border: "1px solid var(--s-border)",
+                    background: "var(--s-surface)",
+                    padding: "9px 12px",
+                    textAlign: "left",
+                    fontFamily: "var(--s-mono)",
+                    fontSize: 11,
+                    color: "var(--s-ink)",
+                    cursor: "pointer",
+                  }}
                 >
-                  <span>{files.length > 0 ? `Preview ${files.length} item${files.length === 1 ? "" : "s"}` : "Preview details"}</span>
-                  <RotateCcw className="size-3.5 text-[var(--ink-mute)]" />
+                  <span>{previewLabel(files)}</span>
+                  <RotateCcw size={13} style={{ color: "var(--s-ink-mute)", flexShrink: 0 }} />
                 </button>
 
-                <div className="overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-2)]">
-                  <div className="border-b border-[var(--border-soft)] px-3 py-2 font-mono text-[10.5px] uppercase tracking-wide text-[var(--ink-mute)]">
-                    {fileTitle(activeFile)}
+                {/* Preview block */}
+                <div
+                  style={{
+                    overflow: "hidden",
+                    borderRadius: 9,
+                    border: "1px solid var(--s-border)",
+                    background: "var(--s-surface)",
+                    marginBottom: 20,
+                  }}
+                >
+                  <div
+                    style={{
+                      borderBottom: "1px solid var(--s-border-soft)",
+                      padding: "7px 12px",
+                      fontFamily: "var(--s-mono)",
+                      fontSize: 10,
+                      textTransform: "uppercase" as const,
+                      letterSpacing: "0.04em",
+                      color: "var(--s-ink-mute)",
+                    }}
+                  >
+                    {fileTitle(activeFile, share.entity_type)}
                   </div>
-                  <pre className="max-h-[142px] overflow-hidden whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-[11px] leading-relaxed text-[var(--ink-soft)]">
+                  <pre
+                    style={{
+                      margin: 0,
+                      maxHeight: 140,
+                      overflow: "hidden",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      padding: "10px 12px",
+                      fontFamily: "var(--s-mono)",
+                      fontSize: 11,
+                      lineHeight: 1.6,
+                      color: "var(--s-ink-soft)",
+                    }}
+                  >
                     {text}
                   </pre>
                 </div>
 
-                <div className="mt-5 flex flex-col gap-2">
-                  <a
-                    href={primaryHref}
-                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-[9px] border border-[var(--primary)] bg-[var(--primary)] px-4 text-sm font-medium text-[var(--primary-text)] shadow-[var(--shadow-btn)]"
+                {/* CTA section */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {/* Primary action — "Copy install command" for skills/packs, or "Run this worker" / "Download" */}
+                  {isWorker || share.entity_type === "brain_pack" ? (
+                    <button
+                      type="button"
+                      onClick={copiedCmd ? undefined : copyInstallCmd}
+                      style={{
+                        display: "inline-flex",
+                        height: 44,
+                        width: "100%",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        borderRadius: 9,
+                        border: "none",
+                        background: "#141414",
+                        padding: "0 16px",
+                        fontSize: 14,
+                        fontWeight: 500,
+                        color: "#ffffff",
+                        cursor: "pointer",
+                        letterSpacing: "-0.01em",
+                      }}
+                    >
+                      {copiedCmd ? <Check size={16} /> : <Copy size={16} />}
+                      {copiedCmd ? "Copied!" : "Copy install command"}
+                    </button>
+                  ) : (
+                    <a
+                      href={primaryHref}
+                      style={{
+                        display: "inline-flex",
+                        height: 44,
+                        width: "100%",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        borderRadius: 9,
+                        border: "none",
+                        background: "#141414",
+                        padding: "0 16px",
+                        fontSize: 14,
+                        fontWeight: 500,
+                        color: "#ffffff",
+                        textDecoration: "none",
+                        letterSpacing: "-0.01em",
+                      }}
+                    >
+                      <Download size={16} />
+                      {primaryLabel}
+                    </a>
+                  )}
+
+                  {/* Command/link artifact */}
+                  <code
+                    style={{
+                      display: "block",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      borderRadius: 7,
+                      border: "1px solid var(--s-border)",
+                      background: "var(--s-surface)",
+                      padding: "9px 12px",
+                      fontFamily: "var(--s-mono)",
+                      fontSize: 11,
+                      color: "var(--s-ink-soft)",
+                    }}
                   >
-                    {share.entity_type === "brain_file" ? <Download className="size-4" /> : <ExternalLink className="size-4" />}
-                    {primaryLabel}
-                  </a>
-                  <code className="block truncate rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-2)] px-3 py-2.5 font-mono text-[11px] text-[var(--ink-soft)]">
-                    {shareUrl}
+                    {isWorker || share.entity_type === "brain_pack" ? installCmd : shareUrl}
                   </code>
-                  <button
-                    type="button"
-                    onClick={copyShareLink}
-                    className="inline-flex h-8 items-center justify-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-card)] px-3 font-mono text-[11px] text-[var(--ink-soft)] hover:border-[var(--ink-mute)] hover:text-[var(--ink)]"
+
+                  {/* Secondary links row */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                    }}
                   >
-                    {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                    {copied ? "Copied" : "Copy share link"}
-                  </button>
-                  <div className="text-center font-mono text-[10.5px] text-[var(--ink-mute)]">
-                    <b className="font-semibold text-[var(--ink-soft)]">No login needed</b>. Anyone with the link can view this page.
+                    {(isWorker || share.entity_type === "brain_pack") && (
+                      <>
+                        <span style={{ fontFamily: "var(--s-mono)", fontSize: 10.5, color: "var(--s-ink-mute)" }}>
+                          Install into one agent only?
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {}}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            padding: 0,
+                            cursor: "pointer",
+                            fontFamily: "var(--s-mono)",
+                            fontSize: 10.5,
+                            color: "var(--s-ink-soft)",
+                            textDecoration: "underline",
+                          }}
+                        >
+                          Show options
+                        </button>
+                      </>
+                    )}
+                    {isFile && (
+                      <button
+                        type="button"
+                        onClick={copyShareLink}
+                        style={{
+                          display: "inline-flex",
+                          height: 32,
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          borderRadius: 7,
+                          border: "1px solid var(--s-border)",
+                          background: "var(--s-card)",
+                          padding: "0 12px",
+                          fontFamily: "var(--s-mono)",
+                          fontSize: 11,
+                          color: "var(--s-ink-soft)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {copied ? <Check size={13} /> : <Copy size={13} />}
+                        {copied ? "Copied" : "Copy share link"}
+                      </button>
+                    )}
                   </div>
+
+                  {/* No account note */}
+                  {(isWorker || share.entity_type === "brain_pack") && (
+                    <p
+                      style={{
+                        margin: 0,
+                        fontFamily: "var(--s-mono)",
+                        fontSize: 10.5,
+                        color: "var(--s-ink-mute)",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      <strong style={{ fontWeight: 600, color: "var(--s-ink-soft)" }}>No account needed.</strong>{" "}
+                      Paste the command into your Claude project.
+                    </p>
+                  )}
                 </div>
 
-                <div className="mt-auto flex items-center justify-between pt-5 font-mono text-[11px] text-[var(--ink-mute)]">
+                {/* Footer */}
+                <div
+                  style={{
+                    marginTop: 20,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    paddingTop: 8,
+                    fontFamily: "var(--s-mono)",
+                    fontSize: 11,
+                    color: "var(--s-ink-mute)",
+                  }}
+                >
                   <span>{entityLabel(share.entity_type)}</span>
                   <button
                     type="button"
                     onClick={() => setShowFiles(true)}
-                    className="inline-flex items-center gap-1.5 rounded-[5px] px-2 py-1 text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-[var(--ink)]"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      borderRadius: 5,
+                      border: "none",
+                      background: "none",
+                      padding: "4px 8px",
+                      fontFamily: "var(--s-mono)",
+                      fontSize: 11,
+                      color: "var(--s-ink-soft)",
+                      cursor: "pointer",
+                    }}
                   >
                     Inspect content
-                    <Layers className="size-3.5" />
+                    <Layers size={13} />
                   </button>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="flex h-full flex-col">
-              <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-5 py-3.5">
-                <span className="font-mono text-[11px] uppercase tracking-wide text-[var(--ink-mute)]">
+            /* File inspector panel */
+            <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 600 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  borderBottom: "1px solid var(--s-border-soft)",
+                  padding: "12px 20px",
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: "var(--s-mono)",
+                    fontSize: 11,
+                    textTransform: "uppercase" as const,
+                    letterSpacing: "0.04em",
+                    color: "var(--s-ink-mute)",
+                  }}
+                >
                   What is inside / {files.length || 1} item{files.length === 1 ? "" : "s"}
                 </span>
                 <button
                   type="button"
                   onClick={() => setShowFiles(false)}
-                  className="inline-flex items-center gap-1.5 rounded-[5px] px-2 py-1 font-mono text-[11px] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-[var(--ink)]"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    borderRadius: 5,
+                    border: "none",
+                    background: "none",
+                    padding: "4px 8px",
+                    fontFamily: "var(--s-mono)",
+                    fontSize: 11,
+                    color: "var(--s-ink-soft)",
+                    cursor: "pointer",
+                  }}
                 >
                   Back
                 </button>
               </div>
 
               {files.length > 0 && (
-                <div className="flex gap-0.5 overflow-x-auto border-b border-[var(--border-soft)] px-3 pt-2">
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 2,
+                    overflowX: "auto",
+                    borderBottom: "1px solid var(--s-border-soft)",
+                    padding: "8px 12px 0",
+                  }}
+                >
                   {files.map((file) => (
                     <button
                       type="button"
                       key={file.path}
                       onClick={() => setActivePath(file.path)}
-                      className={`mb-[-1px] whitespace-nowrap rounded-t-[5px] border-b px-2.5 py-2 font-mono text-[11px] ${
-                        activeFile?.path === file.path
-                          ? "border-[var(--ink)] bg-[var(--bg-2)] text-[var(--ink)]"
-                          : "border-transparent text-[var(--ink-mute)] hover:text-[var(--ink)]"
-                      }`}
+                      style={{
+                        flexShrink: 0,
+                        borderRadius: "5px 5px 0 0",
+                        border: "none",
+                        borderBottom: activeFile?.path === file.path ? "2px solid var(--s-ink)" : "2px solid transparent",
+                        background: activeFile?.path === file.path ? "var(--s-surface)" : "none",
+                        padding: "6px 10px",
+                        fontFamily: "var(--s-mono)",
+                        fontSize: 11,
+                        color: activeFile?.path === file.path ? "var(--s-ink)" : "var(--s-ink-mute)",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                        marginBottom: -1,
+                      }}
                     >
                       {file.path}
-                      <span className="ml-1 text-[var(--ink-faint)]">{formatBytes(file.size)}</span>
+                      <span style={{ marginLeft: 4, color: "var(--s-ink-mute)", fontSize: 10 }}>{formatBytes(file.size)}</span>
                     </button>
                   ))}
                 </div>
               )}
 
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <pre className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-[var(--bg-2)] px-4 py-4 font-mono text-[11.5px] leading-relaxed text-[var(--ink-soft)]">
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
+                <pre
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflowY: "auto",
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    background: "var(--s-surface)",
+                    padding: "16px",
+                    fontFamily: "var(--s-mono)",
+                    fontSize: 11.5,
+                    lineHeight: 1.65,
+                    color: "var(--s-ink-soft)",
+                  }}
+                >
                   {activeFile?.content_text || "Preview is unavailable for this file."}
                 </pre>
               </div>
 
-              <div className="flex flex-col gap-3 border-t border-[var(--border-soft)] px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="grid size-8 place-items-center rounded-full bg-[var(--bg-3)] text-[11px] font-semibold text-[var(--ink)]">W</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[12.5px] font-semibold text-[var(--ink)]">Workeros</div>
-                    <div className="font-mono text-[10.5px] text-[var(--ink-mute)]">Shared content</div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  borderTop: "1px solid var(--s-border-soft)",
+                  padding: "12px 16px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <SenderAvatar name={senderName} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--s-ink)" }}>Workeros</div>
+                    <div style={{ fontFamily: "var(--s-mono)", fontSize: 10.5, color: "var(--s-ink-mute)" }}>Shared content</div>
                   </div>
                 </div>
-                <div className="rounded-[7px] border border-[color-mix(in_srgb,var(--success)_30%,var(--border-default))] bg-[color-mix(in_srgb,var(--success)_10%,var(--bg-card))] px-3 py-2 text-[11px] leading-relaxed text-[var(--ink-soft)]">
-                  <strong className="font-semibold text-[var(--ink)]">Public preview.</strong> Review the visible content before downloading or copying.
+                <div
+                  style={{
+                    borderRadius: 7,
+                    border: "1px solid #c5dfc9",
+                    background: "#edf7ef",
+                    padding: "8px 12px",
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: "var(--s-ink-soft)",
+                  }}
+                >
+                  <strong style={{ fontWeight: 600, color: "var(--s-ink)" }}>Public preview.</strong>{" "}
+                  Review the visible content before downloading or copying.
                 </div>
               </div>
             </div>
           )}
         </section>
 
-        <div className="mx-auto mt-4 flex w-[min(452px,100%)] flex-wrap items-center justify-between gap-3 rounded-[11px] border border-[var(--border-default)] bg-[var(--bg-2)] px-5 py-4">
-          <p className="m-0 text-[13px] leading-relaxed text-[var(--ink-soft)]">Like this? Run your own AI workers with Workeros.</p>
+        {/* Bottom conversion CTA — matches reference: neutral band, black button with arrow */}
+        <div
+          style={{
+            marginTop: 16,
+            width: "100%",
+            borderRadius: 11,
+            border: "1px solid #e2e2e0",
+            background: "#f0f0ee",
+            padding: "16px 20px",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "#555552" }}>
+            Like this? Start your own team&#39;s skill library on Workeros.
+          </p>
           <a
             href="/login"
-            className="inline-flex h-8 items-center justify-center rounded-[7px] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)]"
+            style={{
+              display: "inline-flex",
+              height: 34,
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 7,
+              border: "none",
+              background: "#141414",
+              padding: "0 14px",
+              fontSize: 13,
+              fontWeight: 500,
+              color: "#ffffff",
+              textDecoration: "none",
+              letterSpacing: "-0.01em",
+              whiteSpace: "nowrap",
+            }}
           >
-            Start workspace
+            Start your workspace →
           </a>
         </div>
       </div>
