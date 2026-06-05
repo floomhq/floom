@@ -4,6 +4,29 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 ---
 
+## Backend pass 2 - model split, Emily v5, sharing, Phase G (2026-06-05)
+
+**Scope:** model split, full conversation storage, persona v5, worker short links, MCP tool creation, per-approval public read links, and control-character rejection for secret values.
+
+**Status:** VERIFIED
+
+**Verification:**
+- Final deployed SHA `25b29603d8adc23963ae2f255f3a9bb21987f133`; deploy health `ok`, migration version 55.
+- Production process env verified `WORKEROS_CHAT_MODEL=gpt-5.4-mini` and `WORKEROS_CODEGEN_MODEL=gpt-5.5`.
+- `/system/workspace-agent` returned 200 with model `gpt-5.4-mini`, 31 tools, and `mcp_tools__list/register/update/delete`.
+- `/chat` verified Emily identity and proactive bare greeting behavior with no em/en dash in final text.
+- Production codegen on `gpt-5.5` drafted and created `p2test-codegen-temp-fix`; runs `run_9a614b0db803` and `run_b1545a385c08` completed with expected scalar reverse outputs.
+- Conversation storage probe kept 55 production rows while prompt history returned 50.
+- Short-link probe minted `fls_hosacSIW5y`; public resolver and `/s` alias returned only allow-listed worker fields.
+- `/mcp/tools` create/list/delete worked, and MCP JSON-RPC `tools/list` included the created tool.
+- Signed public approval GET returned a single pending approval with no `owner_id` or `public_link`; bad token returned 401.
+- Secret values containing newline, tab, and NUL returned 400.
+- `p2test-codegen-temp-fix` was deleted; follow-up GET returned 404; DB counts for p2test workers, short links, MCP tools, approvals, and runs were 0.
+
+**Audit:** `docs/audits/backend-pass2-2026-06-05.md`
+
+---
+
 ## P0 — wedge flow (G5-confirm #269, 78/100): "describe a job → get a worker" did NOT create a worker
 
 ### #W1 Prompt-to-worker dead-ended on a drafted bundle (2026-05-29)
