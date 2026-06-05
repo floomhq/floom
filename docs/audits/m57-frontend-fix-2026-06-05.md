@@ -82,7 +82,23 @@ If M58 was a backend persist issue (connection not written to DB), that would be
 
 ## Verification
 
-The fix should be verified visually:
+### Before fix (confirmed via headless browser, 2026-06-05)
+
+Both paths land on the login screen for an unauthenticated browser:
+
+- `https://workers.floom.dev/api/proxy/connections/callback?status=success&connection_id=ca_test`
+  final URL: `https://workers.floom.dev/login?next=%2Fconnections%3Fconnected%3D1`
+  screenshot: `m57-proxy-callback-screenshot-before-fix.png`
+
+- `https://workers.floom.dev/connections/callback?status=success&connection_id=ca_test`
+  final URL: `https://workers.floom.dev/login?next=%2Fconnections%3Fconnected%3D1`
+  screenshot: `m57-frontend-callback-screenshot-before-fix.png`
+
+Both show "Sign in — Enter your access secret to continue." This confirms the reported bug.
+
+### After fix (manual verification required post-merge)
+
+To verify with an authenticated session:
 1. Log in to `workers.floom.dev`
 2. Navigate to `/connections`
 3. Click a tool to connect (e.g., Gmail, Outlook)
@@ -94,5 +110,3 @@ The proxy callback behaviour (307 forwarding) can be verified separately by runn
 ```
 apps/web/tests/proxy-route.test.ts
 ```
-
-No screenshot available (no browser automation in this worktree), but the code path is deterministic given the analysis above.
