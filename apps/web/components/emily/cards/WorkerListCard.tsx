@@ -1,6 +1,4 @@
 import { Box, ExternalLink, Play } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { WorkerListCard as WorkerListCardType } from "@/lib/emily-chat-types";
 
@@ -39,16 +37,20 @@ export function WorkerListCard({ card }: { card: WorkerListCardType }) {
               )}
             </span>
             <div className="flex gap-1 shrink-0">
-              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" asChild title="Run">
-                <a href={`/workers/${w.id}/runs`}>
-                  <Play className="size-3" />
-                </a>
-              </Button>
-              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" asChild title="Open">
-                <a href={`/workers/${w.id}`}>
-                  <ExternalLink className="size-3" />
-                </a>
-              </Button>
+              <a
+                href={`/workers/${w.id}/runs`}
+                title="Run"
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <Play className="size-3" />
+              </a>
+              <a
+                href={`/workers/${w.id}`}
+                title="Open"
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <ExternalLink className="size-3" />
+              </a>
             </div>
           </li>
         ))}
