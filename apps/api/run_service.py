@@ -744,7 +744,7 @@ def _synthesize_example_input_from_schema(manifest: Dict[str, Any]) -> Dict[str,
         elif itype in ("object", "dict", "json"):
             sample[name] = {"key": "value"}
         elif itype == "number":
-            sample[name] = "1"
+            sample[name] = 1
         elif itype == "boolean":
             sample[name] = True
         else:
@@ -988,7 +988,7 @@ def _build_smoke_inputs(
             elif itype in ("object", "dict", "json"):
                 inputs[inp.name] = {"key": "value"}
             elif itype == "number":
-                inputs[inp.name] = "1"
+                inputs[inp.name] = 1
             else:
                 inputs[inp.name] = "sample"
     return inputs

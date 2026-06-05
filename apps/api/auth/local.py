@@ -17,8 +17,13 @@ class SharedSecretAuthProvider:
         self._secret = secret
 
     async def verify(self, request: Request) -> AuthContext:
-        provided = request.headers.get("x-floom-secret", "")
-        if not provided or not hmac.compare_digest(provided, self._secret):
+        provided = None
+        for key, value in request.scope.get("headers", []):
+            if key.lower() == b"x-floom-secret":
+                provided = value
+                break
+        expected = self._secret.encode("latin-1")
+        if provided is None or not hmac.compare_digest(provided, expected):
             raise HTTPException(status_code=401, detail="unauthorized")
         user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
         if os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":

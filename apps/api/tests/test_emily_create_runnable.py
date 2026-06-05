@@ -18,7 +18,8 @@ worker. ``_tool_workers_update`` is converged onto the editor path
 These tests assert:
   * after Emily's create, ``WORKERS_DIR/<id>/`` contains ``worker.yml`` + ``run.py``,
   * a run of that worker reaches ``completed`` (no "worker directory not found"),
-  * Emily's update writes the new ``worker.yml`` to disk and preserves ``run.py``.
+  * Emily's update writes the new ``worker.yml`` to disk and regenerates ``run.py``
+    before smoke-gating, so manifest behavior edits reach runtime.
 """
 
 from __future__ import annotations
@@ -127,7 +128,7 @@ def _fake_uppercase_driver(monkeypatch, run_service):
 _REAL_RUN_PY = (
     "import json\n"
     "from pathlib import Path\n"
-    "inputs = json.loads(Path('inputs/input.json').read_text())\n"
+    "inputs = json.loads(Path('inputs.json').read_text())\n"
     "Path('result.json').write_text(json.dumps({'status': 'success', "
     "'outputs': {'result': str(inputs.get('text', '')).upper()}, 'artifacts': []}))\n"
 )
@@ -207,7 +208,7 @@ def test_emily_created_worker_runs_to_completion(booted, monkeypatch):
     assert output.get("result") == "HELLO WORLD", output
 
 
-def test_emily_update_writes_manifest_to_disk_and_keeps_run_py(booted, monkeypatch):
+def test_emily_update_writes_manifest_to_disk_and_regenerates_run_py(booted, monkeypatch):
     chat_service = booted["chat_service"]
     run_service = booted["run_service"]
     workers_dir = booted["workers_dir"]
@@ -217,9 +218,20 @@ def test_emily_update_writes_manifest_to_disk_and_keeps_run_py(booted, monkeypat
     assert created["ok"] is True, created
     worker_id = created["worker_id"]
 
-    # Give run.py a recognizable marker so we can prove it survives the update.
+    # Give run.py stale generated behavior so we can prove update refreshes it.
     run_py_path = workers_dir / worker_id / "run.py"
-    run_py_path.write_text("# EMILY-MARKER\nprint('hi')\n", encoding="utf-8")
+    run_py_path.write_text("# stale uppercase implementation\nprint('UPPER')\n", encoding="utf-8")
+
+    def _lower_repair(*, run_code, failure, secrets, log_fn, intent=""):
+        return (
+            "import json\n"
+            "from pathlib import Path\n"
+            "inputs=json.loads(Path('inputs.json').read_text())\n"
+            "Path('result.json').write_text(json.dumps({'status':'success',"
+            "'outputs':{'result':str(inputs.get('text','')).lower()}}))\n"
+        )
+
+    monkeypatch.setattr(run_service, "_repair_run_py", _lower_repair)
 
     updated_yml = _UPPERCASE_YML.replace(
         'description: "Uppercases a text input."',
@@ -232,9 +244,11 @@ def test_emily_update_writes_manifest_to_disk_and_keeps_run_py(booted, monkeypat
 
     yml_on_disk = (workers_dir / worker_id / "worker.yml").read_text(encoding="utf-8")
     assert "(edited)" in yml_on_disk, "updated manifest was not written to disk"
-    # run.py must be preserved, not deleted by the update.
+    # run.py must be regenerated from the updated manifest, not preserved stale.
     assert run_py_path.is_file(), "run.py was deleted by update"
-    assert "EMILY-MARKER" in run_py_path.read_text(encoding="utf-8")
+    run_py = run_py_path.read_text(encoding="utf-8")
+    assert ".lower()" in run_py
+    assert "UPPER" not in run_py
 
 
 def test_emily_create_generates_runpy_and_gates(booted, monkeypatch):
@@ -663,9 +677,9 @@ def test_agent_skill_md_worker_not_codegen_or_backfilled_on_update(booted, monke
 
     codegen_calls: list = []
     orig = chat_service._generate_run_py_from_manifest
-    def _spy(wid, manifest, uid, log_fn):
+    def _spy(wid, manifest, uid, log_fn, *, force=False):
         codegen_calls.append(wid)
-        return orig(wid, manifest, uid, log_fn)
+        return orig(wid, manifest, uid, log_fn, force=force)
     monkeypatch.setattr(chat_service, "_generate_run_py_from_manifest", _spy)
 
     # Gate returns skipped for an agent worker (not a script-mode worker) — fine.
@@ -723,9 +737,9 @@ def test_run_js_worker_not_codegen_or_placeholder_gated(booted, monkeypatch):
 
     codegen_calls: list = []
     orig_gen = chat_service._generate_run_py_from_manifest
-    def _spy_gen(wid, manifest, uid, log_fn):
+    def _spy_gen(wid, manifest, uid, log_fn, *, force=False):
         codegen_calls.append(wid)
-        return orig_gen(wid, manifest, uid, log_fn)
+        return orig_gen(wid, manifest, uid, log_fn, force=force)
     monkeypatch.setattr(chat_service, "_generate_run_py_from_manifest", _spy_gen)
 
     # Driver runs node run.js successfully.
