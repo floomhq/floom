@@ -22,7 +22,7 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   Copy, Code2, Clock, Plug2, ListChecks, History,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, Plus, RotateCcw,
+  Brain as BrainIcon, Settings2, Plus, RotateCcw, Search, Check,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
@@ -73,6 +73,7 @@ import {
   normalizeAppSlug,
   SUPPORTED_APPS,
 } from "@/components/connections/connection-data";
+import { BrandLogo } from "@/components/connections/BrandLogo";
 import { formatRelative, formatDuration } from "@/lib/formatters";
 import { humanizeRunError } from "@/lib/run-format";
 import { RunStatusBadge } from "@/components/RunStatus";
@@ -3187,9 +3188,17 @@ function AddToolControl({
 }) {
   const [selected, setSelected] = useState("");
   const [customSlug, setCustomSlug] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const existing = new Set(existingSlugs.map((s) => s.toLowerCase()));
   const options = SUPPORTED_APPS.filter((app) => !existing.has(app.slug.toLowerCase()));
+  const filteredOptions = options.filter((app) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return app.displayName.toLowerCase().includes(q) || app.slug.toLowerCase().includes(q);
+  });
   const busy = saving !== null;
+  const selectedApp = selected && selected !== "__custom__" ? getSupportedApp(selected) : null;
 
   const slugToAdd =
     selected === "__custom__" ? normalizeAppSlug(customSlug) : selected;
@@ -3197,19 +3206,77 @@ function AddToolControl({
 
   return (
     <div className="flex flex-wrap items-center gap-2 pt-1">
-      <Select value={selected} onValueChange={(v) => setSelected(v ?? "")} disabled={busy}>
-        <SelectTrigger className="h-8 w-48 border-line text-xs">
-          <SelectValue placeholder="Add a tool…" />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((app) => (
-            <SelectItem key={app.slug} value={app.slug}>
-              {app.displayName}
-            </SelectItem>
-          ))}
-          <SelectItem value="__custom__">Other (enter slug)…</SelectItem>
-        </SelectContent>
-      </Select>
+      <DropdownMenu open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DropdownMenuTrigger
+          className="inline-flex h-8 w-56 items-center justify-between rounded-[var(--radius-button)] border border-line bg-card px-2 text-xs font-normal text-foreground shadow-xs transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          disabled={busy}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            {selectedApp ? (
+              <span className="flex size-5 shrink-0 items-center justify-center rounded border border-line bg-card">
+                <BrandLogo icon={selectedApp.icon} className="size-3.5" />
+              </span>
+            ) : selected === "__custom__" ? (
+              <span className="flex size-5 shrink-0 items-center justify-center rounded border border-line bg-muted text-[0.65rem] font-medium text-muted-foreground">
+                #
+              </span>
+            ) : null}
+            <span className="truncate">
+              {selectedApp?.displayName || (selected === "__custom__" ? "Other (enter slug)" : "Add a tool...")}
+            </span>
+          </span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64 p-2">
+          <div className="relative mb-2">
+            <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder="Search apps..."
+              className="h-8 pl-7 text-xs"
+              autoFocus
+            />
+          </div>
+          <div className="max-h-64 overflow-y-auto">
+            {filteredOptions.map((app) => (
+              <DropdownMenuItem
+                key={app.slug}
+                className="flex cursor-pointer items-center gap-2 text-xs"
+                onSelect={() => {
+                  setSelected(app.slug);
+                  setPickerOpen(false);
+                  setQuery("");
+                }}
+              >
+                <span className="flex size-6 shrink-0 items-center justify-center rounded border border-line bg-card">
+                  <BrandLogo icon={app.icon} className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1 truncate">{app.displayName}</span>
+                {selected === app.slug ? <Check className="size-3.5 text-muted-foreground" /> : null}
+              </DropdownMenuItem>
+            ))}
+            {filteredOptions.length === 0 ? (
+              <div className="px-2 py-3 text-xs text-muted-foreground">No matching apps.</div>
+            ) : null}
+            <DropdownMenuItem
+              className="mt-1 flex cursor-pointer items-center gap-2 border-t border-line pt-2 text-xs"
+              onSelect={() => {
+                setSelected("__custom__");
+                setPickerOpen(false);
+                setQuery("");
+              }}
+            >
+              <span className="flex size-6 shrink-0 items-center justify-center rounded border border-line bg-muted text-[0.65rem] font-medium text-muted-foreground">
+                #
+              </span>
+              <span className="min-w-0 flex-1 truncate">Other (enter slug)</span>
+              {selected === "__custom__" ? <Check className="size-3.5 text-muted-foreground" /> : null}
+            </DropdownMenuItem>
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {selected === "__custom__" && (
         <Input
           value={customSlug}
