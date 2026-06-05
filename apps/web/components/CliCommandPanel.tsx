@@ -45,7 +45,7 @@ function buildMcpSnippet(target: McpTarget): string {
   const note = target === "codex"
     ? "\n# Codex uses a manual MCP config paste today; the command prints the server snippet."
     : "";
-  return `npm i -g @floomhq/workeros\nworkeros mcp add --target ${cliTarget}${note}`;
+  return `npm i -g @floomhq/workeros\nworkeros mcp install --target ${cliTarget}${note}`;
 }
 
 // The OSS MCP server is HTTP transport: clients connect to /mcp-tools/serve and
@@ -89,7 +89,7 @@ const CLI_COMMANDS: { name: string; description: string }[] = [
   { name: "workeros secrets delete <key>", description: "Delete a secret." },
   { name: "workeros connections list", description: "List saved app and MCP connections." },
   { name: "workeros connections import-mcp-config <path>", description: "Import MCP servers from a client config JSON." },
-  { name: "workeros mcp install --target <client>", description: "Install the Workeros MCP server into a client config." },
+  { name: "workeros mcp install --target <client>", description: "Install the Workeros MCP server into a client config (claude, cursor, vscode, windsurf, generic)." },
   { name: "workeros doctor", description: "Check CLI setup: API, auth, MCP, runs endpoint." },
 ];
 
