@@ -17,6 +17,7 @@
 //     that the /approvals/review page calls from the browser
 //   - /w/* : public worker share page (its data is fetched server-side via a
 //     signed HMAC token, so it needs no proxy exception — only page access)
+//   - /s/* : public standalone share pages for workers and Brain content
 //   - Next.js internals + static assets
 
 import { NextRequest, NextResponse } from "next/server";
@@ -28,6 +29,7 @@ const PUBLIC_PAGE_PREFIXES = [
   "/connections/callback", // OAuth provider return path; finishes via tokenless callback id
   "/approvals/review", // external signed-link approval review
   "/w/", // public worker share (token-gated, server-rendered)
+  "/s/", // public standalone share (token-gated, server-rendered)
 ];
 
 // /api/proxy sub-paths that map to PUBLIC upstream endpoints and must stay
@@ -50,9 +52,17 @@ function isPublicProxy(pathname: string): boolean {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  const withNoindex = (response: NextResponse) => {
+    if (pathname === "/s" || pathname.startsWith("/s/")) {
+      response.headers.set("X-Robots-Tag", "noindex, nofollow");
+      response.headers.set("Cache-Control", "no-store");
+    }
+    return response;
+  };
+
   // Auth endpoints are always reachable (you log in/out through them).
   if (pathname.startsWith("/api/auth/")) {
-    return NextResponse.next();
+    return withNoindex(NextResponse.next());
   }
 
   const token = req.cookies.get(SESSION_COOKIE)?.value;
@@ -62,10 +72,10 @@ export async function middleware(req: NextRequest) {
   if (pathname.startsWith("/api/proxy")) {
     if (isPublicProxy(pathname)) {
       // Public, token-gated upstream endpoint (signed-link approvals). Allow.
-      return NextResponse.next();
+      return withNoindex(NextResponse.next());
     }
     if (authed) {
-      return NextResponse.next();
+      return withNoindex(NextResponse.next());
     }
     return NextResponse.json(
       { detail: "Authentication required." },
@@ -75,10 +85,10 @@ export async function middleware(req: NextRequest) {
 
   // ----- App pages -----
   if (isPublicPage(pathname)) {
-    return NextResponse.next();
+    return withNoindex(NextResponse.next());
   }
   if (authed) {
-    return NextResponse.next();
+    return withNoindex(NextResponse.next());
   }
 
   // Not authed, non-public page -> send to login, preserving intended path.
