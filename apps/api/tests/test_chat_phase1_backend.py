@@ -164,6 +164,34 @@ def test_tool_result_preview_does_not_expose_file_content(booted):
     assert metadata["result_preview"]["ok"] is True
 
 
+def test_tool_result_preview_redacts_secret_query_params(booted):
+    chat_service = booted["chat_service"]
+    approval_token = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+
+    metadata = chat_service.build_tool_event_metadata(
+        "approvals__list_pending",
+        "call_approval_link",
+        args={},
+        result={
+            "ok": True,
+            "count": 1,
+            "approvals": [
+                {
+                    "id": "apr_1",
+                    "run_id": "run_1",
+                    "worker_id": "gmail_sender",
+                    "link": f"https://workers.floom.dev/approvals/review?id=apr_1&token={approval_token}",
+                }
+            ],
+        },
+        phase="result",
+    )
+
+    encoded = json.dumps(metadata["result_preview"])
+    assert approval_token not in encoded
+    assert "token=[redacted]" in encoded
+
+
 def test_finish_tool_args_are_normalized_before_card_metadata(booted):
     chat_service = booted["chat_service"]
 
