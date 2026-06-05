@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/guard_vercel_project.mjs && next build",
+    "deploy:prod": "vercel deploy --prod --yes && bash ops/smoke-routes.sh",
     "start": "next start",
     "lint": "eslint"
   },

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "node scripts/sync-engine-web.mjs && cross-env NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy next dev",
     "build": "node scripts/sync-engine-web.mjs && cross-env NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy next build",
+    "deploy:prod": "npm run sync && vercel deploy --prod --yes && bash ../ops/smoke-routes.sh",
     "start": "next start",
     "lint": "node scripts/sync-engine-web.mjs && eslint",
     "sync": "node scripts/sync-engine-web.mjs",

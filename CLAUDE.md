@@ -91,21 +91,30 @@ git add engine && git commit -m "chore(engine): bump to <sha> (<what>)"
   `/app/*` via the apex project's `vercel.json` rewrite to
   `workeros-cloud-dashboard.vercel.app`. Landing: repo root `app/` → Vercel
   landing project `workeros-cloud-landing` (apex). NOT git-auto-deployed.
+- **HARD post-deploy gate:** after every production deploy and before relying on
+  any production alias, run `bash ops/smoke-routes.sh` from the repo root. It
+  MUST pass. If it fails, the deploy is not promoted, and any changed alias is
+  rolled back to the last known-good deployment. This is the no-CI compensating
+  control for route loops and server errors.
 - **Dashboard is DE-FORKED (2026-05-30, see WORKPLAN-20260530-defork-dashboard).**
   `web/` is NOT a fork of `engine/apps/web` — it IS the engine UI, synced at
   build by `web/scripts/sync-engine-web.mjs` + a 7-file cloud overlay in
   `web/overlay/`. The synced tree (`web/{app,components,lib,public,tests}` + root
   config) is **generated + gitignored**; only `web/overlay/`, `web/scripts/`,
-  `web/package.json`, and config are tracked. To deploy the dashboard:
-  `cd web && npm run sync && vercel deploy --prod --yes` (sync MUST run first so
-  the generated tree is on disk and uploaded — the Vercel build can't reach the
-  root `engine/` submodule, so its `sync` step skips and uses the uploaded tree).
+  `web/package.json`, and config are tracked. To deploy the dashboard, run
+  `cd web && npm run deploy:prod`; it runs `npm run sync`, deploys with Vercel,
+  then runs the hard smoke gate. If using raw Vercel commands, the equivalent is
+  `npm run sync && vercel deploy --prod --yes && cd .. && bash ops/smoke-routes.sh`
+  (sync MUST run first so the generated tree is on disk and uploaded — the Vercel
+  build can't reach the root `engine/` submodule, so its `sync` step skips and
+  uses the uploaded tree).
   To pull engine UI changes: bump the submodule, `npm run sync`, deploy. The env
   seams `NEXT_PUBLIC_BASE_PATH=/app` + `NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy`
   are baked into `web/package.json`'s build script. `npm run check-drift` (CI)
   fails if the synced tree differs from the engine — it can never silently drift.
   Engine seams live upstream (floomhq/workeros#324: env api-base, env basePath,
-  exported sidebar parts). Landing deploys with `vercel deploy --prod --yes`.
+  exported sidebar parts). Landing deploys with `npm run deploy:prod` from the
+  repo root, or `vercel deploy --prod --yes && bash ops/smoke-routes.sh`.
 - **NOTE (2026-05-30):** the de-fork bumped the `engine/` submodule pin to
   `66e9a6e` (from the old `#197`). This moves the **API's** engine too. The
   dashboard frontend is verified against the current API, but the running API on
