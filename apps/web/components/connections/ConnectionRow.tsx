@@ -1,6 +1,7 @@
 "use client";
 
 import { RefreshCw, Trash2, Zap, MoreHorizontal } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -70,6 +71,7 @@ export function ConnectionRow({
   reconnecting,
   testing,
   highlighted,
+  lastUsedLoading,
   onDelete,
   onReconnect,
   onRefresh,
@@ -81,6 +83,8 @@ export function ConnectionRow({
   reconnecting?: boolean;
   testing?: boolean;
   highlighted?: boolean;
+  /** N13: true while the last-used async fetch is still in flight — show skeleton instead of "—" */
+  lastUsedLoading?: boolean;
   onDelete: (connection: ConnectionView) => void;
   onReconnect: (slug: string) => void;
   onRefresh: (connection: ConnectionView) => void;
@@ -142,9 +146,13 @@ export function ConnectionRow({
         )}
       </span>
 
-      {/* Last used (desktop only) */}
+      {/* Last used (desktop only) — N13: show skeleton while async data loads */}
       <span className="hidden md:inline text-xs text-muted-foreground truncate">
-        {connection.lastUsedAt ? `Used ${formatTimestamp(connection.lastUsedAt)}` : <span className="text-muted-foreground/50">—</span>}
+        {lastUsedLoading
+          ? <Skeleton className="h-3 w-16 rounded" />
+          : connection.lastUsedAt
+          ? `Used ${formatTimestamp(connection.lastUsedAt)}`
+          : <span className="text-muted-foreground/50">—</span>}
       </span>
 
       {/* Status pill (desktop only — mobile shows in row above) */}

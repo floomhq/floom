@@ -91,7 +91,10 @@ export function ShareWorkerButton({
           )
         }
       />
-      <DialogContent className="sm:max-w-md p-0 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      {/* N23: offset left by half the sidebar width on md+ so the modal centres
+          over the content pane rather than the full viewport (which includes the
+          240px sidebar, pulling the modal left under the sidebar rail). */}
+      <DialogContent className="sm:max-w-md p-0 overflow-hidden md:translate-x-[120px]" onClick={(e) => e.stopPropagation()}>
         {/* Card header */}
         <div className="px-5 pt-5 pb-4 border-b border-[var(--border-soft)]">
           <DialogHeader>
