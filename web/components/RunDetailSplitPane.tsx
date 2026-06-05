@@ -110,13 +110,13 @@ export function RunDetailSplitPane({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {/* Canonical Source-tab hash is #source (SECTION_TO_HASH[code]);
-              #code stays a back-compat alias in HASH_TO_SECTION. Use the
-              canonical slug so the Edit link lands on the Source tab. */}
+          {/* N27: was "Edit" — misleading in run-detail context (users expected to
+              edit the run, not the worker source). Relabelled "Edit worker" and
+              link lands on the worker Source tab (same destination as before). */}
           <Link href={`/workers/${run.worker_id}#source`}>
             <Button variant="outline" size="sm">
               <Pencil className="size-3.5 mr-1.5" />
-              Edit
+              Edit worker
             </Button>
           </Link>
           <Button variant="outline" size="sm" onClick={onReplay}>

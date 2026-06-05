@@ -37,6 +37,9 @@ export default function ConnectionsClient({
   const [connecting, setConnecting] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [lastUsedBySlug, setLastUsedBySlug] = useState<Record<string, string | undefined>>({});
+  // N13: track whether last-used async load has completed so we can show a
+  // skeleton in the "Last used" column instead of a misleading "—" for all rows.
+  const [lastUsedLoaded, setLastUsedLoaded] = useState(false);
   // Only show skeleton if initialConnections was empty (API unavailable)
   const [loading, setLoading] = useState(initialConnections.length === 0);
   const [metadataByConnectionId, setMetadataByConnectionId] = useState<
@@ -90,9 +93,10 @@ export default function ConnectionsClient({
       hydrateConnectionMetadata(records);
       loadWorkerDetails()
         .then((workers) => getLastUsedByConnection(workers))
-        .then(setLastUsedBySlug)
+        .then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); })
         .catch(() => {
           setLastUsedBySlug({});
+          setLastUsedLoaded(true);
         });
     } catch {
       toast.error("Failed to load connections");
@@ -109,8 +113,8 @@ export default function ConnectionsClient({
       // Still load last-used data and secrets in background
       loadWorkerDetails()
         .then((workers) => getLastUsedByConnection(workers))
-        .then(setLastUsedBySlug)
-        .catch(() => setLastUsedBySlug({}));
+        .then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); })
+        .catch(() => { setLastUsedBySlug({}); setLastUsedLoaded(true); });
     } else {
       void refresh();
     }
@@ -354,6 +358,7 @@ export default function ConnectionsClient({
                     reconnecting={connecting === connection.app_name}
                     testing={testing === connection.id}
                     highlighted={highlightId === connection.id}
+                    lastUsedLoading={!lastUsedLoaded}
                     onDelete={handleDelete}
                     onReconnect={handleConnect}
                     onRefresh={handleRefresh}

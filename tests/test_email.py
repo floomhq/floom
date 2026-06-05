@@ -50,9 +50,10 @@ def test_welcome_email_uses_dashboard_link():
     )
 
     assert message.to == "user@example.com"
-    assert message.subject == "Welcome to Workeros"
+    assert message.subject == "Welcome to Floom"
     assert message.html.startswith("<!doctype html>")
-    assert "Floom <span" in message.html
+    assert email.FLOOM_EMAIL_LOGO_URL in message.html
+    assert 'alt="Floom"' in message.html
     assert "workeros-card" in message.html
     assert "https://workeros.floom.dev/app" in message.html
     assert "https://workeros.floom.dev/app" in (message.text or "")

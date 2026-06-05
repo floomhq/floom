@@ -48,6 +48,7 @@ function isPublicPath(pathname: string): boolean {
   const path = pathname.startsWith("/app") ? pathname.slice(4) || "/" : pathname;
   if (path === "/favicon.ico") return true;
   if (path === "/login") return true;
+  if (path === "/connections/callback") return true;
   if (path === "/privacy" || path === "/terms") return true;
   if (path === "/approvals/review") return true;
   if (path.startsWith("/_next/")) return true;
