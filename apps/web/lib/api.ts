@@ -586,6 +586,11 @@ export const api = {
       fetchJson<import("./types").ConnectionTestResult>(`/connections/${id}/test`, {
         method: "POST",
       }),
+    accountInfo: (id: string) =>
+      fetchJson<import("./types").ConnectedAccountMetadata>(
+        `/connections/${encodeURIComponent(id)}/account-info`,
+        { cache: "no-store" }
+      ),
   },
   slack: {
     // Read-only status (configured: true/false + installed workspaces). Slack

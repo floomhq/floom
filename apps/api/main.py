@@ -12407,7 +12407,7 @@ def _parse_json_string_list(value: Optional[str]) -> List[str]:
 
 _CONNECTION_LIST_REFRESH_STATUSES = {"initiated", "pending"}
 _CONNECTION_LIST_REFRESH_INTERVAL = timedelta(seconds=30)
-_COMPOSIO_ACTIVE_STATUSES = {"active", "valid"}
+_COMPOSIO_ACTIVE_STATUSES = {"active", "valid", "connected", "enabled", "success"}
 
 
 def _normalize_composio_connection_status(status: Optional[str]) -> str:
@@ -12415,6 +12415,46 @@ def _normalize_composio_connection_status(status: Optional[str]) -> str:
     if normalized in _COMPOSIO_ACTIVE_STATUSES:
         return "active"
     return normalized
+
+
+def _account_label_from_info(info: Dict[str, Any]) -> str:
+    for key in ("email", "account_label", "handle", "username", "login"):
+        value = info.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _cache_connection_account_info(
+    *,
+    repos: Repositories,
+    user_id: str,
+    connection_id: str,
+    composio_connection_id: str,
+    now: str,
+) -> Dict[str, Any]:
+    info = _fetch_composio_account_info(composio_connection_id, user_id=user_id)
+    if not info:
+        return {}
+
+    updates: Dict[str, Any] = {"updated_at": now}
+    account_label = _account_label_from_info(info)
+    if account_label:
+        updates["account_label"] = account_label
+    if info.get("scopes") is not None:
+        updates["scopes_json"] = info.get("scopes") or []
+
+    remote_status = _normalize_composio_connection_status(info.get("status"))
+    if remote_status and remote_status != "not_found":
+        updates["status"] = remote_status
+
+    if len(updates) > 1:
+        repos.connections.update(
+            user_id=user_id,
+            composio_id=connection_id,
+            **updates,
+        )
+    return info
 
 
 def _connection_list_refresh_due(row: Dict[str, Any], now: datetime) -> bool:
@@ -12703,6 +12743,22 @@ def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict
             or (account.get("metadata") or {}).get("email")
             or (account.get("user") or {}).get("email")
         )
+        account_label = (
+            email
+            or account.get("handle")
+            or account.get("username")
+            or account.get("login")
+            or (account.get("connection_data") or {}).get("handle")
+            or (account.get("connection_data") or {}).get("username")
+            or (account.get("data") or {}).get("handle")
+            or (account.get("data") or {}).get("username")
+            or (account.get("data") or {}).get("login")
+            or (account.get("metadata") or {}).get("handle")
+            or (account.get("metadata") or {}).get("username")
+            or (account.get("metadata") or {}).get("login")
+            or (account.get("user") or {}).get("login")
+            or (account.get("user") or {}).get("name")
+        )
         # Scopes: Composio v3 does NOT return a `scopes` list on the
         # connected_account. The real granted scopes live as a delimited
         # `scope` STRING under data/params/state.val (verified 2026-05-29):
@@ -12739,8 +12795,10 @@ def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict
             toolkit_slug = ((account.get("toolkit") or {}).get("slug") or "").lower()
             if toolkit_slug and composio_conn_id:
                 email = _fetch_provider_email(toolkit_slug, composio_conn_id, user_id)
+                account_label = email or account_label
         return {
             "email": email,
+            "account_label": account_label,
             "scopes": scopes,
             "user_id": account.get("user_id") or account.get("userId"),
             "auth_config_id": (
@@ -13025,10 +13083,15 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
         except Exception:
             remote_status = ""
 
+        callback_status = _normalize_composio_connection_status(status)
         final_status = (
-            remote_status
+            "active"
+            if callback_status == "active" and remote_status in ("", "initiated", "pending", "unknown", "not_found")
+            else remote_status
             if remote_status and remote_status != "not_found"
-            else (status or existing["status"])
+            else callback_status
+            if callback_status
+            else existing["status"]
         )
         now = now_iso()
         repos.connections.update(
@@ -13082,7 +13145,7 @@ def _dedupe_connection_account(
     landing_id = new_id
     try:
         info = _fetch_composio_account_info(connection_id, user_id=user_id)
-        account_label = (info.get("email") or "").strip()
+        account_label = _account_label_from_info(info)
         if not account_label:
             return landing_id, app_name
 
@@ -13157,23 +13220,34 @@ def get_connection_status(
         return _public_connection_item(item)
 
     # Refresh from Composio
+    now = now_iso()
+    updated_row: Optional[Dict[str, Any]] = None
     try:
         from composio_client import check_status
         remote_status = _normalize_composio_connection_status(
             check_status(item["composio_connection_id"])
         )
-        if remote_status and remote_status != item["status"]:
-            now = now_iso()
-            repos.connections.update(
+        if remote_status and remote_status != "not_found" and remote_status != item["status"]:
+            updated_row = repos.connections.update(
                 user_id=user_id,
                 composio_id=connection_id,
                 status=remote_status,
                 updated_at=now,
             )
-            item["status"] = remote_status
-            item["updated_at"] = now
     except Exception as exc:
         logger.warning("Could not refresh Composio status for %s: %s", connection_id, exc)
+
+    _cache_connection_account_info(
+        repos=repos,
+        user_id=user_id,
+        connection_id=connection_id,
+        composio_connection_id=item["composio_connection_id"],
+        now=now,
+    )
+    updated_row = repos.connections.get(user_id=user_id, composio_id=connection_id) or updated_row
+    if updated_row:
+        item = row_to_dict(updated_row)
+        item["scopes"] = _parse_scopes_json(item.pop("scopes_json", None))
 
     return _public_connection_item(item)
 
@@ -13231,7 +13305,7 @@ def get_connection_account_info(
         raise HTTPException(status_code=503, detail="Unable to fetch account info from upstream")
 
     # Cache scopes + account_label in DB for the list endpoint.
-    account_label = info.get("email") or ""
+    account_label = _account_label_from_info(info)
     if info.get("scopes") is not None or account_label:
         now = now_iso()
         repos.connections.update(
@@ -13361,7 +13435,7 @@ def test_connection(
     tested_at = now_iso()
 
     if (row.get("kind") or "composio") != "composio":
-        _write_connection_check(connection_id, "valid", None, tested_at, repos=repos)
+        _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
         return ConnectionTestResult(
             status="valid",
             reason="MCP server is saved; runtime connection is checked when a worker runs.",
@@ -13372,7 +13446,7 @@ def test_connection(
         from composio_client import check_status
         remote_status = _normalize_composio_connection_status(check_status(composio_conn_id))
     except Exception as exc:
-        _write_connection_check(connection_id, "failed", str(exc), tested_at, repos=repos)
+        _write_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
         return ConnectionTestResult(
             status="failed",
             reason=f"Upstream check failed: {exc}",
@@ -13385,6 +13459,7 @@ def test_connection(
             "failed",
             "Connection not found in upstream",
             tested_at,
+            status="failed",
             repos=repos,
         )
         return ConnectionTestResult(
@@ -13398,6 +13473,7 @@ def test_connection(
             remote_status,
             f"Status: {remote_status}",
             tested_at,
+            status=remote_status,
             repos=repos,
         )
         return ConnectionTestResult(
@@ -13406,7 +13482,14 @@ def test_connection(
             tested_at=tested_at,
         )
     if remote_status == "active":
-        _write_connection_check(connection_id, "valid", None, tested_at, repos=repos)
+        _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
+        _cache_connection_account_info(
+            repos=repos,
+            user_id=auth.user_id,
+            connection_id=connection_id,
+            composio_connection_id=composio_conn_id,
+            now=tested_at,
+        )
         return ConnectionTestResult(
             status="valid",
             reason="Connection is active",
@@ -13419,7 +13502,15 @@ def test_connection(
         "valid",
         f"Status: {remote_status}",
         tested_at,
+        status="active",
         repos=repos,
+    )
+    _cache_connection_account_info(
+        repos=repos,
+        user_id=auth.user_id,
+        connection_id=connection_id,
+        composio_connection_id=composio_conn_id,
+        now=tested_at,
     )
     return ConnectionTestResult(
         status="valid",
@@ -13441,6 +13532,8 @@ def _write_connection_check(
     check_status: str,
     error: Optional[str],
     checked_at: str,
+    *,
+    status: Optional[str] = None,
     repos: Repositories | None = None,
 ) -> None:
     """Persist health-check result to the DB row."""
@@ -13448,14 +13541,15 @@ def _write_connection_check(
     row = _connection_by_id(connection_id, repos_obj)
     if row is None:
         return
-    repos_obj.connections.update(
-        user_id=row["user_id"],
-        composio_id=connection_id,
-        last_checked_at=checked_at,
-        last_check_status=check_status,
-        last_check_error=error,
-        updated_at=checked_at,
-    )
+    updates: Dict[str, Any] = {
+        "last_checked_at": checked_at,
+        "last_check_status": check_status,
+        "last_check_error": error,
+        "updated_at": checked_at,
+    }
+    if status:
+        updates["status"] = status
+    repos_obj.connections.update(user_id=row["user_id"], composio_id=connection_id, **updates)
 
 
 async def _run_connection_sweep(*, user_id: str | None = None) -> None:
