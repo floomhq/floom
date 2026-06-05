@@ -134,8 +134,9 @@ export default function McpConnectionsPage() {
 
   // Concept B: add an MCP server for workers — single add flow, with an
   // "Import from JSON" toggle folded inside the same panel.
+  // M61: JSON config is the default mode; "Enter details" is secondary.
   const [formOpen, setFormOpen] = useState(false);
-  const [mode, setMode] = useState<"manual" | "import">("manual");
+  const [mode, setMode] = useState<"manual" | "import">("import");
 
   // Manual add-form state
   const [label, setLabel] = useState("");
@@ -401,18 +402,29 @@ export default function McpConnectionsPage() {
           </p>
         </div>
         {!formOpen && (
-          <Button type="button" size="sm" onClick={() => openForm("manual")}>
+          <Button type="button" size="sm" onClick={() => openForm("import")}>
             <Plus className="size-4" />
             Add MCP server
           </Button>
         )}
       </div>
 
-      {/* Single add flow: manual form + "Import from JSON" toggle */}
+      {/* Single add flow: JSON-config paste (default) + manual form toggle */}
       {formOpen && (
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4">
-          {/* Mode toggle */}
+          {/* M61: JSON config is primary; "Enter details" is secondary */}
           <div className="mb-4 inline-flex rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)] p-0.5">
+            <button
+              type="button"
+              onClick={() => setMode("import")}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                mode === "import"
+                  ? "bg-[var(--bg-card)] text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              JSON config
+            </button>
             <button
               type="button"
               onClick={() => setMode("manual")}
@@ -423,17 +435,6 @@ export default function McpConnectionsPage() {
               }`}
             >
               Enter details
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("import")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                mode === "import"
-                  ? "bg-[var(--bg-card)] text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Import from JSON
             </button>
           </div>
 
@@ -683,7 +684,7 @@ export default function McpConnectionsPage() {
               </p>
             </div>
             {!formOpen && (
-              <Button type="button" size="sm" variant="outline" onClick={() => openForm("manual")}>
+              <Button type="button" size="sm" variant="outline" onClick={() => openForm("import")}>
                 <Plus className="size-4" />
                 Add MCP server
               </Button>

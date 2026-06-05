@@ -36,6 +36,14 @@ import type { ContextDetail, ContextFileItem, ContextSummary, SecretWarning, Ver
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl, AssetVisibilityIndicator } from "@/components/AssetVisibilityControl";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -2166,6 +2174,8 @@ function FileHistoryMenu({
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
+  // M63: pending version waiting for in-app confirm dialog.
+  const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
 
   const canRestore = isKnownTextFile(file) && !readOnly;
 
@@ -2193,14 +2203,7 @@ function FileHistoryMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  async function handleRestore(v: VersionSummary) {
-    if (
-      !confirm(
-        `Restore "${fileName}" to v${v.version_number}?\n\nThis replaces the current contents. The current version is saved as a new revision first.`
-      )
-    ) {
-      return;
-    }
+  async function doRestore(v: VersionSummary) {
     setRestoring(v.id);
     try {
       const detail = await api.contexts.getFileVersion(packName, filePath, v.id);
@@ -2226,17 +2229,47 @@ function FileHistoryMenu({
   }
 
   return (
-    <VersionHistoryMenu
-      versions={versions}
-      loading={loading && !loadedOnce}
-      canRestore={canRestore}
-      restoringId={restoring}
-      buttonClassName="h-7 text-xs"
-      onOpen={() => {
-        if (!loadedOnce) void loadVersions();
-      }}
-      onRestore={(v) => void handleRestore(v)}
-    />
+    <>
+      <VersionHistoryMenu
+        versions={versions}
+        loading={loading && !loadedOnce}
+        canRestore={canRestore}
+        restoringId={restoring}
+        buttonClassName="h-7 text-xs"
+        onOpen={() => {
+          if (!loadedOnce) void loadVersions();
+        }}
+        onRestore={(v) => setPendingRestore(v)}
+      />
+
+      {/* M63: in-app restore confirm — replaces browser confirm() */}
+      <Dialog open={pendingRestore !== null} onOpenChange={(open) => { if (!open) setPendingRestore(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Restore &ldquo;{fileName}&rdquo; to v{pendingRestore?.version_number}?
+            </DialogTitle>
+            <DialogDescription>
+              This replaces the current file contents with v{pendingRestore?.version_number}. The current state is automatically saved as a new revision first, so you can restore any version forward or back.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRestore(null)} disabled={Boolean(restoring)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={Boolean(restoring)}
+              onClick={() => {
+                if (pendingRestore) void doRestore(pendingRestore);
+                setPendingRestore(null);
+              }}
+            >
+              {restoring ? "Restoring…" : "Restore this version"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

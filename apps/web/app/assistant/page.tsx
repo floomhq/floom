@@ -12,6 +12,14 @@ import { formatRelative } from "@/lib/formatters";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,6 +36,7 @@ function validTab(value: string): value is TabKey {
 
 // Inline "Versions ▾" dropdown for workspace instructions. Lazily loads the
 // version list when opened and rolls back in place — no separate tab/page.
+// M63: rollback uses our in-app Dialog, not the browser's native confirm().
 function InstructionsHistoryMenu({
   onRollback,
   refreshKey,
@@ -39,6 +48,8 @@ function InstructionsHistoryMenu({
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
+  // M63: pending version waiting for in-app confirm dialog.
+  const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
 
   const loadVersions = useCallback(async () => {
     setLoading(true);
@@ -59,20 +70,13 @@ function InstructionsHistoryMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  async function handleRollback(v: VersionSummary) {
-    if (
-      !confirm(
-        `Restore workspace instructions to version ${v.version_number} (saved ${formatRelative(v.created_at)})?\n\nThis will overwrite the current instructions.`
-      )
-    ) {
-      return;
-    }
+  async function doRollback(v: VersionSummary) {
     setRollingBack(v.id);
     try {
       const content = await api.system.rollbackWorkspaceInstructions(v.id);
       onRollback(content);
       await loadVersions();
-      toast.success(`Rolled back to version ${v.version_number}`);
+      toast.success(`Restored to version ${v.version_number}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
     } finally {
@@ -81,15 +85,47 @@ function InstructionsHistoryMenu({
   }
 
   return (
-    <VersionHistoryMenu
-      versions={versions}
-      loading={loading && !loadedOnce}
-      restoringId={rollingBack}
-      onOpen={() => {
-        if (!loadedOnce) void loadVersions();
-      }}
-      onRestore={(v) => void handleRollback(v)}
-    />
+    <>
+      <VersionHistoryMenu
+        versions={versions}
+        loading={loading && !loadedOnce}
+        restoringId={rollingBack}
+        onOpen={() => {
+          if (!loadedOnce) void loadVersions();
+        }}
+        onRestore={(v) => setPendingRestore(v)}
+      />
+
+      {/* M63: in-app restore confirm — replaces browser confirm() */}
+      <Dialog open={pendingRestore !== null} onOpenChange={(open) => { if (!open) setPendingRestore(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Restore to version {pendingRestore?.version_number}?
+            </DialogTitle>
+            <DialogDescription>
+              {pendingRestore
+                ? `This will replace the current workspace instructions with the version saved ${formatRelative(pendingRestore.created_at)}. The current state is preserved as a new version so you can restore it later.`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRestore(null)} disabled={Boolean(rollingBack)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={Boolean(rollingBack)}
+              onClick={() => {
+                if (pendingRestore) void doRollback(pendingRestore);
+                setPendingRestore(null);
+              }}
+            >
+              {rollingBack ? "Restoring…" : "Restore this version"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

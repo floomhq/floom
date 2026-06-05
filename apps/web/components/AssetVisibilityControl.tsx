@@ -3,7 +3,15 @@
 import { useEffect, useState } from "react";
 import { Lock, Users, ChevronDown, Check } from "lucide-react";
 import { toast } from "sonner";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -94,6 +102,8 @@ export function AssetVisibilityControl({
   const current = normalize(visibility);
   const [value, setValue] = useState<Vis>(current);
   const [saving, setSaving] = useState(false);
+  // M62: pending visibility change waiting for modal confirmation.
+  const [pendingVis, setPendingVis] = useState<Vis | null>(null);
 
   // Keep in sync when the parent re-fetches and hands a new visibility.
   useEffect(() => {
@@ -108,8 +118,7 @@ export function AssetVisibilityControl({
   const m = VIS[value];
   const Icon = m.icon;
 
-  const apply = async (next: string) => {
-    const nextVis: Vis = next === "workspace" ? "workspace" : "private";
+  const apply = async (nextVis: Vis) => {
     if (nextVis === value) return;
     const prev = value;
     setValue(nextVis);
@@ -127,46 +136,96 @@ export function AssetVisibilityControl({
     }
   };
 
+  // M62: intercept the dropdown selection — Share→Private requires a confirm
+  // modal because it can break existing shared links. Share→Shared is safe, no modal.
+  const handleSelect = (next: Vis) => {
+    if (next === value) return;
+    // Any direction change gets a modal: switching to "private" warns about
+    // breaking shared links; switching to "workspace" confirms the share action.
+    setPendingVis(next);
+  };
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        disabled={saving}
-        className={cn(
-          buttonVariants({ variant: "outline", size: "sm" }),
-          "shrink-0",
-        )}
-      >
-        <Icon className="size-3.5" />
-        {m.label}
-        <ChevronDown className="size-3.5 text-muted-foreground" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>
-            {titleLabel ?? `${noun[0].toUpperCase()}${noun.slice(1)} visibility`}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {(["private", "workspace"] as const).map((key) => {
-            const im = VIS[key];
-            const ItemIcon = im.icon;
-            const active = value === key;
-            return (
-              <DropdownMenuItem
-                key={key}
-                onClick={() => void apply(key)}
-                className={`flex-col items-start gap-0.5 py-2 ${active ? "bg-[var(--active-nav-bg)]" : ""}`}
-              >
-                <span className="flex w-full items-center gap-1.5 text-sm font-medium text-foreground">
-                  <ItemIcon className="size-3.5 text-foreground" />
-                  {im.label}
-                  {active && <Check className="size-3.5 ml-auto text-foreground" />}
-                </span>
-                <span className="text-xs text-muted-foreground">{im.hint}</span>
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          disabled={saving}
+          className={cn(
+            buttonVariants({ variant: "outline", size: "sm" }),
+            "shrink-0",
+          )}
+        >
+          <Icon className="size-3.5" />
+          {m.label}
+          <ChevronDown className="size-3.5 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>
+              {titleLabel ?? `${noun[0].toUpperCase()}${noun.slice(1)} visibility`}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {(["private", "workspace"] as const).map((key) => {
+              const im = VIS[key];
+              const ItemIcon = im.icon;
+              const active = value === key;
+              return (
+                <DropdownMenuItem
+                  key={key}
+                  onClick={() => handleSelect(key)}
+                  className={`flex-col items-start gap-0.5 py-2 ${active ? "bg-[var(--active-nav-bg)]" : ""}`}
+                >
+                  <span className="flex w-full items-center gap-1.5 text-sm font-medium text-foreground">
+                    <ItemIcon className="size-3.5 text-foreground" />
+                    {im.label}
+                    {active && <Check className="size-3.5 ml-auto text-foreground" />}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{im.hint}</span>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* M62: confirm modal for visibility changes */}
+      <Dialog open={pendingVis !== null} onOpenChange={(open) => { if (!open) setPendingVis(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {pendingVis === "private"
+                ? `Make this ${noun} private?`
+                : `Share this ${noun} with your workspace?`}
+            </DialogTitle>
+            <DialogDescription>
+              {pendingVis === "private"
+                ? `This will make the ${noun} private. Anyone with an existing shared link will lose access — existing links will stop working.`
+                : `This will share the ${noun} with everyone in your workspace. They will be able to see and use it.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setPendingVis(null)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={pendingVis === "private" ? "destructive" : "default"}
+              disabled={saving}
+              onClick={() => {
+                if (pendingVis) {
+                  void apply(pendingVis);
+                }
+                setPendingVis(null);
+              }}
+            >
+              {saving ? "Saving…" : pendingVis === "private" ? "Make private" : "Share with workspace"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

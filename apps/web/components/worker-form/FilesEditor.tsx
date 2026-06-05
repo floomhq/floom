@@ -362,11 +362,14 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
 
   const content = file.content || "";
   const lang = file.language || detectLanguage(file.path);
+  const kind = sourceFileKind(file.path, lang);
 
-  // worker.yml and other rendered kinds (markdown / html / table): Preview + Raw.
-  // All source files with a rendered view use the same two-tab pattern — "Summary"
-  // was removed (Federico: "same as brain, fully aligned, consistent").
+  // M64/M65: all text source files get Preview + Raw tabs — matching the Brain
+  // file viewer exactly. "Preview" for code/YAML/text = syntax-highlighted view;
+  // for markdown/html/table = rendered document; for worker.yml = summary card.
+  // No file gets a raw-only view (single tab) — consistent across source + brain.
   if (hasWorkerYamlSummary(file.path, file.binary) || supportsRenderedPreview(file.path, file.binary)) {
+    // Rendered kinds: Preview shows the rendered document, Raw shows syntax-highlighted source.
     return (
       <Tabs defaultValue="preview" className="bg-muted/20">
         <div className="flex items-center justify-end gap-3 border-b border-line px-4 py-2">
@@ -386,13 +389,37 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
     );
   }
 
-  // Everything else (.py / .ts / .json / .yaml / .yml / .txt / ...): a single
-  // canonical syntax-highlighted view — no redundant Preview-vs-Raw tabs.
+  // M65: code files (.py, .sh, .json, .yaml, .txt, requirements.txt, etc.)
+  // Preview = syntax-highlighted; Raw = plain text. Same pattern as Brain.
+  if (!["spreadsheet", "pdf", "image", "video"].includes(kind)) {
+    return (
+      <Tabs defaultValue="preview" className="bg-muted/20">
+        <div className="flex items-center justify-end gap-3 border-b border-line px-4 py-2">
+          <TabsList>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsTrigger value="raw">Raw</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="preview" className="m-0">
+          <SyntaxHighlightedCode content={content} path={file.path} language={lang} />
+        </TabsContent>
+        <TabsContent value="raw" className="m-0">
+          <SourcePreviewToolbar path={file.path} content={content} label="Raw" />
+          <pre className="p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-words overflow-auto max-h-[600px]">
+            {content}
+          </pre>
+        </TabsContent>
+      </Tabs>
+    );
+  }
+
+  // Binary/unsupported formats (pdf, image, video, spreadsheet): no tab, just info.
   return (
-    <div>
-      <SourcePreviewToolbar path={file.path} content={content} label="Source" />
-      <SyntaxHighlightedCode content={content} path={file.path} language={lang} />
-    </div>
+    <UnsupportedSourcePreview
+      title={`${kind} preview unavailable`}
+      detail="This worker source payload only includes text content for source files."
+      path={file.path}
+    />
   );
 }
 
