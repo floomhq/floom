@@ -102,9 +102,9 @@ def strip_em_dashes(text: str) -> str:
 def get_workspace_md() -> str:
     """Return editable workspace custom instructions, or a custom-only default."""
     if WORKSPACE_MD_PATH.is_file():
-        return WORKSPACE_MD_PATH.read_text()
+        return WORKSPACE_MD_PATH.read_text(encoding='utf-8')
     if WORKSPACE_MD_TEMPLATE.is_file():
-        return WORKSPACE_MD_TEMPLATE.read_text()
+        return WORKSPACE_MD_TEMPLATE.read_text(encoding='utf-8')
     return DEFAULT_WORKSPACE_CUSTOM_INSTRUCTIONS
 
 
@@ -144,7 +144,7 @@ def unwrap_workspace_body(body: str) -> str:
 def set_workspace_md(content: str) -> None:
     """Overwrite workspace.md."""
     WORKSPACE_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
-    WORKSPACE_MD_PATH.write_text(content)
+    WORKSPACE_MD_PATH.write_text(content, encoding='utf-8')
 
 
 def _settings_bool(value: Any, default: bool) -> bool:
@@ -572,7 +572,7 @@ def _brain_read_tools(
             with use_context_scope(context_scope_for_user(user_id or "")):
                 full_path = safe_context_file_path(pack, file_path)
                 full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text(content)
+                full_path.write_text(content, encoding='utf-8')
             return json.dumps({"ok": True, "message": f"Written {len(content)} chars to {pack}/{file_path}."})
         except Exception as exc:
             return json.dumps({"ok": False, "error": str(exc)})
@@ -2108,7 +2108,7 @@ def _tool_contexts_write(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         with use_context_scope(context_scope_for_user(user_id)):
             full_path = safe_context_file_path(name, file_path)
             full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text(content)
+            full_path.write_text(content, encoding='utf-8')
         return {"ok": True, "message": f"Written {len(content)} chars to {name}/{file_path}."}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -2470,7 +2470,7 @@ def _build_system_prompt(user_id: str) -> str:
     preamble = _build_workspace_preamble(user_id)
     from worker_registry import WORKERS_DIR
     skill_path = WORKERS_DIR / WORKSPACE_AGENT_ID / "SKILL.md"
-    skill_md = skill_path.read_text() if skill_path.is_file() else ""
+    skill_md = skill_path.read_text(encoding='utf-8') if skill_path.is_file() else ""
     skill_md = skill_md.replace("{{WORKSPACE_PREAMBLE}}", preamble)
     custom = (
         "## Workspace custom instructions\n\n"
@@ -2490,7 +2490,15 @@ ENVIRONMENT_NOTES: Dict[str, str] = {
         "## Current environment: Slack\n"
         "You are currently being reached in Slack (a chat). Keep replies short and "
         "chat-shaped. The person is DMing you or mentioned you in a channel. When "
-        "something needs the screen, give a workers.floom.dev link they can tap."
+        "something needs the screen, give a workers.floom.dev link they can tap.\n\n"
+        "Formatting rules for Slack (mrkdwn):\n"
+        "- Use *bold* for emphasis, not **bold**.\n"
+        "- Wrap ALL YAML, JSON, and code in triple backticks so Slack renders it as "
+        "a code block. Never paste raw YAML inline.\n"
+        "- Use emoji to signal state: :white_check_mark: done, :hammer_and_wrench: "
+        "building/creating, :rocket: running, :warning: warning, :x: error. "
+        "Lead the first line of every response with a relevant emoji.\n"
+        "- Keep prose under 3 short lines. Let the code block speak for itself."
     ),
     "whatsapp": (
         "## Current environment: WhatsApp\n"
