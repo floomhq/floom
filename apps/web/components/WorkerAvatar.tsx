@@ -5,6 +5,11 @@
 //
 // Style: muted bg + foreground initials + thin line ring. One color
 // register, no per-worker variation. Stays circular (radius via --r-pill).
+//
+// M36: avatarUrl prop added for Google OAuth picture. The UI is wired;
+// the backend MUST expose a `picture` (or `avatar_url`) field on the
+// session/user object (e.g. GET /user/me → { picture: string | null })
+// for this to populate. Fallback to initials when null/absent.
 import { cn } from "@/lib/utils";
 
 interface WorkerAvatarProps {
@@ -16,6 +21,9 @@ interface WorkerAvatarProps {
   className?: string;
   // Tailwind size class. Default size-9.
   size?: string;
+  // M36: Google OAuth / provider avatar URL. When present, renders as <img>.
+  // Backend dependency: GET /user/me must return { picture: string | null }.
+  avatarUrl?: string | null;
 }
 
 function initials(name: string): string {
@@ -27,8 +35,24 @@ function initials(name: string): string {
   return (first + second).toUpperCase();
 }
 
-export function WorkerAvatar({ seed, name, className, size = "size-9" }: WorkerAvatarProps) {
+export function WorkerAvatar({ seed, name, className, size = "size-9", avatarUrl }: WorkerAvatarProps) {
   const display = name || seed || "?";
+  if (avatarUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={avatarUrl}
+        alt={`${display} avatar`}
+        referrerPolicy="no-referrer"
+        className={cn(
+          "shrink-0 rounded-full object-cover border border-line",
+          size,
+          className,
+        )}
+        aria-label={`${display} avatar`}
+      />
+    );
+  }
   return (
     <div
       className={cn(
