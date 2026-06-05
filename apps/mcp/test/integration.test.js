@@ -201,6 +201,15 @@ async function startMockApi() {
       const body = await readBody(request);
       bodies.push(body);
       assert.equal(body.run_py.includes("WORKEROS_API_SECRET"), false);
+      if (body.worker_yml.includes("Bad Worker")) {
+        json(response, 400, {
+          detail: {
+            message: "Schema validation failed",
+            errors: [{ loc: "request", msg: "Field required", type: "missing" }],
+          },
+        });
+        return;
+      }
       json(response, 200, makeWorkerDetail("mcp-test-worker", { manifest_yaml: body.worker_yml }));
       return;
     }
@@ -303,6 +312,16 @@ async function startMockApi() {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/chat") {
+      const body = await readBody(request);
+      bodies.push(body);
+      sse(response, [
+        { type: "text", text: "chat ok" },
+        { type: "finish", conversation_id: body.conversation_id || "conv_mock", message_id: "msg_mock" },
+      ]);
+      return;
+    }
+
     json(response, 404, { detail: "Not found" });
   });
 
@@ -397,6 +416,10 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     ]) {
       assert.ok(names.includes(name), `expected MCP tool ${name}`);
     }
+    const workersCreateTool = tools.tools.find((tool) => tool.name === "workers.create");
+    assert.match(workersCreateTool.description, /schema_version/);
+    assert.match(workersCreateTool.description, /exec/);
+    assert.match(workersCreateTool.inputSchema.properties.worker_yml.description, /inputs\.json/);
 
     const listed = await client.callTool({ name: "workers.list", arguments: {} });
     assert.deepEqual(listed.structuredContent, { data: [] });
@@ -455,6 +478,17 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     assert.equal(readRun.structuredContent.status, "completed");
     assert.deepEqual(readRun.structuredContent.output, { result: "hello" });
 
+    const chat = await client.callTool({
+      name: "workspace.chat",
+      arguments: { message: "hello", conversation_id: "mcp-thread", timeout_ms: 5000 },
+    });
+    assert.equal(chat.structuredContent.reply, "chat ok");
+    assert.deepEqual(mock.bodies.at(-1), {
+      message: "hello",
+      source: "mcp",
+      conversation_id: "mcp-thread",
+    });
+
     const watched = await client.callTool({ name: "runs.watch", arguments: { id: "run_test", timeout_ms: 5000 } });
     assert.equal(watched.structuredContent.status, "completed");
     assert.deepEqual(watched.structuredContent.events.map((event) => event.data.type), ["status", "status", "close"]);
@@ -476,9 +510,29 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     "POST /workers/mcp-test-worker/runs",
     "GET /runs",
     "GET /runs/run_test",
+    "POST /chat",
     "GET /runs/run_test/events",
     "DELETE /workers/mcp-test-worker",
   ]);
+});
+
+test("workers.create renders object validation details as JSON, not object string", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const result = await client.callTool({
+      name: "workers.create",
+      arguments: {
+        worker_yml: "name: Bad Worker\nversion: nope\n",
+        run_py: "print('x')\n",
+      },
+    });
+    assert.equal(result.isError, true);
+    assert.doesNotMatch(result.content[0].text, /\\[object Object\\]/);
+    assert.match(result.content[0].text, /Schema validation failed/);
+    assert.match(result.content[0].text, /Field required/);
+  });
 });
 
 test("workers.update, workers.delete, and runs.watch surface 404s in tool results", async (t) => {
