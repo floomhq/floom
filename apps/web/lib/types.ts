@@ -592,6 +592,14 @@ export interface LocalWorkspaceListResponse {
   active_id: string;
 }
 
+export interface CurrentUser {
+  user_id: string;
+  email?: string | null;
+  display_name?: string | null;
+  workspace_id?: string | null;
+  scopes?: string[];
+}
+
 export interface WorkspaceShareLink {
   url: string;
   token: string;
