@@ -72,6 +72,24 @@ function displayTypeIcon(displayType: string) {
   return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
 }
 
+function packNameFromFiles(files: FileList | File[], existing: ContextSummary[]): string {
+  const first = Array.from(files)[0];
+  const baseName = (first?.name || "My brain")
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "my-brain";
+  const existingNames = new Set(existing.map((item) => item.name));
+  let candidate = baseName;
+  let suffix = 2;
+  while (existingNames.has(candidate)) {
+    candidate = `${baseName}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
 function visibleMetadataEntries(file: ContextFileItem): [string, string][] {
   return Object.entries(file.metadata ?? {})
     .filter(([, value]) => value !== undefined && value !== null && value !== "")
@@ -354,7 +372,7 @@ function ContextsPage() {
   const [versionsKey, setVersionsKey] = useState(0);
   // Secret-detection warnings from the most recent save/upload. Brain packs are
   // readable by anyone with workspace access, so a live credential stored here
-  // is a leak — we surface it inline and nudge the operator to Secrets.
+  // is a leak. We surface it inline and nudge the operator to Secrets.
   const [secretWarnings, setSecretWarnings] = useState<SecretWarning[]>([]);
 
   const [search, setSearch] = useState("");
@@ -613,29 +631,58 @@ function ContextsPage() {
   }
 
   async function uploadFiles(files: FileList | File[]) {
-    if (!selectedName || files.length === 0) return;
+    if (files.length === 0) return;
     if (readOnly) {
       toast.error("System packs are read-only.");
       return;
     }
+    const creatingPack = !selectedName;
+    const targetName = creatingPack ? packNameFromFiles(files, contexts) : selectedName;
     try {
       const result = await api.contexts.upload(
-        selectedName,
+        targetName,
         files,
-        folderPath.length ? folderPath.join("/") : undefined,
+        creatingPack ? undefined : (folderPath.length ? folderPath.join("/") : undefined),
+        { createIfMissing: creatingPack },
       );
-      const refreshed = await api.contexts.get(selectedName);
+      const refreshed = await api.contexts.get(targetName);
       setDetail(refreshed);
-      await loadContexts(selectedName);
+      setSelectedName(targetName);
+      setFolderPath([]);
+      await loadContexts(targetName);
       const warnings = (result.files ?? []).flatMap((f) => f.secret_warnings ?? []);
       if (warnings.length) {
         setSecretWarnings(warnings);
-        toast.warning("File added — but it looks like it contains a secret");
+        toast.warning("File added - but it looks like it contains a secret");
       } else {
-        toast.success("File added");
+        toast.success(creatingPack ? "Knowledge pack created" : "File added");
       }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to add file");
+    }
+  }
+
+  async function createTextFile() {
+    if (!selectedName || readOnly) return;
+    const rawPath = window.prompt("File path", folderPath.length ? `${folderPath.join("/")}/notes.md` : "notes.md");
+    const path = rawPath?.trim().replace(/^\/+|\/+$/g, "");
+    if (!path) return;
+    try {
+      await api.contexts.saveTextFile(selectedName, path, "");
+      const refreshed = await api.contexts.get(selectedName);
+      setDetail(refreshed);
+      setSelectedFile(path);
+      const slash = path.lastIndexOf("/");
+      setFolderPath(slash === -1 ? [] : path.slice(0, slash).split("/").filter(Boolean));
+      setEditText("");
+      setFileText("");
+      setEditing(true);
+      setMobilePane("file");
+      setVersionsKey((k) => k + 1);
+      await loadContexts(selectedName);
+      toast.success("File created");
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Failed to create file");
     }
   }
 
@@ -656,7 +703,7 @@ function ContextsPage() {
         // preventDefault on BOTH dragenter and dragover is REQUIRED, otherwise
         // the browser treats the pane as a non-drop target and the `drop` event
         // never fires. We always preventDefault here and only gate the *visual*
-        // dragActive overlay on whether the payload is actually files — some
+        // dragActive overlay on whether the payload is actually files. Some
         // browsers report an empty `types` list mid-drag, so guarding the
         // preventDefault itself (the previous behavior) silently broke drops.
         onDragEnter: (e: React.DragEvent) => {
@@ -693,7 +740,7 @@ function ContextsPage() {
       const warnings = saved.secret_warnings ?? [];
       if (warnings.length) {
         setSecretWarnings(warnings);
-        toast.warning("File saved — but it looks like it contains a secret");
+        toast.warning("File saved - but it looks like it contains a secret");
       } else {
         setSecretWarnings([]);
         toast.success("File saved");
@@ -863,7 +910,12 @@ function ContextsPage() {
 
         {/* ---- Pack detail / miller folder columns ------------------------ */}
         {!selectedName ? (
-          <section className="flex-1 overflow-hidden flex items-center justify-center p-8">
+          <section
+            {...dropHandlers}
+            className={`relative flex-1 overflow-hidden flex items-center justify-center p-8 transition-colors duration-300 ${
+              dragActive ? "bg-muted/30" : ""
+            }`}
+          >
             <div className="max-w-md text-center space-y-4">
               <div className="space-y-1.5">
                 <h2 className="text-base font-semibold">Give your workers knowledge</h2>
@@ -878,6 +930,11 @@ function ContextsPage() {
                 New knowledge pack
               </Button>
             </div>
+            {dragActive && (
+              <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-[var(--primary)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
+                Drop files to create a knowledge pack
+              </div>
+            )}
           </section>
         ) : !detail ? (
           <section className="flex-1 overflow-hidden flex items-center justify-center">
@@ -898,6 +955,7 @@ function ContextsPage() {
             onOpenFile={openFile}
             onDeleteFile={deleteFile}
             onAddFile={() => fileInputRef.current?.click()}
+            onCreateFile={createTextFile}
             onVisibilityChange={(updated) => setDetail(updated)}
             dropHandlers={dropHandlers}
           />
@@ -995,7 +1053,7 @@ function ContextsPage() {
 //
 // Brain packs are readable by anyone with workspace access, so a stored live
 // credential is a leak. When a save/upload returns secret_warnings we surface
-// this inline (masked findings only — the raw value is never returned) and
+// this inline (masked findings only, the raw value is never returned) and
 // point the operator at Settings → Secrets.
 // ===========================================================================
 
@@ -1027,7 +1085,7 @@ function SecretWarningBanner({
         <ul className="space-y-0.5 font-mono text-xs text-muted-foreground">
           {warnings.slice(0, 5).map((w, i) => (
             <li key={`${w.pattern}:${w.line}:${i}`} className="truncate">
-              line {w.line}: {w.pattern} — {w.masked}
+              line {w.line}: {w.pattern} - {w.masked}
             </li>
           ))}
           {warnings.length > 5 && (
@@ -1152,6 +1210,7 @@ function PackDetailPane({
   onOpenFile,
   onDeleteFile,
   onAddFile,
+  onCreateFile,
   onVisibilityChange,
   dropHandlers,
 }: {
@@ -1166,6 +1225,7 @@ function PackDetailPane({
   onOpenFile: (path: string) => void;
   onDeleteFile: (path: string) => void;
   onAddFile: () => void;
+  onCreateFile: () => void;
   onVisibilityChange: (updated: ContextDetail) => void;
   dropHandlers: Partial<{
     onDragEnter: React.DragEventHandler<HTMLElement>;
@@ -1286,17 +1346,23 @@ function PackDetailPane({
         {readOnly ? (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Lock className="size-3" />
-            Read-only — uploads disabled
+            Read-only - uploads disabled
           </span>
         ) : (
-          <Button size="sm" variant="outline" onClick={onAddFile} className="h-7 text-xs gap-1">
-            <Plus className="size-3.5" />
-            Add file
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={onCreateFile} className="h-7 text-xs gap-1">
+              <FileText className="size-3.5" />
+              New text file
+            </Button>
+            <Button size="sm" variant="outline" onClick={onAddFile} className="h-7 text-xs gap-1">
+              <Plus className="size-3.5" />
+              Add file
+            </Button>
+          </div>
         )}
       </div>
 
-      {/* Miller columns — one column per folder level, horizontally scrollable */}
+      {/* Miller columns: one column per folder level, horizontally scrollable */}
       {detail.files.length === 0 ? (
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="rounded-[var(--radius-button)] border border-dashed border-[var(--border-default)] p-6 text-center">
@@ -1308,6 +1374,10 @@ function PackDetailPane({
                 <Button size="sm" variant="outline" className="mt-3" onClick={onAddFile}>
                   <Plus className="size-4" />
                   Add file
+                </Button>
+                <Button size="sm" variant="outline" className="mt-3 ml-2" onClick={onCreateFile}>
+                  <FileText className="size-4" />
+                  New text file
                 </Button>
               </>
             )}
@@ -1515,7 +1585,7 @@ function FolderColumn({
 }
 
 // ===========================================================================
-// File content pane (the 70% right pane). Opens in place — no navigation.
+// File content pane (the 70% right pane). Opens in place, no navigation.
 // ===========================================================================
 
 function FilePane({
@@ -1714,7 +1784,7 @@ function FileContent({
   }
 
   if (kind === "code") {
-    // Single syntax-highlighted view — no redundant Preview-vs-Raw tabs.
+    // Single syntax-highlighted view, no redundant Preview-vs-Raw tabs.
     // A .py/.ts/.json/.yaml/.txt file has one canonical rendering: the
     // highlighted code block (with a copy affordance), shared with the
     // worker-detail Source view.
@@ -1831,7 +1901,7 @@ function PreviewRawTabs({
   );
 }
 
-// A single "Copy" affordance for the code view — replaces the old redundant
+// A single "Copy" affordance for the code view replaces the old redundant
 // Raw tab. One canonical highlighted block + a copy button, instead of a second
 // tab that showed the same content unhighlighted.
 function CodeViewToolbar({ text }: { text: string }) {
@@ -2141,7 +2211,7 @@ function PreviewUnavailable({
 
 // Inline per-file "Versions ▾" dropdown. Each brain-pack file is snapshotted
 // independently on the backend (asset_type `brain_file`), so this lists the
-// revisions of ONE file and restores only THAT file — not the whole pack.
+// revisions of ONE file and restores only THAT file, not the whole pack.
 // Restore fetches the chosen revision's snapshot and writes it back via the
 // normal save path (which records a new snapshot), so it is limited to text
 // files (the only kind that carries an inline content body here). This mirrors
@@ -2321,4 +2391,3 @@ function MarkdownRenderer({ content }: { content: string }) {
     </div>
   );
 }
-
