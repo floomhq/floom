@@ -118,8 +118,37 @@ def set_workspace_md(content: str) -> None:
 # Conversation persistence
 # ---------------------------------------------------------------------------
 
-def create_conversation(user_id: str, title: Optional[str] = None) -> str:
-    conv_id = f"conv_{uuid.uuid4().hex[:16]}"
+def _client_conversation_storage_id(raw_id: str, user_id: str) -> str:
+    """Map caller-supplied thread ids to owner-scoped internal conversation ids."""
+    digest = hashlib.sha256(f"{user_id}\0{raw_id}".encode("utf-8")).hexdigest()[:32]
+    return f"conv_client_{digest}"
+
+
+def resolve_conversation_id(raw_id: Optional[str], user_id: str) -> Optional[str]:
+    """Return the internal conversation id for a server or caller supplied id."""
+    if not raw_id:
+        return None
+    value = str(raw_id).strip()
+    if not value:
+        return None
+    if value.startswith("conv_"):
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM conversations WHERE id = ?",
+                (value,),
+            ).fetchone()
+        if row and row["user_id"] != user_id:
+            return _client_conversation_storage_id(value, user_id)
+        return value
+    return _client_conversation_storage_id(value, user_id)
+
+
+def create_conversation(
+    user_id: str,
+    title: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+) -> str:
+    conv_id = conversation_id or f"conv_{uuid.uuid4().hex[:16]}"
     ts = now_iso()
     with get_db() as conn:
         conn.execute(
@@ -851,6 +880,8 @@ def _generate_run_py_from_manifest(
     manifest: Dict[str, Any],
     user_id: str,
     log_fn,
+    *,
+    force: bool = False,
 ) -> bool:
     """Synthesise a real run.py for a manifest-only worker, replacing the no-op stub.
 
@@ -877,10 +908,10 @@ def _generate_run_py_from_manifest(
         current = run_py_path.read_text(encoding="utf-8")
     except OSError:
         return False
-    # Only generate when the file is the no-op placeholder. A worker that already
-    # carries real code (e.g. a future create path that supplies run.py) is left
-    # untouched — the smoke gate validates/repairs it.
-    if _PLACEHOLDER_RUN_PY_MARKER not in current:
+    # Create only generates when the file is the no-op placeholder. Update can
+    # force regeneration because Emily edits the manifest, not run.py; preserving
+    # stale generated code makes behavior changes silently no-op at runtime.
+    if not force and _PLACEHOLDER_RUN_PY_MARKER not in current:
         return False
 
     import yaml as _yaml
@@ -902,7 +933,7 @@ def _generate_run_py_from_manifest(
     failure = (
         "The worker has only a placeholder run.py that returns empty outputs, so "
         "it produces none of its declared outputs. Implement the worker from its "
-        "manifest below. Read inputs from inputs/input.json and write result.json "
+        "manifest below. Read inputs from inputs.json and write result.json "
         "with {\"status\",\"outputs\",\"artifacts\"}, filling EVERY declared "
         f"output.\n\nWorker manifest:\n{manifest_yaml[:4000]}"
     )
@@ -929,7 +960,8 @@ def _generate_run_py_from_manifest(
     except Exception as exc:
         log_fn(f"could not persist generated run.py: {exc}", "warning")
         return False
-    log_fn("generated real run.py from manifest", "info")
+    action = "regenerated" if force else "generated"
+    log_fn(f"{action} real run.py from manifest", "info")
     return True
 
 
@@ -1456,6 +1488,18 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": str(exc.detail)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+    if _manifest_executes_run_py(manifest):
+        def _update_codegen_log(msg: str, level: str = "info") -> None:
+            logger.info("emily worker update codegen %s: %s", worker_id, msg)
+
+        _generate_run_py_from_manifest(
+            worker_id,
+            manifest,
+            user_id,
+            _update_codegen_log,
+            force=True,
+        )
 
     # Gate == runtime (ISSUES.md #E1): an update that would break every real run
     # must NOT be persisted as a silent success. Run the SAME smoke gate create
@@ -2216,11 +2260,20 @@ async def stream_chat(
     from agents import Agent, ModelSettings, RunConfig, Runner
     from worker_registry import WORKERS_DIR
 
-    # Resolve or create conversation
+    # Resolve or create conversation. Caller-supplied thread ids (Slack, MCP,
+    # Langdock, custom clients) are mapped to deterministic owner-scoped internal
+    # ids so the same caller id continues the same thread without becoming
+    # guessable across users.
+    conversation_id = resolve_conversation_id(conversation_id, user_id)
     if conversation_id:
         conv = get_conversation(conversation_id, user_id)
         if not conv:
-            conversation_id = None
+            conv_title = message[:60] + ("..." if len(message) > 60 else "")
+            conversation_id = create_conversation(
+                user_id,
+                title=conv_title,
+                conversation_id=conversation_id,
+            )
     if not conversation_id:
         # Auto-title from first message
         title = message[:60] + ("..." if len(message) > 60 else "")
@@ -2471,6 +2524,12 @@ async def stream_chat(
                     except Exception:
                         pass
                 pending_tool_calls[call_id] = {"name": tool_name_raw, "args": raw_args}
+                if (
+                    tool_name_raw == "finish_with_outputs"
+                    and isinstance(raw_args, dict)
+                    and isinstance(raw_args.get("reply"), str)
+                ):
+                    raw_args = {**raw_args, "reply": strip_em_dashes(raw_args["reply"])}
                 await part_queue.put({
                     "type": "tool-call",
                     "toolName": tool_name_raw,
