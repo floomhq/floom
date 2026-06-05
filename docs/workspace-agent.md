@@ -3,39 +3,53 @@
 The workspace agent is the operator-facing assistant for a Workeros workspace.
 It combines:
 
-- An engine-owned Emily base persona: immutable Chief-of-Staff identity,
-  proactivity, and safety rules.
-- `workspace.md`: editable workspace custom instructions owned by the operator.
+- `workspace.base.md`: optional editable Emily base-persona override. If absent,
+  Workeros uses the built-in Emily default.
+- `workspace.md`: editable workspace custom instructions layered on top of the
+  base persona.
 - A live workspace snapshot: workers, recent run state, brain packs, and
   pending approvals.
 - The engine prompt and tool contract from the `workspace-agent` worker.
 
 ## Editing Instructions
 
-Open `Agent -> Instructions` in the dashboard. Changes are saved to
-`workspace.md` through:
+Open `Agent -> Instructions` in the dashboard. Workspace custom-instruction
+changes are saved to `workspace.md` through:
 
 - `GET /workspace`
 - `PUT /workspace`
 
+Base persona edits are saved separately through:
+
+- `GET /workspace/base`
+- `PUT /workspace/base`
+
 The resolved prompt is visible in `Agent -> Resolved prompt`. It is read-only
-because it includes the engine persona and generated runtime context.
+because it includes the base persona, workspace custom instructions, the
+workspace-agent SKILL.md, and generated runtime context.
 
 ## Versions
 
-Open `Agent -> Versions` to list automatic snapshots of `workspace.md` (up to 50
-per workspace). Each save via `PUT /workspace` creates a version. Roll back with:
+Open `Agent -> Versions` to list automatic snapshots. Each save via
+`PUT /workspace` creates a workspace custom-instruction version. Roll back with:
 
 - `GET /workspace/versions`
 - `POST /workspace/rollback/{version_id}`
+
+Each save via `PUT /workspace/base` creates a separate base-persona version.
+Roll back with:
+
+- `GET /workspace/base/versions`
+- `POST /workspace/base/rollback/{version_id}`
 
 AI edits (sandbox run token) are tagged `ai`; operator saves are tagged `user`.
 
 ## Channels
 
-Slack and other channels use the same engine persona and workspace custom
-instructions. Channel-specific preferences can live in `workspace.md`; the
-base Emily identity does not.
+Slack and other channels use the same base persona and workspace custom
+instructions. Channel-specific preferences can live in `workspace.md`; broad
+Emily identity and operating style belong in `workspace.base.md` when an
+override is needed.
 
 The docs/DX lane only documents the channel contract. The local Slack listener
 manifest lives at [workers/slack-listener/worker.yml](../workers/slack-listener/worker.yml)

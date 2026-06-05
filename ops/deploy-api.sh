@@ -13,11 +13,12 @@
 #   4. Abort (or wait) if runs are currently active
 #   5. Sync source files from origin/main (no git reset --hard)
 #   6. Clean .rej/.bak patch cruft under apps/
-#   7. systemctl restart workeros-api
-#   8. Poll /health until ok (hard gate, exit 1 on timeout)
-#   9. Assert key endpoints return expected HTTP codes
-#  10. Verify schema drift (calls ops/verify-schema.py)
-#  11. Print SUCCESS/FAIL summary
+#   7. Install deployed apps/api/requirements.txt into the actual service venv
+#   8. systemctl restart workeros-api
+#   9. Poll /health until ok (hard gate, exit 1 on timeout)
+#  10. Assert key endpoints return expected HTTP codes
+#  11. Verify schema drift (calls ops/verify-schema.py)
+#  12. Print SUCCESS/FAIL summary
 
 set -euo pipefail
 
@@ -27,6 +28,8 @@ set -euo pipefail
 WORKEROS_ROOT="${WORKEROS_ROOT:-/root/workeros}"
 DB_PATH="${FLOOM_DB:-$WORKEROS_ROOT/data/floom.db}"
 BACKUP_ROOT="${WORKEROS_BACKUP_ROOT:-/root/backups}"
+SERVICE_VENV="${WORKEROS_API_VENV:-$WORKEROS_ROOT/apps/api/venv}"
+API_REQUIREMENTS="${WORKEROS_API_REQUIREMENTS:-$WORKEROS_ROOT/apps/api/requirements.txt}"
 API_PORT="${WORKEROS_API_PORT:-8011}"
 API_BASE="http://127.0.0.1:${API_PORT}"
 HEALTH_POLL_INTERVAL=2          # seconds between health polls
@@ -197,7 +200,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 6: Restart service
+# Step 6: Install API dependencies into the actual service venv
+# ---------------------------------------------------------------------------
+if [[ $DRY_RUN -eq 1 ]]; then
+  log "DRY-RUN: would install API dependencies: $SERVICE_VENV/bin/python -m pip install -r $API_REQUIREMENTS"
+else
+  [[ -x "$SERVICE_VENV/bin/python" ]] || fail "Service venv Python not found or not executable: $SERVICE_VENV/bin/python"
+  [[ -f "$API_REQUIREMENTS" ]] || fail "API requirements file not found: $API_REQUIREMENTS"
+  log "Installing API dependencies from $API_REQUIREMENTS into $SERVICE_VENV..."
+  "$SERVICE_VENV/bin/python" -m pip install -r "$API_REQUIREMENTS"
+  "$SERVICE_VENV/bin/python" -m pip check
+  log "API dependencies installed and verified."
+fi
+
+# ---------------------------------------------------------------------------
+# Step 7: Restart service
 # ---------------------------------------------------------------------------
 if [[ $DRY_RUN -eq 1 ]]; then
   log "DRY-RUN: would run: systemctl restart $SERVICE_NAME"
@@ -208,7 +225,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 7: Wait for /health to return ok
+# Step 8: Wait for /health to return ok
 # ---------------------------------------------------------------------------
 log "Polling ${API_BASE}/health (timeout: ${HEALTH_TIMEOUT}s)..."
 ELAPSED=0
@@ -239,7 +256,7 @@ if [[ $HEALTH_OK -ne 1 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 8: Assert key endpoints return expected HTTP codes
+# Step 9: Assert key endpoints return expected HTTP codes
 #
 # These endpoints are auth-exempt (/health, /healthz) or require the secret.
 # We test /health and /healthz without auth, then read FLOOM_SECRET from
@@ -295,7 +312,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 9: Schema drift check
+# Step 10: Schema drift check
 # ---------------------------------------------------------------------------
 SCHEMA_CHECK_SCRIPT="$WORKEROS_ROOT/ops/verify-schema.py"
 if [[ $DRY_RUN -eq 1 ]]; then
@@ -311,12 +328,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 10: Print summary
+# Step 11: Print summary
 # ---------------------------------------------------------------------------
 log ""
 log "=== DEPLOY SUCCESS ==="
 log "  Deployed SHA:        $TARGET_SHA"
 log "  Service:             $SERVICE_NAME"
+log "  Service venv:        $SERVICE_VENV"
+log "  Requirements:        $API_REQUIREMENTS"
 log "  DB backup:           ${BACKUP_FILE:-DRY-RUN}"
 log "  Health:              ok"
 DEPLOYED_VERSION="$(sqlite3 "$RESOLVED_DB" "SELECT MAX(version) FROM schema_version;" 2>/dev/null || echo "unknown")"
