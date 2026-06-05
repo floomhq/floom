@@ -759,6 +759,13 @@ export interface ConnectionTestResult {
   tested_at: string;
 }
 
+export interface ConnectedAccountMetadata {
+  id?: string;
+  connected_at?: string;
+  email?: string;
+  scopes?: string[];
+}
+
 export interface ConnectionInitResponse {
   id: string;
   app_name: string;
