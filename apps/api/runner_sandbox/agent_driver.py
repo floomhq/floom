@@ -1036,15 +1036,31 @@ class AgentDriver(SandboxDriver):
         secrets: Dict[str, str],
         log_fn: Callable[[str, str], None],
     ) -> list[Any]:
-        return await agent_capabilities.connect_mcp_servers(
-            config, secrets, log_fn, WORKER_POLICY
-        )
+        servers: list[Any] = []
+        for connection in self._mcp_connections(config):
+            try:
+                server = self._make_mcp_server(connection, secrets)
+                await server.connect()
+                log_fn(f"Connected MCP server {connection.label}", "debug")
+                servers.append(server)
+            except Exception as exc:  # noqa: BLE001 - normalize reload-split MCP errors
+                if exc.__class__.__name__ == "MCPConnectionError":
+                    raise _MCPConnectionError(str(exc)) from exc
+                raise _MCPConnectionError(
+                    f"MCP connection failed for {connection.label}: {exc}"
+                ) from exc
+        return servers
 
     async def _cleanup_mcp_servers(self, servers: list[Any], log_fn: Callable[[str, str], None]) -> None:
         await agent_capabilities.cleanup_mcp_servers(servers, log_fn)
 
     def _make_mcp_server(self, connection: Any, secrets: Dict[str, str]) -> Any:
-        return agent_capabilities.make_mcp_server(connection, secrets, WORKER_POLICY)
+        try:
+            return agent_capabilities.make_mcp_server(connection, secrets, WORKER_POLICY)
+        except Exception as exc:  # noqa: BLE001 - normalize reload-split MCP errors
+            if exc.__class__.__name__ == "MCPConnectionError":
+                raise _MCPConnectionError(str(exc)) from exc
+            raise
 
     def _mcp_connections(self, config: WorkerConfig) -> list[Any]:
         return agent_capabilities.mcp_connections(config)
