@@ -56,7 +56,7 @@ const MOCK_WORKERS = [
 const MOCK_RECENT_RUNS = [
   { id: "r1", worker: "Weekly GitHub Digest", status: "success" as const, duration: "4.2s", ago: "2h ago" },
   { id: "r2", worker: "Daily Standup", status: "success" as const, duration: "1.1s", ago: "4h ago" },
-  { id: "r3", worker: "Stripe Failure Monitor", status: "blocked" as const, duration: "—", ago: "Pending" },
+  { id: "r3", worker: "Stripe Failure Monitor", status: "blocked" as const, duration: "n/a", ago: "Pending" },
 ];
 
 // ── Workers list (left pane) ──────────────────────────────────────────────────
@@ -161,7 +161,7 @@ export default function PrototypePage() {
                 <Badge variant="outline" className="text-xs">3 active</Badge>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                Your AI workers — runs on triggers, schedules, and webhooks.
+                Your AI workers, running on triggers, schedules, and webhooks.
               </p>
             </div>
             <Button size="sm" className="gap-1.5 shrink-0">

@@ -4,23 +4,27 @@
  * Emily Rail — Chief of Staff AI chat prototype
  *
  * Built with REAL Vercel AI Elements components:
- *   - Conversation + ConversationContent + ConversationScrollButton
+ *   - Conversation + ConversationContent
  *   - Message + MessageContent + MessageResponse
  *   - AiTool + ToolHeader + ToolContent + ToolInput + ToolOutput (collapsed by default)
  *   - Task (worker-creation steps)
  *
- * v2 changes:
- *   - More digestible cards: extra breathing room, quieter hierarchy
- *   - Tool calls collapsed by default (expand on click)
- *   - File attachment: Paperclip button + file chip previews above input
- *   - File validation: max 10 MB, common types only
+ * v3 changes:
+ *   - Collapse reclaims space: collapsed = 48px strip, main content fills freed width
+ *   - Markdown renders via ReactMarkdown + remark-gfm (no raw **bold**)
+ *   - Worker-creation card: Sparkles removed, EmilyDot (Workeros accent) used instead
+ *   - BrandLogo used for Gmail + Stripe cards (real brand SVGs from IconSprite)
+ *   - Em dashes removed from all mock text
+ *   - Stray floating scroll widget removed from Conversation
  *
  * Panel behaviour:
- *   Desktop: ~460px / ~32% right rail, collapsible to 48px strip
+ *   Desktop: ~460px right rail, collapsible to 48px strip
  *   Mobile: full-screen overlay
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -31,8 +35,6 @@ import {
   SendHorizonal,
   CheckCircle2,
   Clock,
-  Sparkles,
-  Mail,
   Play,
   FileText,
   ExternalLink,
@@ -42,7 +44,6 @@ import {
 import {
   Conversation,
   ConversationContent,
-  ConversationScrollButton,
   ConversationEmptyState,
 } from "@/components/ai-elements/conversation";
 import {
@@ -59,6 +60,7 @@ import {
   type ToolState,
 } from "@/components/ai-elements/ai-tool";
 import { Task } from "@/components/ai-elements/task";
+import { BrandLogo } from "@/components/connections/BrandLogo";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,8 +73,8 @@ type MsgPart =
   | { type: "tool"; name: string; state: ToolState; input?: unknown; output?: unknown }
   | { type: "worker-creation"; workerName: string; step: "drafting" | "generating" | "smoke" | "ready" }
   | { type: "run-card"; workerName: string; duration: string; lines: number; artifact?: string }
-  | { type: "approval-card"; workerName: string; action: string; approved: boolean | null }
-  | { type: "connect-gmail" };
+  | { type: "approval-card"; workerName: string; action: string; approved: boolean | null; brand?: string }
+  | { type: "connect-service"; brand: string; label: string };
 
 interface AttachedFile {
   id: string;
@@ -126,7 +128,7 @@ const MOCK_MESSAGES: Msg[] = [
     parts: [
       {
         type: "text",
-        text: "On it. I'm drafting a Weekly GitHub Digest worker for you — it'll pull your open PRs every Monday morning and email you a summary.",
+        text: "On it. Drafting a **Weekly GitHub Digest** worker for you. It will pull your open PRs every Monday morning and email you a summary.",
       },
       {
         type: "worker-creation",
@@ -163,7 +165,7 @@ const MOCK_MESSAGES: Msg[] = [
         type: "tool",
         name: "email.send",
         state: "output-available",
-        input: { to: "depontefede@gmail.com", subject: "Weekly GitHub Digest — 5 open PRs" },
+        input: { to: "depontefede@gmail.com", subject: "Weekly GitHub Digest, 5 open PRs" },
         output: { messageId: "msg_01ABCD", status: "sent" },
       },
       {
@@ -186,13 +188,14 @@ const MOCK_MESSAGES: Msg[] = [
     parts: [
       {
         type: "text",
-        text: "I need to connect to your Stripe account first. I'll also check Slack.",
+        text: "I need to connect to your Stripe account first. I will also verify your Slack connection.",
       },
       {
         type: "approval-card",
         workerName: "Stripe Failure Monitor",
-        action: "Connect Stripe + read payment events",
+        action: "Connect Stripe and read payment events",
         approved: null,
+        brand: "stripe",
       },
     ],
   },
@@ -205,8 +208,8 @@ const MOCK_MESSAGES: Msg[] = [
     id: "8",
     role: "assistant",
     parts: [
-      { type: "text", text: "Sure — connect Gmail first:" },
-      { type: "connect-gmail" },
+      { type: "text", text: "Sure. Connect Gmail first:" },
+      { type: "connect-service", brand: "gmail", label: "Gmail" },
     ],
   },
   {
@@ -220,13 +223,25 @@ const MOCK_MESSAGES: Msg[] = [
     parts: [
       {
         type: "text",
-        text: "You have 3 active workers:\n\n1. **Weekly GitHub Digest** — runs every Monday at 9am\n2. **Stripe Failure Monitor** — waiting for Stripe approval\n3. **Daily Standup** — posts to Slack at 8:30am weekdays\n\nAll healthy. Last run: 4 hours ago.",
+        text: "You have 3 active workers:\n\n1. **Weekly GitHub Digest** runs every Monday at 9am\n2. **Stripe Failure Monitor** is waiting for Stripe approval\n3. **Daily Standup** posts to Slack at 8:30am on weekdays\n\nAll healthy. Last run: 4 hours ago.",
       },
     ],
   },
 ];
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+// EmilyDot — the Workeros accent blue dot used in the sidebar nav as the
+// Emily identity mark. Reused here in place of any decorative AI icon.
+function EmilyDot({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn("shrink-0 rounded-full", className)}
+      style={{ background: "var(--emily-accent, #59AAF8)", width: "14px", height: "14px" }}
+      aria-hidden="true"
+    />
+  );
+}
 
 function WorkerCreationCard({
   workerName,
@@ -256,9 +271,9 @@ function WorkerCreationCard({
 
   return (
     <div className="rounded-xl border border-border bg-card/60 overflow-hidden">
-      {/* Card header */}
+      {/* Card header: EmilyDot (Workeros brand) instead of Sparkles */}
       <div className="flex items-center gap-2.5 px-4 py-3 border-b border-border/50">
-        <Sparkles className="size-3.5 text-[#59AAF8] shrink-0" />
+        <EmilyDot />
         <span className="text-sm font-medium flex-1 min-w-0 truncate">{workerName}</span>
         {step === "ready" && (
           <Badge variant="secondary" className="text-[11px] px-2 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 font-normal">
@@ -325,12 +340,14 @@ function ApprovalCard({
   workerName,
   action,
   approved,
+  brand,
   onApprove,
   onDeny,
 }: {
   workerName: string;
   action: string;
   approved: boolean | null;
+  brand?: string;
   onApprove: () => void;
   onDeny: () => void;
 }) {
@@ -346,7 +363,11 @@ function ApprovalCard({
       )}
     >
       <div className="flex items-start gap-2.5 px-4 py-3">
-        <Clock className="size-3.5 text-amber-600 mt-0.5 shrink-0" />
+        {brand ? (
+          <BrandLogo icon={brand} className="size-3.5 mt-0.5 shrink-0" />
+        ) : (
+          <Clock className="size-3.5 text-amber-600 mt-0.5 shrink-0" />
+        )}
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">{workerName}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{action}</p>
@@ -378,14 +399,14 @@ function ApprovalCard({
   );
 }
 
-function ConnectGmailCard() {
+function ConnectServiceCard({ brand, label }: { brand: string; label: string }) {
   const [connected, setConnected] = useState(false);
 
   return (
     <div className="rounded-xl border border-border bg-card/60 overflow-hidden">
       <div className="flex items-center gap-2.5 px-4 py-3">
-        <Mail className="size-3.5 text-[#59AAF8] shrink-0" />
-        <span className="text-sm font-medium flex-1">Connect Gmail</span>
+        <BrandLogo icon={brand} className="size-3.5 shrink-0" />
+        <span className="text-sm font-medium flex-1">Connect {label}</span>
         {connected && (
           <Badge variant="secondary" className="text-[11px] px-2 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 font-normal">
             Connected
@@ -396,22 +417,49 @@ function ConnectGmailCard() {
         {!connected ? (
           <>
             <p className="text-xs text-muted-foreground">
-              Allow Emily to send emails from your Gmail account.
+              Allow Emily to send emails from your {label} account.
             </p>
             <Button
               size="sm"
-              className="h-7 text-xs gap-1.5 font-normal"
+              className="h-7 text-xs gap-2 font-normal"
               onClick={() => setConnected(true)}
             >
-              <Mail className="size-3" />
-              Connect Gmail
+              <BrandLogo icon={brand} className="size-3.5" />
+              Connect {label}
             </Button>
           </>
         ) : (
-          <p className="text-xs text-muted-foreground">depontefede@gmail.com — ready to send</p>
+          <p className="text-xs text-muted-foreground">depontefede@gmail.com, ready to send</p>
         )}
       </div>
     </div>
+  );
+}
+
+// MarkdownText — renders markdown via ReactMarkdown + remark-gfm so
+// **bold**, _italic_, lists, and inline code display correctly.
+function MarkdownText({ text, streaming }: { text: string; streaming?: boolean }) {
+  return (
+    <MessageResponse isAnimating={streaming}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          // Map prose elements to unstyled spans so the parent prose class
+          // controls spacing. Keep paragraphs inline with the prose container.
+          p: ({ children }) => <p className="m-0 leading-relaxed">{children}</p>,
+          ul: ({ children }) => <ul className="mt-1 ml-4 list-disc space-y-0.5">{children}</ul>,
+          ol: ({ children }) => <ol className="mt-1 ml-4 list-decimal space-y-0.5">{children}</ol>,
+          li: ({ children }) => <li className="text-sm">{children}</li>,
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          code: ({ children }) => (
+            <code className="rounded bg-muted px-1 py-0.5 text-[11px] font-mono">{children}</code>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </MessageResponse>
   );
 }
 
@@ -424,9 +472,7 @@ function MsgParts({ parts, msgId }: { parts: MsgPart[]; msgId: string }) {
         const key = `${msgId}-${i}`;
         if (part.type === "text") {
           return (
-            <MessageResponse key={key} isAnimating={part.streaming}>
-              {part.text}
-            </MessageResponse>
+            <MarkdownText key={key} text={part.text} streaming={part.streaming} />
           );
         }
         if (part.type === "tool") {
@@ -470,13 +516,16 @@ function MsgParts({ parts, msgId }: { parts: MsgPart[]; msgId: string }) {
               workerName={part.workerName}
               action={part.action}
               approved={state}
+              brand={part.brand}
               onApprove={() => setApprovalStates((s) => ({ ...s, [key]: true }))}
               onDeny={() => setApprovalStates((s) => ({ ...s, [key]: false }))}
             />
           );
         }
-        if (part.type === "connect-gmail") {
-          return <ConnectGmailCard key={key} />;
+        if (part.type === "connect-service") {
+          return (
+            <ConnectServiceCard key={key} brand={part.brand} label={part.label} />
+          );
         }
         return null;
       })}
@@ -651,6 +700,11 @@ const SUGGESTIONS = [
 ];
 
 // ── Main Rail component ───────────────────────────────────────────────────────
+//
+// Collapse behaviour: rather than returning a different element when collapsed
+// (which leaves the parent flex container at whatever width it was), we render
+// a single element and toggle its width via Tailwind classes. This way the
+// sibling "main content" area naturally fills the freed space via flex-1.
 
 export function EmilyRail({ className }: { className?: string }) {
   const [open, setOpen] = useState(true);
@@ -692,8 +746,8 @@ export function EmilyRail({ className }: { className?: string }) {
             {
               type: "text",
               text: content
-                ? `Got it — "${content}". Give me a moment.`
-                : `Got it — I'll look at ${files.length === 1 ? "that file" : "those files"} now.`,
+                ? `Got it: "${content}". Give me a moment.`
+                : `Got it. I will look at ${files.length === 1 ? "that file" : "those files"} now.`,
             },
           ],
         };
@@ -704,12 +758,13 @@ export function EmilyRail({ className }: { className?: string }) {
     [input, attachedFiles]
   );
 
-  // ── Collapsed strip ──────────────────────────────────────────────────────
+  // ── Collapsed strip (48px icon strip, border-left, no white gap)
   if (!open) {
     return (
       <div
         className={cn(
-          "flex h-full w-12 flex-col items-center justify-start border-l border-border bg-background pt-4 gap-3",
+          // 48px fixed-width strip on the right edge, full height
+          "flex h-full w-12 shrink-0 flex-col items-center justify-start border-l border-border bg-background pt-4 gap-3",
           className
         )}
       >
@@ -731,7 +786,9 @@ export function EmilyRail({ className }: { className?: string }) {
     <div
       className={cn(
         "flex h-full flex-col border-l border-border bg-background",
-        "w-full md:w-[460px] md:max-w-[32vw]",
+        // shrink-0 so the rail doesn't collapse under flex pressure;
+        // w-full on mobile, fixed 460px capped at 32vw on desktop
+        "shrink-0 w-full md:w-[460px] md:max-w-[32vw]",
         className
       )}
     >
@@ -769,6 +826,8 @@ export function EmilyRail({ className }: { className?: string }) {
           />
         </div>
       ) : (
+        // No ConversationScrollButton — removes the floating bottom-center
+        // circle widget that appeared stray/unintended on the prototype.
         <Conversation className="flex-1">
           <ConversationContent className="gap-5 py-5 px-4">
             {messages.map((msg) =>
@@ -827,7 +886,6 @@ export function EmilyRail({ className }: { className?: string }) {
               </Message>
             )}
           </ConversationContent>
-          <ConversationScrollButton />
         </Conversation>
       )}
 
