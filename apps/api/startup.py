@@ -25,6 +25,7 @@ from apps.api.config import get_cloud_settings
 from apps.api.db._secret_crypto import ensure_secret_crypto_ready
 from apps.api.db.supabase_repos import (
     SupabaseApprovalRepository,
+    SupabaseAssetAccessRepository,
     SupabaseCliAuthRepository,
     SupabaseConnectionRepository,
     SupabaseMcpToolRepository,
@@ -136,6 +137,7 @@ def _cloud_repositories() -> Repositories:
         cli_auth=SupabaseCliAuthRepository(),
         approvals=SupabaseApprovalRepository(),
         alerts=SqliteAlertRepository(),
+        asset_access=SupabaseAssetAccessRepository(),
         versions=SupabaseVersionRepository(),
         mcp_tools=SupabaseMcpToolRepository(),
     )

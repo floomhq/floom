@@ -96,6 +96,7 @@ async function handler(
   // cannot be used to scope into another user's workspace.
   const activeWorkspace =
     req.headers.get("x-workeros-workspace")?.trim() ||
+    req.nextUrl.searchParams.get("workspace_id")?.trim() ||
     req.cookies.get("workeros_active_workspace")?.value;
   if (activeWorkspace) forwardHeaders["x-workeros-workspace"] = activeWorkspace;
   const contentType = req.headers.get("content-type");

@@ -2773,6 +2773,277 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
 # Version repository
 # ---------------------------------------------------------------------------
 
+VISIBILITY_VALUES: frozenset[str] = frozenset({"private", "workspace", "specific_people"})
+_ASSET_TABLES: dict[str, str] = {
+    "worker": "workers",
+    "brain_pack": "brain_packs",
+    "assistant": "assistants",
+}
+
+
+class SupabaseAssetAccessRepository:
+    """Cloud implementation of the engine AssetAccessRepository."""
+
+    @property
+    def _client(self) -> Client:
+        return get_supabase_service_client()
+
+    @staticmethod
+    def _workspace_id(workspace_id: str | None, *, owner_id: str | None = None) -> str | None:
+        active = get_active_workspace_id()
+        if active:
+            return active
+        if workspace_id and workspace_id != "local-default":
+            return workspace_id
+        if owner_id:
+            return _resolve_workspace_id_for_write(user_id=owner_id)
+        return workspace_id
+
+    def _asset_row(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        owner_col = "user_id" if asset_type == "worker" else "owner_id"
+        builder = (
+            self._client.table(table)
+            .select(f"id,{owner_col},workspace_id,visibility")
+            .eq("id", asset_id)
+        )
+        if asset_type in {"brain_pack", "assistant"}:
+            effective_workspace_id = self._workspace_id(workspace_id)
+            if effective_workspace_id:
+                builder = builder.eq("workspace_id", effective_workspace_id)
+        response = builder.limit(1).execute()
+        row = _first_row(response)
+        if row is None:
+            return None
+        row["owner_id"] = row.get(owner_col)
+        visibility = str(row.get("visibility") or "private")
+        row["visibility"] = "workspace" if visibility == "shared" else visibility
+        return row
+
+    @staticmethod
+    def _role(*, workspace_id: str, user_id: str) -> str | None:
+        ws = workspace_repo.get(workspace_id=workspace_id)
+        if ws and str(ws.get("owner_user_id", "")) == str(user_id):
+            return "owner"
+        return workspace_repo.get_member_role(workspace_id=workspace_id, user_id=user_id)
+
+    @staticmethod
+    def _compute(
+        *, owner_id: str | None, visibility: str, role: str | None, user_id: str
+    ) -> dict[str, Any]:
+        is_owner = bool(owner_id) and owner_id == user_id
+        is_admin = role in {"owner", "admin"}
+        is_member = role in {"owner", "admin", "member"}
+        shared = visibility == "workspace"
+        can_view = is_owner or (shared and is_member)
+        return {
+            "owner_id": owner_id,
+            "visibility": visibility,
+            "is_owner": is_owner,
+            "role": role,
+            "can_view": can_view,
+            "can_edit": is_owner or (shared and is_admin),
+            "can_delete": is_owner or (shared and is_admin),
+            "can_run": can_view,
+            "can_share": is_owner or is_admin,
+        }
+
+    def ensure_brain_pack(
+        self,
+        *,
+        pack_id: str,
+        workspace_id: str,
+        owner_id: str,
+        name: str | None = None,
+        default_visibility: str = "private",
+    ) -> dict[str, Any]:
+        if default_visibility not in VISIBILITY_VALUES:
+            default_visibility = "private"
+        workspace_id = self._workspace_id(workspace_id, owner_id=owner_id) or workspace_id
+        now = datetime.now(timezone.utc).isoformat()
+        existing = self._asset_row(
+            asset_type="brain_pack",
+            asset_id=pack_id,
+            workspace_id=workspace_id,
+        )
+        if existing is not None:
+            (
+                self._client.table("brain_packs")
+                .update({"owner_id": owner_id, "name": name or pack_id, "updated_at": now})
+                .eq("workspace_id", workspace_id)
+                .eq("id", pack_id)
+                .execute()
+            )
+            return self._asset_row(
+                asset_type="brain_pack",
+                asset_id=pack_id,
+                workspace_id=workspace_id,
+            ) or {}
+        insert_payload = {
+            "id": pack_id,
+            "workspace_id": workspace_id,
+            "owner_id": owner_id,
+            "visibility": default_visibility,
+            "name": name or pack_id,
+            "metadata_json": {},
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._client.table("brain_packs").upsert(insert_payload, on_conflict="workspace_id,id").execute()
+        return self._asset_row(
+            asset_type="brain_pack",
+            asset_id=pack_id,
+            workspace_id=workspace_id,
+        ) or {}
+
+    def ensure_assistant(
+        self,
+        *,
+        assistant_id: str,
+        workspace_id: str,
+        owner_id: str,
+        name: str = "Workspace assistant",
+        default_visibility: str = "workspace",
+    ) -> dict[str, Any]:
+        if default_visibility not in VISIBILITY_VALUES:
+            default_visibility = "workspace"
+        workspace_id = self._workspace_id(workspace_id, owner_id=owner_id) or workspace_id
+        now = datetime.now(timezone.utc).isoformat()
+        existing = self._asset_row(
+            asset_type="assistant",
+            asset_id=assistant_id,
+            workspace_id=workspace_id,
+        )
+        if existing is not None:
+            (
+                self._client.table("assistants")
+                .update({"owner_id": owner_id, "name": name, "updated_at": now})
+                .eq("workspace_id", workspace_id)
+                .eq("id", assistant_id)
+                .execute()
+            )
+            return self._asset_row(
+                asset_type="assistant",
+                asset_id=assistant_id,
+                workspace_id=workspace_id,
+            ) or {}
+        self._client.table("assistants").insert(
+            {
+                "id": assistant_id,
+                "workspace_id": workspace_id,
+                "owner_id": owner_id,
+                "visibility": default_visibility,
+                "name": name,
+                "config_json": {},
+                "instructions_md": None,
+                "created_at": now,
+                "updated_at": now,
+            },
+        ).execute()
+        return self._asset_row(
+            asset_type="assistant",
+            asset_id=assistant_id,
+            workspace_id=workspace_id,
+        ) or {}
+
+    def get_permissions(
+        self, *, workspace_id: str, user_id: str, asset_type: str, asset_id: str
+    ) -> dict[str, Any]:
+        workspace_id = self._workspace_id(workspace_id, owner_id=user_id) or workspace_id
+        asset = self._asset_row(
+            asset_type=asset_type,
+            asset_id=asset_id,
+            workspace_id=workspace_id,
+        )
+        if asset is None:
+            return self._compute(owner_id=None, visibility="private", role=None, user_id=user_id)
+        asset_workspace_id = str(asset.get("workspace_id") or workspace_id)
+        role = self._role(workspace_id=asset_workspace_id, user_id=user_id)
+        return self._compute(
+            owner_id=str(asset.get("owner_id") or ""),
+            visibility=str(asset.get("visibility") or "private"),
+            role=role,
+            user_id=user_id,
+        )
+
+    def set_visibility(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, visibility: str
+    ) -> dict[str, Any] | None:
+        if visibility not in VISIBILITY_VALUES:
+            raise ValueError(f"invalid visibility {visibility!r}")
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        workspace_id = self._workspace_id(workspace_id, owner_id=actor_id) or workspace_id
+        asset = self._asset_row(
+            asset_type=asset_type,
+            asset_id=asset_id,
+            workspace_id=workspace_id,
+        )
+        if asset is None:
+            return None
+        asset_workspace_id = str(asset.get("workspace_id") or workspace_id)
+        role = self._role(workspace_id=asset_workspace_id, user_id=actor_id)
+        perms = self._compute(
+            owner_id=str(asset.get("owner_id") or ""),
+            visibility=str(asset.get("visibility") or "private"),
+            role=role,
+            user_id=actor_id,
+        )
+        if not perms["can_share"]:
+            raise PermissionError("only the asset owner or a workspace admin can change visibility")
+        stored_visibility = "shared" if asset_type == "worker" and visibility == "workspace" else visibility
+        update_builder = self._client.table(table).update({"visibility": stored_visibility}).eq("id", asset_id)
+        if asset_type in {"brain_pack", "assistant"}:
+            update_builder = update_builder.eq("workspace_id", asset_workspace_id)
+        update_builder.execute()
+        return self.get_permissions(
+            workspace_id=asset_workspace_id,
+            user_id=actor_id,
+            asset_type=asset_type,
+            asset_id=asset_id,
+        )
+
+    def transfer_asset_owner(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, new_owner_id: str
+    ) -> dict[str, Any] | None:
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        workspace_id = self._workspace_id(workspace_id, owner_id=actor_id) or workspace_id
+        asset = self._asset_row(
+            asset_type=asset_type,
+            asset_id=asset_id,
+            workspace_id=workspace_id,
+        )
+        if asset is None:
+            return None
+        asset_workspace_id = str(asset.get("workspace_id") or workspace_id)
+        role = self._role(workspace_id=asset_workspace_id, user_id=actor_id)
+        is_owner = str(asset.get("owner_id") or "") == actor_id
+        if not (is_owner or role in {"owner", "admin"}):
+            raise PermissionError("only the asset owner or a workspace admin can transfer the asset")
+        owner_col = "user_id" if asset_type == "worker" else "owner_id"
+        update_builder = self._client.table(table).update({owner_col: new_owner_id}).eq("id", asset_id)
+        if asset_type in {"brain_pack", "assistant"}:
+            update_builder = update_builder.eq("workspace_id", asset_workspace_id)
+        update_builder.execute()
+        return self.get_permissions(
+            workspace_id=asset_workspace_id,
+            user_id=actor_id,
+            asset_type=asset_type,
+            asset_id=asset_id,
+        )
+
+
 class SupabaseVersionRepository:
     """Supabase implementation of VersionRepository."""
 

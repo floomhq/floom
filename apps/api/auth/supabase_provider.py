@@ -259,8 +259,11 @@ class SupabaseAuthProvider:
     ) -> AuthContext:
         header_workspace_id = request.headers.get(ACTIVE_WORKSPACE_HEADER)
         cookie_workspace_id = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
+        query_workspace_id = request.query_params.get("workspace_id")
         requested_workspace_id = (
-            (header_workspace_id or "").strip() or cookie_workspace_id
+            (header_workspace_id or "").strip()
+            or (query_workspace_id or "").strip()
+            or cookie_workspace_id
         )
 
         if workspace_id and requested_workspace_id and requested_workspace_id != workspace_id:
@@ -299,8 +302,11 @@ class SupabaseAuthProvider:
         # leaks data from another user's workspace.
         header_workspace_id = request.headers.get(ACTIVE_WORKSPACE_HEADER)
         cookie_workspace_id = request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
+        query_workspace_id = request.query_params.get("workspace_id")
         requested_workspace_id = (
-            (header_workspace_id or "").strip() or cookie_workspace_id
+            (header_workspace_id or "").strip()
+            or (query_workspace_id or "").strip()
+            or cookie_workspace_id
         )
 
         # Cache key includes the requested workspace so explicit switches
