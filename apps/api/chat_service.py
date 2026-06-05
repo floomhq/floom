@@ -33,6 +33,7 @@ TOOL_RESULT_MAX_BYTES = 2048
 CONVERSATION_WINDOW = 50       # LLM context window; stored rows are permanent
 CONVERSATION_KEEP_VERBATIM = 20  # retained for legacy summary compatibility
 WORKSPACE_MD_PATH = Path(__file__).resolve().parents[3] / "workspace.md"
+WORKSPACE_BASE_PERSONA_PATH = Path(__file__).resolve().parents[3] / "workspace.base.md"
 WORKSPACE_MD_TEMPLATE = Path(__file__).resolve().parents[3] / "workspace.md.template"
 
 EMILY_BASE_PERSONA = """# Emily
@@ -96,8 +97,21 @@ def strip_em_dashes(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# workspace.md helpers
+# workspace prompt helpers
 # ---------------------------------------------------------------------------
+
+def get_workspace_base_persona() -> str:
+    """Return the editable base persona override, or the engine default."""
+    if WORKSPACE_BASE_PERSONA_PATH.is_file():
+        return WORKSPACE_BASE_PERSONA_PATH.read_text(encoding='utf-8')
+    return EMILY_BASE_PERSONA
+
+
+def set_workspace_base_persona(content: str) -> None:
+    """Overwrite the optional base persona override."""
+    WORKSPACE_BASE_PERSONA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    WORKSPACE_BASE_PERSONA_PATH.write_text(content, encoding='utf-8')
+
 
 def get_workspace_md() -> str:
     """Return editable workspace custom instructions, or a custom-only default."""
@@ -2465,7 +2479,8 @@ def _build_workspace_preamble(user_id: str) -> str:
 
 
 def _build_system_prompt(user_id: str) -> str:
-    """Build the full system prompt: engine persona + custom instructions + SKILL.md."""
+    """Build the full system prompt: editable base + workspace custom + SKILL.md."""
+    base_persona = get_workspace_base_persona()
     workspace_content = get_workspace_md()
     preamble = _build_workspace_preamble(user_id)
     from worker_registry import WORKERS_DIR
@@ -2478,7 +2493,7 @@ def _build_system_prompt(user_id: str) -> str:
         if workspace_content.strip()
         else ""
     )
-    return "\n\n".join(part for part in [EMILY_BASE_PERSONA, custom, skill_md] if part)
+    return "\n\n".join(part for part in [base_persona, custom, skill_md] if part)
 
 
 # Per-call environment notes. The engine persona is shared and
@@ -2526,11 +2541,11 @@ def _environment_note(source: str) -> str:
 
 
 def build_system_prompt_for_source(user_id: str, source: str = "web") -> str:
-    """Shared engine persona plus a short per-call environment note.
+    """Shared workspace-agent prompt plus a short per-call environment note.
 
-    The persona is immutable engine content and is identical for every source.
-    Editable workspace.md content is layered as custom instructions, then the
-    appended environment note differs by Slack, WhatsApp, MCP, or web.
+    The editable base persona and workspace.md custom instructions are identical
+    for every source. The appended environment note differs by Slack, WhatsApp,
+    MCP, or web.
     """
     base = _build_system_prompt(user_id)
     return f"{base}\n\n{_environment_note(source)}"
@@ -2587,9 +2602,10 @@ def workspace_agent_tool_metadata(user_id: str) -> List[Dict[str, str]]:
 def workspace_agent_info(user_id: str) -> Dict[str, Any]:
     """Read-only metadata for the workspace agent that powers /chat.
 
-    Returns the resolved system prompt (engine persona + editable workspace.md
-    custom instructions + engine SKILL.md + live workspace snapshot) and the
-    agent's available tools (names + descriptions). Contains no secret values.
+    Returns the resolved system prompt (editable base persona + editable
+    workspace.md custom instructions + engine SKILL.md + live workspace snapshot)
+    and the agent's available tools (names + descriptions). Contains no secret
+    values.
     """
     settings = get_workspace_agent_settings(user_id)
     return {

@@ -31,7 +31,12 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_SECRET", AUTH_HEADERS["x-floom-secret"])
 
     sys.path.insert(0, str(api_dir))
-    for name in ["main", "db", "models", "worker_registry", "run_service", "composio_client"]:
+    for name in [
+        "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory",
+        "db.dependency", "db.interface", "models", "worker_registry",
+        "run_service", "composio_client", "auth", "auth.context",
+        "auth.dependency", "auth.factory", "auth.interface", "auth.local",
+    ]:
         sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
@@ -363,6 +368,24 @@ class TestConnectionCallbackAndComposio503:
         account_info = client.get(f"/connections/{conn['id']}/account-info", headers=AUTH_HEADERS)
         assert account_info.status_code == 503
         assert "Composio" in account_info.json()["detail"]
+
+    def test_connect_upstream_failure_returns_graceful_503(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        with patch("composio_client.initiate_connection") as mock_init:
+            mock_init.side_effect = RuntimeError("raw upstream traceback detail")
+            resp = client.post(
+                "/connections",
+                json={"app_name": "unknown-oauth-app"},
+                headers=AUTH_HEADERS,
+            )
+
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert "integration provider" in detail
+        assert "raw upstream traceback detail" not in detail
+        assert "traceback" not in detail.lower()
 
     def test_missing_composio_api_key_returns_503_for_catalog_and_triggers(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)

@@ -8,6 +8,7 @@ venv/
 
 # Workspace configuration (user-editable, not committed)
 workspace.md
+workspace.base.md
 
 # Data
 data/floom.db
