@@ -194,10 +194,16 @@ def test_tool_result_preview_redacts_secret_query_params(booted):
 
 def test_finish_tool_args_are_normalized_before_card_metadata(booted):
     chat_service = booted["chat_service"]
+    approval_token = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 
     normalized = chat_service.normalize_tool_args_for_event(
         "finish_with_outputs",
-        {"reply": "Done — with dash"},
+        {
+            "reply": (
+                "Done — with dash. "
+                f"https://workers.floom.dev/approvals/review?id=apr_1&token={approval_token}"
+            )
+        },
     )
     metadata = chat_service.build_tool_event_metadata(
         "finish_with_outputs",
@@ -209,6 +215,8 @@ def test_finish_tool_args_are_normalized_before_card_metadata(booted):
     encoded = json.dumps(metadata["args_preview"])
     assert "—" not in encoded
     assert "–" not in encoded
+    assert approval_token not in encoded
+    assert "token=[redacted]" in encoded
 
 
 def test_async_create_from_prompt_is_idempotent(booted, monkeypatch):

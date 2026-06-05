@@ -786,7 +786,7 @@ def normalize_tool_args_for_event(tool_name: str, args: Any) -> Any:
         and isinstance(args, dict)
         and isinstance(args.get("reply"), str)
     ):
-        return {**args, "reply": strip_em_dashes(args["reply"])}
+        return {**args, "reply": _sanitize_preview_text(strip_em_dashes(args["reply"]))}
     return args
 
 
@@ -3655,7 +3655,7 @@ async def stream_chat(
             args = {}
         reply = _ensure_bare_greeting_identity(
             message,
-            strip_em_dashes(str(args.get("reply") or "")),
+            _sanitize_preview_text(strip_em_dashes(str(args.get("reply") or ""))),
         )
         final_reply_box["reply"] = reply
         # Emit as text part if the agent didn't stream text deltas
@@ -3718,7 +3718,7 @@ async def stream_chat(
                 data_type = str(getattr(data, "type", "") or "")
                 delta = getattr(data, "delta", None)
                 if delta and data_type.endswith("output_text.delta"):
-                    text = strip_em_dashes(str(delta))
+                    text = _sanitize_preview_text(strip_em_dashes(str(delta)))
                     assistant_text_parts.append(text)
                     part = {"type": "text", "text": text}
                     part.update({
@@ -3751,7 +3751,7 @@ async def stream_chat(
                         texts.append(str(t))
                 full_text = _ensure_bare_greeting_identity(
                     message,
-                    strip_em_dashes("".join(texts)),
+                    _sanitize_preview_text(strip_em_dashes("".join(texts))),
                 )
                 if full_text:
                     assistant_text_parts.append(full_text)
@@ -3912,6 +3912,7 @@ async def stream_chat(
         full_reply = "".join(assistant_text_parts).strip()
         if not full_reply and "reply" in final_reply_box:
             full_reply = final_reply_box["reply"]
+        full_reply = _sanitize_preview_text(full_reply)
         full_reply = _ensure_bare_greeting_identity(message, full_reply)
         if full_reply:
             final_message_id = insert_message(conversation_id, "assistant", full_reply)
