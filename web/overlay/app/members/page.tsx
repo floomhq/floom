@@ -132,13 +132,6 @@ function MembersContent() {
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [roleChangingId, setRoleChangingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const ws = wsId();
-    setWorkspaceId(ws);
-    if (ws) void refresh(ws);
-    else setLoading(false);
-  }, []);
-
   const refresh = useCallback(async (ws: string) => {
     try {
       const [mRes, iRes] = await Promise.all([
@@ -157,6 +150,13 @@ function MembersContent() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const ws = wsId();
+    setWorkspaceId(ws);
+    if (ws) void refresh(ws);
+    else setLoading(false);
+  }, [refresh]);
 
   // ---- invite ---------------------------------------------------------------
 

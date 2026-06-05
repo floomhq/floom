@@ -127,7 +127,7 @@ function JoinContent() {
             <div className="space-y-1">
               <p className="text-sm font-medium">Your API token</p>
               <p className="text-xs text-muted-foreground">
-                This is shown <strong>once only</strong> and can't be retrieved again.
+                This is shown <strong>once only</strong> and can&apos;t be retrieved again.
                 Use it as your <code className="bg-muted rounded px-1 font-mono">x-floom-token</code> header.
               </p>
             </div>

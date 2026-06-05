@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -81,12 +81,7 @@ export default function WorkerSharePage() {
   const [generatingLink, setGeneratingLink] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    if (!workerId) return;
-    void load();
-  }, [workerId]);
-
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await apiFetch<Worker>(`/workers/${workerId}`);
@@ -96,7 +91,12 @@ export default function WorkerSharePage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [workerId]);
+
+  useEffect(() => {
+    if (!workerId) return;
+    void load();
+  }, [load, workerId]);
 
   async function handleShareToWorkspace() {
     if (!worker || sharing) return;
