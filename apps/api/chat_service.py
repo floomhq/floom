@@ -3637,7 +3637,7 @@ async def stream_chat(
     loop_local_provider = LoopLocalModelProvider()
     run_config = RunConfig(
         workflow_name="workeros:workspace-agent",
-        trace_id=f"chat_{uuid.uuid4().hex[:16]}",
+        trace_id=f"trace_chat_{uuid.uuid4().hex[:16]}",
         trace_metadata={"conversation_id": conversation_id, "user_id": user_id},
         model_provider=loop_local_provider.provider,
     )
