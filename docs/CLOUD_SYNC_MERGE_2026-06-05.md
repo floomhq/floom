@@ -2,7 +2,7 @@
 
 Status: BLOCKED before merge
 Branch: `codex/cloud-launch-fixes-20260605`
-Latest pushed SHA: `45fd6f59bdda6a7da8be20782625e9e68889490b`
+Latest pushed SHA: `2f36d04fcf0307dcd67c7c96c5bef665ca4f00ac`
 PR: https://github.com/floomhq/workeros-cloud/pull/86
 
 ## Completed
@@ -41,6 +41,7 @@ Committed and pushed:
 ```text
 b425411 chore(engine): bump WorkerOS to 0998640
 45fd6f5 chore(api): record dependency audit verification
+2f36d04 docs: record cloud sync merge blocker
 ```
 
 The PR branch now pins `engine/` at `099864073486e544e95e88190d9dac6a11ac3c89`.
