@@ -40,7 +40,10 @@ const EXAMPLE_PROMPTS: Array<{ label: string; prompt: string; tool: string }> = 
 // an SVG; otherwise the chip is label-only, never a fake monogram).
 const KNOWN_TOOLS: Array<{ keys: string[]; canonical: string; tool: string }> = [
   { keys: ["slack"], canonical: "Slack", tool: "slack" },
+  { keys: ["whatsapp"], canonical: "WhatsApp", tool: "whatsapp" },
+  { keys: ["discord"], canonical: "Discord", tool: "discord" },
   { keys: ["gmail"], canonical: "Gmail", tool: "gmail" },
+  { keys: ["outlook"], canonical: "Outlook", tool: "outlook" },
   { keys: ["google calendar", "gcal"], canonical: "Google Calendar", tool: "calendar" },
   { keys: ["hubspot crm", "hubspot"], canonical: "HubSpot", tool: "hubspot" },
   { keys: ["google sheets", "sheets"], canonical: "Google Sheets", tool: "sheets" },
@@ -50,6 +53,17 @@ const KNOWN_TOOLS: Array<{ keys: string[]; canonical: string; tool: string }> = 
   { keys: ["github"], canonical: "GitHub", tool: "github" },
   { keys: ["linear"], canonical: "Linear", tool: "linear" },
   { keys: ["granola"], canonical: "Granola", tool: "granola" },
+  { keys: ["calendly"], canonical: "Calendly", tool: "calendly" },
+  { keys: ["zoom"], canonical: "Zoom", tool: "zoom" },
+  { keys: ["asana"], canonical: "Asana", tool: "asana" },
+  { keys: ["jira"], canonical: "Jira", tool: "jira" },
+  { keys: ["airtable"], canonical: "Airtable", tool: "airtable" },
+  { keys: ["google drive", "gdrive"], canonical: "Google Drive", tool: "drive" },
+  { keys: ["claude code"], canonical: "Claude Code", tool: "claude-code" },
+  { keys: ["claude"], canonical: "Claude", tool: "claude" },
+  { keys: ["cursor"], canonical: "Cursor", tool: "cursor" },
+  { keys: ["codex"], canonical: "Codex", tool: "codex" },
+  { keys: ["copilot"], canonical: "GitHub Copilot", tool: "copilot" },
 ];
 
 type Match = { start: number; end: number; canonical: string; tool: string };
@@ -199,9 +213,9 @@ export function HeroPromptComposer({
             rows={3}
             className="relative w-full resize-none bg-transparent px-3 pt-3 pb-2 text-[15px] leading-relaxed placeholder:text-muted-foreground/70 focus:outline-none"
             style={{
-              color: matches.length ? "transparent" : "var(--ink)",
+              color: "transparent",
               caretColor: "var(--ink)",
-              WebkitTextFillColor: matches.length ? "transparent" : "var(--ink)",
+              WebkitTextFillColor: "transparent",
             }}
             aria-label="Describe what your AI worker should do"
           />
