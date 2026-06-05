@@ -5,6 +5,9 @@
 // Cloud wrapper consume this file unmodified (no fork).
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
+const APP_API_BASE = API_BASE.endsWith("/api/proxy")
+  ? API_BASE.slice(0, -"/api/proxy".length) + "/api"
+  : "/api";
 
 export function getActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
@@ -148,6 +151,23 @@ async function fetchRaw(path: string, options?: RequestInit): Promise<Response> 
 }
 
 export const api = {
+  me: async () => {
+    const res = await fetch(`${APP_API_BASE}/me`, {
+      cache: "no-store",
+      headers: withWorkspaceHeaders(),
+    });
+    if (!res.ok) {
+      let err = "";
+      try {
+        const body = await res.json();
+        err = extractApiErrorMessage(body);
+      } catch {
+        err = res.statusText || `HTTP ${res.status}`;
+      }
+      throw new Error(err);
+    }
+    return res.json() as Promise<import("./types").CurrentUser>;
+  },
   whatsapp: {
     claim: (token: string) =>
       fetchJson<{ ok: boolean; wa_id: string; user_id: string }>("/whatsapp/bindings/claim", {
@@ -171,6 +191,10 @@ export const api = {
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}/visibility`, {
         method: "PUT",
         body: JSON.stringify({ visibility }),
+      }),
+    shareLink: (id: string) =>
+      fetchJson<import("./types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
+        method: "POST",
       }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
@@ -440,6 +464,11 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/visibility`,
         { method: "PUT", body: JSON.stringify({ visibility }) }
       ),
+    sharePackLink: (name: string) =>
+      fetchJson<import("./types").StandaloneShareLink>(
+        `/contexts/${encodeURIComponent(name)}/share-link`,
+        { method: "POST" }
+      ),
     delete: (name: string, force = false) =>
       fetchJson<{ status: string; referenced_by: string[] }>(
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
@@ -454,6 +483,11 @@ export const api = {
       fetchJson<import("./types").ContextDetail>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
         { method: "DELETE" }
+      ),
+    shareFileLink: (name: string, path: string) =>
+      fetchJson<import("./types").StandaloneShareLink>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
+        { method: "POST" }
       ),
     readTextFile: async (name: string, path: string) => {
       const res = await fetchRaw(
@@ -586,6 +620,11 @@ export const api = {
       fetchJson<import("./types").ConnectionTestResult>(`/connections/${id}/test`, {
         method: "POST",
       }),
+    accountInfo: (id: string) =>
+      fetchJson<import("./types").ConnectedAccountMetadata>(
+        `/connections/${encodeURIComponent(id)}/account-info`,
+        { cache: "no-store" }
+      ),
   },
   slack: {
     // Read-only status (configured: true/false + installed workspaces). Slack

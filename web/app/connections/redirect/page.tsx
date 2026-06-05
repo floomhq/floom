@@ -34,8 +34,6 @@ function RedirectInner() {
     }
 
     let cancelled = false;
-    let timeout: number | undefined;
-
     (async () => {
       try {
         const result = await api.connections.initiate(slug);
@@ -44,9 +42,7 @@ function RedirectInner() {
         if (result.redirect_url) {
           setRedirectUrl(result.redirect_url);
           setPhase("redirecting");
-          timeout = window.setTimeout(() => {
-            window.location.href = result.redirect_url;
-          }, 3000);
+          window.location.assign(result.redirect_url);
           return;
         }
 
@@ -66,7 +62,6 @@ function RedirectInner() {
 
     return () => {
       cancelled = true;
-      if (timeout) window.clearTimeout(timeout);
     };
   }, [providerName, returnTo, router, slug]);
 

@@ -64,6 +64,7 @@ function isPublicPath(pathname: string): boolean {
   if (path === "/connections/callback") return true;
   if (path === "/privacy" || path === "/terms") return true;
   if (path === "/approvals/review") return true;
+  if (path.startsWith("/s/")) return true;
   if (path.startsWith("/_next/")) return true;
   if (path.startsWith("/api/auth/")) return true;
   if (path.startsWith("/api/proxy/")) return true;

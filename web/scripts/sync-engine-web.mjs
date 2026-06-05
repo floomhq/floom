@@ -66,6 +66,7 @@ export const OVERLAY_FILES = [
   "app/api/auth/email/route.ts",
   "app/api/auth/password/route.ts",
   "app/api/proxy/[...path]/route.ts",
+  "app/s/[token]/download/route.ts",
   "app/contexts/page.tsx",
   "app/assistant/page.tsx",
   "app/cloud-shell.css",

@@ -767,7 +767,7 @@ function WorkerCard({
           )}
           {!worker.archived && (
             <div className="flex items-center gap-0.5 shrink-0">
-              <ShareWorkerButton publicLink={worker.public_link} variant="icon" />
+              <ShareWorkerButton workerId={worker.id} workerName={worker.name} variant="icon" />
               <button
                 type="button"
                 title={isFavorite ? "Remove from favourites" : "Add to favourites"}

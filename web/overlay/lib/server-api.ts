@@ -3,6 +3,7 @@ import type {
   ConnectionItem,
   PublicWorker,
   RunSummary,
+  StandaloneShare,
   SystemOverview,
   WorkerSummary,
 } from "@/lib/types";
@@ -117,4 +118,24 @@ export async function fetchPublicWorker(id: string, token: string) {
     `/workers/public/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,
     { next: { revalidate: 30 } }
   );
+}
+
+export async function fetchStandaloneShare(token: string) {
+  const res = await fetch(`${API_BASE}/api/s/${encodeURIComponent(token)}`, {
+    headers: {
+      "content-type": "application/json",
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    let err = "";
+    try {
+      const body = await res.json();
+      err = body.detail || JSON.stringify(body);
+    } catch {
+      err = res.statusText || `HTTP ${res.status}`;
+    }
+    throw new Error(`Cloud public API error ${res.status}: ${err}`);
+  }
+  return res.json() as Promise<StandaloneShare>;
 }
