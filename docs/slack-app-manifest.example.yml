@@ -12,7 +12,7 @@ features:
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
   assistant_view:
-    assistant_description: Workeros helps coordinate worker tasks, approvals, and workspace operations from Slack.
+    assistant_description: Emily is your personal Chief-of-Staff. She routes tasks to a swarm of always-on agents/workers. DM her or @mention her.
     suggested_prompts:
       - title: Pending approvals
         message: Show my pending approvals.

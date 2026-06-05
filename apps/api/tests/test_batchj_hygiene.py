@@ -178,6 +178,40 @@ def test_smoke_inputs_string_placeholder_unchanged(tmp_path):
     assert out["text"] == "sample"
 
 
+def test_smoke_inputs_use_manifest_example_input(tmp_path):
+    import run_service
+    from models import WorkerConfig
+
+    config = WorkerConfig(
+        id="median-worker",
+        name="Median Worker",
+        trigger={"type": "manual"},
+        runtime={"type": "python", "entrypoint": "run.py"},
+        inputs=[
+            {
+                "name": "numbers",
+                "type": "list",
+                "required": True,
+                "kind": "scalar",
+                "label": "Numbers",
+            }
+        ],
+        outputs=[],
+    )
+    bundle = {
+        "worker_yml": (
+            'schema_version: "0.3"\n'
+            'name: "median-worker"\n'
+            "example_input:\n"
+            "  numbers: [3, 1, 2, 5, 4]\n"
+        )
+    }
+
+    out = run_service._build_smoke_inputs(config, bundle, tmp_path)
+
+    assert out["numbers"] == [3, 1, 2, 5, 4]
+
+
 # --------------------------------------------------------------------------
 # Batch K / G5 P1-A — smoke_reason humanization (draft-and-create + SSE) and
 # the run "Recent logs" failure line must never leak raw exceptions/paths.
@@ -443,6 +477,53 @@ def test_output_validation_failed_routes_to_repair() -> None:
     # the generator gets a bounded chance to fix the scalar-vs-file contract,
     # instead of gating on the first try.
     assert "output_validation_failed" in rs._SMOKE_CODE_FAILURE_CODES
+
+
+def test_smoke_example_output_detects_wrong_median() -> None:
+    import run_service as rs
+    from models import WorkerConfig, WorkerOutput, WorkerRuntime, WorkerTrigger
+
+    config = WorkerConfig(
+        id="median-worker",
+        name="Median Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="pure-script", entrypoint="run.py", runner="e2b", mode="pure-script"),
+        outputs=[WorkerOutput(name="median", label="Median", type="number", required=True)],
+    )
+    err = rs._validate_example_output(
+        "run_test",
+        config,
+        {"example_output": "3"},
+        {"median": 0.0},
+        [],
+    )
+    assert err is not None
+    assert "example_output mismatch" in err
+    assert "expected 3" in err
+
+
+def test_smoke_example_output_accepts_matching_json_object() -> None:
+    import run_service as rs
+    from models import WorkerConfig, WorkerOutput, WorkerRuntime, WorkerTrigger
+
+    config = WorkerConfig(
+        id="stats-worker",
+        name="Stats Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="pure-script", entrypoint="run.py", runner="e2b", mode="pure-script"),
+        outputs=[
+            WorkerOutput(name="median", label="Median", type="number", required=True),
+            WorkerOutput(name="count", label="Count", type="number", required=True),
+        ],
+    )
+    err = rs._validate_example_output(
+        "run_test",
+        config,
+        {"example_output": '{"median": 3, "count": 5}'},
+        {"median": 3.0, "count": 5},
+        [],
+    )
+    assert err is None
 
 
 def test_smoke_repair_prompt_teaches_scalar_vs_file_output_contract() -> None:

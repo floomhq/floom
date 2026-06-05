@@ -337,6 +337,48 @@ def test_build_config_maps_db_connections(chat_env):
     assert ok is False
 
 
+def test_build_config_respects_connection_permission_flags(chat_env):
+    db = chat_env["db"]
+    chat = chat_env["chat"]
+    repos = db.get_repositories()
+    repos.connections.upsert(
+        user_id="federico", id="c1", app_name="gmail",
+        composio_connection_id="ca_x", status="active",
+    )
+
+    disabled = chat.build_workspace_agent_config(
+        "federico",
+        {
+            "brain_read": True,
+            "brain_write": False,
+            "connections_read": False,
+            "connections_use": False,
+            "connections_add": False,
+        },
+    )
+    from models import declared_composio_connections
+    assert declared_composio_connections(disabled) == {}
+
+    writable = chat.build_workspace_agent_config(
+        "federico",
+        {
+            "brain_read": True,
+            "brain_write": False,
+            "connections_read": True,
+            "connections_use": True,
+            "connections_add": False,
+        },
+    )
+    from runner_sandbox import agent_capabilities as cap
+    ok, _, _ = cap.composio_tool_permitted(
+        writable,
+        chat._workspace_agent_policy({"connections_use": True}),
+        "gmail",
+        "GMAIL_SEND_EMAIL",
+    )
+    assert ok is True
+
+
 def test_tool_metadata_includes_brain_and_composio(chat_env):
     db = chat_env["db"]
     chat = chat_env["chat"]
