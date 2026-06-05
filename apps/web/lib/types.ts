@@ -325,11 +325,51 @@ export interface PublicWorker {
   how_it_works?: string | null;
   is_example?: boolean | null;
   tags: string[];
+  example_input?: Record<string, unknown> | null;
+  example_output?: string | null;
   trigger_type: string;
   runtime?: string | null;
   connections: string[];
   inputs: PublicWorkerInput[];
   outputs: PublicWorkerOutput[];
+}
+
+export interface StandaloneShareLink {
+  token: string;
+  url: string;
+  entity_type: "worker" | "brain_file" | "brain_pack";
+}
+
+export interface PublicShareFile {
+  path: string;
+  size: number;
+  mime_type: string;
+  display_type?: string | null;
+  is_binary: boolean;
+  updated_at?: string | null;
+  description?: string | null;
+  tags?: string[];
+  metadata?: Record<string, string | number | boolean | null | undefined>;
+  content_text?: string | null;
+  download_url?: string | null;
+}
+
+export interface PublicSharePack {
+  name: string;
+  description?: string | null;
+  file_count: number;
+  total_size_bytes: number;
+  updated_at?: string | null;
+}
+
+export interface StandaloneShare {
+  entity_type: "worker" | "brain_file" | "brain_pack";
+  title: string;
+  description?: string | null;
+  worker?: PublicWorker;
+  pack?: PublicSharePack;
+  file?: PublicShareFile | null;
+  files: PublicShareFile[];
 }
 
 export interface WorkerSuggestion {

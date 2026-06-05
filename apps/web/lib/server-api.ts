@@ -88,3 +88,11 @@ export async function fetchPublicWorker(id: string, token: string) {
     { next: { revalidate: 30 } }
   );
 }
+
+/** Fetch a no-login standalone share payload for /s/<token>. */
+export async function fetchStandaloneShare(token: string) {
+  return serverFetch<import("./types").StandaloneShare>(
+    `/s/${encodeURIComponent(token)}`,
+    { next: { revalidate: false } }
+  );
+}

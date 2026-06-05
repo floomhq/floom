@@ -8,10 +8,10 @@ import { Toaster } from "@/components/ui/sonner";
 import { Sidebar } from "@/components/layout/sidebar";
 
 // Public, shareable "skill card" pages render full-bleed without the app
-// sidebar / command palette. /w is the standalone public worker share page.
+// sidebar / command palette. /w and /s are standalone public share pages.
 // /login is the access gate — it must render without sidebar chrome (and is
 // the one page reachable while logged out, see middleware.ts).
-const standalonePrefixes = ["/approvals/review", "/w", "/login"];
+const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
