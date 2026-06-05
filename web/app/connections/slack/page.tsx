@@ -1,12 +1,11 @@
 import { redirect } from "next/navigation";
 
-// Slack redesign Phase 1: the credential-paste UI and the Connections → Slack
-// tab were removed. Slack app credentials are now platform env (not
-// user-entered), and the assistant-Slack interface ("Add to Slack" +
-// read-only installed-workspace status) lives on the Assistant page. This stub
-// preserves old links and any OAuth callback that still targets
-// /connections/slack by forwarding to /assistant with the query string intact
-// (slack_connected / slack_error / team_id).
+// Slack is NOT a worker connection — it is the human interface for Floom
+// Worker OS (DM the assistant, @mention it, handle approvals in Slack).
+// It belongs in Settings, not Connections. This stub preserves any OAuth
+// callback or old link targeting /connections/slack by forwarding to
+// /settings#slack with the query string intact (slack_connected / slack_error
+// / team_id).
 export default async function LegacySlackConnectionsRedirect({
   searchParams,
 }: {
@@ -19,5 +18,5 @@ export default async function LegacySlackConnectionsRedirect({
     else if (Array.isArray(value) && value[0]) qs.set(key, value[0]);
   }
   const query = qs.toString();
-  redirect(`/assistant${query ? `?${query}` : ""}`);
+  redirect(`/settings${query ? `?${query}` : ""}#slack`);
 }

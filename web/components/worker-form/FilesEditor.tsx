@@ -264,18 +264,18 @@ export function FilesEditor(props: FilesEditorProps) {
   return <FilesEditorEdit {...props} />;
 }
 
-function defaultSourceMode(path: string, hasForm: boolean, binary?: boolean): SourceMode {
+function defaultSourceMode(path: string, _hasForm: boolean, binary?: boolean): SourceMode {
   if (binary) return "raw";
   if (hasWorkerYamlSummary(path, binary)) return "preview";
   if (supportsRenderedPreview(path)) return "preview";
-  return hasForm ? "form" : "raw";
+  return "raw";
 }
 
-function sourceModeLabel(mode: SourceMode, isWorkerYaml = false): string {
+function sourceModeLabel(mode: SourceMode, _isWorkerYaml = false): string {
   if (mode === "raw") return "Raw";
   if (mode === "form") return "Form";
-  // worker.yml's rendered view is a structured summary, not a "preview".
-  return isWorkerYaml ? "Summary" : "Preview";
+  // All rendered views use "Preview" — consistent with Brain file viewer.
+  return "Preview";
 }
 
 function sourceModeIcon(mode: SourceMode) {
@@ -363,29 +363,10 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
   const content = file.content || "";
   const lang = file.language || detectLanguage(file.path);
 
-  // worker.yml: structured Summary vs raw YAML source — a real distinction.
-  if (hasWorkerYamlSummary(file.path, file.binary)) {
-    return (
-      <Tabs defaultValue="preview" className="bg-muted/20">
-        <div className="flex items-center justify-end gap-3 border-b border-line px-4 py-2">
-          <TabsList>
-            <TabsTrigger value="preview">Summary</TabsTrigger>
-            <TabsTrigger value="raw">Raw</TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent value="preview" className="m-0">
-          <RenderedFilePreview path={file.path} content={content} language={lang} />
-        </TabsContent>
-        <TabsContent value="raw" className="m-0">
-          <SourcePreviewToolbar path={file.path} content={content} label="Raw" />
-          <SyntaxHighlightedCode content={content} path={file.path} language={lang} />
-        </TabsContent>
-      </Tabs>
-    );
-  }
-
-  // markdown / html / table: rendered document vs source — a real distinction.
-  if (supportsRenderedPreview(file.path, file.binary)) {
+  // worker.yml and other rendered kinds (markdown / html / table): Preview + Raw.
+  // All source files with a rendered view use the same two-tab pattern — "Summary"
+  // was removed (Federico: "same as brain, fully aligned, consistent").
+  if (hasWorkerYamlSummary(file.path, file.binary) || supportsRenderedPreview(file.path, file.binary)) {
     return (
       <Tabs defaultValue="preview" className="bg-muted/20">
         <div className="flex items-center justify-end gap-3 border-b border-line px-4 py-2">
@@ -833,9 +814,9 @@ function FilesEditorEdit({
             <CardTitle className="text-xs font-medium font-mono text-muted-foreground">
               {selectedFile ? selectedFile.path : "Select a file"}
             </CardTitle>
-            {selectedFile && (selectedHasPreview || selectedHasForm) && (
+            {selectedFile && selectedHasPreview && (
               <div className="flex items-center gap-0 rounded-md border border-border overflow-hidden shrink-0">
-                {(["raw", "preview", ...(selectedHasForm ? ["form"] : [])] as SourceMode[]).map((mode) => (
+                {(["raw", "preview"] as SourceMode[]).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -847,7 +828,7 @@ function FilesEditorEdit({
                     }`}
                   >
                     {sourceModeIcon(mode)}
-                    {sourceModeLabel(mode, selectedIsWorkerYaml)}
+                    {sourceModeLabel(mode)}
                   </button>
                 ))}
               </div>

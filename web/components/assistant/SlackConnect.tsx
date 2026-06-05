@@ -75,7 +75,7 @@ export function SlackConnect() {
   async function addToSlack() {
     setConnecting(true);
     try {
-      const result = await api.slack.installUrl("/assistant");
+      const result = await api.slack.installUrl("/settings#slack");
       window.location.href = result.install_url;
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to start Slack install");
@@ -156,23 +156,50 @@ export function SlackConnect() {
           ) : null}
 
           {connected ? (
-            <div className="overflow-hidden rounded-[var(--radius-button)] border border-line">
-              {installedTeams.map((team) => (
-                <div
-                  key={team.team_id}
-                  className="flex items-center justify-between gap-2 border-b border-line px-3 py-2 last:border-b-0"
-                >
-                  <div className="min-w-0">
-                    <span className="text-sm font-medium text-foreground">
-                      {team.team_name || team.team_id}
-                    </span>
-                    <p className="truncate text-[11px] text-muted-foreground">{team.team_id}</p>
+            <div className="space-y-3">
+              <div className="overflow-hidden rounded-[var(--radius-button)] border border-line">
+                {installedTeams.map((team) => (
+                  <div
+                    key={team.team_id}
+                    className="flex items-center justify-between gap-2 border-b border-line px-3 py-2 last:border-b-0"
+                  >
+                    <div className="min-w-0">
+                      <span className="text-sm font-medium text-foreground">
+                        {team.team_name || team.team_id}
+                      </span>
+                      <p className="truncate text-[11px] text-muted-foreground">{team.team_id}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Badge variant={team.status === "active" ? "default" : "outline"}>
+                        {team.status}
+                      </Badge>
+                      <a
+                        href={`https://app.slack.com/client/${team.team_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[#4A154B] bg-[#4A154B] px-2.5 text-xs font-medium text-white transition-colors hover:bg-[#3d1140]"
+                      >
+                        <SlackMark className="size-3.5" />
+                        Open {team.team_name ?? "Slack"}
+                      </a>
+                    </div>
                   </div>
-                  <Badge variant={team.status === "active" ? "default" : "outline"}>
-                    {team.status}
-                  </Badge>
-                </div>
-              ))}
+                ))}
+              </div>
+              {/* Primary CTA: get the user back into Slack where the work happens. */}
+              {installedTeams[0] ? (
+                <p className="text-xs text-muted-foreground">
+                  You&apos;re connected — DM your assistant in Slack to get started.{" "}
+                  <a
+                    href={`https://app.slack.com/client/${installedTeams[0].team_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-foreground underline-offset-2 hover:underline"
+                  >
+                    Open {installedTeams[0].team_name ?? "Slack"} &rarr;
+                  </a>
+                </p>
+              ) : null}
             </div>
           ) : null}
         </>

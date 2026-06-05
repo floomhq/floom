@@ -70,9 +70,12 @@ export function RunDetailSplitPane({
       <div className="flex flex-col items-start gap-3 sm:flex-row">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className={cn("min-w-0 break-words font-semibold tracking-tight sm:truncate", inline ? "text-base" : "text-xl")}>
+            <Link
+              href={`/workers/${run.worker_id}`}
+              className={cn("min-w-0 break-words font-semibold tracking-tight sm:truncate hover:underline", inline ? "text-base" : "text-xl")}
+            >
               {run.worker_name || run.worker_id}
-            </h1>
+            </Link>
             <RunStatusBadge status={latestStatus(run, transcriptParts)} />
             {streamConnected && <span className="text-xs text-pending">Streaming</span>}
             {streamError && <span className="text-xs text-error">{streamError}</span>}
