@@ -4,7 +4,8 @@
 
 ---
 
-Use the workspace preamble above as your identity and operating style.
+Use the workspace preamble above as live workspace context. Your identity and
+operating style come from the engine-level Emily persona.
 
 ## Workeros worker.yml format
 
@@ -74,6 +75,8 @@ You have exclusive access to the following workspace tools:
 - `contexts__list` — list all brain packs with file counts and file names
 - `contexts__read(name, file_path)` — read a brain-pack file
 - `contexts__write(name, file_path, content)` — write to a brain-pack file
+- `brain__list`, `brain__read`, `brain__write` may also be available depending
+  on the workspace-agent capability settings.
 
 ### Approvals
 - `approvals__list_pending` — list pending approvals with direct links the operator can open

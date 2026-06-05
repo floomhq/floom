@@ -489,6 +489,16 @@ class LocalWorkspaceListResponse(BaseModel):
     active_id: str
 
 
+class WorkspaceAgentSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    brain_read: Optional[bool] = None
+    brain_write: Optional[bool] = None
+    connections_read: Optional[bool] = None
+    connections_use: Optional[bool] = None
+    connections_add: Optional[bool] = None
+
+
 def _local_workspace_out(row: Dict[str, Any]) -> LocalWorkspaceOut:
     return LocalWorkspaceOut(
         id=str(row["id"]),
@@ -7940,6 +7950,11 @@ async def draft_and_create_worker(
             smoke_bundle: Dict[str, Any] = {}
             if isinstance(sample_input, dict):
                 smoke_bundle["example_input"] = sample_input
+            try:
+                manifest_text = (WORKERS_DIR / created_worker_id / "worker.yml").read_text(encoding="utf-8")
+                smoke_bundle["worker_yml"] = manifest_text
+            except OSError:
+                pass
 
             def _draft_smoke_log(msg: str, level: str = "info") -> None:
                 logger.info("draft-and-create smoke %s: %s", created_worker_id, msg)
@@ -14447,7 +14462,10 @@ async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any], bot_t
         _post_slack_thread_reply(
             channel=channel,
             thread_ts=thread_ts,
-            text="I am ready. Ask me to inspect workers, draft an action, or list approvals.",
+            text=(
+                "I'm Emily, your personal Chief-of-Staff. I route tasks to a "
+                "swarm of always-on agents and workers. DM me or @mention me."
+            ),
             bot_token=bot_token,
         )
     except Exception:
@@ -14918,8 +14936,137 @@ def _whatsapp_configured() -> bool:
     return bool(_whatsapp_phone_id() and _whatsapp_token())
 
 
-def _whatsapp_workspace_user_id() -> str:
-    return (os.environ.get("WHATSAPP_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
+def _normalize_whatsapp_wa_id(wa_id: str) -> str:
+    return re.sub(r"\D", "", str(wa_id or ""))
+
+
+def _whatsapp_claim_url(token: str) -> str:
+    base = (
+        os.environ.get("WORKERS_FRONTEND_URL")
+        or os.environ.get("WORKEROS_PUBLIC_URL")
+        or "https://workers.floom.dev"
+    ).rstrip("/")
+    return f"{base}/settings?whatsapp_claim={urllib.parse.quote(token)}"
+
+
+def _whatsapp_binding_user_id(wa_id: str) -> Optional[str]:
+    normalized = _normalize_whatsapp_wa_id(wa_id)
+    if not normalized:
+        return None
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT user_id
+                FROM whatsapp_sender_bindings
+                WHERE wa_id = ? AND status = 'active' AND user_id IS NOT NULL
+                """,
+                (normalized,),
+            ).fetchone()
+            if row and row["user_id"]:
+                conn.execute(
+                    "UPDATE whatsapp_sender_bindings SET last_seen_at = ?, updated_at = ? WHERE wa_id = ?",
+                    (now_iso(), now_iso(), normalized),
+                )
+                return str(row["user_id"])
+    except Exception:
+        logger.exception("WhatsApp sender binding lookup failed")
+    return None
+
+
+def _whatsapp_create_claim(wa_id: str, profile_name: str = "") -> Dict[str, str]:
+    normalized = _normalize_whatsapp_wa_id(wa_id)
+    if not normalized:
+        raise ValueError("WhatsApp sender id missing")
+    token = pysecrets.token_urlsafe(24)
+    now_ts = now_iso()
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at, last_seen_at)
+            VALUES (?, NULL, ?, 'pending', ?, ?, ?, ?, ?)
+            ON CONFLICT(wa_id) DO UPDATE SET
+                profile_name = excluded.profile_name,
+                status = CASE
+                    WHEN whatsapp_sender_bindings.status = 'active'
+                    THEN whatsapp_sender_bindings.status
+                    ELSE 'pending'
+                END,
+                claim_token = CASE
+                    WHEN whatsapp_sender_bindings.status = 'active'
+                    THEN whatsapp_sender_bindings.claim_token
+                    ELSE excluded.claim_token
+                END,
+                claim_expires_at = CASE
+                    WHEN whatsapp_sender_bindings.status = 'active'
+                    THEN whatsapp_sender_bindings.claim_expires_at
+                    ELSE excluded.claim_expires_at
+                END,
+                updated_at = excluded.updated_at,
+                last_seen_at = excluded.last_seen_at
+            """,
+            (normalized, profile_name or None, token, expires_at, now_ts, now_ts, now_ts),
+        )
+        row = conn.execute(
+            "SELECT claim_token, claim_expires_at, status FROM whatsapp_sender_bindings WHERE wa_id = ?",
+            (normalized,),
+        ).fetchone()
+    claim_token = str(row["claim_token"] or token) if row else token
+    return {
+        "wa_id": normalized,
+        "claim_token": claim_token,
+        "claim_url": _whatsapp_claim_url(claim_token),
+        "claim_expires_at": str(row["claim_expires_at"] if row else expires_at),
+        "status": str(row["status"] if row else "pending"),
+    }
+
+
+class WhatsAppClaimRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str
+
+
+@app.post("/whatsapp/bindings/claim")
+def claim_whatsapp_sender(
+    payload: WhatsAppClaimRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    token = (payload.token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="token is required")
+    now_dt = datetime.now(timezone.utc)
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT wa_id, status, claim_expires_at
+            FROM whatsapp_sender_bindings
+            WHERE claim_token = ?
+            """,
+            (token,),
+        ).fetchone()
+        if not row or row["status"] == "active":
+            raise HTTPException(status_code=404, detail="WhatsApp claim not found")
+        try:
+            expires = datetime.fromisoformat(str(row["claim_expires_at"]))
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+        except Exception:
+            expires = now_dt - timedelta(seconds=1)
+        if expires < now_dt:
+            raise HTTPException(status_code=410, detail="WhatsApp claim expired")
+        conn.execute(
+            """
+            UPDATE whatsapp_sender_bindings
+            SET user_id = ?, status = 'active', updated_at = ?
+            WHERE claim_token = ?
+            """,
+            (auth.user_id, now_iso(), token),
+        )
+    return {"ok": True, "wa_id": row["wa_id"], "user_id": auth.user_id}
 
 
 def _verify_whatsapp_signature(body: bytes, request: Request, app_secret: str) -> bool:
@@ -15075,10 +15222,26 @@ def _parse_whatsapp_inbound(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     return events
 
 
-async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str) -> None:
+async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, profile_name: str = "") -> None:
     """Run the inbound text through the shared assistant pipeline and reply."""
-    conversation_id = f"whatsapp:{wa_id}"
-    user_id = _whatsapp_workspace_user_id()
+    normalized_wa_id = _normalize_whatsapp_wa_id(wa_id)
+    user_id = _whatsapp_binding_user_id(normalized_wa_id)
+    if not user_id:
+        try:
+            claim = _whatsapp_create_claim(normalized_wa_id, profile_name)
+            send_whatsapp_text(
+                normalized_wa_id,
+                (
+                    "Link this WhatsApp number to your Workeros workspace before "
+                    "I can access any workers, runs, brain packs, or connections.\n\n"
+                    f"{claim['claim_url']}\n\n"
+                    "This link expires in 24 hours."
+                ),
+            )
+        except Exception:
+            logger.exception("WhatsApp unbound sender claim prompt failed")
+        return
+    conversation_id = f"whatsapp:{normalized_wa_id}"
     try:
         try:
             _send_whatsapp_typing_indicator(message_id)
@@ -15090,13 +15253,13 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str) ->
             conversation_id=conversation_id,
             source="whatsapp",
         )
-        send_whatsapp_text(wa_id, reply)
+        send_whatsapp_text(normalized_wa_id, reply)
     except Exception:
         logger.exception("WhatsApp message processing failed")
         if os.environ.get("WHATSAPP_POST_ERRORS_TO_CHAT", "1").strip().lower() not in {"0", "false", "no", "off"}:
             try:
                 send_whatsapp_text(
-                    wa_id,
+                    normalized_wa_id,
                     "I could not complete that request. The failure was logged for the workspace operator.",
                 )
             except Exception:
@@ -15166,6 +15329,7 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks) 
             wa_id=event["wa_id"],
             text=event["text"],
             message_id=message_id,
+            profile_name=event.get("profile_name") or "",
         )
         queued += 1
 
@@ -16628,6 +16792,7 @@ def system_workspace_agent(
         "model": info["model"],
         "system_prompt": info["system_prompt"],
         "tools": info["tools"],
+        "settings": info.get("settings") or {},
         "channels": info["channels"],
         # Members STEP 5: ownership + per-asset visibility + computed permissions.
         # The assistant is a shared workspace tool — default visibility=workspace.
@@ -16635,6 +16800,21 @@ def system_workspace_agent(
         "visibility": visibility,
         "permissions": permissions.model_dump(),
     }
+
+
+@app.put("/system/workspace-agent/settings")
+def update_workspace_agent_settings(
+    payload: WorkspaceAgentSettingsUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Update per-user workspace-agent capability flags."""
+    from chat_service import set_workspace_agent_settings
+
+    settings = set_workspace_agent_settings(
+        auth.user_id,
+        payload.model_dump(exclude_unset=True),
+    )
+    return {"settings": settings}
 
 
 @app.put("/system/workspace-agent/visibility")

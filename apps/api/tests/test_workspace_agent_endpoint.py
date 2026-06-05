@@ -44,6 +44,7 @@ def client_and_main(monkeypatch, tmp_path):
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "")
     monkeypatch.setenv("SLACK_ALLOWED_TEAM_IDS", "")
+    monkeypatch.setenv("WORKEROS_CHAT_MODEL", "gpt-5-mini")
 
     for name in [
         "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory",
@@ -87,10 +88,18 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
         "allowed_team_ids_configured": False,
     }
     # System prompt is the resolved SKILL.md (placeholder expanded).
+    assert "You are Emily" in body["system_prompt"]
     assert "You manage the workspace." in body["system_prompt"]
     assert "{{WORKSPACE_PREAMBLE}}" not in body["system_prompt"]
     assert "Workspace snapshot" in body["system_prompt"]
     assert "Secret names: OPENAI_API_KEY" in body["system_prompt"]
+    assert body["settings"] == {
+        "brain_read": True,
+        "brain_write": False,
+        "connections_read": True,
+        "connections_use": False,
+        "connections_add": False,
+    }
     # Tools are present with names + descriptions.
     tools = body["tools"]
     names = {t["name"] for t in tools}
@@ -125,6 +134,34 @@ def test_endpoint_reports_model_and_slack_readiness(client_and_main, monkeypatch
         "bot_configured": True,
         "allowed_team_ids_configured": True,
     }
+
+
+def test_endpoint_updates_capability_settings_and_gates_tools(client_and_main):
+    client, _main = client_and_main
+
+    resp = client.put(
+        "/system/workspace-agent/settings",
+        json={
+            "brain_read": False,
+            "brain_write": True,
+            "connections_read": False,
+            "connections_add": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["settings"]["brain_read"] is False
+    assert resp.json()["settings"]["brain_write"] is True
+
+    body = client.get("/system/workspace-agent").json()
+    names = {tool["name"] for tool in body["tools"]}
+    assert "contexts__list" not in names
+    assert "contexts__read" not in names
+    assert "brain__list" not in names
+    assert "brain__read" not in names
+    assert "contexts__write" in names
+    assert "brain__write" in names
+    assert "connections__list" not in names
+    assert "connections__add_mcp" in names
 
 
 def test_endpoint_requires_auth(client_and_main):

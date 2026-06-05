@@ -15,6 +15,7 @@ import importlib
 import json
 import sys
 import types
+import asyncio
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -56,7 +57,7 @@ def _load_api(monkeypatch, tmp_path, *, with_creds: bool = True):
             "WHATSAPP_APP_SECRET",
             "WHATSAPP_WEBHOOK_VERIFY_TOKEN",
         ):
-            monkeypatch.delenv(var, raising=False)
+            monkeypatch.setenv(var, "")
 
     sys.path.insert(0, str(api_dir))
     for name in ["main", "db", "models", "worker_registry", "run_service", "chat_service"]:
@@ -158,7 +159,7 @@ def test_post_accepts_valid_signature_and_queues(monkeypatch, tmp_path):
 
     captured: list = []
 
-    async def _fake_handle(*, wa_id, text, message_id):
+    async def _fake_handle(*, wa_id, text, message_id, profile_name=""):
         captured.append((wa_id, text, message_id))
 
     monkeypatch.setattr(main, "_handle_whatsapp_message", _fake_handle)
@@ -228,7 +229,7 @@ def test_post_ignores_status_callbacks(monkeypatch, tmp_path):
 def test_post_dedups_meta_retries(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
 
-    async def _fake_handle(*, wa_id, text, message_id):
+    async def _fake_handle(*, wa_id, text, message_id, profile_name=""):
         return None
 
     monkeypatch.setattr(main, "_handle_whatsapp_message", _fake_handle)
@@ -240,6 +241,70 @@ def test_post_dedups_meta_retries(monkeypatch, tmp_path):
         second = client.post("/whatsapp/webhook", content=body, headers=headers)
     assert first.json().get("queued") == 1
     assert second.json().get("queued") == 0
+
+
+def test_unbound_sender_gets_claim_prompt_without_workspace_access(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    sent: list[tuple[str, str]] = []
+
+    async def _boom_collect(**_kwargs):  # pragma: no cover - must never run
+        raise AssertionError("unbound sender must not reach workspace chat")
+
+    monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", _boom_collect)
+    monkeypatch.setattr(main, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+
+    asyncio.run(
+        main._handle_whatsapp_message(
+            wa_id="491701234567",
+            text="list my workers",
+            message_id="wamid.UNBOUND",
+            profile_name="Tester",
+        )
+    )
+
+    assert sent
+    assert sent[0][0] == "491701234567"
+    assert "whatsapp_claim=" in sent[0][1]
+    assert "before I can access any workers" in sent[0][1]
+
+
+def test_bound_senders_route_to_distinct_users(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    routed: list[tuple[str, str]] = []
+    sent: list[tuple[str, str]] = []
+
+    with main.get_db() as conn:
+        now = main.now_iso()
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, created_at, updated_at)
+            VALUES
+                ('491701111111', 'alice', 'Alice', 'active', ?, ?),
+                ('491702222222', 'bob', 'Bob', 'active', ?, ?)
+            """,
+            (now, now, now, now),
+        )
+
+    async def _fake_collect(*, message, user_id, conversation_id, source):
+        routed.append((user_id, conversation_id))
+        return f"reply for {user_id}"
+
+    monkeypatch.setattr(main, "_send_whatsapp_typing_indicator", lambda _message_id: None)
+    monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", _fake_collect)
+    monkeypatch.setattr(main, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+
+    asyncio.run(main._handle_whatsapp_message(wa_id="491701111111", text="hi", message_id="wamid.A"))
+    asyncio.run(main._handle_whatsapp_message(wa_id="491702222222", text="hi", message_id="wamid.B"))
+
+    assert routed == [
+        ("alice", "whatsapp:491701111111"),
+        ("bob", "whatsapp:491702222222"),
+    ]
+    assert sent == [
+        ("491701111111", "reply for alice"),
+        ("491702222222", "reply for bob"),
+    ]
 
 
 # --------------------------------------------------------------------------- #

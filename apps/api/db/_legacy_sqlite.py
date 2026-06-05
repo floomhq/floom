@@ -1465,6 +1465,37 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_worker_short_links_worker_owner
         ON worker_short_links(worker_id, owner_id);
     """,
+    # -- migration 56: workspace-agent capability settings -------------------
+    """
+    CREATE TABLE IF NOT EXISTS workspace_agent_settings (
+        user_id TEXT PRIMARY KEY,
+        brain_read INTEGER DEFAULT 1 NOT NULL,
+        brain_write INTEGER DEFAULT 0 NOT NULL,
+        connections_read INTEGER DEFAULT 1 NOT NULL,
+        connections_use INTEGER DEFAULT 0 NOT NULL,
+        connections_add INTEGER DEFAULT 0 NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    # -- migration 57: WhatsApp sender-to-workspace bindings ------------------
+    """
+    CREATE TABLE IF NOT EXISTS whatsapp_sender_bindings (
+        wa_id TEXT PRIMARY KEY,
+        user_id TEXT,
+        profile_name TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        claim_token TEXT UNIQUE,
+        claim_expires_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_seen_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_sender_bindings_user_id
+        ON whatsapp_sender_bindings(user_id);
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_sender_bindings_claim_token
+        ON whatsapp_sender_bindings(claim_token);
+    """,
 ]
 
 
