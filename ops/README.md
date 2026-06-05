@@ -2,6 +2,21 @@
 
 Operational scripts and systemd units for the production API.
 
+## Hard Post-Deploy Smoke Gate
+
+After every production deploy and before relying on a production alias, run:
+
+```bash
+bash ops/smoke-routes.sh
+```
+
+The gate must pass. It curls critical OS and Cloud routes and fails on any 508,
+5xx, or curl failure. If it fails, the deploy is not promoted, and any changed
+alias is rolled back to the last known-good deployment.
+
+`ops/deploy-api.sh` runs this gate automatically after the API health, endpoint,
+and schema checks pass.
+
 ## Hourly Data Backup
 
 Files:

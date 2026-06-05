@@ -18,7 +18,8 @@
 #   9. Poll /health until ok (hard gate, exit 1 on timeout)
 #  10. Assert key endpoints return expected HTTP codes
 #  11. Verify schema drift (calls ops/verify-schema.py)
-#  12. Print SUCCESS/FAIL summary
+#  12. Run live route smoke gate (hard post-deploy gate)
+#  13. Print SUCCESS/FAIL summary
 
 set -euo pipefail
 
@@ -328,7 +329,21 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 11: Print summary
+# Step 11: Live route smoke gate
+# ---------------------------------------------------------------------------
+SMOKE_SCRIPT="$WORKEROS_ROOT/ops/smoke-routes.sh"
+if [[ $DRY_RUN -eq 1 ]]; then
+  log "DRY-RUN: would run hard post-deploy smoke gate: bash $SMOKE_SCRIPT"
+elif [[ -f "$SMOKE_SCRIPT" ]]; then
+  log "Running hard post-deploy smoke gate..."
+  bash "$SMOKE_SCRIPT"
+  log "Hard post-deploy smoke gate passed."
+else
+  fail "Smoke gate script missing: $SMOKE_SCRIPT"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 12: Print summary
 # ---------------------------------------------------------------------------
 log ""
 log "=== DEPLOY SUCCESS ==="
