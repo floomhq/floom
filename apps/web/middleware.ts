@@ -25,12 +25,14 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/web-session";
 // Pages reachable WITHOUT a session cookie. Exact path or prefix match.
 const PUBLIC_PAGE_PREFIXES = [
   "/login",
+  "/connections/callback", // OAuth provider return path; finishes via tokenless callback id
   "/approvals/review", // external signed-link approval review
   "/w/", // public worker share (token-gated, server-rendered)
 ];
 
-// /api/proxy sub-paths that map to PUBLIC, token-gated upstream endpoints and
-// must stay reachable for external approvers using a signed link.
+// /api/proxy sub-paths that map to PUBLIC upstream endpoints and must stay
+// reachable without a Workeros session (OAuth callbacks and signed approvals).
+const PUBLIC_PROXY_PATHS = ["/api/proxy/connections/callback"];
 const PUBLIC_PROXY_PREFIXES = ["/api/proxy/approvals/public/"];
 
 function isPublicPage(pathname: string): boolean {
@@ -41,6 +43,7 @@ function isPublicPage(pathname: string): boolean {
 }
 
 function isPublicProxy(pathname: string): boolean {
+  if (PUBLIC_PROXY_PATHS.includes(pathname)) return true;
   return PUBLIC_PROXY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
