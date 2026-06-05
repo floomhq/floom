@@ -61,6 +61,43 @@ const SECURITY_HEADERS = [
   { key: "Permissions-Policy", value: PERMISSIONS_POLICY },
 ];
 
+const APP_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+type RedirectRule = Awaited<ReturnType<NonNullable<NextConfig["redirects"]>>>[number];
+
+function cloudApexRedirects(): RedirectRule[] {
+  if (!APP_BASE_PATH) return [];
+
+  const appPathRules = [
+    "overview",
+    "workers",
+    "runs",
+    "assistant",
+    "brain",
+    "contexts",
+    "approvals",
+    "connections",
+    "secrets",
+    "settings",
+    "members",
+    "cli-auth",
+  ];
+
+  return appPathRules.flatMap((path) => [
+    {
+      source: `/${path}`,
+      destination: `${APP_BASE_PATH}/${path}`,
+      permanent: false as const,
+      basePath: false as const,
+    },
+    {
+      source: `/${path}/:path*`,
+      destination: `${APP_BASE_PATH}/${path}/:path*`,
+      permanent: false as const,
+      basePath: false as const,
+    },
+  ]);
+}
+
 const nextConfig: NextConfig = {
   // basePath seam: unset for the single-tenant OSS build (served at "/").
   // The Downstream host serves the dashboard under "/app" and sets
@@ -73,6 +110,7 @@ const nextConfig: NextConfig = {
   // page with edit mode toggled on via ?edit=1.
   async redirects() {
     return [
+      ...cloudApexRedirects(),
       {
         source: "/workers/:id/edit",
         destination: "/workers/:id?edit=1",
