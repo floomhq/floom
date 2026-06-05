@@ -190,7 +190,7 @@ function ChatInput({
         value={value}
         onChange={handleInput}
         onKeyDown={handleKeyDown}
-        placeholder="Ask Emily anything&hellip;"
+        placeholder="Ask Emily anything..."
         disabled={disabled}
         rows={1}
         className="max-h-40 min-h-[1.5rem] flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
