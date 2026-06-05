@@ -27,6 +27,7 @@ const PUBLIC_PAGE_PREFIXES = [
   "/login",
   "/approvals/review", // external signed-link approval review
   "/w/", // public worker share (token-gated, server-rendered)
+  "/prototype", // Emily chat prototype — mock-only, no real data, safe to expose
 ];
 
 // /api/proxy sub-paths that map to PUBLIC, token-gated upstream endpoints and

@@ -95,7 +95,7 @@ describe("middleware auth gate", () => {
 
   it("keeps public pages reachable without login", async () => {
     const { middleware } = await import("@/middleware");
-    for (const p of ["/login", "/approvals/review?id=x&token=y", "/w/abc?token=y"]) {
+    for (const p of ["/login", "/approvals/review?id=x&token=y", "/w/abc?token=y", "/prototype"]) {
       const res = await middleware(req(p));
       expect(res.headers.get("x-middleware-next")).toBe("1");
     }
