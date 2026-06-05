@@ -23,7 +23,7 @@ export function setActiveWorkspaceId(workspaceId: string | null) {
 
 // Extract a human-readable string from a FastAPI error body. `detail` can be:
 //   - a string ("Worker not found")
-//   - an object ({ message, errors }) — our schema-validation 400s
+//   - an object ({ message, errors }) - our schema-validation 400s
 //   - a Pydantic validation array ([{ loc, msg, type }, ...])
 // `new Error(detail)` on a non-string coerces to "[object Object]", which is the
 // useless toast the X5 clone-on-edit 400 surfaced. Always resolve to a string.
@@ -461,10 +461,16 @@ export const api = {
       );
       return res.text();
     },
-    upload: async (name: string, files: FileList | File[], pathPrefix?: string) => {
+    upload: async (
+      name: string,
+      files: FileList | File[],
+      pathPrefix?: string,
+      options?: { createIfMissing?: boolean }
+    ) => {
       const form = new FormData();
       Array.from(files).forEach((file) => form.append("files", file, file.name));
       if (pathPrefix) form.append("path_prefix", pathPrefix);
+      if (options?.createIfMissing) form.append("create_if_missing", "true");
       const res = await fetch(`${API_BASE}/contexts/${encodeURIComponent(name)}/upload`, {
         method: "POST",
         headers: withWorkspaceHeaders(),
