@@ -91,7 +91,7 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
         "allowed_team_ids_configured": False,
     }
     # System prompt is the resolved SKILL.md (placeholder expanded).
-    assert "You are Emily" in body["system_prompt"]
+    assert "I'm Emily, your chief-of-staff for this Workeros workspace." in body["system_prompt"]
     assert "You manage the workspace." in body["system_prompt"]
     assert "{{WORKSPACE_PREAMBLE}}" not in body["system_prompt"]
     assert "Workspace snapshot" in body["system_prompt"]
@@ -174,8 +174,9 @@ def test_base_persona_and_workspace_instructions_are_separate_editable_layers(cl
 
     default_base = client.get("/workspace/base")
     assert default_base.status_code == 200
-    assert "You are Emily" in default_base.text
-    assert "personal Chief-of-Staff" in default_base.text
+    assert "I'm Emily, your chief-of-staff for this Workeros workspace." in default_base.text
+    assert "Owner: Federico" not in default_base.text
+    assert "personal Chief-of-Staff" not in default_base.text
 
     put_base = client.put(
         "/workspace/base",
