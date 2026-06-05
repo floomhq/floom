@@ -198,6 +198,8 @@ def _write_env_lines(lines: list[str]) -> None:
 
 
 def _upsert_env_var(name: str, value: str) -> None:
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ValueError("Secret value must not contain newline or control characters")
     lines = _read_env_lines()
     new_line = f"{name}={value}\n"
     replaced = False

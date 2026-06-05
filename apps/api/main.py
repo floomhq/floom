@@ -1250,6 +1250,8 @@ async def auth_middleware(request: Request, call_next):
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
             or path.startswith("/workers/public/")
+            or path.startswith("/workers/short-links/")
+            or path.startswith("/s/")
             or path.startswith("/workspace/template/")
             or path == "/cli-auth/devices"
             or path.startswith("/cli-auth/poll/")
@@ -5749,6 +5751,79 @@ def _worker_public_link(worker: Dict[str, Any]) -> Optional[str]:
     return f"{_frontend_base_url()}/w/{worker_id}?token={token}"
 
 
+def _short_link_base_url() -> str:
+    return (os.environ.get("WORKEROS_SHORT_LINK_BASE_URL") or "https://floom.dev/s").rstrip("/")
+
+
+def _mint_worker_short_id() -> str:
+    return f"fls_{pysecrets.token_urlsafe(8).replace('-', '').replace('_', '')[:10]}"
+
+
+def _ensure_worker_short_links_table() -> None:
+    with get_db() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS worker_short_links (
+                short_id TEXT PRIMARY KEY,
+                worker_id TEXT NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+                owner_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(worker_id, owner_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_worker_short_links_worker_owner
+                ON worker_short_links(worker_id, owner_id);
+            """
+        )
+
+
+def _worker_short_link_response(worker: Dict[str, Any]) -> Dict[str, str]:
+    worker_id = str(worker.get("id") or "")
+    owner_id = str(worker.get("owner_id") or "")
+    if not worker_id or not owner_id:
+        raise HTTPException(status_code=409, detail="Worker cannot be shared")
+    _ensure_worker_short_links_table()
+    with get_db() as conn:
+        existing = conn.execute(
+            """
+            SELECT short_id FROM worker_short_links
+            WHERE worker_id = ? AND owner_id = ?
+            LIMIT 1
+            """,
+            (worker_id, owner_id),
+        ).fetchone()
+        if existing:
+            short_id = str(existing["short_id"])
+        else:
+            ts = now_iso()
+            for _ in range(5):
+                short_id = _mint_worker_short_id()
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO worker_short_links (short_id, worker_id, owner_id, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (short_id, worker_id, owner_id, ts),
+                    )
+                    break
+                except sqlite3.IntegrityError:
+                    owner_existing = conn.execute(
+                        """
+                        SELECT short_id FROM worker_short_links
+                        WHERE worker_id = ? AND owner_id = ?
+                        LIMIT 1
+                        """,
+                        (worker_id, owner_id),
+                    ).fetchone()
+                    if owner_existing:
+                        short_id = str(owner_existing["short_id"])
+                        break
+                    short_id = ""
+            if not short_id:
+                raise HTTPException(status_code=500, detail="Could not mint short link")
+    return {"short_id": short_id, "short_url": f"{_short_link_base_url()}/{short_id}"}
+
+
 def _worker_permissions(
     worker: Dict[str, Any],
     *,
@@ -6013,6 +6088,28 @@ def _load_public_worker(worker_id: str, token: str, repos: Repositories) -> Dict
     return worker
 
 
+def _load_short_link_public_worker(short_id: str, repos: Repositories) -> Dict[str, Any]:
+    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,64}", short_id or ""):
+        raise HTTPException(status_code=404, detail="Short link not found")
+    _ensure_worker_short_links_table()
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT worker_id, owner_id
+            FROM worker_short_links
+            WHERE short_id = ?
+            LIMIT 1
+            """,
+            (short_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Short link not found")
+    worker = repos.workers.get_any(worker_id=str(row["worker_id"]))
+    if not worker or str(worker.get("owner_id") or "") != str(row["owner_id"]):
+        raise HTTPException(status_code=404, detail="Short link not found")
+    return worker
+
+
 @app.get("/workers/public/{worker_id}", response_model=PublicWorker)
 def get_public_worker(
     worker_id: str,
@@ -6037,6 +6134,44 @@ def get_public_worker(
             runtime={"type": "python", "entrypoint": "run.py"},
         )
     return _public_worker_response(worker, config)
+
+
+@app.post("/workers/{worker_id}/short-link")
+def create_worker_short_link(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return _worker_short_link_response(worker)
+
+
+@app.get("/workers/short-links/{short_id}", response_model=PublicWorker)
+def resolve_worker_short_link(
+    short_id: str,
+    repos: Repositories = Depends(get_repos),
+) -> PublicWorker:
+    worker = _load_short_link_public_worker(short_id, repos)
+    try:
+        config = WorkerConfig(**(worker.get("config") or {}))
+    except Exception:
+        config = WorkerConfig(
+            id=str(worker.get("id") or short_id),
+            name=str(worker.get("name") or short_id),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
+    return _public_worker_response(worker, config)
+
+
+@app.get("/s/{short_id}", response_model=PublicWorker)
+def resolve_worker_short_link_alias(
+    short_id: str,
+    repos: Repositories = Depends(get_repos),
+) -> PublicWorker:
+    return resolve_worker_short_link(short_id, repos)
 
 
 @app.get("/workers/{worker_id}", response_model=WorkerDetail)
@@ -11631,6 +11766,10 @@ class SecretTestResult(BaseModel):
 SecretName = Annotated[str, PathParam(min_length=1, max_length=64, pattern=r"^[A-Z][A-Z0-9_]*$")]
 
 
+def _secret_value_has_control_chars(value: str) -> bool:
+    return any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+
+
 def _read_env_lines() -> list[str]:
     """Read .env lines; return [] if file does not exist."""
     env_path = _env_file_path()
@@ -11662,11 +11801,11 @@ def _upsert_env_var(name: str, value: str) -> None:
         raise ValueError(f"Invalid secret name: {name!r}")
     if len(value) < 1 or len(value) > 32 * 1024:
         raise ValueError("Secret value must be 1-32768 characters")
-    # Reject values that contain newline or null bytes — they corrupt the .env
-    # file by injecting extra lines (newline injection attack).
-    if any(c in value for c in ("\n", "\r", "\x00")):
+    # Reject control characters. Newline/CR corrupt the env file by injecting
+    # extra lines; other controls make later rendering/logging unsafe.
+    if _secret_value_has_control_chars(value):
         raise ValueError(
-            "Secret value must not contain newline or null characters"
+            "Secret value must not contain newline or control characters"
         )
 
     lines = _read_env_lines()
@@ -11723,6 +11862,11 @@ def upsert_secret(
                 "the server's environment file. It cannot be set via the "
                 "secrets API. See ARCHITECTURE.md."
             ),
+        )
+    if _secret_value_has_control_chars(payload.value):
+        raise HTTPException(
+            status_code=400,
+            detail="Secret value must not contain newline or control characters",
         )
     repos.secrets.set(
         user_id=auth.user_id,
@@ -17331,7 +17475,48 @@ async def get_conversation_detail(
 # MCP tool CRUD endpoints
 # ---------------------------------------------------------------------------
 
+def _mcp_input_schema_from_worker_record(worker: Dict[str, Any]) -> Dict[str, Any]:
+    config = worker.get("config") or {}
+    inputs = config.get("inputs") if isinstance(config, dict) else []
+    if not isinstance(inputs, list):
+        return {"type": "object", "properties": {}}
+    properties: Dict[str, Any] = {}
+    required: List[str] = []
+    type_map = {
+        "string": "string",
+        "text": "string",
+        "markdown": "string",
+        "number": "number",
+        "integer": "integer",
+        "boolean": "boolean",
+        "bool": "boolean",
+        "object": "object",
+        "json": "object",
+        "array": "array",
+    }
+    for item in inputs:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        raw_type = str(item.get("type") or item.get("kind") or "string").lower()
+        prop: Dict[str, Any] = {"type": type_map.get(raw_type, "string")}
+        if item.get("description"):
+            prop["description"] = str(item["description"])
+        if isinstance(item.get("options"), list):
+            prop["enum"] = [str(option) for option in item["options"]]
+        properties[name] = prop
+        if item.get("required"):
+            required.append(name)
+    schema: Dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+    return schema
+
+
 @app.get("/mcp-tools", response_model=List[McpToolItem])
+@app.get("/mcp/tools", response_model=List[McpToolItem])
 def list_mcp_tools(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
@@ -17340,6 +17525,7 @@ def list_mcp_tools(
 
 
 @app.post("/mcp-tools", response_model=McpToolItem)
+@app.post("/mcp/tools", response_model=McpToolItem)
 def create_mcp_tool(
     payload: McpToolCreate,
     auth: AuthContext = Depends(get_auth_context),
@@ -17357,8 +17543,7 @@ def create_mcp_tool(
 
     input_schema = payload.input_schema
     if not input_schema:
-        config = json.loads(worker.get("config_json") or "{}")
-        input_schema = config.get("inputs_schema") or {}
+        input_schema = _mcp_input_schema_from_worker_record(worker)
 
     return repos.mcp_tools.create(
         user_id=auth.user_id,
@@ -17370,6 +17555,7 @@ def create_mcp_tool(
 
 
 @app.put("/mcp-tools/{tool_id}", response_model=McpToolItem)
+@app.put("/mcp/tools/{tool_id}", response_model=McpToolItem)
 def update_mcp_tool(
     tool_id: str,
     payload: McpToolUpdate,
@@ -17384,6 +17570,7 @@ def update_mcp_tool(
 
 
 @app.delete("/mcp-tools/{tool_id}", response_model=ActionResponse)
+@app.delete("/mcp/tools/{tool_id}", response_model=ActionResponse)
 def delete_mcp_tool(
     tool_id: str,
     auth: AuthContext = Depends(get_auth_context),
@@ -17767,8 +17954,7 @@ async def _mcp_dispatch(
         if repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name):
             return _mcp_content(f"Tool {tool_name!r} already exists — use tools_delete first to replace it", is_error=True)
         if not input_schema:
-            config = json.loads(worker.get("config_json") or "{}")
-            input_schema = config.get("inputs_schema") or {}
+            input_schema = _mcp_input_schema_from_worker_record(worker)
         tool = repos.mcp_tools.create(
             user_id=auth.user_id,
             name=tool_name,
