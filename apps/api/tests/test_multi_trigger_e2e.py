@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 
 API_DIR = Path(__file__).resolve().parents[1]
@@ -114,6 +115,32 @@ def test_registration_reconciles_multi_trigger_into_rows(booted):
     single = repos.workers.list_trigger_rows(worker_id="single-trigger-worker")
     assert len(single) == 1
     assert single[0]["type"] == "schedule"
+
+
+def test_patch_schedule_to_manual_reconciles_scheduler_trigger_rows(booted):
+    db, main = booted
+    repos = db.get_repositories()
+
+    before = repos.workers.list_trigger_rows(worker_id="single-trigger-worker")
+    assert [(r["type"], r["enabled"]) for r in before] == [("schedule", 1)]
+    repos.workers.set_trigger_next_run_at(
+        trigger_id=before[0]["id"], next_run_at="2000-01-01T00:00:00+00:00"
+    )
+
+    with TestClient(main.app, headers={"x-floom-secret": "test-secret-multitrigger"}) as client:
+        response = client.patch(
+            "/workers/single-trigger-worker",
+            json={"trigger_type": "manual"},
+        )
+
+    assert response.status_code == 200, response.text
+    after = repos.workers.list_trigger_rows(worker_id="single-trigger-worker")
+    assert [(r["type"], r["enabled"]) for r in after] == [("manual", 1)]
+
+    scheduler_rows = repos.workers.list_due_schedule_triggers(
+        now_iso="2100-01-01T00:00:00+00:00"
+    )
+    assert [r for r in scheduler_rows if r["worker_id"] == "single-trigger-worker"] == []
 
 
 def test_scheduler_fires_both_schedule_triggers_of_multi_worker(booted, monkeypatch):
