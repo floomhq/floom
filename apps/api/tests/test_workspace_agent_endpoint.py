@@ -212,3 +212,34 @@ def test_endpoint_requires_auth(client_and_main):
     client, _main = client_and_main
     resp = client.get("/system/workspace-agent", headers={"x-floom-secret": "wrong"})
     assert resp.status_code in (401, 403)
+
+
+def test_bare_greeting_identity_guard_adds_emily_without_hiding_state():
+    import chat_service
+
+    reply = chat_service._ensure_bare_greeting_identity(
+        "Hello",
+        "Two things need attention:\n\n- No pending approvals.",
+    )
+
+    assert reply.startswith("I'm Emily. Two things need attention:")
+    assert "No pending approvals" in reply
+
+
+def test_bare_greeting_identity_guard_trims_model_greeting_prefix():
+    import chat_service
+
+    reply = chat_service._ensure_bare_greeting_identity(
+        "Hi",
+        "Hi. I checked the workspace.\n\n- Pending approvals: none.",
+    )
+
+    assert reply == "I'm Emily. Workspace state:\n\n- Pending approvals: none."
+
+
+def test_bare_greeting_identity_guard_leaves_specific_requests_alone():
+    import chat_service
+
+    reply = "Two things need attention."
+
+    assert chat_service._ensure_bare_greeting_identity("Run the first worker", reply) == reply
