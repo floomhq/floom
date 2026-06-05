@@ -2,7 +2,7 @@
 
 Status: BLOCKED before merge
 Branch: `codex/cloud-launch-fixes-20260605`
-Latest pushed SHA: `2f36d04fcf0307dcd67c7c96c5bef665ca4f00ac`
+Latest pushed SHA: PR #86 branch head at the time of review; verify with `gh pr view 86 --json headRefOid`.
 PR: https://github.com/floomhq/workeros-cloud/pull/86
 
 ## Completed
