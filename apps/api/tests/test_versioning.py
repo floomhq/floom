@@ -734,6 +734,7 @@ class TestWorkspaceInstructionsVersioningIntegration:
         from fastapi.testclient import TestClient
 
         workspace_md = tmp_path / "workspace.md"
+        workspace_base_md = tmp_path / "workspace.base.md"
         workspace_md.write_text("# Workspace v0\n", encoding="utf-8")
 
         env_patches = {
@@ -753,15 +754,16 @@ class TestWorkspaceInstructionsVersioningIntegration:
                 sys.modules.pop(mod, None)
             import chat_service as chat_mod
             chat_mod.WORKSPACE_MD_PATH = workspace_md
+            chat_mod.WORKSPACE_BASE_PERSONA_PATH = workspace_base_md
             import db as db_mod
             db_mod.init_db()
             db_mod.get_repositories.cache_clear()
             import main as app_main
             client = TestClient(app_main.app, raise_server_exceptions=False)
-            yield client, workspace_md
+            yield client, workspace_md, workspace_base_md
 
     def test_workspace_version_on_save_and_rollback(self, client):
-        test_client, workspace_md = client
+        test_client, workspace_md, _workspace_base_md = client
         headers = {"x-floom-secret": "test-secret", "Content-Type": "text/markdown"}
 
         r1 = test_client.put("/workspace", content="# Workspace v1\n", headers=headers)
@@ -781,5 +783,34 @@ class TestWorkspaceInstructionsVersioningIntegration:
         assert workspace_md.read_text(encoding="utf-8") == "# Workspace v1\n"
 
         versions_after = test_client.get("/workspace/versions", headers=headers).json()
+        assert len(versions_after) == 3
+        assert versions_after[0]["change_source"].startswith("rollback:")
+
+    def test_workspace_base_persona_version_on_save_and_rollback(self, client):
+        test_client, _workspace_md, workspace_base_md = client
+        headers = {"x-floom-secret": "test-secret", "Content-Type": "text/markdown"}
+
+        r1 = test_client.put("/workspace/base", content="# Emily\n\nYou are Emily v1.\n", headers=headers)
+        assert r1.status_code == 204
+
+        r2 = test_client.put("/workspace/base", content="# Emily\n\nYou are Emily v2.\n", headers=headers)
+        assert r2.status_code == 204
+
+        versions = test_client.get("/workspace/base/versions", headers=headers).json()
+        assert len(versions) == 2
+        assert versions[0]["version_number"] == 2
+        assert versions[0]["asset_type"] == "workspace_base_persona"
+
+        v1_id = versions[1]["id"]
+        snap = test_client.get(f"/workspace/base/versions/{v1_id}", headers=headers)
+        assert snap.status_code == 200
+        assert "Emily v1" in snap.json()["content"]
+
+        rb = test_client.post(f"/workspace/base/rollback/{v1_id}", headers=headers)
+        assert rb.status_code == 200
+        assert "Emily v1" in rb.text
+        assert workspace_base_md.read_text(encoding="utf-8") == "# Emily\n\nYou are Emily v1.\n"
+
+        versions_after = test_client.get("/workspace/base/versions", headers=headers).json()
         assert len(versions_after) == 3
         assert versions_after[0]["change_source"].startswith("rollback:")

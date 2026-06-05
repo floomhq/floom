@@ -64,6 +64,9 @@ def client_and_main(monkeypatch, tmp_path):
     db.init_db()
     db.get_repositories.cache_clear()
     main = importlib.import_module("main")
+    chat_service = importlib.import_module("chat_service")
+    monkeypatch.setattr(chat_service, "WORKSPACE_MD_PATH", tmp_path / "workspace.md")
+    monkeypatch.setattr(chat_service, "WORKSPACE_BASE_PERSONA_PATH", tmp_path / "workspace.base.md")
 
     # Seed a secret to prove its VALUE never appears in the response.
     repos = db.get_repositories()
@@ -162,6 +165,46 @@ def test_endpoint_updates_capability_settings_and_gates_tools(client_and_main):
     assert "brain__write" in names
     assert "connections__list" not in names
     assert "connections__add_mcp" in names
+
+
+def test_base_persona_and_workspace_instructions_are_separate_editable_layers(client_and_main):
+    client, _main = client_and_main
+    base = "# Emily\n\nYou are Emily, the custom Workeros operator.\n"
+    custom = "# Workspace custom instructions\n\nPrefer verified workspace facts.\n"
+
+    default_base = client.get("/workspace/base")
+    assert default_base.status_code == 200
+    assert "You are Emily" in default_base.text
+    assert "personal Chief-of-Staff" in default_base.text
+
+    put_base = client.put(
+        "/workspace/base",
+        content=base,
+        headers={"content-type": "text/markdown"},
+    )
+    assert put_base.status_code == 204, put_base.text
+    put_custom = client.put(
+        "/workspace",
+        content=custom,
+        headers={"content-type": "text/markdown"},
+    )
+    assert put_custom.status_code == 204, put_custom.text
+
+    body = client.get("/system/workspace-agent").json()
+    prompt = body["system_prompt"]
+    assert "You are Emily, the custom Workeros operator." in prompt
+    assert "personal Chief-of-Staff" not in prompt
+    assert "Prefer verified workspace facts." in prompt
+    assert "You manage the workspace." in prompt
+    assert prompt.index("custom Workeros operator") < prompt.index("Prefer verified workspace facts.")
+    assert prompt.index("Prefer verified workspace facts.") < prompt.index("You manage the workspace.")
+
+    base_versions = client.get("/workspace/base/versions").json()
+    custom_versions = client.get("/workspace/versions").json()
+    assert len(base_versions) == 1
+    assert base_versions[0]["asset_type"] == "workspace_base_persona"
+    assert len(custom_versions) == 1
+    assert custom_versions[0]["asset_type"] == "workspace_instructions"
 
 
 def test_endpoint_requires_auth(client_and_main):
