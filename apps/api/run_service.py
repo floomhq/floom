@@ -1402,7 +1402,7 @@ def _mark_worker_paused_on_disk(worker_id: str, *, paused: bool = True) -> None:
         else:
             raw.pop("paused", None)
         yml_path.write_text(
-            _pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False),
+            _pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False, encoding='utf-8'),
             encoding="utf-8",
         )
     except Exception:
@@ -1946,7 +1946,7 @@ def _materialize_declared_file_outputs(
         path = _safe_artifact_path(run_id, relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         value = outputs[output.name]
-        path.write_text(value if isinstance(value, str) else json.dumps(value, indent=2))
+        path.write_text(value if isinstance(value, str, encoding='utf-8') else json.dumps(value, indent=2))
         artifacts.append(
             {
                 "name": relative_path,
@@ -1989,14 +1989,14 @@ def _validate_run_outputs(
                 # A valid, parseable JSON document is a legitimate result at any
                 # non-zero size — gate on parseability, never the byte floor.
                 try:
-                    json.loads(path.read_text())
+                    json.loads(path.read_text(encoding='utf-8'))
                 except Exception as exc:
                     return f"output_validation_failed: {name} JSON file is invalid: {exc}", warnings
                 continue
             if not media_type:
                 # Unknown type: if it parses as JSON, accept as structured data.
                 try:
-                    json.loads(path.read_text())
+                    json.loads(path.read_text(encoding='utf-8'))
                     continue
                 except Exception:
                     pass
@@ -2206,7 +2206,7 @@ def _env_keys_from_file(path: Path) -> set[str]:
     keys: set[str] = set()
     if not path.is_file():
         return keys
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding='utf-8').splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue

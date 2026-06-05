@@ -2602,7 +2602,7 @@ def rollback_worker(
         for f in files:
             dest = tmp_dir / f["path"]
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(f.get("content") or "", encoding="utf-8")
+            dest.write_text(f.get("content", encoding='utf-8') or "", encoding="utf-8")
 
         existing_files = list(target_dir.rglob("*"))
         new_paths = {f["path"] for f in files}
@@ -6006,15 +6006,15 @@ def _build_worker_detail(
             run_path = worker_dir / "run.py"
             skill_path = worker_dir / "SKILL.md"
             if yml_path.is_file():
-                manifest_yaml = yml_path.read_text()
+                manifest_yaml = yml_path.read_text(encoding='utf-8')
             elif worker.get("manifest"):
                 import yaml as pyyaml
                 manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
             if run_path.is_file():
-                run_py = run_path.read_text()
+                run_py = run_path.read_text(encoding='utf-8')
                 run_py_content = run_py
             if skill_path.is_file():
-                skill_md_content = skill_path.read_text()
+                skill_md_content = skill_path.read_text(encoding='utf-8')
             worker_files = _read_worker_files(worker_dir)
             if not worker_files:
                 worker_files = _worker_files_from_manifest(worker)
@@ -6299,7 +6299,7 @@ def restore_worker(
     if not worker_yml_path.exists():
         raise HTTPException(status_code=404, detail="Worker not found")
     try:
-        raw_yml = worker_yml_path.read_text()
+        raw_yml = worker_yml_path.read_text(encoding='utf-8')
         # Remove or set archived to false. Match both `archived: true` and `archived:true`.
         updated = _re.sub(r"(?m)^(archived:\s*)true\s*$", r"\1false\n", raw_yml)
         if updated == raw_yml:
@@ -6307,7 +6307,7 @@ def restore_worker(
             updated = raw_yml  # already not archived
         # Also remove archive_reason line when restoring
         updated = _re.sub(r"(?m)^archive_reason:.*\n?", "", updated)
-        worker_yml_path.write_text(updated)
+        worker_yml_path.write_text(updated, encoding='utf-8')
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
     # Mirror the cleared archived flag into the DB manifest (see archive_worker:
@@ -6342,7 +6342,7 @@ def archive_worker(
     if not worker_yml_path.exists():
         raise HTTPException(status_code=404, detail="Worker not found")
     try:
-        raw_yml = worker_yml_path.read_text()
+        raw_yml = worker_yml_path.read_text(encoding='utf-8')
         # Flip an existing `archived: false` to true; otherwise append the field.
         # Match both `archived: true` and `archived:true` spacing, same as restore.
         updated, n = _re.subn(r"(?m)^(archived:\s*)false\s*$", r"\1true\n", raw_yml)
@@ -6351,7 +6351,7 @@ def archive_worker(
             if not updated.endswith("\n"):
                 updated += "\n"
             updated += "archived: true\n"
-        worker_yml_path.write_text(updated)
+        worker_yml_path.write_text(updated, encoding='utf-8')
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
     # Persist the archived flag to the DB manifest too. The API reads `archived`
@@ -6465,7 +6465,7 @@ def get_worker_sample_input(
     sample_path = WORKERS_DIR.parent / "docs" / "workers" / "inputs" / f"{safe_id}.json"
     if sample_path.is_file():
         try:
-            return json.loads(sample_path.read_text())
+            return json.loads(sample_path.read_text(encoding='utf-8'))
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to parse sample input: {exc}") from exc
 
@@ -6565,7 +6565,7 @@ def update_worker(
         worker_yml_path = WORKERS_DIR / worker_id / "worker.yml"
         if worker_yml_path.exists():
             try:
-                existing_yml = worker_yml_path.read_text()
+                existing_yml = worker_yml_path.read_text(encoding='utf-8')
                 # Build the updated trigger block from DB state so the single
                 # source of truth (DB) is serialised back to disk.
                 effective_type = payload.trigger_type or (
@@ -6603,7 +6603,7 @@ def update_worker(
                 else:
                     # No trigger block found — append
                     updated_yml = existing_yml.rstrip("\n") + "\n\n" + new_trigger_yaml + "\n"
-                worker_yml_path.write_text(updated_yml)
+                worker_yml_path.write_text(updated_yml, encoding='utf-8')
                 logger.info(
                     "PATCH %s: wrote trigger changes to worker.yml on disk (type=%s, cron=%s)",
                     worker_id,
@@ -6924,7 +6924,7 @@ files:
         "status": "success",
         "outputs": {"result": out_path},
         "artifacts": [{"name": out_path, "relative_path": out_path, "type": "text/csv"}],
-    }), encoding="utf-8")
+    }, encoding='utf-8'), encoding="utf-8")
   requirements.txt: |
     # stdlib only — no third-party deps needed
 
@@ -7043,7 +7043,7 @@ Respond with ONLY valid JSON (no markdown fences). The `files` array is mandator
 
 === RUN.PY CONTRACT (script mode — these EXACT mistakes crash generated workers) ===
 When you emit run.py, follow this contract EXACTLY:
-- Read inputs: `inputs = json.loads(Path("inputs.json").read_text())`. A SCALAR
+- Read inputs: `inputs = json.loads(Path("inputs.json").read_text(encoding='utf-8'))`. A SCALAR
   input is the literal value inline (use it directly, never open() it). A FILE
   input's value IS already the relative path (e.g. "inputs/csv_file") — open() it
   directly; NEVER os.path.join("inputs", value) (double-prepend is a top crash).
@@ -7066,18 +7066,18 @@ When you emit run.py, follow this contract EXACTLY:
 Worked run.py examples (copy the matching shape):
   # reverse a string (scalar in -> scalar out):
   #   import json; from pathlib import Path
-  #   inputs = json.loads(Path("inputs.json").read_text())
+  #   inputs = json.loads(Path("inputs.json").read_text(encoding='utf-8'))
   #   Path("result.json").write_text(json.dumps({"status":"success",
-  #     "outputs":{"reversed": str(inputs["text"])[::-1]}, "artifacts":[], "error":None}))
+  #     "outputs":{"reversed": str(inputs["text"], encoding='utf-8')[::-1]}, "artifacts":[], "error":None}))
   # word+char+sentence count (scalar in -> json file out, ALL three computed):
   #   import json, re, os; from pathlib import Path
-  #   t = str(json.loads(Path("inputs.json").read_text()).get("text") or "")
+  #   t = str(json.loads(Path("inputs.json").read_text(encoding='utf-8')).get("text") or "")
   #   c = {"words":len(t.split()),"chars":len(t),
   #        "sentences":len([s for s in re.split(r"[.!?]+",t) if s.strip()])}
-  #   os.makedirs("out",exist_ok=True); Path("out/counts.json").write_text(json.dumps(c))
+  #   os.makedirs("out",exist_ok=True); Path("out/counts.json").write_text(json.dumps(c), encoding='utf-8')
   #   Path("result.json").write_text(json.dumps({"status":"success",
   #     "outputs":{"counts":"out/counts.json"},
-  #     "artifacts":[{"name":"out/counts.json","relative_path":"out/counts.json","type":"application/json"}],"error":None}))
+  #     "artifacts":[{"name":"out/counts.json","relative_path":"out/counts.json","type":"application/json"}],"error":None}), encoding='utf-8')
 
 Only include files that are needed. Omit run.py for agent-only (A), omit SKILL.md for pure-script (B).
 The `requirements` array is the authoritative source. `required_connections` = oauth slugs only. `required_secrets` = API_KEY names only."""
@@ -7773,7 +7773,8 @@ _DEFAULT_RUN_PY_STUB = (
     "    # E2B pure-script entry: write result.json so the run does not fail\n"
     "    # with missing_result. Edit this to produce real outputs.\n"
     "    Path(\"result.json\").write_text(\n"
-    "        json.dumps({\"status\": \"success\", \"outputs\": {}, \"artifacts\": []})\n"
+    "        json.dumps({\"status\": \"success\", \"outputs\": {}, \"artifacts\": []}),\n"
+    "        encoding='utf-8',\n"
     "    )\n"
 )
 
@@ -7842,12 +7843,12 @@ def _register_worker_from_files(
             for part in parts[:-1]:
                 dest = dest / part
                 dest.mkdir(exist_ok=True)
-            (dest / parts[-1]).write_text(f.content)
+            (dest / parts[-1]).write_text(f.content, encoding='utf-8')
 
         if not (target_dir / "run.py").exists():
-            (target_dir / "run.py").write_text(_DEFAULT_RUN_PY_STUB)
+            (target_dir / "run.py").write_text(_DEFAULT_RUN_PY_STUB, encoding='utf-8')
         if not (target_dir / "requirements.txt").exists():
-            (target_dir / "requirements.txt").write_text("")
+            (target_dir / "requirements.txt").write_text("", encoding='utf-8')
     except HTTPException:
         import shutil
         shutil.rmtree(target_dir, ignore_errors=True)
@@ -8148,12 +8149,12 @@ async def draft_and_create_worker(
             for part in parts[:-1]:
                 dest = dest / part
                 dest.mkdir(exist_ok=True)
-            (dest / parts[-1]).write_text(f.content)
+            (dest / parts[-1]).write_text(f.content, encoding='utf-8')
 
         if not (target_dir / "run.py").exists():
-            (target_dir / "run.py").write_text(_DEFAULT_RUN_PY_STUB)
+            (target_dir / "run.py").write_text(_DEFAULT_RUN_PY_STUB, encoding='utf-8')
         if not (target_dir / "requirements.txt").exists():
-            (target_dir / "requirements.txt").write_text("")
+            (target_dir / "requirements.txt").write_text("", encoding='utf-8')
     except Exception as exc:
         import shutil
         shutil.rmtree(target_dir, ignore_errors=True)
@@ -8282,17 +8283,17 @@ def create_worker(
         target_dir.mkdir(parents=True, exist_ok=False)
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists") from exc
-    (target_dir / "worker.yml").write_text(payload.worker_yml)
-    (target_dir / "run.py").write_text(payload.run_py)
-    (target_dir / "requirements.txt").write_text("")
+    (target_dir / "worker.yml").write_text(payload.worker_yml, encoding='utf-8')
+    (target_dir / "run.py").write_text(payload.run_py, encoding='utf-8')
+    (target_dir / "requirements.txt").write_text("", encoding='utf-8')
     if payload.skill_md:
-        (target_dir / "SKILL.md").write_text(payload.skill_md)
+        (target_dir / "SKILL.md").write_text(payload.skill_md, encoding='utf-8')
     else:
         (target_dir / "SKILL.md").write_text(
             f"# {config.name}\n\n"
             "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
             "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
-        )
+        , encoding='utf-8')
 
     # Register
     invalidate_worker_cache()
@@ -8456,12 +8457,12 @@ async def create_worker_from_bundle(
     # Ensure run.py exists (stub if absent)
     run_py_path = target_dir / "run.py"
     if not run_py_path.exists():
-        run_py_path.write_text(_DEFAULT_RUN_PY_STUB)
+        run_py_path.write_text(_DEFAULT_RUN_PY_STUB, encoding='utf-8')
 
     # Ensure requirements.txt exists
     req_path = target_dir / "requirements.txt"
     if not req_path.exists():
-        req_path.write_text("")
+        req_path.write_text("", encoding='utf-8')
 
     # Register
     invalidate_worker_cache()
@@ -9038,23 +9039,23 @@ def update_worker(
     run_py_path = target_dir / "run.py"
     requirements_path = target_dir / "requirements.txt"
     skill_path = target_dir / "SKILL.md"
-    old_worker_yml = worker_yml_path.read_text() if worker_yml_path.exists() else None
-    old_run_py = run_py_path.read_text() if run_py_path.exists() else None
+    old_worker_yml = worker_yml_path.read_text(encoding='utf-8') if worker_yml_path.exists() else None
+    old_run_py = run_py_path.read_text(encoding='utf-8') if run_py_path.exists() else None
     had_requirements = requirements_path.exists()
-    old_skill = skill_path.read_text() if skill_path.exists() else None
+    old_skill = skill_path.read_text(encoding='utf-8') if skill_path.exists() else None
 
-    worker_yml_path.write_text(payload.worker_yml)
-    run_py_path.write_text(payload.run_py)
+    worker_yml_path.write_text(payload.worker_yml, encoding='utf-8')
+    run_py_path.write_text(payload.run_py, encoding='utf-8')
     if not requirements_path.exists():
-        requirements_path.write_text("")
+        requirements_path.write_text("", encoding='utf-8')
     if payload.skill_md:
-        skill_path.write_text(payload.skill_md)
+        skill_path.write_text(payload.skill_md, encoding='utf-8')
     elif not skill_path.exists():
         skill_path.write_text(
             f"# {_config.name}\n\n"
             "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
             "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
-        )
+        , encoding='utf-8')
 
     invalidate_worker_cache()
     workers = discover_workers()
@@ -9063,13 +9064,13 @@ def update_worker(
             _persist_discovered_workers(conn, workers, user_id=auth.user_id)
         except RuntimeError as exc:
             if old_worker_yml is not None:
-                worker_yml_path.write_text(old_worker_yml)
+                worker_yml_path.write_text(old_worker_yml, encoding='utf-8')
             if old_run_py is not None:
-                run_py_path.write_text(old_run_py)
+                run_py_path.write_text(old_run_py, encoding='utf-8')
             if not had_requirements and requirements_path.exists():
                 requirements_path.unlink()
             if old_skill is not None:
-                skill_path.write_text(old_skill)
+                skill_path.write_text(old_skill, encoding='utf-8')
             elif skill_path.exists():
                 skill_path.unlink()
             invalidate_worker_cache()
@@ -14224,6 +14225,22 @@ async def _collect_workspace_agent_reply_for_slack(
     return strip_em_dashes("".join(text_parts).strip())
 
 
+def _slack_reaction(action: str, *, channel: str, ts: str, emoji: str, bot_token: Optional[str] = None) -> None:
+    """Add or remove a reaction emoji on a Slack message. Best-effort — never raises."""
+    token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
+    if not token:
+        return
+    try:
+        requests.post(
+            f"https://slack.com/api/reactions.{action}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+            json={"channel": channel, "timestamp": ts, "name": emoji},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str, bot_token: Optional[str] = None) -> None:
     bot_token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
     if not bot_token:
@@ -14430,15 +14447,21 @@ async def _handle_slack_app_mention(
         logger.warning("Slack app_mention missing channel/thread timestamp")
         return
     conversation_id = f"slack:{channel}:{thread_ts}"
+    msg_ts = str(event.get("ts") or thread_ts)
+    _slack_reaction("add", channel=channel, ts=msg_ts, emoji="eyes", bot_token=bot_token)
     try:
         reply = await _collect_workspace_agent_reply_for_slack(
             message=prompt,
             user_id=user_id,
             conversation_id=conversation_id,
         )
+        _slack_reaction("remove", channel=channel, ts=msg_ts, emoji="eyes", bot_token=bot_token)
+        _slack_reaction("add", channel=channel, ts=msg_ts, emoji="white_check_mark", bot_token=bot_token)
         _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply, bot_token=bot_token)
     except Exception:
         logger.exception("Slack app_mention processing failed")
+        _slack_reaction("remove", channel=channel, ts=msg_ts, emoji="eyes", bot_token=bot_token)
+        _slack_reaction("add", channel=channel, ts=msg_ts, emoji="x", bot_token=bot_token)
         if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
             try:
                 _post_slack_thread_reply(
@@ -17479,6 +17502,28 @@ def list_workspace_versions(
         limit=min(limit, 100),
     )
     return [VersionSummary(**r) for r in rows]
+
+
+@app.get("/workspace/versions/{version_id}")
+def get_workspace_version(
+    version_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the content snapshot for a specific workspace instructions version."""
+    import json as _json
+
+    asset_id = _workspace_instructions_asset_id(request)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != _WORKSPACE_INSTRUCTIONS_ASSET_TYPE
+        or version.get("asset_id") != asset_id
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"content": snapshot.get("content") or ""}
 
 
 @app.post("/workspace/rollback/{version_id}")
