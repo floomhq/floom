@@ -543,10 +543,26 @@ async def cloud_get_worker(worker_id: str, request: Request) -> Any:
         email=getattr(auth, "email", None),
         scopes=getattr(auth, "scopes", ()),
     )
-    result = await _asyncio.to_thread(
-        engine_main._build_worker_detail, worker_id,
-        user_id=auth.user_id, repos=repos
-    )
+    try:
+        result = await _asyncio.to_thread(
+            engine_main._build_worker_detail, worker_id,
+            user_id=auth.user_id, repos=repos
+        )
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        raw_worker = repos.workers.get_any(worker_id=worker_id) or {}
+        owner_id = raw_worker.get("owner_id") or raw_worker.get("user_id") or ""
+        actual_workspace_id = str(raw_worker.get("workspace_id") or "")
+        if str(owner_id) != str(auth.user_id) or not actual_workspace_id:
+            raise
+        from apps.api.auth.workspace_context import active_workspace
+
+        with active_workspace(actual_workspace_id, "admin"):
+            result = await _asyncio.to_thread(
+                engine_main._build_worker_detail, worker_id,
+                user_id=auth.user_id, repos=repos
+            )
     if result is None:
         raise HTTPException(status_code=404, detail="worker not found")
 
@@ -555,6 +571,57 @@ async def cloud_get_worker(worker_id: str, request: Request) -> Any:
     result_dict["visibility"] = raw.get("visibility") or "private"
     result_dict["published_at"] = raw.get("published_at")
     return result_dict
+
+
+@app.get("/runs/{run_id}")
+@app.get("/api/runs/{run_id}")
+async def cloud_get_run(run_id: str, request: Request) -> Any:
+    """Cloud override for exact run detail deep links.
+
+    Lists stay scoped to the active workspace. Exact owned deep links can be
+    opened from activity cards and notifications even when the browser still has
+    an older workspace cookie, so recover the row's workspace before delegating
+    to the engine run-detail builder.
+    """
+    import asyncio as _asyncio
+
+    from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from auth.context import AuthContext as _AuthContext
+
+    provider = SupabaseAuthProvider()
+    try:
+        auth = await provider.verify(request)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    repos = engine_main.get_repositories()
+    engine_auth = _AuthContext(
+        user_id=auth.user_id,
+        email=getattr(auth, "email", None),
+        scopes=getattr(auth, "scopes", ()),
+    )
+    try:
+        return await _asyncio.to_thread(
+            engine_main.get_run, run_id,
+            auth=engine_auth, repos=repos
+        )
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        raw_run = repos.runs.get_any(run_id=run_id) or {}
+        owner_id = raw_run.get("owner_id") or raw_run.get("user_id") or ""
+        actual_workspace_id = str(raw_run.get("workspace_id") or "")
+        if str(owner_id) != str(auth.user_id) or not actual_workspace_id:
+            raise
+        from apps.api.auth.workspace_context import active_workspace
+
+        with active_workspace(actual_workspace_id, "admin"):
+            return await _asyncio.to_thread(
+                engine_main.get_run, run_id,
+                auth=engine_auth, repos=repos
+            )
 
 
 @app.patch("/workers/{worker_id}/visibility")
