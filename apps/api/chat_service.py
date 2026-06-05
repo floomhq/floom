@@ -19,7 +19,10 @@ import hmac
 import json
 import logging
 import os
+import re
+import time
 import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 
@@ -32,6 +35,11 @@ DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-5-mini"
 TOOL_RESULT_MAX_BYTES = 2048
 CONVERSATION_WINDOW = 50       # LLM context window; stored rows are permanent
 CONVERSATION_KEEP_VERBATIM = 20  # retained for legacy summary compatibility
+CHAT_EVENT_PROTOCOL_VERSION = "emily.chat.v1"
+CHAT_EVENT_VERSION = 2
+ARGS_PREVIEW_MAX_STRING = 240
+ARGS_PREVIEW_MAX_ITEMS = 12
+ARGS_PREVIEW_MAX_DEPTH = 4
 WORKSPACE_MD_PATH = Path(__file__).resolve().parents[3] / "workspace.md"
 WORKSPACE_BASE_PERSONA_PATH = Path(__file__).resolve().parents[3] / "workspace.base.md"
 WORKSPACE_MD_TEMPLATE = Path(__file__).resolve().parents[3] / "workspace.md.template"
@@ -94,6 +102,34 @@ DEFAULT_WORKSPACE_AGENT_SETTINGS: Dict[str, bool] = {
     "connections_use": False,
     "connections_add": False,
 }
+
+_SENSITIVE_ARG_KEY_RE = re.compile(
+    r"(?:^|_)(?:secret|token|password|passwd|pwd|api[_-]?key|access[_-]?key|private[_-]?key|authorization|auth|bearer|credential|client[_-]?secret|refresh[_-]?token)(?:$|_)",
+    re.IGNORECASE,
+)
+_CONTENT_ARG_KEYS = {
+    "content",
+    "file_content",
+    "body",
+    "text",
+    "markdown",
+    "yaml_text",
+    "worker_yml",
+    "run_py",
+    "skill_md",
+    "code",
+    "value",
+}
+_BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
+_TOKEN_LIKE_RE = re.compile(r"\b(?:sk|pat|ghp|glpat|xox[baprs])[-_A-Za-z0-9]{12,}\b")
+_SECRET_QUERY_RE = re.compile(
+    r"([?&](?:token|key|secret|signature|sig|code)=)([^&\s]+)",
+    re.IGNORECASE,
+)
+_current_chat_conversation_id: ContextVar[Optional[str]] = ContextVar(
+    "workeros_chat_conversation_id",
+    default=None,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +435,412 @@ def list_conversation_messages(conv_id: str, user_id: str) -> List[Dict[str, Any
             (conv_id,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def list_conversation_tool_cards(conv_id: str, user_id: str) -> List[Dict[str, Any]]:
+    """Return persisted renderable tool cards for conversation replay."""
+    with get_db() as conn:
+        owned = conn.execute(
+            "SELECT id FROM conversations WHERE id = ? AND user_id = ?",
+            (conv_id, user_id),
+        ).fetchone()
+        if not owned:
+            return []
+        rows = conn.execute(
+            """
+            SELECT id, call_id, tool_name, status, card_json, resource_json,
+                   streams_json, actions_json, args_preview_json,
+                   result_preview_json, run_id, worker_id, created_at, updated_at
+            FROM conversation_tool_calls
+            WHERE conversation_id = ? AND user_id = ?
+            ORDER BY created_at ASC
+            """,
+            (conv_id, user_id),
+        ).fetchall()
+
+    def _loads(raw: Any, fallback: Any) -> Any:
+        try:
+            return json.loads(raw) if raw else fallback
+        except Exception:
+            return fallback
+
+    cards: List[Dict[str, Any]] = []
+    for row in rows:
+        card = _loads(row["card_json"], {})
+        cards.append({
+            "id": row["id"],
+            "callId": row["call_id"],
+            "toolName": row["tool_name"],
+            "status": row["status"],
+            "card": card,
+            "resource": _loads(row["resource_json"], None),
+            "streams": _loads(row["streams_json"], None),
+            "actions": _loads(row["actions_json"], []),
+            "args_preview": _loads(row["args_preview_json"], {}),
+            "result_preview": _loads(row["result_preview_json"], None),
+            "run_id": row["run_id"],
+            "worker_id": row["worker_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        })
+    return cards
+
+
+def _safe_json_dumps(value: Any) -> str:
+    return json.dumps(value, default=str, sort_keys=True)
+
+
+def _redacted_marker(reason: str, value: Any = None) -> Dict[str, Any]:
+    marker: Dict[str, Any] = {"redacted": True, "reason": reason}
+    try:
+        marker["bytes"] = len(str(value).encode("utf-8")) if value is not None else 0
+    except Exception:
+        pass
+    return marker
+
+
+def _looks_sensitive_string(value: str) -> bool:
+    return bool(_BEARER_RE.search(value) or _TOKEN_LIKE_RE.search(value))
+
+
+def _sanitize_preview_text(value: str) -> str:
+    return _SECRET_QUERY_RE.sub(r"\1[redacted]", value)
+
+
+def _arg_key_tokens(key: str) -> str:
+    snake = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(key or ""))
+    snake = re.sub(r"[^A-Za-z0-9]+", "_", snake)
+    return snake.strip("_").lower()
+
+
+def _is_sensitive_arg_key(key: str) -> bool:
+    tokens = _arg_key_tokens(key)
+    if _SENSITIVE_ARG_KEY_RE.search(tokens):
+        return True
+    compact = tokens.replace("_", "")
+    return any(
+        marker in compact
+        for marker in (
+            "accesstoken",
+            "refreshtoken",
+            "bearertoken",
+            "sessiontoken",
+            "apikey",
+            "clientsecret",
+            "privatekey",
+            "authorization",
+            "credential",
+            "password",
+        )
+    )
+
+
+def _looks_like_large_markup(key: str, value: str) -> bool:
+    lower_key = key.lower()
+    if lower_key in {"yaml_text", "worker_yml"}:
+        return True
+    if len(value.encode("utf-8")) > ARGS_PREVIEW_MAX_STRING:
+        return True
+    stripped = value.lstrip()
+    return stripped.startswith(("schema_version:", "name:", "---", "```"))
+
+
+def _preview_scalar(value: Any, *, key: str = "") -> Any:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    text = str(value)
+    if key.lower() in {"content", "file_content", "run_py", "skill_md", "code"}:
+        return _redacted_marker("file content", text)
+    if _looks_sensitive_string(text):
+        return _redacted_marker("secret-like value", text)
+    text = _sanitize_preview_text(text)
+    if _looks_like_large_markup(key, text):
+        return {
+            "redacted": True,
+            "reason": "large or structured content",
+            "bytes": len(text.encode("utf-8", errors="replace")),
+            "chars": len(text),
+        }
+    if len(text) > ARGS_PREVIEW_MAX_STRING:
+        return {
+            "preview": text[:ARGS_PREVIEW_MAX_STRING] + "...",
+            "truncated": True,
+            "chars": len(text),
+        }
+    return text
+
+
+def build_args_preview(tool_name: str, args: Any) -> Any:
+    """Return a renderable, secret-free summary of tool arguments."""
+    def _walk(value: Any, key: str = "", depth: int = 0) -> Any:
+        key_lower = _arg_key_tokens(key)
+        if key_lower == "value" and tool_name == "secrets__set":
+            return _redacted_marker("secret value", value)
+        if _is_sensitive_arg_key(key):
+            return _redacted_marker("sensitive field", value)
+        if key_lower in _CONTENT_ARG_KEYS and isinstance(value, str):
+            return _preview_scalar(value, key=key_lower)
+        if depth >= ARGS_PREVIEW_MAX_DEPTH:
+            return _redacted_marker("max depth", value)
+        if isinstance(value, dict):
+            preview: Dict[str, Any] = {}
+            for idx, item_key in enumerate(sorted(value.keys(), key=str)):
+                if idx >= ARGS_PREVIEW_MAX_ITEMS:
+                    preview["_truncated"] = True
+                    preview["_remaining_keys"] = len(value) - idx
+                    break
+                preview[str(item_key)] = _walk(value[item_key], str(item_key), depth + 1)
+            return preview
+        if isinstance(value, list):
+            items = [_walk(item, key, depth + 1) for item in value[:ARGS_PREVIEW_MAX_ITEMS]]
+            if len(value) > ARGS_PREVIEW_MAX_ITEMS:
+                items.append({"truncated": True, "remaining_items": len(value) - ARGS_PREVIEW_MAX_ITEMS})
+            return items
+        return _preview_scalar(value, key=key)
+
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:
+            return _preview_scalar(args, key="arguments")
+    return _walk(args)
+
+
+def _preview_result(result: Any) -> Any:
+    if isinstance(result, dict):
+        return build_args_preview("tool-result", result)
+    return _preview_scalar(result, key="result")
+
+
+def _card_kind_for_tool(tool_name: str) -> str:
+    if tool_name.startswith("workers__"):
+        return "worker"
+    if tool_name.startswith("runs__"):
+        return "run"
+    if tool_name.startswith("secrets__"):
+        return "secret"
+    if tool_name.startswith("connections__"):
+        return "connection"
+    if tool_name.startswith("contexts__") or tool_name.startswith("brain__"):
+        return "brain"
+    if tool_name.startswith("approvals__"):
+        return "approval"
+    if tool_name.startswith("slack__"):
+        return "slack"
+    return "tool"
+
+
+def _tool_title(tool_name: str, args_preview: Any) -> str:
+    if tool_name == "workers__create_from_prompt":
+        return "Create worker from prompt"
+    if tool_name == "workers__create":
+        return "Create worker from YAML"
+    if tool_name == "secrets__set":
+        name = args_preview.get("name") if isinstance(args_preview, dict) else None
+        return f"Set secret {name}" if name else "Set secret"
+    return tool_name.replace("__", ".").replace("_", " ")
+
+
+def _tool_resource(tool_name: str, payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    worker_id = payload.get("worker_id") or payload.get("id")
+    run_id = payload.get("run_id")
+    if tool_name == "workers__create_from_prompt":
+        worker_id = payload.get("worker_id") or "worker-author"
+    if run_id:
+        return {"kind": "run", "worker_id": worker_id, "run_id": run_id}
+    if worker_id and tool_name.startswith("workers__"):
+        return {"kind": "worker", "worker_id": worker_id}
+    return None
+
+
+def _tool_streams(resource: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    if not resource or not resource.get("run_id"):
+        return None
+    run_id = str(resource["run_id"])
+    return {"events": f"/runs/{run_id}/events", "parts": f"/runs/{run_id}/stream"}
+
+
+def _tool_actions(tool_name: str, resource: Optional[Dict[str, Any]], status: str) -> List[Dict[str, Any]]:
+    actions: List[Dict[str, Any]] = []
+    if resource and resource.get("run_id"):
+        run_id = str(resource["run_id"])
+        actions.append({"id": "open_run", "method": "GET", "href": f"/runs/{run_id}"})
+        actions.append({"id": "cancel_run", "method": "POST", "href": f"/runs/{run_id}/cancel"})
+    if resource and resource.get("worker_id") and status == "succeeded":
+        worker_id = str(resource["worker_id"])
+        if worker_id != "worker-author":
+            actions.append({"id": "open_worker", "method": "GET", "href": f"/workers/{worker_id}"})
+            actions.append({"id": "edit_worker", "method": "GET", "href": f"/workers/{worker_id}?edit=1"})
+    if resource and resource.get("approval_id"):
+        run_id = str(resource.get("run_id") or "")
+        if run_id:
+            actions.append({"id": "approve", "method": "POST", "href": f"/runs/{run_id}/approve"})
+            actions.append({"id": "reject", "method": "POST", "href": f"/runs/{run_id}/reject"})
+    if resource and resource.get("kind") == "connection":
+        app_name = str(resource.get("app_name") or "")
+        body: Dict[str, str] = {"app_name": app_name} if app_name else {}
+        actions.append({"id": "connect", "method": "POST", "href": "/connections", "body": body})
+    if tool_name == "secrets__set":
+        actions.append({"id": "open_secrets", "method": "GET", "href": "/settings/secrets"})
+    return actions
+
+
+def _action_required_reason(tool_name: str, result: Any, resource: Optional[Dict[str, Any]]) -> Optional[str]:
+    if isinstance(resource, dict) and resource.get("approval_id"):
+        return "approval_required"
+    if isinstance(result, dict):
+        code = str(result.get("error_code") or result.get("error") or "")
+        lowered = code.lower()
+        if "missing_connection" in lowered or ("connection" in lowered and not result.get("ok", True)):
+            return "missing_connection"
+        if "missing_secret" in lowered or ("secret" in lowered and not result.get("ok", True)):
+            return "missing_secret"
+    if tool_name == "approvals__list_pending" and isinstance(result, dict) and int(result.get("count") or 0) > 0:
+        return "approval_required"
+    return None
+
+
+def build_tool_event_metadata(
+    tool_name: str,
+    call_id: str,
+    *,
+    args: Any = None,
+    result: Any = None,
+    phase: str,
+) -> Dict[str, Any]:
+    args_preview = build_args_preview(tool_name, args)
+    status = "starting" if phase == "call" else "succeeded"
+    if phase == "result" and isinstance(result, dict) and not result.get("ok", True):
+        status = "failed"
+    if phase == "result" and isinstance(result, dict) and result.get("ok", True) and result.get("run_id"):
+        status = "running"
+    payload_for_resource = result if phase == "result" else args
+    resource = _tool_resource(tool_name, payload_for_resource)
+    if not resource and isinstance(result, dict):
+        resource = _tool_resource(tool_name, result)
+    if (
+        resource
+        and resource.get("kind") == "run"
+        and not resource.get("worker_id")
+        and isinstance(args, dict)
+        and args.get("id")
+    ):
+        resource["worker_id"] = str(args["id"])
+    if tool_name == "approvals__list_pending" and isinstance(result, dict):
+        approvals = result.get("approvals") if isinstance(result.get("approvals"), list) else []
+        if approvals:
+            first = approvals[0]
+            if isinstance(first, dict):
+                resource = {
+                    "kind": "approval",
+                    "approval_id": first.get("id"),
+                    "run_id": first.get("run_id"),
+                    "worker_id": first.get("worker_id"),
+                    "count": result.get("count") or len(approvals),
+                }
+                status = "action_required"
+    reason = _action_required_reason(tool_name, result, resource)
+    if reason:
+        status = "action_required"
+        if not resource and reason == "missing_connection":
+            app_name = ""
+            if isinstance(result, dict):
+                app_name = str(result.get("app_name") or result.get("connection") or "")
+            if isinstance(args, dict) and not app_name:
+                app_name = str(args.get("app_name") or args.get("connection") or "")
+            resource = {"kind": "connection", "app_name": app_name or None, "status": "missing"}
+        if not resource and reason == "missing_secret":
+            secret_name = ""
+            if isinstance(result, dict):
+                secret_name = str(result.get("secret_name") or result.get("name") or "")
+            if isinstance(args, dict) and not secret_name:
+                secret_name = str(args.get("name") or "")
+            resource = {"kind": "secret", "name": secret_name or None, "status": "missing"}
+    card_id = f"card_{call_id}" if not str(call_id).startswith("card_") else str(call_id)
+    card = {
+        "id": card_id,
+        "kind": _card_kind_for_tool(tool_name),
+        "title": _tool_title(tool_name, args_preview),
+        "status": status,
+    }
+    streams = _tool_streams(resource)
+    actions = _tool_actions(tool_name, resource, status)
+    return {
+        "protocol": CHAT_EVENT_PROTOCOL_VERSION,
+        "version": CHAT_EVENT_VERSION,
+        "card": card,
+        "resource": resource,
+        "streams": streams,
+        "actions": actions,
+        "args_preview": args_preview,
+        "result_preview": _preview_result(result) if phase == "result" else None,
+        "reason": reason,
+    }
+
+
+def normalize_tool_args_for_event(tool_name: str, args: Any) -> Any:
+    if (
+        tool_name == "finish_with_outputs"
+        and isinstance(args, dict)
+        and isinstance(args.get("reply"), str)
+    ):
+        return {**args, "reply": _sanitize_preview_text(strip_em_dashes(args["reply"]))}
+    return args
+
+
+def _persist_tool_card(
+    conversation_id: str,
+    user_id: str,
+    call_id: str,
+    tool_name: str,
+    metadata: Dict[str, Any],
+) -> None:
+    card = metadata.get("card") or {}
+    resource = metadata.get("resource") or {}
+    ts = now_iso()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO conversation_tool_calls
+                (id, user_id, conversation_id, call_id, tool_name, status,
+                 card_json, resource_json, streams_json, actions_json,
+                 args_preview_json, result_preview_json, run_id, worker_id,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(conversation_id, call_id) DO UPDATE SET
+                tool_name = excluded.tool_name,
+                status = excluded.status,
+                card_json = excluded.card_json,
+                resource_json = excluded.resource_json,
+                streams_json = excluded.streams_json,
+                actions_json = excluded.actions_json,
+                args_preview_json = COALESCE(excluded.args_preview_json, conversation_tool_calls.args_preview_json),
+                result_preview_json = excluded.result_preview_json,
+                run_id = COALESCE(excluded.run_id, conversation_tool_calls.run_id),
+                worker_id = COALESCE(excluded.worker_id, conversation_tool_calls.worker_id),
+                updated_at = excluded.updated_at
+            """,
+            (
+                f"tool_{uuid.uuid4().hex[:16]}",
+                user_id,
+                conversation_id,
+                call_id,
+                tool_name,
+                str(card.get("status") or "running"),
+                _safe_json_dumps(card),
+                _safe_json_dumps(metadata.get("resource")) if metadata.get("resource") is not None else None,
+                _safe_json_dumps(metadata.get("streams")) if metadata.get("streams") is not None else None,
+                _safe_json_dumps(metadata.get("actions") or []),
+                _safe_json_dumps(metadata.get("args_preview")) if metadata.get("args_preview") is not None else None,
+                _safe_json_dumps(metadata.get("result_preview")) if metadata.get("result_preview") is not None else None,
+                resource.get("run_id") if isinstance(resource, dict) else None,
+                resource.get("worker_id") if isinstance(resource, dict) else None,
+                ts,
+                ts,
+            ),
+        )
 
 
 def insert_message(
@@ -832,6 +1274,23 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
                 "required": ["yaml_text"],
             },
             _tool_workers_create,
+        ),
+        _make_tool(
+            "workers__create_from_prompt",
+            (
+                "Start an async worker-author run from a natural-language prompt. "
+                "Returns immediately with run_id; use the run events stream for progress."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["draft", "create"], "default": "create"},
+                    "idempotency_key": {"type": "string"},
+                },
+                "required": ["prompt", "idempotency_key"],
+            },
+            _tool_workers_create_from_prompt,
         ),
         _make_tool(
             "workers__update",
@@ -1605,6 +2064,307 @@ def _emily_worker_result_message(
     }
 
 
+def _chat_workspace_id(user_id: str) -> str:
+    try:
+        from db import derive_workspace_id
+
+        return derive_workspace_id(user_id)
+    except Exception:
+        return "local-default"
+
+
+def _claim_chat_rate_slot(key: str, *, limit: int, window: float) -> Optional[int]:
+    if limit <= 0:
+        return None
+    now = time.time()
+    cutoff = now - window
+    with get_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS run_create_rate_limits (
+                key TEXT NOT NULL,
+                ts REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_create_rate_limits_key_ts ON run_create_rate_limits(key, ts)"
+        )
+        conn.execute("DELETE FROM run_create_rate_limits WHERE ts <= ?", (cutoff,))
+        row = conn.execute(
+            "SELECT COUNT(*) AS count, MIN(ts) AS oldest_ts FROM run_create_rate_limits WHERE key = ?",
+            (key,),
+        ).fetchone()
+        count = int(row["count"] or 0) if row else 0
+        if count >= limit:
+            oldest_ts = float(row["oldest_ts"] or now) if row else now
+            return max(1, int((oldest_ts + window) - now) + 1)
+        conn.execute("INSERT INTO run_create_rate_limits (key, ts) VALUES (?, ?)", (key, now))
+    return None
+
+
+def _release_chat_rate_slot(key: str) -> None:
+    try:
+        with get_db() as conn:
+            conn.execute(
+                """
+                DELETE FROM run_create_rate_limits
+                WHERE rowid = (
+                    SELECT rowid FROM run_create_rate_limits
+                    WHERE key = ?
+                    ORDER BY ts DESC
+                    LIMIT 1
+                )
+                """,
+                (key,),
+            )
+    except Exception:
+        logger.warning("Failed to release rate slot for %s", key, exc_info=True)
+
+
+def _emily_draft_limit() -> tuple[int, float]:
+    try:
+        limit = int(os.environ.get("WORKEROS_DRAFT_RATE_HOUR", "20"))
+    except ValueError:
+        limit = 20
+    return max(0, limit), 3600.0
+
+
+def _emily_run_create_limit() -> tuple[int, float]:
+    try:
+        limit = int(os.environ.get("WORKEROS_RUN_CREATE_RATE_LIMIT", "10"))
+    except ValueError:
+        limit = 10
+    try:
+        window = float(os.environ.get("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60"))
+    except ValueError:
+        window = 60.0
+    return max(0, limit), max(1.0, window)
+
+
+def _enforce_worker_author_chat_throttles(user_id: str, workspace_id: str) -> Optional[Dict[str, Any]]:
+    draft_limit, draft_window = _emily_draft_limit()
+    draft_key = f"user:{user_id}:workspace:{workspace_id}:drafts"
+    retry_after = _claim_chat_rate_slot(
+        draft_key,
+        limit=draft_limit,
+        window=draft_window,
+    )
+    if retry_after is not None:
+        return {
+            "ok": False,
+            "error": f"Draft rate limit reached: {draft_limit}/hour.",
+            "retry_after": retry_after,
+        }
+
+    run_limit, run_window = _emily_run_create_limit()
+    retry_after = _claim_chat_rate_slot(
+        f"user:{user_id}:workspace:{workspace_id}:runs",
+        limit=run_limit,
+        window=run_window,
+    )
+    if retry_after is not None:
+        _release_chat_rate_slot(draft_key)
+        return {
+            "ok": False,
+            "error": f"Run creation rate limit exceeded: {run_limit}/{int(run_window)}s.",
+            "retry_after": retry_after,
+        }
+    return None
+
+
+def _ensure_worker_author_registered(user_id: str) -> Optional[str]:
+    try:
+        from main import _WORKER_AUTHOR_ID, _get_db_worker
+        from worker_registry import discover_workers, get_worker, invalidate_worker_cache
+        from db import get_repositories
+        from main import _persist_discovered_workers
+    except Exception as exc:
+        return str(exc)
+
+    repos = get_repositories()
+    worker = _get_db_worker(_WORKER_AUTHOR_ID, user_id=user_id, repos=repos) or get_worker(_WORKER_AUTHOR_ID)
+    if worker:
+        return None
+    try:
+        invalidate_worker_cache()
+        workers = discover_workers(use_cache=False)
+        with get_db() as conn:
+            _persist_discovered_workers(conn, workers, user_id=user_id)
+    except Exception as exc:
+        logger.warning("Failed to auto-register worker-author for chat: %s", exc)
+    worker = _get_db_worker(_WORKER_AUTHOR_ID, user_id=user_id, repos=repos) or get_worker(_WORKER_AUTHOR_ID)
+    if not worker:
+        return "worker-author bundle not found"
+    return None
+
+
+def _idempotent_worker_author_run(
+    *,
+    user_id: str,
+    conversation_id: str,
+    idempotency_key: str,
+    prompt: str,
+    mode: str,
+) -> Dict[str, Any]:
+    from db import get_repositories
+    from run_service import create_run, start_run
+
+    tool_name = "workers__create_from_prompt"
+    clean_key = idempotency_key.strip()
+    if not clean_key:
+        return {"ok": False, "error": "idempotency_key is required"}
+
+    claimed = False
+    with get_db() as conn:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO chat_tool_idempotency
+                (user_id, conversation_id, tool_name, idempotency_key,
+                 run_id, worker_id, created_at)
+            VALUES (?, ?, ?, ?, NULL, ?, ?)
+            """,
+            (
+                user_id,
+                conversation_id,
+                tool_name,
+                clean_key,
+                "worker-author",
+                now_iso(),
+            ),
+        )
+        claimed = cursor.rowcount == 1
+        if not claimed:
+            row = conn.execute(
+                """
+                SELECT run_id, worker_id
+                FROM chat_tool_idempotency
+                WHERE user_id = ? AND conversation_id = ? AND tool_name = ? AND idempotency_key = ?
+                """,
+                (user_id, conversation_id, tool_name, clean_key),
+            ).fetchone()
+            if row and row["run_id"]:
+                return {
+                    "ok": True,
+                    "run_id": row["run_id"],
+                    "worker_id": row["worker_id"] or "worker-author",
+                    "idempotent": True,
+                    "message": f"Worker-author run '{row['run_id']}' is already queued.",
+                }
+
+    if not claimed:
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            time.sleep(0.05)
+            with get_db() as conn:
+                row = conn.execute(
+                    """
+                    SELECT run_id, worker_id
+                    FROM chat_tool_idempotency
+                    WHERE user_id = ? AND conversation_id = ? AND tool_name = ? AND idempotency_key = ?
+                    """,
+                    (user_id, conversation_id, tool_name, clean_key),
+                ).fetchone()
+            if row and row["run_id"]:
+                return {
+                    "ok": True,
+                    "run_id": row["run_id"],
+                    "worker_id": row["worker_id"] or "worker-author",
+                    "idempotent": True,
+                    "message": f"Worker-author run '{row['run_id']}' is already queued.",
+                }
+        return {
+            "ok": False,
+            "error": "A matching worker-author request is already being created. Retry shortly with the same idempotency_key.",
+            "idempotent": True,
+        }
+
+    def _release_reservation() -> None:
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    """
+                    DELETE FROM chat_tool_idempotency
+                    WHERE user_id = ? AND conversation_id = ? AND tool_name = ?
+                      AND idempotency_key = ? AND run_id IS NULL
+                    """,
+                    (user_id, conversation_id, tool_name, clean_key),
+                )
+        except Exception:
+            logger.warning("Failed to release worker-author idempotency reservation", exc_info=True)
+
+    try:
+        workspace_id = _chat_workspace_id(user_id)
+        throttled = _enforce_worker_author_chat_throttles(user_id, workspace_id)
+        if throttled:
+            _release_reservation()
+            return throttled
+        unavailable = _ensure_worker_author_registered(user_id)
+        if unavailable:
+            _release_reservation()
+            return {"ok": False, "error": unavailable}
+
+        inputs: Dict[str, Any] = {"prompt": prompt, "mode": mode}
+        repos = get_repositories()
+        run_id = create_run(
+            "worker-author",
+            inputs,
+            "workspace-agent",
+            user_id=user_id,
+            repos=repos,
+        )
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE chat_tool_idempotency
+                SET run_id = ?, worker_id = ?
+                WHERE user_id = ? AND conversation_id = ? AND tool_name = ? AND idempotency_key = ?
+                """,
+                (
+                    run_id,
+                    "worker-author",
+                    user_id,
+                    conversation_id,
+                    tool_name,
+                    clean_key,
+                ),
+            )
+        start_run(run_id, "worker-author", inputs, user_id=user_id, repos=repos)
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "worker_id": "worker-author",
+            "status": "running",
+            "idempotent": False,
+            "message": f"Worker-author run '{run_id}' started.",
+        }
+    except Exception as exc:
+        _release_reservation()
+        logger.exception("workers__create_from_prompt failed")
+        return {"ok": False, "error": str(exc)}
+
+
+def _tool_workers_create_from_prompt(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    prompt = str(args.get("prompt") or "").strip()
+    if not prompt:
+        return {"ok": False, "error": "prompt is required"}
+    if len(prompt) > 4000:
+        return {"ok": False, "error": "prompt must be 4000 characters or fewer"}
+    mode = str(args.get("mode") or "create").strip()
+    if mode not in {"draft", "create"}:
+        return {"ok": False, "error": "mode must be 'draft' or 'create'"}
+    conversation_id = _current_chat_conversation_id.get()
+    if not conversation_id:
+        return {"ok": False, "error": "conversation context unavailable"}
+    return _idempotent_worker_author_run(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        idempotency_key=str(args.get("idempotency_key") or ""),
+        prompt=prompt,
+        mode=mode,
+    )
+
+
 def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """Create a RUNNABLE worker from a worker.yml manifest — same path as the API.
 
@@ -1803,17 +2563,18 @@ def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         inputs = json.loads(inputs_json) if isinstance(inputs_json, str) else dict(inputs_json or {})
     except json.JSONDecodeError as exc:
         return {"ok": False, "error": f"Invalid inputs_json: {exc}"}
-    from run_service import create_run, execute_run
-    import threading
+    from run_service import create_run, start_run
+    from db import get_repositories
     try:
-        run_id = create_run(worker_id, inputs, trigger_source="workspace-agent", user_id=user_id)
-        thread = threading.Thread(
-            target=execute_run,
-            args=(run_id, worker_id, inputs),
-            kwargs={"user_id": user_id},
-            daemon=True,
+        repos = get_repositories()
+        run_id = create_run(
+            worker_id,
+            inputs,
+            trigger_source="workspace-agent",
+            user_id=user_id,
+            repos=repos,
         )
-        thread.start()
+        start_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
         return {"ok": True, "run_id": run_id, "message": f"Run '{run_id}' started for worker '{worker_id}'."}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -2722,8 +3483,18 @@ async def stream_chat(
         title = message[:60] + ("..." if len(message) > 60 else "")
         conversation_id = create_conversation(user_id, title=title)
 
+    assistant_message_id = f"msg_pending_{uuid.uuid4().hex[:16]}"
+
     # Persist user message
     insert_message(conversation_id, "user", message)
+    await part_queue.put({
+        "type": "chat.meta",
+        "protocol": CHAT_EVENT_PROTOCOL_VERSION,
+        "version": CHAT_EVENT_VERSION,
+        "conversation_id": conversation_id,
+        "assistant_message_id": assistant_message_id,
+        "source": source,
+    })
 
     # Load history (last 50 messages)
     history = load_conversation_history(conversation_id, limit=CONVERSATION_WINDOW)
@@ -2866,7 +3637,7 @@ async def stream_chat(
     loop_local_provider = LoopLocalModelProvider()
     run_config = RunConfig(
         workflow_name="workeros:workspace-agent",
-        trace_id=f"chat_{uuid.uuid4().hex[:16]}",
+        trace_id=f"trace_chat_{uuid.uuid4().hex[:16]}",
         trace_metadata={"conversation_id": conversation_id, "user_id": user_id},
         model_provider=loop_local_provider.provider,
     )
@@ -2874,6 +3645,7 @@ async def stream_chat(
     # Buffer assistant text and tool messages for persistence
     assistant_text_parts: List[str] = []
     pending_tool_calls: Dict[str, Dict[str, Any]] = {}  # call_id -> {name, args}
+    card_summaries: Dict[str, Dict[str, Any]] = {}
 
     # Wire finish tool to emit the reply as a text part
     async def _finish_invoke_inner(_ctx: Any, raw_args: str) -> str:
@@ -2883,13 +3655,19 @@ async def stream_chat(
             args = {}
         reply = _ensure_bare_greeting_identity(
             message,
-            strip_em_dashes(str(args.get("reply") or "")),
+            _sanitize_preview_text(strip_em_dashes(str(args.get("reply") or ""))),
         )
         final_reply_box["reply"] = reply
         # Emit as text part if the agent didn't stream text deltas
         if reply and not assistant_text_parts:
             assistant_text_parts.append(reply)
-            await part_queue.put({"type": "text", "text": reply})
+            await part_queue.put({
+                "type": "text",
+                "version": CHAT_EVENT_VERSION,
+                "conversation_id": conversation_id,
+                "message_id": assistant_message_id,
+                "text": reply,
+            })
         return json.dumps({"ok": True, "finished": True})
 
     finish_tool.on_invoke_tool = _finish_invoke_inner
@@ -2897,6 +3675,7 @@ async def stream_chat(
     final_message_id: Optional[str] = None
     emitted_text_delta = False
     mcp_servers: List[Any] = []
+    conversation_token = _current_chat_conversation_id.set(conversation_id)
 
     try:
         # Dial registered MCP servers (workspace-agent policy → require_approval=always).
@@ -2939,9 +3718,14 @@ async def stream_chat(
                 data_type = str(getattr(data, "type", "") or "")
                 delta = getattr(data, "delta", None)
                 if delta and data_type.endswith("output_text.delta"):
-                    text = strip_em_dashes(str(delta))
+                    text = _sanitize_preview_text(strip_em_dashes(str(delta)))
                     assistant_text_parts.append(text)
                     part = {"type": "text", "text": text}
+                    part.update({
+                        "version": CHAT_EVENT_VERSION,
+                        "conversation_id": conversation_id,
+                        "message_id": assistant_message_id,
+                    })
                     emitted_text_delta = True
                     await part_queue.put(part)
                 continue
@@ -2967,11 +3751,17 @@ async def stream_chat(
                         texts.append(str(t))
                 full_text = _ensure_bare_greeting_identity(
                     message,
-                    strip_em_dashes("".join(texts)),
+                    _sanitize_preview_text(strip_em_dashes("".join(texts))),
                 )
                 if full_text:
                     assistant_text_parts.append(full_text)
-                    await part_queue.put({"type": "text", "text": full_text})
+                    await part_queue.put({
+                        "type": "text",
+                        "version": CHAT_EVENT_VERSION,
+                        "conversation_id": conversation_id,
+                        "message_id": assistant_message_id,
+                        "text": full_text,
+                    })
 
             elif name == "tool_called":
                 call_id = str(_get(raw_item, "call_id") or _get(raw_item, "id") or f"call_{uuid.uuid4().hex[:8]}")
@@ -2982,6 +3772,7 @@ async def stream_chat(
                         raw_args = json.loads(raw_args)
                     except Exception:
                         pass
+                raw_args = normalize_tool_args_for_event(tool_name_raw, raw_args)
                 pending_tool_calls[call_id] = {"name": tool_name_raw, "args": raw_args}
                 if (
                     tool_name_raw == "finish_with_outputs"
@@ -2995,11 +3786,51 @@ async def stream_chat(
                             strip_em_dashes(raw_args["reply"]),
                         ),
                     }
-                await part_queue.put({
-                    "type": "tool-call",
-                    "toolName": tool_name_raw,
-                    "args": raw_args,
+                metadata = build_tool_event_metadata(
+                    tool_name_raw,
+                    call_id,
+                    args=raw_args,
+                    phase="call",
+                )
+                _persist_tool_card(conversation_id, user_id, call_id, tool_name_raw, metadata)
+                card_summaries[metadata["card"]["id"]] = {
+                    "id": metadata["card"]["id"],
                     "callId": call_id,
+                    "kind": metadata["card"]["kind"],
+                    "resource": metadata["resource"],
+                    "status": metadata["card"]["status"],
+                }
+                event = {
+                    "type": "tool-call",
+                    "version": metadata["version"],
+                    "conversation_id": conversation_id,
+                    "message_id": assistant_message_id,
+                    "toolName": tool_name_raw,
+                    "args": metadata["args_preview"],
+                    "args_preview": metadata["args_preview"],
+                    "callId": call_id,
+                    "protocol": metadata["protocol"],
+                    "card": metadata["card"],
+                    "resource": metadata["resource"],
+                    "streams": metadata["streams"],
+                    "actions": metadata["actions"],
+                    "redaction": {"args_redacted": True},
+                }
+                await part_queue.put(event)
+                await part_queue.put({
+                    "type": "tool-progress",
+                    "version": metadata["version"],
+                    "conversation_id": conversation_id,
+                    "message_id": assistant_message_id,
+                    "toolName": tool_name_raw,
+                    "callId": call_id,
+                    "card_id": metadata["card"]["id"],
+                    "protocol": metadata["protocol"],
+                    "resource": metadata["resource"],
+                    "status": metadata["card"]["status"],
+                    "stage": "started",
+                    "label": metadata["card"]["title"],
+                    "percent": None,
                 })
 
             elif name == "tool_output":
@@ -3010,20 +3841,78 @@ async def stream_chat(
                     parsed_output = json.loads(output) if isinstance(output, str) else output
                 except Exception:
                     parsed_output = output
+                pending = pending_tool_calls.get(call_id, {})
+                tool_name = str(pending.get("name") or "tool")
+                raw_args = pending.get("args") or {}
+                metadata = build_tool_event_metadata(
+                    tool_name,
+                    call_id,
+                    args=raw_args,
+                    result=parsed_output,
+                    phase="result",
+                )
+                _persist_tool_card(conversation_id, user_id, call_id, tool_name, metadata)
+                card_summaries[metadata["card"]["id"]] = {
+                    "id": metadata["card"]["id"],
+                    "callId": call_id,
+                    "kind": metadata["card"]["kind"],
+                    "resource": metadata["resource"],
+                    "status": metadata["card"]["status"],
+                }
+                safe_result = metadata["result_preview"]
                 await part_queue.put({
                     "type": "tool-result",
+                    "version": metadata["version"],
+                    "conversation_id": conversation_id,
+                    "message_id": assistant_message_id,
                     "callId": call_id,
-                    "result": parsed_output,
+                    "toolName": tool_name,
+                    "result": safe_result,
                     "isError": isinstance(parsed_output, dict) and not parsed_output.get("ok", True),
+                    "protocol": metadata["protocol"],
+                    "card": metadata["card"],
+                    "resource": metadata["resource"],
+                    "streams": metadata["streams"],
+                    "actions": metadata["actions"],
+                    "args_preview": metadata["args_preview"],
+                    "result_preview": metadata["result_preview"],
                 })
+                if metadata.get("resource"):
+                    await part_queue.put({
+                        "type": "tool-resource",
+                        "version": metadata["version"],
+                        "conversation_id": conversation_id,
+                        "message_id": assistant_message_id,
+                        "toolName": tool_name,
+                        "callId": call_id,
+                        "card_id": metadata["card"]["id"],
+                        "protocol": metadata["protocol"],
+                        "resource": metadata["resource"],
+                        "actions": metadata["actions"],
+                    })
+                if metadata.get("actions") and metadata["card"].get("status") in {"failed", "action_required"}:
+                    await part_queue.put({
+                        "type": "tool-action-required",
+                        "version": metadata["version"],
+                        "conversation_id": conversation_id,
+                        "message_id": assistant_message_id,
+                        "toolName": tool_name,
+                        "callId": call_id,
+                        "card_id": metadata["card"]["id"],
+                        "protocol": metadata["protocol"],
+                        "reason": metadata.get("reason") or "tool_failed",
+                        "resource": metadata["resource"],
+                        "actions": metadata["actions"],
+                    })
                 # Persist tool message
-                content_str = json.dumps(parsed_output, default=str) if not isinstance(parsed_output, str) else parsed_output
+                content_str = json.dumps(safe_result, default=str) if not isinstance(safe_result, str) else safe_result
                 insert_message(conversation_id, "tool", content_str, tool_call_id=call_id)
 
         # Persist full assistant reply
         full_reply = "".join(assistant_text_parts).strip()
         if not full_reply and "reply" in final_reply_box:
             full_reply = final_reply_box["reply"]
+        full_reply = _sanitize_preview_text(full_reply)
         full_reply = _ensure_bare_greeting_identity(message, full_reply)
         if full_reply:
             final_message_id = insert_message(conversation_id, "assistant", full_reply)
@@ -3033,24 +3922,33 @@ async def stream_chat(
 
         await part_queue.put({
             "type": "finish",
+            "version": CHAT_EVENT_VERSION,
             "conversation_id": conversation_id,
             "message_id": final_message_id,
+            "assistant_message_id": assistant_message_id,
+            "cards": list(card_summaries.values()),
         })
 
     except Exception as exc:
         logger.exception("stream_chat failed for conversation %s", conversation_id)
         await part_queue.put({
             "type": "error",
+            "version": CHAT_EVENT_VERSION,
             "error": str(exc),
             "conversation_id": conversation_id,
+            "message_id": assistant_message_id,
         })
         await part_queue.put({
             "type": "finish",
+            "version": CHAT_EVENT_VERSION,
             "conversation_id": conversation_id,
             "message_id": None,
+            "assistant_message_id": assistant_message_id,
+            "cards": list(card_summaries.values()) if "card_summaries" in locals() else [],
         })
     finally:
         # Tear down MCP servers (best-effort) before releasing the OpenAI client.
+        _current_chat_conversation_id.reset(conversation_token)
         if mcp_servers:
             await agent_capabilities.cleanup_mcp_servers(mcp_servers, _cap_log)
         # Release the per-stream OpenAI + httpx client on this loop.
