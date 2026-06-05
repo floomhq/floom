@@ -65,4 +65,3 @@ Passed:
 python3 -m compileall -q apps/api
 git diff --check
 ```
-
