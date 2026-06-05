@@ -1453,6 +1453,18 @@ MIGRATIONS: list[Migration] = [
     # One assistant row per local workspace + per distinct worker owner. Brain
     # packs are lazily upserted by the API (owner lives in FS metadata, not the DB).
     _migrate_brain_pack_assistant_backfill,
+    # -- migration 55: public worker share short links -------------------------
+    """
+    CREATE TABLE IF NOT EXISTS worker_short_links (
+        short_id TEXT PRIMARY KEY,
+        worker_id TEXT NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+        owner_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(worker_id, owner_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_short_links_worker_owner
+        ON worker_short_links(worker_id, owner_id);
+    """,
 ]
 
 
