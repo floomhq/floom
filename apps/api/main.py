@@ -16897,6 +16897,394 @@ def system_workspace_agent(
     }
 
 
+ASSISTANT_CHANNEL_PROVIDERS = {"slack", "whatsapp"}
+
+
+class AssistantChannelBindingPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_id: str
+    target_label: Optional[str] = None
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class AssistantChannelBinding(BaseModel):
+    provider: Literal["slack", "whatsapp"]
+    target_id: str
+    target_label: Optional[str] = None
+    status: str
+    metadata: Dict[str, str] = Field(default_factory=dict)
+    updated_at: str
+
+
+class AssistantChannelStatusItem(BaseModel):
+    provider: Literal["slack", "whatsapp"]
+    oauth_connected: bool
+    events_configured: bool
+    bot_configured: bool
+    binding: Optional[AssistantChannelBinding] = None
+    connection_id: Optional[str] = None
+    account_label: Optional[str] = None
+
+
+class AssistantChannelStatusResponse(BaseModel):
+    channels: List[AssistantChannelStatusItem]
+
+
+class AssistantChannelOption(BaseModel):
+    id: str
+    label: str
+    description: Optional[str] = None
+    metadata: Dict[str, str] = Field(default_factory=dict)
+
+
+class AssistantChannelOptionsResponse(BaseModel):
+    provider: Literal["slack", "whatsapp"]
+    options: List[AssistantChannelOption]
+
+
+def _normalize_assistant_channel_provider(provider: str) -> Literal["slack", "whatsapp"]:
+    normalized = (provider or "").strip().lower()
+    if normalized not in ASSISTANT_CHANNEL_PROVIDERS:
+        raise HTTPException(status_code=404, detail="Channel provider not supported")
+    return normalized  # type: ignore[return-value]
+
+
+def _ensure_assistant_channel_bindings_table() -> None:
+    with get_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS assistant_channel_bindings (
+                user_id TEXT NOT NULL,
+                provider TEXT NOT NULL CHECK (provider IN ('slack', 'whatsapp')),
+                target_id TEXT NOT NULL,
+                target_label TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                metadata_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, provider)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_assistant_channel_bindings_provider
+            ON assistant_channel_bindings(provider)
+            """
+        )
+
+
+def _assistant_channel_binding(user_id: str, provider: str) -> Optional[AssistantChannelBinding]:
+    _ensure_assistant_channel_bindings_table()
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT provider, target_id, target_label, status, metadata_json, updated_at
+            FROM assistant_channel_bindings
+            WHERE user_id = ? AND provider = ?
+            """,
+            (user_id, provider),
+        ).fetchone()
+    if not row:
+        return None
+    metadata: Dict[str, str] = {}
+    try:
+        parsed = json.loads(row["metadata_json"] or "{}")
+        if isinstance(parsed, dict):
+            metadata = {str(k): str(v) for k, v in parsed.items() if v is not None}
+    except Exception:
+        metadata = {}
+    return AssistantChannelBinding(
+        provider=row["provider"],
+        target_id=row["target_id"],
+        target_label=row["target_label"],
+        status=row["status"],
+        metadata=metadata,
+        updated_at=row["updated_at"],
+    )
+
+
+def _active_composio_connection_for_app(
+    *,
+    user_id: str,
+    app_name: str,
+    repos: Repositories,
+) -> Optional[Dict[str, Any]]:
+    for row in repos.connections.list(user_id=user_id):
+        if (row.get("kind") or "composio") != "composio":
+            continue
+        if str(row.get("app_name") or "").lower() != app_name:
+            continue
+        if _normalize_composio_connection_status(row.get("status")) not in _COMPOSIO_ACTIVE_STATUSES:
+            continue
+        return dict(row)
+    return None
+
+
+def _composio_tool_execute(
+    *,
+    tool_slug: str,
+    connected_account_id: str,
+    user_id: str,
+    arguments: Dict[str, Any],
+) -> Dict[str, Any]:
+    key = os.environ.get("COMPOSIO_API_KEY", "")
+    if not key:
+        raise HTTPException(status_code=503, detail="Composio is not configured")
+    response = requests.post(
+        f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
+        headers={"x-api-key": key, "Content-Type": "application/json"},
+        json={
+            "connected_account_id": connected_account_id,
+            "user_id": user_id,
+            "arguments": arguments,
+        },
+        timeout=15,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Composio returned a non-JSON response") from exc
+    if not response.ok or payload.get("successful") is False:
+        error = str(payload.get("error") or payload.get("message") or f"HTTP {response.status_code}")
+        raise HTTPException(status_code=502, detail=f"Composio tool failed: {error[:240]}")
+    return payload
+
+
+def _response_payload_candidates(payload: Dict[str, Any]) -> List[Any]:
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    candidates: List[Any] = [data]
+    if isinstance(data, dict):
+        for key in ("response_data", "response_dict", "response", "result", "data"):
+            if key in data:
+                candidates.append(data[key])
+    expanded: List[Any] = []
+    for item in candidates:
+        expanded.append(item)
+        if isinstance(item, dict):
+            for key in ("channels", "conversations", "items", "phone_numbers", "numbers", "data"):
+                if key in item:
+                    expanded.append(item[key])
+    return expanded
+
+
+def _list_from_composio_payload(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    for candidate in _response_payload_candidates(payload):
+        if isinstance(candidate, list):
+            return [item for item in candidate if isinstance(item, dict)]
+        if isinstance(candidate, dict):
+            for key in ("channels", "conversations", "items", "phone_numbers", "numbers"):
+                value = candidate.get(key)
+                if isinstance(value, list):
+                    return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _slack_channel_options(connection: Dict[str, Any], *, user_id: str) -> List[AssistantChannelOption]:
+    payload = _composio_tool_execute(
+        tool_slug="SLACK_LIST_ALL_CHANNELS",
+        connected_account_id=str(connection.get("composio_connection_id") or ""),
+        user_id=user_id,
+        arguments={
+            "limit": 200,
+            "types": "public_channel,private_channel",
+            "exclude_archived": True,
+        },
+    )
+    options: List[AssistantChannelOption] = []
+    seen: set[str] = set()
+    for item in _list_from_composio_payload(payload):
+        channel_id = str(item.get("id") or item.get("channel_id") or "").strip()
+        name = str(item.get("name") or item.get("channel_name") or channel_id).strip()
+        if not channel_id or channel_id in seen:
+            continue
+        seen.add(channel_id)
+        prefix = "#" if not name.startswith("#") else ""
+        is_private = bool(item.get("is_private") or item.get("is_group"))
+        options.append(
+            AssistantChannelOption(
+                id=channel_id,
+                label=f"{prefix}{name}",
+                description="Private channel" if is_private else "Public channel",
+                metadata={
+                    "team_id": str(item.get("context_team_id") or item.get("team_id") or ""),
+                    "is_private": "1" if is_private else "0",
+                },
+            )
+        )
+    return sorted(options, key=lambda option: option.label.lower())
+
+
+def _whatsapp_phone_options(connection: Dict[str, Any], *, user_id: str) -> List[AssistantChannelOption]:
+    payload = _composio_tool_execute(
+        tool_slug="WHATSAPP_GET_PHONE_NUMBERS",
+        connected_account_id=str(connection.get("composio_connection_id") or ""),
+        user_id=user_id,
+        arguments={"limit": 100},
+    )
+    options: List[AssistantChannelOption] = []
+    seen: set[str] = set()
+    for item in _list_from_composio_payload(payload):
+        phone_id = str(item.get("id") or item.get("phone_number_id") or "").strip()
+        display = str(item.get("display_phone_number") or item.get("verified_name") or phone_id).strip()
+        if not phone_id or phone_id in seen:
+            continue
+        seen.add(phone_id)
+        verified = str(item.get("verified_name") or "").strip()
+        quality = str(item.get("quality_rating") or "").strip()
+        description = ", ".join(part for part in [verified, quality] if part) or None
+        options.append(
+            AssistantChannelOption(
+                id=phone_id,
+                label=display,
+                description=description,
+                metadata={
+                    "verified_name": verified,
+                    "display_phone_number": str(item.get("display_phone_number") or ""),
+                    "quality_rating": quality,
+                },
+            )
+        )
+    return sorted(options, key=lambda option: option.label.lower())
+
+
+def _assistant_channel_status_item(
+    *,
+    provider: Literal["slack", "whatsapp"],
+    auth: AuthContext,
+    repos: Repositories,
+) -> AssistantChannelStatusItem:
+    connection = _active_composio_connection_for_app(
+        user_id=auth.user_id,
+        app_name=provider,
+        repos=repos,
+    )
+    binding = _assistant_channel_binding(auth.user_id, provider)
+    if provider == "slack":
+        setup = _slack_setup_status_for_user(auth.user_id)
+        bot_configured = any(bool(team.get("bot_token_set")) for team in setup.installed_teams)
+        events_configured = bool(setup.signing_secret_set and setup.events_enabled)
+    else:
+        events_configured = bool(_whatsapp_enabled())
+        bot_configured = bool(connection)
+    account_label = None
+    if connection:
+        account_label = str(connection.get("account_label") or connection.get("display_name") or "").strip() or None
+    return AssistantChannelStatusItem(
+        provider=provider,
+        oauth_connected=bool(connection),
+        events_configured=events_configured,
+        bot_configured=bot_configured,
+        binding=binding,
+        connection_id=str(connection.get("id") or "") if connection else None,
+        account_label=account_label,
+    )
+
+
+@app.get("/assistant/channels/status", response_model=AssistantChannelStatusResponse)
+def assistant_channels_status(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> AssistantChannelStatusResponse:
+    return AssistantChannelStatusResponse(
+        channels=[
+            _assistant_channel_status_item(provider="slack", auth=auth, repos=repos),
+            _assistant_channel_status_item(provider="whatsapp", auth=auth, repos=repos),
+        ]
+    )
+
+
+@app.get("/assistant/channels/{provider}/options", response_model=AssistantChannelOptionsResponse)
+def assistant_channel_options(
+    provider: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> AssistantChannelOptionsResponse:
+    normalized = _normalize_assistant_channel_provider(provider)
+    connection = _active_composio_connection_for_app(
+        user_id=auth.user_id,
+        app_name=normalized,
+        repos=repos,
+    )
+    if not connection:
+        raise HTTPException(status_code=409, detail=f"Connect {normalized} first")
+    if normalized == "slack":
+        options = _slack_channel_options(connection, user_id=auth.user_id)
+    else:
+        options = _whatsapp_phone_options(connection, user_id=auth.user_id)
+    return AssistantChannelOptionsResponse(provider=normalized, options=options)
+
+
+@app.put("/assistant/channels/{provider}/binding", response_model=AssistantChannelBinding)
+def set_assistant_channel_binding(
+    provider: str,
+    payload: AssistantChannelBindingPayload,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> AssistantChannelBinding:
+    normalized = _normalize_assistant_channel_provider(provider)
+    connection = _active_composio_connection_for_app(
+        user_id=auth.user_id,
+        app_name=normalized,
+        repos=repos,
+    )
+    if not connection:
+        raise HTTPException(status_code=409, detail=f"Connect {normalized} first")
+    target_id = payload.target_id.strip()
+    if not target_id:
+        raise HTTPException(status_code=400, detail="target_id is required")
+    safe_metadata = {
+        str(key)[:64]: str(value)[:256]
+        for key, value in (payload.metadata or {}).items()
+        if str(key).strip() and value is not None
+    }
+    now = now_iso()
+    _ensure_assistant_channel_bindings_table()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO assistant_channel_bindings
+                (user_id, provider, target_id, target_label, status, metadata_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+            ON CONFLICT(user_id, provider) DO UPDATE SET
+                target_id = excluded.target_id,
+                target_label = excluded.target_label,
+                status = 'active',
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                auth.user_id,
+                normalized,
+                target_id,
+                (payload.target_label or "").strip() or None,
+                json.dumps(safe_metadata, separators=(",", ":")),
+                now,
+                now,
+            ),
+        )
+    binding = _assistant_channel_binding(auth.user_id, normalized)
+    if binding is None:
+        raise HTTPException(status_code=500, detail="Channel binding was not saved")
+    return binding
+
+
+@app.delete("/assistant/channels/{provider}/binding")
+def delete_assistant_channel_binding(
+    provider: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, str]:
+    normalized = _normalize_assistant_channel_provider(provider)
+    _ensure_assistant_channel_bindings_table()
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM assistant_channel_bindings WHERE user_id = ? AND provider = ?",
+            (auth.user_id, normalized),
+        )
+    return {"status": "deleted"}
+
+
 @app.put("/system/workspace-agent/settings")
 def update_workspace_agent_settings(
     payload: WorkspaceAgentSettingsUpdate,

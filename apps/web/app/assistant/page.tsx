@@ -17,10 +17,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
+import { AssistantChannels } from "@/components/assistant/AssistantChannels";
 
-type TabKey = "instructions" | "prompt";
+type TabKey = "instructions" | "channels" | "prompt";
 
-const TABS: TabKey[] = ["instructions", "prompt"];
+const TABS: TabKey[] = ["instructions", "channels", "prompt"];
 
 function validTab(value: string): value is TabKey {
   return TABS.includes(value as TabKey);
@@ -94,11 +95,7 @@ function InstructionsHistoryMenu({
 }
 
 export default function AssistantPage() {
-  const initial =
-    typeof window !== "undefined" && validTab(window.location.hash.replace(/^#/, ""))
-      ? (window.location.hash.replace(/^#/, "") as TabKey)
-      : "instructions";
-  const [tab, setTab] = useState<TabKey>(initial);
+  const [tab, setTab] = useState<TabKey>("instructions");
   const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
   const [instructions, setInstructions] = useState("");
   const [originalInstructions, setOriginalInstructions] = useState("");
@@ -137,6 +134,7 @@ export default function AssistantPage() {
       const next = window.location.hash.replace(/^#/, "");
       if (validTab(next)) setTab(next);
     }
+    sync();
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
@@ -144,7 +142,7 @@ export default function AssistantPage() {
   function changeTab(value: string) {
     if (!validTab(value)) return;
     setTab(value);
-    window.history.replaceState(null, "", `/assistant#${value}`);
+    window.history.replaceState(null, "", `${window.location.pathname}#${value}`);
   }
 
   async function saveInstructions() {
@@ -203,7 +201,7 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Your interactive workspace assistant — chat with it to get help and orchestrate your
+          Your interactive workspace assistant. Chat with it to get help and orchestrate your
           workers. It reads the same Brain your workers use and can use your Connections read-only;
           actions that would change a live connection need your approval. Workers run autonomously
           on triggers; the assistant is interactive.
@@ -222,6 +220,7 @@ export default function AssistantPage() {
         <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <TabsList>
             <TabsTrigger value="instructions">Instructions</TabsTrigger>
+            <TabsTrigger value="channels">Channels</TabsTrigger>
             <TabsTrigger value="prompt">Final prompt</TabsTrigger>
           </TabsList>
         </div>
@@ -286,6 +285,10 @@ export default function AssistantPage() {
           )}
         </TabsContent>
 
+        <TabsContent value="channels" className="space-y-3">
+          <AssistantChannels />
+        </TabsContent>
+
         <TabsContent value="prompt" className="space-y-3">
           {loading || !agent ? (
             <Skeleton className="h-96 w-full" />
@@ -308,14 +311,6 @@ export default function AssistantPage() {
         </TabsContent>
 
       </Tabs>
-
-      <p className="text-xs text-muted-foreground">
-        To use this assistant from Slack, go to{" "}
-        <a href="/settings#slack" className="font-medium text-foreground underline-offset-2 hover:underline">
-          Settings &rarr; Slack
-        </a>
-        .
-      </p>
     </div>
   );
 }

@@ -595,6 +595,37 @@ export const api = {
         body: JSON.stringify({ return_to }),
       }),
   },
+  assistantChannels: {
+    status: () =>
+      fetchJson<import("./types").AssistantChannelStatusResponse>("/assistant/channels/status", {
+        cache: "no-store",
+      }),
+    options: (provider: "slack" | "whatsapp") =>
+      fetchJson<import("./types").AssistantChannelOptionsResponse>(
+        `/assistant/channels/${encodeURIComponent(provider)}/options`,
+        { cache: "no-store" },
+      ),
+    bind: (
+      provider: "slack" | "whatsapp",
+      payload: {
+        target_id: string;
+        target_label?: string | null;
+        metadata?: Record<string, string>;
+      },
+    ) =>
+      fetchJson<import("./types").AssistantChannelBinding>(
+        `/assistant/channels/${encodeURIComponent(provider)}/binding`,
+        {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        },
+      ),
+    unbind: (provider: "slack" | "whatsapp") =>
+      fetchJson<{ status: string }>(
+        `/assistant/channels/${encodeURIComponent(provider)}/binding`,
+        { method: "DELETE" },
+      ),
+  },
   workspace: {
     // Download the whole workspace as a .zip template. Returns the Blob so the
     // caller can trigger a browser download. The proxy streams the binary body

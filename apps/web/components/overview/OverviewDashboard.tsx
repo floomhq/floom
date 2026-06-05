@@ -9,6 +9,7 @@ import {
   ArrowUp,
   CalendarClock,
   ChevronRight,
+  Plug,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -518,10 +519,21 @@ export function OverviewDashboard({
     <div className="flex flex-col space-y-3 pb-3 pt-4 lg:h-[calc(100dvh-8rem)] lg:min-h-[620px] lg:overflow-hidden">
       {/* Hero — compact */}
       <section>
-        <h1 className="text-xl font-semibold tracking-normal text-[var(--text-primary)]">Work done</h1>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">
-          {completedThisWeek} {completedThisWeek === 1 ? "run" : "runs"} completed in the last 7 days.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold tracking-normal text-[var(--text-primary)]">Work done</h1>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              {completedThisWeek} {completedThisWeek === 1 ? "run" : "runs"} completed in the last 7 days.
+            </p>
+          </div>
+          <Link
+            href="/assistant#channels"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-card)] px-3 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)]"
+          >
+            <Plug className="size-3.5" />
+            Set up channels
+          </Link>
+        </div>
       </section>
 
       {/* Metric tiles with sparklines — S45 */}

@@ -1496,6 +1496,22 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_whatsapp_sender_bindings_claim_token
         ON whatsapp_sender_bindings(claim_token);
     """,
+    # -- migration 58: assistant channel onboarding bindings -----------------
+    """
+    CREATE TABLE IF NOT EXISTS assistant_channel_bindings (
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK (provider IN ('slack', 'whatsapp')),
+        target_id TEXT NOT NULL,
+        target_label TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        metadata_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, provider)
+    );
+    CREATE INDEX IF NOT EXISTS idx_assistant_channel_bindings_provider
+        ON assistant_channel_bindings(provider);
+    """,
 ]
 
 

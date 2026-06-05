@@ -539,6 +539,41 @@ export interface SlackSetupConfigResponse {
   setup: SlackSetupStatus;
 }
 
+export interface AssistantChannelBinding {
+  provider: "slack" | "whatsapp";
+  target_id: string;
+  target_label?: string | null;
+  status: string;
+  metadata: Record<string, string>;
+  updated_at: string;
+}
+
+export interface AssistantChannelStatusItem {
+  provider: "slack" | "whatsapp";
+  oauth_connected: boolean;
+  events_configured: boolean;
+  bot_configured: boolean;
+  binding?: AssistantChannelBinding | null;
+  connection_id?: string | null;
+  account_label?: string | null;
+}
+
+export interface AssistantChannelStatusResponse {
+  channels: AssistantChannelStatusItem[];
+}
+
+export interface AssistantChannelOption {
+  id: string;
+  label: string;
+  description?: string | null;
+  metadata: Record<string, string>;
+}
+
+export interface AssistantChannelOptionsResponse {
+  provider: "slack" | "whatsapp";
+  options: AssistantChannelOption[];
+}
+
 export interface WorkspaceAgentTool {
   name: string;
   description: string;
