@@ -56,11 +56,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <IconSprite />
       <Ambient />
       <Sidebar />
-      {/* Main content between sidebar and Emily dock */}
-      <main className="relative z-10 flex-1 min-w-0 overflow-hidden">
+      {/* Main content between sidebar and Emily dock — scrolls in its own container */}
+      <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
       </main>
-      {/* Emily dock: persistent right-side rail, collapsible to 48px strip */}
+      {/* Emily dock: fixed-height right rail — scrolls internally, never bleeds to body */}
       <EmilyDock className="hidden md:flex" />
       <CommandPalette />
       <Toaster position="bottom-right" />
