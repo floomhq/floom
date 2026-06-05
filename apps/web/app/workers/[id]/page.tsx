@@ -364,6 +364,7 @@ export default function WorkerDetailPage() {
   const [worker, setWorker] = useState<WorkerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [inputs, setInputs] = useState<Record<string, unknown>>({});
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
@@ -566,6 +567,7 @@ export default function WorkerDetailPage() {
     }
     async function load() {
       setNotFound(false);
+      setFetchError(null);
       try {
         const [w, conns, packs] = await Promise.all([
           fetchWorkerWithRetry(id as string),
@@ -641,6 +643,11 @@ export default function WorkerDetailPage() {
           msg.toLowerCase() === "not found";
         if (isNotFound) {
           setNotFound(true);
+        } else {
+          // C1: store the error message so the error state can surface it.
+          // Sanitise: strip raw stack traces, keep the first sentence only.
+          const safe = msg.split(/\n/)[0]?.trim() || "Network or server error";
+          setFetchError(safe);
         }
         // PR S19 (I-32): swallow the toast for non-404 failures. The page
         // renders a "Couldn't load worker / Retry" state for that case;
@@ -1484,7 +1491,9 @@ export default function WorkerDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
         <p className="text-sm font-medium text-foreground">Couldn&apos;t load worker</p>
-        <p className="text-xs text-muted-foreground">Something went wrong fetching this worker.</p>
+        <p className="text-xs text-muted-foreground">
+          {fetchError ?? "Something went wrong fetching this worker."}
+        </p>
         <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
           Retry
         </Button>
@@ -1714,7 +1723,7 @@ export default function WorkerDetailPage() {
               />
             </span>
             <span className="[&_button]:min-h-11 sm:[&_button]:min-h-0">
-              <ShareWorkerButton publicLink={worker.public_link} />
+              <ShareWorkerButton publicLink={worker.public_link} workerName={worker.name} />
             </span>
             <Button
               variant="outline"
