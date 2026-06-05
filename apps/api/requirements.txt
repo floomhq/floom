@@ -1,5 +1,5 @@
 -r ../../engine/apps/api/requirements.txt
-cryptography==43.0.1
+cryptography==48.0.0
 psycopg[binary]==3.2.9
 resend==2.30.1
-supabase==2.15.3
+supabase==2.31.0

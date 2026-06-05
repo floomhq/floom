@@ -19,12 +19,8 @@ RUN if [ -n "$GIT_TOKEN" ]; then \
       git config --global --unset-all url."https://${GIT_TOKEN}@github.com/".insteadOf || true; \
     fi
 
-# openai-agents>=0.17 needs websockets>=15; supabase/realtime pins websockets<15.
-# Locally websockets==16 works fine (real-time subscriptions unused).
-# Force-resolve via uv override — matches the working local venv.
 RUN pip install --no-cache-dir uv
-RUN echo "websockets>=15.0,<17" > /tmp/ws_override.txt
-RUN uv pip install --system --no-cache -r requirements.txt --override /tmp/ws_override.txt
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # Create var dirs — volume will be mounted here at runtime
 RUN mkdir -p /opt/workeros-cloud/var/workers \

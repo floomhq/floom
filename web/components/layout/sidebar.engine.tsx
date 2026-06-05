@@ -1,15 +1,23 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Bot, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut } from "lucide-react";
+import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // Exported so the Cloud wrapper's sidebar overlay can compose the engine's
 // brand mark + nav + primary actions and only add its account/workspace
@@ -34,6 +42,20 @@ export function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
+// C6: Emily avatar — solid Workeros accent blue circle, no glyph.
+// Used as the nav icon for the Assistant item in place of the generic Bot glyph.
+// The accent blue (#59AAF8 / --accent in dark, hardcoded for light) is the
+// Workeros brand blue Federico designated for Emily's identity.
+function EmilyDot({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn("shrink-0 rounded-full", className)}
+      style={{ background: "var(--emily-accent, #59AAF8)", width: "16px", height: "16px" }}
+      aria-hidden="true"
+    />
+  );
+}
+
 // S24: Secrets removed from top-level nav; reachable as a third tab on
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
@@ -42,10 +64,19 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 // nav has no room for a permanent subtitle without a redesign, so the
 // employee-model microcopy ("Assistant = the thing you talk to"; "Workers run
 // on triggers") lives in the tooltip instead (Federico 2026-06-02).
-const nav = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ElementType | null;
+  hint?: string;
+  badge?: boolean;
+  emilyDot?: boolean;
+};
+
+const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
-  { href: "/assistant", label: "Assistant", icon: Bot, hint: "Chat, ask, delegate" },
+  { href: "/assistant", label: "Assistant", icon: null, emilyDot: true, hint: "Chat, ask, delegate" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
@@ -78,7 +109,11 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
                 : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
             )}
           >
-            <item.icon className="w-4 h-4" />
+            {item.emilyDot ? (
+              <EmilyDot />
+            ) : item.icon ? (
+              <item.icon className="w-4 h-4" />
+            ) : null}
             {item.label}
             {showBadge && (
               <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
@@ -138,7 +173,7 @@ export function Sidebar() {
   return (
     <>
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-app)] px-4 md:hidden">
-        <Link href="/" className="flex items-center gap-2">
+        <Link href="/overview" className="flex items-center gap-2">
           <FloomMark size={22} />
           <span className="font-semibold text-base tracking-tight">Floom</span>
         </Link>
@@ -166,7 +201,7 @@ export function Sidebar() {
       <aside className="sticky top-0 z-20 hidden h-screen w-60 flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] md:flex">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
         <div className="px-5 pt-6 pb-8">
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/overview" className="flex items-center gap-2">
             <FloomMark size={22} />
             <span className="font-semibold text-base tracking-tight">Floom</span>
           </Link>
@@ -189,7 +224,7 @@ export function Sidebar() {
           <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] shadow-pop">
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
             <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-5 py-4">
-              <Link href="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
+              <Link href="/overview" className="flex items-center gap-2" onClick={() => setOpen(false)}>
                 <FloomMark size={22} />
                 <span className="font-semibold text-base tracking-tight">Floom</span>
               </Link>
@@ -226,7 +261,17 @@ export function Sidebar() {
 // its own row." Settings is now a small gear-icon button inline on the name
 // row instead of a separate full-width SidebarSettingsLink. Theme toggle stays
 // on the right.
-export function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
+//
+// M36: avatarUrl prop wired for Google OAuth picture. When provided, the
+// profile chip shows the real photo. Backend dependency: GET /user/me must
+// return { picture: string | null } and the caller must pass it here.
+//
+// M37: Clicking the profile chip (avatar + name) opens a dropdown with
+// Settings and Sign out, so logout is reachable without hunting for the icon.
+export function UserProfileFooter({
+  onNavigate,
+  avatarUrl,
+}: { onNavigate?: () => void; avatarUrl?: string | null } = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -244,38 +289,52 @@ export function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = 
 
   return (
     <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
-          LU
-        </div>
-        <div className="min-w-0 leading-tight">
-          <p className="text-xs font-medium text-foreground truncate">Local user</p>
-          <p className="text-[10px] text-muted-foreground truncate">Floom Workers v0</p>
-        </div>
-      </div>
-      <Link
-        href="/settings"
-        onClick={onNavigate}
-        aria-label="Settings"
-        title="Settings"
-        className={cn(
-          "inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150 ease-[var(--ease)]",
-          settingsActive
-            ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)]"
-            : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-        )}
-      >
-        <Settings className="size-4" />
-      </Link>
-      <button
-        type="button"
-        onClick={logout}
-        aria-label="Sign out"
-        title="Sign out"
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-      >
-        <LogOut className="size-4" />
-      </button>
+      {/* Profile chip — clicking opens a dropdown with Settings + Sign out (M37). */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            "flex items-center gap-2 min-w-0 flex-1 rounded-[var(--radius-button)] px-1 py-0.5 -mx-1 transition-[background,color] duration-150 ease-[var(--ease)]",
+            "hover:bg-[var(--active-nav-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+          )}
+          aria-label="Profile menu"
+        >
+          {/* M36: show Google avatar when avatarUrl is provided, else initials. */}
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt="Profile avatar"
+              className="size-7 shrink-0 rounded-full border border-[var(--border-soft)] object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
+              LU
+            </div>
+          )}
+          <div className="min-w-0 leading-tight text-left">
+            <p className="text-xs font-medium text-foreground truncate">Local user</p>
+            <p className="text-[10px] text-muted-foreground truncate">Floom Workers v0</p>
+          </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48 p-1">
+          <DropdownMenuItem
+            render={<Link href="/settings" onClick={onNavigate} />}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Settings className={cn("size-4", settingsActive && "text-[var(--active-nav-text)]")} />
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => void logout()}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <LogOut className="size-4" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
       <ThemeModeButton />
     </div>
   );
