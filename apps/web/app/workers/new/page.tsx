@@ -9,6 +9,7 @@ import { Paperclip, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { PromptText } from "@/components/PromptText";
 
 // ---------------------------------------------------------------------------
 // Example chips shown below the hero card
@@ -588,7 +589,9 @@ function NewWorkerContent() {
               className="group flex flex-col items-start gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-3 text-left hover:bg-[var(--active-nav-bg)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <span className="text-sm font-medium text-foreground">{ex.label}</span>
-              <span className="text-xs text-muted-foreground line-clamp-2">{ex.prompt}</span>
+              <span className="text-xs text-muted-foreground line-clamp-2">
+                <PromptText>{ex.prompt}</PromptText>
+              </span>
             </button>
           ))}
         </div>
@@ -696,7 +699,9 @@ function GeneratingPanel({
       {prompt && (
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-2)] px-4 py-3">
           <p className="text-[11px] text-muted-foreground mb-1">Your prompt</p>
-          <p className="text-sm text-foreground whitespace-pre-wrap">{prompt}</p>
+          <p className="text-sm text-foreground whitespace-pre-wrap">
+            <PromptText>{prompt}</PromptText>
+          </p>
         </div>
       )}
 
