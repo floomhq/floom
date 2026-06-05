@@ -337,42 +337,42 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
         </div>
       </div>
 
-      {!loading && workers.length === 0 ? (
+      {/* Tab bar + search — always visible so the user can switch tabs even
+          when the active workers list is empty (e.g. all workers archived). */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Input
+            data-workers-search
+            placeholder="Search workers or tags..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        {/* V9 (Federico 2026-06-02): icon-only filter tabs. */}
+        <Tabs value={tab} onValueChange={handleTabChange}>
+          <TabsList>
+            <TabsTrigger value="all" aria-label="All workers" title="All">
+              <LayoutGrid />
+            </TabsTrigger>
+            <TabsTrigger value="starred" aria-label="Starred workers" title="Starred">
+              <Star />
+            </TabsTrigger>
+            <TabsTrigger value="recent" aria-label="Recently run workers" title="Recent">
+              <Clock />
+            </TabsTrigger>
+            <TabsTrigger value="archived" aria-label="Archived workers" title="Archived">
+              <Archive />
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      {!loading && workers.length === 0 && tab !== "archived" ? (
         <EmptyWorkersState />
       ) : (
         <div className="space-y-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative max-w-sm flex-1">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input
-                data-workers-search
-                placeholder="Search workers or tags..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            {/* V9 (Federico 2026-06-02): "replace these by icons as well" —
-                icon-only filter tabs. Each carries an aria-label + title so it
-                stays discoverable; the active-state underline is unchanged. */}
-            <Tabs value={tab} onValueChange={handleTabChange}>
-              <TabsList>
-                <TabsTrigger value="all" aria-label="All workers" title="All">
-                  <LayoutGrid />
-                </TabsTrigger>
-                <TabsTrigger value="starred" aria-label="Starred workers" title="Starred">
-                  <Star />
-                </TabsTrigger>
-                <TabsTrigger value="recent" aria-label="Recently run workers" title="Recent">
-                  <Clock />
-                </TabsTrigger>
-                <TabsTrigger value="archived" aria-label="Archived workers" title="Archived">
-                  <Archive />
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-
           {/* R5: breadcrumb + folder chips share ONE wrapping row so
               selecting a folder never opens a second row / pushes content
               down. The block renders whenever there are folders to show or
@@ -656,7 +656,7 @@ function WorkerCard({
               )}
               {/* Share — hover-only, mirrors the favourite star treatment. */}
               <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                <ShareWorkerButton publicLink={worker.public_link} variant="icon" />
+                <ShareWorkerButton publicLink={worker.public_link} workerName={worker.name} variant="icon" />
               </span>
               {/* Favourite star (Federico 2026-05-30): hover-only to cut cognitive
                   load — except an already-favourited worker keeps its filled star

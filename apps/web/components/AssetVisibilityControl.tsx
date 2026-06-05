@@ -154,12 +154,12 @@ export function AssetVisibilityControl({
               <DropdownMenuItem
                 key={key}
                 onClick={() => void apply(key)}
-                className="flex-col items-start gap-0.5 py-2"
+                className={`flex-col items-start gap-0.5 py-2 ${active ? "bg-[var(--active-nav-bg)]" : ""}`}
               >
-                <span className="flex w-full items-center gap-1.5 text-sm font-medium">
-                  <ItemIcon className="size-3.5" />
+                <span className="flex w-full items-center gap-1.5 text-sm font-medium text-foreground">
+                  <ItemIcon className="size-3.5 text-foreground" />
                   {im.label}
-                  {active && <Check className="size-3.5 text-foreground ml-auto" />}
+                  {active && <Check className="size-3.5 ml-auto text-foreground" />}
                 </span>
                 <span className="text-xs text-muted-foreground">{im.hint}</span>
               </DropdownMenuItem>
