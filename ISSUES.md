@@ -1755,3 +1755,39 @@ Doc: `docs/audits/workspace-duplicate-2026-05-29.md`.
 **Tests:** `tests/test_emily_slack_channels.py` — 12 tests (list/read happy paths, name resolution, bare-id, limit clamp, and the graceful missing_scope / not_in_channel / no-token paths). All green.
 
 **Status:** SHIPPED (live-verified pre-scope-grant: Emily responds gracefully, telling the operator how to enable channel access).
+
+---
+
+## Backend batch - Emily cross-surface + Round 9/10 (2026-06-05)
+
+### #BB-A1 Emily `workers__update` did not change runtime behavior
+
+**Status:** FIXED + VERIFIED. Deployed in PR #427 at `bb8c92942c3f88c00a817a428089bdbd3dceebfe`. Prod worker `cxtest-a1-4410f483` changed from run `run_db40defe7596` output `HELLO MIXED` to run `run_fffec79acedc` output `hello mixed` after Emily called `workers__update`.
+
+### #BB-A2 Caller-supplied conversation ids lost history
+
+**Status:** FIXED. Caller ids now map to stable owner-scoped `conv_client_*` ids. Prod caller `cxtest-a2-26acccc0` remembered `codeword-0c343d` on turn 2. Cross-owner protection is verified by local tests; prod is currently single-tenant and does not enable `x-floom-user` scoping.
+
+### #BB-A3 `/chat` source was hardcoded to web
+
+**Status:** FIXED + VERIFIED. `/chat` accepts `source`; MCP sends `source:"mcp"`. Prod `source:"mcp"` returned the MCP channel phrasing; invalid source returned 422.
+
+### #BB-A4 MCP create errors rendered `[object Object]`
+
+**Status:** FIXED + VERIFIED. Real MCP stdio `workers.create` invalid WorkerContract now returns JSON validation detail and no `[object Object]`. Tool docs include `schema_version` and root `inputs.json` / `result.json`.
+
+### #BB-B1 Public trailing-space auth repro
+
+**Status:** PARTIAL. App/Uvicorn raw-header path is fixed: direct raw socket to `127.0.0.1:8011` returns 403 for secret plus space/tab. Public `https://workers-api.floom.dev` still returns 200 for the trailing-space curl repro because Cloudflare/cloudflared normalizes trailing header whitespace before FastAPI receives it. Public edge enforcement remains open.
+
+### #BB-B2 `/workers/draft-and-create` 500
+
+**Status:** NO LIVE 500 REPRODUCED. Empty/missing/null/invalid JSON shapes returned clean 4xx on prod before and after deploy. Existing empty-prompt test is green.
+
+### #BB-B5 Approval pause
+
+**Status:** VERIFIED EXISTING. Prod worker `cxtest-b5-e35143b3`, run `run_37d0b3a562be`, reached `pending_approval`; no code change needed.
+
+### #BB-P1 Follow-ups
+
+**Status:** MIXED. A5, A6, A8 fixed; B6 verified on prod (`cxtest-b6-6f0aa63d` create + rotate); A7, A9, A10, B7, and P2 items remain open/skipped. Full evidence: `docs/audits/backend-batch-fix-2026-06-04.md`.
