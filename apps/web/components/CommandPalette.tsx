@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   Activity,
   Box,
+  Brain,
+  CheckCircle,
   Clock,
   KeyRound,
   Plug,
@@ -28,9 +30,11 @@ import { api } from "@/lib/api";
 import type { WorkerSummary } from "@/lib/types";
 
 const NAV = [
-  { href: "/", label: "Overview", icon: Activity, keywords: "home dashboard" },
+  { href: "/overview", label: "Overview", icon: Activity, keywords: "home dashboard" },
   { href: "/workers", label: "Workers", icon: Box, keywords: "list jobs" },
   { href: "/runs", label: "Runs", icon: Clock, keywords: "history executions" },
+  { href: "/brain", label: "Brain", icon: Brain, keywords: "context knowledge packs resources" },
+  { href: "/approvals", label: "Approvals", icon: CheckCircle, keywords: "review pending actions" },
   { href: "/connections/secrets", label: "Secrets", icon: KeyRound, keywords: "env tokens" },
   { href: "/connections", label: "Connections", icon: Plug, keywords: "integrations oauth" },
   { href: "/settings", label: "Settings", icon: Settings, keywords: "config danger appearance" },

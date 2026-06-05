@@ -1862,3 +1862,83 @@ Doc: `docs/audits/workspace-duplicate-2026-05-29.md`.
 ### #BB-P1 Follow-ups
 
 **Status:** MIXED. A5, A6, A8 fixed; B6 verified on prod (`cxtest-b6-6f0aa63d` create + rotate); A7, A9, A10, B7, and P2 items remain open/skipped. Full evidence: `docs/audits/backend-batch-fix-2026-06-04.md`.
+
+---
+
+## Deep prod walk — UI batch (2026-06-05, N-series)
+
+**Source:** Federico deep prod walk, N1–N27 series.
+
+**PR:** https://github.com/floomhq/workeros/pull/433 (`ui/batch-deepwalk-fixes`)
+
+### N1 (P0) — Emily chat UI / /assistant
+
+**Status:** INVESTIGATED — NOT REGRESSED, NEVER EXISTED
+
+**Finding:** No chat component ever existed in web. First commit of `apps/web/app/assistant/page.tsx` (f089491, 2026-06-01) is config-only (Instructions + Final Prompt tabs). Backend `/chat` SSE endpoint works. Web frontend has always been config-only; Slack is the designed chat interface. **Scope question for Federico: build a chat tab on /assistant or leave Slack as the sole chat interface?**
+
+### N5 — Overview nav / inconsistent path
+
+**Status:** FIXED (PR #433)
+
+Sidebar logo links (desktop, mobile header, mobile drawer) changed from `/` to `/overview`. Nav item already detected both paths as active; canonical URL is now `/overview`.
+
+### N7 — Missing secret badge lacks fix CTA
+
+**Status:** FIXED (PR #433)
+
+"Add secret →" inline link to `/secrets` added next to the "Missing secret" status badge in the worker header.
+
+### N8 — Webhook placeholder looks real
+
+**Status:** FIXED (PR #433)
+
+Placeholder text changed from `https://hooks.example.com/run-events` to `e.g. https://hooks.example.com/run-events`.
+
+### N10 — Brain tab "0 brain resources attached" while packs shown
+
+**Status:** FIXED (PR #433)
+
+Header copy when 0 attached now reads "No brain resources attached — toggle any pack below to attach it." instead of the misleading "0 brain resources attached".
+
+### N11 — Pack with 0 files + 2 workers not clear
+
+**Status:** FIXED (PR #433)
+
+Pack file count: 0 files renders "Empty pack (no files yet)". Worker count only shows when > 0 ("used by N workers").
+
+### N13 — Connections "Last used" shows "—" before async load
+
+**Status:** FIXED (PR #433)
+
+Added `lastUsedLoaded` state; ConnectionRow accepts `lastUsedLoading` prop; shows `<Skeleton>` while in flight instead of "—".
+
+### N17 — Cmd-K palette missing Brain + Approvals; sidebar missing Settings
+
+**Status:** FIXED (PR #433)
+
+Cmd-K NAV now includes Brain and Approvals. Settings was already in the palette. Sidebar already had Brain/Approvals top-level; Settings reachable via profile dropdown — sidebar gap was palette-only.
+
+### N18 — Worker attention reason buried in Runs, not on About
+
+**Status:** FIXED (PR #433)
+
+About tab shows an attention banner when `worker.status === "missing_secret"` listing required secret names + link to /secrets.
+
+### N23 — Share modal clips left edge under sidebar at 1280px
+
+**Status:** FIXED (PR #433)
+
+`DialogContent` gets `md:translate-x-[120px]` to offset half the sidebar width, centering the modal over the content pane.
+
+### N25 — Source tab Save shown when no edits pending
+
+**Status:** FIXED (PR #433)
+
+Raw/YAML Save + Discard buttons only render when `filesDirty === true`.
+
+### N27 — Run-detail "Edit" misleadingly navigates to worker source
+
+**Status:** FIXED (PR #433)
+
+Button relabelled "Edit worker" to clarify destination.
