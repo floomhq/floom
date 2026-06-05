@@ -11,6 +11,8 @@ import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
+import { api } from "@/lib/api";
+import type { CurrentUser } from "@/lib/types";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -275,6 +277,25 @@ export function UserProfileFooter({
   const pathname = usePathname();
   const router = useRouter();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
+  const [user, setUser] = useState<CurrentUser | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.me()
+      .then((currentUser) => {
+        if (active) setUser(currentUser);
+      })
+      .catch(() => {
+        if (active) setUser(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const primary = user?.email || user?.display_name || "Local user";
+  const secondary = user?.email ? "Signed in" : "Floom Workers v0";
+  const initials = profileInitials(primary);
 
   async function logout() {
     try {
@@ -308,12 +329,12 @@ export function UserProfileFooter({
             />
           ) : (
             <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
-              LU
+              {initials}
             </div>
           )}
           <div className="min-w-0 leading-tight text-left">
-            <p className="text-xs font-medium text-foreground truncate">Local user</p>
-            <p className="text-[10px] text-muted-foreground truncate">Floom Workers v0</p>
+            <p className="text-xs font-medium text-foreground truncate">{primary}</p>
+            <p className="text-[10px] text-muted-foreground truncate">{secondary}</p>
           </div>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48 p-1">
@@ -338,4 +359,17 @@ export function UserProfileFooter({
       <ThemeModeButton />
     </div>
   );
+}
+
+function profileInitials(value: string) {
+  const local = value.includes("@") ? value.split("@", 1)[0] : value;
+  const parts = local
+    .split(/[\s._-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const letters = parts.length > 1 ? [parts[0][0], parts[1][0]] : [local[0], local[1]];
+  return letters
+    .filter(Boolean)
+    .join("")
+    .toUpperCase() || "LU";
 }
