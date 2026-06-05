@@ -1256,9 +1256,16 @@ async def auth_middleware(request: Request, call_next):
             or _RE_RUN_COMPOSIO_PROXY.match(path)
         ):
             return await call_next(request)
-        header = request.headers.get("x-floom-secret", "")
-        if header != secret:
+        raw_secret = None
+        for key, value in request.scope.get("headers", []):
+            if key.lower() == b"x-floom-secret":
+                raw_secret = value
+                break
+        expected = secret.encode("latin-1")
+        if raw_secret is None:
             return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+        if not hmac.compare_digest(raw_secret, expected):
+            return _JSONResponse(status_code=403, content={"detail": "Forbidden"})
     return await call_next(request)
 
 logger = logging.getLogger("floom.api")
@@ -15255,6 +15262,13 @@ def _mcp_json_schema(properties: Dict[str, Any], required: Optional[List[str]] =
 
 
 def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
+    worker_contract_yaml_description = (
+        'WorkerContract YAML content. Required top-level fields: schema_version: "0.3", '
+        "name, title, description, version, exec, and trigger. For script workers, "
+        'exec must include entry: "run.py", runtime: "python311", runner: "e2b", '
+        'command: "python run.py", plus exec.inputs and exec.outputs arrays. '
+        "Script workers read inputs.json and write result.json at the worker root."
+    )
     workspace_schema = _mcp_json_schema(
         {
             "message": {
@@ -15295,7 +15309,7 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             "description": "Create a Workeros worker from WorkerContract YAML and Python source.",
             "inputSchema": _mcp_json_schema(
                 {
-                    "worker_yml": {"type": "string", "description": "WorkerContract YAML content."},
+                    "worker_yml": {"type": "string", "description": worker_contract_yaml_description},
                     "run_py": {"type": "string", "description": "Python source for run.py."},
                     "skill_md": {"type": "string", "description": "Optional SKILL.md content."},
                 },
@@ -17100,6 +17114,7 @@ class ChatRequest(BaseModel):
 
     message: str
     conversation_id: Optional[str] = None
+    source: Literal["web", "slack", "mcp", "whatsapp"] = "web"
 
 
 class ConversationSummary(BaseModel):
@@ -17252,7 +17267,7 @@ async def post_chat(
                 user_id=auth.user_id,
                 conversation_id=payload.conversation_id,
                 part_queue=part_queue,
-                source="web",
+                source=payload.source,
             )
         except Exception as exc:
             logger.exception("chat background task failed")

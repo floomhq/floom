@@ -116,6 +116,13 @@ function redactSecretText(text: string): string {
   );
 }
 
+function renderErrorDetail(value: unknown): string {
+  if (typeof value === "string") {
+    return redactSecretText(value);
+  }
+  return JSON.stringify(redactSecrets(value));
+}
+
 async function callTool(handler: () => Promise<CallToolResult>): Promise<CallToolResult> {
   try {
     return await handler();
@@ -171,7 +178,7 @@ async function request(
     const safeParsed = redactSecrets(parsed);
     const detail =
       typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
-        ? redactSecretText(String((safeParsed as { detail: unknown }).detail))
+        ? renderErrorDetail((safeParsed as { detail: unknown }).detail)
         : JSON.stringify(safeParsed);
     throw new WorkerosApiError(
       `Workeros API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
@@ -203,7 +210,7 @@ async function requestBytes(
     const safeParsed = redactSecrets(parsed);
     const detail =
       typeof safeParsed === "object" && safeParsed && "detail" in safeParsed
-        ? redactSecretText(String((safeParsed as { detail: unknown }).detail))
+        ? renderErrorDetail((safeParsed as { detail: unknown }).detail)
         : JSON.stringify(safeParsed);
     throw new WorkerosApiError(
       `Workeros API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
@@ -529,7 +536,7 @@ async function consumeChatStream(
   let buffer = "";
 
   try {
-    const body: JsonObject = { message };
+    const body: JsonObject = { message, source: "mcp" };
     if (conversationId) {
       body.conversation_id = conversationId;
     }
@@ -629,6 +636,11 @@ export function createServer(): McpServer {
     version: "0.1.0",
   });
 
+  const workerContractYamlDescription =
+    "WorkerContract YAML content. Required top-level fields: schema_version: \"0.3\", name, title, description, version, exec, and trigger. " +
+    "For script workers, exec must include entry: \"run.py\", runtime: \"python311\", runner: \"e2b\", command: \"python run.py\", plus exec.inputs and exec.outputs arrays. " +
+    "Example script output path: write result.json at the worker root after reading inputs.json at the worker root.";
+
   server.registerTool(
     "workers.list",
     {
@@ -655,9 +667,12 @@ export function createServer(): McpServer {
     "workers.create",
     {
       title: "Create Worker",
-      description: "Create a Workeros worker from WorkerContract YAML. For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md (the agent system prompt) and a minimal run_py stub.",
+      description:
+        "Create a Workeros worker from WorkerContract YAML. " +
+        "The YAML must include schema_version, name, title, description, version, exec, and trigger. " +
+        "For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md (the agent system prompt) and a minimal run_py stub.",
       inputSchema: {
-        worker_yml: z.string().min(1).describe("WorkerContract YAML content."),
+        worker_yml: z.string().min(1).describe(workerContractYamlDescription),
         run_py: z.string().min(1).describe("Python source for run.py. For skill workers use a minimal stub: 'def run(inputs, context): pass'"),
         skill_md: z.string().optional().describe("Agent system prompt (SKILL.md) for skill/agent-mode workers. Omit for script-mode workers."),
       },

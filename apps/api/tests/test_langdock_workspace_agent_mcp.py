@@ -168,6 +168,11 @@ def test_langdock_mcp_lists_remote_workeros_control_plane_tools(monkeypatch, tmp
     assert "contexts.write" in names
     workspace_tool = next(tool for tool in tools if tool["name"] == "ask_workspace_agent")
     assert workspace_tool["inputSchema"]["required"] == ["message"]
+    create_tool = next(tool for tool in tools if tool["name"] == "workers.create")
+    create_desc = create_tool["inputSchema"]["properties"]["worker_yml"]["description"]
+    assert 'schema_version: "0.3"' in create_desc
+    assert "inputs.json" in create_desc
+    assert "result.json" in create_desc
 
 
 def test_langdock_mcp_tool_call_forwards_to_workspace_agent(monkeypatch, tmp_path):
