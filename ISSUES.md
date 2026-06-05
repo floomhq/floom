@@ -1,5 +1,35 @@
 # ISSUES (Federico's 2026-05-26 morning walkthrough)
 
+---
+
+## M61–M65 — UI consistency batch (2026-06-05)
+
+**Scope:** M61 MCP JSON default, M62 visibility confirm modal, M63 version rollback modal, M64 source/brain consistency, M65 run.py preview.
+
+**Status:** FIXED (PR pending review)
+
+**Branch:** `fix/m61-m65-ui-consistency-2026-06-05`
+
+| Item | Description | Status |
+|------|-------------|--------|
+| M61 (P2) | Add MCP server defaults to JSON config tab | FIXED |
+| M62 (P1) | Visibility change shows in-app confirm modal | FIXED |
+| M63 (P1) | Version rollback uses app Dialog, not browser confirm | FIXED |
+| M64 (P1) | Worker source view matches Brain view (Preview-first) | FIXED |
+| M65 (P1) | run.py and requirements.txt have Preview+Raw tabs | FIXED |
+
+**Files changed:**
+- `apps/web/app/connections/mcp/page.tsx`
+- `apps/web/components/AssetVisibilityControl.tsx`
+- `apps/web/app/assistant/page.tsx`
+- `apps/web/app/contexts/page.tsx`
+- `apps/web/components/worker-form/FilesEditor.tsx`
+
+**Audit:** `docs/audits/ui-consistency-m61-m65-2026-06-05.md`
+
+---
+
+
 Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from a real browser walkthrough of workers.floom.dev after PRs #29-#33 landed.
 
 ---
