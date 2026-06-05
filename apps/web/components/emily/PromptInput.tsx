@@ -1,0 +1,134 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import { Paperclip, SendHorizonal } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { FileChip } from "./FileChip";
+import type { AttachedFile } from "@/lib/emily-chat-types";
+
+const ACCEPTED_TYPES = [
+  "image/*",
+  "text/*",
+  "application/pdf",
+  "application/json",
+  "application/zip",
+  "application/vnd.openxmlformats-officedocument.*",
+  "application/msword",
+];
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+export function PromptInput({
+  value,
+  onChange,
+  onSubmit,
+  onFilesChange,
+  attachedFiles,
+  placeholder,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onFilesChange: (files: AttachedFile[]) => void;
+  attachedFiles: AttachedFile[];
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      onSubmit();
+    }
+  };
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
+    }
+  }, [value]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newFiles = Array.from(e.target.files ?? []);
+    const valid: AttachedFile[] = newFiles
+      .filter((f) => f.size <= MAX_FILE_SIZE)
+      .map((f) => ({
+        id: `${f.name}-${f.size}-${Date.now()}`,
+        name: f.name,
+        size: f.size,
+        type: f.type,
+      }));
+    onFilesChange([...attachedFiles, ...valid]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeFile = (id: string) => {
+    onFilesChange(attachedFiles.filter((f) => f.id !== id));
+  };
+
+  const canSend = (value.trim().length > 0 || attachedFiles.length > 0) && !disabled;
+
+  return (
+    <div className="space-y-2">
+      {attachedFiles.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-1">
+          {attachedFiles.map((f) => (
+            <FileChip key={f.id} file={f} onRemove={() => removeFile(f.id)} />
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-end gap-2 rounded-xl border border-border bg-background px-3 py-2.5 shadow-sm focus-within:ring-1 focus-within:ring-[#59AAF8]/40 transition-shadow">
+        {/* Attach button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled}
+          className="shrink-0 mb-0.5 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+          title="Attach file"
+          aria-label="Attach file"
+        >
+          <Paperclip className="size-4" />
+        </button>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ACCEPTED_TYPES.join(",")}
+          className="hidden"
+          onChange={handleFileChange}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+
+        <textarea
+          ref={textareaRef}
+          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[140px] overflow-auto"
+          placeholder={placeholder ?? "Message Emily..."}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKey}
+          rows={1}
+          disabled={disabled}
+        />
+
+        <Button
+          size="sm"
+          className="h-7 w-7 p-0 shrink-0 mb-0.5"
+          onClick={onSubmit}
+          disabled={!canSend}
+          style={{ background: canSend ? "#59AAF8" : undefined, color: canSend ? "white" : undefined }}
+          type="button"
+          aria-label="Send message"
+        >
+          <SendHorizonal className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
