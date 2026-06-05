@@ -52,6 +52,20 @@ class FailingOpenAIClient:
         raise RuntimeError("simulated model failure")
 
 
+class TemperatureRejectingOpenAIClient(FakeOpenAIClient):
+    def create(self, **kwargs):
+        self.calls.append(copy.deepcopy(kwargs))
+        if len(self.calls) == 1:
+            raise RuntimeError(
+                "Unsupported value: 'temperature' does not support 0.5 "
+                "with this model. Only temperature=1 supported"
+            )
+        if not self._messages:
+            raise AssertionError("OpenAI stub exhausted")
+        message = self._messages.pop(0)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
 def assistant_message(content="", tool_calls=None):
     return SimpleNamespace(
         role="assistant",
@@ -160,6 +174,42 @@ class SkillRuntimeDriverTest(_SkillDriverDirsMixin, unittest.TestCase):
             self.assertEqual(tool_message["role"], "tool")
             self.assertEqual(tool_message["tool_call_id"], "call_1")
             self.assertNotIn("name", tool_message)
+
+    def test_model_temperature_rejection_retries_without_temperature(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker_dir = base / "worker"
+            artifacts_dir = base / "artifacts"
+            worker_dir.mkdir()
+            (worker_dir / "SKILL.md").write_text("Write a brief and call write_output.", encoding="utf-8")
+            skill_driver.ARTIFACTS_DIR = artifacts_dir
+            skill_driver.WORKERS_DIR = base / "workers"
+
+            fake_client = TemperatureRejectingOpenAIClient([
+                assistant_message(
+                    tool_calls=[
+                        tool_call("write_output", {"name": "brief", "content": "# Brief\nDone"})
+                    ]
+                ),
+                assistant_message(content="Done."),
+            ])
+            driver = skill_driver.SkillRuntimeDriver(openai_client=fake_client)
+
+            result = driver.run(
+                worker_id="research_brief",
+                run_id="run_temperature_retry",
+                inputs={"topic": "AI agents"},
+                secrets={"OPENAI_API_KEY": "secret-value"},
+                log_fn=lambda *_args, **_kwargs: None,
+                trace_id="trace_test",
+                config=config_for(worker_dir),
+            )
+
+            self.assertEqual(result.status, "success")
+            self.assertEqual(result.outputs["brief"], "# Brief\nDone")
+            self.assertEqual(fake_client.calls[0]["temperature"], 0.5)
+            self.assertNotIn("temperature", fake_client.calls[1])
+            self.assertEqual(fake_client.calls[1]["model"], "gpt-test")
 
     def test_transcript_artifact_scrubs_secret_values(self):
         with tempfile.TemporaryDirectory() as tmp:

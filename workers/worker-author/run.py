@@ -66,13 +66,14 @@ def _codegen_chat(
         else "max_tokens"
     )
 
-    def _create(token_param: str) -> Any:
+    def _create(token_param: str, *, include_temperature: bool = True) -> Any:
         kwargs: Dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
             token_param: max_output_tokens,
         }
+        if include_temperature:
+            kwargs["temperature"] = temperature
         if response_format is not None:
             kwargs["response_format"] = response_format
         return client.chat.completions.create(**kwargs)
@@ -85,6 +86,16 @@ def _codegen_chat(
             return _create("max_completion_tokens")
         if "max_tokens" in msg and token_kwarg == "max_completion_tokens":
             return _create("max_tokens")
+        if (
+            "temperature" in msg
+            and (
+                "unsupported" in msg
+                or "does not support" in msg
+                or "only the default" in msg
+                or "only temperature=1" in msg
+            )
+        ):
+            return _create(token_kwarg, include_temperature=False)
         raise
 
 
