@@ -1734,7 +1734,7 @@ export default function WorkerDetailPage() {
               />
             </span>
             <span className="[&_button]:min-h-11 sm:[&_button]:min-h-0">
-              <ShareWorkerButton publicLink={worker.public_link} workerName={worker.name} />
+              <ShareWorkerButton workerId={worker.id} workerName={worker.name} />
             </span>
             <Button
               variant="outline"
