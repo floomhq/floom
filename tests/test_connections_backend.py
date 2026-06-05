@@ -210,6 +210,14 @@ class TestComposioScopeParsing:
         })
         assert info["scopes"] == ["channels:read", "chat:write"]
 
+    def test_reads_handle_when_email_is_absent(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        info = self._info(main, {
+            "toolkit": {"slug": "github"},
+            "data": {"login": "floomhq"},
+        })
+        assert info["account_label"] == "floomhq"
+
 
 # ---------------------------------------------------------------------------
 # #8 + #9 - GET /connections projects scopes + account_label
@@ -371,6 +379,22 @@ class TestConnectionCallbackAndComposio503:
 
         assert resp.status_code in {302, 307}
         assert resp.headers["location"].startswith("https://workers.floom.dev/connections?connected=1")
+        listed = client.get("/connections", headers=AUTH_HEADERS)
+        item = next(c for c in listed.json() if c["id"] == conn["id"])
+        assert item["status"] == "active"
+
+    def test_callback_success_promotes_transient_initiated_to_active(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="gmail")
+
+        with patch("composio_client.check_status", return_value="initiated"):
+            resp = client.get(
+                f"/connections/callback?connection_id={conn['composio_connection_id']}&status=success",
+                follow_redirects=False,
+            )
+
+        assert resp.status_code in {302, 307}
         listed = client.get("/connections", headers=AUTH_HEADERS)
         item = next(c for c in listed.json() if c["id"] == conn["id"])
         assert item["status"] == "active"
@@ -753,6 +777,30 @@ class TestConnectionTestEndpoint:
         assert item is not None
         assert item["last_checked_at"] is not None
         assert item["last_check_status"] == "valid"
+
+    def test_test_promotes_connection_to_active_and_caches_identity(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="gmail")
+        local_id = conn["id"]
+
+        with patch("composio_client.check_status", return_value="enabled"), patch(
+            "main._fetch_composio_account_info"
+        ) as mock_info:
+            mock_info.return_value = {
+                "email": "user@example.com",
+                "scopes": ["gmail.readonly"],
+                "status": "enabled",
+            }
+            resp = client.post(f"/connections/{local_id}/test", headers=AUTH_HEADERS)
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "valid"
+        list_resp = client.get("/connections", headers=AUTH_HEADERS)
+        item = next(c for c in list_resp.json() if c["id"] == local_id)
+        assert item["status"] == "active"
+        assert item["account_label"] == "user@example.com"
+        assert item["scopes"] == ["gmail.readonly"]
 
     def test_test_404_for_unknown_connection(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
