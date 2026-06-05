@@ -3,23 +3,48 @@
 import { Suspense, use, useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, apiProxyPath } from "@/lib/api";
 import { toast } from "sonner";
 import { Paperclip, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { PromptText } from "@/components/PromptText";
+import { BrandLogo } from "@/components/connections/BrandLogo";
 
 // ---------------------------------------------------------------------------
 // Example chips shown below the hero card
 // ---------------------------------------------------------------------------
 
+// App logo slugs are derived from the prompt text — same tool names PromptText
+// highlights. Kept as a co-located parallel array so any prompt edit is a
+// reminder to sync the logos.
 const EXAMPLES = [
-  { label: "Granola → HubSpot daily", prompt: "Summarise my Granola meetings and post action items to HubSpot CRM daily" },
-  { label: "GitHub PR digest 9am", prompt: "Every morning at 9am, send me a digest of my unread GitHub PRs and open issues" },
-  { label: "Invoice → Sheets", prompt: "Process any new email in label 'invoices', extract total amount, and add a row to Google Sheets" },
-  { label: "HubSpot deal → Slack", prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel" },
-  { label: "Granola → email drafts", prompt: "Fetch last week's Granola meeting notes and draft follow-up emails via Gmail" },
+  {
+    label: "Granola → HubSpot daily",
+    prompt: "Summarise my Granola meetings and post action items to HubSpot CRM daily",
+    apps: ["granola", "hubspot"],
+  },
+  {
+    label: "GitHub PR digest 9am",
+    prompt: "Every morning at 9am, send me a digest of my unread GitHub PRs and open issues",
+    apps: ["github"],
+  },
+  {
+    label: "Invoice → Sheets",
+    prompt: "Process any new email in label 'invoices', extract total amount, and add a row to Google Sheets",
+    apps: ["gmail", "google-sheets"],
+  },
+  {
+    label: "HubSpot deal → Slack",
+    prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel",
+    apps: ["hubspot", "slack"],
+  },
+  {
+    label: "Granola → email drafts",
+    prompt: "Fetch last week's Granola meeting notes and draft follow-up emails via Gmail",
+    apps: ["granola", "gmail"],
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -90,7 +115,6 @@ function NewWorkerContent() {
   // Guards against double navigation (e.g. onerror firing right after onmessage
   // already navigated on the terminal `close`/status event).
   const navigatedRef = useRef(false);
-  const fallbackFiredRef = useRef(false);
 
   function getLivePrompt(): string {
     return (textareaRef.current?.value ?? prompt).trim();
@@ -103,7 +127,6 @@ function NewWorkerContent() {
     }
     runIdRef.current = null;
     navigatedRef.current = false;
-    fallbackFiredRef.current = false;
     setGenerating(false);
     setStreamRunId(null);
     setStreamLogs([]);
@@ -216,27 +239,6 @@ function NewWorkerContent() {
     if (!navigatedRef.current) navigateToRun(runId);
   }
 
-  async function fallbackDraftAndCreate(trimmed: string) {
-    if (fallbackFiredRef.current || navigatedRef.current) return;
-    fallbackFiredRef.current = true;
-    if (sseRef.current) {
-      sseRef.current.close();
-      sseRef.current = null;
-    }
-    try {
-      const result = await api.workers.draftAndCreate({ prompt: trimmed });
-      navigatedRef.current = true;
-      toast.success("Worker drafted");
-      router.push(`/workers/${result.worker_id}?edit=1`);
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to generate worker");
-      setGenerating(false);
-      setStreamRunId(null);
-      runIdRef.current = null;
-      setStreamLogs([]);
-    }
-  }
-
   async function handleGenerate(overridePrompt?: string) {
     const trimmed = overridePrompt ?? getLivePrompt();
     if (!trimmed) {
@@ -244,7 +246,6 @@ function NewWorkerContent() {
       return;
     }
     if (overridePrompt) setPrompt(overridePrompt);
-    fallbackFiredRef.current = false;
     navigatedRef.current = false;
     runIdRef.current = null;
     setStreamRunId(null);
@@ -260,7 +261,9 @@ function NewWorkerContent() {
       setStreamRunId(runId);
 
       // Subscribe to SSE events for real-time progress
-      const evtSource = new EventSource(`/api/proxy/runs/${runId}/events`);
+      const evtSource = new EventSource(
+        apiProxyPath(`/runs/${encodeURIComponent(runId)}/events`, true),
+      );
       sseRef.current = evtSource;
 
       evtSource.onmessage = (e) => {
@@ -295,18 +298,18 @@ function NewWorkerContent() {
         const id = runIdRef.current;
         if (id) {
           void pollRunUntilTerminalThenRoute(id);
-        } else if (!fallbackFiredRef.current) {
-          // The run never started (no id yet) — fall back so a worker still
-          // gets created rather than dead-ending on an empty stream.
-          void fallbackDraftAndCreate(trimmed);
         }
       };
     } catch (streamErr) {
-      // The /workers/new/from-prompt endpoint itself failed before a run was
-      // created (e.g. 404/503). No run id exists, so fall back to the
-      // synchronous path so a worker still gets created.
-      console.warn("worker-author endpoint unavailable, falling back to draftAndCreate:", streamErr);
-      void fallbackDraftAndCreate(trimmed);
+      // The async worker-author run did not start, so there is no run page to
+      // poll. Keep this path async-only; the legacy synchronous endpoint can
+      // outlive the Cloud proxy request budget.
+      console.warn("worker-author endpoint unavailable:", streamErr);
+      toast.error(streamErr instanceof Error ? streamErr.message : "Failed to start worker generation");
+      setGenerating(false);
+      setStreamRunId(null);
+      runIdRef.current = null;
+      setStreamLogs([]);
     }
   }
 
@@ -587,8 +590,22 @@ function NewWorkerContent() {
               onClick={() => setPrompt(ex.prompt)}
               className="group flex flex-col items-start gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-3 text-left hover:bg-[var(--active-nav-bg)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
+              {/* Compact logo row — derived from the apps the example touches */}
+              <div className="flex items-center gap-1" aria-hidden="true">
+                {ex.apps.map((slug) => (
+                  <span
+                    key={slug}
+                    className="inline-flex items-center justify-center size-[18px] rounded-[3px] bg-[var(--bg-2)]"
+                    title={slug}
+                  >
+                    <BrandLogo icon={slug} className="size-3" />
+                  </span>
+                ))}
+              </div>
               <span className="text-sm font-medium text-foreground">{ex.label}</span>
-              <span className="text-xs text-muted-foreground line-clamp-2">{ex.prompt}</span>
+              <span className="text-xs text-muted-foreground line-clamp-2">
+                <PromptText>{ex.prompt}</PromptText>
+              </span>
             </button>
           ))}
         </div>
@@ -696,7 +713,9 @@ function GeneratingPanel({
       {prompt && (
         <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-2)] px-4 py-3">
           <p className="text-[11px] text-muted-foreground mb-1">Your prompt</p>
-          <p className="text-sm text-foreground whitespace-pre-wrap">{prompt}</p>
+          <p className="text-sm text-foreground whitespace-pre-wrap">
+            <PromptText>{prompt}</PromptText>
+          </p>
         </div>
       )}
 

@@ -1,6 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "workeros_cloud_session";
+const APP_BASE_PATH = "/app";
+
+function stripAppBase(pathname: string): string {
+  if (pathname === APP_BASE_PATH) return "/";
+  if (pathname.startsWith(`${APP_BASE_PATH}/`)) {
+    return pathname.slice(APP_BASE_PATH.length) || "/";
+  }
+  return pathname;
+}
+
+function withAppBase(pathname: string): string {
+  return `${APP_BASE_PATH}${pathname === "/" ? "" : pathname}`;
+}
 
 function normalizeCookieValue(value: string): string {
   const trimmed = value.trim();
@@ -45,7 +58,7 @@ function isPublicPath(pathname: string): boolean {
   // Next.js with basePath strips it before passing to middleware in matcher,
   // but path here can be either /workers OR /app/workers depending on the
   // routing context. Handle both.
-  const path = pathname.startsWith("/app") ? pathname.slice(4) || "/" : pathname;
+  const path = stripAppBase(pathname);
   if (path === "/favicon.ico") return true;
   if (path === "/login") return true;
   if (path === "/connections/callback") return true;
@@ -65,11 +78,12 @@ export function middleware(req: NextRequest): NextResponse {
   const session = req.cookies.get(SESSION_COOKIE);
   const usableSession = hasUsableSession(session?.value);
   if (!usableSession) {
-    const path = req.nextUrl.pathname.startsWith("/app")
-      ? req.nextUrl.pathname.slice(4) || "/"
-      : req.nextUrl.pathname;
-    const next = encodeURIComponent(`/app${path === "/" ? "" : path}${req.nextUrl.search}`);
-    return NextResponse.redirect(new URL(`/app/login?next=${next}`, req.url));
+    const path = stripAppBase(req.nextUrl.pathname);
+    const loginUrl = req.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.search = "";
+    loginUrl.searchParams.set("next", `${withAppBase(path)}${req.nextUrl.search}`);
+    return NextResponse.redirect(loginUrl);
   }
   return NextResponse.next();
 }
