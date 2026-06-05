@@ -268,6 +268,9 @@ function defaultSourceMode(path: string, _hasForm: boolean, binary?: boolean): S
   if (binary) return "raw";
   if (hasWorkerYamlSummary(path, binary)) return "preview";
   if (supportsRenderedPreview(path)) return "preview";
+  // M65: code/text files also default to Preview — brain-consistent.
+  const kind = sourceFileKind(path);
+  if (!["spreadsheet", "pdf", "image", "video"].includes(kind)) return "preview";
   return "raw";
 }
 
@@ -721,11 +724,13 @@ function FilesEditorEdit({
   const selectedFile = files.find((f) => f.path === effectiveSelected) || null;
   const selectedHasForm = Boolean(selectedFile && selectedFile.path === "worker.yml" && renderYamlPreview);
   const selectedIsWorkerYaml = Boolean(selectedFile && hasWorkerYamlSummary(selectedFile.path, selectedFile.binary));
-  // A second rendered tab is only meaningful for files with a real
-  // rendered-vs-source distinction (markdown/html/table) or worker.yml's
-  // structured summary. Generic .yaml/.json/.py show a single raw editor.
+  // M65: all non-binary text files now get a Preview tab — matching the Brain
+  // file viewer. For markdown/html/table/worker.yml: rendered document.
+  // For code (.py, .sh, .json, .yaml): syntax-highlighted read-only view.
+  const selectedKind = selectedFile ? sourceFileKind(selectedFile.path, selectedFile.language) : "code";
   const selectedHasPreview = Boolean(
-    selectedFile && (supportsRenderedPreview(selectedFile.path, selectedFile.binary) || selectedIsWorkerYaml)
+    selectedFile && !selectedFile.binary &&
+    !["spreadsheet", "pdf", "image", "video"].includes(selectedKind)
   );
 
   const [sourceMode, setSourceMode] = useState<SourceMode>(() =>
@@ -843,7 +848,8 @@ function FilesEditorEdit({
             </CardTitle>
             {selectedFile && selectedHasPreview && (
               <div className="flex items-center gap-0 rounded-md border border-border overflow-hidden shrink-0">
-                {(["raw", "preview"] as SourceMode[]).map((mode) => (
+                {/* M64/M65: Preview first, Raw second — consistent with Brain file viewer. */}
+                {(["preview", "raw"] as SourceMode[]).map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -878,6 +884,14 @@ function FilesEditorEdit({
                   path={selectedFile.path}
                   content={selectedFile.content}
                   language={selectedFile.language || detectLanguage(selectedFile.path)}
+                />
+              ) : !["spreadsheet", "pdf", "image", "video"].includes(selectedKind) ? (
+                // M65: code/text files — syntax-highlighted read-only preview
+                // (same as the Brain file viewer), matching brain consistency.
+                <SyntaxHighlightedCode
+                  content={selectedFile.content}
+                  path={selectedFile.path}
+                  language={selectedFile.language}
                 />
               ) : (
                 <UnsupportedSourcePreview
