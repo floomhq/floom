@@ -3,7 +3,7 @@
 import { Suspense, use, useEffect, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, apiProxyPath } from "@/lib/api";
 import { toast } from "sonner";
 import { Paperclip, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -115,7 +115,6 @@ function NewWorkerContent() {
   // Guards against double navigation (e.g. onerror firing right after onmessage
   // already navigated on the terminal `close`/status event).
   const navigatedRef = useRef(false);
-  const fallbackFiredRef = useRef(false);
 
   function getLivePrompt(): string {
     return (textareaRef.current?.value ?? prompt).trim();
@@ -128,7 +127,6 @@ function NewWorkerContent() {
     }
     runIdRef.current = null;
     navigatedRef.current = false;
-    fallbackFiredRef.current = false;
     setGenerating(false);
     setStreamRunId(null);
     setStreamLogs([]);
@@ -241,27 +239,6 @@ function NewWorkerContent() {
     if (!navigatedRef.current) navigateToRun(runId);
   }
 
-  async function fallbackDraftAndCreate(trimmed: string) {
-    if (fallbackFiredRef.current || navigatedRef.current) return;
-    fallbackFiredRef.current = true;
-    if (sseRef.current) {
-      sseRef.current.close();
-      sseRef.current = null;
-    }
-    try {
-      const result = await api.workers.draftAndCreate({ prompt: trimmed });
-      navigatedRef.current = true;
-      toast.success("Worker drafted");
-      router.push(`/workers/${result.worker_id}?edit=1`);
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to generate worker");
-      setGenerating(false);
-      setStreamRunId(null);
-      runIdRef.current = null;
-      setStreamLogs([]);
-    }
-  }
-
   async function handleGenerate(overridePrompt?: string) {
     const trimmed = overridePrompt ?? getLivePrompt();
     if (!trimmed) {
@@ -269,7 +246,6 @@ function NewWorkerContent() {
       return;
     }
     if (overridePrompt) setPrompt(overridePrompt);
-    fallbackFiredRef.current = false;
     navigatedRef.current = false;
     runIdRef.current = null;
     setStreamRunId(null);
@@ -285,7 +261,9 @@ function NewWorkerContent() {
       setStreamRunId(runId);
 
       // Subscribe to SSE events for real-time progress
-      const evtSource = new EventSource(`/api/proxy/runs/${runId}/events`);
+      const evtSource = new EventSource(
+        apiProxyPath(`/runs/${encodeURIComponent(runId)}/events`, true),
+      );
       sseRef.current = evtSource;
 
       evtSource.onmessage = (e) => {
@@ -320,18 +298,18 @@ function NewWorkerContent() {
         const id = runIdRef.current;
         if (id) {
           void pollRunUntilTerminalThenRoute(id);
-        } else if (!fallbackFiredRef.current) {
-          // The run never started (no id yet) — fall back so a worker still
-          // gets created rather than dead-ending on an empty stream.
-          void fallbackDraftAndCreate(trimmed);
         }
       };
     } catch (streamErr) {
-      // The /workers/new/from-prompt endpoint itself failed before a run was
-      // created (e.g. 404/503). No run id exists, so fall back to the
-      // synchronous path so a worker still gets created.
-      console.warn("worker-author endpoint unavailable, falling back to draftAndCreate:", streamErr);
-      void fallbackDraftAndCreate(trimmed);
+      // The async worker-author run did not start, so there is no run page to
+      // poll. Keep this path async-only; the legacy synchronous endpoint can
+      // outlive the Cloud proxy request budget.
+      console.warn("worker-author endpoint unavailable:", streamErr);
+      toast.error(streamErr instanceof Error ? streamErr.message : "Failed to start worker generation");
+      setGenerating(false);
+      setStreamRunId(null);
+      runIdRef.current = null;
+      setStreamLogs([]);
     }
   }
 
