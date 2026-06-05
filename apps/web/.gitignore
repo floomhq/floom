@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+WORKPLAN-*.md
 
 # debug
 npm-debug.log*
