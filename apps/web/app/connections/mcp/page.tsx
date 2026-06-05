@@ -359,27 +359,22 @@ export default function McpConnectionsPage() {
         </button>
 
         {installOpen && (
-          <div className="space-y-4 border-t border-[var(--border-default)] px-4 py-4">
-            <div>
-              <span className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Pick your client
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {MCP_INSTALL_TARGETS.map((target) => (
-                  <button
-                    key={target.target}
-                    type="button"
-                    onClick={() => setInstallTarget(target.target)}
-                    className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
-                      installTarget === target.target
-                        ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg-app)]"
-                        : "border-[var(--border-default)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {target.label}
-                  </button>
-                ))}
-              </div>
+          <div className="space-y-3 border-t border-[var(--border-default)] px-4 py-4">
+            <div className="flex flex-wrap gap-1.5">
+              {MCP_INSTALL_TARGETS.map((target) => (
+                <button
+                  key={target.target}
+                  type="button"
+                  onClick={() => setInstallTarget(target.target)}
+                  className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                    installTarget === target.target
+                      ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg-app)]"
+                      : "border-[var(--border-default)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {target.label}
+                </button>
+              ))}
             </div>
             <CommandBlock
               title="Run in your terminal"
@@ -388,8 +383,8 @@ export default function McpConnectionsPage() {
               onCopy={() => copyCommand(currentInstallCommand)}
             />
             <p className="text-xs text-muted-foreground">
-              This installs Floom Workers&apos; tools into your own AI client. To connect a
-              third-party MCP server <em>into</em> Floom instead, use the section below.
+              Installs Floom Workers&apos; tools into your AI client. To connect a third-party MCP
+              server <em>into</em> Floom instead, use the section below.
             </p>
           </div>
         )}

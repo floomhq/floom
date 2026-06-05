@@ -1,10 +1,11 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Bot, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut } from "lucide-react";
+import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -34,6 +35,20 @@ export function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
+// C6: Emily avatar — solid Workeros accent blue circle, no glyph.
+// Used as the nav icon for the Assistant item in place of the generic Bot glyph.
+// The accent blue (#59AAF8 / --accent in dark, hardcoded for light) is the
+// Workeros brand blue Federico designated for Emily's identity.
+function EmilyDot({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn("shrink-0 rounded-full", className)}
+      style={{ background: "var(--emily-accent, #59AAF8)", width: "16px", height: "16px" }}
+      aria-hidden="true"
+    />
+  );
+}
+
 // S24: Secrets removed from top-level nav; reachable as a third tab on
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
@@ -42,10 +57,19 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 // nav has no room for a permanent subtitle without a redesign, so the
 // employee-model microcopy ("Assistant = the thing you talk to"; "Workers run
 // on triggers") lives in the tooltip instead (Federico 2026-06-02).
-const nav = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ElementType | null;
+  hint?: string;
+  badge?: boolean;
+  emilyDot?: boolean;
+};
+
+const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
-  { href: "/assistant", label: "Assistant", icon: Bot, hint: "Chat, ask, delegate" },
+  { href: "/assistant", label: "Assistant", icon: null, emilyDot: true, hint: "Chat, ask, delegate" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
@@ -78,7 +102,11 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
                 : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
             )}
           >
-            <item.icon className="w-4 h-4" />
+            {item.emilyDot ? (
+              <EmilyDot />
+            ) : item.icon ? (
+              <item.icon className="w-4 h-4" />
+            ) : null}
             {item.label}
             {showBadge && (
               <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
