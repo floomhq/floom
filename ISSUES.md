@@ -4,6 +4,30 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 ---
 
+## P0 — from-prompt new-worker flow failed on gpt-5.x temperature (2026-06-05)
+
+**Scope:** `POST /workers/new/from-prompt` → worker-author meta-worker in E2B; gpt-5.x model compatibility.
+
+**Status:** VERIFIED
+
+**Root cause:** the from-prompt path sent non-default `temperature` values to gpt-5.x models from two places: `workers/worker-author/run.py` (`temperature=0.2`) and `apps/api/runner_sandbox/skill_driver.py` (`temperature=0.5`). gpt-5.x models reject those values with HTTP 400. The draft-and-create path already had retry-without-temperature protection; from-prompt did not.
+
+**Fix:** commit `093e9c3e166f8cb8c52e58041e2d69b9d3abae43` adds retry-without-temperature handling to worker-author and skill-driver, adds focused regression tests, removes the unused `WORKER_AUTHOR_DEFAULT_MODEL` env override, and updates stale codegen docs to reference `WORKEROS_CODEGEN_MODEL`.
+
+**Verification:**
+- Deployed via `ops/deploy-api.sh`; active systemd working directory `/opt/workeros-api-deploy/apps/api` verified at SHA `093e9c3e166f8cb8c52e58041e2d69b9d3abae43`.
+- External `/health` returned HTTP 200, `status: ok`.
+- Prod from-prompt runs completed and produced workers:
+  - `run_f7c47c53541d` → `fp-temp-word-char-0605030601`, smoke `passed`.
+  - `run_69c82681681f` → `fp-temp-number-stats-0605030601`, smoke `passed`.
+  - `run_bcb6743ec0c0` → `fp-temp-granola-hubspot-0605030601`, connection prompt, smoke `skipped` because it was not script-mode, creation did not hard-fail.
+- Draft-and-create regression returned HTTP 200: `fp-temp-draft-create-0605031004`, smoke `passed`.
+- All `fp-temp-*` test workers were deleted; follow-up GETs returned 404 and final list scan found none.
+
+**Audit:** `docs/audits/fromprompt-temperature-fix-2026-06-05.md`
+
+---
+
 ## Backend pass 2 - model split, Emily v5, sharing, Phase G (2026-06-05)
 
 **Scope:** model split, full conversation storage, persona v5, worker short links, MCP tool creation, per-approval public read links, and control-character rejection for secret values.
