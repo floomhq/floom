@@ -14330,7 +14330,7 @@ async def composio_events_alias(request: Request) -> ActionResponse:
 # Slack Events API
 # ---------------------------------------------------------------------------
 
-SLACK_INSTALL_SCOPES = [
+DEFAULT_SLACK_INSTALL_SCOPES = [
     "app_mentions:read",
     "assistant:write",
     "chat:write",
@@ -14411,6 +14411,20 @@ def _slack_interactivity_url() -> str:
     return f"{_public_api_base_url()}/slack/interactivity"
 
 
+def _slack_install_scopes() -> List[str]:
+    raw = os.environ.get("SLACK_INSTALL_SCOPES", "").strip()
+    if not raw:
+        return list(DEFAULT_SLACK_INSTALL_SCOPES)
+    scopes: List[str] = []
+    seen = set()
+    for part in re.split(r"[,\s]+", raw):
+        scope = part.strip()
+        if scope and scope not in seen:
+            scopes.append(scope)
+            seen.add(scope)
+    return scopes or list(DEFAULT_SLACK_INSTALL_SCOPES)
+
+
 def _slack_state_secret() -> str:
     secret = (os.environ.get("FLOOM_SECRET") or os.environ.get("SLACK_CLIENT_SECRET") or "").strip()
     if not secret:
@@ -14465,7 +14479,7 @@ def _slack_install_url(*, state: str) -> str:
         raise HTTPException(status_code=503, detail="SLACK_CLIENT_ID is not configured")
     params = urllib.parse.urlencode({
         "client_id": client_id,
-        "scope": ",".join(SLACK_INSTALL_SCOPES),
+        "scope": ",".join(_slack_install_scopes()),
         "redirect_uri": _slack_oauth_callback_url(),
         "state": state,
     })
