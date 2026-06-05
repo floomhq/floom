@@ -11,6 +11,13 @@ import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // Exported so the Downstream host's sidebar overlay can compose the engine's
 // brand mark + nav + primary actions and only add its account/workspace
@@ -254,7 +261,17 @@ export function Sidebar() {
 // its own row." Settings is now a small gear-icon button inline on the name
 // row instead of a separate full-width SidebarSettingsLink. Theme toggle stays
 // on the right.
-export function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
+//
+// M36: avatarUrl prop wired for Google OAuth picture. When provided, the
+// profile chip shows the real photo. Backend dependency: GET /user/me must
+// return { picture: string | null } and the caller must pass it here.
+//
+// M37: Clicking the profile chip (avatar + name) opens a dropdown with
+// Settings and Sign out, so logout is reachable without hunting for the icon.
+export function UserProfileFooter({
+  onNavigate,
+  avatarUrl,
+}: { onNavigate?: () => void; avatarUrl?: string | null } = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -272,38 +289,52 @@ export function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = 
 
   return (
     <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
-          LU
-        </div>
-        <div className="min-w-0 leading-tight">
-          <p className="text-xs font-medium text-foreground truncate">Local user</p>
-          <p className="text-[10px] text-muted-foreground truncate">Floom Workers v0</p>
-        </div>
-      </div>
-      <Link
-        href="/settings"
-        onClick={onNavigate}
-        aria-label="Settings"
-        title="Settings"
-        className={cn(
-          "inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150 ease-[var(--ease)]",
-          settingsActive
-            ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)]"
-            : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-        )}
-      >
-        <Settings className="size-4" />
-      </Link>
-      <button
-        type="button"
-        onClick={logout}
-        aria-label="Sign out"
-        title="Sign out"
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-      >
-        <LogOut className="size-4" />
-      </button>
+      {/* Profile chip — clicking opens a dropdown with Settings + Sign out (M37). */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            "flex items-center gap-2 min-w-0 flex-1 rounded-[var(--radius-button)] px-1 py-0.5 -mx-1 transition-[background,color] duration-150 ease-[var(--ease)]",
+            "hover:bg-[var(--active-nav-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+          )}
+          aria-label="Profile menu"
+        >
+          {/* M36: show Google avatar when avatarUrl is provided, else initials. */}
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt="Profile avatar"
+              className="size-7 shrink-0 rounded-full border border-[var(--border-soft)] object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
+              LU
+            </div>
+          )}
+          <div className="min-w-0 leading-tight text-left">
+            <p className="text-xs font-medium text-foreground truncate">Local user</p>
+            <p className="text-[10px] text-muted-foreground truncate">Floom Workers v0</p>
+          </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48 p-1">
+          <DropdownMenuItem
+            render={<Link href="/settings" onClick={onNavigate} />}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Settings className={cn("size-4", settingsActive && "text-[var(--active-nav-text)]")} />
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => void logout()}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <LogOut className="size-4" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
       <ThemeModeButton />
     </div>
   );
