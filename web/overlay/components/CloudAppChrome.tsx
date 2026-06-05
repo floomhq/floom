@@ -22,7 +22,13 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
     return (
       <>
         <IconSprite />
-        {children}
+        {/* flex-1 w-full: on desktop the cloud-app-shell body is flex-direction:row;
+            without this wrapper the login <main> shrinks to content width and
+            left-aligns. flex-1 fills the row, w-full ensures the inner grid
+            place-items-center centres the auth card correctly. */}
+        <div className="flex-1 w-full">
+          {children}
+        </div>
         <Toaster position="bottom-right" />
       </>
     );
