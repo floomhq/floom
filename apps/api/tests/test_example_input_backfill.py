@@ -77,7 +77,7 @@ def test_synthesize_scalars_from_schema() -> None:
     out = run_service._backfill_example_input(yml, None, _log)
     ei = yaml.safe_load(out)["example_input"]
     assert ei["text"] == "sample"
-    assert ei["count"] == "1"
+    assert ei["count"] == 1
 
 
 def test_synthesize_skips_when_no_inputs() -> None:

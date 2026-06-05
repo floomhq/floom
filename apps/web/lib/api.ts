@@ -144,6 +144,13 @@ async function fetchRaw(path: string, options?: RequestInit): Promise<Response> 
 }
 
 export const api = {
+  whatsapp: {
+    claim: (token: string) =>
+      fetchJson<{ ok: boolean; wa_id: string; user_id: string }>("/whatsapp/bindings/claim", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
+  },
   workers: {
     // S44 Win 3: use list shape (~15 KB vs 47 KB full) for the web UI.
     // CLI consumers that call GET /workers directly get full payload (no ?shape=list).

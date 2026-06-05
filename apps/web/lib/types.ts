@@ -549,6 +549,13 @@ export interface WorkspaceAgentInfo {
   model: string;
   system_prompt: string;
   tools: WorkspaceAgentTool[];
+  settings?: {
+    brain_read: boolean;
+    brain_write: boolean;
+    connections_read: boolean;
+    connections_use: boolean;
+    connections_add: boolean;
+  };
   channels?: {
     slack?: {
       events_configured: boolean;

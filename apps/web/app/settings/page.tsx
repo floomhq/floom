@@ -80,6 +80,7 @@ function SettingsContent() {
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
   const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [claimedWhatsAppToken, setClaimedWhatsAppToken] = useState<string | null>(null);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
 
@@ -99,6 +100,27 @@ function SettingsContent() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const token = (searchParams.get("whatsapp_claim") || "").trim();
+    if (!token || token === claimedWhatsAppToken) return;
+    setClaimedWhatsAppToken(token);
+    void (async () => {
+      try {
+        await api.whatsapp.claim(token);
+        toast.success("WhatsApp number linked");
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : "Failed to link WhatsApp");
+      } finally {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("whatsapp_claim");
+        const qs = params.size ? `?${params.toString()}` : "";
+        const hash = typeof window !== "undefined" ? window.location.hash : "";
+        const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
+        window.history.replaceState(null, "", `${path}${qs}${hash}`);
+      }
+    })();
+  }, [claimedWhatsAppToken, searchParams]);
 
   // Keep state in sync with the URL hash for deep-links and back/forward.
   useEffect(() => {
@@ -120,7 +142,7 @@ function SettingsContent() {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("tab");
     const qs = params.size ? `?${params.toString()}` : "";
-    window.history.replaceState(null, "", `/settings${qs}#${value}`);
+    window.history.replaceState(null, "", `${window.location.pathname}${qs}#${value}`);
   }
 
   async function handleReload() {

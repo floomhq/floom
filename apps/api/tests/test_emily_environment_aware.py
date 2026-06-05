@@ -1,10 +1,10 @@
-"""Emily environment-awareness: the persona (workspace.md) stays identical for
-every source, but a SHORT per-call environment note is injected so the assistant
-knows whether it is reached via Slack, MCP, or the web assistant.
+"""Emily environment-awareness: the engine persona stays identical for every
+source, but a SHORT per-call environment note is injected so the assistant knows
+whether it is reached via Slack, MCP, or the web assistant.
 
 These tests assert:
   - the env note differs by source (slack vs mcp vs web),
-  - the shared persona is still present in all three,
+  - the shared persona base is still present in all three,
   - unknown / unset source falls back to web,
   - the note is short.
 """
@@ -28,8 +28,8 @@ PERSONA_MARKER = "SWARM-OF-WORKERS-PERSONA-MARKER"
 
 @pytest.fixture
 def fake_persona(monkeypatch):
-    """Stand in for the shared workspace.md persona so the test does not depend
-    on disk content. Same value for every source by construction."""
+    """Stand in for the shared persona base so the test does not depend on disk
+    content. Same value for every source by construction."""
 
     def _fake_build(user_id: str) -> str:
         return f"# Workspace\n\n{PERSONA_MARKER}\nWarm, proactive, no em dashes."

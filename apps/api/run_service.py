@@ -921,7 +921,9 @@ _SMOKE_REPAIR_SYSTEM_PROMPT = (
     "- end with `if __name__ == \"__main__\": main()`.\n"
     "The failure message tells you exactly what broke — fix THAT. If it says "
     "'scalar output leaked a path string', return the literal value in that "
-    "output instead of a path. Return ONLY the corrected, complete run.py file. "
+    "output instead of a path. If it says example_output mismatch, change the "
+    "logic so the declared example_input produces the declared example_output. "
+    "Return ONLY the corrected, complete run.py file. "
     "No markdown fences, no commentary."
 )
 
@@ -960,6 +962,20 @@ def _build_smoke_inputs(
             sample = {}
     if not sample and isinstance(bundle.get("example_input"), dict):
         sample = dict(bundle["example_input"])
+    if not sample:
+        worker_yml = bundle.get("worker_yml")
+        if isinstance(worker_yml, str) and worker_yml.strip():
+            try:
+                import yaml as pyyaml
+
+                raw_manifest = pyyaml.safe_load(worker_yml) or {}
+                manifest_sample = (
+                    raw_manifest.get("example_input") if isinstance(raw_manifest, dict) else None
+                )
+                if isinstance(manifest_sample, dict):
+                    sample = dict(manifest_sample)
+            except Exception:
+                sample = {}
 
     inputs: Dict[str, Any] = {}
     for inp in config.inputs:
@@ -1228,6 +1244,10 @@ def _smoke_and_repair_generated_worker(
                 if substance_error is None:
                     substance_error, _smoke_warnings = _validate_run_outputs(
                         smoke_run_id, config, result_outputs, result_artifacts
+                    )
+                if substance_error is None:
+                    substance_error = _validate_example_output(
+                        smoke_run_id, config, bundle, result_outputs, result_artifacts
                     )
                 if substance_error is None:
                     # A required output that parses as JSON but is an EMPTY
@@ -2037,6 +2057,119 @@ def _smoke_empty_output_error(
             return (
                 f"output_validation_failed: {output.name} produced an empty result "
                 "(the worker ran but did nothing)"
+            )
+    return None
+
+
+def _parse_expected_example_output(raw: Any) -> Any:
+    if raw is None:
+        return None
+    if isinstance(raw, (dict, list, int, float, bool)):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return None
+    for parser in (json.loads,):
+        try:
+            return parser(text)
+        except Exception:
+            pass
+    try:
+        import yaml as pyyaml
+
+        parsed = pyyaml.safe_load(text)
+        if parsed is not None:
+            return parsed
+    except Exception:
+        pass
+    return text
+
+
+def _expected_example_output_from_bundle(bundle: Dict[str, Any]) -> Any:
+    if "example_output" in bundle:
+        return _parse_expected_example_output(bundle.get("example_output"))
+    worker_yml = bundle.get("worker_yml")
+    if isinstance(worker_yml, str) and worker_yml.strip():
+        try:
+            import yaml as pyyaml
+
+            raw = pyyaml.safe_load(worker_yml) or {}
+            if isinstance(raw, dict):
+                return _parse_expected_example_output(raw.get("example_output"))
+        except Exception:
+            return None
+    return None
+
+
+def _normalize_example_value(value: Any) -> Any:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ""
+        try:
+            return json.loads(text)
+        except Exception:
+            return text
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def _example_values_equal(actual: Any, expected: Any) -> bool:
+    actual_norm = _normalize_example_value(actual)
+    expected_norm = _normalize_example_value(expected)
+    if actual_norm == expected_norm:
+        return True
+    try:
+        return float(actual_norm) == float(expected_norm)
+    except (TypeError, ValueError):
+        return False
+
+
+def _actual_example_outputs(
+    run_id: str,
+    config: WorkerConfig,
+    outputs: Dict[str, Any],
+    artifacts: list[Dict[str, Any]],
+) -> Dict[str, Any]:
+    actual = dict(outputs or {})
+    for output in config.outputs:
+        kind = output.kind or ("file" if output.type == "file" else "scalar")
+        if kind != "file":
+            continue
+        path = _candidate_output_path(run_id, output, outputs, artifacts)
+        if path is not None and path.is_file():
+            actual[output.name] = path.read_text(errors="replace").strip()
+    return actual
+
+
+def _validate_example_output(
+    run_id: str,
+    config: WorkerConfig,
+    bundle: Dict[str, Any],
+    outputs: Dict[str, Any],
+    artifacts: list[Dict[str, Any]],
+) -> str | None:
+    expected = _expected_example_output_from_bundle(bundle)
+    if expected is None:
+        return None
+    actual = _actual_example_outputs(run_id, config, outputs, artifacts)
+    if isinstance(expected, dict):
+        for name, expected_value in expected.items():
+            if name not in actual:
+                return f"output_validation_failed: example_output mismatch for {name}: missing actual output"
+            if not _example_values_equal(actual.get(name), expected_value):
+                return (
+                    f"output_validation_failed: example_output mismatch for {name}: "
+                    f"expected {expected_value!r}, got {actual.get(name)!r}"
+                )
+        return None
+    if len(config.outputs) == 1:
+        name = config.outputs[0].name
+        if not _example_values_equal(actual.get(name), expected):
+            return (
+                f"output_validation_failed: example_output mismatch for {name}: "
+                f"expected {expected!r}, got {actual.get(name)!r}"
             )
     return None
 

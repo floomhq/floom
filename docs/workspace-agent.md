@@ -3,7 +3,9 @@
 The workspace agent is the operator-facing assistant for a Workeros workspace.
 It combines:
 
-- `workspace.md`: editable workspace instructions owned by the operator.
+- An engine-owned Emily base persona: immutable Chief-of-Staff identity,
+  proactivity, and safety rules.
+- `workspace.md`: editable workspace custom instructions owned by the operator.
 - A live workspace snapshot: workers, recent run state, brain packs, and
   pending approvals.
 - The engine prompt and tool contract from the `workspace-agent` worker.
@@ -17,7 +19,7 @@ Open `Agent -> Instructions` in the dashboard. Changes are saved to
 - `PUT /workspace`
 
 The resolved prompt is visible in `Agent -> Resolved prompt`. It is read-only
-because it includes generated runtime context.
+because it includes the engine persona and generated runtime context.
 
 ## Versions
 
@@ -31,9 +33,9 @@ AI edits (sandbox run token) are tagged `ai`; operator saves are tagged `user`.
 
 ## Channels
 
-Slack and other channels use the same workspace instructions. Channel-specific
-behavior belongs in `workspace.md`, for example the tone, escalation rules, and
-which workers the agent can use for a Slack workspace.
+Slack and other channels use the same engine persona and workspace custom
+instructions. Channel-specific preferences can live in `workspace.md`; the
+base Emily identity does not.
 
 The docs/DX lane only documents the channel contract. The local Slack listener
 manifest lives at [workers/slack-listener/worker.yml](../workers/slack-listener/worker.yml)
