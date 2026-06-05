@@ -188,6 +188,8 @@ except OSError:
     pass
 init_db()
 
+PUBLIC_SHARE_TEXT_PREVIEW_LIMIT = 512 * 1024
+
 # ---------------------------------------------------------------------------
 # App & middleware
 # ---------------------------------------------------------------------------
@@ -5799,12 +5801,105 @@ def _worker_public_link(worker: Dict[str, Any]) -> Optional[str]:
     return f"{_frontend_base_url()}/w/{worker_id}?token={token}"
 
 
+def _standalone_share_url(token: str) -> str:
+    return f"{_frontend_base_url()}/s/{urllib.parse.quote(token, safe='')}"
+
+
+def _public_noindex_headers() -> Dict[str, str]:
+    return {
+        "X-Robots-Tag": "noindex, nofollow",
+        "Cache-Control": "no-store",
+    }
+
+
 def _short_link_base_url() -> str:
     return (os.environ.get("WORKEROS_SHORT_LINK_BASE_URL") or "https://floom.dev/s").rstrip("/")
 
 
 def _mint_worker_short_id() -> str:
     return f"fls_{pysecrets.token_urlsafe(8).replace('-', '').replace('_', '')[:10]}"
+
+
+def _mint_standalone_share_token() -> str:
+    return f"fls_{pysecrets.token_urlsafe(18).replace('-', '').replace('_', '')[:24]}"
+
+
+def _ensure_standalone_share_links_table() -> None:
+    with get_db() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS standalone_share_links (
+                token TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                file_path TEXT NOT NULL DEFAULT '',
+                owner_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(entity_type, entity_id, file_path, owner_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity
+                ON standalone_share_links(entity_type, entity_id, file_path, owner_id);
+            """
+        )
+
+
+def _create_or_get_standalone_share_link(
+    *,
+    entity_type: Literal["worker", "brain_file", "brain_pack"],
+    entity_id: str,
+    owner_id: str,
+    file_path: str = "",
+) -> Dict[str, str]:
+    safe_file_path = file_path or ""
+    if not entity_id or not owner_id:
+        raise HTTPException(status_code=409, detail="Item cannot be shared")
+    _ensure_standalone_share_links_table()
+    with get_db() as conn:
+        existing = conn.execute(
+            """
+            SELECT token FROM standalone_share_links
+            WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
+            LIMIT 1
+            """,
+            (entity_type, entity_id, safe_file_path, owner_id),
+        ).fetchone()
+        if existing:
+            token = str(existing["token"])
+        else:
+            token = ""
+            ts = now_iso()
+            for _ in range(8):
+                candidate = _mint_standalone_share_token()
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO standalone_share_links
+                            (token, entity_type, entity_id, file_path, owner_id, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (candidate, entity_type, entity_id, safe_file_path, owner_id, ts),
+                    )
+                    token = candidate
+                    break
+                except sqlite3.IntegrityError:
+                    dup = conn.execute(
+                        """
+                        SELECT token FROM standalone_share_links
+                        WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
+                        LIMIT 1
+                        """,
+                        (entity_type, entity_id, safe_file_path, owner_id),
+                    ).fetchone()
+                    if dup:
+                        token = str(dup["token"])
+                        break
+            if not token:
+                raise HTTPException(status_code=500, detail="Could not create share link")
+    return {
+        "token": token,
+        "url": _standalone_share_url(token),
+        "entity_type": entity_type,
+    }
 
 
 def _ensure_worker_short_links_table() -> None:
@@ -5963,6 +6058,8 @@ def _public_worker_response(worker: Dict[str, Any], config: WorkerConfig) -> Pub
         how_it_works=worker.get("how_it_works"),
         is_example=worker.get("is_example"),
         tags=worker.get("tags") or [],
+        example_input=worker.get("example_input"),
+        example_output=worker.get("example_output"),
         trigger_type=str(worker.get("trigger_type") or "manual"),
         runtime=(config.runtime.type if config.runtime else None),
         connections=_public_connection_labels(config),
@@ -6214,12 +6311,277 @@ def resolve_worker_short_link(
     return _public_worker_response(worker, config)
 
 
-@app.get("/s/{short_id}", response_model=PublicWorker)
-def resolve_worker_short_link_alias(
-    short_id: str,
+def _json_noindex(payload: Dict[str, Any], *, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(payload, status_code=status_code, headers=_public_noindex_headers())
+
+
+def _file_has_share_blocking_secret(rel: str, data: bytes) -> bool:
+    return bool(_scan_context_write(rel, data))
+
+
+def _assert_context_file_shareable(rel: str, target: Path) -> None:
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    try:
+        data = target.read_bytes()
+    except OSError:
+        raise HTTPException(status_code=404, detail="Context file not found")
+    if _file_has_share_blocking_secret(rel, data):
+        raise HTTPException(
+            status_code=409,
+            detail="Move detected secrets to the Secrets vault before sharing this file",
+        )
+
+
+def _assert_context_pack_shareable(name: str) -> None:
+    root = context_dir(name)
+    for path in iter_context_files(root):
+        rel = path.relative_to(root).as_posix()
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if _file_has_share_blocking_secret(rel, data):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Move detected secrets to the Secrets vault before sharing {rel}",
+            )
+
+
+def _public_file_entry(name: str, root: Path, path: Path, token: str | None = None) -> Dict[str, Any]:
+    rel = path.relative_to(root).as_posix()
+    meta = context_file_metadata(root, path, pack_metadata=load_context_metadata().get(name) or {})
+    raw = path.read_bytes()
+    mime_type = str(meta.get("mime_type") or guess_mime_type(rel))
+    binary = bool(meta.get("is_binary")) or is_binary_file(rel, mime_type)
+    content_text: str | None = None
+    if not binary and len(raw) <= PUBLIC_SHARE_TEXT_PREVIEW_LIMIT:
+        content_text = raw.decode("utf-8", errors="replace")
+    entry = {
+        "path": rel,
+        "size": int(meta.get("size") or len(raw)),
+        "mime_type": mime_type,
+        "display_type": meta.get("display_type") or "File",
+        "is_binary": binary,
+        "updated_at": meta.get("updated_at"),
+        "description": meta.get("description"),
+        "tags": meta.get("tags") or [],
+        "metadata": meta.get("metadata") or {},
+        "content_text": content_text,
+    }
+    if token:
+        entry["download_url"] = f"{_frontend_base_url()}/s/{urllib.parse.quote(token, safe='')}/download"
+    return entry
+
+
+def _public_brain_file_share(row: Dict[str, Any]) -> Dict[str, Any]:
+    owner_id = str(row.get("owner_id") or "")
+    name = str(row.get("entity_id") or "")
+    rel = str(row.get("file_path") or "")
+    token = str(row.get("token") or "")
+    with use_context_scope(context_scope_for_user(owner_id)):
+        safe_name = _context_name_or_400(name)
+        rel = _context_file_path_or_400(rel)
+        target = _safe_context_file_or_400(safe_name, rel)
+        _assert_context_file_shareable(rel, target)
+        root = context_dir(safe_name)
+        summary = _context_summary(safe_name, load_context_metadata(), user_id=owner_id)
+        file_entry = _public_file_entry(safe_name, root, target, token)
+    return {
+        "entity_type": "brain_file",
+        "title": Path(rel).name,
+        "description": f"{safe_name} / {rel}",
+        "pack": {
+            "name": summary.name,
+            "description": summary.description,
+            "file_count": summary.file_count,
+            "total_size_bytes": summary.total_size_bytes,
+        },
+        "file": file_entry,
+        "files": [file_entry],
+    }
+
+
+def _public_brain_pack_share(row: Dict[str, Any]) -> Dict[str, Any]:
+    owner_id = str(row.get("owner_id") or "")
+    name = str(row.get("entity_id") or "")
+    with use_context_scope(context_scope_for_user(owner_id)):
+        safe_name = _context_name_or_400(name)
+        _assert_context_pack_shareable(safe_name)
+        root = context_dir(safe_name)
+        if not root.is_dir():
+            raise HTTPException(status_code=404, detail="Brain pack not found")
+        metadata = load_context_metadata()
+        summary = _context_summary(safe_name, metadata, user_id=owner_id)
+        files = [
+            _public_file_entry(safe_name, root, path)
+            for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
+        ]
+    preview_file = next((f for f in files if f.get("content_text")), files[0] if files else None)
+    return {
+        "entity_type": "brain_pack",
+        "title": summary.name,
+        "description": summary.description or f"{summary.file_count} files",
+        "pack": {
+            "name": summary.name,
+            "description": summary.description,
+            "file_count": summary.file_count,
+            "total_size_bytes": summary.total_size_bytes,
+            "updated_at": summary.updated_at,
+        },
+        "file": preview_file,
+        "files": files,
+    }
+
+
+def _public_worker_share_from_worker(worker: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        config = WorkerConfig(**(worker.get("config") or {}))
+    except Exception:
+        config = WorkerConfig(
+            id=str(worker.get("id") or ""),
+            name=str(worker.get("name") or ""),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
+    public = _public_worker_response(worker, config).model_dump()
+    return {
+        "entity_type": "worker",
+        "title": public.get("name"),
+        "description": public.get("description") or public.get("long_description"),
+        "worker": public,
+        "files": [],
+    }
+
+
+def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
+    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
+        raise HTTPException(status_code=404, detail="Share link not found")
+    _ensure_standalone_share_links_table()
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT token, entity_type, entity_id, file_path, owner_id, created_at
+            FROM standalone_share_links
+            WHERE token = ?
+            LIMIT 1
+            """,
+            (token,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _standalone_share_payload(token: str, repos: Repositories) -> Dict[str, Any]:
+    row = _load_standalone_share_row(token)
+    if row:
+        entity_type = str(row.get("entity_type") or "")
+        if entity_type == "worker":
+            worker = repos.workers.get_any(worker_id=str(row.get("entity_id") or ""))
+            if not worker or str(worker.get("owner_id") or "") != str(row.get("owner_id") or ""):
+                raise HTTPException(status_code=404, detail="Share link not found")
+            return _public_worker_share_from_worker(worker)
+        if entity_type == "brain_file":
+            return _public_brain_file_share(row)
+        if entity_type == "brain_pack":
+            return _public_brain_pack_share(row)
+        raise HTTPException(status_code=404, detail="Share link not found")
+
+    # Backward compatibility for worker short links created before the unified
+    # share table existed.
+    worker = _load_short_link_public_worker(token, repos)
+    return _public_worker_share_from_worker(worker)
+
+
+@app.post("/workers/{worker_id}/share-link")
+def create_worker_share_link(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> PublicWorker:
-    return resolve_worker_short_link(short_id, repos)
+) -> Dict[str, str]:
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    perms = _worker_permissions(worker, user_id=auth.user_id, repos=repos)
+    if not perms.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this worker")
+    return _create_or_get_standalone_share_link(
+        entity_type="worker",
+        entity_id=str(worker["id"]),
+        owner_id=str(worker.get("owner_id") or auth.user_id),
+    )
+
+
+@app.post("/contexts/{name}/share-link")
+def create_brain_pack_share_link(
+    name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    summary = _context_summary(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+    if not summary.permissions.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this brain pack")
+    _assert_context_pack_shareable(safe_name)
+    return _create_or_get_standalone_share_link(
+        entity_type="brain_pack",
+        entity_id=safe_name,
+        owner_id=auth.user_id,
+    )
+
+
+@app.post("/contexts/{name}/files/{file_path:path}/share-link")
+def create_brain_file_share_link(
+    name: str,
+    file_path: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    summary = _context_summary(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+    if not summary.permissions.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this brain file")
+    rel = _context_file_path_or_400(file_path)
+    target = _safe_context_file_or_400(safe_name, rel)
+    _assert_context_file_shareable(rel, target)
+    return _create_or_get_standalone_share_link(
+        entity_type="brain_file",
+        entity_id=safe_name,
+        file_path=rel,
+        owner_id=auth.user_id,
+    )
+
+
+@app.get("/s/{token}/download")
+def download_standalone_share_file(
+    token: str,
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    row = _load_standalone_share_row(token)
+    if not row or row.get("entity_type") != "brain_file":
+        raise HTTPException(status_code=404, detail="Download not found")
+    owner_id = str(row.get("owner_id") or "")
+    safe_name = str(row.get("entity_id") or "")
+    rel = str(row.get("file_path") or "")
+    with use_context_scope(context_scope_for_user(owner_id)):
+        safe_name = _context_name_or_400(safe_name)
+        rel = _context_file_path_or_400(rel)
+        target = _safe_context_file_or_400(safe_name, rel)
+        _assert_context_file_shareable(rel, target)
+        mime_type = guess_mime_type(rel)
+        headers = {
+            **_public_noindex_headers(),
+            "Content-Disposition": f'attachment; filename="{_sanitize_download_name(Path(rel).name)}"',
+            "X-Content-Type-Options": "nosniff",
+        }
+        return FileResponse(target, media_type=mime_type, headers=headers)
+
+
+@app.get("/s/{token}")
+def get_standalone_share(
+    token: str,
+    repos: Repositories = Depends(get_repos),
+) -> JSONResponse:
+    return _json_noindex(_standalone_share_payload(token, repos))
 
 
 @app.get("/workers/{worker_id}", response_model=WorkerDetail)

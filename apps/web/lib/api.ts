@@ -172,6 +172,10 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ visibility }),
       }),
+    shareLink: (id: string) =>
+      fetchJson<import("./types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
+        method: "POST",
+      }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
     run: (id: string, inputs: Record<string, unknown>) =>
@@ -440,6 +444,11 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/visibility`,
         { method: "PUT", body: JSON.stringify({ visibility }) }
       ),
+    sharePackLink: (name: string) =>
+      fetchJson<import("./types").StandaloneShareLink>(
+        `/contexts/${encodeURIComponent(name)}/share-link`,
+        { method: "POST" }
+      ),
     delete: (name: string, force = false) =>
       fetchJson<{ status: string; referenced_by: string[] }>(
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
@@ -454,6 +463,11 @@ export const api = {
       fetchJson<import("./types").ContextDetail>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
         { method: "DELETE" }
+      ),
+    shareFileLink: (name: string, path: string) =>
+      fetchJson<import("./types").StandaloneShareLink>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
+        { method: "POST" }
       ),
     readTextFile: async (name: string, path: string) => {
       const res = await fetchRaw(

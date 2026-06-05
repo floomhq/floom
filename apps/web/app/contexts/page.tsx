@@ -1176,12 +1176,16 @@ function PackDetailPane({
 }) {
   const [packLinkCopied, setPackLinkCopied] = useState(false);
 
-  function copyPackLink() {
-    const url = `${window.location.origin}${BRAIN_ROUTE}?pack=${encodeURIComponent(detail.name)}`;
-    navigator.clipboard.writeText(url).then(() => {
+  async function copyPackLink() {
+    try {
+      const link = await api.contexts.sharePackLink(detail.name);
+      await navigator.clipboard.writeText(link.url);
       setPackLinkCopied(true);
+      toast.success("Share link copied");
       setTimeout(() => setPackLinkCopied(false), 1500);
-    });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create share link");
+    }
   }
 
   return (
@@ -1234,7 +1238,7 @@ function PackDetailPane({
               type="button"
               onClick={copyPackLink}
               className="p-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground transition-colors shrink-0"
-              title="Copy link to this pack"
+              title="Share this pack"
             >
               {packLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
             </button>
@@ -1558,13 +1562,17 @@ function FilePane({
   const [fileLinkCopied, setFileLinkCopied] = useState(false);
   if (!file) return null;
 
-  function copyFileLink() {
+  async function copyFileLink() {
     if (!file) return;
-    const url = `${window.location.origin}${BRAIN_ROUTE}?pack=${encodeURIComponent(packName)}&file=${encodeURIComponent(file.path)}`;
-    navigator.clipboard.writeText(url).then(() => {
+    try {
+      const link = await api.contexts.shareFileLink(packName, file.path);
+      await navigator.clipboard.writeText(link.url);
       setFileLinkCopied(true);
+      toast.success("Share link copied");
       setTimeout(() => setFileLinkCopied(false), 1500);
-    });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create share link");
+    }
   }
 
   const canEdit = isKnownTextFile(file) && !readOnly;
@@ -1632,7 +1640,7 @@ function FilePane({
             type="button"
             onClick={copyFileLink}
             className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-default)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            title="Copy link to this file"
+            title="Share this file"
           >
             {fileLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
           </button>
@@ -2321,4 +2329,3 @@ function MarkdownRenderer({ content }: { content: string }) {
     </div>
   );
 }
-
