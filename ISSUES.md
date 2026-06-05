@@ -4,6 +4,30 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 ---
 
+## Backend pass 3 - multi-tenant, capabilities, codegen self-check (2026-06-05)
+
+**Scope:** M31 persona-global, M32/M33 brain and connection write permissions, M39 WhatsApp per-sender routing, #E2 generated-worker example self-check, and M41 Slack greeting copy.
+
+**Status:** VERIFIED
+
+**Fix:** commit `be7ff47a1df176e1e97e06d3a4999da90f6900eb` moves Emily's immutable base persona into engine code, keeps editable workspace instructions custom-only, adds `workspace_agent_settings` capability gates, adds `whatsapp_sender_bindings` with claim flow, enforces manifest `example_input`/`example_output` in worker smoke gates, and updates Slack Chief-of-Staff greeting copy.
+
+**Verification:**
+- Local verification: API py_compile passed, `git diff --check` passed, full API suite passed twice after the final patch/rebase (`561 passed, 185 warnings`), frontend build passed, frontend lint passed with 0 errors and 21 existing warnings.
+- Codex review found and the commit fixed five issues: WhatsApp claim UI wiring, numeric sample type, Emily direct worker manifest smoke bundle, settings base-path preservation, and manifest `example_input` use with `example_output`.
+- Deployed once with `ops/deploy-api.sh`; service restarted. The script's `/health` gate passed, then its `/healthz` assertion exited with `got 000000`; direct post-deploy `/healthz` returned 200 and the script was not rerun.
+- Public `/health` returned HTTP 200 with DB/disk/E2B/OpenAI/Composio all `ok`; systemd service `workeros-api` was active.
+- Active production working directory `/opt/workeros-api-deploy/apps/api` verified at SHA `be7ff47a1df176e1e97e06d3a4999da90f6900eb`; deployed tracked paths matched `origin/main`.
+- M31 prod: after replacing `/workspace` with custom-only `PASS3_CUSTOM_TOKEN`, `/system/workspace-agent` still contained `You are Emily` and `Chief-of-Staff`; `/chat` streamed `p3test-pass3-chat-ok`; original workspace content restored.
+- M32/M33 prod: live tool list changed with settings flags; read-only mode exposed brain/connection reads and hid writes/adds; write/add mode exposed `brain__write`, `contexts__write`, `connections__add_mcp` and hid read tools as configured; original settings restored.
+- M39 prod: unbound WhatsApp sender got a claim link and zero workspace route; two bound sender IDs routed to distinct `p3test-user-a` / `p3test-user-b`; all test rows deleted.
+- #E2 prod: logically wrong `p3test-median-wrong` and `p3test-sum-wrong` workers smoke-failed; correct `p3test-median-ok` smoke-passed; all test workers deleted and follow-up GETs returned 404.
+- M41 prod: monkeypatched deployed Slack handler emitted exact greeting: `I'm Emily, your personal Chief-of-Staff. I route tasks to a swarm of always-on agents and workers. DM me or @mention me.`
+
+**Audit:** `docs/audits/backend-pass3-2026-06-05.md`
+
+---
+
 ## P0 — from-prompt new-worker flow failed on gpt-5.x temperature (2026-06-05)
 
 **Scope:** `POST /workers/new/from-prompt` → worker-author meta-worker in E2B; gpt-5.x model compatibility.
