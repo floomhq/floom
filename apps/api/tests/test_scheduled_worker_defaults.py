@@ -103,6 +103,30 @@ inputs:
 connections: []
 """
 
+_SCHEDULED_MISSING_SECRET_YML = """\
+schema_version: "0.3"
+name: "scheduled-missing-secret"
+title: "Scheduled Missing Secret"
+description: "A scheduled worker that cannot run until its credential exists."
+version: "0.1.0"
+trigger:
+  type: "schedule"
+  cron: "*/5 * * * *"
+exec:
+  entry: "run.py"
+  runtime: "python311"
+  runner: "local"
+  command: "python run.py"
+inputs: []
+outputs:
+  - name: "summary"
+    type: "markdown"
+    required: true
+secrets:
+  - MISSING_API_KEY
+connections: []
+"""
+
 
 @pytest.fixture
 def client_and_main(monkeypatch, tmp_path):
@@ -113,6 +137,7 @@ def client_and_main(monkeypatch, tmp_path):
         ("scheduled-no-defaults", _SCHEDULED_MISSING_DEFAULTS_YML),
         ("scheduled-with-defaults", _SCHEDULED_WITH_DEFAULTS_YML),
         ("manual-no-defaults", _MANUAL_MISSING_DEFAULTS_YML),
+        ("scheduled-missing-secret", _SCHEDULED_MISSING_SECRET_YML),
     ]:
         wdir = workers_dir / name
         wdir.mkdir()
@@ -235,6 +260,42 @@ def test_scheduled_run_creation_applies_worker_yml_defaults(client_and_main):
     if isinstance(payload, str):
         payload = json.loads(payload)
     assert payload["channel_id"] == "123456789012345678"
+
+
+def test_repeated_scheduled_missing_secret_failures_auto_pause_worker(client_and_main, monkeypatch):
+    _, _, workers_dir = client_and_main
+    monkeypatch.setenv("WORKEROS_SCHEDULE_MISSING_SECRET_PAUSE_AFTER", "3")
+    run_service = importlib.import_module("run_service")
+    db = importlib.import_module("db")
+    repos = db.get_repositories()
+
+    run_ids = []
+    for _ in range(3):
+        run_id = run_service.create_run(
+            "scheduled-missing-secret",
+            {},
+            trigger_source="schedule",
+            user_id="federico",
+            repos=repos,
+        )
+        run_ids.append(run_id)
+        run_service.execute_run(
+            run_id,
+            "scheduled-missing-secret",
+            {},
+            user_id="federico",
+            repos=repos,
+        )
+
+    for run_id in run_ids:
+        row = repos.runs.get(user_id="federico", run_id=run_id)
+        assert row["status"] == "failed"
+        assert row["error_code"] == "missing_secret"
+
+    worker = repos.workers.get(user_id="federico", worker_id="scheduled-missing-secret")
+    assert worker["enabled"] is False
+    assert worker["manifest"]["paused"] is True
+    assert "paused: true" in (workers_dir / "scheduled-missing-secret" / "worker.yml").read_text(encoding="utf-8")
 
 
 def test_manual_worker_with_missing_defaults_is_not_flagged(client_and_main):

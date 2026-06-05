@@ -12175,6 +12175,14 @@ def _get_callback_url() -> str:
     return f"{base}/connections/callback"
 
 
+def _raise_composio_unavailable(exc: Exception) -> None:
+    from composio_client import ComposioConfigurationError
+
+    if isinstance(exc, ComposioConfigurationError):
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
+
+
 @app.get("/integrations/catalog", response_model=IntegrationCatalogResponse)
 def integrations_catalog(
     page: int = Query(1, ge=1),
@@ -12187,7 +12195,7 @@ def integrations_catalog(
     When ``category`` contains multiple comma-separated slugs, results from each
     slug are fetched separately and merged (union, de-duplicated by app slug).
     """
-    from composio_client import list_catalog_apps
+    from composio_client import ComposioConfigurationError, list_catalog_apps
 
     # Split comma-separated categories for OR-merge support.
     category_slugs = [s.strip() for s in category.split(",") if s.strip()] if category.strip() else []
@@ -12205,6 +12213,7 @@ def integrations_catalog(
         else:
             # Multi-category: fetch each slug and merge (de-duplicated by app slug).
             seen: Dict[str, Any] = {}
+            first_error: Exception | None = None
             for slug in category_slugs:
                 try:
                     partial = list_catalog_apps(
@@ -12216,8 +12225,14 @@ def integrations_catalog(
                     for item in partial.get("items") or []:
                         if item["slug"] not in seen:
                             seen[item["slug"]] = item
+                except ComposioConfigurationError:
+                    raise
                 except Exception:
+                    if first_error is None:
+                        first_error = sys.exc_info()[1]
                     logger.warning("Failed to fetch category %s from Composio", slug)
+            if first_error is not None and not seen:
+                raise first_error
 
             all_items = list(seen.values())
             total_items = len(all_items)
@@ -12239,7 +12254,7 @@ def integrations_catalog(
         raise
     except Exception as exc:
         logger.exception("Failed to load Composio catalog")
-        raise HTTPException(status_code=502, detail=f"Composio catalog error: {exc}") from exc
+        _raise_composio_unavailable(exc)
     return IntegrationCatalogResponse(**result)
 
 
@@ -12768,7 +12783,7 @@ def initiate_connection(
         ) from exc
     except Exception as exc:
         logger.exception("Failed to initiate Composio connection for %s", app_name)
-        raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
+        _raise_composio_unavailable(exc)
 
     composio_conn_id = result["composio_connection_id"]
     redirect_url = result["redirect_url"]
@@ -12844,7 +12859,7 @@ def create_mcp_connection(
 
 
 @app.get("/connections/callback")
-def connections_callback(connection_id: str = "", status: str = ""):
+def connections_callback(request: Request, connection_id: str = "", status: str = ""):
     """OAuth callback landing — Composio redirects here after user authorizes.
 
     Composio sends: ?connection_id=<composio_conn_id>&status=<status>
@@ -12859,10 +12874,18 @@ def connections_callback(connection_id: str = "", status: str = ""):
     landing_id = ""
     landing_app = ""
 
-    if connection_id:
+    callback_connection_id = (
+        connection_id
+        or request.query_params.get("connected_account_id", "")
+        or request.query_params.get("connectedAccountId", "")
+        or request.query_params.get("connectionId", "")
+        or request.query_params.get("id", "")
+    )
+
+    if callback_connection_id:
         repos = get_repositories()
         existing = repos.connections.get_by_composio_connection_id(
-            composio_connection_id=connection_id,
+            composio_connection_id=callback_connection_id,
         )
 
         # F2 (2026-06-03) — connection-existence timing oracle: ACCEPTED.
@@ -12899,7 +12922,7 @@ def connections_callback(connection_id: str = "", status: str = ""):
         # Try to refresh from Composio first
         try:
             from composio_client import check_status
-            remote_status = _normalize_composio_connection_status(check_status(connection_id))
+            remote_status = _normalize_composio_connection_status(check_status(callback_connection_id))
         except Exception:
             remote_status = ""
 
@@ -12913,7 +12936,7 @@ def connections_callback(connection_id: str = "", status: str = ""):
             user_id=existing["user_id"],
             composio_id=existing["id"],
             status=final_status,
-            composio_connection_id=connection_id,
+            composio_connection_id=callback_connection_id,
             updated_at=now,
         )
 
@@ -12927,7 +12950,7 @@ def connections_callback(connection_id: str = "", status: str = ""):
         landing_id, landing_app = _dedupe_connection_account(
             repos=repos,
             row=existing,
-            connection_id=connection_id,
+            connection_id=callback_connection_id,
             final_status=final_status,
             now=now,
         )
@@ -13009,8 +13032,8 @@ def _dedupe_connection_account(
         "The existing /connections/callback route remains the primary callback URL."
     ),
 )
-def connections_callback_alias(connection_id: str = "", status: str = ""):
-    return connections_callback(connection_id=connection_id, status=status)
+def connections_callback_alias(request: Request, connection_id: str = "", status: str = ""):
+    return connections_callback(request=request, connection_id=connection_id, status=status)
 
 
 @app.get("/connections/{connection_id}/status", response_model=ConnectionItem)
@@ -13098,10 +13121,15 @@ def get_connection_account_info(
         repos=repos,
     )
 
+    if not os.environ.get("COMPOSIO_API_KEY", "").strip():
+        raise HTTPException(
+            status_code=503,
+            detail="Composio is not configured on this server. Set COMPOSIO_API_KEY to enable connections.",
+        )
     composio_conn_id = row["composio_connection_id"]
     info = _fetch_composio_account_info(composio_conn_id, user_id=auth.user_id)
     if not info:
-        raise HTTPException(status_code=502, detail="Unable to fetch account info from upstream")
+        raise HTTPException(status_code=503, detail="Unable to fetch account info from upstream")
 
     # Cache scopes + account_label in DB for the list endpoint.
     account_label = info.get("email") or ""
@@ -13471,7 +13499,7 @@ def list_integration_triggers(
         items = list_triggers()
     except Exception as exc:
         logger.exception("Failed to fetch Composio trigger catalog")
-        raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
+        _raise_composio_unavailable(exc)
 
     with _trigger_catalog_lock:
         _trigger_catalog_cache["items"] = items

@@ -69,11 +69,31 @@ describe("middleware auth gate", () => {
     }
   });
 
+  it("keeps the OAuth callback page and exact proxy callback reachable without login", async () => {
+    const { middleware } = await import("@/middleware");
+
+    const page = await middleware(req("/connections/callback?status=success&connection_id=ca_test"));
+    expect(page.status).toBe(200);
+    expect(page.headers.get("x-middleware-next")).toBe("1");
+
+    const proxy = await middleware(req("/api/proxy/connections/callback?status=success&connection_id=ca_test"));
+    expect(proxy.status).toBe(200);
+    expect(proxy.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("does NOT leak the authed approvals proxy through the public prefix", async () => {
     const { middleware } = await import("@/middleware");
     // The plain /api/proxy/approvals list is NOT public.
     const res = await middleware(req("/api/proxy/approvals"));
     expect(res.status).toBe(401);
+  });
+
+  it("does NOT leak neighboring connections proxy routes through the callback exception", async () => {
+    const { middleware } = await import("@/middleware");
+    for (const p of ["/api/proxy/connections", "/api/proxy/connections/callback-extra"]) {
+      const res = await middleware(req(p));
+      expect(res.status).toBe(401);
+    }
   });
 
   it("lets the auth endpoints through unauthenticated", async () => {
@@ -95,7 +115,7 @@ describe("middleware auth gate", () => {
 
   it("keeps public pages reachable without login", async () => {
     const { middleware } = await import("@/middleware");
-    for (const p of ["/login", "/approvals/review?id=x&token=y", "/w/abc?token=y"]) {
+    for (const p of ["/login", "/connections/callback?status=success", "/approvals/review?id=x&token=y", "/w/abc?token=y"]) {
       const res = await middleware(req(p));
       expect(res.headers.get("x-middleware-next")).toBe("1");
     }

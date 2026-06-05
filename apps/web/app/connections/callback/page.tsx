@@ -31,7 +31,13 @@ function CallbackInner() {
       }
     } else {
       // Forward all params to the API callback endpoint, then redirect
-      const connectionId = params.get("connection_id") || params.get("connectionId") || "";
+      const connectionId =
+        params.get("connection_id") ||
+        params.get("connectionId") ||
+        params.get("connected_account_id") ||
+        params.get("connectedAccountId") ||
+        params.get("id") ||
+        "";
       const status = params.get("status") || "";
       const qs = new URLSearchParams();
       if (connectionId) qs.set("connection_id", connectionId);

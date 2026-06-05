@@ -102,6 +102,15 @@ def test_mcp_tools_alias_crud_and_emily_metadata(monkeypatch, tmp_path):
     assert listed.status_code == 200, listed.text
     assert tool_name in {item["name"] for item in listed.json()}
 
+    rpc_list = client.post(
+        "/mcp-tools/serve",
+        headers=_headers("user-a"),
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
+    assert rpc_list.status_code == 200, rpc_list.text
+    rpc_tools = rpc_list.json()["result"]["tools"]
+    assert tool_name in {item["name"] for item in rpc_tools}
+
     updated = client.put(
         f"/mcp/tools/{tool['id']}",
         headers=_headers("user-a"),
