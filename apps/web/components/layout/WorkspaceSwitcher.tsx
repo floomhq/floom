@@ -294,24 +294,39 @@ export function WorkspaceSwitcher() {
                 <Settings2 className="size-4" />
                 Workspace actions
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="w-56 p-1">
+              {/* M34/M35: clarified labels. Export = download a zip anyone can
+                  import; Share template link = a signed URL to that zip (no
+                  secrets, no connections); Duplicate = live copy in this
+                  instance with agents + instructions, connections & secrets
+                  NOT copied (intentional: they must be reconnected). */}
+              <DropdownMenuSubContent className="w-64 p-1">
                 <DropdownMenuItem
                   closeOnClick={false}
                   disabled={exporting}
                   onClick={() => void handleExport()}
-                  className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
                 >
-                  <Download className="size-4" />
-                  {exporting ? "Exporting…" : "Export / share as template"}
+                  <div className="flex items-center gap-2">
+                    <Download className="size-4 shrink-0" />
+                    <span>{exporting ? "Exporting…" : "Export workspace"}</span>
+                  </div>
+                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                    Download a zip of agents + instructions (no secrets)
+                  </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   closeOnClick={false}
                   disabled={importing}
                   onClick={() => importInputRef.current?.click()}
-                  className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
                 >
-                  <Upload className="size-4" />
-                  {importing ? "Importing…" : "Import template…"}
+                  <div className="flex items-center gap-2">
+                    <Upload className="size-4 shrink-0" />
+                    <span>{importing ? "Importing…" : "Import workspace…"}</span>
+                  </div>
+                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                    Restore from an exported zip
+                  </span>
                 </DropdownMenuItem>
                 {/* W9b: Duplicate mints a "<name> (copy)" sibling; Share copies a
                     signed login-free download link (no secret values). */}
@@ -319,19 +334,29 @@ export function WorkspaceSwitcher() {
                   closeOnClick={false}
                   disabled={duplicating}
                   onClick={() => void handleDuplicate()}
-                  className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
                 >
-                  <Copy className="size-4" />
-                  {duplicating ? "Duplicating…" : "Duplicate workspace"}
+                  <div className="flex items-center gap-2">
+                    <Copy className="size-4 shrink-0" />
+                    <span>{duplicating ? "Duplicating…" : "Duplicate workspace"}</span>
+                  </div>
+                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                    Copies agents + instructions. Connections &amp; secrets are not copied — reconnect after.
+                  </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   closeOnClick={false}
                   disabled={sharingLink}
                   onClick={() => void handleShareLink()}
-                  className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
                 >
-                  <Link2 className="size-4" />
-                  {sharingLink ? "Creating link…" : "Share template link"}
+                  <div className="flex items-center gap-2">
+                    <Link2 className="size-4 shrink-0" />
+                    <span>{sharingLink ? "Creating link…" : "Share as template link"}</span>
+                  </div>
+                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                    Shareable link to the exported zip — no secrets included
+                  </span>
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
