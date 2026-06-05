@@ -122,6 +122,10 @@ _CONTENT_ARG_KEYS = {
 }
 _BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
 _TOKEN_LIKE_RE = re.compile(r"\b(?:sk|pat|ghp|glpat|xox[baprs])[-_A-Za-z0-9]{12,}\b")
+_SECRET_QUERY_RE = re.compile(
+    r"([?&](?:token|key|secret|signature|sig|code)=)([^&\s]+)",
+    re.IGNORECASE,
+)
 _current_chat_conversation_id: ContextVar[Optional[str]] = ContextVar(
     "workeros_chat_conversation_id",
     default=None,
@@ -499,6 +503,10 @@ def _looks_sensitive_string(value: str) -> bool:
     return bool(_BEARER_RE.search(value) or _TOKEN_LIKE_RE.search(value))
 
 
+def _sanitize_preview_text(value: str) -> str:
+    return _SECRET_QUERY_RE.sub(r"\1[redacted]", value)
+
+
 def _arg_key_tokens(key: str) -> str:
     snake = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(key or ""))
     snake = re.sub(r"[^A-Za-z0-9]+", "_", snake)
@@ -545,6 +553,7 @@ def _preview_scalar(value: Any, *, key: str = "") -> Any:
         return _redacted_marker("file content", text)
     if _looks_sensitive_string(text):
         return _redacted_marker("secret-like value", text)
+    text = _sanitize_preview_text(text)
     if _looks_like_large_markup(key, text):
         return {
             "redacted": True,
