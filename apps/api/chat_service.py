@@ -122,6 +122,46 @@ def strip_em_dashes(text: str) -> str:
     return text
 
 
+def _is_bare_greeting(message: str) -> bool:
+    text = " ".join(str(message or "").strip().lower().split())
+    text = text.rstrip("!.?")
+    return text in {
+        "hi",
+        "hello",
+        "hey",
+        "hiya",
+        "yo",
+        "good morning",
+        "good afternoon",
+        "good evening",
+    }
+
+
+def _ensure_bare_greeting_identity(message: str, reply: str) -> str:
+    """Make the bare-greeting contract deterministic without changing persona text."""
+    if not _is_bare_greeting(message):
+        return reply
+    text = str(reply or "").strip()
+    if not text or "I'm Emily" in text:
+        return text
+    for prefix in (
+        "Hi. I checked the workspace.\n\n",
+        "Hello. I checked the workspace.\n\n",
+        "Hi. I checked the workspace.",
+        "Hello. I checked the workspace.",
+        "Hi.\n\n",
+        "Hello.\n\n",
+        "Hi. ",
+        "Hello. ",
+    ):
+        if text.startswith(prefix):
+            text = text[len(prefix):].lstrip()
+            break
+    if text.startswith("- "):
+        return f"I'm Emily. Workspace state:\n\n{text}"
+    return f"I'm Emily. {text}" if text else "I'm Emily."
+
+
 # ---------------------------------------------------------------------------
 # workspace prompt helpers
 # ---------------------------------------------------------------------------
@@ -2841,7 +2881,10 @@ async def stream_chat(
             args = json.loads(raw_args or "{}")
         except json.JSONDecodeError:
             args = {}
-        reply = strip_em_dashes(str(args.get("reply") or ""))
+        reply = _ensure_bare_greeting_identity(
+            message,
+            strip_em_dashes(str(args.get("reply") or "")),
+        )
         final_reply_box["reply"] = reply
         # Emit as text part if the agent didn't stream text deltas
         if reply and not assistant_text_parts:
@@ -2922,7 +2965,10 @@ async def stream_chat(
                     t = _get(c, "text")
                     if t:
                         texts.append(str(t))
-                full_text = strip_em_dashes("".join(texts))
+                full_text = _ensure_bare_greeting_identity(
+                    message,
+                    strip_em_dashes("".join(texts)),
+                )
                 if full_text:
                     assistant_text_parts.append(full_text)
                     await part_queue.put({"type": "text", "text": full_text})
@@ -2942,7 +2988,13 @@ async def stream_chat(
                     and isinstance(raw_args, dict)
                     and isinstance(raw_args.get("reply"), str)
                 ):
-                    raw_args = {**raw_args, "reply": strip_em_dashes(raw_args["reply"])}
+                    raw_args = {
+                        **raw_args,
+                        "reply": _ensure_bare_greeting_identity(
+                            message,
+                            strip_em_dashes(raw_args["reply"]),
+                        ),
+                    }
                 await part_queue.put({
                     "type": "tool-call",
                     "toolName": tool_name_raw,
@@ -2972,6 +3024,7 @@ async def stream_chat(
         full_reply = "".join(assistant_text_parts).strip()
         if not full_reply and "reply" in final_reply_box:
             full_reply = final_reply_box["reply"]
+        full_reply = _ensure_bare_greeting_identity(message, full_reply)
         if full_reply:
             final_message_id = insert_message(conversation_id, "assistant", full_reply)
 
