@@ -16,6 +16,7 @@ import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { ShareWorkerButton } from "@/components/ShareWorkerButton";
+import { PromptText } from "@/components/PromptText";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -569,7 +570,7 @@ function EmptyWorkersState() {
                   href={`/workers/new?prompt=${encodeURIComponent(ex)}`}
                   className="block rounded-[var(--radius-button)] px-3 py-2 text-sm hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
                 >
-                  &quot;{ex}&quot;
+                  &quot;<PromptText>{ex}</PromptText>&quot;
                 </Link>
               </li>
             ))}
