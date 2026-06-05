@@ -143,6 +143,31 @@ def test_operator_create_and_upload_roundtrip(client_and_main):
     assert any(f["path"] == "icp.md" for f in detail["files"])
 
 
+def test_upload_can_create_missing_pack_when_requested(client_and_main):
+    client, _main = client_and_main
+
+    missing = client.post(
+        "/contexts/drop-created/upload",
+        files={"files": ("first-note.md", b"# First\nDrop flow.\n", "text/markdown")},
+    )
+    assert missing.status_code == 404
+
+    created = client.post(
+        "/contexts/drop-created/upload",
+        data={"create_if_missing": "true"},
+        files={"files": ("first-note.md", b"# First\nDrop flow.\n", "text/markdown")},
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["files"][0]["path"] == "first-note.md"
+
+    detail = client.get("/contexts/drop-created")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["writeable"] is True
+    assert body["owner_id"] == "federico"
+    assert any(f["path"] == "first-note.md" for f in body["files"])
+
+
 def test_context_file_metadata_tags_roundtrip(client_and_main):
     client, _main = client_and_main
     assert client.post("/contexts/my-company").status_code == 200

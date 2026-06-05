@@ -5537,7 +5537,7 @@ def delete_context_file(
     set_context_file_metadata(safe_name, rel, tags=[], file_metadata={}, owner_id=auth.user_id)
     _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos, deleted=True)
     _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
-    return _context_detail(safe_name)
+    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
 @app.post("/contexts/{name}/upload", response_model=ContextUploadResponse)
@@ -5547,10 +5547,24 @@ async def upload_context_files(
     path_prefix: str = Form(""),
     tags_json: str = Form(""),
     metadata_json: str = Form(""),
+    create_if_missing: bool = Form(False),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextUploadResponse:
-    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    safe_name = _context_name_or_400(name)
+    root = context_dir(safe_name)
+    if root.is_dir():
+        safe_name, _metadata = _require_context_for_user(
+            safe_name,
+            user_id=auth.user_id,
+            repos=repos,
+        )
+    elif create_if_missing:
+        root.mkdir(parents=True, exist_ok=True)
+        set_context_metadata(safe_name, writeable=True, owner_id=auth.user_id)
+        _ensure_brain_pack_row(safe_name, owner_id=auth.user_id, repos=repos)
+    else:
+        raise HTTPException(status_code=404, detail="Context not found")
     raw_prefix = path_prefix.strip().strip("/")
     prefix = _context_file_path_or_400(raw_prefix) if raw_prefix else ""
     upload_tags: List[str] | None = None
