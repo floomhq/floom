@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { CheckCircle2, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,9 @@ export function SlackConnect() {
   const [status, setStatus] = useState<SlackSetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  // M17: track the team that was just connected so we can surface a prominent
+  // "Open in Slack" CTA right after the OAuth round-trip lands the user back.
+  const [justConnectedTeamId, setJustConnectedTeamId] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -43,14 +46,19 @@ export function SlackConnect() {
     void loadStatus();
   }, [loadStatus]);
 
-  // Surface the post-install / error redirect from the OAuth callback once.
+  // M17: detect the post-install redirect from the OAuth callback.
+  // The backend appends ?slack_connected=1&team_id=<id> to the return_to URL.
+  // We capture team_id so we can deep-link straight into that workspace,
+  // then strip the query params so they don't persist on refresh.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const connected = params.get("slack_connected");
+    const teamId = params.get("team_id");
     const slackError = params.get("slack_error");
     if (connected) {
       toast.success("Slack workspace connected");
+      setJustConnectedTeamId(teamId || null);
     } else if (slackError) {
       toast.error(`Slack connection failed: ${slackError}`);
     }
@@ -71,6 +79,13 @@ export function SlackConnect() {
     if (installedTeams.length === 0) return null;
     return installedTeams.map((team) => team.team_name || team.team_id).join(", ");
   }, [installedTeams]);
+
+  // M17: resolve the just-connected team from the status response so we have
+  // the workspace name available for the CTA, not just the ID.
+  const justConnectedTeam = useMemo(() => {
+    if (!justConnectedTeamId) return null;
+    return installedTeams.find((t) => t.team_id === justConnectedTeamId) ?? null;
+  }, [justConnectedTeamId, installedTeams]);
 
   async function addToSlack() {
     setConnecting(true);
@@ -107,6 +122,33 @@ export function SlackConnect() {
         <Skeleton className="h-24 w-full" />
       ) : (
         <>
+          {/* M17: prominent "Open in Slack" CTA shown immediately after the
+              OAuth round-trip. Dismissed once the user navigates away or
+              dismisses manually by clicking the link. */}
+          {justConnectedTeam || (justConnectedTeamId && connected) ? (
+            <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 px-4 py-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span className="text-sm font-medium text-emerald-800 dark:text-emerald-200 truncate">
+                  {justConnectedTeam?.team_name
+                    ? `${justConnectedTeam.team_name} connected`
+                    : "Workspace connected"}
+                </span>
+              </div>
+              <a
+                href={`https://app.slack.com/client/${justConnectedTeamId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setJustConnectedTeamId(null)}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#4A154B] bg-[#4A154B] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#3d1140]"
+              >
+                <SlackMark className="size-3.5" />
+                Open{justConnectedTeam?.team_name ? ` ${justConnectedTeam.team_name}` : ""} in Slack
+                <ExternalLink className="size-3" />
+              </a>
+            </div>
+          ) : null}
+
           {/* Tutorial / empty-state explainer. */}
           <ol className="space-y-1.5 text-xs text-muted-foreground">
             <li>
