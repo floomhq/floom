@@ -2652,13 +2652,25 @@ def list_worker_versions(
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     prefix = _workers_git_prefix()
+    workspace = _git_workspace()
     rows = _git_ops.get_log(
-        _git_workspace(),
+        workspace,
         rel_path=f"{prefix}/{worker_id}",
         limit=min(limit, 100),
         asset_type="worker",
         asset_id=worker_id,
     )
+    if not rows:
+        # First time viewing versions for a pre-existing worker — commit its
+        # current files as the initial baseline so history isn't empty.
+        _git_commit_worker(worker_id, message=f"baseline: snapshot existing {worker_id}")
+        rows = _git_ops.get_log(
+            workspace,
+            rel_path=f"{prefix}/{worker_id}",
+            limit=min(limit, 100),
+            asset_type="worker",
+            asset_id=worker_id,
+        )
     return [VersionSummary(**r) for r in rows]
 
 
@@ -2738,13 +2750,23 @@ def list_context_versions(
     """List git commit history for a brain pack (newest first)."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     prefix = _contexts_git_prefix()
+    workspace = _git_workspace()
     rows = _git_ops.get_log(
-        _git_workspace(),
+        workspace,
         rel_path=f"{prefix}/{safe_name}",
         limit=min(limit, 100),
         asset_type="brain_pack",
         asset_id=safe_name,
     )
+    if not rows:
+        _git_commit_context(safe_name, message=f"baseline: snapshot existing context {safe_name}")
+        rows = _git_ops.get_log(
+            workspace,
+            rel_path=f"{prefix}/{safe_name}",
+            limit=min(limit, 100),
+            asset_type="brain_pack",
+            asset_id=safe_name,
+        )
     return [VersionSummary(**r) for r in rows]
 
 
@@ -18152,6 +18174,10 @@ def list_workspace_versions(
         rel = "workspace.md"
     rows = _git_ops.get_log(workspace, rel_path=rel, limit=min(limit, 100),
                             asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE, asset_id="default")
+    if not rows and WORKSPACE_MD_PATH.is_file():
+        _git_commit_workspace_md(message="baseline: snapshot existing workspace instructions")
+        rows = _git_ops.get_log(workspace, rel_path=rel, limit=min(limit, 100),
+                                asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE, asset_id="default")
     return [VersionSummary(**r) for r in rows]
 
 

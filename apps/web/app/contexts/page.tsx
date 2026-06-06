@@ -2285,7 +2285,13 @@ function FileHistoryMenu({
       if (result.deleted) {
         toast.error("This commit recorded the file as deleted — it has been removed.");
       } else {
-        onRestored("");
+        // Fetch the restored content so the editor refreshes correctly
+        try {
+          const text = await api.contexts.readTextFile(packName, filePath);
+          onRestored(text);
+        } catch {
+          onRestored("");
+        }
         toast.success(`Restored ${fileName} to commit ${v.sha}`);
       }
       await loadVersions();
