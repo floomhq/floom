@@ -32,6 +32,10 @@ Passing:
 - `python3 -m py_compile apps/api/main.py tests/test_api_endpoints.py apps/api/tests/test_backend_batch_b9_binrest_wback.py` passed.
 - `pytest -q tests/test_api_endpoints.py tests/test_round8_worker_authz.py tests/test_pr_s13_info_disclosure_and_caps.py tests/test_worker_push_p0.py` passed: 124 passed, 7 warnings.
 
+## GitHub Checks
+
+GitHub Actions run `27049427708` did not start the Web, API, or MCP jobs. GitHub reported: "The job was not started because recent account payments have failed or your spending limit needs to be increased." Vercel preview was still pending when checked.
+
 ## One-Shot Orphan Cleanup Status
 
 Not run.
@@ -40,4 +44,4 @@ Reason: the orphan reaper is implemented in this branch, but the live `workeros-
 
 ## Blocker
 
-None for this lane. PR #465 is open. It has not been merged or deployed.
+None in the local required gate. PR #465 is open. It has not been merged or deployed. GitHub-hosted CI is blocked by account billing/spending-limit state rather than by a reported test failure.
