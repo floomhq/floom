@@ -32,10 +32,10 @@ function changeSourceBadge(src: string) {
       className={cn(
         "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border",
         isRollback
-          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 group-focus/dropdown-menu-item:bg-amber-400/30 group-focus/dropdown-menu-item:border-amber-300/40"
           : isAi
-            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
-            : "border-border bg-muted text-muted-foreground"
+            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400 group-focus/dropdown-menu-item:bg-violet-400/30 group-focus/dropdown-menu-item:border-violet-300/40"
+            : "border-border bg-muted text-muted-foreground group-focus/dropdown-menu-item:bg-white/20 group-focus/dropdown-menu-item:border-white/30"
       )}
     >
       {label}
