@@ -1,5 +1,48 @@
 export type WorkerStatus = "healthy" | "ready" | "needs_attention" | "missing_secret" | "error";
 
+// ── Emily conversation persistence ─────────────────────────────────────────────
+// Shapes returned by GET /conversations and GET /conversations/{id}
+// (apps/api/main.py list_conversations + get_conversation_detail).
+
+export interface ConversationSummary {
+  id: string;
+  title?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  message_count?: number;
+}
+
+export interface ConversationMessageRow {
+  id: string;
+  role: "user" | "assistant" | "tool" | string;
+  content: string;
+  tool_call_id?: string | null;
+  created_at?: string;
+}
+
+export interface ConversationToolCardRow {
+  id: string;
+  callId?: string | null;
+  toolName?: string | null;
+  status?: string | null;
+  card?: Record<string, unknown> | null;
+  resource?: Record<string, unknown> | null;
+  streams?: { events: string; parts: string } | null;
+  actions?: unknown[] | null;
+  args_preview?: Record<string, unknown> | null;
+  result_preview?: unknown;
+  run_id?: string | null;
+  worker_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  user_id?: string;
+  messages: ConversationMessageRow[];
+  tool_cards: ConversationToolCardRow[];
+}
+
 export interface TriggerSpec {
   type: string;
   cron?: string;
