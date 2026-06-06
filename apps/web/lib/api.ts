@@ -727,6 +727,30 @@ export const api = {
         { method: "POST", body: JSON.stringify({ new_owner_id: newOwnerId }) }
       ),
   },
+  // Multi-member: user management + personal access tokens
+  users: {
+    list: () => fetchJson<import("./types").OssUser[]>("/users"),
+    create: (data: { username: string; password: string; display_name?: string; role?: string }) =>
+      fetchJson<import("./types").OssUser>("/users", { method: "POST", body: JSON.stringify(data) }),
+    update: (userId: string, data: Partial<{ display_name: string; role: string; disabled: boolean; password: string }>) =>
+      fetchJson<import("./types").OssUser>(`/users/${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    remove: (userId: string) =>
+      fetchJson<null>(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" }),
+  },
+  tokens: {
+    list: () => fetchJson<import("./types").PersonalAccessToken[]>("/auth/tokens"),
+    create: (name: string, expiresAt?: string) =>
+      fetchJson<import("./types").PersonalAccessTokenCreate>("/auth/tokens", {
+        method: "POST",
+        body: JSON.stringify({ name, expires_at: expiresAt }),
+      }),
+    revoke: (tokenId: string) =>
+      fetchJson<null>(`/auth/tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
+  },
+  authMe: () => fetchJson<import("./types").AuthMe>("/auth/me"),
   integrations: {
     triggers: () =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),
