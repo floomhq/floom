@@ -82,13 +82,13 @@ export function PromptInput({
         </div>
       )}
 
-      <div className="flex items-end gap-2 rounded-xl border border-border bg-background px-3 py-2.5 shadow-sm focus-within:ring-1 focus-within:ring-[#59AAF8]/40 transition-shadow">
+      <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 shadow-sm focus-within:ring-1 focus-within:ring-[#59AAF8]/40 transition-shadow">
         {/* Attach button */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled}
-          className="shrink-0 mb-0.5 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+          className="shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
           title="Attach file"
           aria-label="Attach file"
         >
@@ -119,7 +119,7 @@ export function PromptInput({
 
         <Button
           size="sm"
-          className="h-7 w-7 p-0 shrink-0 mb-0.5"
+          className="h-7 w-7 p-0 shrink-0"
           onClick={onSubmit}
           disabled={!canSend}
           style={{ background: canSend ? "#59AAF8" : undefined, color: canSend ? "white" : undefined }}
