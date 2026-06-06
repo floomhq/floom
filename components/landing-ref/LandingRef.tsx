@@ -1,18 +1,15 @@
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
 import { Nav, Footer } from "./Nav";
-import { ToolLogoChip } from "./logos";
 import { TemplateCard } from "./TemplateCard";
 import { TemplateRow } from "./TemplateRow";
 import { BrainVisual } from "./BrainVisual";
-import { EmailArtifact } from "./EmailArtifact";
 import { ScrollEmailArtifact } from "./ScrollEmailArtifact";
 import { RunCard } from "./RunCard";
-import { Reveal, RevealItem, RevealStagger } from "./Reveal";
-import { HeroPromptComposer } from "./HeroPromptComposer";
+import { RevealItem, RevealStagger } from "./Reveal";
 import { HeroV3Collage } from "../hero-variants/HeroV3Collage";
-import { ScrollToHeroButton } from "./ScrollToHeroButton";
 import { InterfaceMockups } from "./InterfaceMockups";
+import { SectionHeader } from "./SectionHeader";
+import { TemplatesHeader, FinalCTAGroup } from "./LandingMotion";
+import { CapabilityRow } from "./CapabilityRow";
 import { getTemplate } from "./data";
 
 const TEMPLATES_HREF = "/templates";
@@ -37,35 +34,8 @@ export function LandingRef() {
   );
 }
 
-function SectionHead({
-  eyebrow,
-  title,
-  sub,
-  center,
-}: {
-  eyebrow?: string;
-  title: string;
-  sub?: string;
-  center?: boolean;
-}) {
-  return (
-    <Reveal className={center ? "mx-auto max-w-2xl text-center" : "max-w-2xl"}>
-      {eyebrow && (
-        <div className="mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.22em] text-[#3a6ea5]"
-          style={center ? { justifyContent: "center" } : undefined}
-        >
-          <span aria-hidden="true" className="h-px w-6 bg-[#3a6ea5]/30" />
-          {eyebrow}
-          <span aria-hidden="true" className="h-px w-6 bg-[#3a6ea5]/30" />
-        </div>
-      )}
-      <h2 className="text-balance text-[32px] font-semibold leading-tight tracking-[-0.02em] text-foreground sm:text-[40px]">
-        {title}
-      </h2>
-      {sub && <p className="mt-3 text-base text-muted-foreground">{sub}</p>}
-    </Reveal>
-  );
-}
+// SectionHead extracted to ./SectionHeader (client) with proper stagger motion.
+const SectionHead = SectionHeader;
 
 /* 1 — HERO: brand line + prompt composer (new-worker-flow first) */
 /* PopularTemplates */
@@ -86,27 +56,7 @@ function PopularTemplates() {
       className="relative scroll-mt-20 bg-foreground px-6 py-20 text-background"
     >
       <div className="relative mx-auto max-w-6xl">
-        <Reveal className="mb-10 flex flex-wrap items-end justify-between gap-4">
-          <div className="max-w-2xl">
-            <div className="mb-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.22em] text-background/65">
-              <span aria-hidden="true" className="h-px w-6 bg-background/30" />
-              Start in 60 seconds
-            </div>
-            <h2 className="text-balance text-[32px] font-semibold leading-tight tracking-[-0.02em] text-background sm:text-[40px]">
-              Hire a worker in 60 seconds.
-            </h2>
-            <p className="mt-3 text-base text-background/65">
-              Templates already tuned for the recurring work teams ask Workeros to handle.
-            </p>
-          </div>
-          <Link
-            href={TEMPLATES_HREF}
-            className="group/cta inline-flex h-11 items-center gap-1.5 rounded-[12px] bg-background px-4 text-[13.5px] font-semibold text-foreground shadow-[0_8px_24px_-8px_rgba(0,0,0,0.45)] transition hover:-translate-y-px hover:shadow-[0_12px_32px_-10px_rgba(0,0,0,0.55)]"
-          >
-            Browse all templates{" "}
-            <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover/cta:translate-x-0.5" />
-          </Link>
-        </Reveal>
+        <TemplatesHeader templatesHref={TEMPLATES_HREF} />
         <RevealStagger className="grid gap-4 lg:grid-cols-[1.05fr_1fr] lg:items-stretch">
           <RevealItem className="min-w-0">
             <TemplateCard t={featured} featured />
@@ -167,9 +117,9 @@ function KnowsYourCompany() {
           />
         </div>
 
-        <Reveal className="mx-auto max-w-5xl" delay={0.1}>
+        <div className="mx-auto max-w-5xl">
           <BrainVisual />
-        </Reveal>
+        </div>
       </div>
     </section>
   );
@@ -185,19 +135,17 @@ function RunsSection() {
           title="What happened, what was used, what's waiting on you."
           sub="Floom shows the trigger, the tools the worker used, the context it pulled, and the output it created, with the approval gate before anything ships."
         />
-        <Reveal>
-          <RunCard
-            layout="inspector"
-            id="Run #1042"
-            worker="Client Follow-up Worker"
-            statusLabel="Completed"
-            trigger="Slack request"
-            tools={["Google Calendar", "Gmail", "HubSpot", "Slack"]}
-            brain={["Tone guide", "Pricing", "CRM rules", "Past follow-ups"]}
-            output="Email draft + CRM note"
-            approval="Required before sending"
-          />
-        </Reveal>
+        <RunCard
+          layout="inspector"
+          id="Run #1042"
+          worker="Client Follow-up Worker"
+          statusLabel="Completed"
+          trigger="Slack request"
+          tools={["Google Calendar", "Gmail", "HubSpot", "Slack"]}
+          brain={["Tone guide", "Pricing", "CRM rules", "Past follow-ups"]}
+          output="Email draft + CRM note"
+          approval="Required before sending"
+        />
       </div>
     </section>
   );
@@ -225,25 +173,8 @@ function ConnectionsSection() {
         </div>
         <RevealStagger className="divide-y divide-border/70 overflow-hidden rounded-[18px] border border-border bg-card shadow-sm">
           {CAPABILITIES.map((cap) => (
-            <RevealItem
-              key={cap.label}
-              className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:gap-6"
-            >
-              <div className="w-32 shrink-0 text-[12.5px] font-semibold text-foreground">
-                {cap.label}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {cap.kind === "tools"
-                  ? cap.items.map((t) => <ToolLogoChip key={t} tool={t} size="sm" surface="app" />)
-                  : cap.items.map((t) => (
-                      <span
-                        key={t}
-                        className="inline-flex h-7 items-center rounded-[9px] border border-border bg-background px-2 text-[11.5px] font-medium text-foreground/85"
-                      >
-                        {t}
-                      </span>
-                    ))}
-              </div>
+            <RevealItem key={cap.label}>
+              <CapabilityRow label={cap.label} items={cap.items} kind={cap.kind} />
             </RevealItem>
           ))}
         </RevealStagger>
@@ -256,29 +187,7 @@ function ConnectionsSection() {
 function FinalCTA() {
   return (
     <section className="border-t border-border/70 bg-secondary/40 px-6 py-20">
-      <div className="mx-auto max-w-3xl text-center">
-        <Reveal>
-          <h2 className="text-balance text-[40px] font-semibold leading-[1.02] tracking-[-0.03em] text-foreground sm:text-[56px]">
-            Hire your first worker.
-          </h2>
-        </Reveal>
-        <Reveal delay={0.08}>
-          <p className="mx-auto mt-5 max-w-md text-[16px] text-muted-foreground">
-            Describe the task once. Workeros runs it for your team, with your approval before anything ships.
-          </p>
-        </Reveal>
-        <Reveal delay={0.16}>
-          <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <ScrollToHeroButton className="w-full sm:w-auto">Describe your worker</ScrollToHeroButton>
-            <Link
-              href={TEMPLATES_HREF}
-              className="inline-flex h-12 w-full items-center justify-center gap-1.5 rounded-[12px] border border-border bg-card px-5 text-[14px] font-medium text-foreground transition hover:border-foreground/30 hover:bg-secondary/60 sm:w-auto"
-            >
-              Or browse templates
-            </Link>
-          </div>
-        </Reveal>
-      </div>
+      <FinalCTAGroup templatesHref={TEMPLATES_HREF} />
     </section>
   );
 }
