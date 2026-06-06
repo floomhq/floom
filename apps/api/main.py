@@ -1297,7 +1297,7 @@ async def auth_middleware(request: Request, call_next):
             or path.startswith("/cli-auth/poll/")
             or _RE_RUN_COMPOSIO_PROXY.match(path)
             # Multi-member: login/setup paths always exempt so users can authenticate without secret
-            or path in {"/auth/setup", "/auth/login", "/auth/logout", "/auth/setup-required"}
+            or path in {"/auth/setup", "/auth/login", "/auth/logout", "/auth/me", "/auth/setup-required"}
         ):
             return await call_next(request)
         raw_secret = None
