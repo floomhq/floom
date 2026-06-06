@@ -451,6 +451,22 @@ export function HeroV3Collage() {
         >
           <HeroPromptComposer onFocusedChange={setFocused} />
         </motion.div>
+
+        <motion.div
+          initial={reduce ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.55, delay: 0.42, ease: EASE_OUT }}
+          className="mt-6 text-center text-[13px] text-muted-foreground"
+        >
+          Or{" "}
+          <a
+            href="/templates"
+            className="font-medium text-foreground underline-offset-4 transition-colors hover:text-[#3a6ea5] hover:underline"
+          >
+            browse ready-made workers
+          </a>
+          .
+        </motion.div>
       </div>
     </section>
   );
