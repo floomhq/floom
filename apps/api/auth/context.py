@@ -9,6 +9,14 @@ class AuthContext:
     user_id: str
     email: str | None = None
     scopes: tuple[str, ...] = ()
+    # multi-member fields (added in migration 59)
+    role: str = "admin"          # "admin" | "member"
+    auth_method: str = "secret"  # "pat" | "session" | "secret" | "dev" | "supabase"
+    username: str | None = None  # human-readable login name (None for legacy auth)
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == "admin" or "admin" in self.scopes
 
 
 _current_auth_context: ContextVar[AuthContext | None] = ContextVar(
