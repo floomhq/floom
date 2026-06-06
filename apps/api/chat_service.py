@@ -215,6 +215,19 @@ def set_workspace_base_persona(content: str) -> None:
     WORKSPACE_BASE_PERSONA_PATH.write_text(content, encoding='utf-8')
 
 
+def base_persona_is_custom() -> bool:
+    """True when a saved override exists (vs the built-in engine default)."""
+    return WORKSPACE_BASE_PERSONA_PATH.is_file()
+
+
+def clear_workspace_base_persona() -> None:
+    """Remove the override so the built-in engine default applies again."""
+    try:
+        WORKSPACE_BASE_PERSONA_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def get_workspace_md() -> str:
     """Return editable workspace custom instructions, or a custom-only default."""
     if WORKSPACE_MD_PATH.is_file():
