@@ -591,6 +591,30 @@ export const api = {
       fetchJson<{ content: string }>(`/workspace/versions/${encodeURIComponent(versionId)}`),
     rollbackWorkspaceInstructions: (versionId: string) =>
       fetchText(`/workspace/rollback/${versionId}`, { method: "POST" }),
+    // Git workspace integration
+    gitStatus: () =>
+      fetchJson<import("./types").GitWorkspaceStatus>("/system/git"),
+    gitConnect: (pat: string) =>
+      fetchJson<{ username: string; avatar_url: string; name: string | null }>(
+        "/system/git/connect",
+        { method: "POST", body: JSON.stringify({ pat }) }
+      ),
+    gitListRepos: () =>
+      fetchJson<import("./types").GitRepoItem[]>("/system/git/repos"),
+    gitCreateRepo: (name: string) =>
+      fetchJson<import("./types").GitRepoItem>(
+        "/system/git/repos",
+        { method: "POST", body: JSON.stringify({ name }) }
+      ),
+    gitLink: (repo_full_name: string) =>
+      fetchJson<import("./types").GitWorkspaceStatus>(
+        "/system/git/link",
+        { method: "POST", body: JSON.stringify({ repo_full_name }) }
+      ),
+    gitPush: () =>
+      fetchJson<import("./types").GitWorkspaceStatus>("/system/git/push", { method: "POST" }),
+    gitDisconnect: () =>
+      fetch("/system/git", { method: "DELETE" }),
   },
   connections: {
     list: () => fetchJson<import("./types").ConnectionItem[]>("/connections"),

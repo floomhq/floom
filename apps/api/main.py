@@ -17458,6 +17458,244 @@ def set_workspace_agent_visibility(
     return system_workspace_agent(auth=auth, repos=repos)
 
 
+# ---------------------------------------------------------------------------
+# Git workspace integration: GitHub PAT + repo linking
+# ---------------------------------------------------------------------------
+
+class _GitStatus(BaseModel):
+    connected: bool
+    github_username: Optional[str] = None
+    repo_full_name: Optional[str] = None
+    repo_url: Optional[str] = None
+    connected_at: Optional[str] = None
+    last_pushed_at: Optional[str] = None
+
+
+class _GitConnectRequest(BaseModel):
+    pat: str
+
+
+class _GitLinkRequest(BaseModel):
+    repo_full_name: str
+
+
+class _GitCreateRepoRequest(BaseModel):
+    name: str
+
+
+class _GitRepoItem(BaseModel):
+    full_name: str
+    name: str
+    url: str
+    private: bool
+    description: Optional[str] = None
+    pushed_at: Optional[str] = None
+
+
+def _git_cfg_get(user_id: str) -> dict | None:
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT github_pat, github_username, repo_full_name, repo_url,
+                      remote_url, connected_at, last_pushed_at
+               FROM git_workspace_config WHERE user_id = ?""",
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _git_cfg_upsert(user_id: str, **fields: str) -> None:
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM git_workspace_config WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if existing:
+            set_clause = ", ".join(f"{k} = ?" for k in fields)
+            conn.execute(
+                f"UPDATE git_workspace_config SET {set_clause} WHERE user_id = ?",
+                [*fields.values(), user_id],
+            )
+        else:
+            fields["user_id"] = user_id
+            keys = ", ".join(fields)
+            placeholders = ", ".join("?" * len(fields))
+            conn.execute(
+                f"INSERT INTO git_workspace_config ({keys}) VALUES ({placeholders})",
+                list(fields.values()),
+            )
+
+
+@app.get("/system/git", response_model=_GitStatus)
+def get_git_status(auth: AuthContext = Depends(get_auth_context)) -> _GitStatus:
+    """Return current GitHub connection + linked repo status."""
+    cfg = _git_cfg_get(auth.user_id)
+    if not cfg or not cfg.get("repo_full_name"):
+        return _GitStatus(connected=False)
+    return _GitStatus(
+        connected=True,
+        github_username=cfg.get("github_username"),
+        repo_full_name=cfg.get("repo_full_name"),
+        repo_url=cfg.get("repo_url"),
+        connected_at=cfg.get("connected_at"),
+        last_pushed_at=cfg.get("last_pushed_at"),
+    )
+
+
+@app.post("/system/git/connect")
+def connect_github(
+    payload: _GitConnectRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Validate a GitHub PAT and store it. Does not link a repo yet."""
+    import github_api as _gh
+
+    pat = payload.pat.strip()
+    if not pat:
+        raise HTTPException(status_code=400, detail="PAT cannot be empty")
+    try:
+        user_info = _gh.validate_pat(pat)
+    except _gh.GitHubAPIError as exc:
+        status = getattr(exc, "status", 0)
+        if status == 401:
+            raise HTTPException(status_code=400, detail="Invalid GitHub token — check it has the 'repo' scope") from exc
+        raise HTTPException(status_code=400, detail=f"GitHub error: {exc}") from exc
+
+    # Preserve existing repo link if there is one
+    existing = _git_cfg_get(auth.user_id) or {}
+    _git_cfg_upsert(
+        auth.user_id,
+        github_pat=pat,
+        github_username=user_info.get("login", ""),
+        connected_at=existing.get("connected_at") or now_iso(),
+        # Keep existing repo fields if already linked
+        **({
+            "repo_full_name": existing["repo_full_name"],
+            "repo_url": existing["repo_url"],
+            "remote_url": existing["remote_url"],
+        } if existing.get("repo_full_name") else {}),
+    )
+    return {
+        "username": user_info.get("login"),
+        "avatar_url": user_info.get("avatar_url"),
+        "name": user_info.get("name"),
+    }
+
+
+@app.get("/system/git/repos", response_model=List[_GitRepoItem])
+def list_git_repos(auth: AuthContext = Depends(get_auth_context)) -> List[_GitRepoItem]:
+    """List GitHub repos that look like WorkerOS workspaces (name prefix or topic)."""
+    import github_api as _gh
+
+    cfg = _git_cfg_get(auth.user_id)
+    if not cfg or not cfg.get("github_pat"):
+        raise HTTPException(status_code=400, detail="Not connected to GitHub — provide a PAT first")
+    try:
+        repos = _gh.list_workeros_repos(cfg["github_pat"])
+    except _gh.GitHubAPIError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [_GitRepoItem(**{k: r[k] for k in _GitRepoItem.model_fields if k in r}) for r in repos]
+
+
+@app.post("/system/git/repos", response_model=_GitRepoItem, status_code=201)
+def create_git_repo(
+    payload: _GitCreateRepoRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> _GitRepoItem:
+    """Create a new private GitHub repo for this workspace."""
+    import github_api as _gh
+
+    cfg = _git_cfg_get(auth.user_id)
+    if not cfg or not cfg.get("github_pat"):
+        raise HTTPException(status_code=400, detail="Not connected to GitHub")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Repo name cannot be empty")
+    try:
+        repo = _gh.create_workeros_repo(cfg["github_pat"], name)
+    except _gh.GitHubAPIError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _GitRepoItem(**{k: repo[k] for k in _GitRepoItem.model_fields if k in repo})
+
+
+@app.post("/system/git/link", response_model=_GitStatus)
+def link_git_repo(
+    payload: _GitLinkRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> _GitStatus:
+    """Link a GitHub repo as this workspace's remote and push the current state."""
+    cfg = _git_cfg_get(auth.user_id)
+    if not cfg or not cfg.get("github_pat"):
+        raise HTTPException(status_code=400, detail="Not connected to GitHub")
+
+    pat = cfg["github_pat"]
+    full_name = payload.repo_full_name.strip()
+    remote_url = f"https://x-access-token:{pat}@github.com/{full_name}.git"
+    repo_url = f"https://github.com/{full_name}"
+
+    workspace = _git_workspace()
+    try:
+        _git_ops.configure_remote(workspace, remote_url)
+        # Pull if the remote has commits (e.g. auto-init), then push
+        try:
+            _git_ops.pull(workspace)
+        except _git_ops.GitOpsError:
+            pass  # Remote is empty — fine, we'll just push
+        _git_ops.push(workspace)
+    except _git_ops.GitOpsError as exc:
+        raise HTTPException(status_code=500, detail=f"Git operation failed: {exc}") from exc
+
+    pushed_at = now_iso()
+    _git_cfg_upsert(
+        auth.user_id,
+        repo_full_name=full_name,
+        repo_url=repo_url,
+        remote_url=remote_url,
+        last_pushed_at=pushed_at,
+    )
+    return _GitStatus(
+        connected=True,
+        github_username=cfg.get("github_username"),
+        repo_full_name=full_name,
+        repo_url=repo_url,
+        connected_at=cfg.get("connected_at"),
+        last_pushed_at=pushed_at,
+    )
+
+
+@app.post("/system/git/push", response_model=_GitStatus)
+def push_git_workspace(auth: AuthContext = Depends(get_auth_context)) -> _GitStatus:
+    """Push the workspace git repo to GitHub."""
+    cfg = _git_cfg_get(auth.user_id)
+    if not cfg or not cfg.get("repo_full_name"):
+        raise HTTPException(status_code=400, detail="No GitHub repo linked")
+    try:
+        _git_ops.push(_git_workspace())
+    except _git_ops.GitOpsError as exc:
+        raise HTTPException(status_code=500, detail=f"Push failed: {exc}") from exc
+
+    pushed_at = now_iso()
+    _git_cfg_upsert(auth.user_id, last_pushed_at=pushed_at)
+    return _GitStatus(
+        connected=True,
+        github_username=cfg.get("github_username"),
+        repo_full_name=cfg.get("repo_full_name"),
+        repo_url=cfg.get("repo_url"),
+        connected_at=cfg.get("connected_at"),
+        last_pushed_at=pushed_at,
+    )
+
+
+@app.delete("/system/git", status_code=204)
+def disconnect_git(auth: AuthContext = Depends(get_auth_context)) -> Response:
+    """Remove stored GitHub credentials and detach the remote."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM git_workspace_config WHERE user_id = ?", (auth.user_id,))
+    try:
+        _git_ops._git(["remote", "remove", "origin"], _git_workspace(), check=False)
+    except Exception:
+        pass
+    return Response(status_code=204)
+
+
 @app.get("/system/alerts")
 def system_alerts(auth: AuthContext = Depends(get_auth_context)):
     """Return open (unresolved) alert incidents.

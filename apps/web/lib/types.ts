@@ -936,6 +936,24 @@ export interface VersionFile {
   content: string;
 }
 
+export interface GitWorkspaceStatus {
+  connected: boolean;
+  github_username?: string | null;
+  repo_full_name?: string | null;
+  repo_url?: string | null;
+  connected_at?: string | null;
+  last_pushed_at?: string | null;
+}
+
+export interface GitRepoItem {
+  full_name: string;
+  name: string;
+  url: string;
+  private: boolean;
+  description?: string | null;
+  pushed_at?: string | null;
+}
+
 export interface VersionDetail {
   files: VersionFile[];
 }

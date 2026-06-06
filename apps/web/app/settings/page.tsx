@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
+import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
 import { AlertTriangle, CheckCircle2, Copy, Trash2 } from "lucide-react";
@@ -157,14 +158,15 @@ function PersonalAccessTokensPanel() {
 // Phase 2 (Slack→Settings): Slack is the human interface for Floom Worker OS
 // (DM the assistant, @mention, approvals) — NOT a worker OAuth connection. It
 // belongs in Settings, not Connections.
-type TabKey = "api" | "system" | "slack" | "assistant" | "notifications" | "appearance" | "danger";
+type TabKey = "api" | "system" | "slack" | "git" | "assistant" | "notifications" | "appearance" | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "slack", "appearance", "danger"];
-const TAB_KEYS: TabKey[] = ["api", "system", "slack", "assistant", "notifications", "appearance", "danger"];
+const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "git", "slack", "appearance", "danger"];
+const TAB_KEYS: TabKey[] = ["api", "system", "git", "slack", "assistant", "notifications", "appearance", "danger"];
 
 const NAV_ITEMS: { key: TabKey; label: string }[] = [
   { key: "api", label: "API access" },
   { key: "system", label: "System" },
+  { key: "git", label: "GitHub" },
   { key: "slack", label: "Slack" },
   { key: "appearance", label: "Appearance" },
   { key: "danger", label: "Danger zone" },
@@ -443,6 +445,10 @@ function SettingsContent() {
               )}
             </div>
           </section>
+        </TabsContent>
+
+        <TabsContent value="git" className="space-y-8 pt-6">
+          <GitWorkspacePanel />
         </TabsContent>
 
         <TabsContent value="slack" className="pt-6">
