@@ -1296,13 +1296,30 @@ async def auth_middleware(request: Request, call_next):
             or path == "/cli-auth/devices"
             or path.startswith("/cli-auth/poll/")
             or _RE_RUN_COMPOSIO_PROXY.match(path)
+            # Multi-member: login/setup paths always exempt so users can authenticate without secret
+            or path in {"/auth/setup", "/auth/login", "/auth/logout", "/auth/setup-required"}
         ):
             return await call_next(request)
         raw_secret = None
+        bearer_token = None
+        session_cookie = None
         for key, value in request.scope.get("headers", []):
             if key.lower() == b"x-floom-secret":
                 raw_secret = value
-                break
+            elif key.lower() == b"authorization":
+                auth_value = value.decode("latin-1", errors="replace")
+                if auth_value.startswith("Bearer "):
+                    bearer_token = auth_value[7:].strip()
+            elif key.lower() == b"cookie":
+                # Parse session cookie from Cookie header
+                cookie_str = value.decode("latin-1", errors="replace")
+                for part in cookie_str.split(";"):
+                    part = part.strip()
+                    if part.startswith("workeros_session="):
+                        session_cookie = part.split("=", 1)[1]
+        # Multi-member auth: Bearer PAT or session cookie bypass x-floom-secret
+        if bearer_token or session_cookie:
+            return await call_next(request)
         expected = secret.encode("latin-1")
         if raw_secret is None:
             return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
@@ -3606,7 +3623,7 @@ def _list_db_workers(
     *,
     user_id: str,
     repos: Repositories,
-    role: str = "admin",
+    role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     try:
         return repos.workers.list(user_id=user_id, role=role)
@@ -3684,7 +3701,7 @@ def _list_visible_workers(
     user_id: str,
     repos: Repositories,
     use_cache: bool = True,
-    role: str = "admin",
+    role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     visible = {
         worker["id"]: worker
@@ -3727,7 +3744,7 @@ def _get_db_worker(
     *,
     user_id: str,
     repos: Repositories,
-    role: str = "admin",
+    role: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     try:
         return repos.workers.get(user_id=user_id, worker_id=worker_id, role=role)
@@ -3756,7 +3773,7 @@ def _get_visible_worker(
     *,
     user_id: str,
     repos: Repositories,
-    role: str = "admin",
+    role: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     worker = _get_db_worker(worker_id, user_id=user_id, repos=repos, role=role)
     if worker is not None:
@@ -6165,7 +6182,7 @@ def _build_worker_detail(
     *,
     user_id: str,
     repos: Repositories,
-    role: str = "admin",
+    role: Optional[str] = None,
 ) -> WorkerDetail:
     worker = _get_visible_worker(worker_id, user_id=user_id, repos=repos, role=role)
     if not worker:
@@ -19371,8 +19388,8 @@ def auth_setup(
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
     response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
-    return _UserOut(**{k: row[k] for k in ("id", "username", "display_name", "role", "disabled", "created_at")},
-                    disabled=bool(row["disabled"]))
+    return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
+                    role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
 
 
 @app.post("/auth/login")
@@ -19452,8 +19469,8 @@ def list_users(
     _require_admin(auth)
     user_repo, _, _ = _require_multi_member_repos(repos)
     rows = user_repo.list()
-    return [_UserOut(**{k: r[k] for k in ("id", "username", "display_name", "role", "created_at")},
-                     disabled=bool(r["disabled"])) for r in rows]
+    return [_UserOut(id=r["id"], username=r["username"], display_name=r.get("display_name"),
+                     role=r["role"], disabled=bool(r["disabled"]), created_at=r["created_at"]) for r in rows]
 
 
 @app.post("/users", response_model=_UserOut, status_code=201)
@@ -19482,8 +19499,8 @@ def create_user(
         password_hash=pw_hash,
         role=payload.role,
     )
-    return _UserOut(**{k: row[k] for k in ("id", "username", "display_name", "role", "created_at")},
-                    disabled=bool(row["disabled"]))
+    return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
+                    role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
 
 
 @app.patch("/users/{uid}", response_model=_UserOut)
@@ -19511,8 +19528,8 @@ def update_user(
     row = user_repo.update(user_id=uid, **updates)
     if row is None:
         raise HTTPException(status_code=404, detail="user not found")
-    return _UserOut(**{k: row[k] for k in ("id", "username", "display_name", "role", "created_at")},
-                    disabled=bool(row["disabled"]))
+    return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
+                    role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
 
 
 @app.delete("/users/{uid}", status_code=204)
