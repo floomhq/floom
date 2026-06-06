@@ -12,7 +12,7 @@ from html import escape
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # ---------------------------------------------------------------------------
 # Concurrency gate — E2B has a hard cap of 20 concurrent sandboxes.
@@ -54,7 +54,7 @@ from dotenv import load_dotenv
 
 from contexts import context_scope_for_user, use_context_scope
 from db.factory import Repositories, get_repositories
-from runner_utils import ARTIFACTS_DIR, _validate_output_schema
+from runner_utils import ARTIFACTS_DIR, DEFAULT_TIMEOUT_SECONDS, _validate_output_schema
 from worker_registry import WORKERS_DIR, get_worker_config
 from runner_sandbox import get_driver as get_sandbox_driver
 from models import (
@@ -2315,8 +2315,12 @@ def get_secrets_for_worker(
 
 INTERRUPTED_RUN_ERROR = "Run was interrupted by an API restart before completion."
 INTERRUPTED_RUN_ERROR_CODE = "interrupted_by_restart"
+ABANDONED_RUN_ERROR = "run abandoned (server restarted): no active executor after timeout window"
+ABANDONED_RUN_ERROR_CODE = "run_abandoned_server_restart"
 WORKER_DELETED_RUN_ERROR = "Worker deleted before run completed."
 _SCHEDULE_MISSING_SECRET_PAUSE_AFTER = 3
+_RUN_REAPER_DEFAULT_GRACE_SECONDS = 60
+_RUN_REAPER_DEFAULT_INTERVAL_SECONDS = 180
 
 
 @dataclass
@@ -2439,9 +2443,89 @@ def active_run_count() -> int:
         return len(_active_runs)
 
 
+def _active_run_ids() -> set[str]:
+    with _active_runs_lock:
+        return set(_active_runs)
+
+
 def was_shutdown_cancelled(run_id: str) -> bool:
     with _active_runs_lock:
         return run_id in _shutdown_cancelled_runs
+
+
+def _run_reaper_grace_seconds() -> int:
+    raw = os.environ.get("WORKEROS_RUN_REAPER_GRACE_SECONDS", "")
+    if not raw:
+        return _RUN_REAPER_DEFAULT_GRACE_SECONDS
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _RUN_REAPER_DEFAULT_GRACE_SECONDS
+
+
+def _run_reaper_interval_seconds() -> int:
+    raw = os.environ.get("WORKEROS_RUN_REAPER_INTERVAL_SECONDS", "")
+    if not raw:
+        return _RUN_REAPER_DEFAULT_INTERVAL_SECONDS
+    try:
+        return max(30, int(raw))
+    except ValueError:
+        return _RUN_REAPER_DEFAULT_INTERVAL_SECONDS
+
+
+def reap_abandoned_runs(
+    *,
+    repos: Repositories | None = None,
+    now: datetime | None = None,
+    timeout_seconds: int | None = None,
+    grace_seconds: int | None = None,
+) -> int:
+    """Fail stale `running` rows that no longer have a live executor.
+
+    This is intentionally conservative: a row must be older than the normal run
+    timeout plus a grace margin, and its run id must not be present in the
+    current process' active execution registry. The repository update is also
+    status-gated, so repeated sweeps are harmless.
+    """
+    repos_obj = _repos(repos)
+    timeout = DEFAULT_TIMEOUT_SECONDS if timeout_seconds is None else max(0, int(timeout_seconds))
+    grace = _run_reaper_grace_seconds() if grace_seconds is None else max(0, int(grace_seconds))
+    now_dt = now or datetime.now(timezone.utc)
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=timezone.utc)
+    cutoff_iso = (now_dt - timedelta(seconds=timeout + grace)).isoformat()
+    active_ids = _active_run_ids()
+
+    failed = repos_obj.runs.fail_stale_running(
+        cutoff_iso=cutoff_iso,
+        exclude_run_ids=active_ids,
+        error=ABANDONED_RUN_ERROR,
+        error_code=ABANDONED_RUN_ERROR_CODE,
+    )
+    for row in failed:
+        run_id = str(row.get("run_id") or row.get("id") or "")
+        user_id = row.get("user_id")
+        if not run_id or not user_id:
+            continue
+        try:
+            repos_obj.runs.add_log(
+                user_id=str(user_id),
+                run_id=run_id,
+                level="error",
+                message=ABANDONED_RUN_ERROR,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                trace_id=None,
+            )
+        except Exception as exc:
+            logger.warning("Failed to add abandoned-run log for %s: %s", run_id, exc)
+    if failed:
+        logger.warning(
+            "Reaped %d abandoned running run(s) older than %ss + %ss grace",
+            len(failed),
+            timeout,
+            grace,
+        )
+    return len(failed)
 
 # ---------------------------------------------------------------------------
 # Queue drain loop
@@ -2457,6 +2541,10 @@ _drain_thread: Optional[threading.Thread] = None
 _drain_lock = threading.Lock()
 
 _DRAIN_POLL_INTERVAL = 0.5  # seconds between polls when runs are queued
+
+_run_reaper_stop = threading.Event()
+_run_reaper_thread: Optional[threading.Thread] = None
+_run_reaper_lock = threading.Lock()
 
 
 def _wake_drain() -> None:
@@ -2568,6 +2656,42 @@ def stop_drain_loop(timeout: float = 5.0) -> None:
     _wake_drain()
     with _drain_lock:
         t = _drain_thread
+    if t is not None:
+        t.join(timeout=timeout)
+
+
+def _run_reaper_loop() -> None:
+    """Background thread: periodically reconcile abandoned running rows."""
+    interval = _run_reaper_interval_seconds()
+    logger.info("Run reaper loop started (interval=%ss)", interval)
+    while not _run_reaper_stop.wait(timeout=interval):
+        try:
+            reap_abandoned_runs()
+        except Exception as exc:
+            logger.warning("Run reaper sweep failed: %s", exc)
+
+
+def start_run_reaper_loop() -> None:
+    """Start the abandoned-run reaper thread (idempotent)."""
+    global _run_reaper_thread
+    with _run_reaper_lock:
+        if _run_reaper_thread is not None and _run_reaper_thread.is_alive():
+            return
+        _run_reaper_stop.clear()
+        _run_reaper_thread = threading.Thread(
+            target=_run_reaper_loop,
+            daemon=True,
+            name="workeros-run-reaper",
+        )
+        _run_reaper_thread.start()
+
+
+def stop_run_reaper_loop(timeout: float = 5.0) -> None:
+    """Stop the abandoned-run reaper thread."""
+    global _run_reaper_thread
+    _run_reaper_stop.set()
+    with _run_reaper_lock:
+        t = _run_reaper_thread
     if t is not None:
         t.join(timeout=timeout)
 
@@ -2705,36 +2829,19 @@ def fail_interrupted_runs_on_startup(
     user_id: str,
     repos: Repositories | None = None,
 ) -> int:
-    """Fail runs left in-flight by a prior API process.
+    """Fail old runs left in-flight by a prior API process.
 
     Worker execution currently runs in process-local threads. A service restart
-    terminates those threads, so any row that is still `running` at the next
-    startup no longer has an executor attached.
+    terminates those threads, so a sufficiently old `running` row with no live
+    active-run handle is abandoned.
 
     Runs in status=`queued` are NOT failed here — they are re-enqueued by
     re_enqueue_queued_runs_on_startup so they resume draining after boot.
+
+    The user_id parameter is kept for compatibility with older callers; the
+    reaper operates across owners because server restarts are process-wide.
     """
-    repos_obj = _repos(repos)
-    failed = repos_obj.runs.fail_running(
-        user_id=user_id,
-        error=INTERRUPTED_RUN_ERROR,
-        error_code=INTERRUPTED_RUN_ERROR_CODE,
-    )
-    for run_id in failed:
-        try:
-            repos_obj.runs.add_log(
-                user_id=user_id,
-                run_id=run_id,
-                level="error",
-                message=INTERRUPTED_RUN_ERROR,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                trace_id=None,
-            )
-        except Exception as exc:
-            logger.warning("Failed to add interrupted-run log for %s: %s", run_id, exc)
-    if failed:
-        logger.warning("Marked %d interrupted run(s) as failed on startup", len(failed))
-    return len(failed)
+    return reap_abandoned_runs(repos=repos)
 
 
 def re_enqueue_queued_runs_on_startup(
