@@ -1833,6 +1833,13 @@ def _raise_if_protected_worker_mutation(worker_id: str) -> None:
         raise HTTPException(status_code=403, detail="Stock workers cannot be modified through the API")
 
 
+def _canonical_worker_id(value: str) -> str:
+    text = (value or "").strip()
+    if text in PROTECTED_STOCK_WORKER_IDS:
+        return text
+    return _slugify_worker_id(text)
+
+
 def _extract_primary_output_file(output_payload: Dict[str, Any]) -> Optional[tuple[str, bytes]]:
     def _decode_data_uri(value: str) -> Optional[tuple[bytes, Optional[str]]]:
         if not value.startswith("data:") or ";base64," not in value:
@@ -2590,6 +2597,7 @@ def list_worker_versions(
     repos: Repositories = Depends(get_repos),
 ) -> List[VersionSummary]:
     """List saved versions of a worker (newest first)."""
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -2614,6 +2622,7 @@ def get_worker_version(
 ) -> Dict[str, Any]:
     """Return the file snapshot for a specific worker version."""
     import json as _json
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -2636,6 +2645,7 @@ def rollback_worker(
     import shutil as _shutil
     from worker_registry import WORKERS_DIR
 
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -2665,7 +2675,7 @@ def rollback_worker(
         for f in files:
             dest = tmp_dir / f["path"]
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(f.get("content", encoding='utf-8') or "", encoding="utf-8")
+            dest.write_text(f.get("content") or "", encoding="utf-8")
 
         existing_files = list(target_dir.rglob("*"))
         new_paths = {f["path"] for f in files}
@@ -6324,6 +6334,7 @@ def create_worker_short_link(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6535,6 +6546,7 @@ def create_worker_share_link(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6627,6 +6639,7 @@ def get_worker_detail(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
+    worker_id = _canonical_worker_id(worker_id)
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
@@ -6645,6 +6658,7 @@ def set_worker_visibility(
     and is a no-op-shaped toggle for the one-member workspace. 404 for an
     invisible/unknown worker (never reveals another owner's private worker).
     """
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6727,6 +6741,7 @@ def restore_worker(
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
     import re as _re
 
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -6770,6 +6785,7 @@ def archive_worker(
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
     import re as _re
 
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -6831,6 +6847,7 @@ async def suggest_worker_updates(
     from openai import OpenAI as _OpenAI
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
 
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6893,6 +6910,7 @@ def get_worker_sample_input(
     an API consumer gets the same answer the UI shows instead of a spurious 404
     on generated workers (the manifest example_input was always available).
     """
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6934,6 +6952,7 @@ def update_worker(
     secret once in the response (new_webhook_secret field) — it is never
     stored in plaintext.
     """
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -7127,6 +7146,7 @@ def update_worker(
 
 def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> None:
     """Core delete-worker logic, shared by the DELETE endpoint and approval execution."""
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = repos.workers.get(user_id=owner_id, worker_id=worker_id)
     if not worker:
@@ -9481,6 +9501,7 @@ def update_worker(
     """Update an existing worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
@@ -9668,6 +9689,7 @@ def update_worker_files(
     """
     from worker_registry import WORKERS_DIR
 
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -9885,6 +9907,7 @@ def create_worker_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
