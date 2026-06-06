@@ -31,6 +31,7 @@ def _load_api(monkeypatch, tmp_path):
         "SLACK_BOT_TOKEN",
         "SLACK_ALLOWED_TEAM_IDS",
         "SLACK_BOT_TOKEN_T123",
+        "SLACK_INSTALL_SCOPES",
     ]:
         monkeypatch.delenv(name, raising=False)
 
@@ -49,12 +50,13 @@ def _load_api(monkeypatch, tmp_path):
         "SLACK_BOT_TOKEN",
         "SLACK_ALLOWED_TEAM_IDS",
         "SLACK_BOT_TOKEN_T123",
+        "SLACK_INSTALL_SCOPES",
     ]:
         monkeypatch.delenv(name, raising=False)
     return main, env_file
 
 
-def test_slack_setup_config_writes_allowlisted_env_and_redacts_values(monkeypatch, tmp_path):
+def test_slack_setup_config_rejects_user_managed_credentials(monkeypatch, tmp_path):
     main, env_file = _load_api(monkeypatch, tmp_path)
 
     with TestClient(main.app, headers=AUTH_HEADERS) as client:
@@ -68,24 +70,11 @@ def test_slack_setup_config_writes_allowlisted_env_and_redacts_values(monkeypatc
             },
         )
 
-    assert response.status_code == 200, response.text
-    payload = response.json()
-    assert payload["updated"] == [
-        "SLACK_CLIENT_ID",
-        "SLACK_CLIENT_SECRET",
-        "SLACK_EVENTS_ENABLED",
-        "SLACK_SIGNING_SECRET",
-    ]
-    assert payload["setup"]["configured"] is True
-    assert payload["setup"]["client_secret_set"] is True
-    assert payload["setup"]["signing_secret_set"] is True
+    assert response.status_code == 403, response.text
+    assert "Slack credentials are managed by the platform" in response.text
     assert "client-secret" not in response.text
     assert "signing-secret" not in response.text
-    assert "https://slack.com/oauth/v2/authorize" in payload["setup"]["install_url"]
-    env_text = env_file.read_text()
-    assert "SLACK_CLIENT_ID=123.abc" in env_text
-    assert "SLACK_CLIENT_SECRET=client-secret" in env_text
-    assert "SLACK_SIGNING_SECRET=signing-secret" in env_text
+    assert not env_file.exists()
 
 
 def test_slack_oauth_callback_persists_team_install_without_leaking_token(monkeypatch, tmp_path):
@@ -154,3 +143,21 @@ def test_slack_oauth_callback_persists_team_install_without_leaking_token(monkey
     assert status.json()["installed_teams"][0]["bot_token_set"] is True
     assert "bot_token_env_key" not in status.text
     assert "xoxb-installed-token" not in status.text
+
+
+def test_slack_oauth_install_uses_env_scopes(monkeypatch, tmp_path):
+    main, _env_file = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setenv("SLACK_CLIENT_ID", "123.abc")
+    monkeypatch.setenv("SLACK_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "signing-secret")
+    monkeypatch.setenv(
+        "SLACK_INSTALL_SCOPES",
+        "chat:write, channels:read channels:history,chat:write,im:read",
+    )
+
+    with TestClient(main.app, headers=AUTH_HEADERS) as client:
+        response = client.post("/slack/oauth/install", json={"return_to": "/connections/slack"})
+
+    assert response.status_code == 200, response.text
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(response.json()["install_url"]).query)
+    assert query["scope"] == ["chat:write,channels:read,channels:history,im:read"]
