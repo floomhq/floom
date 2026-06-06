@@ -842,7 +842,7 @@ function ReviewContent() {
         <div className="flex flex-col gap-1.5">
           <span className="inline-flex items-center gap-2">
             <FloomMark size={20} />
-            <span className="text-sm font-semibold tracking-tight text-[var(--ink)]">Floom Workers</span>
+            <span className="text-sm font-semibold tracking-tight text-[var(--ink)]">Workeros</span>
           </span>
           {isSignedLink ? (
             <span className="text-xs text-[var(--ink-soft)]">Approval review</span>

@@ -7,7 +7,7 @@
 import { EmilyChatPage } from "@/components/emily/EmilyChat";
 
 export const metadata = {
-  title: "Emily - Floom Workers",
+  title: "Emily - Workeros",
   description: "Chat with Emily, your AI Chief of Staff.",
 };
 
