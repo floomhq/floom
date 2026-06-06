@@ -11,7 +11,7 @@ interface VersionFile {
 }
 
 interface Props {
-  versionNumber: number;
+  versionSha: string;
   versionFiles: VersionFile[];
   currentFiles: VersionFile[];
   isRestoring: boolean;
@@ -97,7 +97,7 @@ function FullFileView({ content }: { content: string }) {
 }
 
 export function VersionDiffPanel({
-  versionNumber,
+  versionSha,
   versionFiles,
   currentFiles,
   isRestoring,
@@ -184,7 +184,7 @@ export function VersionDiffPanel({
       {canRestore && (
         <div className="flex items-center justify-between border-t border-[var(--border-default)] px-4 py-2.5">
           <p className="text-xs text-muted-foreground">
-            Restoring replaces this file&apos;s current contents with v{versionNumber}.
+            Restoring replaces this file&apos;s current contents with commit {versionSha}.
           </p>
           <Button
             size="sm"
@@ -198,7 +198,7 @@ export function VersionDiffPanel({
             ) : (
               <RotateCcw className="size-3" />
             )}
-            {isRestoring ? "Restoring…" : `Restore to v${versionNumber}`}
+            {isRestoring ? "Restoring…" : `Restore to ${versionSha}`}
           </Button>
         </div>
       )}

@@ -2274,28 +2274,21 @@ function FileHistoryMenu({
   async function handleRestore(v: VersionSummary) {
     if (
       !confirm(
-        `Restore "${fileName}" to v${v.version_number}?\n\nThis replaces the current contents. The current version is saved as a new revision first.`
+        `Restore "${fileName}" to commit ${v.sha}?\n\nThis replaces the current contents. A new commit is created automatically.`
       )
     ) {
       return;
     }
     setRestoring(v.id);
     try {
-      const detail = await api.contexts.getFileVersion(packName, filePath, v.id);
-      const snapshot = detail.file;
-      if (!snapshot || snapshot.deleted) {
-        toast.error("This snapshot recorded the file as deleted and can't be restored inline.");
-        return;
+      const result = await api.contexts.restoreFileVersion(packName, filePath, v.id);
+      if (result.deleted) {
+        toast.error("This commit recorded the file as deleted — it has been removed.");
+      } else {
+        onRestored("");
+        toast.success(`Restored ${fileName} to commit ${v.sha}`);
       }
-      if (snapshot.encoding === "base64") {
-        toast.error("Restoring binary file revisions isn't supported yet.");
-        return;
-      }
-      const restoredContent = snapshot.content ?? "";
-      await api.contexts.saveTextFile(packName, filePath, restoredContent);
-      onRestored(restoredContent);
       await loadVersions();
-      toast.success(`Restored ${fileName} to v${v.version_number}`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Restore failed");
     } finally {
