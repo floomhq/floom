@@ -23,7 +23,7 @@ from fastapi import HTTPException, Request
 
 from .context import AuthContext
 
-SESSION_COOKIE = "workeros_session"
+SESSION_COOKIE = "wos_session"  # backend session; intentionally different from the Next.js web-session cookie
 _PAT_PREFIX = "wos_"  # all generated PATs start with this prefix for easy identification
 
 
