@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Box, ChevronRight, Folder, Plus, Search, Star, Archive, LayoutGrid, Clock, Users,
+  Box, ChevronDown, ChevronRight, Folder, Globe, Lock, Plus, Search, Star, Archive, LayoutGrid, Clock, Users,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -73,6 +73,10 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
   const [loading, setLoading] = useState(false);
   const [loadingArchived, setLoadingArchived] = useState(false);
   const [favorites, setFavorites] = useState<Set<string>>(() => getFavorites());
+
+  // Shared/Private section collapse state (both open by default)
+  const [sharedCollapsed, setSharedCollapsed] = useState(false);
+  const [privateCollapsed, setPrivateCollapsed] = useState(false);
 
   // S28: tabs (All/Starred/Recent) live in URL hash.
   const initialTab =
@@ -263,6 +267,23 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     return pool;
   }, [workers, archivedWorkers, tab, folderFilter, favorites, searchLower]);
 
+  // Show Shared / Private sections when:
+  //   - on the All or Starred tab (Recent and Archived don't need grouping)
+  //   - no active search or folder drill-in (sections add noise when filtered)
+  //   - at least one shared worker exists (a lone "Private" heading is pointless)
+  const splitSections =
+    (tab === "all" || tab === "starred") &&
+    !searchLower &&
+    !folderFilter &&
+    displayedWorkers.some((w) => w.visibility === "workspace");
+
+  const sharedWorkers = splitSections
+    ? displayedWorkers.filter((w) => w.visibility === "workspace")
+    : [];
+  const privateWorkers = splitSections
+    ? displayedWorkers.filter((w) => w.visibility !== "workspace")
+    : [];
+
   // R5: one combined breadcrumb + folder-chip row. Render whenever we're on
   // the All tab (no search/tag) and there is either a drill-in path or
   // folders to show — so selecting a folder swaps content within the same
@@ -420,23 +441,48 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
             </div>
           )}
 
-          {/* Flat grid (not grouped by folder). Tag matching folded into the
-              search box above; the standing tag-chip wall was removed for
-              digestibility (Federico 2026-05-29). */}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {(loading || (isArchivedTab && loadingArchived))
-              ? Array.from({ length: 8 }).map((_, i) => (
-                  <WorkerCardSkeleton key={i} />
-                ))
-              : displayedWorkers.map((w) => (
-                  <WorkerCard
-                    key={w.id}
-                    worker={w}
-                    isFavorite={favorites.has(w.id)}
-                    onFavoriteToggle={toggleFavorite}
-                  />
-                ))}
-          </div>
+          {/* Grid — flat or split into Shared / Private sections. */}
+          {(loading || (isArchivedTab && loadingArchived)) ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <WorkerCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : splitSections ? (
+            <div className="space-y-6">
+              <WorkerSection
+                label="Shared"
+                icon={Globe}
+                workers={sharedWorkers}
+                collapsed={sharedCollapsed}
+                onToggle={() => setSharedCollapsed((c) => !c)}
+                favorites={favorites}
+                onFavoriteToggle={toggleFavorite}
+              />
+              {privateWorkers.length > 0 && (
+                <WorkerSection
+                  label="Private"
+                  icon={Lock}
+                  workers={privateWorkers}
+                  collapsed={privateCollapsed}
+                  onToggle={() => setPrivateCollapsed((c) => !c)}
+                  favorites={favorites}
+                  onFavoriteToggle={toggleFavorite}
+                />
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {displayedWorkers.map((w) => (
+                <WorkerCard
+                  key={w.id}
+                  worker={w}
+                  isFavorite={favorites.has(w.id)}
+                  onFavoriteToggle={toggleFavorite}
+                />
+              ))}
+            </div>
+          )}
 
           {!loading && !loadingArchived && displayedWorkers.length === 0 && (
             <p className="text-sm text-muted-foreground">
@@ -578,6 +624,65 @@ function EmptyWorkersState() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WorkerSection — collapsible Shared / Private group header + grid
+// ---------------------------------------------------------------------------
+
+function WorkerSection({
+  label,
+  icon: Icon,
+  workers,
+  collapsed,
+  onToggle,
+  favorites,
+  onFavoriteToggle,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  workers: WorkerSummary[];
+  collapsed: boolean;
+  onToggle: () => void;
+  favorites: Set<string>;
+  onFavoriteToggle: (id: string) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors select-none"
+      >
+        <Icon className="size-3.5" />
+        <span>{label}</span>
+        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal tabular-nums leading-none">
+          {workers.length}
+        </span>
+        <ChevronDown
+          className={`size-3.5 transition-transform duration-150 ${collapsed ? "-rotate-90" : ""}`}
+        />
+      </button>
+      {!collapsed && (
+        workers.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {workers.map((w) => (
+              <WorkerCard
+                key={w.id}
+                worker={w}
+                isFavorite={favorites.has(w.id)}
+                onFavoriteToggle={onFavoriteToggle}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No {label.toLowerCase()} workers.
+          </p>
+        )
+      )}
+    </div>
   );
 }
 
