@@ -81,7 +81,7 @@ function InstructionsHistoryMenu({
       const content = await api.system.rollbackWorkspaceInstructions(v.id);
       onRollback(content);
       await loadVersions();
-      toast.success(`Rolled back to version ${v.version_number}`);
+      toast.success(`Rolled back to commit ${v.sha}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
     } finally {
@@ -107,7 +107,7 @@ function InstructionsHistoryMenu({
       >
         <DialogContent showCloseButton={false} className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Restore version {pendingRestore?.version_number}?</DialogTitle>
+            <DialogTitle>Restore commit {pendingRestore?.sha}?</DialogTitle>
           </DialogHeader>
           <DialogDescription>
             This will overwrite your current workspace instructions. The current version is saved automatically before restoring.
