@@ -24,18 +24,20 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 // S22f: Notifications tab is currently hidden. The TabKey type still includes
 // it (plus the now-removed "assistant") so old URLs (?tab=assistant /
-// #assistant) don't blow up; we silently fall back to "api" for any tab not in
-// VISIBLE_TAB_KEYS.
+// #assistant) don't blow up; we silently fall back to "developer" for any tab
+// not in VISIBLE_TAB_KEYS.
 // Phase 2 (Slack→Settings): Slack is the human interface for Floom Worker OS
 // (DM the assistant, @mention, approvals) — NOT a worker OAuth connection. It
 // belongs in Settings, not Connections.
-type TabKey = "api" | "system" | "slack" | "assistant" | "notifications" | "appearance" | "danger";
+// S-dev: renamed "API access" tab to "Developer" (value "api" → "developer").
+// The old ?tab=api / #api URLs are handled by the legacy fallback below.
+type TabKey = "developer" | "system" | "slack" | "assistant" | "notifications" | "appearance" | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["api", "system", "slack", "appearance", "danger"];
-const TAB_KEYS: TabKey[] = ["api", "system", "slack", "assistant", "notifications", "appearance", "danger"];
+const VISIBLE_TAB_KEYS: TabKey[] = ["developer", "system", "slack", "appearance", "danger"];
+const TAB_KEYS: TabKey[] = ["developer", "system", "slack", "assistant", "notifications", "appearance", "danger"];
 
 const NAV_ITEMS: { key: TabKey; label: string }[] = [
-  { key: "api", label: "API access" },
+  { key: "developer", label: "Developer" },
   { key: "system", label: "System" },
   { key: "slack", label: "Slack" },
   { key: "appearance", label: "Appearance" },
@@ -69,10 +71,12 @@ function SettingsContent() {
       typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : null;
     const fromQuery = searchParams.get("tab");
     const candidate = fromHash || fromQuery;
-    // S22f: hidden tab (e.g. notifications) requested via URL falls back to api.
+    // S22f / S-dev: hidden tab (e.g. notifications) or legacy #api URL falls
+    // back to "developer". Legacy ?tab=api / #api deep-links land here too.
+    if (candidate === "api") return "developer";
     return isValidTab(candidate) && VISIBLE_TAB_KEYS.includes(candidate)
       ? candidate
-      : "api";
+      : "developer";
   })();
   const [tab, setTab] = useState<TabKey>(initialTab);
 
@@ -135,7 +139,9 @@ function SettingsContent() {
   // Keep state in sync with the URL hash for deep-links and back/forward.
   useEffect(() => {
     function syncFromHash() {
-      const fromHash = window.location.hash.replace(/^#/, "");
+      const raw = window.location.hash.replace(/^#/, "");
+      // legacy #api URLs redirect to developer tab
+      const fromHash = raw === "api" ? "developer" : raw;
       if (isValidTab(fromHash) && VISIBLE_TAB_KEYS.includes(fromHash)) {
         setTab((prev) => (prev === fromHash ? prev : fromHash));
       }
@@ -231,12 +237,12 @@ function SettingsContent() {
           </TabsList>
         </div>
 
-        <TabsContent value="api" className="space-y-8 pt-6">
+        <TabsContent value="developer" className="space-y-8 pt-6">
           <CliCommandPanel />
         </TabsContent>
 
         <TabsContent value="system" className="space-y-8 pt-6">
-          {/* S29s: dropped Card wrappers. Match sister tabs (API access,
+          {/* S29s: dropped Card wrappers. Match sister tabs (Developer,
               Appearance) which also flat-section now. */}
           <section className="space-y-3">
             <h2 className="text-sm font-medium text-muted-foreground">System info</h2>
