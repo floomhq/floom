@@ -557,6 +557,11 @@ export const api = {
       fetchJson<import("./types").VersionFileDetail>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/versions/${versionId}`
       ),
+    restoreFileVersion: (name: string, path: string, sha: string) =>
+      fetchJson<import("./types").ContextFileItem>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/restore/${sha}`,
+        { method: "POST" }
+      ),
   },
   system: {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),

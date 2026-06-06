@@ -922,12 +922,13 @@ export interface CatalogToolItem {
 }
 
 export interface VersionSummary {
-  id: string;
+  id: string;       // 7-char git SHA
+  sha: string;      // same 7-char git SHA
+  message: string;  // commit message
+  author: string;   // git author name
+  timestamp: string; // ISO 8601 commit date
   asset_type: string;
   asset_id: string;
-  version_number: number;
-  change_source: string;
-  created_at: string;
 }
 
 export interface VersionFile {

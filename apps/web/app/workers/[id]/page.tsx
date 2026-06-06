@@ -3738,7 +3738,7 @@ function VersionsSection({
       setVersions(fresh);
       setExpandedId(null);
       setExpandedFiles(null);
-      toast.success(`Rolled back to version ${v.version_number}`);
+      toast.success(`Rolled back to commit ${v.sha}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
     } finally {
@@ -3767,37 +3767,10 @@ function VersionsSection({
     );
   }
 
-  function changeSourceLabel(src: string): string {
-    if (src === "user") return "Manual save";
-    if (src === "ai") return "AI edit";
-    if (src === "api") return "API";
-    if (src.startsWith("rollback:")) return "Rollback";
-    return src;
-  }
-
-  function changeSourceBadge(src: string) {
-    const label = changeSourceLabel(src);
-    const isRollback = src.startsWith("rollback:");
-    const isAi = src === "ai";
-    return (
-      <span
-        className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border ${
-          isRollback
-            ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-            : isAi
-            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
-            : "border-border bg-muted text-muted-foreground"
-        }`}
-      >
-        {label}
-      </span>
-    );
-  }
-
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {versions.length} version{versions.length !== 1 ? "s" : ""} · newest first · click a version to preview
+        {versions.length} commit{versions.length !== 1 ? "s" : ""} · newest first · click a commit to preview
       </p>
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden divide-y divide-[var(--border-default)]">
         {versions.map((v, idx) => (
@@ -3807,18 +3780,18 @@ function VersionsSection({
               onClick={() => { if (idx !== 0) void handleExpand(v); }}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 text-right">
-                  v{v.version_number}
+                <span className="text-xs font-mono text-muted-foreground shrink-0">
+                  {v.sha}
                 </span>
                 <div className="min-w-0 flex flex-col gap-0.5">
                   <div className="flex items-center gap-2">
-                    {changeSourceBadge(v.change_source)}
+                    <span className="truncate text-xs text-foreground max-w-[200px]" title={v.message}>{v.message}</span>
                     {idx === 0 && (
-                      <span className="text-[10px] text-muted-foreground font-medium">(current)</span>
+                      <span className="text-[10px] text-muted-foreground font-medium shrink-0">(current)</span>
                     )}
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {formatRelative(v.created_at)}
+                    {v.author} · {formatRelative(v.timestamp)}
                   </span>
                 </div>
               </div>
@@ -3830,7 +3803,7 @@ function VersionsSection({
             </div>
             {expandedId === v.id && expandedFiles && (
               <VersionDiffPanel
-                versionNumber={v.version_number}
+                versionSha={v.sha}
                 versionFiles={expandedFiles}
                 currentFiles={currentFiles}
                 isRestoring={rollingBack === v.id}
