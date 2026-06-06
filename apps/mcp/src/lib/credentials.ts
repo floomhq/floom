@@ -30,6 +30,10 @@ export type StoredCredentials = {
 const DEFAULT_OSS_API_BASE = "https://workers-api.floom.dev";
 const DEFAULT_CLOUD_API_BASE = "https://workeros-api.floom.dev";
 
+function envApiBase(defaultBase: string): string {
+  return (process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE || defaultBase).replace(/\/+$/, "");
+}
+
 function resolveHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "";
 }
@@ -46,7 +50,7 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
   const envCloudToken = process.env.WORKEROS_API_TOKEN?.trim();
   if (envCloudToken) {
     return {
-      api_base: (process.env.WORKEROS_API_BASE || DEFAULT_CLOUD_API_BASE).replace(/\/+$/, ""),
+      api_base: envApiBase(DEFAULT_CLOUD_API_BASE),
       mode: "cloud",
       api_token: envCloudToken,
       workspace_id: process.env.WORKEROS_WORKSPACE_ID?.trim() || undefined,
@@ -55,10 +59,10 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     };
   }
 
-  const envOssSecret = process.env.WORKEROS_API_SECRET?.trim();
+  const envOssSecret = (process.env.WORKEROS_API_SECRET || process.env.FLOOM_API_SECRET || "").trim();
   if (envOssSecret) {
     return {
-      api_base: (process.env.WORKEROS_API_BASE || DEFAULT_OSS_API_BASE).replace(/\/+$/, ""),
+      api_base: envApiBase(DEFAULT_OSS_API_BASE),
       mode: "oss",
       api_secret: envOssSecret,
       authed_at: new Date().toISOString(),

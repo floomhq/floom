@@ -9671,7 +9671,30 @@ def update_worker(
     """Update an existing worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
-    _raise_if_protected_worker_mutation(worker_id)
+    worker_id = _canonical_worker_id(worker_id)
+    raw_worker_id = _raw_worker_id_from_worker_yml(payload.worker_yml)
+    if raw_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"worker_yml name {raw_worker_id!r} does not match path worker_id {worker_id!r}",
+        )
+    if worker_id in PROTECTED_STOCK_WORKER_IDS:
+        edited_files = [
+            WorkerFilePatch(path="worker.yml", content=payload.worker_yml),
+            WorkerFilePatch(path="run.py", content=payload.run_py),
+        ]
+        if payload.skill_md is not None:
+            edited_files.append(WorkerFilePatch(path="SKILL.md", content=payload.skill_md))
+        new_id = _clone_protected_worker_for_edit(
+            worker_id,
+            edited_files,
+            user_id=auth.user_id,
+            repos=repos,
+        )
+        detail = _build_worker_detail(new_id, user_id=auth.user_id, repos=repos)
+        detail.cloned_from = worker_id
+        return detail
+
     parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(

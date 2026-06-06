@@ -13,6 +13,16 @@ export class WorkerosApiError extends Error {
   }
 }
 
+export class WorkerosConnectionError extends Error {
+  constructor(
+    message: string,
+    readonly apiBase: string,
+  ) {
+    super(message);
+    this.name = "WorkerosConnectionError";
+  }
+}
+
 type QueryValue = string | number | boolean | null | undefined;
 
 type RequestOptions = {
@@ -34,6 +44,18 @@ function buildUrl(base: string, path: string, query?: Record<string, QueryValue>
     }
   }
   return url.toString();
+}
+
+async function fetchWorkeros(apiBase: string, input: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new WorkerosConnectionError(
+      `Cannot reach Workeros API at ${normalizeBase(apiBase)}: ${message}`,
+      normalizeBase(apiBase),
+    );
+  }
 }
 
 async function parseResponse(response: Response): Promise<unknown> {
@@ -187,7 +209,7 @@ export class WorkerosApiClient {
       headers["content-type"] = "application/json";
       body = JSON.stringify(options.body);
     }
-    const response = await fetch(buildUrl(this.apiBase, this.resolvePath(path), options.query), {
+    const response = await fetchWorkeros(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path), options.query), {
       method,
       headers,
       body,
@@ -216,7 +238,7 @@ export class WorkerosApiClient {
     if (auth) {
       Object.assign(headers, await this.authHeaders());
     }
-    const response = await fetch(buildUrl(this.apiBase, this.resolvePath(path), options.query), {
+    const response = await fetchWorkeros(this.apiBase, buildUrl(this.apiBase, this.resolvePath(path), options.query), {
       method,
       headers,
     });
@@ -242,7 +264,7 @@ export class WorkerosApiClient {
     const bytes = await readFile(filePath);
     const form = new FormData();
     form.append("file", new File([bytes], basename(filePath)));
-    const response = await fetch(buildUrl(this.apiBase, this.resolvePath("/uploads")), {
+    const response = await fetchWorkeros(this.apiBase, buildUrl(this.apiBase, this.resolvePath("/uploads")), {
       method: "POST",
       headers: {
         accept: "application/json",
@@ -293,7 +315,7 @@ export function createPublicClient(
 // Used by `floom login [--cloud]` to talk to the API base before any
 // credentials have been saved. WORKEROS_CLOUD=1 also flips to cloud.
 export function resolveLoginApiBase(opts: { cloud?: boolean } = {}): string {
-  const explicit = process.env.WORKEROS_API_BASE;
+  const explicit = process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE;
   if (explicit) return normalizeBase(explicit);
   const cloud =
     opts.cloud === true ||
