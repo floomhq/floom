@@ -12430,13 +12430,18 @@ def test_secret(
     """Test a user-managed secret without exposing provider details or values."""
     if name in PLATFORM_SECRETS:
         raise HTTPException(status_code=404, detail="Secret not found")
-    if repos.secrets.get(user_id=auth.user_id, name=name) is None:
-        raise HTTPException(status_code=404, detail="Secret not found")
-    value = repos.secrets.read_value(user_id=auth.user_id, name=name)
-    if not value:
-        raise HTTPException(status_code=404, detail="Secret not found")
-
-    return SecretTestResult(status="valid", reason="Secret is configured.")
+    db_row = repos.secrets.get(user_id=auth.user_id, name=name)
+    if db_row is not None:
+        value = repos.secrets.read_value(user_id=auth.user_id, name=name)
+        if not value:
+            raise HTTPException(status_code=404, detail="Secret not found")
+        return SecretTestResult(status="valid", reason="Secret is configured.")
+    # Secret not in DB — check if it is available via environment (e.g. set as a
+    # platform env var that the list endpoint also surfaces as SET).
+    available = _available_secret_names_for_user(auth.user_id, repos)
+    if name in available:
+        return SecretTestResult(status="valid", reason="Secret is configured.")
+    raise HTTPException(status_code=404, detail="Secret not found")
 
 
 # ---------------------------------------------------------------------------
