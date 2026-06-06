@@ -239,14 +239,20 @@ async def lifespan(app: FastAPI):
     _validate_startup_configuration()
     # Ensure the git workspace repo is initialized (idempotent)
     try:
-        _git_ops.ensure_repo(_git_workspace())
+        _wgit = _git_workspace()
         _git_remote = os.environ.get("WORKEROS_GIT_REMOTE", "").strip()
-        if _git_remote:
-            _git_ops.configure_remote(_git_workspace(), _git_remote)
-            try:
-                _git_ops.pull(_git_workspace())
-            except Exception as _pull_exc:
-                logger.warning("Git pull from remote failed (non-fatal): %s", _pull_exc)
+        if _git_remote and not (_wgit / ".git").exists():
+            # Fresh install with a remote configured: clone so full history arrives.
+            logger.info("Git workspace: cloning from %s ...", _git_remote)
+            _git_ops.clone_or_init(_wgit, _git_remote)
+        else:
+            _git_ops.ensure_repo(_wgit)
+            if _git_remote:
+                _git_ops.configure_remote(_wgit, _git_remote)
+                try:
+                    _git_ops.pull(_wgit)
+                except Exception as _pull_exc:
+                    logger.warning("Git pull from remote failed (non-fatal): %s", _pull_exc)
     except Exception as _git_exc:
         logger.warning("Git workspace init failed (non-fatal): %s", _git_exc)
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
