@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
-import type { PlatformConfig, SystemInfo } from "@/lib/types";
+import type { PlatformConfig, PersonalAccessToken, SystemInfo } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,135 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, Trash2 } from "lucide-react";
+
+function PersonalAccessTokensPanel() {
+  const [tokens, setTokens] = useState<PersonalAccessToken[] | null>(null);
+  const [newTokenName, setNewTokenName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.tokens.list();
+      setTokens(list);
+    } catch {
+      // /auth/tokens 404/401 means multi-member not active — hide silently
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  if (tokens === null) return null; // Not yet loaded or not available
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newTokenName.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    setCreatedToken(null);
+    try {
+      const result = await api.tokens.create(name);
+      setCreatedToken(result.token);
+      setNewTokenName("");
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to create token");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleRevoke(id: string, name: string) {
+    try {
+      await api.tokens.revoke(id);
+      toast.success(`Revoked "${name}"`);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to revoke token");
+    }
+  }
+
+  async function copyToken(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Token copied to clipboard");
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">Personal access tokens</h2>
+      <p className="text-sm text-muted-foreground">
+        Use tokens to authenticate API and MCP requests without a shared secret.
+        Token values are shown once — store them securely.
+      </p>
+
+      {createdToken && (
+        <Alert>
+          <CheckCircle2 className="size-4" />
+          <AlertTitle>Token created</AlertTitle>
+          <AlertDescription>
+            <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+              <span className="flex-1 break-all">{createdToken}</span>
+              <button
+                type="button"
+                onClick={() => void copyToken(createdToken)}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <Copy className="size-3.5" />
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              This value won&apos;t be shown again.
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <form onSubmit={handleCreate} className="flex gap-2">
+        <Input
+          placeholder="Token name (e.g. ci-pipeline)"
+          value={newTokenName}
+          onChange={(e) => setNewTokenName(e.target.value)}
+          className="max-w-xs"
+        />
+        <Button type="submit" size="sm" disabled={!newTokenName.trim() || creating}>
+          {creating ? "Creating…" : "Create token"}
+        </Button>
+      </form>
+
+      {tokens.length > 0 ? (
+        <div className="space-y-1">
+          {tokens.map((t) => (
+            <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+              <div className="flex-1 min-w-0">
+                <span className="font-medium">{t.name}</span>
+                {t.last_used_at && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    last used {new Date(t.last_used_at).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleRevoke(t.id, t.name)}
+                className="text-muted-foreground hover:text-destructive"
+                aria-label={`Revoke ${t.name}`}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">No tokens yet.</p>
+      )}
+    </section>
+  );
+}
 
 // S22f: Notifications tab is currently hidden. The TabKey type still includes
 // it (plus the now-removed "assistant") so old URLs (?tab=assistant /
@@ -233,6 +361,7 @@ function SettingsContent() {
 
         <TabsContent value="api" className="space-y-8 pt-6">
           <CliCommandPanel />
+          <PersonalAccessTokensPanel />
         </TabsContent>
 
         <TabsContent value="system" className="space-y-8 pt-6">
