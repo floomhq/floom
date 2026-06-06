@@ -208,6 +208,41 @@ def test_base_persona_and_workspace_instructions_are_separate_editable_layers(cl
     assert custom_versions[0]["asset_type"] == "workspace_instructions"
 
 
+def test_base_persona_state_and_reset_to_default(client_and_main):
+    client, _main = client_and_main
+
+    # Pristine: built-in default in effect, not custom.
+    state = client.get("/workspace/base/state").json()
+    assert state["is_custom"] is False
+    assert "I'm Emily, your chief-of-staff" in state["content"]
+    assert state["content"] == state["default"]
+
+    custom = "# Emily\n\nYou are Emily, edited base.\n"
+    put_base = client.put(
+        "/workspace/base",
+        content=custom,
+        headers={"content-type": "text/markdown"},
+    )
+    assert put_base.status_code == 204, put_base.text
+
+    state2 = client.get("/workspace/base/state").json()
+    assert state2["is_custom"] is True
+    assert state2["content"] == custom
+    assert "I'm Emily, your chief-of-staff" in state2["default"]
+
+    reset = client.delete("/workspace/base")
+    assert reset.status_code == 204, reset.text
+
+    state3 = client.get("/workspace/base/state").json()
+    assert state3["is_custom"] is False
+    assert state3["content"] == state3["default"]
+    assert "edited base" not in state3["content"]
+
+    # The reset is captured in version history.
+    versions = client.get("/workspace/base/versions").json()
+    assert any(v.get("change_source") == "reset-to-default" for v in versions)
+
+
 def test_endpoint_requires_auth(client_and_main):
     client, _main = client_and_main
     resp = client.get("/system/workspace-agent", headers={"x-floom-secret": "wrong"})

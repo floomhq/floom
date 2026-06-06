@@ -18485,6 +18485,59 @@ async def get_workspace_base_persona(auth: AuthContext = Depends(get_auth_contex
     return PlainTextResponse(get_workspace_base_persona(), media_type="text/markdown")
 
 
+@app.get("/workspace/base/state")
+async def get_workspace_base_persona_state(
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Return the resolved base persona plus whether it is a custom override.
+
+    ``content`` is what currently applies to every conversation. ``is_custom``
+    is True when an override has been saved; False means the built-in engine
+    default is in effect. ``default`` is the built-in default, used by the UI to
+    preview what a reset would restore.
+    """
+    from chat_service import (
+        EMILY_BASE_PERSONA,
+        base_persona_is_custom,
+        get_workspace_base_persona,
+    )
+
+    return {
+        "content": get_workspace_base_persona(),
+        "is_custom": base_persona_is_custom(),
+        "default": EMILY_BASE_PERSONA,
+    }
+
+
+@app.delete("/workspace/base", status_code=204)
+async def reset_workspace_base_persona(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Remove the base-persona override, restoring the built-in engine default.
+
+    Snapshots the built-in default so the reset itself is in version history.
+    """
+    from chat_service import (
+        base_persona_is_custom,
+        clear_workspace_base_persona,
+        get_workspace_base_persona,
+    )
+
+    was_custom = base_persona_is_custom()
+    clear_workspace_base_persona()
+    if was_custom:
+        _snapshot_workspace_base_persona(
+            user_id=auth.user_id,
+            repos=repos,
+            asset_id=_workspace_base_persona_asset_id(request),
+            content=get_workspace_base_persona(),
+            change_source="reset-to-default",
+        )
+    return Response(status_code=204)
+
+
 @app.get("/workspace/base/versions", response_model=List[VersionSummary])
 def list_workspace_base_persona_versions(
     request: Request,
