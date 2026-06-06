@@ -8691,6 +8691,10 @@ def create_worker(
         target_committed = True
         invalidate_worker_cache()
         detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+        # Commit new worker files to the workspace git repo
+        author_name, author_email = _git_author(auth)
+        worker_name = (config.name if config else None) or worker_id
+        _git_commit_worker(worker_id, message=f"worker: create {worker_name}", author_name=author_name, author_email=author_email)
         create_complete = True
         return detail
     except sqlite3.IntegrityError as exc:
