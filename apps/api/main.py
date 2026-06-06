@@ -17136,6 +17136,72 @@ def _overview_failure_cause(row: Dict[str, Any]) -> str:
     return error_code
 
 
+def _overview_consecutive_failure_threshold() -> int:
+    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "3")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 3
+
+
+def _overview_consecutive_failure_items(
+    *,
+    runs: List[Dict[str, Any]],
+    worker_names: Dict[str, str],
+    threshold: int,
+) -> List[OverviewAttentionItem]:
+    by_worker: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for row in runs:
+        worker_id = row.get("worker_id")
+        if worker_id:
+            by_worker[str(worker_id)].append(row)
+
+    def _run_time(row: Dict[str, Any]) -> datetime:
+        parsed = _parse_iso8601(row.get("started_at") or row.get("completed_at") or row.get("created_at"))
+        return parsed or datetime.min.replace(tzinfo=timezone.utc)
+
+    items: List[OverviewAttentionItem] = []
+    for worker_id, rows in by_worker.items():
+        ordered = sorted(rows, key=_run_time, reverse=True)
+        consecutive = 0
+        latest_failure: Dict[str, Any] | None = None
+        for row in ordered:
+            status = str(row.get("status") or "").lower()
+            if status in {"failed", "error", "cancelled", "rejected", "timeout"}:
+                consecutive += 1
+                if latest_failure is None:
+                    latest_failure = row
+                continue
+            break
+        if consecutive < threshold or latest_failure is None:
+            continue
+        last_failed_at = (
+            latest_failure.get("started_at")
+            or latest_failure.get("completed_at")
+            or latest_failure.get("created_at")
+        )
+        items.append(
+            OverviewAttentionItem(
+                type="consecutive_failures",
+                kind="failing",
+                worker_id=worker_id,
+                worker_name=worker_names.get(worker_id, worker_id),
+                message=f"{consecutive} consecutive failures",
+                cause=_overview_failure_cause(latest_failure),
+                error_code=latest_failure.get("error_code"),
+                recent_failure_count=consecutive,
+                last_failed_at=last_failed_at,
+                suggested_actions=["view_logs", "retry", "disable"],
+                action_url=f"/workers/{worker_id}",
+            )
+        )
+    return sorted(
+        items,
+        key=lambda item: (item.recent_failure_count or 0, item.last_failed_at or ""),
+        reverse=True,
+    )
+
+
 def _overview_schedule_triggers(worker: Dict[str, Any]) -> List[Dict[str, Any]]:
     raw_triggers = worker.get("triggers_json")
     triggers: List[Dict[str, Any]] = []
@@ -17411,6 +17477,24 @@ def system_overview(
         row for row in failure_runs
         if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
     ]
+    visible_terminal_runs = [
+        row for row in runs_14d_rows
+        if str(row.get("status") or "").lower()
+        in {"completed", "approved", "success", "succeeded", "failed", "error", "cancelled", "rejected", "timeout"}
+        and _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+    ]
+    attention_items.extend(
+        _overview_consecutive_failure_items(
+            runs=visible_terminal_runs,
+            worker_names=worker_names,
+            threshold=_overview_consecutive_failure_threshold(),
+        )
+    )
+    _consecutive_failure_worker_ids = {
+        item.worker_id
+        for item in attention_items
+        if item.type == "consecutive_failures" and item.worker_id
+    }
     failure_counts: Dict[str, int] = collections.Counter(row["worker_id"] for row in failure_runs if row.get("worker_id"))
     latest_failure_by_worker: Dict[str, Dict[str, Any]] = {}
     for row in failure_runs:
@@ -17427,6 +17511,8 @@ def system_overview(
         key=lambda item: item[1],
         reverse=True,
     )[:3]:
+        if worker_id in _consecutive_failure_worker_ids:
+            continue
         latest_failure = latest_failure_by_worker.get(worker_id) or {}
         last_failed_at = latest_failure.get("started_at") or latest_failure.get("completed_at") or latest_failure.get("created_at")
         cause = _overview_failure_cause(latest_failure)
