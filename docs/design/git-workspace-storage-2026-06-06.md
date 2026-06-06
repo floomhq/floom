@@ -6,20 +6,21 @@ Supersedes: PR #479, `docs/design/cloud-worker-storage-2026-06-06.md`
 
 ## Summary
 
-Use git as the durable substrate for authored workspace source in both OSS and Cloud. The repository is private per workspace, invisible in the product UI, and stores source-like content only:
+Use git as the durable substrate for workspace files in both OSS and Cloud. The repository is private per workspace, invisible in the product UI, and stores every file-shaped workspace object:
 
 - worker bundles: `worker.yml`, `run.py`, `SKILL.md`, `requirements.txt`, and support files
 - brain folders and files, with metadata and tags in YAML frontmatter
 - `workspace.base.md`
 - `workspace.md`
 - workspace instruction and persona metadata
+- run output artifacts that are files
 
-The runtime database remains the source of truth for operational state: runs, logs, conversations, metrics, schedules, trigger registrations, approvals, secrets metadata, and search indexes. Large brain binaries use object storage pointers in Cloud and optional Git LFS in OSS or GitHub mirrors.
+The runtime database remains the source of truth for non-file operational records: run status, logs/events, conversations, metrics, schedules, trigger registrations, approvals, secrets metadata, and search indexes. Large binaries stay in the workspace repo through Git LFS. Supabase Storage in Cloud and local persistent disk in OSS are physical repo backing, not second file stores.
 
 Recommended implementation choices:
 
 - Git library: `isomorphic-git` in a small internal `workspace-git` service/module.
-- Cloud repository location: Workeros-owned bare repos on a persistent volume, outside Railway's ephemeral app filesystem, with object-store bundle backups.
+- Cloud repository location: Supabase-backed workspace git repo, with Supabase Storage for repo/LFS bytes and Supabase Postgres for refs, locks, indexes, and metadata. Railway ephemeral disk is only a transient cache.
 - Rollout: OSS local git foundation first, then Cloud pilot, then Cloud cutover, then optional GitHub mirror/import.
 
 ## Verified Current Facts
@@ -33,7 +34,7 @@ This design is grounded in the current code paths named in the brief:
 - `apps/api/contexts.py` stores brain/context files as directories under `CONTEXTS_DIR`; in Cloud mode the root can be scoped by workspace/user. Metadata and tags currently live in `.workeros-contexts.json`.
 - `apps/api/main.py` records DB snapshots for workers, brain packs/files, `workspace.md`, and `workspace.base.md` through `asset_versions`.
 - `apps/api/chat_service.py` reads and writes `workspace.md` and `workspace.base.md` from root-level files.
-- PR #479 proposed DB indexing plus object-storage worker bundles. This design carries forward durable storage, workspace scoping, immutable run snapshots, stock worker protection, and large-object controls. It changes the canonical authored source store from DB/object-store bundle rows to git history.
+- PR #479 proposed DB indexing plus object-storage worker bundles. This design carries forward durable storage, workspace scoping, immutable run snapshots, stock worker protection, and large-object controls. It changes the canonical file store from DB/object-store bundle rows to one workspace git repo.
 
 ## Repository Layout
 
@@ -57,7 +58,13 @@ One private repo exists per workspace. The repo stores the workspace's authored 
       <file>.md
       <file>.txt
       <file>.yaml
-      <large-file>.pointer.yml
+      <large-file>.pdf
+  artifacts/
+    runs/
+      <run-id>/
+        output.json
+        files/
+          <artifact-file>
   .workeros/
     indexes/
       brain-index.yml
@@ -102,20 +109,14 @@ agent_scope:
 
 For YAML, JSON, CSV, and plain text files where frontmatter is awkward, Workeros can store a sidecar metadata file under `.workeros/indexes/brain-index.yml` keyed by path. Markdown and MDX use frontmatter by default. Existing `.workeros-contexts.json` metadata migrates into frontmatter or the index file.
 
-Large binary pointer file:
+Large binary files stay at their product paths and are tracked by Git LFS. Example `.gitattributes`:
 
-```yaml
-schema_version: "1"
-kind: "workeros.asset_pointer"
-path: "brain/contracts/vendor-master.pdf"
-mime_type: "application/pdf"
-size_bytes: 24839218
-sha256: "..."
-storage:
-  provider: "r2"
-  key: "workspaces/ws_.../brain/contracts/vendor-master.pdf"
-tags: ["contracts"]
-source: "upload"
+```text
+*.pdf filter=lfs diff=lfs merge=lfs -text
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
+artifacts/runs/** filter=lfs diff=lfs merge=lfs -text
 ```
 
 ## Write Mechanism
@@ -191,13 +192,13 @@ Railway app filesystem is ephemeral, so the Cloud canonical repo location cannot
 
 Recommended Cloud v1:
 
-- Run a Workeros-owned git storage service with a persistent volume.
-- Store one bare repo per workspace under `/var/lib/workeros/git/workspaces/<workspace-id>.git`.
-- Keep transient checkouts and per-run materializations on ephemeral disk only.
-- Snapshot bare repos to object storage with `git bundle` or packed archive backups after writes.
-- Store large binary objects in object storage and commit pointer files.
+- Store the workspace repo in Supabase-backed storage.
+- Store repo pack/object bytes and Git LFS objects in Supabase Storage.
+- Store refs, locks, workspace repo metadata, and query indexes in Supabase Postgres.
+- Keep Railway filesystem usage to transient checkouts, staging directories, and short-lived caches.
+- Treat Supabase/local backing as the repo's physical backing, not a separate product-level file store.
 
-This beats object-store-backed bare repos for v1 because git expects POSIX-style filesystem semantics, locks, atomic renames, and packfile updates. Object storage remains excellent for backup bundles and binary blobs. A managed git host is valuable as an optional mirror, not the canonical store, because users can operate without connecting GitHub.
+This matches the product rule: files live in one workspace git repo; deployment-specific backing differs by environment. OSS uses local persistent disk. Cloud uses Supabase Storage plus Postgres. Railway ephemeral disk never owns canonical source.
 
 ## Connect To GitHub
 
@@ -214,41 +215,42 @@ Flow:
 What syncs:
 
 - `workers/`
-- `brain/` text files and pointer files
+- `brain/` files
+- `artifacts/runs/` files that are retained in the workspace repo
 - `workspace.base.md`
 - `workspace.md`
 - `.workeros/` indexes and migration manifests
 - `.gitattributes` and `.gitignore`
+- Git LFS objects when GitHub LFS is enabled for the mirror
 
 What never syncs:
 
 - secret values
-- run logs
+- run status records and log/event records
 - conversations
 - schedules and trigger runtime state
 - OAuth tokens or connection credentials
-- object-store binary bytes when using pointer mode, unless the workspace explicitly enables Git LFS
 
 v1 is push-only. Later phases can add GitHub import, pull, and branch/PR review flows after conflict policy and secret scanning are proven.
 
 ## Large Binaries And Secret Hygiene
 
-Cloud default: object-store-with-pointer.
+Cloud default: Git LFS inside the workspace repo, physically backed by Supabase Storage.
 
 Reasons:
 
-- It avoids Git LFS account quotas and bandwidth coupling.
-- It keeps the canonical repo small.
-- It lets Workeros enforce workspace ownership, signed download URLs, retention, and malware/secret scanning before access.
-- It mirrors cleanly to GitHub as pointer metadata without leaking bytes.
+- It keeps file-shaped data in the single workspace repo abstraction.
+- It keeps large blob bytes out of normal git packfile paths.
+- It lets Workeros enforce workspace ownership, retention, and malware/secret scanning before access.
+- It maps cleanly to GitHub LFS when the user enables GitHub mirroring.
 
-Git LFS remains an optional OSS/GitHub mirror mode when an operator wants binary bytes in git infrastructure. `.gitattributes` can mark known large extensions for LFS in that mode.
+The product does not introduce object-store pointer files as a separate file location. Supabase Storage stores the repo's Git/LFS bytes in Cloud; local disk stores them in OSS.
 
 Secret hygiene:
 
 - Pre-commit secret scanning gates every write path.
 - Connection config stored in source uses vault references only, for example `secret_ref: "vault://workspace/ws_.../OPENAI_API_KEY"`.
-- Pointer files never contain signed URLs or temporary credentials.
+- LFS metadata never contains signed URLs or temporary credentials.
 - Migration imports run the same scanner before committing. Flagged content is quarantined into a report rather than committed.
 - GitHub mirror pushes run a second scan on the outgoing tree.
 
@@ -265,6 +267,7 @@ Run a read-only inventory for each workspace:
 - `workspace.md`
 - `workspace.base.md`
 - DB `asset_versions` rows for workers, brain packs/files, workspace instructions, and base persona
+- existing file artifacts under the configured artifacts directory
 - DB `skill_versions` rows and current `workers` rows
 - large files and binary files
 - secret scan findings
@@ -312,6 +315,7 @@ After historical rows, import the current filesystem state. This guarantees the 
 
 - copy current `WORKERS_DIR/<id>` worker bundles into `workers/<id>/`
 - copy current scoped contexts into `brain/<folder>/`
+- copy retained run output artifact files into `artifacts/runs/<run-id>/`
 - convert `.workeros-contexts.json` metadata to frontmatter or `.workeros/indexes/brain-index.yml`
 - copy current `workspace.md` and `workspace.base.md` when present
 - create one final `Import current filesystem state` commit
@@ -345,7 +349,7 @@ Git stores authored source. The DB stores runtime and query state.
 Remain in DB:
 
 - users, workspaces, membership, roles
-- runs, logs, artifacts, approvals, conversations
+- run records, log/event records, approvals, conversations
 - schedules, triggers, webhook secrets, Composio trigger IDs
 - secret metadata and vault references
 - connection metadata
@@ -357,13 +361,14 @@ Remain in DB:
 Move to git as canonical source:
 
 - worker bundle files
-- brain file bytes for text/small files
+- brain file bytes
+- retained run output artifact files
 - brain metadata/tags
 - workspace instructions
 - base persona
 - source history and rollback data for those assets
 
-Run execution records the worker revision SHA used for the run. This pins runs to source history without placing run data in git.
+Run execution records the worker revision SHA used for the run. The DB stores run state and log/event records. Any file-shaped run output is committed under `artifacts/runs/<run-id>/` and can use Git LFS.
 
 ## Rollout
 
@@ -375,7 +380,7 @@ Run execution records the worker revision SHA used for the run. This pins runs t
 - Add secret scanning before commit.
 - Add migration inventory and idempotent import.
 - Keep existing filesystem paths as fallback in OSS.
-- Ship Cloud pilot on a persistent-volume git storage service.
+- Ship Cloud pilot on Supabase-backed repo storage.
 - Keep GitHub mirror out of the critical path.
 
 ### V1.1
@@ -384,21 +389,21 @@ Run execution records the worker revision SHA used for the run. This pins runs t
 - Keep stock workers as source-tree templates and fork edits into workspace repos.
 - Store run revision SHA on every run.
 - Serve version history from git for source assets.
-- Snapshot bare repos to object storage.
+- Store retained run output artifact files in the repo through Git LFS.
 
 ### Later
 
 - GitHub push mirror.
 - GitHub import and pull.
 - Branch/PR workflows for advanced teams.
-- Optional Git LFS mode.
+- GitHub LFS mirror controls and retention policies.
 - Cleanup of legacy `asset_versions` source snapshots after an audit window.
 
 Rollout order: OSS local foundation first, Cloud pilot second, Cloud cutover third, GitHub mirror fourth. That order proves the source abstraction against the current filesystem-heavy code before making Cloud dependent on it.
 
 ## Recommendation
 
-Use git as the canonical source store for workspace-authored files. Keep the DB for runtime state. Implement the git engine with `isomorphic-git`, store Cloud repos as Workeros-owned bare repos on a persistent volume with object-store backups, use object-store pointer files for large binaries, migrate legacy DB versions into commit history before importing current filesystem state, and roll out OSS foundation before Cloud cutover.
+Use git as the canonical store for every workspace file. Keep the DB for non-file runtime records. Implement the git engine with `isomorphic-git`; use local persistent disk for OSS repo backing and Supabase Storage plus Supabase Postgres for Cloud repo backing; use Git LFS for large binaries and run output artifact files; migrate legacy DB versions into commit history before importing current filesystem state; roll out OSS foundation before Cloud cutover.
 
 ## Sources Read
 
