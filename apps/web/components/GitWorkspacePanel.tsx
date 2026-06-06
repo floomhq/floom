@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, ExternalLink, GitBranch, Github, Loader2, Plus, RefreshCw, Unlink } from "lucide-react";
+import { AlertTriangle, Check, ExternalLink, GitBranch, Github, Loader2, Plus, RefreshCw, Unlink } from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
@@ -294,8 +294,36 @@ function ConnectedView({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Every worker save, context edit, and workspace update is automatically committed and pushed to this repo. Use it for backups, team sharing, CI/CD, or to restore on a fresh install.
+        Every worker save, context edit, and workspace update is automatically committed and pushed to this repo. Secrets are mirrored to GitHub Actions secrets so CI/CD and fresh installs have everything they need.
       </p>
+
+      {/* Missing secrets — show on fresh install when GitHub has secrets not yet configured locally */}
+      {status.missing_secrets && status.missing_secrets.length > 0 && (
+        <div className="rounded-[var(--radius-card)] border border-amber-500/30 bg-amber-500/5 px-4 py-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="size-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+              {status.missing_secrets.length} secret{status.missing_secrets.length !== 1 ? "s" : ""} need to be configured locally
+            </p>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            These secrets exist in the GitHub repo but haven&apos;t been set on this install yet.
+          </p>
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            {status.missing_secrets.map((name) => (
+              <code key={name} className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-800 dark:text-amber-300 border border-amber-500/20">
+                {name}
+              </code>
+            ))}
+          </div>
+          <a
+            href="/settings#secrets"
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline pt-1"
+          >
+            Go to Secrets <ExternalLink className="size-3" />
+          </a>
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <Button
