@@ -502,6 +502,8 @@ class CurrentUserResponse(BaseModel):
     display_name: Optional[str] = None
     workspace_id: Optional[str] = None
     scopes: List[str] = []
+    role: str = "admin"
+    username: Optional[str] = None
 
 
 class WorkspaceAgentSettingsUpdate(BaseModel):
@@ -541,9 +543,11 @@ def get_current_user(auth: AuthContext = Depends(get_auth_context)) -> CurrentUs
     return CurrentUserResponse(
         user_id=auth.user_id,
         email=auth.email,
-        display_name=auth.email or auth.user_id,
+        display_name=auth.email or auth.username or auth.user_id,
         workspace_id=_active_local_workspace_id(auth) if not _is_cloud_deploy() else None,
         scopes=list(auth.scopes or ()),
+        role=auth.role,
+        username=auth.username,
     )
 
 
@@ -3602,9 +3606,10 @@ def _list_db_workers(
     *,
     user_id: str,
     repos: Repositories,
+    role: str = "admin",
 ) -> List[Dict[str, Any]]:
     try:
-        return repos.workers.list(user_id=user_id)
+        return repos.workers.list(user_id=user_id, role=role)
     except sqlite3.OperationalError:
         return []
 
@@ -3679,10 +3684,11 @@ def _list_visible_workers(
     user_id: str,
     repos: Repositories,
     use_cache: bool = True,
+    role: str = "admin",
 ) -> List[Dict[str, Any]]:
     visible = {
         worker["id"]: worker
-        for worker in _list_db_workers(user_id=user_id, repos=repos)
+        for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
         if not _worker_hidden_from_api(worker["id"])
     }
     for worker in _stock_workers_from_filesystem(use_cache=use_cache):
@@ -3721,9 +3727,10 @@ def _get_db_worker(
     *,
     user_id: str,
     repos: Repositories,
+    role: str = "admin",
 ) -> Optional[Dict[str, Any]]:
     try:
-        return repos.workers.get(user_id=user_id, worker_id=worker_id)
+        return repos.workers.get(user_id=user_id, worker_id=worker_id, role=role)
     except sqlite3.OperationalError:
         return None
 
@@ -3749,8 +3756,9 @@ def _get_visible_worker(
     *,
     user_id: str,
     repos: Repositories,
+    role: str = "admin",
 ) -> Optional[Dict[str, Any]]:
-    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos)
+    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos, role=role)
     if worker is not None:
         if _worker_hidden_from_api(worker["id"]):
             # Archived workers stay reachable for detail rendering (not 404).
@@ -5730,7 +5738,7 @@ def list_workers(
     ?include_archived=true — include archived workers (archived:true in worker.yml).
                              Default: excluded from All/Starred/Recent; shown only in Archived view.
     """
-    workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True)
+    workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True, role=auth.role)
     # Filter out system_worker: true workers unless explicitly requested.
     if not include_system:
         workers = [
@@ -6157,8 +6165,9 @@ def _build_worker_detail(
     *,
     user_id: str,
     repos: Repositories,
+    role: str = "admin",
 ) -> WorkerDetail:
-    worker = _get_visible_worker(worker_id, user_id=user_id, repos=repos)
+    worker = _get_visible_worker(worker_id, user_id=user_id, repos=repos, role=role)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -6662,7 +6671,7 @@ def get_worker_detail(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     canonical_id = _canonical_worker_id(worker_id)
-    return _build_worker_detail(canonical_id, user_id=auth.user_id, repos=repos)
+    return _build_worker_detail(canonical_id, user_id=auth.user_id, repos=repos, role=auth.role)
 
 
 @app.put("/workers/{worker_id}/visibility", response_model=WorkerDetail)
@@ -19240,6 +19249,332 @@ async def mcp_http_endpoint(
     except Exception:
         return JSONResponse(_mcp_err(None, -32700, "Parse error"), status_code=400)
     return JSONResponse(await _mcp_handle_request(body, auth, repos, request))
+
+
+# ---------------------------------------------------------------------------
+# Multi-member: auth, users, personal access tokens (migration 59)
+# ---------------------------------------------------------------------------
+
+import secrets as _secrets_mod
+from auth.multi_member import SESSION_COOKIE, _hash_token as _hash_pat
+
+_SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+
+
+class _AuthSetupRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class _LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class _UserOut(BaseModel):
+    id: str
+    username: str
+    display_name: Optional[str] = None
+    role: str
+    disabled: bool
+    created_at: str
+
+
+class _UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+    role: str = "member"
+
+
+class _UserUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    disabled: Optional[bool] = None
+    password: Optional[str] = None
+
+
+class _PATOut(BaseModel):
+    id: str
+    name: str
+    last_used_at: Optional[str] = None
+    created_at: str
+    expires_at: Optional[str] = None
+
+
+class _PATCreateRequest(BaseModel):
+    name: str
+    expires_at: Optional[str] = None
+
+
+class _PATCreateResponse(BaseModel):
+    token: str  # raw value — shown once, never stored
+    pat: _PATOut
+
+
+def _bcrypt_hash(password: str) -> str:
+    try:
+        import bcrypt
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    except ImportError:
+        raise HTTPException(status_code=500, detail="bcrypt not installed")
+
+
+def _bcrypt_verify(password: str, hashed: str) -> bool:
+    try:
+        import bcrypt
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    except ImportError:
+        return False
+
+
+def _require_multi_member_repos(repos: Repositories):
+    if repos.users is None or repos.sessions is None or repos.tokens is None:
+        raise HTTPException(status_code=503, detail="multi-member not available")
+    return repos.users, repos.sessions, repos.tokens
+
+
+def _require_admin(auth: AuthContext) -> None:
+    if not auth.is_admin:
+        raise HTTPException(status_code=403, detail="admin required")
+
+
+@app.post("/auth/setup", response_model=_UserOut, status_code=201)
+def auth_setup(
+    payload: _AuthSetupRequest,
+    response: Response,
+    repos: Repositories = Depends(get_repos),
+) -> _UserOut:
+    """Create the first admin account. Returns 409 if any user already exists."""
+    user_repo, session_repo, _ = _require_multi_member_repos(repos)
+    if user_repo.count() > 0:
+        raise HTTPException(status_code=409, detail="workspace already set up")
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="username required")
+    password = payload.password
+    if not password or len(password) < 6:
+        raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+    user_id = str(_uuid_mod.uuid4())
+    pw_hash = _bcrypt_hash(password)
+    row = user_repo.create(
+        user_id=user_id,
+        username=username,
+        display_name=payload.display_name,
+        password_hash=pw_hash,
+        role="admin",
+    )
+    # Auto-login: issue a session cookie so the browser is immediately logged in
+    session_id = _secrets_mod.token_urlsafe(32)
+    from datetime import datetime, timedelta, timezone as _tz
+    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
+    session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    return _UserOut(**{k: row[k] for k in ("id", "username", "display_name", "role", "disabled", "created_at")},
+                    disabled=bool(row["disabled"]))
+
+
+@app.post("/auth/login")
+def auth_login(
+    payload: _LoginRequest,
+    response: Response,
+    repos: Repositories = Depends(get_repos),
+) -> dict:
+    """Authenticate with username+password; sets a session cookie."""
+    user_repo, session_repo, _ = _require_multi_member_repos(repos)
+    user = user_repo.get_by_username(username=payload.username)
+    if user is None or not _bcrypt_verify(payload.password, user.get("password_hash") or ""):
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    if user.get("disabled"):
+        raise HTTPException(status_code=403, detail="account disabled")
+    session_id = _secrets_mod.token_urlsafe(32)
+    from datetime import datetime, timedelta, timezone as _tz
+    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
+    session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "display_name": user.get("display_name"),
+        "role": user["role"],
+    }
+
+
+@app.post("/auth/logout")
+def auth_logout(
+    request: Request,
+    response: Response,
+    repos: Repositories = Depends(get_repos),
+) -> dict:
+    """Invalidate the current session cookie."""
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if session_id and repos.sessions is not None:
+        try:
+            repos.sessions.delete(session_id=session_id)
+        except Exception:
+            pass
+    response.delete_cookie(SESSION_COOKIE)
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def auth_me(auth: AuthContext = Depends(get_auth_context)) -> dict:
+    """Return the current authenticated user's profile."""
+    return {
+        "user_id": auth.user_id,
+        "username": auth.username,
+        "role": auth.role,
+        "auth_method": auth.auth_method,
+        "is_admin": auth.is_admin,
+    }
+
+
+@app.get("/auth/setup-required")
+def auth_setup_required(repos: Repositories = Depends(get_repos)) -> dict:
+    """Public endpoint — returns whether the workspace needs initial setup.
+
+    Used by the login page to decide whether to show the setup form.
+    """
+    if repos.users is None:
+        return {"required": False}
+    return {"required": repos.users.count() == 0}
+
+
+# --- User management (admin only) ---
+
+
+@app.get("/users", response_model=List[_UserOut])
+def list_users(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[_UserOut]:
+    _require_admin(auth)
+    user_repo, _, _ = _require_multi_member_repos(repos)
+    rows = user_repo.list()
+    return [_UserOut(**{k: r[k] for k in ("id", "username", "display_name", "role", "created_at")},
+                     disabled=bool(r["disabled"])) for r in rows]
+
+
+@app.post("/users", response_model=_UserOut, status_code=201)
+def create_user(
+    payload: _UserCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _UserOut:
+    _require_admin(auth)
+    user_repo, _, _ = _require_multi_member_repos(repos)
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="username required")
+    if payload.role not in ("admin", "member"):
+        raise HTTPException(status_code=422, detail="role must be admin or member")
+    if not payload.password or len(payload.password) < 6:
+        raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+    if user_repo.get_by_username(username=username) is not None:
+        raise HTTPException(status_code=409, detail="username already taken")
+    user_id = str(_uuid_mod.uuid4())
+    pw_hash = _bcrypt_hash(payload.password)
+    row = user_repo.create(
+        user_id=user_id,
+        username=username,
+        display_name=payload.display_name,
+        password_hash=pw_hash,
+        role=payload.role,
+    )
+    return _UserOut(**{k: row[k] for k in ("id", "username", "display_name", "role", "created_at")},
+                    disabled=bool(row["disabled"]))
+
+
+@app.patch("/users/{uid}", response_model=_UserOut)
+def update_user(
+    uid: str = PathParam(...),
+    payload: _UserUpdateRequest = Body(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _UserOut:
+    _require_admin(auth)
+    user_repo, _, _ = _require_multi_member_repos(repos)
+    updates: dict = {}
+    if payload.display_name is not None:
+        updates["display_name"] = payload.display_name
+    if payload.role is not None:
+        if payload.role not in ("admin", "member"):
+            raise HTTPException(status_code=422, detail="role must be admin or member")
+        updates["role"] = payload.role
+    if payload.disabled is not None:
+        updates["disabled"] = 1 if payload.disabled else 0
+    if payload.password is not None:
+        if len(payload.password) < 6:
+            raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+        updates["password_hash"] = _bcrypt_hash(payload.password)
+    row = user_repo.update(user_id=uid, **updates)
+    if row is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return _UserOut(**{k: row[k] for k in ("id", "username", "display_name", "role", "created_at")},
+                    disabled=bool(row["disabled"]))
+
+
+@app.delete("/users/{uid}", status_code=204)
+def delete_user(
+    uid: str = PathParam(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    _require_admin(auth)
+    user_repo, _, _ = _require_multi_member_repos(repos)
+    if uid == auth.user_id:
+        raise HTTPException(status_code=400, detail="cannot delete your own account")
+    if not user_repo.delete(user_id=uid):
+        raise HTTPException(status_code=404, detail="user not found")
+
+
+# --- Personal access tokens (current user) ---
+
+
+@app.get("/auth/tokens", response_model=List[_PATOut])
+def list_tokens(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[_PATOut]:
+    _, _, token_repo = _require_multi_member_repos(repos)
+    rows = token_repo.list(user_id=auth.user_id)
+    return [_PATOut(**{k: r[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")}) for r in rows]
+
+
+@app.post("/auth/tokens", response_model=_PATCreateResponse, status_code=201)
+def create_token(
+    payload: _PATCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _PATCreateResponse:
+    _, _, token_repo = _require_multi_member_repos(repos)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="token name required")
+    raw = "wos_" + _secrets_mod.token_urlsafe(32)
+    token_hash = _hash_pat(raw)
+    token_id = str(_uuid_mod.uuid4())
+    row = token_repo.create(
+        token_id=token_id,
+        user_id=auth.user_id,
+        name=name,
+        token_hash=token_hash,
+        expires_at=payload.expires_at,
+    )
+    pat = _PATOut(**{k: row[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")})
+    return _PATCreateResponse(token=raw, pat=pat)
+
+
+@app.delete("/auth/tokens/{token_id}", status_code=204)
+def delete_token(
+    token_id: str = PathParam(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    _, _, token_repo = _require_multi_member_repos(repos)
+    if not token_repo.delete(token_id=token_id, user_id=auth.user_id):
+        raise HTTPException(status_code=404, detail="token not found")
 
 
 if __name__ == "__main__":
