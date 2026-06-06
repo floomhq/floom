@@ -1,0 +1,124 @@
+"use client";
+
+/**
+ * Emily chat — rehydration.
+ *
+ * Maps the persisted server conversation (GET /conversations/{id}, see
+ * apps/api/main.py:get_conversation_detail) into the live ChatMessage[] shape
+ * that useChatStream builds from the SSE stream, so a reloaded/reopened
+ * conversation renders identically to a freshly streamed one.
+ *
+ * Server shape:
+ *   messages:   [{ id, role: "user"|"assistant"|"tool", content, tool_call_id, created_at }]
+ *   tool_cards: [{ id, callId, toolName, status, card, ... , created_at }]
+ *
+ * Strategy: build one chronological timeline keyed by created_at.
+ *   - user message     → ChatMessage { role: "user", text }
+ *   - assistant message→ ChatMessage { role: "assistant", parts: [text] }
+ *   - tool card        → tool-card part appended to the current assistant turn
+ *                        (a new assistant turn is opened if none is active)
+ *   - "tool" role messages are raw tool results already represented by their
+ *     card, so they are skipped for rendering.
+ */
+
+import type {
+  ConversationDetail,
+  ConversationMessageRow,
+  ConversationToolCardRow,
+} from "./types";
+import type {
+  ChatMessage,
+  GenericToolCard,
+  MsgPart,
+  CardStatus,
+} from "./emily-chat-types";
+import {
+  getToolCardTitle,
+  isInternalToolName,
+} from "./useChatStream";
+
+type TimelineItem =
+  | { kind: "message"; ts: string; row: ConversationMessageRow }
+  | { kind: "card"; ts: string; row: ConversationToolCardRow };
+
+function normalizeStatus(raw: unknown): CardStatus {
+  const s = typeof raw === "string" ? raw : "";
+  return (s || "completed") as CardStatus;
+}
+
+function toGenericCard(row: ConversationToolCardRow): GenericToolCard {
+  const toolName = row.toolName || "tool";
+  const status = normalizeStatus(row.status);
+  const callId = row.callId || row.id;
+  return {
+    kind: "generic",
+    callId,
+    card_id: row.id || callId,
+    toolName,
+    title: getToolCardTitle(toolName, status),
+    preview:
+      (row.args_preview as Record<string, unknown> | undefined) ?? undefined,
+    status,
+    ...(row.streams ? { streams: row.streams } : {}),
+    ...(row.actions && row.actions.length
+      ? { actions: row.actions as GenericToolCard["actions"] }
+      : {}),
+  };
+}
+
+export function rehydrateConversation(detail: ConversationDetail): ChatMessage[] {
+  const messages = Array.isArray(detail?.messages) ? detail.messages : [];
+  const toolCards = Array.isArray(detail?.tool_cards) ? detail.tool_cards : [];
+
+  const timeline: TimelineItem[] = [];
+  for (const row of messages) {
+    timeline.push({ kind: "message", ts: row.created_at || "", row });
+  }
+  for (const row of toolCards) {
+    if (row.toolName && isInternalToolName(row.toolName)) continue;
+    timeline.push({ kind: "card", ts: row.created_at || "", row });
+  }
+
+  // Stable chronological sort. Items without a timestamp keep their relative
+  // insertion order (messages first, then cards) via the index tiebreak.
+  timeline.sort((a, b) => {
+    if (a.ts && b.ts && a.ts !== b.ts) return a.ts < b.ts ? -1 : 1;
+    return 0;
+  });
+
+  const out: ChatMessage[] = [];
+  let activeAssistant: ChatMessage | null = null;
+
+  for (const item of timeline) {
+    if (item.kind === "message") {
+      const { row } = item;
+      if (row.role === "user") {
+        activeAssistant = null;
+        out.push({ id: row.id, role: "user", text: row.content || "" });
+      } else if (row.role === "assistant") {
+        const text = (row.content || "").trim();
+        const parts: MsgPart[] = text
+          ? [{ type: "text", text, streaming: false }]
+          : [];
+        const msg: ChatMessage = { id: row.id, role: "assistant", parts };
+        out.push(msg);
+        activeAssistant = msg;
+      }
+      // role === "tool": represented by its persisted card; skip.
+    } else {
+      // tool card → append to the active assistant turn (open one if needed)
+      const part: MsgPart = { type: "tool-card", card: toGenericCard(item.row) };
+      if (!activeAssistant) {
+        activeAssistant = {
+          id: `a-rehydrate-${item.row.id}`,
+          role: "assistant",
+          parts: [],
+        };
+        out.push(activeAssistant);
+      }
+      activeAssistant.parts = [...(activeAssistant.parts ?? []), part];
+    }
+  }
+
+  return out;
+}
