@@ -17,6 +17,7 @@ import { motion } from "motion/react";
 import { Check, Hash, Lock } from "lucide-react";
 import {
   CalendlyLogo,
+  ClaudeLogo,
   GmailLogo,
   HubSpotLogo,
   SlackLogo,
@@ -156,32 +157,48 @@ function SlackMockup() {
 }
 
 /* ── WhatsApp ──────────────────────────────────────────────────────── */
-function Bubble({
-  side,
-  children,
-  meta,
-}: {
-  side: "left" | "right";
-  children: React.ReactNode;
-  meta: string;
-}) {
-  const isUser = side === "right";
+function WaInBubble({ children, time }: { children: React.ReactNode; time: string }) {
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className="flex justify-start">
       <div
-        className="max-w-[88%] rounded-[12px] px-3 py-2 text-[12.5px] leading-relaxed shadow-[0_1px_0_rgba(0,0,0,0.04)]"
+        className="relative max-w-[82%] rounded-[7px] rounded-tl-[2px] px-2.5 py-1.5 text-[12px] leading-snug"
         style={{
-          background: isUser
-            ? "color-mix(in srgb, #3a6ea5 12%, transparent)"
-            : "var(--bg-card)",
-          border: isUser
-            ? "1px solid color-mix(in srgb, #3a6ea5 26%, transparent)"
-            : "1px solid var(--border-default)",
-          color: "var(--ink)",
+          background: "#FFFFFF",
+          color: "#111B21",
+          boxShadow: "0 1px 0.5px rgba(0,0,0,0.13)",
         }}
       >
         <div>{children}</div>
-        <div className="mt-1 text-right font-mono text-[9.5px] text-muted-foreground">{meta}</div>
+        <div
+          className="mt-0.5 text-right font-mono text-[9.5px]"
+          style={{ color: "rgba(0,0,0,0.45)" }}
+        >
+          {time}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WaOutBubble({ children, time }: { children: React.ReactNode; time: string }) {
+  return (
+    <div className="flex justify-end">
+      <div
+        className="max-w-[82%] rounded-[7px] rounded-tr-[2px] px-2.5 py-1.5 text-[12px] leading-snug"
+        style={{
+          background: "#D9FDD3",
+          color: "#111B21",
+          boxShadow: "0 1px 0.5px rgba(0,0,0,0.13)",
+        }}
+      >
+        <div>{children}</div>
+        <div
+          className="mt-0.5 flex items-center justify-end gap-1 text-right font-mono text-[9.5px]"
+          style={{ color: "rgba(0,0,0,0.45)" }}
+        >
+          {time}
+          <span style={{ color: "#53BDEB" }}>✓✓</span>
+        </div>
       </div>
     </div>
   );
@@ -190,96 +207,151 @@ function Bubble({
 function WhatsAppMockup() {
   return (
     <Card app="WhatsApp" Logo={WhatsAppLogo} meta="DM">
-      <div className="flex items-center gap-2 pb-3">
-        <Avatar initial="N" tone="worker" />
-        <div>
-          <div className="text-[12.5px] font-semibold text-foreground">Nova Worker</div>
-          <div className="text-[10.5px] text-muted-foreground">Online</div>
+      <div className="overflow-hidden rounded-[10px] border border-border">
+        {/* Green chat header */}
+        <div
+          className="flex items-center gap-2.5 px-3 py-2"
+          style={{ background: "#075E54" }}
+        >
+          <span
+            aria-hidden
+            className="grid h-8 w-8 place-items-center rounded-full text-[12px] font-semibold"
+            style={{ background: "#25D366", color: "#FFFFFF" }}
+          >
+            N
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-semibold text-white">Nova Worker</div>
+            <div className="text-[10.5px]" style={{ color: "rgba(255,255,255,0.78)" }}>
+              online
+            </div>
+          </div>
         </div>
-      </div>
-      <div className="space-y-2">
-        <Bubble side="left" meta="9:02">
-          Weekly pipeline summary is ready. 23 new deals, 4 need a nudge, 2 are
-          stuck &gt; 7 days.
-        </Bubble>
-        <Bubble side="left" meta="9:02">
-          Want the action items, or the full breakdown?
-        </Bubble>
-        <Bubble side="right" meta="9:03 ✓✓">
-          Action items
-        </Bubble>
-        <Bubble side="left" meta="9:03">
-          <ol className="m-0 list-decimal pl-4 leading-[1.6]">
-            <li>Ping Acme on pricing</li>
-            <li>Reschedule Tara&apos;s demo</li>
-            <li>Forward Q4 deck to Notion</li>
-          </ol>
-        </Bubble>
+        {/* Chat surface */}
+        <div
+          className="space-y-1.5 px-3 py-3"
+          style={{
+            background: "#ECE5DD",
+            backgroundImage:
+              "radial-gradient(circle at 25% 30%, rgba(255,255,255,0.35) 0, transparent 35%), radial-gradient(circle at 75% 70%, rgba(0,0,0,0.03) 0, transparent 35%)",
+          }}
+        >
+          <WaInBubble time="9:02">
+            Weekly pipeline summary is ready. 23 new deals, 4 need a nudge, 2 stuck &gt; 7 days.
+          </WaInBubble>
+          <WaInBubble time="9:02">Want the action items, or the full breakdown?</WaInBubble>
+          <WaOutBubble time="9:03">Action items</WaOutBubble>
+          <WaInBubble time="9:03">
+            <ol className="m-0 list-decimal pl-4 leading-[1.55]">
+              <li>Ping Acme on pricing</li>
+              <li>Reschedule Tara&apos;s demo</li>
+              <li>Forward Q4 deck to Notion</li>
+            </ol>
+          </WaInBubble>
+        </div>
       </div>
     </Card>
   );
 }
 
-/* ── Coding agent (Claude Code / Cursor) ───────────────────────────── */
-function CodexMark() {
+/* ── Coding agent (Claude Code) ────────────────────────────────────── */
+function ToolCall({
+  verb,
+  tool,
+  detail,
+}: {
+  verb: string;
+  tool: string;
+  detail?: string;
+}) {
   return (
-    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-      <rect x="2" y="3" width="20" height="18" rx="3" fill="#181818" />
-      <path
-        d="M7 9l-2.2 2.2a.8.8 0 0 0 0 1.1L7 14.5"
-        stroke="#a7c4e2"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        fill="none"
-      />
-      <path
-        d="M14 9l2.2 2.2a.8.8 0 0 1 0 1.1L14 14.5"
-        stroke="#a7c4e2"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        fill="none"
-      />
-      <line
-        x1="12"
-        y1="8"
-        x2="9.5"
-        y2="16"
-        stroke="#a7c4e2"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-    </svg>
+    <div
+      className="flex items-center gap-2 rounded-[4px] border px-2 py-1 text-[10.5px]"
+      style={{
+        borderColor: "#2a2a2a",
+        background: "#181818",
+        color: "#9aa0a6",
+      }}
+    >
+      <span style={{ color: "#7ee0a7" }}>●</span>
+      <span style={{ color: "#D97757" }} className="font-semibold">
+        {verb}
+      </span>
+      <span style={{ color: "#c8c8c8" }}>{tool}</span>
+      {detail && (
+        <span className="ml-auto truncate" style={{ color: "#6c6c6c" }}>
+          {detail}
+        </span>
+      )}
+    </div>
   );
 }
 
 function CodingAgentMockup() {
   return (
-    <Card app="Claude Code · Cursor" Logo={CodexMark} meta="terminal">
-      <div className="rounded-[10px] border border-border bg-[#161616] p-3 font-mono text-[11.5px] leading-relaxed text-[#d4d4d4]">
-        <div className="flex items-center gap-2 pb-2 text-[10px] text-[#888]">
-          <span className="inline-flex h-2 w-2 rounded-full bg-[#ff5f56]" />
-          <span className="inline-flex h-2 w-2 rounded-full bg-[#ffbd2e]" />
-          <span className="inline-flex h-2 w-2 rounded-full bg-[#27c93f]" />
-          <span className="ml-1">workeros · client-follow-up</span>
+    <Card app="Claude Code" Logo={ClaudeLogo} meta="agent">
+      <div
+        className="overflow-hidden rounded-[10px]"
+        style={{ background: "#0F0F0F", border: "1px solid #232323" }}
+      >
+        {/* Top bar */}
+        <div
+          className="flex items-center gap-2 px-3 py-1.5"
+          style={{ borderBottom: "1px solid #1f1f1f" }}
+        >
+          <span className="inline-flex h-2 w-2 rounded-full" style={{ background: "#ff5f56" }} />
+          <span className="inline-flex h-2 w-2 rounded-full" style={{ background: "#ffbd2e" }} />
+          <span className="inline-flex h-2 w-2 rounded-full" style={{ background: "#27c93f" }} />
+          <span
+            className="ml-2 font-mono text-[10px]"
+            style={{ color: "#6c6c6c" }}
+          >
+            ~/workeros · claude
+          </span>
         </div>
-        <div>
-          <span className="text-[#7ee0a7]">$</span> workeros run client-follow-up{" "}
-          <span className="text-[#a7c4e2]">--ctx acme</span>
+        {/* Conversation */}
+        <div className="space-y-3 px-3 py-3 font-mono text-[11.5px] leading-relaxed">
+          {/* User prompt */}
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 text-[12px]" style={{ color: "#6c6c6c" }}>
+              &gt;
+            </span>
+            <span style={{ color: "#c8c8c8" }}>
+              Run client-follow-up for the Acme call
+            </span>
+          </div>
+          {/* Claude turn */}
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center [&>svg]:h-3.5 [&>svg]:w-3.5">
+              <ClaudeLogo />
+            </span>
+            <div className="min-w-0 flex-1 space-y-2">
+              <div style={{ color: "#d4d4d4" }}>Pulling context from your tools.</div>
+              <div className="space-y-1">
+                <ToolCall verb="Read" tool="Google Calendar" detail="3 calls" />
+                <ToolCall verb="Read" tool="Company Brain" detail="tone · pricing · CRM" />
+                <ToolCall verb="Write" tool="Gmail draft" detail="+ HubSpot note" />
+              </div>
+              <div style={{ color: "#d4d4d4" }}>
+                Output ready.{" "}
+                <span style={{ color: "#7ee0a7" }}>Run #1042</span>{" "}
+                <span style={{ color: "#6c6c6c" }}>·</span> approval requested in{" "}
+                <span style={{ color: "#a7c4e2" }}>#sales</span>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="mt-1 text-[#9aa0a6]">
-          <span className="text-[#9d6df1]">→</span> Reading Google Calendar · 3 calls
-        </div>
-        <div className="text-[#9aa0a6]">
-          <span className="text-[#9d6df1]">→</span> Loading brain (tone, pricing, CRM rules)
-        </div>
-        <div className="text-[#9aa0a6]">
-          <span className="text-[#9d6df1]">→</span> Drafting email + CRM note…
-        </div>
-        <div className="mt-1 text-[#7ee0a7]">
-          ✓ Output ready · <span className="text-[#d4d4d4]">Run #1042</span>
-        </div>
-        <div className="mt-0.5 text-[#9aa0a6]">
-          Awaiting approval in <span className="text-[#a7c4e2]">#sales</span>
+        {/* Prompt input */}
+        <div
+          className="flex items-center gap-2 px-3 py-2 font-mono text-[11px]"
+          style={{ borderTop: "1px solid #1f1f1f" }}
+        >
+          <span style={{ color: "#D97757" }}>&gt;</span>
+          <span
+            aria-hidden
+            className="inline-block h-3 w-[2px]"
+            style={{ background: "#d4d4d4", animation: "none" }}
+          />
         </div>
       </div>
       <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">

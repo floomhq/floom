@@ -244,6 +244,23 @@ export const WhatsAppLogo = () => (
   </svg>
 );
 
+/* Claude / Anthropic - 8-point starburst in Anthropic peach */
+export const ClaudeLogo = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+    <g fill="#D97757">
+      <path d="M12 1.5 L12.9 10.2 L12 11.1 L11.1 10.2 Z" />
+      <path d="M12 22.5 L11.1 13.8 L12 12.9 L12.9 13.8 Z" />
+      <path d="M1.5 12 L10.2 12.9 L11.1 12 L10.2 11.1 Z" />
+      <path d="M22.5 12 L13.8 11.1 L12.9 12 L13.8 12.9 Z" />
+      <path d="M4.575 4.575 L10.8 10.2 L11.4 10.8 L10.8 11.4 Z" />
+      <path d="M19.425 19.425 L13.2 13.8 L12.6 13.2 L13.2 12.6 Z" />
+      <path d="M19.425 4.575 L13.8 10.8 L13.2 11.4 L12.6 10.8 Z" />
+      <path d="M4.575 19.425 L10.2 13.2 L10.8 12.6 L11.4 13.2 Z" />
+    </g>
+    <circle cx="12" cy="12" r="2.2" fill="#D97757" />
+  </svg>
+);
+
 /* Calendly - SimpleIcons (calendly) */
 export const CalendlyLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
