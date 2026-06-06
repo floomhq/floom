@@ -105,7 +105,7 @@ def test_register_auth_provider_clears_cache(monkeypatch):
     monkeypatch.setenv("FLOOM_SECRET", "test-secret")
 
     first = get_auth_provider()
-    assert isinstance(first, SharedSecretAuthProvider)
+    assert isinstance(first, MultiMemberAuthProvider)
 
     register_auth_provider("local", lambda: _FakeCloudProvider())
 

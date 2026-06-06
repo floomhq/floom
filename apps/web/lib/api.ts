@@ -582,6 +582,8 @@ export const api = {
       }),
     listWorkspaceVersions: (limit = 50) =>
       fetchJson<import("./types").VersionSummary[]>(`/workspace/versions?limit=${limit}`),
+    getWorkspaceVersion: (versionId: string) =>
+      fetchJson<{ content: string }>(`/workspace/versions/${encodeURIComponent(versionId)}`),
     rollbackWorkspaceInstructions: (versionId: string) =>
       fetchText(`/workspace/rollback/${versionId}`, { method: "POST" }),
   },
