@@ -122,7 +122,7 @@ function RedirectInner() {
                 </div>
                 <h1 className="mt-4 text-xl font-semibold">Redirecting to Composio</h1>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Authorize {providerName} with Composio. You will return to Floom Workers when the connection is complete.
+                  Authorize {providerName} with Composio. You will return to Workeros when the connection is complete.
                 </p>
                 {redirectUrl ? (
                   <a href={redirectUrl} className={buttonVariants({ className: "mt-6 w-full" })}>
