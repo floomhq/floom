@@ -5,40 +5,61 @@ import {
   isCorrectSecret,
 } from "@/lib/web-session";
 
-// 30 days. The owner logs in once and stays in; bumping SESSION_MESSAGE in
-// lib/web-session.ts (or rotating FLOOM_API_SECRET) invalidates all sessions.
+const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 /**
  * POST /api/auth/login
- * Body: { secret: string }  (JSON or form-encoded)
  *
- * Verifies the supplied access secret against FLOOM_API_SECRET. On success,
- * sets an HttpOnly, Secure, SameSite=Lax cookie carrying an HMAC token derived
- * from the secret (never the raw secret). Wrong secret -> 401.
+ * Supports two login modes:
  *
- * Agents can authenticate non-interactively:
- *   curl -i -X POST https://workers.floom.dev/api/auth/login \
- *     -H 'content-type: application/json' \
- *     -d '{"secret":"<FLOOM_API_SECRET>"}'
- * then reuse the returned Set-Cookie on subsequent /api/proxy/* calls.
+ * 1. Legacy single-user mode (FLOOM_API_SECRET set):
+ *    Body: { secret: string }
+ *    Verifies against FLOOM_API_SECRET, sets HMAC web-session cookie.
+ *
+ * 2. Multi-member mode (username + password):
+ *    Body: { username: string; password: string }
+ *    Proxies to backend /auth/login, which sets a wos_session cookie.
+ *    The middleware accepts wos_session as valid auth.
  */
 export async function POST(req: NextRequest) {
-  let secret = "";
   const contentType = req.headers.get("content-type") || "";
+  let body: Record<string, unknown> = {};
   try {
     if (contentType.includes("application/json")) {
-      const body = (await req.json()) as { secret?: unknown };
-      secret = typeof body.secret === "string" ? body.secret : "";
+      body = (await req.json()) as Record<string, unknown>;
     } else {
       const form = await req.formData();
-      const value = form.get("secret");
-      secret = typeof value === "string" ? value : "";
+      for (const [key, value] of form.entries()) {
+        body[key] = value;
+      }
     }
   } catch {
-    secret = "";
+    body = {};
   }
 
+  // Multi-member flow: username + password
+  if (typeof body.username === "string") {
+    const upstream = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: body.username, password: body.password ?? "" }),
+    });
+    const upstreamBody = await upstream.text();
+    const res = new NextResponse(upstreamBody, {
+      status: upstream.status,
+      headers: { "content-type": "application/json" },
+    });
+    // Forward the wos_session cookie from the backend
+    const setCookie = upstream.headers.get("set-cookie");
+    if (setCookie) {
+      res.headers.set("set-cookie", setCookie);
+    }
+    return res;
+  }
+
+  // Legacy single-user flow: secret
+  const secret = typeof body.secret === "string" ? body.secret : "";
   if (!isCorrectSecret(secret)) {
     return NextResponse.json({ detail: "Invalid access secret." }, { status: 401 });
   }
