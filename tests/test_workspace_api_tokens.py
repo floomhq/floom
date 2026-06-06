@@ -28,6 +28,7 @@ def _pat_request(*, token: str = "floom_test", workspace: str | None = None) -> 
             "type": "http",
             "method": "GET",
             "path": "/api/workers",
+            "query_string": b"",
             "headers": headers,
         }
     )
