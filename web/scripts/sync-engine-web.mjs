@@ -91,6 +91,7 @@ export const OVERLAY_FILES = [
   "components/TelemetryProvider.tsx",
   "components/layout/WorkspaceSwitcher.tsx",
   "components/layout/sidebar.tsx",
+  "components/ui/dropdown-menu.tsx",
   "components/CliCommandPanel.tsx",
   "middleware.ts",
   "lib/server-api.ts",
