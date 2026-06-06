@@ -681,6 +681,9 @@ export interface CurrentUser {
   display_name?: string | null;
   workspace_id?: string | null;
   scopes?: string[];
+  // Multi-member fields (populated when using username/password or PAT auth)
+  role?: string;
+  username?: string | null;
 }
 
 export interface WorkspaceShareLink {
@@ -988,4 +991,38 @@ export interface VersionFileSnapshot {
 
 export interface VersionFileDetail {
   file: VersionFileSnapshot;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-member: local users + personal access tokens (migration 59)
+// ---------------------------------------------------------------------------
+
+export interface OssUser {
+  id: string;
+  username: string;
+  display_name?: string | null;
+  role: "admin" | "member";
+  disabled: boolean;
+  created_at: string;
+}
+
+export interface PersonalAccessToken {
+  id: string;
+  name: string;
+  last_used_at?: string | null;
+  created_at: string;
+  expires_at?: string | null;
+}
+
+export interface PersonalAccessTokenCreate {
+  token: string;
+  pat: PersonalAccessToken;
+}
+
+export interface AuthMe {
+  user_id: string;
+  username?: string | null;
+  role: string;
+  auth_method: string;
+  is_admin: boolean;
 }
