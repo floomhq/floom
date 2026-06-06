@@ -13,8 +13,11 @@ from .interface import (
     CliAuthRepository,
     ConnectionRepository,
     McpToolRepository,
+    PersonalAccessTokenRepository,
     RunRepository,
     SecretRepository,
+    UserRepository,
+    UserSessionRepository,
     VersionRepository,
     WorkerRepository,
     WorkspaceMemberRepository,
@@ -26,8 +29,11 @@ from .sqlite import (
     SqliteCliAuthRepository,
     SqliteConnectionRepository,
     SqliteMcpToolRepository,
+    SqlitePersonalAccessTokenRepository,
     SqliteRunRepository,
     SqliteSecretRepository,
+    SqliteUserRepository,
+    SqliteUserSessionRepository,
     SqliteVersionRepository,
     SqliteWorkerRepository,
     SqliteWorkspaceMemberRepository,
@@ -50,6 +56,10 @@ class Repositories(NamedTuple):
     # when it ships member/visibility support.
     members: Optional[WorkspaceMemberRepository] = None
     asset_access: Optional[AssetAccessRepository] = None
+    # Multi-member auth (migration 59). Optional with defaults for backwards compat.
+    users: Optional[UserRepository] = None
+    tokens: Optional[PersonalAccessTokenRepository] = None
+    sessions: Optional[UserSessionRepository] = None
 
 
 def _local_repositories() -> Repositories:
@@ -65,6 +75,9 @@ def _local_repositories() -> Repositories:
         mcp_tools=SqliteMcpToolRepository(),
         members=SqliteWorkspaceMemberRepository(),
         asset_access=SqliteAssetAccessRepository(),
+        users=SqliteUserRepository(),
+        tokens=SqlitePersonalAccessTokenRepository(),
+        sessions=SqliteUserSessionRepository(),
     )
 
 

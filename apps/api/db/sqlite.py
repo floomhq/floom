@@ -2995,3 +2995,199 @@ class SqliteAssetAccessRepository:
         return self.get_permissions(
             workspace_id=workspace_id, user_id=actor_id, asset_type=asset_type, asset_id=asset_id
         )
+
+
+# ---------------------------------------------------------------------------
+# Multi-member: users, sessions, personal access tokens (migration 59)
+# ---------------------------------------------------------------------------
+
+
+class SqliteUserRepository:
+    """Local user accounts — created via POST /auth/setup or POST /users (admin)."""
+
+    def count(self) -> int:
+        with get_db() as conn:
+            row = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()
+        return int(row["cnt"] or 0) if row else 0
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        username: str,
+        display_name: str | None,
+        password_hash: str,
+        role: str,
+    ) -> dict[str, Any]:
+        created_at = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (id, username, display_name, password_hash, role, disabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (user_id, username, display_name, password_hash, role, created_at, created_at),
+            )
+        result = self.get(user_id=user_id)
+        if result is None:
+            raise RuntimeError(f"failed to create user {user_id}")
+        return result
+
+    def get(self, *, user_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, username, display_name, role, disabled, created_at, updated_at FROM users WHERE id = ? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def get_by_username(self, *, username: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, username, display_name, password_hash, role, disabled, created_at, updated_at FROM users WHERE username = ? LIMIT 1",
+                (username,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def list(self) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, username, display_name, role, disabled, created_at, updated_at FROM users ORDER BY created_at, id"
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def update(self, *, user_id: str, **fields: Any) -> dict[str, Any] | None:
+        allowed = {"display_name", "password_hash", "role", "disabled"}
+        updates: list[str] = []
+        params: list[Any] = []
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            updates.append(f"{key} = ?")
+            params.append(value)
+        if updates:
+            updates.append("updated_at = ?")
+            params.append(now_iso())
+            params.append(user_id)
+            with get_db() as conn:
+                conn.execute(
+                    f"UPDATE users SET {', '.join(updates)} WHERE id = ?",
+                    tuple(params),
+                )
+        return self.get(user_id=user_id)
+
+    def delete(self, *, user_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return cursor.rowcount > 0
+
+
+class SqlitePersonalAccessTokenRepository:
+    """Per-user PATs for API/MCP access — token values are never stored, only their SHA-256 hash."""
+
+    def create(
+        self,
+        *,
+        token_id: str,
+        user_id: str,
+        name: str,
+        token_hash: str,
+        expires_at: str | None,
+    ) -> dict[str, Any]:
+        created_at = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO personal_access_tokens (id, user_id, name, token_hash, last_used_at, created_at, expires_at)
+                VALUES (?, ?, ?, ?, NULL, ?, ?)
+                """,
+                (token_id, user_id, name, token_hash, created_at, expires_at),
+            )
+        return self._get(token_id=token_id)
+
+    def _get(self, *, token_id: str) -> dict[str, Any]:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, user_id, name, last_used_at, created_at, expires_at FROM personal_access_tokens WHERE id = ? LIMIT 1",
+                (token_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError(f"PAT {token_id} not found after insert")
+        return _row_dict(row)
+
+    def get_by_hash(self, *, token_hash: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT p.id, p.user_id, p.name, p.last_used_at, p.created_at, p.expires_at,
+                       u.username, u.role, u.disabled
+                FROM personal_access_tokens p
+                JOIN users u ON u.id = p.user_id
+                WHERE p.token_hash = ? LIMIT 1
+                """,
+                (token_hash,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def list(self, *, user_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, user_id, name, last_used_at, created_at, expires_at FROM personal_access_tokens WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def delete(self, *, token_id: str, user_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM personal_access_tokens WHERE id = ? AND user_id = ?",
+                (token_id, user_id),
+            )
+        return cursor.rowcount > 0
+
+    def touch_last_used(self, *, token_id: str, last_used_at: str) -> None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE personal_access_tokens SET last_used_at = ? WHERE id = ?",
+                (last_used_at, token_id),
+            )
+
+
+class SqliteUserSessionRepository:
+    """Server-side sessions for cookie-based auth — each session is a random UUID."""
+
+    def create(self, *, session_id: str, user_id: str, expires_at: str) -> dict[str, Any]:
+        created_at = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO user_sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+                (session_id, user_id, expires_at, created_at),
+            )
+        return {"id": session_id, "user_id": user_id, "expires_at": expires_at, "created_at": created_at}
+
+    def get(self, *, session_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT s.id, s.user_id, s.expires_at, s.created_at,
+                       u.username, u.role, u.disabled
+                FROM user_sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.id = ? LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def delete(self, *, session_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute("DELETE FROM user_sessions WHERE id = ?", (session_id,))
+        return cursor.rowcount > 0
+
+    def prune_expired(self, *, now_iso: str) -> int:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM user_sessions WHERE expires_at < ?",
+                (now_iso,),
+            )
+        return cursor.rowcount
