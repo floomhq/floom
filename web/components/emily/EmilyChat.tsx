@@ -181,78 +181,69 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
 export function EmilyDock({ className }: { className?: string }) {
   const [open, setOpen] = useState(true);
 
-  // Collapsed: 48px strip
-  if (!open) {
-    return (
-      <div
-        className={cn(
-          "flex h-full w-12 shrink-0 flex-col items-center justify-start border-l border-border bg-background pt-4 gap-3",
-          className
-        )}
-        aria-label="Emily dock (collapsed)"
-      >
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="flex flex-col items-center gap-1.5 group"
-          title="Open Emily"
-          aria-label="Open Emily"
-        >
-          <EmilyAvatar size="sm" />
-          <ChevronLeft className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div
       className={cn(
-        // Fixed right rail: 380px on md+, full-width on mobile.
-        // shrink-0 prevents flex-squeeze. w-full on mobile renders as overlay handled by parent.
-        "flex h-full flex-col border-l border-border bg-background",
-        "shrink-0 w-full md:w-[380px] md:max-w-[30vw]",
+        "flex h-full flex-col border-l border-border bg-background shrink-0",
+        // Width collapses to 48px strip when closed; full rail when open
+        open ? "w-full md:w-[380px] md:max-w-[30vw]" : "w-12",
         className
       )}
-      aria-label="Emily dock"
+      aria-label={open ? "Emily dock" : "Emily dock (collapsed)"}
     >
-      {/* Header */}
-      <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
-        <EmilyAvatar size="sm" />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold leading-none truncate">Emily</p>
-          <p className="text-[11px] text-muted-foreground leading-none mt-0.5">Chief of Staff</p>
+      {/* Collapsed strip — shown only when closed */}
+      {!open && (
+        <div className="flex flex-col items-center justify-start pt-4 gap-3">
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="flex flex-col items-center gap-1.5 group"
+            title="Open Emily"
+            aria-label="Open Emily"
+          >
+            <EmilyAvatar size="sm" />
+            <ChevronLeft className="size-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+          </button>
         </div>
-        <Badge
-          variant="secondary"
-          className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 shrink-0 font-normal"
-        >
-          Online
-        </Badge>
-        {/* Full-page link */}
-        <Link
-          href="/chat"
-          title="Full-page chat"
-          aria-label="Open full-page Emily chat"
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-        >
-          <Maximize2 className="size-3.5" />
-        </Link>
-        {/* Collapse button */}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="size-7 p-0"
-          onClick={() => setOpen(false)}
-          title="Collapse Emily"
-          aria-label="Collapse Emily"
-        >
-          <ChevronRight className="size-4" />
-        </Button>
-      </div>
+      )}
 
-      {/* Chat content */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      {/* Full header — shown only when open */}
+      {open && (
+        <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
+          <EmilyAvatar size="sm" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold leading-none truncate">Emily</p>
+            <p className="text-[11px] text-muted-foreground leading-none mt-0.5">Chief of Staff</p>
+          </div>
+          <Badge
+            variant="secondary"
+            className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 shrink-0 font-normal"
+          >
+            Online
+          </Badge>
+          <Link
+            href="/chat"
+            title="Full-page chat"
+            aria-label="Open full-page Emily chat"
+            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            <Maximize2 className="size-3.5" />
+          </Link>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="size-7 p-0"
+            onClick={() => setOpen(false)}
+            title="Collapse Emily"
+            aria-label="Collapse Emily"
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
+      )}
+
+      {/* Chat content — ALWAYS mounted so useChatStream state survives collapse */}
+      <div className={cn("flex-1 min-h-0 overflow-hidden", !open && "hidden")}>
         <EmilyChatCore />
       </div>
     </div>
