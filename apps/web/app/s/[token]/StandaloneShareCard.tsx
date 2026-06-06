@@ -66,19 +66,8 @@ function baseName(path: string): string {
 }
 
 export function StandaloneShareCard({ share, token }: { share: StandaloneShare; token: string }) {
-  // Worker shares reuse the v6 worker flip-card (DRY).
-  if (share.entity_type === "worker" && share.worker) {
-    return (
-      <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
-        <div className="rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
-          <WorkerShareCard worker={share.worker} />
-        </div>
-      </div>
-    );
-  }
-
   const isSingleFile = share.entity_type === "brain_file";
-  const files = share.files || [];
+  const files = useMemo(() => share.files || [], [share.files]);
 
   // Navigation state: "" = root; a string ending in "/" = folder prefix; a path
   // (no trailing slash) that matches a file = file view.
@@ -95,6 +84,17 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
   const nodes = useMemo(() => childrenAt(files, folderPrefix), [files, folderPrefix]);
 
   const downloadHref = `/s/${encodeURIComponent(token)}/download`;
+
+  // Worker shares reuse the v6 worker flip-card (DRY).
+  if (share.entity_type === "worker" && share.worker) {
+    return (
+      <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
+        <div className="rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+          <WorkerShareCard worker={share.worker} />
+        </div>
+      </div>
+    );
+  }
 
   // Breadcrumb segments for the current location.
   const crumbs: { label: string; onClick?: () => void }[] = [
