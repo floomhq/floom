@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Check, ChevronsUpDown, Copy, Download, Link, Plus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, ChevronsUpDown, Copy, Download, FolderOpen, Link, Plus, Upload } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -123,8 +126,10 @@ export function WorkspaceSwitcher() {
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -273,6 +278,40 @@ export function WorkspaceSwitcher() {
     }
   }
 
+  async function handleImportFromFile(file: File) {
+    setImporting(true);
+    setError(null);
+    try {
+      const created = await workspacesApi.create(`Imported workspace`);
+      const form = new FormData();
+      form.append(
+        "bundle",
+        new File([file], "workspace-template.zip", { type: "application/zip" })
+      );
+      const importRes = await fetch(`${PROXY_BASE}/workspace/import`, {
+        method: "POST",
+        headers: workspaceHeaders(created.id),
+        body: form,
+      });
+      if (!importRes.ok) {
+        let detail = "";
+        try {
+          const body = (await importRes.json()) as { detail?: string };
+          detail = body.detail || JSON.stringify(body);
+        } catch {
+          detail = importRes.statusText || `HTTP ${importRes.status}`;
+        }
+        throw new Error(detail);
+      }
+      await workspacesApi.select(created.id);
+      setActiveWorkspaceId(created.id);
+      window.location.reload();
+    } catch (err) {
+      setError((err as Error).message || "Failed to import workspace");
+      setImporting(false);
+    }
+  }
+
   // Render-state guards: while loading we show a placeholder so the
   // sidebar doesn't jump when data arrives.
   if (!state) {
@@ -351,30 +390,49 @@ export function WorkspaceSwitcher() {
             })}
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => handleCreateShareLink(active)}
-            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-            disabled={duplicating || exporting || sharing}
-          >
-            <Link className="size-4" />
-            {sharing ? "Creating link…" : shareCopied ? "Link copied" : "Share template link"}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => handleDuplicateWorkspace(active)}
-            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-            disabled={duplicating || exporting || sharing}
-          >
-            <Copy className="size-4" />
-            {duplicating ? "Duplicating…" : "Duplicate workspace"}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => handleExportWorkspace(active)}
-            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-            disabled={duplicating || exporting || sharing}
-          >
-            <Download className="size-4" />
-            {exporting ? "Exporting…" : "Export template"}
-          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger
+              className="flex items-center gap-2 text-[var(--ink-soft)]"
+            >
+              <FolderOpen className="size-4" />
+              Workspace actions
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem
+                onClick={() => handleDuplicateWorkspace(active)}
+                className="flex items-center gap-2"
+                disabled={duplicating || exporting || sharing || importing}
+              >
+                <Copy className="size-4" />
+                {duplicating ? "Copying…" : "Make a local copy"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => handleExportWorkspace(active)}
+                className="flex items-center gap-2"
+                disabled={duplicating || exporting || sharing || importing}
+              >
+                <Download className="size-4" />
+                {exporting ? "Downloading…" : "Download copy"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => handleCreateShareLink(active)}
+                className="flex items-center gap-2"
+                disabled={duplicating || exporting || sharing || importing}
+              >
+                <Link className="size-4" />
+                {sharing ? "Copying link…" : shareCopied ? "Link copied" : "Copy setup link"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2"
+                disabled={duplicating || exporting || sharing || importing}
+              >
+                <Upload className="size-4" />
+                {importing ? "Importing…" : "Import from file…"}
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
@@ -388,6 +446,19 @@ export function WorkspaceSwitcher() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".zip"
+        className="sr-only"
+        aria-hidden="true"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleImportFromFile(file);
+          e.target.value = "";
+        }}
+      />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-md">
