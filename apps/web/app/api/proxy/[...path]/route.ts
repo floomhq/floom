@@ -36,6 +36,11 @@ async function handler(
   };
   const activeWorkspace = req.headers.get("x-workeros-workspace");
   if (activeWorkspace) forwardHeaders["x-workeros-workspace"] = activeWorkspace;
+  // Multi-member: forward the backend session cookie so per-user identity reaches the API
+  const backendSession = req.cookies.get("wos_session")?.value;
+  if (backendSession) {
+    forwardHeaders["cookie"] = `wos_session=${backendSession}`;
+  }
   const contentType = req.headers.get("content-type");
   if (contentType) forwardHeaders["content-type"] = contentType;
   const lastEventId = req.headers.get("last-event-id");

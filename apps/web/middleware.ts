@@ -66,7 +66,9 @@ export async function middleware(req: NextRequest) {
   }
 
   const token = req.cookies.get(SESSION_COOKIE)?.value;
-  const authed = await verifySessionToken(token);
+  const authed = await verifySessionToken(token) ||
+    // Multi-member: a wos_session backend cookie is also valid — the backend validates it
+    Boolean(req.cookies.get("wos_session")?.value);
 
   // ----- /api/proxy/* : the dangerous surface -----
   if (pathname.startsWith("/api/proxy")) {
