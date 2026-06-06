@@ -2645,6 +2645,7 @@ def list_worker_versions(
     repos: Repositories = Depends(get_repos),
 ) -> List[VersionSummary]:
     """List saved versions of a worker (newest first)."""
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -2669,6 +2670,7 @@ def get_worker_version(
 ) -> Dict[str, Any]:
     """Return the file snapshot for a specific worker version."""
     import json as _json
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -2691,6 +2693,7 @@ def rollback_worker(
     import shutil as _shutil
     from worker_registry import WORKERS_DIR
 
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -2720,7 +2723,7 @@ def rollback_worker(
         for f in files:
             dest = tmp_dir / f["path"]
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(f.get("content", encoding='utf-8') or "", encoding="utf-8")
+            dest.write_text(f.get("content") or "", encoding="utf-8")
 
         existing_files = list(target_dir.rglob("*"))
         new_paths = {f["path"] for f in files}
@@ -6384,6 +6387,7 @@ def create_worker_short_link(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6595,6 +6599,7 @@ def create_worker_share_link(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6791,6 +6796,7 @@ def restore_worker(
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
     import re as _re
 
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -6834,6 +6840,7 @@ def archive_worker(
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
     import re as _re
 
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -6895,6 +6902,7 @@ async def suggest_worker_updates(
     from openai import OpenAI as _OpenAI
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
 
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6957,6 +6965,7 @@ def get_worker_sample_input(
     an API consumer gets the same answer the UI shows instead of a spurious 404
     on generated workers (the manifest example_input was always available).
     """
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -10127,6 +10136,7 @@ def create_worker_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
