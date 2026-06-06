@@ -293,8 +293,11 @@ export function UserProfileFooter({
     };
   }, []);
 
-  const primary = user?.email || user?.display_name || "Local user";
-  const secondary = user?.email ? "Signed in" : "Workeros v0";
+  // Multi-member: prefer username, then email, then display_name
+  const primary = (user as (typeof user & { username?: string | null }) | null)?.username
+    || user?.email || user?.display_name || "Local user";
+  const userRole = (user as (typeof user & { role?: string }) | null)?.role;
+  const secondary = userRole === "admin" ? "Admin" : userRole === "member" ? "Member" : (user?.email ? "Signed in" : "Workeros");
   const initials = profileInitials(primary);
 
   async function logout() {
