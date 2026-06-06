@@ -12,7 +12,7 @@ import { ChevronRight, Download, FileText, Folder, Package, X } from "lucide-rea
 import { GenericOutput } from "@/components/generic-output";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
-import { SHARE_CARD_BODY_HEIGHT } from "@/components/share/ShareCardShell";
+import { SHARE_CARD_BODY_HEIGHT, WorkerosMark } from "@/components/share/ShareCardShell";
 import type { PublicShareFile, StandaloneShare } from "@/lib/types";
 
 function formatBytes(bytes: number): string {
@@ -132,12 +132,7 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
       <div className="rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
         {/* Nav */}
         <div className="flex items-center justify-between rounded-t-[var(--radius-card)] border-b border-[var(--border-soft)] bg-[var(--bg-card)] px-5 py-3">
-          <Link href="/" className="inline-flex items-center gap-2 text-[15px] font-semibold text-[var(--ink)] no-underline">
-            <span className="grid size-[22px] place-items-center rounded-[5px] bg-[var(--primary)] text-xs font-bold text-[var(--primary-text)]">
-              W
-            </span>
-            Workeros
-          </Link>
+          <WorkerosMark />
           <Link href="/login" className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
             Add to workspace
           </Link>
