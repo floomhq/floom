@@ -1311,11 +1311,11 @@ async def auth_middleware(request: Request, call_next):
                 if auth_value.startswith("Bearer "):
                     bearer_token = auth_value[7:].strip()
             elif key.lower() == b"cookie":
-                # Parse session cookie from Cookie header
+                # Parse backend session cookie from Cookie header (wos_session is the backend multi-member session)
                 cookie_str = value.decode("latin-1", errors="replace")
                 for part in cookie_str.split(";"):
                     part = part.strip()
-                    if part.startswith("workeros_session="):
+                    if part.startswith("wos_session="):
                         session_cookie = part.split("=", 1)[1]
         # Multi-member auth: Bearer PAT or session cookie bypass x-floom-secret
         if bearer_token or session_cookie:
@@ -1324,7 +1324,7 @@ async def auth_middleware(request: Request, call_next):
         if raw_secret is None:
             return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
         if not hmac.compare_digest(raw_secret, expected):
-            return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+            return _JSONResponse(status_code=403, content={"detail": "Forbidden"})
     return await call_next(request)
 
 logger = logging.getLogger("floom.api")
