@@ -61,12 +61,14 @@ export function RunStatusBadge({
 }) {
   const kind = classify(status);
   if (kind === "success" && !showSuccess) return null;
+  // v6: Title-case statuses everywhere on the run page.
+  const humanized = status.replace(/_/g, " ").trim().toLowerCase();
   const label =
     kind === "approval"
       ? "Awaiting approval"
       : kind === "success"
       ? "Completed"
-      : status.replace(/_/g, " ");
+      : humanized.charAt(0).toUpperCase() + humanized.slice(1);
   return (
     <Badge variant="outline" className={BADGE_STYLE[kind]}>
       {label}
