@@ -1,10 +1,10 @@
-"""Tests for OSS multi-member support (migration 59).
+﻿"""Tests for OSS multi-member support (migration 59).
 
 Covers:
   - Backwards compat: x-floom-secret keeps working
-  - Dev mode: empty users table → pass-through
+  - Dev mode: empty users table â†’ pass-through
   - /auth/setup: creates first admin, blocks second call
-  - /auth/login: correct creds → session cookie, wrong creds → 401
+  - /auth/login: correct creds â†’ session cookie, wrong creds â†’ 401
   - /auth/logout: clears session
   - /auth/me: returns current user info
   - /auth/setup-required: public endpoint
@@ -144,7 +144,7 @@ def test_wrong_secret_returns_403(monkeypatch, tmp_path):
     main = load_main(monkeypatch, tmp_path)
     monkeypatch.setenv("FLOOM_SECRET", "mysecret")
     with TestClient(main.app) as c:
-        # /me is not an exempt path — wrong secret is caught by the middleware as 403
+        # /me is not an exempt path â€” wrong secret is caught by the middleware as 403
         resp = c.get("/me", headers={"x-floom-secret": "wrongsecret"})
         assert resp.status_code == 403
 
@@ -165,7 +165,7 @@ def test_setup_creates_first_admin(client):
 def test_setup_returns_session_cookie(client):
     resp = client.post("/auth/setup", json={"username": "alice", "password": "password123"})
     assert resp.status_code == 201
-    assert "workeros_session" in resp.cookies
+    assert "wos_session" in resp.cookies
 
 
 def test_setup_blocked_when_users_exist(client):
@@ -193,7 +193,7 @@ def test_setup_required_returns_false_after_setup(admin_client):
 def test_login_correct_creds(admin_client):
     resp = admin_client.post("/auth/login", json={"username": "admin", "password": "adminpass123"})
     assert resp.status_code == 200
-    assert "workeros_session" in resp.cookies
+    assert "wos_session" in resp.cookies
 
 
 def test_login_wrong_password(admin_client):
@@ -345,7 +345,7 @@ def test_admin_deletes_member(admin_client):
 
 
 # ---------------------------------------------------------------------------
-# Worker visibility — member vs admin
+# Worker visibility â€” member vs admin
 # ---------------------------------------------------------------------------
 
 
@@ -384,7 +384,7 @@ def test_member_sees_workspace_workers(monkeypatch, tmp_path):
 
         workers = c.get("/workers").json()
         # Bob should see the shared worker (if it was created successfully)
-        # In test env without real worker files, creation may fail — so just verify
+        # In test env without real worker files, creation may fail â€” so just verify
         # the endpoint works without 403
         assert isinstance(workers, list)
 
@@ -437,7 +437,7 @@ def test_disabled_user_session_rejected(monkeypatch, tmp_path):
         users = c.get("/users").json()
         frank = next(u for u in users if u["username"] == "frank")
 
-        # Frank logs in — gets a session
+        # Frank logs in â€” gets a session
         c2 = TestClient(main.app)
         c2.post("/auth/login", json={"username": "frank", "password": "frankpass123"})
 
@@ -485,3 +485,4 @@ def test_duplicate_username_rejected(admin_client):
     admin_client.post("/users", json={"username": "henry", "password": "henrypass123", "role": "member"})
     resp = admin_client.post("/users", json={"username": "henry", "password": "henrypass123", "role": "member"})
     assert resp.status_code == 409
+
