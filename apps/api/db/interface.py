@@ -444,6 +444,66 @@ class AssetAccessRepository(Protocol):
     ) -> RowDict | None: ...
 
 
+class UserRepository(Protocol):
+    """Local user accounts for multi-member OSS deployments (migration 59)."""
+
+    def count(self) -> int: ...
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        username: str,
+        display_name: str | None,
+        password_hash: str,
+        role: str,
+    ) -> RowDict: ...
+
+    def get(self, *, user_id: str) -> RowDict | None: ...
+
+    def get_by_username(self, *, username: str) -> RowDict | None: ...
+
+    def list(self) -> list[RowDict]: ...
+
+    def update(self, *, user_id: str, **fields: Any) -> RowDict | None: ...
+
+    def delete(self, *, user_id: str) -> bool: ...
+
+
+class PersonalAccessTokenRepository(Protocol):
+    """Per-user long-lived API tokens for API/MCP access (migration 59)."""
+
+    def create(
+        self,
+        *,
+        token_id: str,
+        user_id: str,
+        name: str,
+        token_hash: str,
+        expires_at: str | None,
+    ) -> RowDict: ...
+
+    def get_by_hash(self, *, token_hash: str) -> RowDict | None: ...
+
+    def list(self, *, user_id: str) -> list[RowDict]: ...
+
+    def delete(self, *, token_id: str, user_id: str) -> bool: ...
+
+    def touch_last_used(self, *, token_id: str, last_used_at: str) -> None: ...
+
+
+class UserSessionRepository(Protocol):
+    """Server-side sessions for cookie-based web UI auth (migration 59)."""
+
+    def create(self, *, session_id: str, user_id: str, expires_at: str) -> RowDict: ...
+
+    def get(self, *, session_id: str) -> RowDict | None: ...
+
+    def delete(self, *, session_id: str) -> bool: ...
+
+    def prune_expired(self, *, now_iso: str) -> int: ...
+
+
 class AlertRepository(Protocol):
     """Webhook and email alert registrations per-worker."""
 
