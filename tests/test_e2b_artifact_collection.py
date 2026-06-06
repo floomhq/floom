@@ -13,8 +13,10 @@ from models import WorkerConfig, WorkerOutput, WorkerRuntime, WorkerTrigger
 from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import (
     E2BSandboxDriver,
+    _configured_e2b_api_keys,
     _extract_context_tar,
     _install_timeout_for_run,
+    _is_e2b_quota_or_rate_limit_error,
     _register_sandbox,
     _sandbox_api_url,
     _sandbox_lifetime_timeout,
@@ -83,7 +85,7 @@ class FakeFullSandbox:
         self.files = FakeWritableFiles({})
         self.commands = FakeCommandRunner(self.files)
         self.killed = False
-        FakeFullSandbox.instances.append(self)
+        self.__class__.instances.append(self)
 
     @classmethod
     def create(cls, **kwargs):
@@ -92,6 +94,24 @@ class FakeFullSandbox:
 
     def kill(self):
         self.killed = True
+
+
+class FakeQuotaError(Exception):
+    status_code = 429
+
+
+class FakeFallbackSandbox(FakeFullSandbox):
+    instances = []
+    last_create_kwargs = {}
+    create_api_keys = []
+
+    @classmethod
+    def create(cls, **kwargs):
+        cls.create_api_keys.append(kwargs["api_key"])
+        cls.last_create_kwargs = kwargs
+        if len(cls.create_api_keys) == 1:
+            raise FakeQuotaError("rate limit exceeded")
+        return cls()
 
 
 class FakeWritableFiles(FakeFiles):
@@ -301,6 +321,62 @@ def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
     assert logs.count(("info", "[e2b] live stdout")) == 1
     assert logs.count(("warning", "[e2b] stderr: live stderr")) == 1
     assert not any("stdout after exit" in message for _level, message in logs)
+
+
+def test_e2b_driver_falls_back_to_next_key_on_quota_error(tmp_path, monkeypatch):
+    primary_key = "e2b-primary-test-key"
+    fallback_key = "e2b-fallback-test-key"
+    monkeypatch.setenv("E2B_API_KEY", primary_key)
+    monkeypatch.setenv("E2B_API_KEY_FALLBACK", fallback_key)
+    monkeypatch.delenv("E2B_API_KEYS", raising=False)
+    monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeFallbackSandbox))
+    monkeypatch.setattr(e2b_driver, "WORKERS_DIR", tmp_path / "workers")
+    FakeFallbackSandbox.instances = []
+    FakeFallbackSandbox.last_create_kwargs = {}
+    FakeFallbackSandbox.create_api_keys = []
+    with e2b_driver._active_sandboxes_lock:
+        e2b_driver._active_sandboxes.clear()
+
+    worker_dir = tmp_path / "workers" / "fallback-worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "run.py").write_text("print('ok')\n")
+    logs = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="fallback-worker",
+        run_id="run_fallback",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((level, msg)),
+        trace_id="trace-fallback",
+        timeout_seconds=30,
+    )
+
+    assert result.status == "success"
+    assert FakeFallbackSandbox.create_api_keys == [primary_key, fallback_key]
+    assert FakeFallbackSandbox.last_create_kwargs["api_key"] == fallback_key
+    assert active_sandbox_count() == 0
+    joined_logs = "\n".join(msg for _level, msg in logs)
+    assert "quota/rate limit" in joined_logs
+    assert primary_key not in joined_logs
+    assert fallback_key not in joined_logs
+
+
+def test_configured_e2b_api_keys_are_ordered_and_deduplicated(monkeypatch):
+    monkeypatch.setenv("E2B_API_KEYS", "k1, k2")
+    monkeypatch.setenv("E2B_API_KEY", "k2")
+    monkeypatch.setenv("E2B_API_KEY_FALLBACK", "k3")
+
+    assert _configured_e2b_api_keys() == ["k1", "k2", "k3"]
+
+
+def test_e2b_quota_error_detection_handles_status_and_text():
+    class PaymentRequired(Exception):
+        status_code = 402
+
+    assert _is_e2b_quota_or_rate_limit_error(PaymentRequired("payment required"))
+    assert _is_e2b_quota_or_rate_limit_error(RuntimeError("quota exhausted"))
+    assert not _is_e2b_quota_or_rate_limit_error(RuntimeError("network unreachable"))
 
 
 def test_sandbox_api_url_prefers_e2b_specific_origin(monkeypatch):
