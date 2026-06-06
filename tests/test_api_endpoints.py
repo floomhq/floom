@@ -193,7 +193,7 @@ class TestAuthGate(unittest.TestCase):
                 "SELECT status FROM composio_connections WHERE composio_connection_id = ?",
                 (conn_id,),
             ).fetchone()
-        self.assertEqual(row["status"], "success")
+        self.assertEqual(row["status"], "active")
 
     def test_options_cors_preflight_passes(self):
         """OPTIONS requests must not be gated by x-floom-secret."""
