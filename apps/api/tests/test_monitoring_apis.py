@@ -19,6 +19,8 @@ import importlib
 import json
 import platform
 import sys
+import threading
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -583,6 +585,138 @@ class TestAlertWebhookFiring:
             )
 
         assert calls == [], "Webhook should NOT have fired for a 'completed'-only alert on a failed run"
+
+    def test_run_status_update_fires_registered_failure_alert(self, client_and_repos):
+        """The real run outcome path dispatches existing WorkerAlert rows."""
+        client, repos = client_and_repos
+        client.post(
+            f"/workers/{_WORKER_ID}/alerts",
+            json={"url": "https://hooks.example.com/run-status", "on": ["failed"]},
+        )
+        run_id = _create_run(client, status="queued")
+        delivered = threading.Event()
+        calls: list[str] = []
+
+        def mock_open(req, timeout=None):
+            calls.append(req.full_url)
+            delivered.set()
+            cm = MagicMock()
+            cm.__enter__ = lambda s: s
+            cm.__exit__ = MagicMock(return_value=False)
+            return cm
+
+        run_svc = importlib.import_module("run_service")
+        alerting = importlib.import_module("alerting")
+        with patch.object(run_svc, "_open_pinned_webhook", side_effect=mock_open), \
+             patch.object(alerting, "alert_worker_failure_if_needed", return_value=None):
+            run_svc.update_run_status(
+                run_id,
+                "failed",
+                error="Test outcome failure",
+                user_id=_USER_ID,
+                repos=repos,
+            )
+            assert delivered.wait(timeout=2), f"registered alert did not fire; calls={calls}"
+
+        assert calls == ["https://hooks.example.com/run-status"]
+
+    def test_run_status_update_does_not_double_fire_alerts(self, client_and_repos):
+        """Central terminal-status dispatch sends one alert for one failed outcome."""
+        client, repos = client_and_repos
+        client.post(
+            f"/workers/{_WORKER_ID}/alerts",
+            json={"url": "https://hooks.example.com/once", "on": ["failed"]},
+        )
+        run_id = _create_run(client, status="queued")
+        delivered = threading.Event()
+        calls: list[str] = []
+
+        def mock_open(req, timeout=None):
+            calls.append(req.full_url)
+            delivered.set()
+            cm = MagicMock()
+            cm.__enter__ = lambda s: s
+            cm.__exit__ = MagicMock(return_value=False)
+            return cm
+
+        run_svc = importlib.import_module("run_service")
+        alerting = importlib.import_module("alerting")
+        with patch.object(run_svc, "_open_pinned_webhook", side_effect=mock_open), \
+             patch.object(alerting, "alert_worker_failure_if_needed", return_value=None):
+            run_svc.update_run_status(
+                run_id,
+                "failed",
+                error="Test outcome failure",
+                user_id=_USER_ID,
+                repos=repos,
+            )
+            assert delivered.wait(timeout=2), f"registered alert did not fire; calls={calls}"
+
+        assert calls == ["https://hooks.example.com/once"]
+
+
+@_LINUX_ONLY
+class TestOverviewConsecutiveFailureAlerting:
+    def test_immediate_incident_check_notifies_once_at_threshold(self, client_and_repos):
+        client, repos = client_and_repos
+        for index in range(1, 4):
+            repos.runs.create(
+                user_id=_USER_ID,
+                run_id=f"run_{uuid.uuid4().hex[:12]}",
+                worker_id=_WORKER_ID,
+                trigger_source="schedule",
+                status="failed",
+                runner="local",
+                error=f"boom {index}",
+                error_code="test_failure",
+                created_at=f"2026-06-06T11:0{index}:00+00:00",
+                completed_at=f"2026-06-06T11:0{index}:10+00:00",
+            )
+
+        alerting = importlib.import_module("alerting")
+        notify_calls: list[tuple[str, str, str, str]] = []
+        with patch.object(
+            alerting,
+            "_notify",
+            side_effect=lambda worker_id, worker_name, reason, details: notify_calls.append(
+                (worker_id, worker_name, reason, details)
+            ),
+        ):
+            first = alerting.alert_worker_failure_if_needed(_WORKER_ID)
+            second = alerting.alert_worker_failure_if_needed(_WORKER_ID)
+
+        assert first and first["opened"] is True
+        assert first["consecutive_failures"] == 3
+        assert second and second["already_open"] is True
+        assert len(notify_calls) == 1
+        assert notify_calls[0][0] == _WORKER_ID
+
+    def test_overview_surfaces_consecutive_failures_at_threshold(self, client_and_repos):
+        client, repos = client_and_repos
+        for index, status in enumerate(["completed", "failed", "failed", "failed"], start=1):
+            repos.runs.create(
+                user_id=_USER_ID,
+                run_id=f"run_{uuid.uuid4().hex[:12]}",
+                worker_id=_WORKER_ID,
+                trigger_source="schedule",
+                status=status,
+                runner="local",
+                error="boom" if status == "failed" else None,
+                error_code="test_failure" if status == "failed" else None,
+                created_at=f"2026-06-06T10:0{index}:00+00:00",
+                completed_at=f"2026-06-06T10:0{index}:10+00:00",
+            )
+
+        resp = client.get("/system/overview")
+        assert resp.status_code == 200
+        items = resp.json()["needs_attention"]
+        consecutive = [
+            item for item in items
+            if item["type"] == "consecutive_failures" and item["worker_id"] == _WORKER_ID
+        ]
+        assert len(consecutive) == 1
+        assert consecutive[0]["recent_failure_count"] == 3
+        assert consecutive[0]["message"] == "3 consecutive failures"
 
 
 # ---------------------------------------------------------------------------
