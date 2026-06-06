@@ -197,16 +197,16 @@ export function ConnectionRow({
             <MoreHorizontal className="size-3.5" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => onTest(connection)} disabled={testing}>
+            <DropdownMenuItem onClick={() => onTest(connection)} disabled={testing}>
               <Zap className="size-3.5" />
               {testing ? "Testing..." : "Test connection"}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onRefresh(connection)} disabled={refreshing}>
+            <DropdownMenuItem onClick={() => onRefresh(connection)} disabled={refreshing}>
               <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
               {refreshing ? "Refreshing..." : "Refresh status"}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={() => onDelete(connection)}
+              onClick={() => onDelete(connection)}
               disabled={deleting}
               variant="destructive"
             >
