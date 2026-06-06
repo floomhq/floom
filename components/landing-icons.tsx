@@ -244,10 +244,50 @@ export const WhatsAppLogo = () => (
   </svg>
 );
 
-/* Claude / Anthropic - 4-petal sparkle (Anthropic Sand #D97757) */
+/* Claude / Anthropic - 4-petal sparkle (Anthropic Sand #D97757).
+   Each petal is an elongated diamond meeting at center, 4-fold symmetry. */
 export const ClaudeLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="#D97757">
-    <path d="M12 2 C 12.6 6.6 13.6 9.6 16.4 11 C 18.2 11.9 20.4 12 22 12 C 20.4 12 18.2 12.1 16.4 13 C 13.6 14.4 12.6 17.4 12 22 C 11.4 17.4 10.4 14.4 7.6 13 C 5.8 12.1 3.6 12 2 12 C 3.6 12 5.8 11.9 7.6 11 C 10.4 9.6 11.4 6.6 12 2 Z" />
+    <path d="M12 1.5 L13.6 11.2 L12 12 L10.4 11.2 Z" />
+    <path d="M12 22.5 L10.4 12.8 L12 12 L13.6 12.8 Z" />
+    <path d="M1.5 12 L11.2 10.4 L12 12 L11.2 13.6 Z" />
+    <path d="M22.5 12 L12.8 13.6 L12 12 L12.8 10.4 Z" />
+  </svg>
+);
+
+/* Cursor - dark cursor arrow (cursor.com brand mark) */
+export const CursorLogo = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="#181818">
+    <path d="M4 2 L20 12 L12.5 13.4 L20 22 L17.5 22 L11 14.4 L4 21 Z" />
+  </svg>
+);
+
+/* OpenAI / Codex - simplified hex-knot inspired mark (OpenAI green) */
+export const CodexLogo = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+    <path
+      fill="none"
+      stroke="#10A37F"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M12 2 L20 6.7 L20 17.3 L12 22 L4 17.3 L4 6.7 Z M12 2 L12 12 M20 6.7 L12 12 M20 17.3 L12 12 M12 22 L12 12 M4 17.3 L12 12 M4 6.7 L12 12"
+    />
+  </svg>
+);
+
+/* OpenCode - generic CLI terminal mark (sst.dev/opencode-flavored) */
+export const OpenCodeLogo = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+    <rect x="2" y="4" width="20" height="16" rx="2.5" fill="#181818" />
+    <path
+      d="M6 10 L9 12 L6 14 M11.5 14 L16.5 14"
+      stroke="#9aa0a6"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      fill="none"
+    />
   </svg>
 );
 

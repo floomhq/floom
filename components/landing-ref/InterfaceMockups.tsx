@@ -18,8 +18,11 @@ import { Check, Hash, Lock } from "lucide-react";
 import {
   CalendlyLogo,
   ClaudeLogo,
+  CodexLogo,
+  CursorLogo,
   GmailLogo,
   HubSpotLogo,
+  OpenCodeLogo,
   SlackLogo,
   WhatsAppLogo,
 } from "../landing-icons";
@@ -368,8 +371,28 @@ function CodingAgentMockup() {
           Wrote to HubSpot
         </span>
       </div>
-      <div className="mt-2 text-center text-[10.5px] text-muted-foreground/85">
-        Same flow in Cursor, Codex, OpenCode, or any other coding agent.
+      <div className="mt-3 border-t border-border/60 pt-2.5">
+        <div className="mb-1.5 text-center text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground">
+          Same flow, any agent
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-1.5">
+          {[
+            { Logo: ClaudeLogo, label: "Claude Code" },
+            { Logo: CursorLogo, label: "Cursor" },
+            { Logo: CodexLogo, label: "Codex" },
+            { Logo: OpenCodeLogo, label: "OpenCode" },
+          ].map(({ Logo, label }) => (
+            <span
+              key={label}
+              className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-card px-2 text-[11px] font-medium text-foreground/85"
+            >
+              <span className="inline-flex h-3.5 w-3.5 items-center justify-center [&>svg]:h-3.5 [&>svg]:w-3.5">
+                <Logo />
+              </span>
+              {label}
+            </span>
+          ))}
+        </div>
       </div>
     </Card>
   );
