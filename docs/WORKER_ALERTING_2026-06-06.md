@@ -1,6 +1,6 @@
 # Worker Alerting 2026-06-06
 
-PR: pending
+PR: #483
 
 ## What Fires
 
