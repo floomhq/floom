@@ -1586,6 +1586,83 @@ class SqliteRunRepository:
                 )
         return [row["id"] for row in rows]
 
+    def fail_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail abandoned running runs older than *cutoff_iso*.
+
+        The status predicate is repeated in the UPDATE so a concurrently
+        finishing run is not overwritten by the reaper after it leaves
+        `running`.
+        """
+        completed_at = now_iso()
+        excluded = [str(run_id) for run_id in exclude_run_ids if str(run_id)]
+        exclude_clause = ""
+        params: list[Any] = [cutoff_iso]
+        if excluded:
+            placeholders = ",".join("?" for _ in excluded)
+            exclude_clause = f"AND r.id NOT IN ({placeholders})"
+            params.extend(excluded)
+
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.id, r.started_at, r.created_at, w.owner_id AS user_id
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE r.status = 'running'
+                  AND COALESCE(r.started_at, r.created_at) < ?
+                  {exclude_clause}
+                ORDER BY COALESCE(r.started_at, r.created_at) ASC
+                """,
+                tuple(params),
+            ).fetchall()
+            failed: list[dict[str, Any]] = []
+            for row in rows:
+                started_at = row["started_at"] or row["created_at"]
+                duration_ms = None
+                if started_at:
+                    try:
+                        import datetime as _dt
+
+                        started = _dt.datetime.fromisoformat(started_at)
+                        completed = _dt.datetime.fromisoformat(completed_at)
+                        duration_ms = int((completed - started).total_seconds() * 1000)
+                    except Exception:
+                        duration_ms = None
+                cursor = conn.execute(
+                    """
+                    UPDATE runs
+                    SET status = ?, error = ?, error_code = ?, completed_at = ?, duration_ms = ?
+                    WHERE id = ? AND status = 'running'
+                    """,
+                    (
+                        RunStatus.FAILED.value,
+                        error,
+                        error_code,
+                        completed_at,
+                        duration_ms,
+                        row["id"],
+                    ),
+                )
+                if cursor.rowcount:
+                    failed.append(
+                        {
+                            "id": row["id"],
+                            "run_id": row["id"],
+                            "user_id": row["user_id"],
+                            "started_at": row["started_at"],
+                            "created_at": row["created_at"],
+                            "completed_at": completed_at,
+                        }
+                    )
+        return failed
+
     def count_running_for_worker(self, *, user_id: str, worker_id: str) -> int:
         with get_db() as conn:
             row = conn.execute(
