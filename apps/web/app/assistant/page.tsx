@@ -12,6 +12,14 @@ import { formatRelative } from "@/lib/formatters";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -39,6 +47,7 @@ function InstructionsHistoryMenu({
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
 
   const loadVersions = useCallback(async () => {
     setLoading(true);
@@ -59,14 +68,14 @@ function InstructionsHistoryMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  async function handleRollback(v: VersionSummary) {
-    if (
-      !confirm(
-        `Restore workspace instructions to version ${v.version_number} (saved ${formatRelative(v.created_at)})?\n\nThis will overwrite the current instructions.`
-      )
-    ) {
-      return;
-    }
+  function handleRollback(v: VersionSummary) {
+    setPendingRestore(v);
+  }
+
+  async function doRollback() {
+    if (!pendingRestore) return;
+    const v = pendingRestore;
+    setPendingRestore(null);
     setRollingBack(v.id);
     try {
       const content = await api.system.rollbackWorkspaceInstructions(v.id);
@@ -81,15 +90,39 @@ function InstructionsHistoryMenu({
   }
 
   return (
-    <VersionHistoryMenu
-      versions={versions}
-      loading={loading && !loadedOnce}
-      restoringId={rollingBack}
-      onOpen={() => {
-        if (!loadedOnce) void loadVersions();
-      }}
-      onRestore={(v) => void handleRollback(v)}
-    />
+    <>
+      <VersionHistoryMenu
+        versions={versions}
+        loading={loading && !loadedOnce}
+        restoringId={rollingBack}
+        onOpen={() => {
+          if (!loadedOnce) void loadVersions();
+        }}
+        onRestore={(v) => handleRollback(v)}
+      />
+
+      <Dialog
+        open={!!pendingRestore}
+        onOpenChange={(open) => { if (!open) setPendingRestore(null); }}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Restore version {pendingRestore?.version_number}?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            This will overwrite your current workspace instructions. The current version is saved automatically before restoring.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRestore(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void doRollback()}>
+              Restore
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
