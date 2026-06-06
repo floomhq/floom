@@ -202,12 +202,12 @@ def test_binary_restore_bad_token_and_owner_scope(monkeypatch, tmp_path):
     assert versions
     vid = versions[-1]["id"]
 
-    # Bad token → 403, no restore.
+    # Bad shared secret -> 401, no restore.
     bad = client.post(
         "/contexts/scoped/files/doc.bin/restore/" + vid,
         headers={"x-floom-secret": "wrong", "x-floom-user": "alice"},
     )
-    assert bad.status_code == 403
+    assert bad.status_code == 401
 
     # A different owner cannot see (or restore) alice's pack → 404.
     foreign = client.post(
