@@ -512,9 +512,9 @@ export default function McpConnectionsPage() {
             <Terminal className="size-4 text-muted-foreground" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-base font-medium">Use Floom Workers in your AI client</h2>
+            <h2 className="text-base font-medium">Use Workeros in your AI client</h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Install Floom Workers as an MCP server in Claude, Cursor, VS Code, or another client.
+              Install Workeros as an MCP server in Claude, Cursor, VS Code, or another client.
             </p>
           </div>
           <ChevronDown
@@ -547,8 +547,8 @@ export default function McpConnectionsPage() {
               onCopy={() => copyCommand(currentInstallCommand)}
             />
             <p className="text-xs text-muted-foreground">
-              Installs Floom Workers&apos; tools into your AI client. To connect a third-party MCP
-              server <em>into</em> Floom instead, use the section below.
+              Installs Workeros&apos; tools into your AI client. To connect a third-party MCP
+              server <em>into</em> Workeros instead, use the section below.
             </p>
           </div>
         )}
