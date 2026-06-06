@@ -172,7 +172,9 @@ from run_service import (
     update_run_status,
     request_active_run_shutdown,
     start_drain_loop,
+    start_run_reaper_loop,
     stop_drain_loop,
+    stop_run_reaper_loop,
     queued_run_position,
     smoke_and_gate_generated_worker,
     InsufficientDiskSpaceError,
@@ -227,6 +229,7 @@ async def lifespan(app: FastAPI):
         fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
         re_enqueue_queued_runs_on_startup()
         start_drain_loop()
+        start_run_reaper_loop()
         from scheduler import start_scheduler
 
         start_scheduler()
@@ -235,6 +238,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     if deploy == "local":
+        stop_run_reaper_loop(timeout=5.0)
         stop_drain_loop(timeout=5.0)
         from scheduler import stop_scheduler
 
