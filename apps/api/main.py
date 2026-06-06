@@ -2479,6 +2479,7 @@ def _git_commit_worker(
         workspace = _git_workspace()
         prefix = _workers_git_prefix()
         _git_ops.commit_paths(workspace, [f"{prefix}/{worker_id}"], message, author_name, author_email)
+        _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for worker %s: %s", worker_id, exc)
 
@@ -2496,6 +2497,7 @@ def _git_commit_context(
         prefix = _contexts_git_prefix()
         path = f"{prefix}/{name}/{rel_path}" if rel_path else f"{prefix}/{name}"
         _git_ops.commit_paths(workspace, [path], message, author_name, author_email)
+        _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for context %s: %s", name, exc)
 
@@ -2514,6 +2516,7 @@ def _git_commit_workspace_md(
         except ValueError:
             rel = "workspace.md"
         _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
+        _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for workspace.md: %s", exc)
 
@@ -2532,6 +2535,7 @@ def _git_commit_workspace_base_md(
         except ValueError:
             rel = "workspace.base.md"
         _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
+        _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for workspace.base.md: %s", exc)
 

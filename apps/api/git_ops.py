@@ -247,6 +247,26 @@ def push(workspace_dir: Path) -> None:
     _git(["push", "-u", "origin", "HEAD"], workspace_dir, timeout=60)
 
 
+def push_background(workspace_dir: Path) -> None:
+    """Push to origin in a daemon thread — fires after every commit, never blocks.
+
+    Silently skips if no remote is configured. Errors are logged at DEBUG level
+    so a transient network blip never surfaces to the user.
+    """
+    import threading
+
+    def _run() -> None:
+        try:
+            has_remote = _git(["remote", "get-url", "origin"], workspace_dir, check=False)
+            if has_remote.returncode != 0:
+                return
+            _git(["push", "-u", "origin", "HEAD"], workspace_dir, check=False, timeout=60)
+        except Exception as exc:
+            logger.debug("Background git push failed (non-fatal): %s", exc)
+
+    threading.Thread(target=_run, daemon=True, name="workeros-git-push").start()
+
+
 def pull(workspace_dir: Path) -> None:
     """Pull from origin (fast-forward only)."""
     _git(["pull", "--ff-only"], workspace_dir, timeout=60)
