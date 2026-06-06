@@ -5,6 +5,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ConnectionRow } from "@/components/connections/ConnectionRow";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { ConnectionSkeleton } from "@/components/connections/ConnectionSkeleton";
@@ -30,6 +39,7 @@ export default function ConnectionsClient({
   );
   const [connecting, setConnecting] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDeleteConn, setConfirmDeleteConn] = useState<ConnectionView | null>(null);
   const [lastUsedBySlug, setLastUsedBySlug] = useState<Record<string, string | undefined>>({});
   // N13: track whether last-used async load has completed so we can show a
   // skeleton in the "Last used" column instead of a misleading "—" for all rows.
@@ -289,11 +299,14 @@ export default function ConnectionsClient({
     }
   }
 
-  async function handleDelete(connection: ConnectionView) {
-    const confirmed = window.confirm(
-      `Disconnect ${connection.displayName}${connection.accountLabel ? ` (${connection.accountLabel})` : ""}?`
-    );
-    if (!confirmed) return;
+  function handleDelete(connection: ConnectionView) {
+    setConfirmDeleteConn(connection);
+  }
+
+  async function confirmDelete() {
+    if (!confirmDeleteConn) return;
+    const connection = confirmDeleteConn;
+    setConfirmDeleteConn(null);
     setDeleting(connection.id);
     try {
       await api.connections.delete(connection.id);
@@ -383,6 +396,31 @@ export default function ConnectionsClient({
           will see an error from the upstream API if the connection isn&apos;t valid.
         </div>
       </div>
+
+      {/* Disconnect confirmation dialog */}
+      <Dialog
+        open={!!confirmDeleteConn}
+        onOpenChange={(open) => { if (!open) setConfirmDeleteConn(null); }}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Disconnect {confirmDeleteConn?.displayName}?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            {confirmDeleteConn?.accountLabel
+              ? `${confirmDeleteConn.accountLabel} will lose access. Workers using this connection will stop working.`
+              : "Workers using this connection will stop working."}
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDeleteConn(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => void confirmDelete()}>
+              Disconnect
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
