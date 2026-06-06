@@ -227,6 +227,15 @@ class RunRepository(Protocol):
 
     def fail_running(self, *, user_id: str, error: str, error_code: str | None = None) -> list[str]: ...
 
+    def fail_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[RowDict]: ...
+
 
 class ConnectionRepository(Protocol):
     def list(self, *, user_id: str) -> list[RowDict]: ...

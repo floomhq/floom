@@ -421,8 +421,8 @@ class TestStartupReEnqueue:
         assert "rq1" in run_ids
         assert "rq2" in run_ids
 
-    def test_fail_running_does_not_touch_queued(self, tmp_path, monkeypatch):
-        """fail_running on startup must not change queued→failed."""
+    def test_startup_reaper_fails_stale_running_and_does_not_touch_queued(self, tmp_path, monkeypatch):
+        """Startup reaper fails stale running rows and never changes queued→failed."""
         monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
         for name in list(sys.modules):
             if name in ("db", "db.sqlite", "run_service") or name.startswith("db."):
@@ -435,7 +435,10 @@ class TestStartupReEnqueue:
 
         import json as _json
         from db._legacy_sqlite import get_db, now_iso
+        import datetime as _dt
+
         now = now_iso()
+        stale = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=900)).isoformat()
         manifestf = {"name": "tf", "title": "tf", "version": "0.1.0", "runtime": {"runner": "e2b"}, "inputs": [], "outputs": [], "trigger": {"type": "manual"}}
         with get_db() as conn:
             conn.execute(
@@ -448,18 +451,19 @@ class TestStartupReEnqueue:
             )
 
         # One running, one queued
-        repos.runs.create(user_id="local", run_id="rrun", worker_id="fail-wkr", status="running", trigger_source="t", runner="e2b", input_json={})
+        repos.runs.create(user_id="local", run_id="rrun", worker_id="fail-wkr", status="running", started_at=stale, trigger_source="t", runner="e2b", input_json={})
         repos.runs.create(user_id="local", run_id="rqueue", worker_id="fail-wkr", status="queued", trigger_source="t", runner="e2b", input_json={})
 
         for name in list(sys.modules):
             if name == "run_service":
                 sys.modules.pop(name, None)
         import run_service
-        run_service.fail_interrupted_runs_on_startup(user_id="local")
+        assert run_service.fail_interrupted_runs_on_startup(user_id="local") == 1
 
         # Running → failed; queued → still queued
         rrun = repos.runs.get(user_id="local", run_id="rrun")
         assert rrun["status"] == "failed"
+        assert rrun["error_code"] == "run_abandoned_server_restart"
 
         rqueue = repos.runs.get(user_id="local", run_id="rqueue")
         assert rqueue["status"] == "queued"
