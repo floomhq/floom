@@ -26,6 +26,39 @@ const item: Variants = {
   hidden: { opacity: 0, y: 10 },
   show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: EASE_OUT } },
 };
+
+// Header stagger fires faster than the in-card stagger, so the eyebrow + h2 +
+// sub land cleanly before the cards take over.
+const headerStagger: Variants = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.08, delayChildren: 0.04 } },
+};
+const headerItem: Variants = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.55, ease: EASE_OUT } },
+};
+const eyebrowLine: Variants = {
+  hidden: { scaleX: 0, opacity: 0 },
+  show: {
+    scaleX: 1,
+    opacity: 1,
+    transition: { duration: 0.5, ease: EASE_OUT },
+  },
+};
+
+// Card grid stagger — children are the three Cards.
+const cardGrid: Variants = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.14, delayChildren: 0.32 } },
+};
+const cardItem: Variants = {
+  hidden: { opacity: 0, y: 18 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.6, ease: EASE_OUT },
+  },
+};
 import {
   CalendlyLogo,
   CursorLogo,
@@ -51,10 +84,7 @@ function Card({
 }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.25, margin: "0px 0px -10% 0px" }}
-      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+      variants={cardItem}
       className="overflow-hidden rounded-[18px] border border-border bg-card shadow-[0_18px_44px_-24px_rgba(20,20,20,0.18),0_2px_6px_-2px_rgba(20,20,20,0.05)]"
     >
       <div className="flex items-center gap-2 border-b border-border/70 bg-secondary/40 px-3 py-2">
@@ -422,11 +452,23 @@ function CodingAgentMockup() {
           Wrote to HubSpot
         </span>
       </div>
-      <div className="mt-3 border-t border-border/60 pt-2.5">
-        <div className="mb-1.5 text-center text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground">
+      <motion.div
+        initial="hidden"
+        whileInView="show"
+        viewport={{ once: true, amount: 0.4, margin: "0px 0px -8% 0px" }}
+        variants={stagger}
+        className="mt-3 border-t border-border/60 pt-2.5"
+      >
+        <motion.div
+          variants={item}
+          className="mb-1.5 text-center text-[10.5px] uppercase tracking-[0.16em] text-muted-foreground"
+        >
           Same flow, any agent
-        </div>
-        <div className="flex flex-wrap items-center justify-center gap-1.5">
+        </motion.div>
+        <motion.div
+          variants={stagger}
+          className="flex flex-wrap items-center justify-center gap-1.5"
+        >
           {[
             {
               logo: (
@@ -448,18 +490,21 @@ function CodingAgentMockup() {
             { logo: <CursorLogo />, label: "Cursor" },
             { logo: <OpenCodeLogo />, label: "OpenCode" },
           ].map(({ logo, label }) => (
-            <span
+            <motion.span
               key={label}
+              variants={item}
+              whileHover={{ y: -1 }}
+              transition={{ type: "spring", stiffness: 320, damping: 22 }}
               className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-card px-2 text-[11px] font-medium text-foreground/85"
             >
               <span className="inline-flex h-3.5 w-3.5 items-center justify-center [&>svg]:h-3.5 [&>svg]:w-3.5 [&>img]:h-3.5 [&>img]:w-3.5 [&>img]:rounded-[2px] [&>img]:object-contain">
                 {logo}
               </span>
               {label}
-            </span>
+            </motion.span>
           ))}
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     </Card>
   );
 }
@@ -471,23 +516,49 @@ export function InterfaceMockups() {
       className="scroll-mt-20 border-y border-border/60 bg-secondary/30 px-6 py-20"
     >
       <div className="mx-auto max-w-6xl">
-        <div className="mx-auto mb-12 max-w-2xl text-center">
-          <div className="mb-3 inline-flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground">
-            <span aria-hidden="true" className="h-px w-6 bg-foreground/20" />
+        <motion.div
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, amount: 0.3, margin: "0px 0px -8% 0px" }}
+          variants={headerStagger}
+          className="mx-auto mb-12 max-w-2xl text-center"
+        >
+          <motion.div
+            variants={headerItem}
+            className="mb-3 inline-flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground"
+          >
+            <motion.span
+              aria-hidden="true"
+              variants={eyebrowLine}
+              style={{ transformOrigin: "left" }}
+              className="h-px w-6 bg-foreground/20"
+            />
             Lives in your team&apos;s tools
-          </div>
-          <h2 className="text-balance text-[32px] font-semibold leading-tight tracking-[-0.02em] text-foreground sm:text-[40px]">
+          </motion.div>
+          <motion.h2
+            variants={headerItem}
+            className="text-balance text-[32px] font-semibold leading-tight tracking-[-0.02em] text-foreground sm:text-[40px]"
+          >
             The worker shows up where you already work.
-          </h2>
-          <p className="mx-auto mt-3 max-w-xl text-base text-muted-foreground">
+          </motion.h2>
+          <motion.p
+            variants={headerItem}
+            className="mx-auto mt-3 max-w-xl text-base text-muted-foreground"
+          >
             Slack, WhatsApp, your IDE. Approve, edit, redirect. The worker handles the rest.
-          </p>
-        </div>
-        <div className="grid gap-5 lg:grid-cols-3">
+          </motion.p>
+        </motion.div>
+        <motion.div
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, amount: 0.15, margin: "0px 0px -8% 0px" }}
+          variants={cardGrid}
+          className="grid gap-5 lg:grid-cols-3"
+        >
           <SlackMockup />
           <WhatsAppMockup />
           <CodingAgentMockup />
-        </div>
+        </motion.div>
       </div>
     </section>
   );
