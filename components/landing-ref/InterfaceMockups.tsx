@@ -368,6 +368,9 @@ function CodingAgentMockup() {
           Wrote to HubSpot
         </span>
       </div>
+      <div className="mt-2 text-center text-[10.5px] text-muted-foreground/85">
+        Same flow in Cursor, Codex, OpenCode, or any other coding agent.
+      </div>
     </Card>
   );
 }
