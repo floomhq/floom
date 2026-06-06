@@ -48,6 +48,117 @@ _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
 
 
+class E2BKeyExhaustedError(RuntimeError):
+    """Raised when every configured E2B key is quota/rate-limit exhausted."""
+
+
+def _split_env_values(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return []
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+def _configured_e2b_api_keys() -> list[str]:
+    """Return E2B keys in use order without logging or exposing values."""
+    raw_keys: list[str] = []
+    raw_keys.extend(_split_env_values(os.environ.get("E2B_API_KEYS")))
+    raw_keys.extend(_split_env_values(os.environ.get("E2B_API_KEY")))
+    raw_keys.extend(_split_env_values(os.environ.get("E2B_API_KEY_FALLBACK")))
+
+    keys: list[str] = []
+    seen: set[str] = set()
+    for key in raw_keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+    return keys
+
+
+def _status_code_from_exception(exc: Exception) -> int | None:
+    for attr in ("status_code", "status", "http_status", "http_status_code"):
+        value = getattr(exc, attr, None)
+        try:
+            if value is not None:
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+
+    response = getattr(exc, "response", None)
+    if response is not None:
+        value = getattr(response, "status_code", None) or getattr(response, "status", None)
+        try:
+            if value is not None:
+                return int(value)
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _is_e2b_quota_or_rate_limit_error(exc: Exception) -> bool:
+    status_code = _status_code_from_exception(exc)
+    if status_code in {402, 429}:
+        return True
+
+    parts = [
+        exc.__class__.__name__,
+        str(getattr(exc, "code", "")),
+        str(getattr(exc, "type", "")),
+        str(exc),
+    ]
+    text = " ".join(parts).lower()
+    markers = (
+        "rate limit",
+        "ratelimit",
+        "too many requests",
+        "quota",
+        "exhausted",
+        "insufficient credits",
+        "payment required",
+        "usage limit",
+        "limit exceeded",
+        "billing limit",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _create_sandbox_with_key_fallback(
+    sandbox_cls: Any,
+    *,
+    api_keys: list[str],
+    timeout: int,
+    envs: dict[str, str],
+    log_fn: Callable[[str, str], None],
+) -> Any:
+    last_quota_error: Exception | None = None
+    total = len(api_keys)
+
+    for index, api_key in enumerate(api_keys, start=1):
+        try:
+            return sandbox_cls.create(
+                api_key=api_key,
+                timeout=timeout,
+                envs=envs,
+            )
+        except Exception as exc:
+            if not _is_e2b_quota_or_rate_limit_error(exc):
+                raise
+            last_quota_error = exc
+            if index < total:
+                log_fn(
+                    f"[e2b] E2B key {index}/{total} hit a quota/rate limit; "
+                    "retrying with the next configured key",
+                    "warning",
+                )
+                continue
+            raise E2BKeyExhaustedError(
+                "All configured E2B API keys are rate-limited or quota-exhausted "
+                f"({total} key(s) tried)."
+            ) from last_quota_error
+
+    raise E2BKeyExhaustedError("No E2B API keys are configured.")
+
+
 def _read_result_json(
     sandbox: Any,
     result_path: str,
@@ -440,6 +551,20 @@ class E2BSandboxDriver(SandboxDriver):
                 worker_id, run_id, inputs, secrets, log_fn, trace_id,
                 timeout_seconds, config, connection_ids or {}, user_id,
             )
+        except E2BKeyExhaustedError as exc:
+            logger.warning(
+                "E2B sandbox quota exhausted for worker %s run %s: %s",
+                worker_id,
+                run_id,
+                exc,
+            )
+            log_fn(f"E2B sandbox quota exhausted: {exc}", "error")
+            return WorkerResult(
+                status="error",
+                error=str(exc),
+                error_code="e2b_quota_exhausted",
+                retryable=True,
+            )
         except Exception as exc:
             exc_stdout = getattr(exc, "stdout", None)
             exc_stderr = getattr(exc, "stderr", None)
@@ -481,8 +606,8 @@ class E2BSandboxDriver(SandboxDriver):
     ) -> WorkerResult:
         from e2b import Sandbox  # e2b 2.x
 
-        api_key = os.environ.get("E2B_API_KEY")
-        if not api_key:
+        api_keys = _configured_e2b_api_keys()
+        if not api_keys:
             return WorkerResult(
                 status="error",
                 error="E2B_API_KEY is not configured",
@@ -531,10 +656,12 @@ class E2BSandboxDriver(SandboxDriver):
         _codegen_model_override = (os.environ.get("WORKEROS_CODEGEN_MODEL") or "").strip()
         if _codegen_model_override:
             _sandbox_envs["WORKEROS_CODEGEN_MODEL"] = _codegen_model_override
-        sandbox = Sandbox.create(
-            api_key=api_key,
+        sandbox = _create_sandbox_with_key_fallback(
+            Sandbox,
+            api_keys=api_keys,
             timeout=sandbox_timeout,
             envs=_sandbox_envs,
+            log_fn=log_fn,
         )
         _register_sandbox(run_id, sandbox)
 
