@@ -1535,6 +1535,56 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_chat_tool_idempotency_run
         ON chat_tool_idempotency(run_id);
     """,
+    # -- migration 59: multi-member support — users, sessions, PATs -----------
+    # users: local user accounts with bcrypt-hashed passwords and admin|member roles.
+    # user_sessions: server-side sessions for cookie-based web UI auth.
+    # personal_access_tokens: per-user long-lived API tokens for API/MCP access.
+    #
+    # Backwards-safe: existing installs with no users keep working via x-floom-secret.
+    # The users table being empty signals "single-user legacy mode" — multi-member
+    # auth only activates once the first admin is created via POST /auth/setup.
+    """
+    CREATE TABLE IF NOT EXISTS users (
+        id          TEXT PRIMARY KEY,
+        username    TEXT NOT NULL,
+        display_name TEXT,
+        password_hash TEXT NOT NULL,
+        role        TEXT NOT NULL DEFAULT 'member'
+                    CHECK (role IN ('admin', 'member')),
+        disabled    INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username
+        ON users(username);
+    CREATE INDEX IF NOT EXISTS idx_users_role
+        ON users(role);
+
+    CREATE TABLE IF NOT EXISTS user_sessions (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at  TEXT NOT NULL,
+        created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id
+        ON user_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_sessions_expires_at
+        ON user_sessions(expires_at);
+
+    CREATE TABLE IF NOT EXISTS personal_access_tokens (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        token_hash  TEXT NOT NULL,
+        last_used_at TEXT,
+        created_at  TEXT NOT NULL,
+        expires_at  TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pat_token_hash
+        ON personal_access_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_pat_user_id
+        ON personal_access_tokens(user_id);
+    """,
 ]
 
 
