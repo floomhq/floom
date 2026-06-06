@@ -46,11 +46,40 @@ def _git(
     return result
 
 
+def clone_or_init(workspace_dir: Path, remote_url: str) -> bool:
+    """Clone remote_url into workspace_dir if it doesn't exist yet.
+
+    Use this instead of ensure_repo() when a remote URL is configured on a
+    fresh install — it does 'git clone' so the full history arrives intact.
+    Returns True if a clone was performed.
+    """
+    git_dir = workspace_dir / ".git"
+    if git_dir.exists():
+        return False  # already have a repo, nothing to clone
+
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    # Clone into a temp subdir then move contents up, since git clone requires
+    # an empty target.  Simpler: clone into the dir directly (git allows it
+    # when the dir is empty or has only non-git files).
+    result = _git(["clone", remote_url, "."], workspace_dir, check=False, timeout=120)
+    if result.returncode != 0:
+        raise GitOpsError(
+            f"git clone failed: {result.stderr.strip()}\n"
+            "Check WORKEROS_GIT_REMOTE and that the token/SSH key has read access."
+        )
+    _git(["config", "user.email", "workeros@local"], workspace_dir)
+    _git(["config", "user.name", "WorkerOS"], workspace_dir)
+    return True
+
+
 def ensure_repo(workspace_dir: Path) -> bool:
     """Init a git repo at workspace_dir if one doesn't exist.
 
     Creates a default .gitignore and makes an initial commit of any existing
     files. Returns True if a fresh repo was created, False if already a repo.
+
+    If a remote URL is configured (WORKEROS_GIT_REMOTE), call clone_or_init()
+    instead so a fresh install clones the full history rather than starting blank.
     """
     git_dir = workspace_dir / ".git"
     if git_dir.exists():
