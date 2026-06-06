@@ -7242,7 +7242,6 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
     bundle_dir = WORKERS_DIR / worker_id
     if ref_count == 0 and bundle_dir.is_dir():
         try:
-            import shutil
             shutil.rmtree(bundle_dir)
             logger.info("Removed bundle dir %s", bundle_dir)
         except Exception as exc:
@@ -8306,6 +8305,18 @@ def _worker_record_from_worker_yml(worker_id: str, worker_yml: str) -> Dict[str,
     }
 
 
+def _raw_worker_id_from_worker_yml(worker_yml: str) -> str:
+    import yaml as pyyaml
+
+    try:
+        raw = pyyaml.safe_load(worker_yml)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
+    return str(raw.get("id") or raw.get("name") or "").strip()
+
+
 def _write_worker_bundle_files(
     target_dir: Path,
     *,
@@ -8314,7 +8325,7 @@ def _write_worker_bundle_files(
     skill_md: Optional[str],
     config: WorkerConfig,
 ) -> None:
-    target_dir.mkdir(parents=True, exist_ok=False)
+    target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / "worker.yml").write_text(worker_yml, encoding="utf-8")
     (target_dir / "run.py").write_text(run_py, encoding="utf-8")
     (target_dir / "requirements.txt").write_text("", encoding="utf-8")
@@ -8893,23 +8904,18 @@ def create_worker(
     _require_worker_write_workspace_context(request)
 
     worker_yml = payload.worker_yml
-    raw_worker_id, config = _parse_worker_payload(
-        worker_yml,
-        user_id=auth.user_id,
-        allow_protected_worker_id=True,
-    )
+    raw_worker_id = _raw_worker_id_from_worker_yml(worker_yml)
     if raw_worker_id in PROTECTED_STOCK_WORKER_IDS:
         worker_id = _free_worker_id(f"{_slugify_worker_id(raw_worker_id)}-copy", repos=repos)
         worker_yml = _set_worker_yml_is_example(
             _rewrite_worker_yml_id(worker_yml, worker_id),
             False,
         )
-        worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
     else:
         worker_id = _canonical_worker_id(raw_worker_id)
         if worker_id != raw_worker_id:
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
-            worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
@@ -8957,6 +8963,10 @@ def create_worker(
         ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create worker {worker_id!r}: {exc}") from exc
     finally:
         if not create_complete:
             _cleanup_worker_create_state(
