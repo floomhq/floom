@@ -18,7 +18,6 @@ from .interface import (
     SecretRepository,
     UserRepository,
     UserSessionRepository,
-    VersionRepository,
     WorkerRepository,
     WorkspaceMemberRepository,
 )
@@ -34,7 +33,6 @@ from .sqlite import (
     SqliteSecretRepository,
     SqliteUserRepository,
     SqliteUserSessionRepository,
-    SqliteVersionRepository,
     SqliteWorkerRepository,
     SqliteWorkspaceMemberRepository,
 )
@@ -48,7 +46,6 @@ class Repositories(NamedTuple):
     cli_auth: CliAuthRepository
     approvals: ApprovalRepository
     alerts: AlertRepository
-    versions: VersionRepository
     mcp_tools: McpToolRepository
     # Members + per-asset visibility (Members STEP 1). Optional with defaults so a
     # downstream factory (e.g. managed-deployment) that predates these fields keeps
@@ -71,7 +68,6 @@ def _local_repositories() -> Repositories:
         cli_auth=SqliteCliAuthRepository(),
         approvals=SqliteApprovalRepository(),
         alerts=SqliteAlertRepository(),
-        versions=SqliteVersionRepository(),
         mcp_tools=SqliteMcpToolRepository(),
         members=SqliteWorkspaceMemberRepository(),
         asset_access=SqliteAssetAccessRepository(),

@@ -164,6 +164,20 @@ from worker_registry import (
     get_worker,
     invalidate_worker_cache,
 )
+import git_ops as _git_ops
+
+
+def _git_workspace() -> Path:
+    """Return the git workspace root (dir that contains workers/, contexts/, workspace.md)."""
+    custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
+    return Path(custom).resolve() if custom else WORKERS_DIR.parent.resolve()
+
+
+def _git_author(auth: "AuthContext") -> tuple[str, str]:
+    """Return (author_name, author_email) suitable for a git commit."""
+    name = getattr(auth, "username", None) or getattr(auth, "user_id", None) or "WorkerOS"
+    email = getattr(auth, "email", None) or f"{name}@workeros.local"
+    return name, email
 from run_service import (
     create_run,
     fail_interrupted_runs_on_startup,
@@ -223,6 +237,18 @@ async def lifespan(app: FastAPI):
     register_part_publisher(_run_part_publish)
     # Startup
     _validate_startup_configuration()
+    # Ensure the git workspace repo is initialized (idempotent)
+    try:
+        _git_ops.ensure_repo(_git_workspace())
+        _git_remote = os.environ.get("WORKEROS_GIT_REMOTE", "").strip()
+        if _git_remote:
+            _git_ops.configure_remote(_git_workspace(), _git_remote)
+            try:
+                _git_ops.pull(_git_workspace())
+            except Exception as _pull_exc:
+                logger.warning("Git pull from remote failed (non-fatal): %s", _pull_exc)
+    except Exception as _git_exc:
+        logger.warning("Git workspace init failed (non-fatal): %s", _git_exc)
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy == "local":
         bootstrap_user_id = _bootstrap_user_id()
@@ -2420,120 +2446,97 @@ def _workspace_base_persona_asset_id(request: Request | None = None) -> str:
     return _workspace_instructions_asset_id(request)
 
 
-def _snapshot_workspace_instructions(
-    *,
-    user_id: str,
-    repos: Repositories,
-    asset_id: str,
-    content: str | None = None,
-    change_source: str = "user",
-) -> None:
-    """Create a version snapshot of workspace.md (Agent → Instructions)."""
-    import json as _json
-
-    from chat_service import get_workspace_md
-
+def _workers_git_prefix() -> str:
+    """Relative dir name of the workers dir within the workspace git root."""
     try:
-        md = content if content is not None else get_workspace_md()
-        snapshot = {"content": md}
-        repos.versions.create(
-            asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
-            asset_id=asset_id,
-            user_id=user_id,
-            snapshot_json=_json.dumps(snapshot),
-            change_source=change_source,
-        )
-        repos.versions.prune(
-            asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
-            asset_id=asset_id,
-            keep=20,
-        )
-    except Exception as _exc:
-        logger.warning("version snapshot failed for workspace instructions: %s", _exc)
+        return WORKERS_DIR.relative_to(_git_workspace()).as_posix()
+    except ValueError:
+        return "workers"
 
 
-def _snapshot_workspace_base_persona(
-    *,
-    user_id: str,
-    repos: Repositories,
-    asset_id: str,
-    content: str | None = None,
-    change_source: str = "user",
-) -> None:
-    """Create a version snapshot of workspace.base.md."""
-    import json as _json
-
-    from chat_service import get_workspace_base_persona
-
+def _contexts_git_prefix() -> str:
+    """Relative dir name of the contexts dir within the workspace git root."""
     try:
-        md = content if content is not None else get_workspace_base_persona()
-        snapshot = {"content": md}
-        repos.versions.create(
-            asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE,
-            asset_id=asset_id,
-            user_id=user_id,
-            snapshot_json=_json.dumps(snapshot),
-            change_source=change_source,
-        )
-        repos.versions.prune(
-            asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE,
-            asset_id=asset_id,
-            keep=20,
-        )
-    except Exception as _exc:
-        logger.warning("version snapshot failed for workspace base persona: %s", _exc)
+        return CONTEXTS_DIR.relative_to(_git_workspace()).as_posix()
+    except ValueError:
+        return "contexts"
 
 
-def _snapshot_worker_version(
+def _git_commit_worker(
     worker_id: str,
     *,
-    user_id: str,
-    repos: Repositories,
-    change_source: str = "user",
+    message: str,
+    author_name: str = "WorkerOS",
+    author_email: str = "workeros@local",
 ) -> None:
-    """Create a version snapshot of a worker's current source files."""
-    import json as _json
-    from worker_registry import WORKERS_DIR
-
     try:
-        files_snapshot = []
-        worker_dir = WORKERS_DIR / worker_id
-        if worker_dir.is_dir():
-            for fp in sorted(worker_dir.rglob("*")):
-                if not fp.is_file():
-                    continue
-                try:
-                    rel = fp.relative_to(worker_dir).as_posix()
-                except ValueError:
-                    continue
-                if _should_ignore_worker_file(rel):
-                    continue
-                try:
-                    files_snapshot.append({"path": rel, "content": fp.read_text(encoding="utf-8")})
-                except Exception:
-                    pass
-        snapshot = {
-            "worker": repos.workers.get(user_id=user_id, worker_id=worker_id),
-            "files": files_snapshot,
-        }
-        repos.versions.create(
-            asset_type="worker",
-            asset_id=worker_id,
-            user_id=user_id,
-            snapshot_json=_json.dumps(snapshot),
-            change_source=change_source,
-        )
-        repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
-    except Exception as _exc:
-        logger.warning("version snapshot failed for worker %s: %s", worker_id, _exc)
+        workspace = _git_workspace()
+        prefix = _workers_git_prefix()
+        _git_ops.commit_paths(workspace, [f"{prefix}/{worker_id}"], message, author_name, author_email)
+    except Exception as exc:
+        logger.warning("git commit failed for worker %s: %s", worker_id, exc)
+
+
+def _git_commit_context(
+    name: str,
+    rel_path: Optional[str] = None,
+    *,
+    message: str,
+    author_name: str = "WorkerOS",
+    author_email: str = "workeros@local",
+) -> None:
+    try:
+        workspace = _git_workspace()
+        prefix = _contexts_git_prefix()
+        path = f"{prefix}/{name}/{rel_path}" if rel_path else f"{prefix}/{name}"
+        _git_ops.commit_paths(workspace, [path], message, author_name, author_email)
+    except Exception as exc:
+        logger.warning("git commit failed for context %s: %s", name, exc)
+
+
+def _git_commit_workspace_md(
+    *,
+    message: str,
+    author_name: str = "WorkerOS",
+    author_email: str = "workeros@local",
+) -> None:
+    try:
+        from chat_service import WORKSPACE_MD_PATH
+        workspace = _git_workspace()
+        try:
+            rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
+        except ValueError:
+            rel = "workspace.md"
+        _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
+    except Exception as exc:
+        logger.warning("git commit failed for workspace.md: %s", exc)
+
+
+def _git_commit_workspace_base_md(
+    *,
+    message: str,
+    author_name: str = "WorkerOS",
+    author_email: str = "workeros@local",
+) -> None:
+    try:
+        from chat_service import WORKSPACE_BASE_PERSONA_PATH
+        workspace = _git_workspace()
+        try:
+            rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
+        except ValueError:
+            rel = "workspace.base.md"
+        _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
+    except Exception as exc:
+        logger.warning("git commit failed for workspace.base.md: %s", exc)
 
 class VersionSummary(BaseModel):
-    id: str
-    asset_type: str
-    asset_id: str
-    version_number: int
-    change_source: str
-    created_at: str
+    id: str           # 7-char git SHA
+    sha: str          # same 7-char git SHA
+    message: str      # commit message
+    author: str       # git author name
+    timestamp: str    # ISO 8601 commit date
+    asset_type: str   # kept for API compat
+    asset_id: str     # kept for API compat
 
 
 class ContextWorkerRef(BaseModel):
@@ -2644,163 +2647,85 @@ def list_worker_versions(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[VersionSummary]:
-    """List saved versions of a worker (newest first)."""
+    """List git commit history for a worker (newest first)."""
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
-    rows = repos.versions.list(asset_type="worker", asset_id=worker_id, limit=min(limit, 100))
-    if not rows:
-        _snapshot_worker_version(
-            worker_id,
-            user_id=auth.user_id,
-            repos=repos,
-            change_source="baseline",
-        )
-        rows = repos.versions.list(asset_type="worker", asset_id=worker_id, limit=min(limit, 100))
+    prefix = _workers_git_prefix()
+    rows = _git_ops.get_log(
+        _git_workspace(),
+        rel_path=f"{prefix}/{worker_id}",
+        limit=min(limit, 100),
+        asset_type="worker",
+        asset_id=worker_id,
+    )
     return [VersionSummary(**r) for r in rows]
 
 
-@app.get("/workers/{worker_id}/versions/{version_id}")
+@app.get("/workers/{worker_id}/versions/{sha}")
 def get_worker_version(
     worker_id: str,
-    version_id: str,
+    sha: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    """Return the file snapshot for a specific worker version."""
-    import json as _json
+    """Return the file tree for a worker at a specific git commit."""
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
-    version = repos.versions.get(version_id=version_id)
-    if not version or version.get("asset_type") != "worker" or version.get("asset_id") != worker_id:
-        raise HTTPException(status_code=404, detail="Version not found")
-    snapshot = _json.loads(version["snapshot_json"])
-    return {"files": snapshot.get("files") or []}
+    workspace = _git_workspace()
+    prefix = _workers_git_prefix()
+    file_paths = _git_ops.list_files_at_sha(workspace, sha, f"{prefix}/{worker_id}")
+    if not file_paths:
+        raise HTTPException(status_code=404, detail="Version not found or worker had no files at this commit")
+    files = []
+    for fp in file_paths:
+        content = _git_ops.get_file_at_sha(workspace, sha, fp)
+        if content is not None:
+            rel = fp[len(f"{prefix}/{worker_id}/"):]
+            files.append({"path": rel, "content": content})
+    return {"files": files}
 
 
-@app.post("/workers/{worker_id}/rollback/{version_id}", response_model=WorkerDetail)
+@app.post("/workers/{worker_id}/rollback/{sha}", response_model=WorkerDetail)
 def rollback_worker(
     worker_id: str,
-    version_id: str,
+    sha: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
-    """Restore a worker to the state captured in the given version snapshot."""
-    import json as _json
-    import shutil as _shutil
-    from worker_registry import WORKERS_DIR
-
+    """Restore a worker to the state at a given git commit SHA."""
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    version = repos.versions.get(version_id=version_id)
-    if not version or version.get("asset_type") != "worker" or version.get("asset_id") != worker_id:
-        raise HTTPException(status_code=404, detail="Version not found")
+    workspace = _git_workspace()
+    prefix = _workers_git_prefix()
+    worker_git_path = f"{prefix}/{worker_id}"
 
-    snapshot = _json.loads(version["snapshot_json"])
-    files = snapshot.get("files") or []
-    if not files:
-        raise HTTPException(status_code=422, detail="Version snapshot contains no files")
-
-    target_dir = WORKERS_DIR / worker_id
-    if not target_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Worker directory not found")
-
-    # Write snapshot files atomically (same strategy as update_worker_files)
-    pid = os.getpid()
-    tmp_dir = WORKERS_DIR / f".{worker_id}.rollback.{pid}"
-    if tmp_dir.exists():
-        _shutil.rmtree(tmp_dir)
-    tmp_dir.mkdir(parents=True)
-    backed_up: List[tuple] = []
     try:
-        for f in files:
-            dest = tmp_dir / f["path"]
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(f.get("content", encoding='utf-8') or "", encoding="utf-8")
+        _git_ops.checkout_path(workspace, sha, worker_git_path)
+    except _git_ops.GitOpsError as exc:
+        raise HTTPException(status_code=404, detail=f"Commit {sha!r} not found: {exc}") from exc
 
-        existing_files = list(target_dir.rglob("*"))
-        new_paths = {f["path"] for f in files}
-        for existing in existing_files:
-            if not existing.is_file():
-                continue
-            try:
-                rel = existing.relative_to(target_dir).as_posix()
-            except ValueError:
-                continue
-            if rel not in new_paths and not _should_ignore_worker_file(rel):
-                bak = existing.with_suffix(existing.suffix + f".bak{pid}")
-                existing.rename(bak)
-                backed_up.append((existing, bak))
+    author_name, author_email = _git_author(auth)
+    _git_commit_worker(
+        worker_id,
+        message=f"rollback: restore {worker_id} to {sha}",
+        author_name=author_name,
+        author_email=author_email,
+    )
 
-        for f in files:
-            dest = target_dir / f["path"]
-            if dest.exists():
-                bak = dest.with_suffix(dest.suffix + f".bak{pid}")
-                dest.rename(bak)
-                backed_up.append((dest, bak))
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            _shutil.copy2(tmp_dir / f["path"], dest)
+    invalidate_worker_cache()
+    workers = discover_workers()
+    this_worker_list = [w for w in workers if w["id"] == worker_id]
+    if not this_worker_list:
+        raise HTTPException(status_code=500, detail=f"Worker {worker_id!r} not found after rollback")
+    with get_db() as conn:
+        _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
 
-        invalidate_worker_cache()
-        workers = discover_workers()
-        this_worker_list = [w for w in workers if w["id"] == worker_id]
-        if not this_worker_list:
-            raise HTTPException(status_code=500, detail=f"Worker {worker_id!r} not found after rollback")
-        with get_db() as conn:
-            _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
-
-        for _orig, bak in backed_up:
-            bak.unlink(missing_ok=True)
-        backed_up.clear()
-
-        # Record the rollback as its own version
-        try:
-            import json as _json2
-            rollback_snapshot = {
-                "worker": repos.workers.get(user_id=auth.user_id, worker_id=worker_id),
-                "files": files,
-            }
-            repos.versions.create(
-                asset_type="worker",
-                asset_id=worker_id,
-                user_id=auth.user_id,
-                snapshot_json=_json2.dumps(rollback_snapshot),
-                change_source=f"rollback:{version_id}",
-            )
-            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
-        except Exception as _ver_exc:
-            logger.warning("version snapshot after rollback failed for %s: %s", worker_id, _ver_exc)
-
-        return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
-
-    except HTTPException:
-        for orig, bak in reversed(backed_up):
-            try:
-                if orig.exists():
-                    orig.unlink()
-                bak.rename(orig)
-            except Exception:
-                pass
-        raise
-    except Exception as exc:
-        for orig, bak in reversed(backed_up):
-            try:
-                if orig.exists():
-                    orig.unlink()
-                bak.rename(orig)
-            except Exception:
-                pass
-        raise HTTPException(status_code=500, detail=f"Rollback failed: {exc}") from exc
-    finally:
-        if tmp_dir.exists():
-            try:
-                _shutil.rmtree(tmp_dir)
-            except Exception:
-                pass
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
 @app.get("/contexts/{name}/versions", response_model=List[VersionSummary])
@@ -2810,85 +2735,45 @@ def list_context_versions(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[VersionSummary]:
-    """List saved versions of a brain pack (newest first)."""
+    """List git commit history for a brain pack (newest first)."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
-    rows = repos.versions.list(asset_type="brain_pack", asset_id=safe_name, limit=min(limit, 100))
-    if not rows:
-        _snapshot_brain_pack_version(
-            safe_name,
-            user_id=auth.user_id,
-            repos=repos,
-            change_source="baseline",
-        )
-        rows = repos.versions.list(asset_type="brain_pack", asset_id=safe_name, limit=min(limit, 100))
+    prefix = _contexts_git_prefix()
+    rows = _git_ops.get_log(
+        _git_workspace(),
+        rel_path=f"{prefix}/{safe_name}",
+        limit=min(limit, 100),
+        asset_type="brain_pack",
+        asset_id=safe_name,
+    )
     return [VersionSummary(**r) for r in rows]
 
 
-@app.get("/contexts/{name}/versions/{version_id}")
+@app.get("/contexts/{name}/versions/{sha}")
 def get_context_version(
     name: str,
-    version_id: str,
+    sha: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    """Return the file snapshot for a specific brain pack version."""
-    import json as _json
+    """Return the file tree for a brain pack at a specific git commit."""
+    import base64 as _base64
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
-    version = repos.versions.get(version_id=version_id)
-    if not version or version.get("asset_type") != "brain_pack" or version.get("asset_id") != safe_name:
-        raise HTTPException(status_code=404, detail="Version not found")
-    snapshot = _json.loads(version["snapshot_json"])
-    return {"files": snapshot.get("files") or []}
-
-
-def _brain_file_asset_id(name: str, rel: str) -> str:
-    return f"{name}:{rel}"
-
-
-def _encode_context_file_snapshot(root: Path, path: Path, rel: str) -> Dict[str, Any]:
-    import base64
-
-    raw = path.read_bytes()
-    try:
-        content = raw.decode("utf-8")
-        encoding = "utf-8"
-    except UnicodeDecodeError:
-        content = base64.b64encode(raw).decode("ascii")
-        encoding = "base64"
-    return {"path": rel, "content": content, "encoding": encoding}
-
-
-def _snapshot_brain_file_version(
-    name: str,
-    rel: str,
-    *,
-    user_id: str,
-    repos: Repositories,
-    change_source: str = "user",
-    deleted: bool = False,
-) -> None:
-    """Create a version snapshot for one brain-pack file."""
-    import json as _json
-
-    try:
-        root = context_dir(name)
-        target = safe_context_file_path(name, rel)
-        file_snapshot: Dict[str, Any]
-        if deleted or not target.is_file():
-            file_snapshot = {"path": rel, "deleted": True}
-        else:
-            file_snapshot = _encode_context_file_snapshot(root, target, rel)
-        snapshot = {"pack": {"name": name}, "file": file_snapshot}
-        repos.versions.create(
-            asset_type="brain_file",
-            asset_id=_brain_file_asset_id(name, rel),
-            user_id=user_id,
-            snapshot_json=_json.dumps(snapshot),
-            change_source=change_source,
-        )
-        repos.versions.prune(asset_type="brain_file", asset_id=_brain_file_asset_id(name, rel), keep=20)
-    except Exception as _exc:
-        logger.warning("version snapshot failed for brain_file %s/%s: %s", name, rel, _exc)
+    workspace = _git_workspace()
+    prefix = _contexts_git_prefix()
+    file_paths = _git_ops.list_files_at_sha(workspace, sha, f"{prefix}/{safe_name}")
+    if not file_paths:
+        raise HTTPException(status_code=404, detail="Version not found or context had no files at this commit")
+    files = []
+    for fp in file_paths:
+        content = _git_ops.get_file_at_sha(workspace, sha, fp)
+        if content is not None:
+            rel = fp[len(f"{prefix}/{safe_name}/"):]
+            try:
+                content.encode("utf-8")
+                files.append({"path": rel, "content": content, "encoding": "utf-8"})
+            except Exception:
+                files.append({"path": rel, "content": _base64.b64encode(content.encode("latin1")).decode(), "encoding": "base64"})
+    return {"files": files}
 
 
 @app.get("/contexts/{name}/files/{file_path:path}/versions", response_model=List[VersionSummary])
@@ -2899,91 +2784,68 @@ def list_context_file_versions(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[VersionSummary]:
-    """List saved versions for one brain-pack file (newest first)."""
+    """List git commits that touched one brain-pack file (newest first)."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
-    rows = repos.versions.list(
-        asset_type="brain_file",
-        asset_id=_brain_file_asset_id(safe_name, rel),
+    prefix = _contexts_git_prefix()
+    rows = _git_ops.get_log(
+        _git_workspace(),
+        rel_path=f"{prefix}/{safe_name}/{rel}",
         limit=min(limit, 100),
+        asset_type="brain_file",
+        asset_id=f"{safe_name}:{rel}",
     )
     return [VersionSummary(**r) for r in rows]
 
 
-@app.get("/contexts/{name}/files/{file_path:path}/versions/{version_id}")
+@app.get("/contexts/{name}/files/{file_path:path}/versions/{sha}")
 def get_context_file_version(
     name: str,
     file_path: str,
-    version_id: str,
+    sha: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    """Return the saved snapshot for one brain-pack file version."""
-    import json as _json
-
+    """Return file content at a specific git commit for one brain-pack file."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
-    version = repos.versions.get(version_id=version_id)
-    if (
-        not version
-        or version.get("asset_type") != "brain_file"
-        or version.get("asset_id") != _brain_file_asset_id(safe_name, rel)
-    ):
+    prefix = _contexts_git_prefix()
+    content = _git_ops.get_file_at_sha(_git_workspace(), sha, f"{prefix}/{safe_name}/{rel}")
+    if content is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    snapshot = _json.loads(version["snapshot_json"])
-    return {"file": snapshot.get("file") or {}}
+    return {"file": {"path": rel, "content": content}}
 
 
-@app.post("/contexts/{name}/files/{file_path:path}/restore/{version_id}", response_model=ContextFileItem)
+@app.post("/contexts/{name}/files/{file_path:path}/restore/{sha}", response_model=ContextFileItem)
 def restore_context_file_version(
     name: str,
     file_path: str,
-    version_id: str,
+    sha: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextFileItem:
-    """Restore one brain-pack file to a specific saved version (C-BINREST, #348).
-
-    The per-file PUT path only accepts UTF-8 text (``ContextTextWriteRequest``),
-    so a binary file revision (image/PDF/etc., stored as base64 in the snapshot)
-    could never be restored through it. This endpoint decodes the stored
-    snapshot — base64 OR utf-8 — back to raw bytes and writes them atomically,
-    owner-scoped. Restoring a snapshot whose file was ``deleted`` removes the
-    current file.
-    """
-    import base64
-    import json as _json
-
+    """Restore one brain-pack file to its state at a given git commit SHA."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
-    version = repos.versions.get(version_id=version_id)
-    if (
-        not version
-        or version.get("asset_type") != "brain_file"
-        or version.get("asset_id") != _brain_file_asset_id(safe_name, rel)
-    ):
-        raise HTTPException(status_code=404, detail="Version not found")
+    workspace = _git_workspace()
+    prefix = _contexts_git_prefix()
+    git_path = f"{prefix}/{safe_name}/{rel}"
 
-    snapshot = _json.loads(version["snapshot_json"])
-    file_snapshot = snapshot.get("file") or {}
+    try:
+        _git_ops.checkout_path(workspace, sha, git_path)
+    except _git_ops.GitOpsError as exc:
+        raise HTTPException(status_code=404, detail=f"Commit {sha!r} not found: {exc}") from exc
 
-    if file_snapshot.get("deleted"):
-        target = _safe_context_file_or_400(safe_name, rel)
-        if target.is_file():
-            target.unlink()
-            for parent in target.parents:
-                if parent == context_dir(safe_name):
-                    break
-                try:
-                    parent.rmdir()
-                except OSError:
-                    break
-        _snapshot_brain_file_version(
-            safe_name, rel, user_id=auth.user_id, repos=repos,
-            change_source=f"restore:{version_id}", deleted=True,
-        )
-        _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
-        # No current file to describe; surface a minimal deleted marker.
+    author_name, author_email = _git_author(auth)
+    _git_commit_context(
+        safe_name, rel,
+        message=f"context {safe_name}: restore {rel} to {sha}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+
+    target = safe_context_file_path(safe_name, rel)
+    if not target.is_file():
         return ContextFileItem(
             path=rel, size=0, mime_type=guess_mime_type(rel),
             updated_at=now_iso(),
@@ -2991,108 +2853,36 @@ def restore_context_file_version(
             display_type=context_file_display_type(rel, guess_mime_type(rel)),
             deleted=True,
         )
-
-    raw_content = file_snapshot.get("content") or ""
-    encoding = file_snapshot.get("encoding")
-    if encoding == "base64":
-        try:
-            data = base64.b64decode(raw_content)
-        except Exception as exc:
-            raise HTTPException(status_code=422, detail="Version snapshot is corrupt") from exc
-    else:
-        data = str(raw_content).encode("utf-8")
-
-    result = _write_context_file(safe_name, rel, data, user_id=auth.user_id)
-    _snapshot_brain_file_version(
-        safe_name, rel, user_id=auth.user_id, repos=repos,
-        change_source=f"restore:{version_id}",
-    )
-    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
-    return result
+    return _write_context_file(safe_name, rel, target.read_bytes(), user_id=auth.user_id)
 
 
-@app.post("/contexts/{name}/rollback/{version_id}")
+@app.post("/contexts/{name}/rollback/{sha}")
 def rollback_context(
     name: str,
-    version_id: str,
+    sha: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    """Restore a brain pack to the state captured in the given version snapshot."""
-    import base64
-    import json as _json
-
+    """Restore a brain pack to its state at a given git commit SHA."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
-    version = repos.versions.get(version_id=version_id)
-    if not version or version.get("asset_type") != "brain_pack" or version.get("asset_id") != safe_name:
-        raise HTTPException(status_code=404, detail="Version not found")
+    workspace = _git_workspace()
+    prefix = _contexts_git_prefix()
+    ctx_git_path = f"{prefix}/{safe_name}"
 
-    snapshot = _json.loads(version["snapshot_json"])
-    files = snapshot.get("files") or []
-
-    root = context_dir(safe_name)
-    if not root.is_dir():
-        raise HTTPException(status_code=404, detail="Context not found")
-
-    # Delete all existing files then restore from snapshot
-    existing = list(iter_context_files(root))
-    backed_up: List[tuple] = []
     try:
-        for path in existing:
-            bak = path.with_suffix(path.suffix + f".bak{os.getpid()}")
-            path.rename(bak)
-            backed_up.append((path, bak))
+        _git_ops.checkout_path(workspace, sha, ctx_git_path)
+    except _git_ops.GitOpsError as exc:
+        raise HTTPException(status_code=404, detail=f"Commit {sha!r} not found: {exc}") from exc
 
-        for f in files:
-            dest = root / f["path"]
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            raw_content = f.get("content") or ""
-            if f.get("encoding") == "base64":
-                dest.write_bytes(base64.b64decode(raw_content))
-            else:
-                dest.write_text(raw_content, encoding="utf-8")
-
-        # Clean up backups
-        for _orig, bak in backed_up:
-            bak.unlink(missing_ok=True)
-        backed_up.clear()
-
-        set_context_metadata(safe_name, owner_id=auth.user_id)
-
-        # Snapshot the rollback
-        try:
-            rollback_snapshot = {"pack": snapshot.get("pack"), "files": files}
-            repos.versions.create(
-                asset_type="brain_pack",
-                asset_id=safe_name,
-                user_id=auth.user_id,
-                snapshot_json=_json.dumps(rollback_snapshot),
-                change_source=f"rollback:{version_id}",
-            )
-            repos.versions.prune(asset_type="brain_pack", asset_id=safe_name, keep=20)
-        except Exception as _exc:
-            logger.warning("version snapshot after context rollback failed: %s", _exc)
-
-        return _context_detail(safe_name, _metadata, repos=repos, user_id=auth.user_id)
-
-    except HTTPException:
-        for orig, bak in reversed(backed_up):
-            try:
-                if orig.exists():
-                    orig.unlink()
-                bak.rename(orig)
-            except Exception:
-                pass
-        raise
-    except Exception as exc:
-        for orig, bak in reversed(backed_up):
-            try:
-                if orig.exists():
-                    orig.unlink()
-                bak.rename(orig)
-            except Exception:
-                pass
-        raise HTTPException(status_code=500, detail=f"Context rollback failed: {exc}") from exc
+    author_name, author_email = _git_author(auth)
+    _git_commit_context(
+        safe_name,
+        message=f"rollback: restore context {safe_name} to {sha}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+    set_context_metadata(safe_name, owner_id=auth.user_id)
+    return _context_detail(safe_name, _metadata, repos=repos, user_id=auth.user_id)
 
 
 def _normalize_trigger_type(value: Any) -> str:
@@ -5475,13 +5265,13 @@ def delete_context(
         )
     shutil.rmtree(root)
     delete_context_metadata(safe_name)
-    # Prune the brain-pack + brain-file version snapshots so they don't orphan
-    # in asset_versions (the keep-20 cap never fires once the context is gone) —
-    # 2026-06-02 P2.
+    # Record the deletion in git so the history is preserved but the directory is gone.
     try:
-        repos.versions.delete_for_context(name=safe_name)
+        workspace = _git_workspace()
+        prefix = _contexts_git_prefix()
+        _git_ops.commit_paths(workspace, [f"{prefix}/{safe_name}"], f"context {safe_name}: delete")
     except Exception as exc:
-        logger.warning("Could not prune asset_versions for context %s: %s", safe_name, exc)
+        logger.warning("git commit for context deletion failed (non-fatal): %s", exc)
     return ContextDeleteResponse(status="deleted", referenced_by=referenced_by)
 
 
@@ -5517,49 +5307,6 @@ def get_context_file(
     return Response(content=target.read_bytes(), media_type=mime_type, headers=headers)
 
 
-def _snapshot_brain_pack_version(
-    name: str,
-    *,
-    user_id: str,
-    repos: Repositories,
-    change_source: str = "user",
-) -> None:
-    """Create a version snapshot of a brain pack's current files."""
-    import base64
-    import json as _json
-
-    try:
-        root = context_dir(name)
-        files_snapshot = []
-        for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix()):
-            rel = path.relative_to(root).as_posix()
-            try:
-                raw = path.read_bytes()
-                try:
-                    content = raw.decode("utf-8")
-                    encoding = "utf-8"
-                except UnicodeDecodeError:
-                    content = base64.b64encode(raw).decode("ascii")
-                    encoding = "base64"
-            except Exception:
-                continue
-            files_snapshot.append({"path": rel, "content": content, "encoding": encoding})
-        metadata = load_context_metadata()
-        pack_meta = metadata.get(name) or {}
-        snapshot = {
-            "pack": {"name": name, "description": pack_meta.get("description")},
-            "files": files_snapshot,
-        }
-        repos.versions.create(
-            asset_type="brain_pack",
-            asset_id=name,
-            user_id=user_id,
-            snapshot_json=_json.dumps(snapshot),
-            change_source=change_source,
-        )
-        repos.versions.prune(asset_type="brain_pack", asset_id=name, keep=20)
-    except Exception as _exc:
-        logger.warning("version snapshot failed for brain_pack %s: %s", name, _exc)
 
 
 @app.put("/contexts/{name}/files/{file_path:path}", response_model=ContextFileItem)
@@ -5593,8 +5340,8 @@ async def put_context_file(
         tags=tags,
         file_metadata=file_metadata,
     )
-    _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos)
-    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+    author_name, author_email = _git_author(auth)
+    _git_commit_context(safe_name, rel, message=f"context {safe_name}: update {rel}", author_name=author_name, author_email=author_email)
     return result
 
 
@@ -5619,8 +5366,8 @@ def delete_context_file(
         except OSError:
             break
     set_context_file_metadata(safe_name, rel, tags=[], file_metadata={}, owner_id=auth.user_id)
-    _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos, deleted=True)
-    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+    author_name, author_email = _git_author(auth)
+    _git_commit_context(safe_name, rel, message=f"context {safe_name}: delete {rel}", author_name=author_name, author_email=author_email)
     return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
@@ -5686,9 +5433,8 @@ async def upload_context_files(
             )
         )
         written_paths.append(rel)
-    for rel in written_paths:
-        _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos)
-    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+    author_name, author_email = _git_author(auth)
+    _git_commit_context(safe_name, message=f"context {safe_name}: upload {len(written_paths)} file(s)", author_name=author_name, author_email=author_email)
     return ContextUploadResponse(
         files=written,
         total_size_bytes=context_total_size(context_dir(safe_name)),
@@ -7151,39 +6897,8 @@ def update_worker(
 
     # Snapshot metadata changes for versioning (fire-and-forget)
     if updates:
-        try:
-            import json as _json
-            from worker_registry import WORKERS_DIR
-            files_snapshot = []
-            worker_dir = WORKERS_DIR / worker_id
-            if worker_dir.is_dir():
-                for fp in sorted(worker_dir.rglob("*")):
-                    if not fp.is_file():
-                        continue
-                    try:
-                        rel = fp.relative_to(worker_dir).as_posix()
-                    except ValueError:
-                        continue
-                    if _should_ignore_worker_file(rel):
-                        continue
-                    try:
-                        files_snapshot.append({"path": rel, "content": fp.read_text(encoding="utf-8")})
-                    except Exception:
-                        pass
-            snapshot = {
-                "worker": repos.workers.get(user_id=auth.user_id, worker_id=worker_id),
-                "files": files_snapshot,
-            }
-            repos.versions.create(
-                asset_type="worker",
-                asset_id=worker_id,
-                user_id=auth.user_id,
-                snapshot_json=_json.dumps(snapshot),
-                change_source="user",
-            )
-            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
-        except Exception as _ver_exc:
-            logger.warning("version snapshot on PATCH failed for %s: %s", worker_id, _ver_exc)
+        author_name, author_email = _git_author(auth)
+        _git_commit_worker(worker_id, message=f"worker: update {worker_id}", author_name=author_name, author_email=author_email)
 
     return detail
 
@@ -7250,13 +6965,6 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
     # Delete the worker (FK CASCADE removes runs/artifacts/logs/webhooks)
     repos.workers.delete(user_id=owner_id, worker_id=worker_id)
 
-    # Prune the worker's version snapshots so they don't orphan in asset_versions
-    # (the keep-20 cap never fires once the worker is gone) — 2026-06-02 P2.
-    try:
-        repos.versions.delete_for_asset(asset_type="worker", asset_id=worker_id)
-    except Exception as exc:
-        logger.warning("Could not prune asset_versions for worker %s: %s", worker_id, exc)
-
     # Check if skill_version is still referenced by other workers; preserve if so.
     ref_count = repos.workers.get_skill_version_ref_count(skill_version_id=skill_version_id)
     if ref_count == 0 and skill_version_id:
@@ -7264,12 +6972,18 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
         logger.info("Removed unreferenced skill_version %s", skill_version_id)
 
     # Remove bundle files from disk only if no other worker references this skill_version
-    from worker_registry import WORKERS_DIR
     bundle_dir = WORKERS_DIR / worker_id
     if ref_count == 0 and bundle_dir.is_dir():
         try:
             shutil.rmtree(bundle_dir)
             logger.info("Removed bundle dir %s", bundle_dir)
+            # Record the deletion in git history (files gone, history preserved)
+            try:
+                workspace = _git_workspace()
+                prefix = _workers_git_prefix()
+                _git_ops.commit_paths(workspace, [f"{prefix}/{worker_id}"], f"worker: delete {worker_id}")
+            except Exception as _git_exc:
+                logger.warning("git commit for worker deletion failed (non-fatal): %s", _git_exc)
         except Exception as exc:
             logger.warning("Could not remove bundle dir %s: %s", bundle_dir, exc)
     elif ref_count > 0:
@@ -10028,23 +9742,9 @@ def update_worker_files(
             bak.unlink(missing_ok=True)
         backed_up.clear()
 
-        # Snapshot for versioning (fire-and-forget; never block the save)
-        try:
-            import json as _json
-            snapshot = {
-                "worker": repos.workers.get(user_id=auth.user_id, worker_id=worker_id),
-                "files": [{"path": f.path, "content": f.content} for f in payload.files],
-            }
-            repos.versions.create(
-                asset_type="worker",
-                asset_id=worker_id,
-                user_id=auth.user_id,
-                snapshot_json=_json.dumps(snapshot),
-                change_source="user",
-            )
-            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
-        except Exception as _ver_exc:
-            logger.warning("version snapshot failed for worker %s: %s", worker_id, _ver_exc)
+        # Commit the updated files to the workspace git repo
+        author_name, author_email = _git_author(auth)
+        _git_commit_worker(worker_id, message=f"worker: save files for {worker_id}", author_name=author_name, author_email=author_email)
 
         return _build_worker_detail(
             worker_id,
@@ -11109,10 +10809,6 @@ def _execute_destructive_delete(path: str, owner_id: str, repos: Repositories) -
         if ctx is None:
             raise HTTPException(status_code=404, detail=f"Brain pack '{name}' not found")
         repos.contexts.delete(owner_id=owner_id, name=name)
-        try:
-            repos.versions.delete_for_context(name=name)
-        except Exception as exc:
-            logger.warning("Could not prune asset_versions for context %s: %s", name, exc)
         return f"Brain pack '{name}' deleted"
 
     m = _RE_DELETE_CONTEXT_FILE.match(path)
@@ -16790,7 +16486,7 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
         content.encode("utf-8"),
         user_id=auth.user_id,
     )
-    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos, change_source="ai")
+    _git_commit_context(safe_name, _context_file_path_or_400(rel), message=f"context {safe_name}: update {rel} (ai)")
     message = "Context file saved."
     if result.secret_warnings:
         patterns = ", ".join(sorted({w.pattern for w in result.secret_warnings}))
@@ -18359,73 +18055,61 @@ def list_workspace_base_persona_versions(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[VersionSummary]:
-    """List saved versions of the editable base persona (newest first)."""
-    asset_id = _workspace_base_persona_asset_id(request)
-    rows = repos.versions.list(
-        asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE,
-        asset_id=asset_id,
-        limit=min(limit, 100),
-    )
+    """List git commit history for workspace.base.md (newest first)."""
+    from chat_service import WORKSPACE_BASE_PERSONA_PATH
+    workspace = _git_workspace()
+    try:
+        rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
+    except ValueError:
+        rel = "workspace.base.md"
+    rows = _git_ops.get_log(workspace, rel_path=rel, limit=min(limit, 100),
+                            asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE, asset_id="default")
     return [VersionSummary(**r) for r in rows]
 
 
-@app.get("/workspace/base/versions/{version_id}")
+@app.get("/workspace/base/versions/{sha}")
 def get_workspace_base_persona_version(
-    version_id: str,
+    sha: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    """Return the content snapshot for a base-persona version."""
-    import json as _json
-
-    asset_id = _workspace_base_persona_asset_id(request)
-    version = repos.versions.get(version_id=version_id)
-    if (
-        not version
-        or version.get("asset_type") != _WORKSPACE_BASE_PERSONA_ASSET_TYPE
-        or version.get("asset_id") != asset_id
-    ):
+    """Return workspace.base.md content at a specific git commit."""
+    from chat_service import WORKSPACE_BASE_PERSONA_PATH
+    workspace = _git_workspace()
+    try:
+        rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
+    except ValueError:
+        rel = "workspace.base.md"
+    content = _git_ops.get_file_at_sha(workspace, sha, rel)
+    if content is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    snapshot = _json.loads(version["snapshot_json"])
-    return {"content": snapshot.get("content") or ""}
+    return {"content": content}
 
 
-@app.post("/workspace/base/rollback/{version_id}")
+@app.post("/workspace/base/rollback/{sha}")
 async def rollback_workspace_base_persona(
-    version_id: str,
+    sha: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> PlainTextResponse:
-    """Restore workspace.base.md to a previous version snapshot."""
-    import json as _json
+    """Restore workspace.base.md to its state at a given git commit SHA."""
+    from chat_service import WORKSPACE_BASE_PERSONA_PATH, set_workspace_base_persona
+    workspace = _git_workspace()
+    try:
+        rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
+    except ValueError:
+        rel = "workspace.base.md"
+    try:
+        _git_ops.checkout_path(workspace, sha, rel)
+    except _git_ops.GitOpsError as exc:
+        raise HTTPException(status_code=404, detail=f"Commit {sha!r} not found: {exc}") from exc
 
-    from chat_service import set_workspace_base_persona
-
-    asset_id = _workspace_base_persona_asset_id(request)
-    version = repos.versions.get(version_id=version_id)
-    if (
-        not version
-        or version.get("asset_type") != _WORKSPACE_BASE_PERSONA_ASSET_TYPE
-        or version.get("asset_id") != asset_id
-    ):
-        raise HTTPException(status_code=404, detail="Version not found")
-
-    snapshot = _json.loads(version["snapshot_json"])
-    content = snapshot.get("content")
-    if content is None or not str(content).strip():
-        raise HTTPException(status_code=422, detail="Version snapshot contains no content")
-
-    set_workspace_base_persona(str(content))
-    _snapshot_workspace_base_persona(
-        user_id=auth.user_id,
-        repos=repos,
-        asset_id=asset_id,
-        content=str(content),
-        change_source=f"rollback:{version_id}",
-    )
-    return PlainTextResponse(str(content), media_type="text/markdown")
+    content = WORKSPACE_BASE_PERSONA_PATH.read_text(encoding="utf-8") if WORKSPACE_BASE_PERSONA_PATH.is_file() else ""
+    author_name, author_email = _git_author(auth)
+    _git_commit_workspace_base_md(message=f"workspace base: rollback to {sha}", author_name=author_name, author_email=author_email)
+    return PlainTextResponse(content, media_type="text/markdown")
 
 
 @app.put("/workspace/base", status_code=204)
@@ -18434,12 +18118,7 @@ async def put_workspace_base_persona(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Response:
-    """Update workspace.base.md, the editable base persona override.
-
-    Accepts raw markdown or the same ``{"content": "..."}`` JSON envelope as
-    /workspace. This file is layered before workspace custom instructions and
-    the workspace-agent SKILL.md.
-    """
+    """Update workspace.base.md, the editable base persona override."""
     from chat_service import set_workspace_base_persona, unwrap_workspace_body
 
     body = await request.body()
@@ -18447,14 +18126,9 @@ async def put_workspace_base_persona(
     if not content.strip():
         raise HTTPException(status_code=400, detail="workspace base persona cannot be empty")
     set_workspace_base_persona(content)
-    change_source = "ai" if request.headers.get("x-workeros-run-token") else "user"
-    _snapshot_workspace_base_persona(
-        user_id=auth.user_id,
-        repos=repos,
-        asset_id=_workspace_base_persona_asset_id(request),
-        content=content,
-        change_source=change_source,
-    )
+    source = "ai" if request.headers.get("x-workeros-run-token") else "user"
+    author_name, author_email = _git_author(auth)
+    _git_commit_workspace_base_md(message=f"workspace base: update ({source})", author_name=author_name, author_email=author_email)
     return Response(status_code=204)
 
 
@@ -18465,73 +18139,63 @@ def list_workspace_versions(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[VersionSummary]:
-    """List saved versions of workspace instructions (newest first)."""
-    asset_id = _workspace_instructions_asset_id(request)
-    rows = repos.versions.list(
-        asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
-        asset_id=asset_id,
-        limit=min(limit, 100),
-    )
+    """List git commit history for workspace.md (newest first)."""
+    from chat_service import WORKSPACE_MD_PATH
+    workspace = _git_workspace()
+    try:
+        rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
+    except ValueError:
+        rel = "workspace.md"
+    rows = _git_ops.get_log(workspace, rel_path=rel, limit=min(limit, 100),
+                            asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE, asset_id="default")
     return [VersionSummary(**r) for r in rows]
 
 
-@app.get("/workspace/versions/{version_id}")
+@app.get("/workspace/versions/{sha}")
 def get_workspace_version(
-    version_id: str,
+    sha: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    """Return the content snapshot for a specific workspace instructions version."""
-    import json as _json
-
-    asset_id = _workspace_instructions_asset_id(request)
-    version = repos.versions.get(version_id=version_id)
-    if (
-        not version
-        or version.get("asset_type") != _WORKSPACE_INSTRUCTIONS_ASSET_TYPE
-        or version.get("asset_id") != asset_id
-    ):
+    """Return workspace.md content at a specific git commit."""
+    from chat_service import WORKSPACE_MD_PATH
+    workspace = _git_workspace()
+    try:
+        rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
+    except ValueError:
+        rel = "workspace.md"
+    content = _git_ops.get_file_at_sha(workspace, sha, rel)
+    if content is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    snapshot = _json.loads(version["snapshot_json"])
-    return {"content": snapshot.get("content") or ""}
+    return {"content": content}
 
 
-@app.post("/workspace/rollback/{version_id}")
+@app.post("/workspace/rollback/{sha}")
 async def rollback_workspace_instructions(
-    version_id: str,
+    sha: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> PlainTextResponse:
-    """Restore workspace.md to a previous version snapshot."""
-    import json as _json
+    """Restore workspace.md to its state at a given git commit SHA."""
+    from chat_service import WORKSPACE_MD_PATH, set_workspace_md
+    workspace = _git_workspace()
+    try:
+        rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
+    except ValueError:
+        rel = "workspace.md"
+    try:
+        _git_ops.checkout_path(workspace, sha, rel)
+    except _git_ops.GitOpsError as exc:
+        raise HTTPException(status_code=404, detail=f"Commit {sha!r} not found: {exc}") from exc
 
-    from chat_service import set_workspace_md
-
-    asset_id = _workspace_instructions_asset_id(request)
-    version = repos.versions.get(version_id=version_id)
-    if (
-        not version
-        or version.get("asset_type") != _WORKSPACE_INSTRUCTIONS_ASSET_TYPE
-        or version.get("asset_id") != asset_id
-    ):
-        raise HTTPException(status_code=404, detail="Version not found")
-
-    snapshot = _json.loads(version["snapshot_json"])
-    content = snapshot.get("content")
-    if content is None or not str(content).strip():
-        raise HTTPException(status_code=422, detail="Version snapshot contains no content")
-
-    set_workspace_md(str(content))
-    _snapshot_workspace_instructions(
-        user_id=auth.user_id,
-        repos=repos,
-        asset_id=asset_id,
-        content=str(content),
-        change_source=f"rollback:{version_id}",
-    )
-    return PlainTextResponse(str(content), media_type="text/markdown")
+    content = WORKSPACE_MD_PATH.read_text(encoding="utf-8") if WORKSPACE_MD_PATH.is_file() else ""
+    if content:
+        set_workspace_md(content)
+    author_name, author_email = _git_author(auth)
+    _git_commit_workspace_md(message=f"workspace: rollback to {sha}", author_name=author_name, author_email=author_email)
+    return PlainTextResponse(content, media_type="text/markdown")
 
 
 @app.put("/workspace", status_code=204)
@@ -18540,13 +18204,7 @@ async def put_workspace(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Response:
-    """Update workspace.md (replaces entire content).
-
-    Accepts BOTH a raw ``text/markdown`` body (the OSS contract) AND a JSON
-    ``{"content": "..."}`` envelope (sent by the Downstream host / some clients).
-    The envelope is unwrapped to its inner markdown so a JSON PUT can no longer
-    corrupt the stored instructions (N3-1).
-    """
+    """Update workspace.md (replaces entire content)."""
     from chat_service import set_workspace_md, unwrap_workspace_body
 
     body = await request.body()
@@ -18554,14 +18212,9 @@ async def put_workspace(
     if not content.strip():
         raise HTTPException(status_code=400, detail="workspace.md content cannot be empty")
     set_workspace_md(content)
-    change_source = "ai" if request.headers.get("x-workeros-run-token") else "user"
-    _snapshot_workspace_instructions(
-        user_id=auth.user_id,
-        repos=repos,
-        asset_id=_workspace_instructions_asset_id(request),
-        content=content,
-        change_source=change_source,
-    )
+    source = "ai" if request.headers.get("x-workeros-run-token") else "user"
+    author_name, author_email = _git_author(auth)
+    _git_commit_workspace_md(message=f"workspace: update instructions ({source})", author_name=author_name, author_email=author_email)
     return Response(status_code=204)
 
 
