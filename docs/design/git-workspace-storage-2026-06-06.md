@@ -38,7 +38,7 @@ This design is grounded in the current code paths named in the brief:
 
 ## Repository Layout
 
-One private repo exists per workspace. The repo stores the workspace's authored source exactly once, in a layout close to the product mental model.
+One private repo exists per workspace. The repo stores workspace files exactly once, in a layout close to the product mental model.
 
 ```text
 /
@@ -344,7 +344,7 @@ No current worker or brain file is deleted during migration. Old filesystem dire
 
 ## Runtime DB Coexistence
 
-Git stores authored source. The DB stores runtime and query state.
+Git stores workspace files. The DB stores runtime and query state.
 
 Remain in DB:
 
