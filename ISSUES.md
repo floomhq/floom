@@ -2006,3 +2006,56 @@ NOTE: 4 screenshots referenced (Mac Desktop paths) could NOT be retrieved (ssh m
   - M85d (feature) **standalone noindex share links for individual FILES** (like the approvals shareable links / M12) — currently can only share a pack, not a file standalone; and even pack sharing "links to the platform" rather than being a true standalone page. Wants standalone noindex pages. (Expands M70.)
   - M85e (feature) brain/context is **read-only — wants WRITE** (add/edit files).
 - **M86 (UX, REPEATED feedback) Worker-card share page is weird; must match the Floom share reference** — target design: https://floom.dev/s/fls_A7lOwwSGOct63FCNC_-4CWlryYf8VddxfTCRxsmVk10 . Federico gave this reference BEFORE; I did not pick it up. The worker share + all standalone share pages (worker/brain-file/pack) should look like that Floom standalone share page. OWN IT — build against the reference this time.
+
+---
+
+## Emily chat persistence pass (2026-06-06)
+
+**Scope:** Emily chat in `apps/web` (engine) — the dock (`EmilyDock`) and the
+full-page chat (`EmilyChatPage` at `/chat`). Federico hit these live on
+`workers.floom.dev`. Propagates to Cloud via engine sync (no Cloud-repo edits).
+
+### EC1 — Conversation does not survive dock close→open, fullscreen toggle, or reload
+
+**Status:** FIXED
+
+**Root cause:** `useChatStream` held `messages` + `conversationId` in in-memory
+`useState` only. Closing/reopening the dock, switching between the dock and
+`/chat`, or reloading the browser dropped the in-memory state, so the chat
+appeared to reset even though the server already persisted the conversation.
+
+**Fix:** the active `conversationId` is persisted to `localStorage`
+(`workeros.emily.conversationId`). On mount the hook fetches
+`GET /conversations/{id}` (new `api.conversations.get`) and rehydrates server
+messages + tool cards into the live `ChatMessage`/`MsgPart` shape via
+`emily-chat-rehydrate.ts`. A `storage` event listener mirrors session changes
+across the dock/full-page/other tabs.
+
+### EC2 — No way to start a new conversation
+
+**Status:** FIXED
+
+**Fix:** a "New chat" control resets messages + conversationId and clears the
+localStorage key, starting a fresh conversation. The previous conversation is
+NOT deleted server-side (still retrievable via `GET /conversations/{id}`).
+
+### EC3 — No way to export a conversation
+
+**Status:** FIXED
+
+**Fix:** an "Export" control downloads the current conversation as Markdown
+(readable You/Emily turns, tool actions noted briefly) via
+`emily-chat-export.ts`. A JSON export helper is included as a bonus.
+
+### EC4 — Controls must be reachable in both dock and full-page chat
+
+**Status:** FIXED
+
+**Fix:** New chat + Export live in a controls bar inside the shared
+`EmilyChatCore`, so both `EmilyDock` and `EmilyChatPage` get them.
+
+**Evidence:** `apps/web` `npm run lint` (0 errors), `npm test` (33 passed),
+`npm run build` (Compiled successfully). Targeted `tsc` of the new/changed
+feature modules is clean; two pre-existing `tsc` errors in
+`tests/useChatStream.test.ts` (`.title` on the `ToolCard` union, present on
+origin/main, not exercised by CI's vitest+lint gate) are untouched.
