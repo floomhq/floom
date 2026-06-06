@@ -382,7 +382,7 @@ export function WorkspaceSwitcher() {
             <DialogTitle>New workspace</DialogTitle>
             <DialogDescription>
               Workspaces keep workers, runs, connections, secrets, and brain packs
-              isolated on this local Floom Workers instance.
+              isolated on this local Workeros instance.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">

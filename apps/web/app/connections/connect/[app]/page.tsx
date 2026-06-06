@@ -110,7 +110,7 @@ export default function ConnectAppPage() {
             <ProviderLogos providerIcon={slug} />
 
             <h1 className="mt-6 text-center text-xl font-semibold">
-              Floom wants to connect to {providerName}
+              Workeros wants to connect to {providerName}
             </h1>
 
             {meta?.description && (
@@ -178,7 +178,7 @@ export default function ConnectAppPage() {
             </Link>
 
             <p className="mt-6 text-center text-xs text-muted-foreground leading-relaxed">
-              You will be redirected to {providerName} to authenticate. Floom uses
+              You will be redirected to {providerName} to authenticate. Workeros uses
               Composio as its integrations layer, so you may see Composio&apos;s
               name on the next screen. That is expected.
             </p>

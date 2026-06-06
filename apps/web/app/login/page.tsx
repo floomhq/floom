@@ -49,7 +49,7 @@ function LoginContent() {
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-10">
       <div className="mb-6 flex items-center gap-2">
         <FloomMark size={22} />
-        <span className="text-base font-semibold tracking-tight">Floom Workers</span>
+        <span className="text-base font-semibold tracking-tight">Workeros</span>
       </div>
       <h1 className="text-xl font-semibold tracking-tight">Sign in</h1>
       <p className="mt-1 text-sm text-muted-foreground">

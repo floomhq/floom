@@ -38,7 +38,7 @@ function FloomMark({ size = 22 }: { size?: number }) {
       viewBox="0 0 100 100"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
-      aria-label="Floom"
+      aria-label="Workeros"
       style={{ borderRadius: "22%" }}
     >
       <rect width="100" height="100" rx="22" fill="var(--primary)" />
@@ -91,7 +91,7 @@ export default async function PublicWorkerPage({
       <nav className="flex items-center justify-between border-b border-[var(--border-soft)] px-5 py-3">
         <Link href="/" className="flex items-center gap-2">
           <FloomMark size={22} />
-          <span className="font-semibold text-base tracking-tight">Floom Workers</span>
+          <span className="font-semibold text-base tracking-tight">Workeros</span>
         </Link>
         <Link
           href="/workers"
@@ -226,7 +226,7 @@ export default async function PublicWorkerPage({
           <p className="text-sm text-muted-foreground">
             Built with{" "}
             <Link href="/" className="font-medium text-foreground hover:underline">
-              Floom Workers
+              Workeros
             </Link>
             {" "}— AI workers that use your tools and run on a schedule, webhook, or on demand.
           </p>
