@@ -65,32 +65,18 @@ def load_main(monkeypatch, tmp_path):
 
     for name in [
         "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",
-        "db.interface", "models", "auth", "auth.context", "auth.dependency",
+        "db.interface", "models", "files", "worker_registry", "run_service",
+        "webhook_service", "composio_client", "runner_utils",
+        "auth", "auth.context", "auth.dependency",
         "auth.factory", "auth.interface", "auth.local", "auth.multi_member",
-        "auth.local_workspaces",
+        "auth.local_workspaces", "contexts", "chat_service", "alerting",
+        "scheduler",
     ]:
         sys.modules.pop(name, None)
 
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,
-    )
-    sys.modules["run_service"] = types.SimpleNamespace(
-        create_run=lambda *a, **k: None,
-        fail_interrupted_runs_on_startup=lambda **k: None,
-        re_enqueue_queued_runs_on_startup=lambda: None,
-        start_drain_loop=lambda: None,
-        stop_drain_loop=lambda **k: None,
-        start_run_reaper_loop=lambda: None,
-        stop_run_reaper_loop=lambda **k: None,
-        get_worker_config_for_run=lambda *a, **k: None,
-        start_run=lambda *a, **k: None,
-        update_run_status=lambda *a, **k: None,
-        request_active_run_shutdown=lambda **k: [],
-        queued_run_position=lambda *a: None,
-        smoke_and_gate_generated_worker=lambda *a, **k: (None, None),
-        register_sse_publisher=lambda *a: None,
-        register_part_publisher=lambda *a: None,
     )
     return importlib.import_module("main")
 
@@ -151,14 +137,16 @@ def test_floom_secret_auth(monkeypatch, tmp_path):
         assert resp.json()["role"] == "admin"
 
 
-def test_wrong_secret_returns_401(monkeypatch, tmp_path):
+def test_wrong_secret_returns_403(monkeypatch, tmp_path):
+    """Wrong x-floom-secret on a non-exempt path is rejected by the pre-auth middleware with 403."""
     from fastapi.testclient import TestClient
     monkeypatch.setenv("FLOOM_SECRET", "mysecret")
     main = load_main(monkeypatch, tmp_path)
     monkeypatch.setenv("FLOOM_SECRET", "mysecret")
     with TestClient(main.app) as c:
-        resp = c.get("/auth/me", headers={"x-floom-secret": "wrongsecret"})
-        assert resp.status_code == 401
+        # /me is not an exempt path — wrong secret is caught by the middleware as 403
+        resp = c.get("/me", headers={"x-floom-secret": "wrongsecret"})
+        assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -221,12 +209,10 @@ def test_login_unknown_user(admin_client):
 def test_logout_clears_cookie(admin_client):
     resp = admin_client.post("/auth/logout")
     assert resp.status_code == 200
-    # After logout, accessing a protected endpoint as this session should fail
-    # (TestClient keeps cookies so we need to manually clear)
+    # After logout, accessing /auth/me without a session should return 401.
+    # Dev mode only activates when the users table is EMPTY; after setup it's not.
     admin_client.cookies.clear()
     me = admin_client.get("/auth/me")
-    # No users exist? No, admin exists. Without a session or secret, should 401.
-    # But dev mode only kicks in when users table is EMPTY. After setup, there's a user.
     assert me.status_code == 401
 
 
@@ -476,12 +462,13 @@ def test_disabled_user_pat_rejected(monkeypatch, tmp_path):
         c.post("/auth/login", json={"username": "grace", "password": "gracepass123"})
         token_resp = c.post("/auth/tokens", json={"name": "my-pat"})
         raw_token = token_resp.json()["token"]
-        grace_id = token_resp.json()["pat"]["user_id"]
-
-        # Admin disables grace
+        # Admin disables grace (look up grace's ID from the users list)
+        c.post("/auth/logout")
         c.cookies.clear()
         c.post("/auth/login", json={"username": "admin", "password": "adminpass123"})
-        c.patch(f"/users/{grace_id}", json={"disabled": True})
+        users = c.get("/users").json()
+        grace = next(u for u in users if u["username"] == "grace")
+        c.patch(f"/users/{grace['id']}", json={"disabled": True})
 
         # Grace's PAT should be rejected
         c3 = TestClient(main.app)
