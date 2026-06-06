@@ -81,6 +81,7 @@ function SettingsContent() {
   const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [claimedWhatsAppToken, setClaimedWhatsAppToken] = useState<string | null>(null);
+  const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
 
@@ -108,9 +109,18 @@ function SettingsContent() {
     void (async () => {
       try {
         await api.whatsapp.claim(token);
-        toast.success("WhatsApp number linked");
+        toast.success("WhatsApp number linked to this workspace");
+        setWaClaimBanner({ ok: true, message: "WhatsApp number linked to this workspace." });
       } catch (e: unknown) {
-        toast.error(e instanceof Error ? e.message : "Failed to link WhatsApp");
+        const raw = e instanceof Error ? e.message : "";
+        const friendly =
+          raw === "WhatsApp claim not found"
+            ? "This link was not found or the number is already linked."
+            : raw === "WhatsApp claim expired"
+              ? "This link has expired. Text the Workeros number again to get a new one."
+              : raw || "Failed to link WhatsApp.";
+        toast.error(friendly);
+        setWaClaimBanner({ ok: false, message: friendly });
       } finally {
         const params = new URLSearchParams(searchParams.toString());
         params.delete("whatsapp_claim");
@@ -190,6 +200,18 @@ function SettingsContent() {
           System configuration and access.
         </p>
       </div>
+
+      {waClaimBanner && (
+        <Alert variant={waClaimBanner.ok ? "default" : "destructive"}>
+          {waClaimBanner.ok ? (
+            <CheckCircle2 className="size-4" />
+          ) : (
+            <AlertTriangle className="size-4" />
+          )}
+          <AlertTitle>{waClaimBanner.ok ? "WhatsApp linked" : "WhatsApp link failed"}</AlertTitle>
+          <AlertDescription>{waClaimBanner.message}</AlertDescription>
+        </Alert>
+      )}
 
       {/* V4: top-bar tab strip, consistent with the rest of the app (e.g. the
           worker-detail page). Reverted from the prior left vertical nav.
