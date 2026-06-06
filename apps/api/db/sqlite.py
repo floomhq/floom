@@ -374,20 +374,41 @@ def _worker_select_sql(where_clause: str = "", limit_clause: str = "") -> str:
 
 
 class SqliteWorkerRepository:
-    def list(self, *, user_id: str) -> list[dict[str, Any]]:
+    def list(self, *, user_id: str, role: str = "admin") -> list[dict[str, Any]]:
+        """List workers visible to the requesting user.
+
+        Admins see all workers regardless of owner; members see their own workers
+        plus any workspace-visibility workers owned by others.
+        """
         with get_db() as conn:
-            rows = conn.execute(
-                _worker_select_sql("WHERE w.owner_id = ?"),
-                (user_id,),
-            ).fetchall()
+            if role == "admin":
+                rows = conn.execute(_worker_select_sql()).fetchall()
+            else:
+                rows = conn.execute(
+                    _worker_select_sql("WHERE w.owner_id = ? OR w.visibility = 'workspace'"),
+                    (user_id,),
+                ).fetchall()
         return [_worker_record_from_row(row) for row in rows]
 
-    def get(self, *, user_id: str, worker_id: str) -> dict[str, Any] | None:
+    def get(self, *, user_id: str, worker_id: str, role: str = "admin") -> dict[str, Any] | None:
+        """Get a single worker, respecting visibility rules.
+
+        Admins can fetch any worker; members can only fetch their own or workspace-visible workers.
+        """
         with get_db() as conn:
-            row = conn.execute(
-                _worker_select_sql("WHERE w.owner_id = ? AND w.id = ?", "LIMIT 1"),
-                (user_id, worker_id),
-            ).fetchone()
+            if role == "admin":
+                row = conn.execute(
+                    _worker_select_sql("WHERE w.id = ?", "LIMIT 1"),
+                    (worker_id,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    _worker_select_sql(
+                        "WHERE w.id = ? AND (w.owner_id = ? OR w.visibility = 'workspace')",
+                        "LIMIT 1",
+                    ),
+                    (worker_id, user_id),
+                ).fetchone()
         return _worker_record_from_row(row) if row else None
 
     def get_any(self, *, worker_id: str) -> dict[str, Any] | None:
@@ -1251,10 +1272,20 @@ class SqliteRunRepository:
         run_id = fields["run_id"]
         with get_db() as conn:
             worker = conn.execute(
-                "SELECT 1 FROM workers WHERE id = ? AND owner_id = ?",
-                (worker_id, user_id),
+                "SELECT owner_id, visibility FROM workers WHERE id = ?",
+                (worker_id,),
             ).fetchone()
             if worker is None:
+                raise ValueError(f"worker {worker_id} not found")
+            # Allow workspace-visible workers to be run by any authenticated user.
+            # Non-workspace private workers can only be run by their owner.
+            # When a non-owner runs a workspace worker, attribute the run to the
+            # worker's owner so existing owner-scoped run queries keep working.
+            if worker["owner_id"] == user_id:
+                effective_user_id = user_id
+            elif worker["visibility"] == "workspace":
+                effective_user_id = worker["owner_id"]
+            else:
                 raise ValueError(f"worker {worker_id} does not belong to {user_id}")
             conn.execute(
                 """
@@ -1283,7 +1314,7 @@ class SqliteRunRepository:
                     fields.get("trigger_ref"),
                 ),
             )
-        created = self.get(user_id=user_id, run_id=run_id)
+        created = self.get(user_id=effective_user_id, run_id=run_id)
         if created is None:
             raise RuntimeError(f"failed to create run {run_id}")
         return created
