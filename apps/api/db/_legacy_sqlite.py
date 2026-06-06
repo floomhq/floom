@@ -1585,6 +1585,24 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_pat_user_id
         ON personal_access_tokens(user_id);
     """,
+    # -- migration 60: git workspace config ----------------------------------
+    # Stores the GitHub PAT and linked repo for the git-backed workspace.
+    # One row per user (in practice one row for the local admin in OSS mode).
+    # The PAT is stored in plain text in the local SQLite DB — acceptable since
+    # OSS runs on a private server and the DB file is already the trust boundary
+    # (same as the workeros.db that holds all other sensitive settings).
+    """
+    CREATE TABLE IF NOT EXISTS git_workspace_config (
+        user_id         TEXT PRIMARY KEY,
+        github_pat      TEXT NOT NULL,
+        github_username TEXT,
+        repo_full_name  TEXT,
+        repo_url        TEXT,
+        remote_url      TEXT,
+        connected_at    TEXT NOT NULL,
+        last_pushed_at  TEXT
+    );
+    """,
 ]
 
 
