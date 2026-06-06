@@ -21,9 +21,11 @@ but never result.json — so every run failed with error_code=missing_result.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -171,6 +173,131 @@ def _validate_worker_yml(yml_string: str) -> Optional[str]:
         return None
     except Exception as exc:
         return f"YAML parse error: {exc}"
+
+
+def _load_manifest(yml_string: str) -> Optional[Dict[str, Any]]:
+    try:
+        import yaml as pyyaml
+
+        parsed = pyyaml.safe_load(yml_string)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _exec_block(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    block = manifest.get("exec")
+    return block if isinstance(block, dict) else {}
+
+
+def _entry(manifest: Dict[str, Any]) -> str:
+    exec_block = _exec_block(manifest)
+    return str(exec_block.get("entry") or exec_block.get("entrypoint") or manifest.get("entrypoint") or "").strip()
+
+
+def _trigger_types(manifest: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    triggers = manifest.get("triggers")
+    if isinstance(triggers, list):
+        for item in triggers:
+            if isinstance(item, dict):
+                out.append(str(item.get("type") or "manual").strip().lower())
+    trigger = manifest.get("trigger")
+    if isinstance(trigger, dict):
+        out.append(str(trigger.get("type") or "manual").strip().lower())
+    return [("schedule" if t in {"cron", "scheduled"} else t) for t in out if t]
+
+
+_SCHEDULE_INTENT_RE = re.compile(
+    r"\b("
+    r"cron|schedule|scheduled|every|daily|weekly|monthly|hourly|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"morning|afternoon|evening|night|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _prompt_requests_schedule(prompt: str) -> bool:
+    return bool(_SCHEDULE_INTENT_RE.search(prompt or ""))
+
+
+_PLACEHOLDER_CODE_MARKERS = (
+    "replace with the real output",
+    "TODO",
+    "pass  #",
+    "NotImplementedError",
+    "_write_result(\"success\", outputs={\"result\": result_value})",
+    "_write_result('success', outputs={'result': result_value})",
+)
+
+
+def _declared_output_names(manifest: Dict[str, Any]) -> List[str]:
+    exec_block = _exec_block(manifest)
+    raw_outputs = exec_block.get("outputs")
+    if not isinstance(raw_outputs, list):
+        raw_outputs = manifest.get("outputs")
+    if not isinstance(raw_outputs, list):
+        return []
+    names: List[str] = []
+    for item in raw_outputs:
+        if isinstance(item, dict) and item.get("name"):
+            names.append(str(item["name"]))
+    return names
+
+
+def _validate_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Optional[str]:
+    """Reject valid-looking bundles that cannot become useful workers.
+
+    The YAML validator only checks shape. This gate checks generation intent:
+    no accidental schedule trigger, script-mode workers must include real
+    executable code, and agent-mode workers must include a real SKILL.md.
+    """
+    worker_yml = parsed.get("worker_yml")
+    if not isinstance(worker_yml, str) or not worker_yml.strip():
+        return "worker_yml is empty"
+
+    yaml_error = _validate_worker_yml(worker_yml)
+    if yaml_error:
+        return yaml_error
+
+    manifest = _load_manifest(worker_yml)
+    if not manifest:
+        return "worker_yml must be a YAML mapping"
+
+    trigger_types = _trigger_types(manifest)
+    if any(t == "schedule" for t in trigger_types) and not _prompt_requests_schedule(prompt):
+        return (
+            "trigger.type is schedule, but the prompt did not request a schedule. "
+            "Use trigger.type: manual unless the operator explicitly asks for recurring execution."
+        )
+
+    entry = _entry(manifest).lower()
+    if entry.endswith(".py"):
+        run_code = parsed.get("run_code")
+        if not isinstance(run_code, str) or not run_code.strip():
+            return "exec.entry is run.py, but run_code is empty"
+        try:
+            ast.parse(run_code)
+        except SyntaxError as exc:
+            return f"run_code is invalid Python: {exc}"
+        lower_code = run_code.lower()
+        for marker in _PLACEHOLDER_CODE_MARKERS:
+            if marker.lower() in lower_code:
+                return f"run_code still contains placeholder logic marker: {marker}"
+        output_names = _declared_output_names(manifest)
+        missing = [name for name in output_names if name not in run_code]
+        if missing:
+            return (
+                "run_code does not produce every declared output: "
+                + ", ".join(missing)
+            )
+    elif entry.endswith(".md"):
+        skill_md = parsed.get("skill_md")
+        if not isinstance(skill_md, str) or len(skill_md.strip()) < 40:
+            return "exec.entry is SKILL.md, but skill_md is empty or too thin"
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +466,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
     it in the editor rather than seeing a hard failure.
     """
     log = log or _stdout_log
+    started_at = time.perf_counter()
     prompt = str(inputs.get("prompt") or "").strip()
     mode = str(inputs.get("mode") or "draft").strip()
     parent_worker_id = str(inputs.get("parent_worker_id") or "").strip() or None
@@ -346,6 +474,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
     if not prompt:
         raise ValueError("prompt is required")
 
+    stage_at = time.perf_counter()
     log("worker-author: reading style context")
     schema_md = _read_context_file("worker-author-style", "SCHEMA.md")
     style_md = _read_context_file("worker-author-style", "STYLE.md")
@@ -358,10 +487,14 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
         content = _read_context_file("worker-author-style", f"EXAMPLES/{fname}")
         if content:
             example_files.append((fname, content))
+    log(f"worker-author: style context read in {time.perf_counter() - stage_at:.2f}s")
 
+    stage_at = time.perf_counter()
     log("worker-author: listing existing workers")
     existing_ids = _read_existing_workers()
+    log(f"worker-author: existing worker scan took {time.perf_counter() - stage_at:.2f}s")
 
+    stage_at = time.perf_counter()
     log(f"worker-author: building prompt (mode={mode})")
     messages = _build_messages(
         prompt=prompt,
@@ -374,6 +507,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
         example_files=example_files,
         run_py_template=run_py_template,
     )
+    log(f"worker-author: prompt assembled in {time.perf_counter() - stage_at:.2f}s")
 
     # Call OpenAI
     openai_key = os.environ.get("OPENAI_API_KEY", "")
@@ -384,7 +518,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
     client = OpenAI(api_key=openai_key)
 
     log(f"worker-author: calling LLM (model={_codegen_model()})")
-    max_attempts = 3
+    max_attempts = 2
     parsed: Dict[str, Any] = {}
     last_error: Optional[str] = None
 
@@ -400,12 +534,17 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
                 ),
             })
 
+        attempt_started_at = time.perf_counter()
         resp = _codegen_chat(
             client,
             messages=call_messages,
             temperature=0.2,
             max_output_tokens=8000,
             response_format={"type": "json_object"},
+        )
+        log(
+            f"worker-author: LLM attempt {attempt}/{max_attempts} took "
+            f"{time.perf_counter() - attempt_started_at:.2f}s"
         )
         raw = resp.choices[0].message.content or ""
 
@@ -422,7 +561,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
             log(f"worker-author: attempt {attempt} empty worker_yml", level="warning")
             continue
 
-        validation_error = _validate_worker_yml(worker_yml)
+        validation_error = _validate_generated_bundle(parsed, prompt)
         if validation_error:
             last_error = validation_error
             log(f"worker-author: attempt {attempt} validation failed: {validation_error}", level="warning")
@@ -449,6 +588,7 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
     else:
         log(f"worker-author: bundle valid, suggested_id={bundle['suggested_id']!r}")
 
+    log(f"worker-author: total generation time {time.perf_counter() - started_at:.2f}s")
     return bundle
 
 
