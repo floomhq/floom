@@ -584,6 +584,26 @@ export const api = {
       fetchJson<import("./types").VersionSummary[]>(`/workspace/versions?limit=${limit}`),
     rollbackWorkspaceInstructions: (versionId: string) =>
       fetchText(`/workspace/rollback/${versionId}`, { method: "POST" }),
+    // Base instructions (the built-in Emily persona). This layer applies to ALL
+    // conversations and is layered BEFORE workspace instructions. Editing it
+    // saves an override; resetting removes the override and restores the
+    // built-in engine default.
+    workspaceBasePersona: () =>
+      fetchJson<{ content: string; is_custom: boolean; default: string }>(
+        "/workspace/base/state"
+      ),
+    updateWorkspaceBasePersona: (content: string) =>
+      fetchText("/workspace/base", {
+        method: "PUT",
+        headers: { "Content-Type": "text/markdown" },
+        body: content,
+      }),
+    resetWorkspaceBasePersona: () =>
+      fetchRaw("/workspace/base", { method: "DELETE" }).then(() => undefined),
+    listWorkspaceBaseVersions: (limit = 50) =>
+      fetchJson<import("./types").VersionSummary[]>(`/workspace/base/versions?limit=${limit}`),
+    rollbackWorkspaceBasePersona: (versionId: string) =>
+      fetchText(`/workspace/base/rollback/${versionId}`, { method: "POST" }),
   },
   connections: {
     list: () => fetchJson<import("./types").ConnectionItem[]>("/connections"),
