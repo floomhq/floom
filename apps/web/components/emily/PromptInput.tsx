@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Paperclip, SendHorizonal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PromptChips } from "@/components/PromptChips";
 import { FileChip } from "./FileChip";
 import type { AttachedFile } from "@/lib/emily-chat-types";
 
@@ -81,6 +82,11 @@ export function PromptInput({
           ))}
         </div>
       )}
+
+      {/* Detected tools + capabilities in the message text (read-only here —
+          the assistant decides what to wire). Same shared detector as
+          /workers/new (lib/prompt-detect). */}
+      <PromptChips prompt={value} className="px-1" />
 
       <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 shadow-sm focus-within:ring-1 focus-within:ring-[#59AAF8]/40 transition-shadow">
         {/* Attach button */}
