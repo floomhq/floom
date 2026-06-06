@@ -1023,7 +1023,7 @@ def test_shipped_worker_directories_match_protected_set(monkeypatch, tmp_path):
     assert shipped_worker_ids == set(main.PROTECTED_STOCK_WORKER_IDS)
 
 
-def test_protected_stock_worker_mutations_are_blocked(monkeypatch, tmp_path):
+def test_protected_stock_worker_direct_mutations_block_but_files_fork(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path, stock_workers=("linkedin-post-engagements",))
     client = TestClient(main.app)
 
@@ -1035,7 +1035,7 @@ def test_protected_stock_worker_mutations_are_blocked(monkeypatch, tmp_path):
         ]
     }
 
-    checks = {
+    blocked_checks = {
         "delete": client.delete("/workers/linkedin-post-engagements", headers=_headers("user-a")),
         "patch": client.patch(
             "/workers/linkedin-post-engagements",
@@ -1047,12 +1047,17 @@ def test_protected_stock_worker_mutations_are_blocked(monkeypatch, tmp_path):
             headers=_headers("user-a"),
             json=payload,
         ),
-        "put_files": client.put(
-            "/workers/linkedin-post-engagements/files",
-            headers=_headers("user-a"),
-            json=files_payload,
-        ),
     }
+    forked = client.put(
+        "/workers/linkedin-post-engagements/files",
+        headers=_headers("user-a"),
+        json=files_payload,
+    )
 
-    for name, response in checks.items():
+    for name, response in blocked_checks.items():
         assert response.status_code == 403, f"{name}: {response.status_code} {response.text}"
+    assert forked.status_code == 200, forked.text
+    body = forked.json()
+    assert body["id"] == "linkedin-post-engagements-copy"
+    assert body["cloned_from"] == "linkedin-post-engagements"
+    assert body["is_example"] is False

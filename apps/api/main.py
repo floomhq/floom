@@ -73,6 +73,7 @@ from auth.local_workspaces import (
     list_local_workspaces,
     local_workspace_base_user_id,
     local_workspace_user_id,
+    requested_local_workspace_id,
 )
 from contexts import (
     MAX_CONTEXT_BYTES,
@@ -1302,7 +1303,7 @@ async def auth_middleware(request: Request, call_next):
         if raw_secret is None:
             return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
         if not hmac.compare_digest(raw_secret, expected):
-            return _JSONResponse(status_code=403, content={"detail": "Forbidden"})
+            return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     return await call_next(request)
 
 logger = logging.getLogger("floom.api")
@@ -1831,6 +1832,39 @@ def _is_sensitive_artifact_row(row: Any) -> bool:
 def _raise_if_protected_worker_mutation(worker_id: str) -> None:
     if worker_id in PROTECTED_STOCK_WORKER_IDS:
         raise HTTPException(status_code=403, detail="Stock workers cannot be modified through the API")
+
+
+def _canonical_worker_id(value: str) -> str:
+    text = (value or "").strip()
+    if text in PROTECTED_STOCK_WORKER_IDS:
+        return text
+    return _slugify_worker_id(text)
+
+
+def _require_worker_write_workspace_context(request: Request) -> None:
+    require_explicit = os.environ.get("WORKEROS_REQUIRE_WORKSPACE_HEADER_FOR_WRITES") == "1"
+    if _is_cloud_deploy():
+        raw_workspace = (
+            request.headers.get("x-workeros-workspace")
+            or request.query_params.get("workspace_id")
+            or ""
+        ).strip()
+        if not raw_workspace:
+            raise HTTPException(
+                status_code=400,
+                detail="x-workeros-workspace header is required for worker writes.",
+            )
+        return
+    if not require_explicit:
+        return
+    if requested_local_workspace_id(request) is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A valid x-workeros-workspace header or workspace_id query parameter "
+                "is required for worker writes."
+            ),
+        )
 
 
 def _extract_primary_output_file(output_payload: Dict[str, Any]) -> Optional[tuple[str, bytes]]:
@@ -6627,13 +6661,15 @@ def get_worker_detail(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
-    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+    canonical_id = _canonical_worker_id(worker_id)
+    return _build_worker_detail(canonical_id, user_id=auth.user_id, repos=repos)
 
 
 @app.put("/workers/{worker_id}/visibility", response_model=WorkerDetail)
 def set_worker_visibility(
     worker_id: str,
     payload: WorkerVisibilityUpdate,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -6645,6 +6681,8 @@ def set_worker_visibility(
     and is a no-op-shaped toggle for the one-member workspace. 404 for an
     invisible/unknown worker (never reveals another owner's private worker).
     """
+    _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6925,6 +6963,7 @@ def get_worker_sample_input(
 def update_worker(
     worker_id: str,
     payload: WorkerUpdateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -6934,6 +6973,8 @@ def update_worker(
     secret once in the response (new_webhook_secret field) — it is never
     stored in plaintext.
     """
+    _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -7127,9 +7168,17 @@ def update_worker(
 
 def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> None:
     """Core delete-worker logic, shared by the DELETE endpoint and approval execution."""
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = repos.workers.get(user_id=owner_id, worker_id=worker_id)
     if not worker:
+        from worker_registry import WORKERS_DIR
+        bundle_dir = WORKERS_DIR / worker_id
+        if bundle_dir.is_dir():
+            shutil.rmtree(bundle_dir, ignore_errors=True)
+            invalidate_worker_cache()
+            logger.info("Removed orphaned worker bundle dir %s", bundle_dir)
+            return
         raise HTTPException(status_code=404, detail="Worker not found")
     skill_version_id = worker.get("skill_version_id")
     config = get_worker_config_for_run(worker_id)
@@ -7193,7 +7242,6 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
     bundle_dir = WORKERS_DIR / worker_id
     if ref_count == 0 and bundle_dir.is_dir():
         try:
-            import shutil
             shutil.rmtree(bundle_dir)
             logger.info("Removed bundle dir %s", bundle_dir)
         except Exception as exc:
@@ -7207,6 +7255,7 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
 @app.delete("/workers/{worker_id}", status_code=204)
 def delete_worker(
     worker_id: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
@@ -7218,6 +7267,7 @@ def delete_worker(
     - Removes scheduler slot (next_run_at cleared before delete).
     - skill_version is preserved if other workers share it.
     """
+    _require_worker_write_workspace_context(request)
     _delete_worker_impl(worker_id, auth.user_id, repos)
     # 204 No Content — FastAPI returns empty body automatically for status_code=204
     return None
@@ -8214,6 +8264,118 @@ def _set_worker_yml_is_example(worker_yml: str, is_example: bool) -> str:
     return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
 
 
+def _worker_record_from_worker_yml(worker_id: str, worker_yml: str) -> Dict[str, Any]:
+    import yaml as pyyaml
+    from models import (
+        WorkerContract,
+        parse_worker_manifest,
+        worker_config_to_worker_contract,
+        worker_contract_to_worker_config,
+    )
+
+    raw = pyyaml.safe_load(worker_yml)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
+    parsed = parse_worker_manifest(raw)
+    if isinstance(parsed, WorkerContract):
+        contract = parsed
+        config = worker_contract_to_worker_config(contract, worker_id)
+    else:
+        config = parsed
+        contract = worker_config_to_worker_contract(config)
+    return {
+        "id": worker_id,
+        "name": config.name,
+        "description": config.description,
+        "long_description": contract.long_description,
+        "use_cases": contract.use_cases,
+        "example_input": contract.example_input,
+        "example_output": contract.example_output,
+        "how_it_works": contract.how_it_works,
+        "is_example": contract.is_example,
+        "archived": contract.archived,
+        "archive_reason": contract.archive_reason,
+        "tags": contract.tags or [],
+        "folder": contract.folder,
+        "config": config.model_dump(),
+        "manifest": contract.model_dump(mode="json", exclude_none=True),
+        "status": "healthy",
+        "trigger_type": config.trigger.type,
+        "runner": config.runtime.runner,
+    }
+
+
+def _raw_worker_id_from_worker_yml(worker_yml: str) -> str:
+    import yaml as pyyaml
+
+    try:
+        raw = pyyaml.safe_load(worker_yml)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
+    return str(raw.get("id") or raw.get("name") or "").strip()
+
+
+def _write_worker_bundle_files(
+    target_dir: Path,
+    *,
+    worker_yml: str,
+    run_py: str,
+    skill_md: Optional[str],
+    config: WorkerConfig,
+) -> None:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "worker.yml").write_text(worker_yml, encoding="utf-8")
+    (target_dir / "run.py").write_text(run_py, encoding="utf-8")
+    (target_dir / "requirements.txt").write_text("", encoding="utf-8")
+    if skill_md:
+        (target_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+    else:
+        (target_dir / "SKILL.md").write_text(
+            f"# {config.name}\n\n"
+            "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
+            "Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+            encoding="utf-8",
+        )
+
+
+def _cleanup_worker_create_state(
+    *,
+    worker_id: str,
+    user_id: str,
+    repos: Repositories,
+    staging_dir: Optional[Path] = None,
+    target_dir: Optional[Path] = None,
+    skill_version_id: Optional[str] = None,
+) -> None:
+    for path in (staging_dir, target_dir):
+        if path and path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+    try:
+        repos.workers.delete(user_id=user_id, worker_id=worker_id)
+    except Exception:
+        logger.debug("worker create cleanup repo delete failed for %s", worker_id, exc_info=True)
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM worker_triggers WHERE worker_id = ?", (worker_id,))
+            conn.execute("DELETE FROM workers WHERE id = ? AND owner_id = ?", (worker_id, user_id))
+            if skill_version_id:
+                conn.execute(
+                    """
+                    DELETE FROM skill_versions
+                    WHERE id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM workers WHERE skill_version_id = ?
+                      )
+                    """,
+                    (skill_version_id, skill_version_id),
+                )
+    except Exception:
+        logger.debug("worker create cleanup sqlite delete failed for %s", worker_id, exc_info=True)
+    invalidate_worker_cache()
+
+
 # Placeholder run.py for a script worker created without code (e.g. the
 # worker-author drafted a script-mode worker but returned no run_code, or a
 # .md upload). It MUST satisfy BOTH execution contracts:
@@ -8645,7 +8807,12 @@ async def draft_and_create_worker(
     )
 
 
-def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tuple[str, WorkerConfig]:
+def _parse_worker_payload(
+    worker_yml: str,
+    *,
+    user_id: str | None = None,
+    allow_protected_worker_id: bool = False,
+) -> tuple[str, WorkerConfig]:
     import yaml as pyyaml
 
     try:
@@ -8655,7 +8822,7 @@ def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tup
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
     raw_worker_id = str(raw.get("id") or raw.get("name") or "").strip()
-    if raw_worker_id in PROTECTED_STOCK_WORKER_IDS:
+    if raw_worker_id in PROTECTED_STOCK_WORKER_IDS and not allow_protected_worker_id:
         _raise_if_protected_worker_mutation(raw_worker_id)
 
     # P1-3: reject path-traversal in caller-supplied bundle_path BEFORE schema parsing
@@ -8719,74 +8886,97 @@ def _parse_worker_payload(worker_yml: str, *, user_id: str | None = None) -> tup
                 )
                 if not context_dir(context_name).is_dir() or not context_is_mountable:
                     raise HTTPException(status_code=400, detail=f"Context not found: {context_name}")
-    _raise_if_protected_worker_mutation(worker_id)
+    if worker_id in PROTECTED_STOCK_WORKER_IDS and not allow_protected_worker_id:
+        _raise_if_protected_worker_mutation(worker_id)
     return worker_id, config
 
 
 @app.post("/workers", response_model=WorkerDetail)
 def create_worker(
     payload: WorkerCreateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     """Create a new worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
-    worker_id, config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
+    _require_worker_write_workspace_context(request)
+
+    worker_yml = payload.worker_yml
+    raw_worker_id = _raw_worker_id_from_worker_yml(worker_yml)
+    if raw_worker_id in PROTECTED_STOCK_WORKER_IDS:
+        worker_id = _free_worker_id(f"{_slugify_worker_id(raw_worker_id)}-copy", repos=repos)
+        worker_yml = _set_worker_yml_is_example(
+            _rewrite_worker_yml_id(worker_yml, worker_id),
+            False,
+        )
+    else:
+        worker_id = _canonical_worker_id(raw_worker_id)
+        if worker_id != raw_worker_id:
+            worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
         raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
-
-    # Write files
     try:
-        target_dir.mkdir(parents=True, exist_ok=False)
-    except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists") from exc
-    (target_dir / "worker.yml").write_text(payload.worker_yml, encoding='utf-8')
-    (target_dir / "run.py").write_text(payload.run_py, encoding='utf-8')
-    (target_dir / "requirements.txt").write_text("", encoding='utf-8')
-    if payload.skill_md:
-        (target_dir / "SKILL.md").write_text(payload.skill_md, encoding='utf-8')
-    else:
-        (target_dir / "SKILL.md").write_text(
-            f"# {config.name}\n\n"
-            "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
-            "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
-        , encoding='utf-8')
+        if repos.workers.get_any(worker_id=worker_id) is not None:
+            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("worker existence lookup failed for %s", worker_id, exc_info=True)
 
-    # Register
-    invalidate_worker_cache()
-    workers = discover_workers()
-
-    # Persist to DB
-    with get_db() as conn:
-        try:
-            _persist_discovered_workers(conn, workers, user_id=auth.user_id)
-        except sqlite3.IntegrityError as exc:
-            # Orphaned skill_versions row from a previously-deleted worker with
-            # the same name+version caused a FK or UNIQUE conflict. Clean up
-            # and return a user-friendly 409 (N5 fix).
-            import shutil
-            shutil.rmtree(target_dir, ignore_errors=True)
-            invalidate_worker_cache()
-            raise HTTPException(
-                status_code=409,
-                detail=f"Worker {worker_id!r} already exists or conflicts with a previous version. "
-                       "Delete the old worker first, then recreate.",
-            ) from exc
-        except RuntimeError as exc:
-            import shutil
-            shutil.rmtree(target_dir, ignore_errors=True)
-            invalidate_worker_cache()
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    # Return the new worker detail
-    return _build_worker_detail(
-        worker_id,
-        user_id=auth.user_id,
-        repos=repos,
-    )
+    staging_dir = Path(tempfile.mkdtemp(prefix=f".{worker_id}.", dir=str(WORKERS_DIR.parent)))
+    worker_record: Optional[Dict[str, Any]] = None
+    skill_version_id: Optional[str] = None
+    create_complete = False
+    target_committed = False
+    try:
+        _write_worker_bundle_files(
+            staging_dir,
+            worker_yml=worker_yml,
+            run_py=payload.run_py,
+            skill_md=payload.skill_md,
+            config=config,
+        )
+        worker_record = _worker_record_from_worker_yml(worker_id, worker_yml)
+        skill_version_id = _skill_version_id(worker_id, worker_record.get("manifest") or {})
+        invalidate_worker_cache()
+        with get_db() as conn:
+            _persist_discovered_workers(conn, [worker_record], user_id=auth.user_id)
+        _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+        os.replace(staging_dir, target_dir)
+        target_committed = True
+        invalidate_worker_cache()
+        detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+        create_complete = True
+        return detail
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Worker {worker_id!r} already exists or conflicts with a previous version. "
+                "Delete the old worker first, then recreate."
+            ),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create worker {worker_id!r}: {exc}") from exc
+    finally:
+        if not create_complete:
+            _cleanup_worker_create_state(
+                worker_id=worker_id,
+                user_id=auth.user_id,
+                repos=repos,
+                staging_dir=staging_dir,
+                target_dir=target_dir if target_committed else None,
+                skill_version_id=skill_version_id,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -9654,6 +9844,7 @@ def _clone_protected_worker_for_edit(
 def update_worker_files(
     worker_id: str,
     payload: WorkerFilesUpdateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -9668,6 +9859,8 @@ def update_worker_files(
     """
     from worker_registry import WORKERS_DIR
 
+    _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
