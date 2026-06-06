@@ -350,7 +350,7 @@ function SettingsContent() {
               compact cycle button; here we show all three at once. */}
           <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
           <p className="text-sm text-muted-foreground">
-            Choose how Floom looks. System follows your operating system.
+            Choose how Workeros looks. System follows your operating system.
           </p>
           <ThemeModeToggleGroup />
         </TabsContent>

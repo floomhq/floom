@@ -271,6 +271,28 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
                   <ShareIconTile type={share.entity_type} />
                 </div>
 
+                {/* Breadcrumb — brain_file only: Brain / <pack name> / <filename> */}
+                {isFile && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      marginBottom: 8,
+                      fontFamily: "var(--s-mono)",
+                      fontSize: 11,
+                      color: "var(--s-ink-mute)",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span>Brain</span>
+                    <span>/</span>
+                    <span>{share.pack?.name ?? "Pack"}</span>
+                    <span>/</span>
+                    <span style={{ color: "var(--s-ink-soft)" }}>{share.title}</span>
+                  </div>
+                )}
+
                 {/* Title */}
                 <h1
                   style={{
