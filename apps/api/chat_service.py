@@ -1581,6 +1581,8 @@ def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     worker_id = str(args.get("id") or "")
     if not worker_id:
         return {"ok": False, "error": "id is required"}
+    from main import _canonical_worker_id
+    worker_id = _canonical_worker_id(worker_id)
     with _get_db() as conn:
         row = conn.execute(
             """
@@ -2454,6 +2456,8 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     yaml_text = str(args.get("yaml_text") or "")
     if not worker_id or not yaml_text:
         return {"ok": False, "error": "id and yaml_text are required"}
+    from main import _canonical_worker_id
+    worker_id = _canonical_worker_id(worker_id)
 
     from db import get_db as _get_db
     with _get_db() as conn:
@@ -2558,6 +2562,8 @@ def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     worker_id = str(args.get("id") or "")
     if not worker_id:
         return {"ok": False, "error": "id is required"}
+    from main import _canonical_worker_id
+    worker_id = _canonical_worker_id(worker_id)
     inputs_json = args.get("inputs_json") or "{}"
     try:
         inputs = json.loads(inputs_json) if isinstance(inputs_json, str) else dict(inputs_json or {})
