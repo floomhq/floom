@@ -374,26 +374,34 @@ def _worker_select_sql(where_clause: str = "", limit_clause: str = "") -> str:
 
 
 class SqliteWorkerRepository:
-    def list(self, *, user_id: str, role: str = "admin") -> list[dict[str, Any]]:
+    def list(self, *, user_id: str, role: str | None = None) -> list[dict[str, Any]]:
         """List workers visible to the requesting user.
 
-        Admins see all workers regardless of owner; members see their own workers
-        plus any workspace-visibility workers owned by others.
+        role="admin"  — admin sees all workers regardless of owner.
+        role="member" — member sees own workers + workspace-visibility workers.
+        role=None     — legacy default: only workers owned by user_id (backwards compat).
         """
         with get_db() as conn:
             if role == "admin":
                 rows = conn.execute(_worker_select_sql()).fetchall()
-            else:
+            elif role == "member":
                 rows = conn.execute(
                     _worker_select_sql("WHERE w.owner_id = ? OR w.visibility = 'workspace'"),
                     (user_id,),
                 ).fetchall()
+            else:
+                rows = conn.execute(
+                    _worker_select_sql("WHERE w.owner_id = ?"),
+                    (user_id,),
+                ).fetchall()
         return [_worker_record_from_row(row) for row in rows]
 
-    def get(self, *, user_id: str, worker_id: str, role: str = "admin") -> dict[str, Any] | None:
+    def get(self, *, user_id: str, worker_id: str, role: str | None = None) -> dict[str, Any] | None:
         """Get a single worker, respecting visibility rules.
 
-        Admins can fetch any worker; members can only fetch their own or workspace-visible workers.
+        role="admin"  — admin can fetch any worker by id.
+        role="member" — member can fetch own or workspace-visible workers.
+        role=None     — legacy default: only owner-scoped fetch (backwards compat).
         """
         with get_db() as conn:
             if role == "admin":
@@ -401,13 +409,18 @@ class SqliteWorkerRepository:
                     _worker_select_sql("WHERE w.id = ?", "LIMIT 1"),
                     (worker_id,),
                 ).fetchone()
-            else:
+            elif role == "member":
                 row = conn.execute(
                     _worker_select_sql(
                         "WHERE w.id = ? AND (w.owner_id = ? OR w.visibility = 'workspace')",
                         "LIMIT 1",
                     ),
                     (worker_id, user_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    _worker_select_sql("WHERE w.owner_id = ? AND w.id = ?", "LIMIT 1"),
+                    (user_id, worker_id),
                 ).fetchone()
         return _worker_record_from_row(row) if row else None
 
