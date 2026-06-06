@@ -191,6 +191,53 @@ def test_normalize_does_not_touch_file_output():
     assert field.get("media_type") == "text/csv"
 
 
+def test_normalize_missing_file_kind_from_markers_validates_contract():
+    # Live create-path schema drift: worker-author sometimes emits file outputs
+    # with media_type/path but omits kind:file. WorkerContract defaults missing
+    # kind to scalar, then rejects media_type/path. Normalize the intended file
+    # shape before registration.
+    import run_service as rs
+    import yaml as pyyaml
+    from models import WorkerContract
+
+    yml = (
+        "schema_version: '0.3'\nname: json-report\ntitle: JSON Report\n"
+        "description: Writes a JSON report.\nversion: 0.1.0\n"
+        "exec:\n  entry: run.py\n  command: python run.py\n  runtime: python311\n  runner: e2b\n"
+        "  inputs:\n  - name: topic\n    kind: scalar\n    type: string\n    required: true\n"
+        "  outputs:\n  - name: report\n    media_type: application/json\n"
+        "    path: out/report.json\n    required: true\n"
+        "trigger:\n  type: manual\n"
+    )
+    out = rs._normalize_authored_worker_yml(yml, lambda *a, **k: None)
+    parsed = pyyaml.safe_load(out)
+    field = parsed["exec"]["outputs"][0]
+    assert field.get("kind") == "file"
+    assert field.get("media_type") == "application/json"
+    assert field.get("path") == "out/report.json"
+    WorkerContract.model_validate(parsed)
+
+
+def test_normalize_select_without_options_to_string():
+    import run_service as rs
+    import yaml as pyyaml
+    from models import WorkerContract
+
+    yml = (
+        "schema_version: '0.3'\nname: choose-topic\ntitle: Choose Topic\n"
+        "description: Echoes the selected topic.\nversion: 0.1.0\n"
+        "exec:\n  entry: run.py\n  command: python run.py\n  runtime: python311\n  runner: e2b\n"
+        "  inputs:\n  - name: topic\n    kind: scalar\n    type: select\n    required: true\n"
+        "  outputs:\n  - name: result\n    kind: scalar\n    type: string\n"
+        "trigger:\n  type: manual\n"
+    )
+    out = rs._normalize_authored_worker_yml(yml, lambda *a, **k: None)
+    parsed = pyyaml.safe_load(out)
+    field = parsed["exec"]["inputs"][0]
+    assert field.get("type") == "string"
+    WorkerContract.model_validate(parsed)
+
+
 def test_normalize_handles_exec_outputs_block():
     import run_service as rs
     import yaml as pyyaml
