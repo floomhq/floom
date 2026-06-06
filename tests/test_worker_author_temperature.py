@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import copy
+import json
 import importlib.util
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -61,3 +63,130 @@ def test_worker_author_codegen_retries_without_temperature_for_gpt5(monkeypatch)
     assert client.completions.calls[1]["model"] == "gpt-5.1"
     assert client.completions.calls[1]["max_completion_tokens"] == 8000
     assert client.completions.calls[1]["response_format"] == {"type": "json_object"}
+
+
+def _script_worker_yml(*, trigger: str = "manual") -> str:
+    trigger_block = (
+        "trigger:\n  type: \"schedule\"\n  cron: \"0 9 * * *\"\n"
+        if trigger == "schedule"
+        else "trigger:\n  type: \"manual\"\n"
+    )
+    return f"""\
+schema_version: "0.3"
+name: "reverse-string"
+title: "Reverse String"
+description: "Reverses a text string."
+version: "0.1.0"
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runtime: "python311"
+  runner: "e2b"
+  inputs:
+    - name: "text"
+      kind: "scalar"
+      type: "string"
+      required: true
+      label: "Text"
+  outputs:
+    - name: "reversed_text"
+      kind: "scalar"
+      type: "string"
+      required: true
+      label: "Reversed Text"
+{trigger_block}"""
+
+
+_FUNCTIONAL_REVERSE_RUN_PY = """\
+import json
+from pathlib import Path
+
+
+def main():
+    inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+    text = str(inputs.get("text") or "")
+    _write = {"status": "success", "outputs": {"reversed_text": text[::-1]}, "artifacts": [], "error": None}
+    Path("result.json").write_text(json.dumps(_write), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+
+def test_worker_author_rejects_unrequested_schedule_stub():
+    module = _load_worker_author_module()
+    bundle = {
+        "worker_yml": _script_worker_yml(trigger="schedule"),
+        "skill_md": None,
+        "run_code": (
+            "import json\nfrom pathlib import Path\n"
+            "result_value = 'replace with the real output'\n"
+            "Path('result.json').write_text(json.dumps({'status':'success','outputs':{'result':result_value}}))\n"
+        ),
+    }
+
+    error = module._validate_generated_bundle(bundle, "Reverse a text string")
+
+    assert error is not None
+    assert "schedule" in error
+
+
+class _QueuedCompletions:
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(copy.deepcopy(kwargs))
+        if not self.payloads:
+            raise AssertionError("OpenAI stub exhausted")
+        payload = self.payloads.pop(0)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(payload))
+                )
+            ]
+        )
+
+
+def test_worker_author_retries_until_bundle_has_functional_run_py(monkeypatch, tmp_path):
+    module = _load_worker_author_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(module, "_read_context_file", lambda *a, **k: "")
+    monkeypatch.setattr(module, "_list_context_dir", lambda *a, **k: [])
+    monkeypatch.setattr(module, "_read_existing_workers", lambda *a, **k: [])
+
+    first_stub = {
+        "worker_yml": _script_worker_yml(trigger="schedule"),
+        "skill_md": None,
+        "run_code": "result_value = 'replace with the real output'\n",
+        "requirements_txt": None,
+        "suggested_id": "reverse-string",
+        "sample_input_json": "{\"text\":\"abc\"}",
+    }
+    second_functional = {
+        "worker_yml": _script_worker_yml(trigger="manual"),
+        "skill_md": None,
+        "run_code": _FUNCTIONAL_REVERSE_RUN_PY,
+        "requirements_txt": None,
+        "suggested_id": "reverse-string",
+        "sample_input_json": "{\"text\":\"abc\"}",
+    }
+
+    completions = _QueuedCompletions([first_stub, second_functional])
+
+    class _FakeOpenAI:
+        def __init__(self, api_key):
+            self.chat = SimpleNamespace(completions=completions)
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=_FakeOpenAI))
+
+    out = module.generate_bundle({"prompt": "Reverse a text string", "mode": "draft"})
+
+    assert completions.calls and len(completions.calls) == 2
+    assert out["worker_yml"] == second_functional["worker_yml"]
+    assert out["run_code"] == _FUNCTIONAL_REVERSE_RUN_PY
+    assert "error" not in out
