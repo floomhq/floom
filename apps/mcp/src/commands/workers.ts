@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { createAuthenticatedClient, WorkerosApiError } from "../lib/api.js";
+import { createAuthenticatedClient, WorkerosApiError, WorkerosConnectionError } from "../lib/api.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
 type WorkerSummary = {
@@ -327,13 +327,40 @@ function emitValidationErrors(errors: string[]): number {
   return 1;
 }
 
+function apiErrorDetail(error: WorkerosApiError): string {
+  const body = error.body;
+  if (body && typeof body === "object" && "detail" in body) {
+    return String((body as { detail: unknown }).detail);
+  }
+  return error.message;
+}
+
+function isExpiredAuthError(error: WorkerosApiError): boolean {
+  if (error.status === 401) return true;
+  if (error.status !== 403) return false;
+  const detail = apiErrorDetail(error).toLowerCase();
+  return detail.includes("expired") || detail.includes("invalid token") || detail.includes("invalid jwt");
+}
+
 function emitApiError(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("Not logged in")) {
     return emitError("Not authenticated.", "Run: floom login");
   }
-  if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
+  if (error instanceof WorkerosConnectionError) {
+    return emitError(
+      "Workeros API is unreachable.",
+      `Tried ${error.apiBase}. Check WORKEROS_API_BASE/FLOOM_API_BASE and network connectivity.`,
+    );
+  }
+  if (error instanceof WorkerosApiError && isExpiredAuthError(error)) {
     return emitError("Your session expired.", "Re-run: floom login");
+  }
+  if (error instanceof WorkerosApiError && error.status === 403) {
+    return emitError(
+      "Request was forbidden.",
+      `API said: ${apiErrorDetail(error)}. Check that this token can access the target worker/workspace.`,
+    );
   }
   if (error instanceof WorkerosApiError && error.status && error.status >= 500) {
     return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/workeros/issues");
