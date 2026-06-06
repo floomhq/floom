@@ -12343,6 +12343,15 @@ def upsert_secret(
         status=SecretStatus.SET.value,
     )
     logger.info("Secret %s upserted", name)
+    # Mirror to GitHub repo secrets if workspace is connected
+    try:
+        import github_api as _gh
+        _cfg = _git_cfg_get(auth.user_id)
+        if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):
+            _gh.set_secret(_cfg["github_pat"], _cfg["repo_full_name"], str(name), payload.value)
+            logger.debug("Secret %s mirrored to GitHub", name)
+    except Exception as _gh_exc:
+        logger.warning("Failed to mirror secret %s to GitHub (non-fatal): %s", name, _gh_exc)
     return SecretTestResult(status="valid", reason=f"Secret {name!r} saved.")
 
 
@@ -12369,6 +12378,14 @@ def delete_secret(
         raise HTTPException(status_code=404, detail=f"Secret {name!r} not found in .env")
     repos.secrets.delete(user_id=auth.user_id, name=name)
     logger.info("Secret %s deleted", name)
+    # Mirror deletion to GitHub repo secrets if workspace is connected
+    try:
+        import github_api as _gh
+        _cfg = _git_cfg_get(auth.user_id)
+        if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):
+            _gh.delete_secret(_cfg["github_pat"], _cfg["repo_full_name"], str(name))
+    except Exception as _gh_exc:
+        logger.warning("Failed to delete secret %s from GitHub (non-fatal): %s", name, _gh_exc)
     return SecretTestResult(status="valid", reason=f"Secret {name!r} removed.")
 
 
