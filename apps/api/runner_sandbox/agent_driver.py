@@ -175,6 +175,18 @@ class AgentDriver(SandboxDriver):
                 )
             )
         except Exception as exc:
+            exc_str = str(exc)
+            if "response.incomplete" in exc_str or "max_output_tokens" in exc_str.lower():
+                log_fn(f"Output token limit reached: {exc}", "error")
+                return WorkerResult(
+                    status="error",
+                    error=(
+                        "The model's response exceeded the per-turn output token limit. "
+                        "Increase max_output_tokens in the worker's limits or simplify the task."
+                    ),
+                    error_code="output_token_limit",
+                    retryable=False,
+                )
             logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
             log_fn(f"Agent runtime error: {exc}", "error")
             return WorkerResult(
