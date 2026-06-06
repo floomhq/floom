@@ -7,7 +7,9 @@ import { CheckCircle, ChevronLeft, ChevronRight, Download, ExternalLink, FileTex
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { FloomMark } from "@/components/layout/sidebar";
+import { WorkerosMark } from "@/components/share/ShareCardShell";
+import { GenericOutput } from "@/components/generic-output";
+import { ApprovalActionItems, approvalActionLine } from "@/components/share/ApprovalActionItems";
 import type { ApprovalRow, Artifact } from "@/lib/types";
 import {
   AnnotationsViewer,
@@ -37,6 +39,14 @@ function parseDecisionInput(raw?: string | null): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+// Infer a GenericOutput type from the proposed-output preview string.
+function inferPreviewType(preview: string): string {
+  const t = preview.trim();
+  if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) return "json";
+  if (/^#{1,3}\s|\n[-*]\s|\|.+\|/.test(t)) return "markdown";
+  return "text";
 }
 
 function formatRelative(iso: string): string {
@@ -840,10 +850,8 @@ function ReviewContent() {
             place the product is identified. Internal reviewers also get the
             "All approvals" back-link below it. */}
         <div className="flex flex-col gap-1.5">
-          <span className="inline-flex items-center gap-2">
-            <FloomMark size={20} />
-            <span className="text-sm font-semibold tracking-tight text-[var(--ink)]">Floom Workers</span>
-          </span>
+          <WorkerosMark size={20} />
+          {/* (the wordmark "Workeros" is rendered by WorkerosMark) */}
           {isSignedLink ? (
             <span className="text-xs text-[var(--ink-soft)]">Approval review</span>
           ) : (
@@ -893,7 +901,7 @@ function ReviewContent() {
               )}
             </div>
             <h1 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--ink)]">
-              {approval.label || "Review approval"}
+              Approval request
             </h1>
             <div className="mt-2 flex flex-wrap gap-3 text-sm text-[var(--ink-soft)]">
               {isSignedLink ? (
@@ -920,11 +928,26 @@ function ReviewContent() {
           </div>
 
           <div className="space-y-5 px-5 py-5 sm:px-6">
+            {/* v6: a bold, plain-language one-liner so a non-technical approver
+                immediately understands the request. */}
+            <div className="rounded-[var(--radius-button)] border border-[color-mix(in_srgb,var(--pending)_24%,var(--border-soft))] bg-[color-mix(in_srgb,var(--pending)_8%,var(--bg-2))] px-4 py-3.5">
+              <p className="text-[15px] font-semibold leading-snug text-[var(--ink)]">
+                {approvalActionLine(approval.label, decisionInput)}
+              </p>
+            </div>
+
+            {/* v6: the ACTUAL action items (not a count), rendered generically. */}
+            {!isDestructiveDelete && (
+              <ApprovalActionItems decisionInput={decisionInput} />
+            )}
+
             {approval.preview ? (
               <div>
-                <h2 className="text-sm font-medium text-[var(--ink)]">Preview</h2>
-                <div className="mt-2 max-h-[46vh] overflow-auto rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] p-4 text-sm leading-6 text-[var(--ink)] whitespace-pre-wrap">
-                  {approval.preview}
+                <h2 className="text-sm font-medium text-[var(--ink)]">What will happen</h2>
+                {/* v6: render the proposed output through the GENERIC renderer
+                    (markdown/json/csv/text) — no whitespace-pre dump. */}
+                <div className="mt-2 max-h-[46vh] overflow-auto rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] p-4">
+                  <GenericOutput type={inferPreviewType(approval.preview)} value={approval.preview} />
                 </div>
               </div>
             ) : (

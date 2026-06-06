@@ -77,7 +77,7 @@ const CATEGORY_FILTERS = [
 ];
 
 function shortDescription(item: IntegrationCatalogItem) {
-  return item.description || `${item.name} integration for your Floom Workers.`;
+  return item.description || `${item.name} integration for your Workeros workers.`;
 }
 
 function CatalogSkeleton() {

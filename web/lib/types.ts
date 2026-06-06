@@ -1,5 +1,48 @@
 export type WorkerStatus = "healthy" | "ready" | "needs_attention" | "missing_secret" | "error";
 
+// ── Emily conversation persistence ─────────────────────────────────────────────
+// Shapes returned by GET /conversations and GET /conversations/{id}
+// (apps/api/main.py list_conversations + get_conversation_detail).
+
+export interface ConversationSummary {
+  id: string;
+  title?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  message_count?: number;
+}
+
+export interface ConversationMessageRow {
+  id: string;
+  role: "user" | "assistant" | "tool" | string;
+  content: string;
+  tool_call_id?: string | null;
+  created_at?: string;
+}
+
+export interface ConversationToolCardRow {
+  id: string;
+  callId?: string | null;
+  toolName?: string | null;
+  status?: string | null;
+  card?: Record<string, unknown> | null;
+  resource?: Record<string, unknown> | null;
+  streams?: { events: string; parts: string } | null;
+  actions?: unknown[] | null;
+  args_preview?: Record<string, unknown> | null;
+  result_preview?: unknown;
+  run_id?: string | null;
+  worker_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  user_id?: string;
+  messages: ConversationMessageRow[];
+  tool_cards: ConversationToolCardRow[];
+}
+
 export interface TriggerSpec {
   type: string;
   cron?: string;
@@ -638,6 +681,9 @@ export interface CurrentUser {
   display_name?: string | null;
   workspace_id?: string | null;
   scopes?: string[];
+  // Multi-member fields (populated when using username/password or PAT auth)
+  role?: string;
+  username?: string | null;
 }
 
 export interface WorkspaceShareLink {
@@ -945,4 +991,38 @@ export interface VersionFileSnapshot {
 
 export interface VersionFileDetail {
   file: VersionFileSnapshot;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-member: local users + personal access tokens (migration 59)
+// ---------------------------------------------------------------------------
+
+export interface OssUser {
+  id: string;
+  username: string;
+  display_name?: string | null;
+  role: "admin" | "member";
+  disabled: boolean;
+  created_at: string;
+}
+
+export interface PersonalAccessToken {
+  id: string;
+  name: string;
+  last_used_at?: string | null;
+  created_at: string;
+  expires_at?: string | null;
+}
+
+export interface PersonalAccessTokenCreate {
+  token: string;
+  pat: PersonalAccessToken;
+}
+
+export interface AuthMe {
+  user_id: string;
+  username?: string | null;
+  role: string;
+  auth_method: string;
+  is_admin: boolean;
 }
