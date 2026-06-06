@@ -183,7 +183,7 @@ def _override_create_run_for_members() -> None:
         return
     _orig = engine_main.create_run
 
-    def _cloud_create_run(worker_id, inputs, trigger_source="manual", *, status, user_id, repos, **kw):
+    def _cloud_create_run(worker_id, inputs, trigger_source="manual", *, status=None, user_id=None, repos=None, **kw):
         role = get_active_member_role()
         # Pop trigger_member_id before forwarding — engine's create_run has no **kwargs.
         trigger_member_id = kw.pop("trigger_member_id", None)
@@ -211,6 +211,38 @@ def _override_create_run_for_members() -> None:
     engine_main.create_run = _cloud_create_run
 
 
+def _override_worker_author_platform_secret() -> None:
+    """Allow the first-party worker-author system worker to use platform OpenAI.
+
+    User-authored workers must not receive platform infra secrets. The
+    worker-author bundle is vendored first-party code and is the Cloud
+    create-worker path, so it can use the process OPENAI_API_KEY when the
+    operator has not configured their own user secret.
+    """
+    from apps.api._engine import import_engine_module
+
+    run_service = import_engine_module("run_service")
+    if getattr(run_service.get_secrets_for_worker, "_workeros_cloud_patched", False):
+        return
+    _orig = run_service.get_secrets_for_worker
+
+    def _cloud_get_secrets_for_worker(worker_id: str, *, user_id=None, repos=None):
+        try:
+            secrets = dict(_orig(worker_id, user_id=user_id, repos=repos) or {})
+        except Exception:
+            if worker_id != "worker-author":
+                raise
+            secrets = {}
+        if worker_id == "worker-author" and "OPENAI_API_KEY" not in secrets:
+            platform_openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+            if platform_openai_key:
+                secrets["OPENAI_API_KEY"] = platform_openai_key
+        return secrets
+
+    _cloud_get_secrets_for_worker._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    run_service.get_secrets_for_worker = _cloud_get_secrets_for_worker
+
+
 def register_cloud_components() -> None:
     _activate_cloud_deploy()
     get_cloud_settings()
@@ -222,6 +254,7 @@ def register_cloud_components() -> None:
     apply_cloud_workspace_agent_overrides()
     _register_contexts_scope_resolver()
     _override_create_run_for_members()
+    _override_worker_author_platform_secret()
     # Run the real init_db() once so the engine's local SQLite DB has the
     # full schema. Several engine endpoints (draft_and_create_worker,
     # _persist_discovered_workers, etc.) bypass the Supabase repos and call

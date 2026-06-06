@@ -30,6 +30,39 @@ _recipe_cache: contextvars.ContextVar[dict[str, tuple[dict, dict | None]] | None
 
 _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 
+_SYSTEM_RUN_WORKER_IDS = frozenset({"worker-author"})
+
+
+def _ensure_system_run_worker_row(client: Client, *, worker_id: str, user_id: str) -> None:
+    existing = (
+        client.table("workers")
+        .select("id")
+        .eq("id", worker_id)
+        .limit(1)
+        .execute()
+    )
+    if _first_row(existing) is not None:
+        return
+
+    from worker_registry import discover_workers, invalidate_worker_cache  # noqa: PLC0415
+
+    invalidate_worker_cache()
+    worker = next(
+        (item for item in discover_workers(use_cache=False) if item.get("id") == worker_id),
+        None,
+    )
+    if worker is None:
+        return
+
+    SupabaseWorkerRepository(client).upsert(
+        user_id=user_id,
+        worker_id=worker_id,
+        name=worker.get("name") or worker_id,
+        manifest_json=worker.get("manifest") or {},
+        trigger_type=worker.get("trigger_type") or "manual",
+        bundle_path=f"workers/{worker_id}",
+    )
+
 from supabase import Client
 
 from apps.api._engine import ensure_engine_api_path
@@ -1542,11 +1575,14 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         # Pre-check: confirm the worker belongs to this user. We scope by
         # workspace_id (if contextvar is set) so a user can't trigger a
         # run on a worker in a workspace they aren't currently viewing.
-        worker_builder = self._client.table("workers").select("id").eq("id", worker_id)
-        worker_builder = _scope_by_workspace(worker_builder, user_id=user_id)
-        worker = worker_builder.limit(1).execute()
-        if _first_row(worker) is None:
-            raise ValueError(f"worker {worker_id} does not belong to {user_id}")
+        if worker_id in _SYSTEM_RUN_WORKER_IDS:
+            _ensure_system_run_worker_row(self._client, worker_id=worker_id, user_id=user_id)
+        else:
+            worker_builder = self._client.table("workers").select("id").eq("id", worker_id)
+            worker_builder = _scope_by_workspace(worker_builder, user_id=user_id)
+            worker = worker_builder.limit(1).execute()
+            if _first_row(worker) is None:
+                raise ValueError(f"worker {worker_id} does not belong to {user_id}")
         run_id = fields["run_id"]
         # Stamp workspace_id on the run row. For scheduler/webhook triggers
         # the contextvar is unset, so we fall back to the worker's
@@ -1659,7 +1695,9 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                     updates["duration_ms"] = int((completed - started).total_seconds() * 1000)
                 except Exception:
                     pass
-        self.update(user_id=user_id, run_id=run_id, **updates)
+        builder = self._client.table("runs").update(updates).eq("id", run_id)
+        builder = _scope_by_workspace(builder, user_id=user_id)
+        builder.execute()
 
     def add_log(
         self,

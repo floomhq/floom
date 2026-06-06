@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import sys
 import types
 from collections import Counter
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -22,6 +24,7 @@ def _load_cloud_app(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "psycopg", psycopg)
 
     for name in [
+        "apps.api.startup",
         "apps.api.main",
         "main",
         "db",
@@ -76,3 +79,85 @@ def test_cloud_versioned_api_prefixes_reach_engine_routes(monkeypatch, tmp_path)
         response = client.get(path)
         assert response.status_code == 401, path
         assert response.json()["detail"] in {"missing bearer token", "unauthorized"}
+
+
+def test_cloud_create_run_override_keeps_engine_status_default(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+
+    signature = inspect.signature(main.engine_main.create_run)
+
+    assert signature.parameters["status"].default is None
+
+
+def test_cloud_worker_author_can_use_platform_openai_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-platform-openai-key")
+    main = _load_cloud_app(monkeypatch, tmp_path)
+
+    class _Workers:
+        def get_owner(self, *, worker_id):
+            return None
+
+        def get_recipe(self, *, worker_id):
+            return None
+
+    class _Secrets:
+        def list_names(self, *, user_id):
+            return []
+
+        def resolve(self, *, user_id, names):
+            return {}
+
+    class _Repos:
+        workers = _Workers()
+        secrets = _Secrets()
+
+    worker_author_secrets = main.engine_run_service.get_secrets_for_worker(
+        "worker-author",
+        user_id="user-1",
+        repos=_Repos(),
+    )
+    other_worker_secrets = main.engine_run_service.get_secrets_for_worker(
+        "not-worker-author",
+        user_id="user-1",
+        repos=_Repos(),
+    )
+
+    assert worker_author_secrets["OPENAI_API_KEY"] == "test-platform-openai-key"
+    assert "OPENAI_API_KEY" not in other_worker_secrets
+
+
+def test_cloud_worker_author_platform_key_survives_secret_store_disconnect(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-platform-openai-key")
+    main = _load_cloud_app(monkeypatch, tmp_path)
+
+    class _Workers:
+        def get_owner(self, *, worker_id):
+            return None
+
+        def get_recipe(self, *, worker_id):
+            return None
+
+    class _Secrets:
+        def list_names(self, *, user_id):
+            return []
+
+        def resolve(self, *, user_id, names):
+            raise RuntimeError("secret store disconnected")
+
+    class _Repos:
+        workers = _Workers()
+        secrets = _Secrets()
+
+    worker_author_secrets = main.engine_run_service.get_secrets_for_worker(
+        "worker-author",
+        user_id="user-1",
+        repos=_Repos(),
+    )
+
+    assert worker_author_secrets["OPENAI_API_KEY"] == "test-platform-openai-key"
+    with pytest.raises(RuntimeError, match="secret store disconnected"):
+        main.engine_run_service.get_secrets_for_worker(
+            "not-worker-author",
+            user_id="user-1",
+            repos=_Repos(),
+        )
