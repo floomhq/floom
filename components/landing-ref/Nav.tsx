@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MobileNav } from "./MobileNav";
 
 const LINKS: Array<{ label: string; href: string }> = [
   { label: "Templates", href: "/templates" },
@@ -70,6 +71,7 @@ export function Nav() {
           >
             Sign in
           </Link>
+          <MobileNav links={LINKS} />
         </div>
       </div>
     </header>
