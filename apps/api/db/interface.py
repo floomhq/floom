@@ -333,43 +333,6 @@ class CliAuthRepository(Protocol):
     def prune_expired(self, *, now_ts: float) -> list[str]: ...
 
 
-class VersionRepository(Protocol):
-    """Immutable snapshots of worker, brain-pack, and workspace-instruction state for rollback."""
-
-    def create(
-        self,
-        *,
-        asset_type: str,
-        asset_id: str,
-        user_id: str,
-        snapshot_json: str,
-        change_source: str,
-        keep: int | None = 20,
-    ) -> RowDict: ...
-
-    def list(
-        self,
-        *,
-        asset_type: str,
-        asset_id: str,
-        limit: int = 50,
-    ) -> list[RowDict]: ...
-
-    def get(self, *, version_id: str) -> RowDict | None: ...
-
-    def prune(
-        self,
-        *,
-        asset_type: str,
-        asset_id: str,
-        keep: int = 20,
-    ) -> int: ...
-
-    def delete_for_asset(self, *, asset_type: str, asset_id: str) -> int: ...
-
-    def delete_for_context(self, *, name: str) -> int: ...
-
-
 class McpToolRepository(Protocol):
     """Custom MCP tools backed by workers, scoped per user/workspace."""
 
