@@ -68,8 +68,9 @@ function NewWorkerPageInner({
 }: {
   searchParams?: Promise<Record<string, string>>;
 }) {
-  use(searchParams || Promise.resolve({} as Record<string, string>));
-  return <NewWorkerContent />;
+  const params = use(searchParams || Promise.resolve({} as Record<string, string>));
+  const seed = typeof params?.prompt === "string" ? params.prompt : "";
+  return <NewWorkerContent initialPrompt={seed} />;
 }
 
 function NewWorkerSkeleton() {
@@ -100,9 +101,9 @@ interface RunEvent {
   created_worker_id?: string;
 }
 
-function NewWorkerContent() {
+function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
   const router = useRouter();
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [generating, setGenerating] = useState(false);
   const [streamRunId, setStreamRunId] = useState<string | null>(null);
   const [streamLogs, setStreamLogs] = useState<string[]>([]);
@@ -115,6 +116,9 @@ function NewWorkerContent() {
   // Guards against double navigation (e.g. onerror firing right after onmessage
   // already navigated on the terminal `close`/status event).
   const navigatedRef = useRef(false);
+  // Auto-trigger fires once when arriving from the marketing prompt-box CTA
+  // (`/workers/new?prompt=…`). Strict-mode-safe via a ref.
+  const autoTriggeredRef = useRef(false);
 
   function getLivePrompt(): string {
     return (textareaRef.current?.value ?? prompt).trim();
@@ -131,6 +135,18 @@ function NewWorkerContent() {
     setStreamRunId(null);
     setStreamLogs([]);
   }, []);
+
+  // Auto-trigger generation when arriving with a seeded prompt from the
+  // marketing prompt-box CTA (`/workers/new?prompt=…`). Only fires once per
+  // page-mount. The handleGenerate reference is hoisted by the JS engine so
+  // referencing it here before its declaration below is safe.
+  useEffect(() => {
+    if (autoTriggeredRef.current) return;
+    if (!initialPrompt.trim()) return;
+    autoTriggeredRef.current = true;
+    void handleGenerate(initialPrompt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPrompt]);
 
   // ---- Generate from prompt ------------------------------------------------
   // Uses the /workers/new/from-prompt endpoint which creates a worker-author
