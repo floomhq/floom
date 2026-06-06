@@ -1976,3 +1976,56 @@ Raw/YAML Save + Discard buttons only render when `filesDirty === true`.
 **Status:** FIXED (PR #433)
 
 Button relabelled "Edit worker" to clarify destination.
+
+---
+
+## Emily chat persistence pass (2026-06-06)
+
+**Scope:** Emily chat in `apps/web` (engine) — the dock (`EmilyDock`) and the
+full-page chat (`EmilyChatPage` at `/chat`). Federico hit these live on
+`workers.floom.dev`. Propagates to Cloud via engine sync (no Cloud-repo edits).
+
+### EC1 — Conversation does not survive dock close→open, fullscreen toggle, or reload
+
+**Status:** FIXED
+
+**Root cause:** `useChatStream` held `messages` + `conversationId` in in-memory
+`useState` only. Closing/reopening the dock, switching between the dock and
+`/chat`, or reloading the browser dropped the in-memory state, so the chat
+appeared to reset even though the server already persisted the conversation.
+
+**Fix:** the active `conversationId` is persisted to `localStorage`
+(`workeros.emily.conversationId`). On mount the hook fetches
+`GET /conversations/{id}` (new `api.conversations.get`) and rehydrates server
+messages + tool cards into the live `ChatMessage`/`MsgPart` shape via
+`emily-chat-rehydrate.ts`. A `storage` event listener mirrors session changes
+across the dock/full-page/other tabs.
+
+### EC2 — No way to start a new conversation
+
+**Status:** FIXED
+
+**Fix:** a "New chat" control resets messages + conversationId and clears the
+localStorage key, starting a fresh conversation. The previous conversation is
+NOT deleted server-side (still retrievable via `GET /conversations/{id}`).
+
+### EC3 — No way to export a conversation
+
+**Status:** FIXED
+
+**Fix:** an "Export" control downloads the current conversation as Markdown
+(readable You/Emily turns, tool actions noted briefly) via
+`emily-chat-export.ts`. A JSON export helper is included as a bonus.
+
+### EC4 — Controls must be reachable in both dock and full-page chat
+
+**Status:** FIXED
+
+**Fix:** New chat + Export live in a controls bar inside the shared
+`EmilyChatCore`, so both `EmilyDock` and `EmilyChatPage` get them.
+
+**Evidence:** `apps/web` `npm run lint` (0 errors), `npm test` (33 passed),
+`npm run build` (Compiled successfully). Targeted `tsc` of the new/changed
+feature modules is clean; two pre-existing `tsc` errors in
+`tests/useChatStream.test.ts` (`.title` on the `ToolCard` union, present on
+origin/main, not exercised by CI's vitest+lint gate) are untouched.
