@@ -17,8 +17,6 @@ import { motion } from "motion/react";
 import { Check, Hash, Lock } from "lucide-react";
 import {
   CalendlyLogo,
-  ClaudeLogo,
-  CodexLogo,
   CursorLogo,
   GmailLogo,
   HubSpotLogo,
@@ -31,12 +29,12 @@ const ACCENT = "#3a6ea5";
 
 function Card({
   app,
-  Logo,
+  logo,
   meta,
   children,
 }: {
   app: string;
-  Logo: () => React.ReactNode;
+  logo: React.ReactNode;
   meta: string;
   children: React.ReactNode;
 }) {
@@ -49,8 +47,8 @@ function Card({
       className="overflow-hidden rounded-[18px] border border-border bg-card shadow-[0_18px_44px_-24px_rgba(20,20,20,0.18),0_2px_6px_-2px_rgba(20,20,20,0.05)]"
     >
       <div className="flex items-center gap-2 border-b border-border/70 bg-secondary/40 px-3 py-2">
-        <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center [&>svg]:h-4 [&>svg]:w-4">
-          <Logo />
+        <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center [&>svg]:h-4 [&>svg]:w-4 [&>img]:h-4 [&>img]:w-4">
+          {logo}
         </span>
         <span className="text-[12px] font-semibold tracking-tight text-foreground">{app}</span>
         <span className="ml-auto text-[10.5px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
@@ -102,7 +100,7 @@ function Avatar({ initial, tone }: { initial: string; tone: "worker" | "user" })
 /* ── Slack ─────────────────────────────────────────────────────────── */
 function SlackMockup() {
   return (
-    <Card app="Slack" Logo={SlackLogo} meta="#sales">
+    <Card app="Slack" logo={<SlackLogo />} meta="#sales">
       <div className="flex items-center gap-2 pb-3 text-muted-foreground">
         <Hash className="h-3.5 w-3.5" />
         <span className="text-[12.5px] font-semibold text-foreground">sales</span>
@@ -209,7 +207,7 @@ function WaOutBubble({ children, time }: { children: React.ReactNode; time: stri
 
 function WhatsAppMockup() {
   return (
-    <Card app="WhatsApp" Logo={WhatsAppLogo} meta="DM">
+    <Card app="WhatsApp" logo={<WhatsAppLogo />} meta="DM">
       <div className="overflow-hidden rounded-[10px] border border-border">
         {/* Green chat header */}
         <div
@@ -292,7 +290,11 @@ function ToolCall({
 
 function CodingAgentMockup() {
   return (
-    <Card app="Claude Code" Logo={ClaudeLogo} meta="agent">
+    <Card
+      app="Claude Code"
+      logo={<img src="/agent-logos/claude-code.png" alt="" width={16} height={16} />}
+      meta="agent"
+    >
       <div
         className="overflow-hidden rounded-[10px]"
         style={{ background: "#0F0F0F", border: "1px solid #232323" }}
@@ -325,8 +327,8 @@ function CodingAgentMockup() {
           </div>
           {/* Claude turn */}
           <div className="flex items-start gap-2">
-            <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center [&>svg]:h-3.5 [&>svg]:w-3.5">
-              <ClaudeLogo />
+            <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center [&>img]:h-3.5 [&>img]:w-3.5 [&>img]:object-contain">
+              <img src="/agent-logos/claude-code.png" alt="" width={14} height={14} />
             </span>
             <div className="min-w-0 flex-1 space-y-2">
               <div style={{ color: "#d4d4d4" }}>Pulling context from your tools.</div>
@@ -377,17 +379,32 @@ function CodingAgentMockup() {
         </div>
         <div className="flex flex-wrap items-center justify-center gap-1.5">
           {[
-            { Logo: ClaudeLogo, label: "Claude Code" },
-            { Logo: CursorLogo, label: "Cursor" },
-            { Logo: CodexLogo, label: "Codex" },
-            { Logo: OpenCodeLogo, label: "OpenCode" },
-          ].map(({ Logo, label }) => (
+            {
+              logo: (
+                <img
+                  src="/agent-logos/claude-code.png"
+                  alt=""
+                  width={14}
+                  height={14}
+                />
+              ),
+              label: "Claude Code",
+            },
+            {
+              logo: (
+                <img src="/agent-logos/codex.webp" alt="" width={14} height={14} />
+              ),
+              label: "Codex",
+            },
+            { logo: <CursorLogo />, label: "Cursor" },
+            { logo: <OpenCodeLogo />, label: "OpenCode" },
+          ].map(({ logo, label }) => (
             <span
               key={label}
               className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border bg-card px-2 text-[11px] font-medium text-foreground/85"
             >
-              <span className="inline-flex h-3.5 w-3.5 items-center justify-center [&>svg]:h-3.5 [&>svg]:w-3.5">
-                <Logo />
+              <span className="inline-flex h-3.5 w-3.5 items-center justify-center [&>svg]:h-3.5 [&>svg]:w-3.5 [&>img]:h-3.5 [&>img]:w-3.5 [&>img]:rounded-[2px] [&>img]:object-contain">
+                {logo}
               </span>
               {label}
             </span>

@@ -160,7 +160,9 @@ export function HeroPromptComposer({
   function submit() {
     const v = value.trim();
     if (!v) return;
-    router.push(`/assistant?q=${encodeURIComponent(v)}`);
+    // Goes to the new-worker flow in the dashboard (basePath /app, see vercel.json),
+    // which reads ?prompt= and seeds the worker-author with it. NOT the assistant.
+    router.push(`/app/workers/new?prompt=${encodeURIComponent(v)}`);
   }
 
   return (
@@ -191,7 +193,7 @@ export function HeroPromptComposer({
               Font/size/padding/line-height MUST match the textarea exactly. */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 px-3 pt-3 pb-2 text-[15px] leading-relaxed text-foreground"
+            className="pointer-events-none absolute inset-0 px-3 pt-3 pb-2 text-left text-[15px] leading-relaxed text-foreground"
             style={{
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
@@ -211,7 +213,7 @@ export function HeroPromptComposer({
             }}
             placeholder="Every Monday, summarize last week's pipeline in #sales..."
             rows={3}
-            className="relative w-full resize-none bg-transparent px-3 pt-3 pb-2 text-[15px] leading-relaxed placeholder:text-muted-foreground/70 focus:outline-none"
+            className="relative w-full resize-none bg-transparent px-3 pt-3 pb-2 text-left text-[15px] leading-relaxed placeholder:text-muted-foreground/70 focus:outline-none"
             style={{
               color: "transparent",
               caretColor: "var(--ink)",
