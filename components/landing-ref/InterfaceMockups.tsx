@@ -13,8 +13,19 @@
  * + WhatsApp green + IDE neon compete for attention.
  */
 
-import { motion } from "motion/react";
+import { motion, type Variants } from "motion/react";
 import { Check, Hash, Lock } from "lucide-react";
+
+const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+const stagger: Variants = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.08, delayChildren: 0.18 } },
+};
+const item: Variants = {
+  hidden: { opacity: 0, y: 10 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: EASE_OUT } },
+};
 import {
   CalendlyLogo,
   CursorLogo,
@@ -107,15 +118,24 @@ function SlackMockup() {
         <Lock className="h-3 w-3" />
         <span className="ml-auto text-[10.5px]">24 members</span>
       </div>
-      <div className="space-y-4">
-        <div className="flex gap-3">
+      <motion.div
+        initial="hidden"
+        whileInView="show"
+        viewport={{ once: true, amount: 0.35, margin: "0px 0px -8% 0px" }}
+        variants={stagger}
+        className="space-y-4"
+      >
+        <motion.div variants={item} className="flex gap-3">
           <Avatar initial="M" tone="worker" />
           <div className="min-w-0 flex-1">
             <NameLine name="Maya Worker" time="2:14 PM" app />
             <p className="mt-0.5 text-[12.5px] leading-relaxed text-foreground">
               Drafted the Acme follow-up. Pricing answer + last call notes. Send?
             </p>
-            <div className="mt-2 rounded-[10px] border border-border bg-secondary/40 px-3 py-2">
+            <motion.div
+              variants={item}
+              className="mt-2 rounded-[10px] border border-border bg-secondary/40 px-3 py-2"
+            >
               <div className="flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 <span className="inline-flex h-3 w-3 items-center justify-center [&>svg]:h-3 [&>svg]:w-3">
                   <GmailLogo />
@@ -128,8 +148,8 @@ function SlackMockup() {
               <p className="mt-0.5 line-clamp-1 text-[11.5px] text-muted-foreground">
                 Hi Sarah, thanks for the call. Based on what you shared, I&apos;d…
               </p>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
+            </motion.div>
+            <motion.div variants={item} className="mt-2 flex flex-wrap gap-1.5">
               <span
                 className="inline-flex h-7 items-center gap-1.5 rounded-[8px] px-3 text-[11.5px] font-semibold text-white"
                 style={{ background: ACCENT }}
@@ -139,20 +159,26 @@ function SlackMockup() {
               <span className="inline-flex h-7 items-center rounded-[8px] border border-border bg-card px-3 text-[11.5px] font-medium text-foreground">
                 Edit
               </span>
-            </div>
+            </motion.div>
           </div>
-        </div>
-        <div className="flex gap-3">
+        </motion.div>
+        <motion.div variants={item} className="flex gap-3">
           <Avatar initial="F" tone="user" />
           <div className="min-w-0 flex-1">
             <NameLine name="Federico" time="2:14 PM" />
             <p className="mt-0.5 inline-flex items-center gap-1 text-[12.5px] text-foreground">
-              <Check className="h-3.5 w-3.5" style={{ color: "#1f7d57" }} />
+              <motion.span
+                animate={{ scale: [1, 1.15, 1] }}
+                transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+                className="inline-flex"
+              >
+                <Check className="h-3.5 w-3.5" style={{ color: "#1f7d57" }} />
+              </motion.span>
               Approved
             </p>
           </div>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     </Card>
   );
 }
@@ -160,7 +186,7 @@ function SlackMockup() {
 /* ── WhatsApp ──────────────────────────────────────────────────────── */
 function WaInBubble({ children, time }: { children: React.ReactNode; time: string }) {
   return (
-    <div className="flex justify-start">
+    <motion.div variants={item} className="flex justify-start">
       <div
         className="relative max-w-[82%] rounded-[7px] rounded-tl-[2px] px-2.5 py-1.5 text-[12px] leading-snug"
         style={{
@@ -177,13 +203,13 @@ function WaInBubble({ children, time }: { children: React.ReactNode; time: strin
           {time}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
 function WaOutBubble({ children, time }: { children: React.ReactNode; time: string }) {
   return (
-    <div className="flex justify-end">
+    <motion.div variants={item} className="flex justify-end">
       <div
         className="max-w-[82%] rounded-[7px] rounded-tr-[2px] px-2.5 py-1.5 text-[12px] leading-snug"
         style={{
@@ -201,7 +227,7 @@ function WaOutBubble({ children, time }: { children: React.ReactNode; time: stri
           <span style={{ color: "#53BDEB" }}>✓✓</span>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -229,7 +255,11 @@ function WhatsAppMockup() {
           </div>
         </div>
         {/* Chat surface */}
-        <div
+        <motion.div
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, amount: 0.35, margin: "0px 0px -8% 0px" }}
+          variants={stagger}
           className="space-y-1.5 px-3 py-3"
           style={{
             background: "#ECE5DD",
@@ -249,7 +279,7 @@ function WhatsAppMockup() {
               <li>Forward Q4 deck to Notion</li>
             </ol>
           </WaInBubble>
-        </div>
+        </motion.div>
       </div>
     </Card>
   );
@@ -315,47 +345,66 @@ function CodingAgentMockup() {
           </span>
         </div>
         {/* Conversation */}
-        <div className="space-y-3 px-3 py-3 font-mono text-[11.5px] leading-relaxed">
+        <motion.div
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, amount: 0.3, margin: "0px 0px -8% 0px" }}
+          variants={stagger}
+          className="space-y-3 px-3 py-3 font-mono text-[11.5px] leading-relaxed"
+        >
           {/* User prompt */}
-          <div className="flex items-start gap-2">
+          <motion.div variants={item} className="flex items-start gap-2">
             <span className="mt-0.5 text-[12px]" style={{ color: "#6c6c6c" }}>
               &gt;
             </span>
             <span style={{ color: "#c8c8c8" }}>
               Run client-follow-up for the Acme call
             </span>
-          </div>
+          </motion.div>
           {/* Claude turn */}
-          <div className="flex items-start gap-2">
+          <motion.div variants={item} className="flex items-start gap-2">
             <span className="mt-0.5 inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center [&>img]:h-3.5 [&>img]:w-3.5 [&>img]:object-contain">
               <img src="/agent-logos/claude-code.png" alt="" width={14} height={14} />
             </span>
-            <div className="min-w-0 flex-1 space-y-2">
-              <div style={{ color: "#d4d4d4" }}>Pulling context from your tools.</div>
-              <div className="space-y-1">
-                <ToolCall verb="Read" tool="Google Calendar" detail="3 calls" />
-                <ToolCall verb="Read" tool="Company Brain" detail="tone · pricing · CRM" />
-                <ToolCall verb="Write" tool="Gmail draft" detail="+ HubSpot note" />
-              </div>
-              <div style={{ color: "#d4d4d4" }}>
+            <motion.div
+              variants={stagger}
+              className="min-w-0 flex-1 space-y-2"
+            >
+              <motion.div variants={item} style={{ color: "#d4d4d4" }}>
+                Pulling context from your tools.
+              </motion.div>
+              <motion.div variants={stagger} className="space-y-1">
+                <motion.div variants={item}>
+                  <ToolCall verb="Read" tool="Google Calendar" detail="3 calls" />
+                </motion.div>
+                <motion.div variants={item}>
+                  <ToolCall verb="Read" tool="Company Brain" detail="tone · pricing · CRM" />
+                </motion.div>
+                <motion.div variants={item}>
+                  <ToolCall verb="Write" tool="Gmail draft" detail="+ HubSpot note" />
+                </motion.div>
+              </motion.div>
+              <motion.div variants={item} style={{ color: "#d4d4d4" }}>
                 Output ready.{" "}
                 <span style={{ color: "#7ee0a7" }}>Run #1042</span>{" "}
                 <span style={{ color: "#6c6c6c" }}>·</span> approval requested in{" "}
                 <span style={{ color: "#a7c4e2" }}>#sales</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        {/* Prompt input */}
+              </motion.div>
+            </motion.div>
+          </motion.div>
+        </motion.div>
+        {/* Prompt input — caret blinks to signal a live prompt */}
         <div
           className="flex items-center gap-2 px-3 py-2 font-mono text-[11px]"
           style={{ borderTop: "1px solid #1f1f1f" }}
         >
           <span style={{ color: "#D97757" }}>&gt;</span>
-          <span
+          <motion.span
             aria-hidden
+            animate={{ opacity: [1, 0.15, 1] }}
+            transition={{ duration: 1.05, repeat: Infinity, ease: "easeInOut" }}
             className="inline-block h-3 w-[2px]"
-            style={{ background: "#d4d4d4", animation: "none" }}
+            style={{ background: "#d4d4d4" }}
           />
         </div>
       </div>
