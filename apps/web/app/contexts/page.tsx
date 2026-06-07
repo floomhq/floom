@@ -25,6 +25,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  ShieldAlert,
   Table,
   Trash2,
   X,
@@ -1348,6 +1349,25 @@ function PackDetailPane({
             )}
           </h2>
           <div className="flex items-center gap-2 shrink-0">
+            {/* Sensitive toggle: when on, this pack is never committed to git
+                or pushed to GitHub — stored only in encrypted Supabase Storage. */}
+            {!readOnly && (
+              <button
+                type="button"
+                title={detail.sensitive ? "Sensitive — not tracked by git. Click to disable." : "Mark as sensitive (exclude from git)"}
+                onClick={async () => {
+                  await api.contexts.setSensitive(detail.name, !detail.sensitive);
+                  onVisibilityChange({ ...detail, sensitive: !detail.sensitive });
+                }}
+                className={`p-1 rounded-[var(--radius-button)] transition-colors shrink-0 ${
+                  detail.sensitive
+                    ? "text-amber-500 hover:text-amber-600 bg-amber-50 hover:bg-amber-100"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                <ShieldAlert className="size-3.5" />
+              </button>
+            )}
             {/* Visibility (Share) control: Private <-> Shared with workspace.
                 Hidden for read-only system packs. Members STEP 4. */}
             {!readOnly && (

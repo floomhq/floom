@@ -476,6 +476,11 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/visibility`,
         { method: "PUT", body: JSON.stringify({ visibility }) }
       ),
+    setSensitive: (name: string, sensitive: boolean) =>
+      fetchJson<{ name: string; sensitive: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/sensitive`,
+        { method: "PATCH", body: JSON.stringify({ sensitive }) }
+      ),
     sharePackLink: (name: string) =>
       fetchJson<import("./types").StandaloneShareLink>(
         `/contexts/${encodeURIComponent(name)}/share-link`,
