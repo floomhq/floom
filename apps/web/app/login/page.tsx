@@ -22,8 +22,8 @@ function LoginContent() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const rawNext = searchParams.get("next") || "/";
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+  const rawNext = searchParams.get("next") || "/overview";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/overview";
 
   useEffect(() => {
     void (async () => {
