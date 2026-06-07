@@ -448,6 +448,8 @@ export interface ContextSummary {
   system?: boolean;
   /** True when the operator cannot edit or delete this pack. */
   read_only?: boolean;
+  /** Sensitive packs are never committed to git or pushed to GitHub. */
+  sensitive?: boolean;
   // Members STEP 4: ownership + per-asset visibility + computed permissions.
   owner_id?: string | null;
   visibility?: AssetVisibility;
