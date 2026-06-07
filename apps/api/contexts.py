@@ -265,6 +265,7 @@ def set_context_metadata(
     *,
     writeable: bool | None = None,
     owner_id: str | None = None,
+    sensitive: bool | None = None,
 ) -> None:
     safe_name = validate_context_name(name)
     metadata = load_context_metadata()
@@ -275,9 +276,20 @@ def set_context_metadata(
         owner_value = str(owner_id).strip()
         if owner_value:
             existing["owner_id"] = owner_value
+    if sensitive is not None:
+        existing["sensitive"] = bool(sensitive)
     existing["updated_at"] = now_iso()
     metadata[safe_name] = existing
     save_context_metadata(metadata)
+
+
+def is_context_sensitive(name: str) -> bool:
+    """Return True if this context is flagged sensitive — must not be committed to git."""
+    try:
+        safe_name = validate_context_name(name)
+        return bool(load_context_metadata().get(safe_name, {}).get("sensitive", False))
+    except Exception:
+        return False
 
 
 def set_context_file_metadata(
