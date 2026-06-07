@@ -17639,7 +17639,8 @@ def connect_github(
     payload: _GitConnectRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> Dict[str, Any]:
-    """Validate a GitHub PAT and store it. Does not link a repo yet."""
+    """Validate a GitHub PAT and store it. Admin only."""
+    _require_admin(auth)
     import github_api as _gh
 
     pat = payload.pat.strip()
@@ -17676,7 +17677,8 @@ def connect_github(
 
 @app.get("/system/git/repos", response_model=List[_GitRepoItem])
 def list_git_repos(auth: AuthContext = Depends(get_auth_context)) -> List[_GitRepoItem]:
-    """List GitHub repos that look like WorkerOS workspaces (name prefix or topic)."""
+    """List GitHub repos that look like WorkerOS workspaces. Admin only."""
+    _require_admin(auth)
     import github_api as _gh
 
     cfg = _git_cfg_get(auth.user_id)
@@ -17694,7 +17696,8 @@ def create_git_repo(
     payload: _GitCreateRepoRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> _GitRepoItem:
-    """Create a new private GitHub repo for this workspace."""
+    """Create a new private GitHub repo for this workspace. Admin only."""
+    _require_admin(auth)
     import github_api as _gh
 
     cfg = _git_cfg_get(auth.user_id)
@@ -17715,7 +17718,8 @@ def link_git_repo(
     payload: _GitLinkRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> _GitStatus:
-    """Link a GitHub repo as this workspace's remote and push the current state."""
+    """Link a GitHub repo as this workspace's remote and push. Admin only."""
+    _require_admin(auth)
     cfg = _git_cfg_get(auth.user_id)
     if not cfg or not cfg.get("github_pat"):
         raise HTTPException(status_code=400, detail="Not connected to GitHub")
@@ -17757,7 +17761,8 @@ def link_git_repo(
 
 @app.post("/system/git/push", response_model=_GitStatus)
 def push_git_workspace(auth: AuthContext = Depends(get_auth_context)) -> _GitStatus:
-    """Push the workspace git repo to GitHub."""
+    """Push the workspace git repo to GitHub. Admin only."""
+    _require_admin(auth)
     cfg = _git_cfg_get(auth.user_id)
     if not cfg or not cfg.get("repo_full_name"):
         raise HTTPException(status_code=400, detail="No GitHub repo linked")
@@ -17780,7 +17785,8 @@ def push_git_workspace(auth: AuthContext = Depends(get_auth_context)) -> _GitSta
 
 @app.delete("/system/git", status_code=204)
 def disconnect_git(auth: AuthContext = Depends(get_auth_context)) -> Response:
-    """Remove stored GitHub credentials and detach the remote."""
+    """Remove stored GitHub credentials and detach the remote. Admin only."""
+    _require_admin(auth)
     with get_db() as conn:
         conn.execute("DELETE FROM git_workspace_config WHERE user_id = ?", (auth.user_id,))
     try:
