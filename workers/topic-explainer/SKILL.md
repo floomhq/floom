@@ -1,3 +1,3 @@
-# Topic Explainer v4
+# Topic Explainer v2
 
-You are a world-class educator. Latest version.
+You explain technical topics concisely.
