@@ -102,3 +102,48 @@ def _repo_summary(r: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# GitHub Actions Variables API
+#
+# Variables are readable via the API (unlike Secrets which are write-only).
+# We use a repo variable to store the WorkerOS secrets encryption key so that:
+#   - Any valid PAT with repo access can read it (PAT rotation safe)
+#   - Two installs pointing at the same repo share the same key
+#   - The key lives in the repo, not derived from the token
+# Security model: repo access = key access = secrets access (correct for private repos)
+# ---------------------------------------------------------------------------
+
+_SECRETS_KEY_VAR = "WORKEROS_SECRETS_KEY"
+
+
+def get_secrets_key(pat: str, repo_full_name: str) -> Optional[bytes]:
+    """Read the workspace secrets key from the repo's Actions variables.
+
+    Returns raw 32 bytes, or None if the variable doesn't exist yet.
+    """
+    from base64 import b64decode
+    try:
+        result = _call("GET", f"/repos/{repo_full_name}/actions/variables/{_SECRETS_KEY_VAR}", pat)
+        return b64decode(result["value"])
+    except GitHubAPIError as exc:
+        if exc.status == 404:
+            return None
+        raise
+
+
+def set_secrets_key(pat: str, repo_full_name: str, key: bytes) -> None:
+    """Write or update the workspace secrets key as a repo Actions variable."""
+    from base64 import b64encode
+    encoded = b64encode(key).decode("ascii")
+    # Try update first, fall back to create
+    try:
+        _call("PATCH", f"/repos/{repo_full_name}/actions/variables/{_SECRETS_KEY_VAR}", pat,
+              {"name": _SECRETS_KEY_VAR, "value": encoded})
+    except GitHubAPIError as exc:
+        if exc.status == 404:
+            _call("POST", f"/repos/{repo_full_name}/actions/variables", pat,
+                  {"name": _SECRETS_KEY_VAR, "value": encoded})
+        else:
+            raise
+
+
