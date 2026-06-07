@@ -52,7 +52,11 @@ export default function ConnectionsClient({
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [scopesByConnectionId, setScopesByConnectionId] = useState<Record<string, string[]>>({});
+  // #565: map app slug -> worker count that uses that connection
+  const [usedByCountBySlug, setUsedByCountBySlug] = useState<Record<string, number>>({});
   const [connectionSearch, setConnectionSearch] = useState("");
+  // #565: track which row is expanded for the in-place peek
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   // X9: floom UUID of the connection that was just added/reconnected, so the
   // Connected tab can highlight + scroll to it instead of silently dropping the
   // user on an unchanged-looking table.
@@ -96,8 +100,10 @@ export default function ConnectionsClient({
       setConnections(records);
       hydrateConnectionMetadata(records);
       loadWorkerDetails()
-        .then((workers) => getLastUsedByConnection(workers))
-        .then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); })
+        .then((workers) => {
+          void getLastUsedByConnection(workers).then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); });
+          setUsedByCountBySlug(computeUsedByCount(workers));
+        })
         .catch(() => {
           setLastUsedBySlug({});
           setLastUsedLoaded(true);
@@ -116,8 +122,10 @@ export default function ConnectionsClient({
       hydrateConnectionMetadata(initialConnections as ConnectionRecord[]);
       // Still load last-used data and secrets in background
       loadWorkerDetails()
-        .then((workers) => getLastUsedByConnection(workers))
-        .then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); })
+        .then((workers) => {
+          void getLastUsedByConnection(workers).then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); });
+          setUsedByCountBySlug(computeUsedByCount(workers));
+        })
         .catch(() => { setLastUsedBySlug({}); setLastUsedLoaded(true); });
     } else {
       void refresh();
@@ -371,10 +379,13 @@ export default function ConnectionsClient({
                     testing={testing === connection.id}
                     highlighted={highlightId === connection.id}
                     lastUsedLoading={!lastUsedLoaded}
+                    expanded={expandedId === connection.id}
+                    usedByCount={usedByCountBySlug[connection.app_name?.toLowerCase() ?? ""] ?? 0}
                     onDelete={handleDelete}
                     onReconnect={handleConnect}
                     onRefresh={handleRefresh}
                     onTest={handleTest}
+                    onToggle={() => setExpandedId((prev) => prev === connection.id ? null : connection.id)}
                   />
                 ))}
                 {oauthConnections.length === 0 && connectionSearch && (
@@ -463,4 +474,17 @@ function removeKey<T>(record: Record<string, T>, key: string) {
   const next = { ...record };
   delete next[key];
   return next;
+}
+
+function computeUsedByCount(workers: WorkerDetail[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const worker of workers) {
+    const connections = worker.config?.connections ?? [];
+    for (const appName of connections) {
+      if (typeof appName !== "string") continue;
+      const slug = appName.toLowerCase();
+      counts[slug] = (counts[slug] ?? 0) + 1;
+    }
+  }
+  return counts;
 }
