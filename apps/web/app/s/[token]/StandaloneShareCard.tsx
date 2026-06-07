@@ -1,8 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Download, FileText, Layers, Package, RotateCcw } from "lucide-react";
+// v6 standalone share card (brain file / brain pack / worker). ONE fixed-height
+// card. Brain content is NAVIGABLE like the in-app brain: a shared pack lists
+// its files + folders with real previews and lets you click between them via
+// breadcrumbs (root -> folder -> file); a shared file renders its actual content
+// inline through the GENERIC renderer. A sticky bottom "Add to workspace" CTA
+// stays pinned. The old `npx ... add <token>` install artifact is dropped.
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { ChevronRight, Download, FileText, Folder, Package, X } from "lucide-react";
+import { GenericOutput } from "@/components/generic-output";
 import { BrandLogo } from "@/components/connections/BrandLogo";
+import { WorkerShareCard } from "@/components/share/WorkerShareCard";
+import { SHARE_CARD_BODY_HEIGHT, WorkerosMark } from "@/components/share/ShareCardShell";
 import type { PublicShareFile, StandaloneShare } from "@/lib/types";
 
 function formatBytes(bytes: number): string {
@@ -11,750 +21,389 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function entityLabel(type: StandaloneShare["entity_type"]): string {
-  if (type === "worker") return "Worker";
-  if (type === "brain_file") return "Brain file";
-  return "Brain pack";
+// Map a file's mime/display type + extension to a GenericOutput type.
+function fileOutputType(file: PublicShareFile): string {
+  const hint = `${file.display_type || ""} ${file.mime_type || ""} ${file.path}`.toLowerCase();
+  if (/\.(json)$|application\/json/.test(hint)) return "json";
+  if (/\.(csv|tsv)$|text\/csv/.test(hint)) return "csv";
+  if (/\.(md|mdx|markdown)$|markdown/.test(hint)) return "markdown";
+  if (/\.(png|jpe?g|gif|webp|svg)$|^image|\bimage\b/.test(hint)) return "file";
+  return "text";
 }
 
-function previewText(share: StandaloneShare): string {
-  if (share.entity_type === "worker") {
-    const worker = share.worker;
-    if (worker?.example_output) return worker.example_output;
-    if (worker?.how_it_works) return worker.how_it_works;
-    if (worker?.use_cases?.length) return worker.use_cases.join("\n");
-    return worker?.description || "This worker is shared as a read-only card.";
+type Node =
+  | { kind: "folder"; name: string; fileCount: number }
+  | { kind: "file"; file: PublicShareFile };
+
+// Build the immediate children (folders + files) at a given path prefix from the
+// flat file list, mirroring the in-app brain's nested folder view.
+function childrenAt(files: PublicShareFile[], prefix: string): Node[] {
+  const folders = new Map<string, number>();
+  const directFiles: PublicShareFile[] = [];
+  for (const file of files) {
+    if (prefix && !file.path.startsWith(prefix)) continue;
+    const rest = prefix ? file.path.slice(prefix.length) : file.path;
+    const slash = rest.indexOf("/");
+    if (slash === -1) {
+      directFiles.push(file);
+    } else {
+      const folderName = rest.slice(0, slash);
+      folders.set(folderName, (folders.get(folderName) ?? 0) + 1);
+    }
   }
-  return share.file?.content_text || "Preview is unavailable. Use the file list to inspect available files.";
+  const nodes: Node[] = [];
+  for (const [name, fileCount] of [...folders.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    nodes.push({ kind: "folder", name, fileCount });
+  }
+  for (const file of directFiles.sort((a, b) => a.path.localeCompare(b.path))) {
+    nodes.push({ kind: "file", file });
+  }
+  return nodes;
 }
 
-function fileTitle(file?: PublicShareFile | null, entityType?: StandaloneShare["entity_type"]): string {
-  if (entityType === "worker") return "WORKER PREVIEW";
-  if (!file) return "PREVIEW";
-  const base = file.path.split("/").pop() || file.path;
-  return `${base.toUpperCase()} PREVIEW`;
+function baseName(path: string): string {
+  return path.split("/").pop() || path;
 }
 
-function previewLabel(files: StandaloneShare["files"]): string {
-  if (files.length > 0) return `Preview all ${files.length} file${files.length === 1 ? "" : "s"} before installing`;
-  return "Preview details";
-}
+export function StandaloneShareCard({
+  share,
+  token,
+  authed = false,
+}: {
+  share: StandaloneShare;
+  token: string;
+  authed?: boolean;
+}) {
+  const isSingleFile = share.entity_type === "brain_file";
+  const files = useMemo(() => share.files || [], [share.files]);
 
-// Layered stack icon matching Floom's share mark
-function ShareIconTile({ type }: { type: StandaloneShare["entity_type"] }) {
-  if (type === "brain_pack") {
+  // FL4: signed-in visitors land back on their dashboard; logged-out prospects
+  // keep the login-bound "Add to workspace" prompt.
+  const ctaHref = authed ? "/" : "/login";
+  const ctaLabel = authed ? "Dashboard" : "Add to workspace";
+
+  // Navigation state: "" = root; a string ending in "/" = folder prefix; a path
+  // (no trailing slash) that matches a file = file view.
+  const [folderPrefix, setFolderPrefix] = useState("");
+  const [openFilePath, setOpenFilePath] = useState<string | null>(
+    isSingleFile ? share.file?.path ?? files[0]?.path ?? null : null,
+  );
+
+  const openFile = useMemo(() => {
+    if (!openFilePath) return null;
+    return files.find((f) => f.path === openFilePath) || share.file || null;
+  }, [openFilePath, files, share.file]);
+
+  const nodes = useMemo(() => childrenAt(files, folderPrefix), [files, folderPrefix]);
+
+  const downloadHref = `/s/${encodeURIComponent(token)}/download`;
+
+  // Worker shares reuse the v6 worker flip-card (DRY).
+  if (share.entity_type === "worker" && share.worker) {
     return (
-      <div
-        style={{
-          width: 48,
-          height: 48,
-          borderRadius: 10,
-          border: "1px solid #e2e2e0",
-          background: "#f0f0ee",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#555",
-        }}
-      >
-        <Package size={22} />
+      <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
+        <div className="rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+          <WorkerShareCard worker={share.worker} authed={authed} />
+        </div>
       </div>
     );
   }
-  if (type === "brain_file") {
-    return (
-      <div
-        style={{
-          width: 48,
-          height: 48,
-          borderRadius: 10,
-          border: "1px solid #e2e2e0",
-          background: "#f0f0ee",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#555",
-        }}
-      >
-        <FileText size={22} />
-      </div>
-    );
+
+  // Breadcrumb segments for the current location.
+  const crumbs: { label: string; onClick?: () => void }[] = [
+    { label: "Brain" },
+    {
+      label: share.title,
+      onClick: openFilePath || folderPrefix ? () => { setFolderPrefix(""); setOpenFilePath(null); } : undefined,
+    },
+  ];
+  if (folderPrefix && !openFilePath) {
+    const parts = folderPrefix.replace(/\/$/, "").split("/");
+    let acc = "";
+    parts.forEach((part, i) => {
+      acc += part + "/";
+      const prefixSoFar = acc;
+      crumbs.push({
+        label: `${part}/`,
+        onClick: i < parts.length - 1 ? () => { setFolderPrefix(prefixSoFar); setOpenFilePath(null); } : undefined,
+      });
+    });
   }
-  // Worker: layered stack mark like Floom's package/share icon
+  if (openFilePath) {
+    // folder context before the file
+    const dir = openFilePath.includes("/") ? openFilePath.slice(0, openFilePath.lastIndexOf("/") + 1) : "";
+    if (dir) {
+      crumbs.push({ label: dir, onClick: () => { setFolderPrefix(dir); setOpenFilePath(null); } });
+    }
+    crumbs.push({ label: baseName(openFilePath) });
+  }
+
+  const showClose = Boolean(folderPrefix || openFilePath) && !isSingleFile;
+
   return (
-    <div
-      style={{
-        width: 48,
-        height: 48,
-        borderRadius: 10,
-        border: "1px solid #e2e2e0",
-        background: "#f0f0ee",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "#444",
-      }}
-    >
-      {/* SVG approximating Floom's layered stack/share icon */}
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2L2 7l10 5 10-5-10-5z" />
-        <path d="M2 17l10 5 10-5" />
-        <path d="M2 12l10 5 10-5" />
-      </svg>
+    <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 760 }}>
+      <div className="rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+        {/* Nav */}
+        <div className="flex items-center justify-between rounded-t-[var(--radius-card)] border-b border-[var(--border-soft)] bg-[var(--bg-card)] px-5 py-3">
+          <WorkerosMark />
+          <Link href={ctaHref} className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
+            {ctaLabel}
+          </Link>
+        </div>
+
+        <div className="px-7 pb-1 pt-4">
+          {/* Breadcrumb */}
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <nav className="flex flex-wrap items-center gap-1.5 text-[13px] text-[var(--ink-soft)]" aria-label="Breadcrumb">
+              {crumbs.map((c, i) => (
+                <span key={i} className="inline-flex items-center gap-1.5">
+                  {i > 0 && <span className="text-[var(--ink-faint)]">/</span>}
+                  {c.onClick ? (
+                    <button type="button" onClick={c.onClick} className="hover:text-[var(--ink)]">
+                      {c.label}
+                    </button>
+                  ) : (
+                    <span className={i === crumbs.length - 1 ? "font-medium text-[var(--ink)]" : ""}>{c.label}</span>
+                  )}
+                </span>
+              ))}
+            </nav>
+            {showClose && (
+              <button
+                type="button"
+                onClick={() => { setFolderPrefix(""); setOpenFilePath(null); }}
+                className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-button)] px-2.5 text-xs text-[var(--ink-soft)] hover:bg-[var(--bg-2)]"
+              >
+                <X className="size-3" />
+                Close
+              </button>
+            )}
+          </div>
+
+          {/* ONE card, fixed height — content swaps in place */}
+          <div
+            className="flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)]"
+            style={{ height: SHARE_CARD_BODY_HEIGHT }}
+          >
+            {openFile ? (
+              <FileView
+                file={openFile}
+                packTitle={share.title}
+                downloadHref={downloadHref}
+                ctaHref={ctaHref}
+                ctaLabel={ctaLabel}
+              />
+            ) : (
+              <PackView
+                share={share}
+                nodes={nodes}
+                folderPrefix={folderPrefix}
+                onOpenFolder={(name) => setFolderPrefix(folderPrefix + name + "/")}
+                onOpenFile={(path) => setOpenFilePath(path)}
+                ctaHref={ctaHref}
+                ctaLabel={ctaLabel}
+              />
+            )}
+          </div>
+        </div>
+
+        <div className="px-7 pb-5 pt-3">
+          <p className="text-xs text-[var(--ink-faint)]">
+            Shared via <span className="font-medium text-[var(--ink-soft)]">Workeros</span>. Review the visible content before adding it to your workspace.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
 
-// Sender avatar: initials or "W"
-function SenderAvatar({ name }: { name?: string }) {
-  const initials = name
-    ? name.trim().split(/\s+/).slice(0, 2).map((w) => w[0].toUpperCase()).join("")
-    : "W";
+function PackView({
+  share,
+  nodes,
+  folderPrefix,
+  onOpenFolder,
+  onOpenFile,
+  ctaHref,
+  ctaLabel,
+}: {
+  share: StandaloneShare;
+  nodes: Node[];
+  folderPrefix: string;
+  onOpenFolder: (name: string) => void;
+  onOpenFile: (path: string) => void;
+  ctaHref: string;
+  ctaLabel: string;
+}) {
+  const atRoot = folderPrefix === "";
+  const fileCount = nodes.filter((n) => n.kind === "file").length;
+  const folderCount = nodes.filter((n) => n.kind === "folder").length;
+
   return (
-    <span
-      style={{
-        display: "grid",
-        placeItems: "center",
-        width: 32,
-        height: 32,
-        minWidth: 32,
-        borderRadius: "50%",
-        background: "#e8e8e5",
-        fontSize: 11,
-        fontWeight: 600,
-        color: "#333",
-        letterSpacing: 0,
-        flexShrink: 0,
-      }}
-    >
-      {initials}
-    </span>
+    <>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {atRoot && (
+          <div className="border-b border-[var(--border-soft)] px-5 py-4">
+            <div className="mb-1 flex items-center gap-2">
+              <Package className="size-4 text-[var(--ink-soft)]" />
+              <h1 className="text-lg font-semibold tracking-tight">{share.title}</h1>
+            </div>
+            {share.description && (
+              <p className="mb-3 text-sm leading-relaxed text-[var(--ink-soft)]">{share.description}</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Metric label="Files" value={share.pack?.file_count ?? share.files.length} />
+              {folderCount > 0 && <Metric label="Folders" value={folderCount} />}
+              {share.pack?.total_size_bytes != null && (
+                <Metric label="Size" value={formatBytes(share.pack.total_size_bytes)} />
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="px-5 py-4">
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">
+            {atRoot ? "Files" : `${folderPrefix.replace(/\/$/, "")} — ${fileCount} file${fileCount === 1 ? "" : "s"}`}
+          </p>
+          <div className="flex flex-col gap-1">
+            {nodes.length === 0 && <p className="text-sm text-[var(--ink-soft)]">This folder is empty.</p>}
+            {nodes.map((node) =>
+              node.kind === "folder" ? (
+                <button
+                  key={`folder-${node.name}`}
+                  type="button"
+                  onClick={() => onOpenFolder(node.name)}
+                  className="flex items-center gap-3 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-2.5 text-left hover:bg-[rgba(107,104,97,0.07)]"
+                >
+                  <Folder className="size-3.5 shrink-0 text-[var(--ink-soft)]" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-xs font-medium">{node.name}/</p>
+                    <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
+                      {node.fileCount} file{node.fileCount === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                  <ChevronRight className="size-3 shrink-0 text-[var(--ink-faint)]" />
+                </button>
+              ) : (
+                <button
+                  key={`file-${node.file.path}`}
+                  type="button"
+                  onClick={() => onOpenFile(node.file.path)}
+                  className="flex items-center gap-3 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-2.5 text-left hover:bg-[rgba(107,104,97,0.07)]"
+                >
+                  <FileText className="size-3.5 shrink-0 text-[var(--ink-soft)]" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-mono text-xs font-medium">{baseName(node.file.path)}</p>
+                    <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
+                      {formatBytes(node.file.size)}
+                      {node.file.display_type ? ` · ${node.file.display_type}` : ""}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-[var(--radius-button)] border border-[var(--line)] px-2.5 py-1 text-[11px] text-[var(--ink-soft)]">
+                    Open
+                  </span>
+                </button>
+              ),
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Sticky CTA */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-soft)] bg-[var(--bg-2)] px-5 py-3">
+        <p className="text-xs text-[var(--ink-soft)]">Add this folder so your workers can use it.</p>
+        <Link
+          href={ctaHref}
+          className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
+        >
+          {ctaLabel}
+        </Link>
+      </div>
+    </>
   );
 }
 
-// Share-specific neutral surface palette — overrides the app's warm beige
-const SHARE_VARS = {
-  "--s-bg": "#f5f5f3",
-  "--s-card": "#ffffff",
-  "--s-surface": "#f0f0ee",
-  "--s-border": "#e2e2e0",
-  "--s-border-soft": "#eaeae8",
-  "--s-ink": "#141414",
-  "--s-ink-soft": "#6b6b68",
-  "--s-ink-mute": "#9c9c98",
-  "--s-mono": '"Geist Mono", "SF Mono", ui-monospace, monospace',
-} as React.CSSProperties;
-
-export function StandaloneShareCard({ share, token }: { share: StandaloneShare; token: string }) {
-  const [copied, setCopied] = useState(false);
-  const [copiedCmd, setCopiedCmd] = useState(false);
-  const [showFiles, setShowFiles] = useState(false);
-  const [activePath, setActivePath] = useState(share.file?.path || share.files[0]?.path || "");
-  const [shareUrl, setShareUrl] = useState(`/s/${token}`);
-  const activeFile = useMemo(
-    () => share.files.find((file) => file.path === activePath) || share.file || share.files[0] || null,
-    [activePath, share.file, share.files],
-  );
-  const text = previewText(share);
-  const worker = share.worker;
-  const files = share.files || [];
-  const isWorker = share.entity_type === "worker";
-  const isFile = share.entity_type === "brain_file";
-
-  // The install command uses the token directly, not the full URL
-  const installCmd = `npx -y @floomhq/floom add ${token}`;
-
-  const primaryHref =
-    isWorker && worker?.id
-      ? `/workers/${encodeURIComponent(worker.id)}`
-      : share.entity_type === "brain_pack"
-        ? "/contexts"
-        : `/s/${encodeURIComponent(token)}/download`;
-  const primaryLabel =
-    isWorker
-      ? "Run this worker"
-      : share.entity_type === "brain_pack"
-        ? "View pack"
-        : "Download file";
-
-  useEffect(() => {
-    setShareUrl(window.location.href);
-  }, []);
-
-  async function copyShareLink() {
-    await navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }
-
-  async function copyInstallCmd() {
-    await navigator.clipboard.writeText(installCmd);
-    setCopiedCmd(true);
-    window.setTimeout(() => setCopiedCmd(false), 1500);
-  }
-
-  // Sender info — PublicWorker has no owner_name; fall back to generic label
-  const senderName: string | undefined = undefined;
-
+function FileView({
+  file,
+  packTitle,
+  downloadHref,
+  ctaHref,
+  ctaLabel,
+}: {
+  file: PublicShareFile;
+  packTitle: string;
+  downloadHref: string;
+  ctaHref: string;
+  ctaLabel: string;
+}) {
+  const type = fileOutputType(file);
+  const content = file.content_text ?? "";
   return (
-    <main
-      style={{
-        minHeight: "calc(100vh - 56px)",
-        padding: "40px 12px 40px",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        background: "var(--s-bg, #f5f5f3)",
-        ...SHARE_VARS,
-      }}
-    >
-      <div style={{ width: "min(452px, 100%)" }}>
-        <section
-          style={{
-            position: "relative",
-            overflow: "hidden",
-            borderRadius: 13,
-            border: "1px solid var(--s-border)",
-            background: "var(--s-card)",
-            boxShadow: "0 16px 36px hsl(0 0% 0% / 0.10), 0 0 0 1px var(--s-border)",
-          }}
-        >
-          {!showFiles ? (
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              {/* Sender strip */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 10,
-                  borderBottom: "1px solid var(--s-border-soft)",
-                  background: "var(--s-surface)",
-                  padding: "14px 20px",
-                }}
-              >
-                <SenderAvatar name={senderName} />
-                <div style={{ minWidth: 0, fontSize: 12.5, lineHeight: 1.5 }}>
-                  <strong style={{ display: "block", fontWeight: 600, color: "var(--s-ink)" }}>
-                    {senderName ? `${senderName} shared this with you` : "A Workeros operator shared this with you"}
-                  </strong>
-                  <span style={{ color: "var(--s-ink-soft)" }}>
-                    Shared via Workeros
-                  </span>
-                </div>
-              </div>
-
-              {/* Content area */}
-              <div style={{ display: "flex", flexDirection: "column", padding: "20px 24px" }}>
-                {/* Shared via link badge */}
-                <div style={{ marginBottom: 16 }}>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      borderRadius: 999,
-                      border: "1px solid var(--s-border)",
-                      background: "var(--s-card)",
-                      padding: "4px 10px",
-                      fontFamily: "var(--s-mono)",
-                      fontSize: 11,
-                      color: "var(--s-ink-soft)",
-                    }}
-                  >
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#2f8f5b", flexShrink: 0 }} />
-                    Shared via link
-                  </span>
-                </div>
-
-                {/* Icon tile */}
-                <div style={{ marginBottom: 12 }}>
-                  <ShareIconTile type={share.entity_type} />
-                </div>
-
-                {/* Title */}
-                <h1
-                  style={{
-                    margin: "0 0 8px 0",
-                    fontSize: 26,
-                    fontWeight: 600,
-                    lineHeight: 1.15,
-                    color: "var(--s-ink)",
-                    letterSpacing: "-0.01em",
-                  }}
-                >
-                  {share.title}
-                </h1>
-
-                {/* Description */}
-                {share.description && (
-                  <p
-                    style={{
-                      margin: "0 0 16px 0",
-                      fontSize: 13.5,
-                      lineHeight: 1.6,
-                      color: "var(--s-ink-soft)",
-                    }}
-                  >
-                    {share.description}
-                  </p>
-                )}
-
-                {/* Connection pills — for worker */}
-                {worker?.connections && worker.connections.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
-                    {worker.connections.map((slug) => (
-                      <span
-                        key={slug}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 5,
-                          borderRadius: 7,
-                          border: "1px solid var(--s-border)",
-                          background: "var(--s-surface)",
-                          padding: "4px 8px",
-                          fontSize: 11,
-                          color: "var(--s-ink-soft)",
-                        }}
-                      >
-                        <BrandLogo icon={slug} className="size-3.5" />
-                        {slug.replace(/[-_]/g, " ")}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Preview toggle button — matches reference "Preview all N files before installing" */}
-                <button
-                  type="button"
-                  onClick={() => setShowFiles(true)}
-                  style={{
-                    marginBottom: 8,
-                    display: "flex",
-                    width: "100%",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    borderRadius: 7,
-                    border: "1px solid var(--s-border)",
-                    background: "var(--s-surface)",
-                    padding: "9px 12px",
-                    textAlign: "left",
-                    fontFamily: "var(--s-mono)",
-                    fontSize: 11,
-                    color: "var(--s-ink)",
-                    cursor: "pointer",
-                  }}
-                >
-                  <span>{previewLabel(files)}</span>
-                  <RotateCcw size={13} style={{ color: "var(--s-ink-mute)", flexShrink: 0 }} />
-                </button>
-
-                {/* Preview block */}
-                <div
-                  style={{
-                    overflow: "hidden",
-                    borderRadius: 9,
-                    border: "1px solid var(--s-border)",
-                    background: "var(--s-surface)",
-                    marginBottom: 20,
-                  }}
-                >
-                  <div
-                    style={{
-                      borderBottom: "1px solid var(--s-border-soft)",
-                      padding: "7px 12px",
-                      fontFamily: "var(--s-mono)",
-                      fontSize: 10,
-                      textTransform: "uppercase" as const,
-                      letterSpacing: "0.04em",
-                      color: "var(--s-ink-mute)",
-                    }}
-                  >
-                    {fileTitle(activeFile, share.entity_type)}
-                  </div>
-                  <pre
-                    style={{
-                      margin: 0,
-                      maxHeight: 140,
-                      overflow: "hidden",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      padding: "10px 12px",
-                      fontFamily: "var(--s-mono)",
-                      fontSize: 11,
-                      lineHeight: 1.6,
-                      color: "var(--s-ink-soft)",
-                    }}
-                  >
-                    {text}
-                  </pre>
-                </div>
-
-                {/* CTA section */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {/* Primary action — "Copy install command" for skills/packs, or "Run this worker" / "Download" */}
-                  {isWorker || share.entity_type === "brain_pack" ? (
-                    <button
-                      type="button"
-                      onClick={copiedCmd ? undefined : copyInstallCmd}
-                      style={{
-                        display: "inline-flex",
-                        height: 44,
-                        width: "100%",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 8,
-                        borderRadius: 9,
-                        border: "none",
-                        background: "#141414",
-                        padding: "0 16px",
-                        fontSize: 14,
-                        fontWeight: 500,
-                        color: "#ffffff",
-                        cursor: "pointer",
-                        letterSpacing: "-0.01em",
-                      }}
-                    >
-                      {copiedCmd ? <Check size={16} /> : <Copy size={16} />}
-                      {copiedCmd ? "Copied!" : "Copy install command"}
-                    </button>
-                  ) : (
-                    <a
-                      href={primaryHref}
-                      style={{
-                        display: "inline-flex",
-                        height: 44,
-                        width: "100%",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 8,
-                        borderRadius: 9,
-                        border: "none",
-                        background: "#141414",
-                        padding: "0 16px",
-                        fontSize: 14,
-                        fontWeight: 500,
-                        color: "#ffffff",
-                        textDecoration: "none",
-                        letterSpacing: "-0.01em",
-                      }}
-                    >
-                      <Download size={16} />
-                      {primaryLabel}
-                    </a>
-                  )}
-
-                  {/* Command/link artifact */}
-                  <code
-                    style={{
-                      display: "block",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      borderRadius: 7,
-                      border: "1px solid var(--s-border)",
-                      background: "var(--s-surface)",
-                      padding: "9px 12px",
-                      fontFamily: "var(--s-mono)",
-                      fontSize: 11,
-                      color: "var(--s-ink-soft)",
-                    }}
-                  >
-                    {isWorker || share.entity_type === "brain_pack" ? installCmd : shareUrl}
-                  </code>
-
-                  {/* Secondary links row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                    }}
-                  >
-                    {(isWorker || share.entity_type === "brain_pack") && (
-                      <>
-                        <span style={{ fontFamily: "var(--s-mono)", fontSize: 10.5, color: "var(--s-ink-mute)" }}>
-                          Install into one agent only?
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {}}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            padding: 0,
-                            cursor: "pointer",
-                            fontFamily: "var(--s-mono)",
-                            fontSize: 10.5,
-                            color: "var(--s-ink-soft)",
-                            textDecoration: "underline",
-                          }}
-                        >
-                          Show options
-                        </button>
-                      </>
-                    )}
-                    {isFile && (
-                      <button
-                        type="button"
-                        onClick={copyShareLink}
-                        style={{
-                          display: "inline-flex",
-                          height: 32,
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 6,
-                          borderRadius: 7,
-                          border: "1px solid var(--s-border)",
-                          background: "var(--s-card)",
-                          padding: "0 12px",
-                          fontFamily: "var(--s-mono)",
-                          fontSize: 11,
-                          color: "var(--s-ink-soft)",
-                          cursor: "pointer",
-                        }}
-                      >
-                        {copied ? <Check size={13} /> : <Copy size={13} />}
-                        {copied ? "Copied" : "Copy share link"}
-                      </button>
-                    )}
-                  </div>
-
-                  {/* No account note */}
-                  {(isWorker || share.entity_type === "brain_pack") && (
-                    <p
-                      style={{
-                        margin: 0,
-                        fontFamily: "var(--s-mono)",
-                        fontSize: 10.5,
-                        color: "var(--s-ink-mute)",
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      <strong style={{ fontWeight: 600, color: "var(--s-ink-soft)" }}>No account needed.</strong>{" "}
-                      Paste the command into your Claude project.
-                    </p>
-                  )}
-                </div>
-
-                {/* Footer */}
-                <div
-                  style={{
-                    marginTop: 20,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    paddingTop: 8,
-                    fontFamily: "var(--s-mono)",
-                    fontSize: 11,
-                    color: "var(--s-ink-mute)",
-                  }}
-                >
-                  <span>{entityLabel(share.entity_type)}</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowFiles(true)}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 5,
-                      borderRadius: 5,
-                      border: "none",
-                      background: "none",
-                      padding: "4px 8px",
-                      fontFamily: "var(--s-mono)",
-                      fontSize: 11,
-                      color: "var(--s-ink-soft)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Inspect content
-                    <Layers size={13} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* File inspector panel */
-            <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 600 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  borderBottom: "1px solid var(--s-border-soft)",
-                  padding: "12px 20px",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: "var(--s-mono)",
-                    fontSize: 11,
-                    textTransform: "uppercase" as const,
-                    letterSpacing: "0.04em",
-                    color: "var(--s-ink-mute)",
-                  }}
-                >
-                  What is inside / {files.length || 1} item{files.length === 1 ? "" : "s"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowFiles(false)}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 5,
-                    borderRadius: 5,
-                    border: "none",
-                    background: "none",
-                    padding: "4px 8px",
-                    fontFamily: "var(--s-mono)",
-                    fontSize: 11,
-                    color: "var(--s-ink-soft)",
-                    cursor: "pointer",
-                  }}
-                >
-                  Back
-                </button>
-              </div>
-
-              {files.length > 0 && (
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 2,
-                    overflowX: "auto",
-                    borderBottom: "1px solid var(--s-border-soft)",
-                    padding: "8px 12px 0",
-                  }}
-                >
-                  {files.map((file) => (
-                    <button
-                      type="button"
-                      key={file.path}
-                      onClick={() => setActivePath(file.path)}
-                      style={{
-                        flexShrink: 0,
-                        borderRadius: "5px 5px 0 0",
-                        border: "none",
-                        borderBottom: activeFile?.path === file.path ? "2px solid var(--s-ink)" : "2px solid transparent",
-                        background: activeFile?.path === file.path ? "var(--s-surface)" : "none",
-                        padding: "6px 10px",
-                        fontFamily: "var(--s-mono)",
-                        fontSize: 11,
-                        color: activeFile?.path === file.path ? "var(--s-ink)" : "var(--s-ink-mute)",
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                        marginBottom: -1,
-                      }}
-                    >
-                      {file.path}
-                      <span style={{ marginLeft: 4, color: "var(--s-ink-mute)", fontSize: 10 }}>{formatBytes(file.size)}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
-                <pre
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    overflowY: "auto",
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    background: "var(--s-surface)",
-                    padding: "16px",
-                    fontFamily: "var(--s-mono)",
-                    fontSize: 11.5,
-                    lineHeight: 1.65,
-                    color: "var(--s-ink-soft)",
-                  }}
-                >
-                  {activeFile?.content_text || "Preview is unavailable for this file."}
-                </pre>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                  borderTop: "1px solid var(--s-border-soft)",
-                  padding: "12px 16px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <SenderAvatar name={senderName} />
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--s-ink)" }}>Workeros</div>
-                    <div style={{ fontFamily: "var(--s-mono)", fontSize: 10.5, color: "var(--s-ink-mute)" }}>Shared content</div>
-                  </div>
-                </div>
-                <div
-                  style={{
-                    borderRadius: 7,
-                    border: "1px solid #c5dfc9",
-                    background: "#edf7ef",
-                    padding: "8px 12px",
-                    fontSize: 11,
-                    lineHeight: 1.5,
-                    color: "var(--s-ink-soft)",
-                  }}
-                >
-                  <strong style={{ fontWeight: 600, color: "var(--s-ink)" }}>Public preview.</strong>{" "}
-                  Review the visible content before downloading or copying.
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* Bottom conversion CTA — matches reference: neutral band, black button with arrow */}
-        <div
-          style={{
-            marginTop: 16,
-            width: "100%",
-            borderRadius: 11,
-            border: "1px solid #e2e2e0",
-            background: "#f0f0ee",
-            padding: "16px 20px",
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-          }}
-        >
-          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "#555552" }}>
-            Like this? Start your own team&#39;s skill library on Workeros.
-          </p>
-          <a
-            href="/login"
-            style={{
-              display: "inline-flex",
-              height: 34,
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 7,
-              border: "none",
-              background: "#141414",
-              padding: "0 14px",
-              fontSize: 13,
-              fontWeight: 500,
-              color: "#ffffff",
-              textDecoration: "none",
-              letterSpacing: "-0.01em",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Start your workspace →
-          </a>
+    <>
+      {/* File header */}
+      <div className="flex shrink-0 items-center gap-3 border-b border-[var(--border-default)] bg-[var(--bg-card)] px-5 py-3.5">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)]">
+          <FileText className="size-4 text-[var(--ink-soft)]" />
         </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-mono text-[13px] font-medium">{baseName(file.path)}</p>
+          <p className="mt-0.5 text-[11px] text-[var(--ink-soft)]">
+            {[file.display_type, formatBytes(file.size)].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        {file.download_url && (
+          <a
+            href={file.download_url}
+            download
+            className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] border border-[var(--line)] text-[var(--ink-soft)] no-underline hover:bg-[var(--bg-2)]"
+            title="Download"
+          >
+            <Download className="size-3.5" />
+          </a>
+        )}
       </div>
-    </main>
+
+      {/* File content via GENERIC renderer */}
+      <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--bg-card)] px-5 py-4">
+        {file.is_binary && type === "file" ? (
+          <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+            <BrandLogo icon={file.display_type || "file"} className="size-8 text-[var(--ink-faint)]" />
+            <p className="text-sm text-[var(--ink-soft)]">Binary file — download to view.</p>
+          </div>
+        ) : content ? (
+          <GenericOutput type={type} value={content} />
+        ) : (
+          <p className="text-sm text-[var(--ink-soft)]">Preview is unavailable for this file.</p>
+        )}
+      </div>
+
+      {/* Sticky CTA */}
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-t border-[var(--border-soft)] bg-[var(--bg-2)] px-5 py-3">
+        <Link
+          href={ctaHref}
+          className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
+        >
+          {ctaLabel}
+        </Link>
+        <a
+          href={downloadHref}
+          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--line)] px-3.5 text-[13px] font-medium no-underline hover:bg-[var(--bg-2)]"
+        >
+          <Download className="size-3.5" />
+          Download
+        </a>
+        <p className="ml-auto text-[11px] text-[var(--ink-faint)]">
+          From <span className="font-medium text-[var(--ink-soft)]">{packTitle}</span>
+        </p>
+      </div>
+    </>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5 text-xs">
+      <span className="text-[var(--ink-soft)]">{label}</span>
+      <span className="font-medium">{value}</span>
+    </span>
   );
 }

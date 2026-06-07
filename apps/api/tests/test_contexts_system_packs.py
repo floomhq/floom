@@ -146,26 +146,57 @@ def test_operator_create_and_upload_roundtrip(client_and_main):
 def test_upload_can_create_missing_pack_when_requested(client_and_main):
     client, _main = client_and_main
 
-    missing = client.post(
+    created_default = client.post(
         "/contexts/drop-created/upload",
         files={"files": ("first-note.md", b"# First\nDrop flow.\n", "text/markdown")},
     )
-    assert missing.status_code == 404
+    assert created_default.status_code == 200, created_default.text
+    assert created_default.json()["files"][0]["path"] == "first-note.md"
 
     created = client.post(
-        "/contexts/drop-created/upload",
+        "/contexts/another-drop-created/upload",
         data={"create_if_missing": "true"},
         files={"files": ("first-note.md", b"# First\nDrop flow.\n", "text/markdown")},
     )
     assert created.status_code == 200, created.text
     assert created.json()["files"][0]["path"] == "first-note.md"
 
-    detail = client.get("/contexts/drop-created")
+    detail = client.get("/contexts/another-drop-created")
     assert detail.status_code == 200, detail.text
     body = detail.json()
     assert body["writeable"] is True
     assert body["owner_id"] == "federico"
     assert any(f["path"] == "first-note.md" for f in body["files"])
+
+
+def test_context_upload_oversize_returns_friendly_413(client_and_main, monkeypatch):
+    client, _main = client_and_main
+    monkeypatch.setenv("WORKEROS_CONTEXT_UPLOAD_MAX_BYTES", "10")
+
+    response = client.post(
+        "/contexts/too-large/upload",
+        files={"files": ("large.png", b"01234567890", "image/png")},
+    )
+
+    assert response.status_code == 413
+    detail = response.json()["detail"]
+    assert "Brain upload is too large" in detail
+    assert "Request body too large" not in detail
+
+
+def test_context_upload_accepts_multi_mb_image_by_default(client_and_main):
+    client, _main = client_and_main
+    image_bytes = b"\x89PNG\r\n\x1a\n" + (b"0" * (2 * 1024 * 1024))
+
+    response = client.post(
+        "/contexts/image-drop/upload",
+        files={"files": ("diagram.png", image_bytes, "image/png")},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["files"][0]["path"] == "diagram.png"
+    assert body["files"][0]["size"] == len(image_bytes)
 
 
 def test_context_file_metadata_tags_roundtrip(client_and_main):

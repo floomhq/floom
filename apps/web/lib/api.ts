@@ -150,6 +150,18 @@ async function fetchRaw(path: string, options?: RequestInit): Promise<Response> 
   return res;
 }
 
+async function fetchWorkspaceBasePersona(): Promise<{ content: string; is_custom: boolean; default: string }> {
+  try {
+    return await fetchJson<{ content: string; is_custom: boolean; default: string }>("/workspace/base/state");
+  } catch (err) {
+    if (!(err instanceof Error) || err.message !== "Not Found") {
+      throw err;
+    }
+    const content = await fetchText("/workspace/base");
+    return { content, is_custom: false, default: content };
+  }
+}
+
 export const api = {
   me: async () => {
     const res = await fetch(`${APP_API_BASE}/me`, {
@@ -557,11 +569,6 @@ export const api = {
       fetchJson<import("./types").VersionFileDetail>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/versions/${versionId}`
       ),
-    restoreFileVersion: (name: string, path: string, sha: string) =>
-      fetchJson<import("./types").ContextFileItem>(
-        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/restore/${sha}`,
-        { method: "POST" }
-      ),
   },
   system: {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
@@ -591,30 +598,23 @@ export const api = {
       fetchJson<{ content: string }>(`/workspace/versions/${encodeURIComponent(versionId)}`),
     rollbackWorkspaceInstructions: (versionId: string) =>
       fetchText(`/workspace/rollback/${versionId}`, { method: "POST" }),
-    // Git workspace integration
-    gitStatus: () =>
-      fetchJson<import("./types").GitWorkspaceStatus>("/system/git"),
-    gitConnect: (pat: string) =>
-      fetchJson<{ username: string; avatar_url: string; name: string | null }>(
-        "/system/git/connect",
-        { method: "POST", body: JSON.stringify({ pat }) }
-      ),
-    gitListRepos: () =>
-      fetchJson<import("./types").GitRepoItem[]>("/system/git/repos"),
-    gitCreateRepo: (name: string) =>
-      fetchJson<import("./types").GitRepoItem>(
-        "/system/git/repos",
-        { method: "POST", body: JSON.stringify({ name }) }
-      ),
-    gitLink: (repo_full_name: string) =>
-      fetchJson<import("./types").GitWorkspaceStatus>(
-        "/system/git/link",
-        { method: "POST", body: JSON.stringify({ repo_full_name }) }
-      ),
-    gitPush: () =>
-      fetchJson<import("./types").GitWorkspaceStatus>("/system/git/push", { method: "POST" }),
-    gitDisconnect: () =>
-      fetch("/system/git", { method: "DELETE" }),
+    // Base instructions (the built-in Emily persona). This layer applies to ALL
+    // conversations and is layered BEFORE workspace instructions. Editing it
+    // saves an override; resetting removes the override and restores the
+    // built-in engine default.
+    workspaceBasePersona: fetchWorkspaceBasePersona,
+    updateWorkspaceBasePersona: (content: string) =>
+      fetchText("/workspace/base", {
+        method: "PUT",
+        headers: { "Content-Type": "text/markdown" },
+        body: content,
+      }),
+    resetWorkspaceBasePersona: () =>
+      fetchRaw("/workspace/base", { method: "DELETE" }).then(() => undefined),
+    listWorkspaceBaseVersions: (limit = 50) =>
+      fetchJson<import("./types").VersionSummary[]>(`/workspace/base/versions?limit=${limit}`),
+    rollbackWorkspaceBasePersona: (versionId: string) =>
+      fetchText(`/workspace/base/rollback/${versionId}`, { method: "POST" }),
   },
   connections: {
     list: () => fetchJson<import("./types").ConnectionItem[]>("/connections"),
@@ -755,6 +755,12 @@ export const api = {
         "/workspace/members/transfer-owner",
         { method: "POST", body: JSON.stringify({ new_owner_id: newOwnerId }) }
       ),
+  },
+  conversations: {
+    list: (limit = 50) =>
+      fetchJson<import("./types").ConversationSummary[]>(`/conversations?limit=${limit}`),
+    get: (id: string) =>
+      fetchJson<import("./types").ConversationDetail>(`/conversations/${encodeURIComponent(id)}`),
   },
   // Multi-member: user management + personal access tokens
   users: {

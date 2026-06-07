@@ -1,6 +1,6 @@
 export const metadata = {
-  title: "Privacy — Floom Workers",
-  description: "How Floom Workers handles data.",
+  title: "Privacy — Workeros",
+  description: "How Workeros handles data.",
 };
 
 export default function PrivacyPage() {
@@ -15,7 +15,7 @@ export default function PrivacyPage() {
 
       <div className="space-y-4 text-sm leading-relaxed">
         <p>
-          Floom Workers is open-source software that runs AI workers on
+          Workeros is open-source software that runs AI workers on
           infrastructure operated by whoever deploys it. This instance is a
           single-tenant deployment: it stores data for one account owner and
           is not a multi-user service collecting third-party personal data.

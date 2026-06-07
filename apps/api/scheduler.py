@@ -21,7 +21,7 @@ from typing import Any, Optional
 from croniter import croniter
 
 from db.factory import get_repositories
-from run_service import create_run, start_run
+from run_service import create_run, get_worker_config_for_run, start_run
 from alerting import alerting_tick
 
 logger = logging.getLogger("floom.scheduler")
@@ -97,6 +97,32 @@ def _worker_is_archived(worker_id: str) -> bool:
         return False
 
 
+def _effective_scheduled_inputs(repos, worker_id: str) -> tuple[dict[str, object], list[str]]:
+    """Return inputs a schedule run will see, plus missing required fields."""
+    config = get_worker_config_for_run(worker_id)
+    recipe = None
+    try:
+        recipe = repos.workers.get_recipe(worker_id=worker_id)
+    except Exception:
+        recipe = None
+
+    inputs: dict[str, object] = {}
+    if isinstance(recipe, dict) and isinstance(recipe.get("input_values"), dict):
+        inputs.update(recipe["input_values"])
+
+    if config is not None:
+        for inp in getattr(config, "inputs", []) or []:
+            if inp.default is not None and inp.name not in inputs:
+                inputs[inp.name] = inp.default
+
+    missing: list[str] = []
+    if config is not None:
+        for inp in getattr(config, "inputs", []) or []:
+            if getattr(inp, "required", False) and inputs.get(inp.name) in (None, ""):
+                missing.append(inp.name)
+    return inputs, missing
+
+
 def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
     """Iterate normalized schedule trigger ROWS and fire any that are due.
 
@@ -154,6 +180,18 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             )
             continue
 
+        scheduled_inputs, missing_inputs = _effective_scheduled_inputs(repos, worker_id)
+        if missing_inputs:
+            if new_next:
+                repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+            logger.warning(
+                "Skipping schedule trigger %s for worker %s: missing required scheduled input(s): %s",
+                trigger_id,
+                worker_id,
+                ", ".join(missing_inputs),
+            )
+            continue
+
         logger.info(
             "Firing schedule trigger %s for worker %s (was due %s)",
             trigger_id,
@@ -163,13 +201,13 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
         try:
             run_id = create_run(
                 worker_id,
-                {},
+                scheduled_inputs,
                 trigger_source="schedule",
                 user_id=user_id,
                 trigger_ref=trigger_id,
                 repos=repos,
             )
-            start_run(run_id, worker_id, {}, user_id=user_id, repos=repos)
+            start_run(run_id, worker_id, scheduled_inputs, user_id=user_id, repos=repos)
             repos.workers.mark_trigger_fired(
                 trigger_id=trigger_id,
                 last_fired_at=now_iso_str,
@@ -281,18 +319,29 @@ def _tick() -> None:
             continue
 
         # Fire the run
+        scheduled_inputs, missing_inputs = _effective_scheduled_inputs(repos, worker_id)
+        if missing_inputs:
+            if new_next:
+                repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+            logger.warning(
+                "Skipping scheduled run for worker %s: missing required scheduled input(s): %s",
+                worker_id,
+                ", ".join(missing_inputs),
+            )
+            continue
+
         logger.info(
             "Firing scheduled run for worker %s (was due %s)", worker_id, next_at_str
         )
         try:
             run_id = create_run(
                 worker_id,
-                {},
+                scheduled_inputs,
                 trigger_source="schedule",
                 user_id=user_id,
                 repos=repos,
             )
-            start_run(run_id, worker_id, {}, user_id=user_id, repos=repos)
+            start_run(run_id, worker_id, scheduled_inputs, user_id=user_id, repos=repos)
 
             # Update last_scheduled_run_at + next_run_at
             new_next = compute_next_run_at(cron_expr, now)

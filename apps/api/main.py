@@ -364,6 +364,7 @@ async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDi
 
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
+DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024
 # A workspace template bundles every operator worker + knowledge pack, so it is
 # larger than a single worker bundle. Cap it generously but bounded.
 WORKSPACE_IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024
@@ -379,6 +380,36 @@ RATE_LIMIT_RULES = [
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
     (re.compile(r"^/connections$"), (20, 60.0)),
 ]
+
+
+def _context_upload_limit_bytes() -> int:
+    try:
+        configured = int(os.environ.get("WORKEROS_CONTEXT_UPLOAD_MAX_BYTES", ""))
+    except ValueError:
+        configured = 0
+    return configured if configured > 0 else DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES
+
+
+def _context_upload_body_limit_bytes() -> int:
+    # Multipart framing adds overhead beyond the uploaded file bytes.
+    return _context_upload_limit_bytes() + (1024 * 1024)
+
+
+def _format_limit_mb(size_bytes: int) -> str:
+    mb = size_bytes / (1024 * 1024)
+    return f"{mb:.0f} MB" if mb.is_integer() else f"{mb:.1f} MB"
+
+
+def _context_upload_too_large_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=413,
+        content={
+            "detail": (
+                "Brain upload is too large. Upload files up to "
+                f"{_format_limit_mb(_context_upload_limit_bytes())}."
+            )
+        },
+    )
 
 PROTECTED_STOCK_WORKER_IDS = frozenset(
     {
@@ -1048,6 +1079,15 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
     return DEFAULT_JSON_BODY_LIMIT_BYTES
 
 
+def _is_context_upload_request(request: Request) -> bool:
+    path = request.url.path
+    return (
+        request.method.upper() == "POST"
+        and path.startswith("/contexts/")
+        and path.endswith("/upload")
+    )
+
+
 @app.middleware("http")
 async def request_body_size_middleware(request: Request, call_next):
     if request.method.upper() in BODYLESS_METHODS:
@@ -1062,6 +1102,14 @@ async def request_body_size_middleware(request: Request, call_next):
             return JSONResponse(status_code=413, content={"detail": "Request body not allowed"})
         return await call_next(request)
 
+    if _is_context_upload_request(request):
+        # Context uploads are multipart streams. Returning a 413 from middleware
+        # before the body is consumed can make edge proxies surface a 502 while
+        # the client continues sending the multipart body. Let the route's
+        # bounded streaming reader enforce the same 25 MB file cap and return
+        # the friendly JSON 413 from inside the request handler.
+        return await call_next(request)
+
     max_bytes = _body_limit_for_request(request)
     if max_bytes is None:
         return await call_next(request)
@@ -1070,13 +1118,29 @@ async def request_body_size_middleware(request: Request, call_next):
     if content_length:
         try:
             if int(content_length) > max_bytes:
-                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": (
+                            "Request body is too large. Reduce the payload size "
+                            "and try again."
+                        )
+                    },
+                )
         except ValueError:
             return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
 
     body = await request.body()
     if len(body) > max_bytes:
-        return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        return JSONResponse(
+            status_code=413,
+            content={
+                "detail": (
+                    "Request body is too large. Reduce the payload size "
+                    "and try again."
+                )
+            },
+        )
     return await call_next(request)
 
 
@@ -1358,7 +1422,7 @@ async def auth_middleware(request: Request, call_next):
             or path.startswith("/cli-auth/poll/")
             or _RE_RUN_COMPOSIO_PROXY.match(path)
             # Multi-member: login/setup paths always exempt so users can authenticate without secret
-            or path in {"/auth/setup", "/auth/login", "/auth/logout", "/auth/setup-required"}
+            or path in {"/auth/setup", "/auth/login", "/auth/logout", "/auth/me", "/auth/setup-required"}
         ):
             return await call_next(request)
         raw_secret = None
@@ -1385,7 +1449,7 @@ async def auth_middleware(request: Request, call_next):
         if raw_secret is None:
             return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
         if not hmac.compare_digest(raw_secret, expected):
-            return _JSONResponse(status_code=403, content={"detail": "Forbidden"})
+            return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     return await call_next(request)
 
 logger = logging.getLogger("floom.api")
@@ -3506,6 +3570,44 @@ def _list_db_workers(
         return []
 
 
+def _worker_access_user_id(auth: AuthContext) -> str:
+    """Resolve the engine owner id for worker visibility checks."""
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    username = (auth.username or "").strip()
+    if deploy != "local" or not username or username == auth.user_id:
+        return auth.user_id
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_members
+                WHERE workspace_id = ?
+                  AND user_id = ?
+                  AND role IN ('owner', 'admin')
+                  AND status = 'active'
+                LIMIT 1
+                """,
+                (DEFAULT_WORKSPACE_ID, username),
+            ).fetchone()
+            if row is not None:
+                return username
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM local_workspaces
+                WHERE id = ? AND owner_user_id = ?
+                LIMIT 1
+                """,
+                (DEFAULT_WORKSPACE_ID, username),
+            ).fetchone()
+            if row is not None:
+                return username
+    except Exception:
+        logger.debug("worker access user-id compatibility lookup failed", exc_info=True)
+    return auth.user_id
+
+
 def _user_scoped_local_mode() -> bool:
     return os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1"
 
@@ -3581,7 +3683,7 @@ def _list_visible_workers(
     visible = {
         worker["id"]: worker
         for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
-        if not _worker_hidden_from_api(worker["id"])
+        if not str(worker.get("id") or "").startswith(".")
     }
     for worker in _stock_workers_from_filesystem(use_cache=use_cache):
         visible.setdefault(worker["id"], worker)
@@ -5198,6 +5300,24 @@ def _write_context_file(
     return item
 
 
+async def _read_context_upload_bytes(upload: UploadFile, remaining_bytes: int) -> bytes:
+    data = bytearray()
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > remaining_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Brain upload is too large. Upload files up to "
+                    f"{_format_limit_mb(_context_upload_limit_bytes())}."
+                ),
+            )
+    return bytes(data)
+
+
 def _workers_referencing_context(name: str, *, user_id: str, repos: Repositories) -> List[str]:
     referenced_by: List[str] = []
     for worker in repos.workers.list(user_id=user_id):
@@ -5463,7 +5583,7 @@ async def upload_context_files(
     path_prefix: str = Form(""),
     tags_json: str = Form(""),
     metadata_json: str = Form(""),
-    create_if_missing: bool = Form(False),
+    create_if_missing: bool = Form(True),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextUploadResponse:
@@ -5503,10 +5623,13 @@ async def upload_context_files(
         upload_metadata = dict(parsed_metadata)
     written: List[ContextFileItem] = []
     written_paths: List[str] = []
+    total_upload_bytes = 0
+    upload_limit = _context_upload_limit_bytes()
     for upload in files:
         filename = _context_file_path_or_400(upload.filename or "upload.bin")
         rel = f"{prefix}/{filename}" if prefix else filename
-        data = await upload.read()
+        data = await _read_context_upload_bytes(upload, upload_limit - total_upload_bytes)
+        total_upload_bytes += len(data)
         written.append(
             _write_context_file(
                 safe_name,
@@ -5586,7 +5709,8 @@ def list_workers(
     ?include_archived=true — include archived workers (archived:true in worker.yml).
                              Default: excluded from All/Starred/Recent; shown only in Archived view.
     """
-    workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True, role=auth.role)
+    worker_user_id = _worker_access_user_id(auth)
+    workers = _list_visible_workers(user_id=worker_user_id, repos=repos, use_cache=True, role=auth.role)
     # Filter out system_worker: true workers unless explicitly requested.
     if not include_system:
         workers = [
@@ -5599,17 +5723,17 @@ def list_workers(
     if not include_archived:
         workers = [w for w in workers if not w.get("archived", False)]
     worker_ids = [w["id"] for w in workers]
-    stats_by_id = _get_stats_batch(worker_ids, user_id=auth.user_id, repos=repos)
+    stats_by_id = _get_stats_batch(worker_ids, user_id=worker_user_id, repos=repos)
     # S44 Win 3: skip expensive timeseries fetch when list shape requested.
     list_shape = shape == "list"
     timeseries_by_id = (
         {} if list_shape
-        else _get_timeseries_batch(worker_ids, user_id=auth.user_id, repos=repos, days=14)
+        else _get_timeseries_batch(worker_ids, user_id=worker_user_id, repos=repos, days=14)
     )
-    available_secret_names = _available_secret_names_for_user(auth.user_id, repos)
+    available_secret_names = _available_secret_names_for_user(worker_user_id, repos)
     result: List[WorkerSummary] = []
     for w in workers:
-        last_run_row = _get_last_run_for_worker(w["id"], user_id=auth.user_id, repos=repos)
+        last_run_row = _get_last_run_for_worker(w["id"], user_id=worker_user_id, repos=repos)
         last_run = _make_run_summary(last_run_row) if last_run_row else None
 
         # Resolve status via the SHARED resolver so LIST and DETAIL agree
@@ -5692,7 +5816,7 @@ def list_workers(
                 public_link=_worker_public_link(w),
                 owner_id=w.get("owner_id"),
                 visibility=str(w.get("visibility") or "private"),
-                permissions=_worker_permissions(w, user_id=auth.user_id, repos=repos),
+                permissions=_worker_permissions(w, user_id=worker_user_id, repos=repos),
             )
         )
     return result
@@ -6215,6 +6339,7 @@ def create_worker_short_link(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6426,6 +6551,7 @@ def create_worker_share_link(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6519,7 +6645,12 @@ def get_worker_detail(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     canonical_id = _canonical_worker_id(worker_id)
-    return _build_worker_detail(canonical_id, user_id=auth.user_id, repos=repos, role=auth.role)
+    return _build_worker_detail(
+        canonical_id,
+        user_id=_worker_access_user_id(auth),
+        repos=repos,
+        role=auth.role,
+    )
 
 
 @app.put("/workers/{worker_id}/visibility", response_model=WorkerDetail)
@@ -6650,6 +6781,7 @@ def restore_worker(
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
     import re as _re
 
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -6693,6 +6825,7 @@ def archive_worker(
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
     import re as _re
 
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -6754,6 +6887,7 @@ async def suggest_worker_updates(
     from openai import OpenAI as _OpenAI
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
 
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -6816,6 +6950,7 @@ def get_worker_sample_input(
     an API consumer gets the same answer the UI shows instead of a spurious 404
     on generated workers (the manifest example_input was always available).
     """
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -9531,7 +9666,30 @@ def update_worker(
     """Update an existing worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
-    _raise_if_protected_worker_mutation(worker_id)
+    worker_id = _canonical_worker_id(worker_id)
+    raw_worker_id = _raw_worker_id_from_worker_yml(payload.worker_yml)
+    if raw_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"worker_yml name {raw_worker_id!r} does not match path worker_id {worker_id!r}",
+        )
+    if worker_id in PROTECTED_STOCK_WORKER_IDS:
+        edited_files = [
+            WorkerFilePatch(path="worker.yml", content=payload.worker_yml),
+            WorkerFilePatch(path="run.py", content=payload.run_py),
+        ]
+        if payload.skill_md is not None:
+            edited_files.append(WorkerFilePatch(path="SKILL.md", content=payload.skill_md))
+        new_id = _clone_protected_worker_for_edit(
+            worker_id,
+            edited_files,
+            user_id=auth.user_id,
+            repos=repos,
+        )
+        detail = _build_worker_detail(new_id, user_id=auth.user_id, repos=repos)
+        detail.cloned_from = worker_id
+        return detail
+
     parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
@@ -9924,6 +10082,7 @@ def create_worker_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
+    worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
@@ -14382,7 +14541,7 @@ async def composio_events_alias(request: Request) -> ActionResponse:
 # Slack Events API
 # ---------------------------------------------------------------------------
 
-SLACK_INSTALL_SCOPES = [
+DEFAULT_SLACK_INSTALL_SCOPES = [
     "app_mentions:read",
     "assistant:write",
     "chat:write",
@@ -14463,6 +14622,20 @@ def _slack_interactivity_url() -> str:
     return f"{_public_api_base_url()}/slack/interactivity"
 
 
+def _slack_install_scopes() -> List[str]:
+    raw = os.environ.get("SLACK_INSTALL_SCOPES", "").strip()
+    if not raw:
+        return list(DEFAULT_SLACK_INSTALL_SCOPES)
+    scopes: List[str] = []
+    seen = set()
+    for part in re.split(r"[,\s]+", raw):
+        scope = part.strip()
+        if scope and scope not in seen:
+            scopes.append(scope)
+            seen.add(scope)
+    return scopes or list(DEFAULT_SLACK_INSTALL_SCOPES)
+
+
 def _slack_state_secret() -> str:
     secret = (os.environ.get("FLOOM_SECRET") or os.environ.get("SLACK_CLIENT_SECRET") or "").strip()
     if not secret:
@@ -14517,7 +14690,7 @@ def _slack_install_url(*, state: str) -> str:
         raise HTTPException(status_code=503, detail="SLACK_CLIENT_ID is not configured")
     params = urllib.parse.urlencode({
         "client_id": client_id,
-        "scope": ",".join(SLACK_INSTALL_SCOPES),
+        "scope": ",".join(_slack_install_scopes()),
         "redirect_uri": _slack_oauth_callback_url(),
         "state": state,
     })
@@ -16986,6 +17159,72 @@ def _overview_failure_cause(row: Dict[str, Any]) -> str:
     return error_code
 
 
+def _overview_consecutive_failure_threshold() -> int:
+    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "3")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 3
+
+
+def _overview_consecutive_failure_items(
+    *,
+    runs: List[Dict[str, Any]],
+    worker_names: Dict[str, str],
+    threshold: int,
+) -> List[OverviewAttentionItem]:
+    by_worker: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for row in runs:
+        worker_id = row.get("worker_id")
+        if worker_id:
+            by_worker[str(worker_id)].append(row)
+
+    def _run_time(row: Dict[str, Any]) -> datetime:
+        parsed = _parse_iso8601(row.get("started_at") or row.get("completed_at") or row.get("created_at"))
+        return parsed or datetime.min.replace(tzinfo=timezone.utc)
+
+    items: List[OverviewAttentionItem] = []
+    for worker_id, rows in by_worker.items():
+        ordered = sorted(rows, key=_run_time, reverse=True)
+        consecutive = 0
+        latest_failure: Dict[str, Any] | None = None
+        for row in ordered:
+            status = str(row.get("status") or "").lower()
+            if status in {"failed", "error", "cancelled", "rejected", "timeout"}:
+                consecutive += 1
+                if latest_failure is None:
+                    latest_failure = row
+                continue
+            break
+        if consecutive < threshold or latest_failure is None:
+            continue
+        last_failed_at = (
+            latest_failure.get("started_at")
+            or latest_failure.get("completed_at")
+            or latest_failure.get("created_at")
+        )
+        items.append(
+            OverviewAttentionItem(
+                type="consecutive_failures",
+                kind="failing",
+                worker_id=worker_id,
+                worker_name=worker_names.get(worker_id, worker_id),
+                message=f"{consecutive} consecutive failures",
+                cause=_overview_failure_cause(latest_failure),
+                error_code=latest_failure.get("error_code"),
+                recent_failure_count=consecutive,
+                last_failed_at=last_failed_at,
+                suggested_actions=["view_logs", "retry", "disable"],
+                action_url=f"/workers/{worker_id}",
+            )
+        )
+    return sorted(
+        items,
+        key=lambda item: (item.recent_failure_count or 0, item.last_failed_at or ""),
+        reverse=True,
+    )
+
+
 def _overview_schedule_triggers(worker: Dict[str, Any]) -> List[Dict[str, Any]]:
     raw_triggers = worker.get("triggers_json")
     triggers: List[Dict[str, Any]] = []
@@ -17261,6 +17500,24 @@ def system_overview(
         row for row in failure_runs
         if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
     ]
+    visible_terminal_runs = [
+        row for row in runs_14d_rows
+        if str(row.get("status") or "").lower()
+        in {"completed", "approved", "success", "succeeded", "failed", "error", "cancelled", "rejected", "timeout"}
+        and _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+    ]
+    attention_items.extend(
+        _overview_consecutive_failure_items(
+            runs=visible_terminal_runs,
+            worker_names=worker_names,
+            threshold=_overview_consecutive_failure_threshold(),
+        )
+    )
+    _consecutive_failure_worker_ids = {
+        item.worker_id
+        for item in attention_items
+        if item.type == "consecutive_failures" and item.worker_id
+    }
     failure_counts: Dict[str, int] = collections.Counter(row["worker_id"] for row in failure_runs if row.get("worker_id"))
     latest_failure_by_worker: Dict[str, Dict[str, Any]] = {}
     for row in failure_runs:
@@ -17277,6 +17534,8 @@ def system_overview(
         key=lambda item: item[1],
         reverse=True,
     )[:3]:
+        if worker_id in _consecutive_failure_worker_ids:
+            continue
         latest_failure = latest_failure_by_worker.get(worker_id) or {}
         last_failed_at = latest_failure.get("started_at") or latest_failure.get("completed_at") or latest_failure.get("created_at")
         cause = _overview_failure_cause(latest_failure)
@@ -18682,6 +18941,59 @@ async def get_workspace_base_persona(auth: AuthContext = Depends(get_auth_contex
     return PlainTextResponse(get_workspace_base_persona(), media_type="text/markdown")
 
 
+@app.get("/workspace/base/state")
+async def get_workspace_base_persona_state(
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Return the resolved base persona plus whether it is a custom override.
+
+    ``content`` is what currently applies to every conversation. ``is_custom``
+    is True when an override has been saved; False means the built-in engine
+    default is in effect. ``default`` is the built-in default, used by the UI to
+    preview what a reset would restore.
+    """
+    from chat_service import (
+        EMILY_BASE_PERSONA,
+        base_persona_is_custom,
+        get_workspace_base_persona,
+    )
+
+    return {
+        "content": get_workspace_base_persona(),
+        "is_custom": base_persona_is_custom(),
+        "default": EMILY_BASE_PERSONA,
+    }
+
+
+@app.delete("/workspace/base", status_code=204)
+async def reset_workspace_base_persona(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Remove the base-persona override, restoring the built-in engine default.
+
+    Snapshots the built-in default so the reset itself is in version history.
+    """
+    from chat_service import (
+        base_persona_is_custom,
+        clear_workspace_base_persona,
+        get_workspace_base_persona,
+    )
+
+    was_custom = base_persona_is_custom()
+    clear_workspace_base_persona()
+    if was_custom:
+        _snapshot_workspace_base_persona(
+            user_id=auth.user_id,
+            repos=repos,
+            asset_id=_workspace_base_persona_asset_id(request),
+            content=get_workspace_base_persona(),
+            change_source="reset-to-default",
+        )
+    return Response(status_code=204)
+
+
 @app.get("/workspace/base/versions", response_model=List[VersionSummary])
 def list_workspace_base_persona_versions(
     request: Request,
@@ -19788,6 +20100,7 @@ def auth_login(
         "username": user["username"],
         "display_name": user.get("display_name"),
         "role": user["role"],
+        "redirect_to": "/overview",
     }
 
 

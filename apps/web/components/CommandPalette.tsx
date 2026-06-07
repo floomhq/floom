@@ -33,7 +33,7 @@ const NAV = [
   { href: "/overview", label: "Overview", icon: Activity, keywords: "home dashboard" },
   { href: "/workers", label: "Workers", icon: Box, keywords: "list jobs" },
   { href: "/runs", label: "Runs", icon: Clock, keywords: "history executions" },
-  { href: "/brain", label: "Brain", icon: Brain, keywords: "context knowledge packs resources" },
+  { href: "/brain", label: "Brain", icon: Brain, keywords: "context folders files knowledge resources" },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, keywords: "review pending actions" },
   { href: "/connections/secrets", label: "Secrets", icon: KeyRound, keywords: "env tokens" },
   { href: "/connections", label: "Connections", icon: Plug, keywords: "integrations oauth" },
@@ -159,12 +159,19 @@ export function CommandPalette() {
             <RefreshCcw />
             Reload workers
           </CommandItem>
+          {/* FL10: clearing all runs is destructive, so it must not read as a
+              one-click action sitting next to the search bar. It stays
+              discoverable via search but is de-emphasized (muted destructive
+              text) and routes to the Danger zone, which gates the actual delete
+              behind a type-to-confirm step. */}
           <CommandItem
             value="action clear runs danger zone delete"
             onSelect={() => go("/settings?tab=danger")}
+            className="text-muted-foreground data-[selected=true]:text-destructive [&_svg]:text-muted-foreground data-[selected=true]:[&_svg]:text-destructive"
           >
             <Trash2 />
-            Clear all runs (Danger zone)
+            Clear run history…
+            <CommandShortcut>Danger zone</CommandShortcut>
           </CommandItem>
         </CommandGroup>
       </CommandList>

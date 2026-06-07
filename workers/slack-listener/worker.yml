@@ -42,9 +42,9 @@ exec:
     - name: "channel"
       kind: "scalar"
       type: "string"
-      required: true
+      required: false
       label: "Slack channel ID"
-      placeholder: "e.g. C01234567"
+      placeholder: "Defaults to SLACK_LISTENER_CHANNEL_ID"
     - name: "lookback_minutes"
       kind: "scalar"
       type: "number"
