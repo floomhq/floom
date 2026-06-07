@@ -8,6 +8,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { fetchPublicWorker } from "@/lib/server-api";
+import { isAuthenticated } from "@/lib/server-auth";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
 import { ShareCardShell } from "@/components/share/ShareCardShell";
 import type { PublicWorker } from "@/lib/types";
@@ -38,15 +39,26 @@ export default async function PublicWorkerPage({
     notFound();
   }
 
+  // FL4: a signed-in visitor gets a "Dashboard" affordance back to the app
+  // instead of being treated as a logged-out prospect ("Browse workers" / a
+  // CTA that bounces through /login).
+  const authed = await isAuthenticated();
+
   return (
     <ShareCardShell
       navRight={
-        <Link href="/workers" className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
-          Browse workers
-        </Link>
+        authed ? (
+          <Link href="/" className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
+            Dashboard
+          </Link>
+        ) : (
+          <Link href="/workers" className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
+            Browse workers
+          </Link>
+        )
       }
     >
-      <WorkerShareCard worker={worker} />
+      <WorkerShareCard worker={worker} authed={authed} />
       <div className="px-7 pb-5 pt-1">
         <p className="text-xs text-[var(--ink-soft)]">
           Built with{" "}
