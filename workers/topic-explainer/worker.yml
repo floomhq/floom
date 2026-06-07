@@ -3,15 +3,18 @@ name: topic-explainer
 title: Topic Explainer
 description: Explains any technical topic clearly in plain English with examples.
 folder: Demo
-tags: [demo, explainer, education]
+tags:
+- demo
+- explainer
+- education
 version: 0.1.0
 entrypoint: SKILL.md
 targets:
-  - generic
+- generic
 entrypoints:
-  - name: main
-    path: SKILL.md
-    type: markdown
+- name: main
+  path: SKILL.md
+  type: markdown
 limits:
   max_tool_iterations: 8
   max_output_tokens: 4000
@@ -22,33 +25,33 @@ exec:
   runner: e2b
   entry: SKILL.md
   inputs:
-    - name: topic
-      kind: scalar
-      type: string
-      required: true
-      label: Topic
-      placeholder: e.g. "How does a database index work?"
-    - name: audience
-      kind: scalar
-      type: select
-      required: true
-      default: beginner
-      enum:
-        - beginner
-        - intermediate
-        - expert
-      label: Audience level
-      options:
-        - beginner
-        - intermediate
-        - expert
+  - name: topic
+    kind: scalar
+    type: string
+    required: true
+    label: Topic
+    placeholder: e.g. "How does a database index work?"
+  - name: audience
+    kind: scalar
+    type: select
+    required: true
+    default: beginner
+    enum:
+    - beginner
+    - intermediate
+    - expert
+    label: Audience level
+    options:
+    - beginner
+    - intermediate
+    - expert
   outputs:
-    - name: explanation
-      kind: file
-      media_type: text/markdown
-      path: out/explanation.md
-      required: true
-      label: Explanation
+  - name: explanation
+    kind: file
+    media_type: text/markdown
+    path: out/explanation.md
+    required: true
+    label: Explanation
 capabilities:
   secrets: []
   network:
@@ -57,3 +60,4 @@ approvals:
   required: false
 trigger:
   type: manual
+visibility: workspace
