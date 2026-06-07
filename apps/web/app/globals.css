@@ -121,7 +121,11 @@
   /* Squircle for small icon pills (WorkerIconPills) — softer than a button,
      not a full pill. Langdock-style rounded-square tool chips. */
   --radius-squircle: 9px;
-  --shadow-card: 0 12px 30px rgba(0,0,0,0.04);
+  /* FL17: the previous 0 12px 30px drop shadow rendered a visible stray
+     shadow band below cards (Overview boxes). Match the rest of the system's
+     subtle card treatment (hairline ring + soft 1px shadow, the same approach
+     dark mode already uses) so boxes read cleanly with no artifact. */
+  --shadow-card: 0 1px 2px hsl(0 0% 0% / 0.04), 0 0 0 1px var(--border-soft);
   /* S45: light mode uses same color-mix pattern for active nav */
   --active-nav-bg: #F1EEE8;
   --active-nav-text: #111111;
