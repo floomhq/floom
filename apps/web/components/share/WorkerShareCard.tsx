@@ -94,13 +94,18 @@ function buildWorkerYml(worker: PublicWorker): string {
 
 type FileTab = "skill" | "yaml" | "output";
 
-export function WorkerShareCard({ worker }: { worker: PublicWorker }) {
+export function WorkerShareCard({ worker, authed = false }: { worker: PublicWorker; authed?: boolean }) {
   const [flipped, setFlipped] = useState(false);
   const [tab, setTab] = useState<FileTab>("skill");
 
   const { label: triggerLabel, Icon: TriggerIcon } = triggerMeta(worker.trigger_type);
   const tools = (worker.connections ?? []).map(normalizeSlug);
   const hasExample = Boolean((worker.example_output ?? "").trim());
+
+  // FL4: signed-in visitors go straight to their dashboard; logged-out
+  // prospects keep the "Add to workspace" prompt that routes through login.
+  const ctaHref = authed ? "/" : "/login";
+  const ctaLabel = authed ? "Dashboard" : "Add to workspace";
 
   return (
     <div className="px-7 pb-4">
@@ -193,7 +198,9 @@ export function WorkerShareCard({ worker }: { worker: PublicWorker }) {
             {/* Pinned CTA */}
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-soft)] bg-[var(--bg-2)] px-5 py-3">
               <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
-                Add this worker to your workspace and connect its tools.
+                {authed
+                  ? "Open your dashboard to add this worker and connect its tools."
+                  : "Add this worker to your workspace and connect its tools."}
               </p>
               <div className="flex shrink-0 gap-2">
                 <button
@@ -205,10 +212,10 @@ export function WorkerShareCard({ worker }: { worker: PublicWorker }) {
                   See files
                 </button>
                 <Link
-                  href="/login"
+                  href={ctaHref}
                   className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
                 >
-                  Add to workspace
+                  {ctaLabel}
                 </Link>
               </div>
             </div>
@@ -235,10 +242,10 @@ export function WorkerShareCard({ worker }: { worker: PublicWorker }) {
                 <span className="text-[13px] font-semibold">Worker files</span>
               </div>
               <Link
-                href="/login"
+                href={ctaHref}
                 className="inline-flex h-7 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
               >
-                Add to workspace
+                {ctaLabel}
               </Link>
             </div>
 
