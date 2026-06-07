@@ -214,6 +214,7 @@ function SettingsContent() {
   const [clearing, setClearing] = useState(false);
   const [claimedWhatsAppToken, setClaimedWhatsAppToken] = useState<string | null>(null);
   const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
+  const [fromInstallChannel, setFromInstallChannel] = useState<string | null>(null);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
 
@@ -263,6 +264,22 @@ function SettingsContent() {
       }
     })();
   }, [claimedWhatsAppToken, searchParams]);
+
+  // #552: consume ?from_install=<channel> placed by the login page after an
+  // install-param sign-in, route to the relevant tab, show a banner.
+  useEffect(() => {
+    const channel = searchParams.get("from_install");
+    if (!channel) return;
+    setFromInstallChannel(channel);
+    const tabMap: Record<string, TabKey> = { slack: "slack", cli: "developer" };
+    const dest = tabMap[channel];
+    if (dest && VISIBLE_TAB_KEYS.includes(dest)) setTab(dest);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("from_install");
+    const qs = params.size ? `?${params.toString()}` : "";
+    window.history.replaceState(null, "", `${window.location.pathname}${qs}${window.location.hash}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep state in sync with the URL hash for deep-links and back/forward.
   useEffect(() => {
@@ -344,6 +361,29 @@ function SettingsContent() {
           )}
           <AlertTitle>{waClaimBanner.ok ? "WhatsApp linked" : "WhatsApp link failed"}</AlertTitle>
           <AlertDescription>{waClaimBanner.message}</AlertDescription>
+        </Alert>
+      )}
+
+      {fromInstallChannel && (
+        <Alert>
+          <AlertTitle>
+            {fromInstallChannel === "slack" ? "Connect Slack to continue" :
+             fromInstallChannel === "cli" ? "Get your CLI access token below" :
+             `Complete your ${fromInstallChannel} setup`}
+          </AlertTitle>
+          <AlertDescription>
+            {fromInstallChannel === "slack"
+              ? "You were sent here from Slack. Add your workspace below to start using the assistant."
+              : "Complete the setup for your channel integration."}
+            {" "}
+            <button
+              type="button"
+              className="underline underline-offset-2 hover:opacity-80"
+              onClick={() => setFromInstallChannel(null)}
+            >
+              Dismiss
+            </button>
+          </AlertDescription>
         </Alert>
       )}
 
