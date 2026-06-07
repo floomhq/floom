@@ -4,6 +4,22 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 ---
 
+## 2026-06-07 Live Test Issues
+
+### FL1 — Federico private workers hidden by role-aware visibility
+
+**Status:** VERIFIED
+
+**Symptom:** Federico's workers appeared gone in the UI even though `/root/workeros/data/floom.db` still contained 100 worker rows, including 99 private rows owned by `federico`.
+
+**Root cause:** The role-aware visibility path did not map Federico's real local login session back to the legacy engine owner id `federico`, and DB-owned private workers were suppressed when their IDs matched filesystem/internal worker filters.
+
+**Fix:** Worker list/detail now resolve the local-default legacy owner for worker access while keeping the auth account identity unchanged. DB-owned workers are no longer hidden by filesystem fallback filters.
+
+**Verification:** Focused backend tests passed (`46 passed`). Live FastAPI `GET /workers?include_system=true&include_archived=true` against `/root/workeros/data/floom.db` returned 100 workers, including 99 private `federico` workers with owner permissions, for both `x-floom-secret` and a Federico session-shaped auth context. Worker DB counts remained `100 total / 99 federico / 100 private / 88 local-default / 12 empty workspace`.
+
+---
+
 ## P0 — blocks the "useful B2C worker" claim
 
 ### #1 Generated worker is empty after create (no SKILL.md, no run.py)
@@ -1045,3 +1061,138 @@ Tackle order (small-to-impact, with bundling where it makes sense):
 ### I-51 — Tag click on Worker card dumps into search with no indicator
 - **What:** Clicking a tag silently filters via search box but doesn't show "Filtered by tag: X" affordance.
 - **Fix:** Show an active-tag chip above results with an `X` to clear.
+
+---
+
+# Deep backend audit — 2026-06-05 (new untracked backend issues)
+
+These are new backend findings from `docs/audits/deep-backend-audit-2026-06-05.md`. The existing file already had `I-50` and `I-51`, while the audit request referred to M1-M49; this section continues the requested M-series.
+
+### M50 — P1: Non-first webhook triggers can bypass webhook authentication
+- **Where:** `apps/api/main.py:7597`, `apps/api/main.py:7624`, `apps/api/main.py:7633`
+- **What:** `_worker_has_webhook_trigger()` can accept a worker because `triggers_json` contains a webhook, but `webhook_trigger()` enforces signature only from `config.trigger.webhook`. For multi-trigger manifests, `config.trigger` is `triggers[0]`.
+- **Impact:** If the webhook trigger is second after a schedule/manual trigger, POST `/webhooks/{worker_id}` without token/signature can create a run.
+- **Status:** OPEN
+
+### M51 — P1: Live `mode=draft` worker-author call persisted a worker
+- **Where:** live prod behavior; local handoff route starts at `apps/api/main.py:3836`
+- **What:** `POST /workers/new/from-prompt` with `mode:"draft"` completed run `run_a0836db867db` and returned output with `created_worker_id:"text-character-count"`. Logs said the drafted bundle was registered. Probe worker was deleted and verified gone.
+- **Impact:** Draft/review mode mutates persistent worker state.
+- **Status:** OPEN
+
+### M52 — P1: `/workers/new/from-prompt` bypasses draft and run-create throttles
+- **Where:** `apps/api/main.py:3836`, contrast `apps/api/main.py:3960` and `apps/api/main.py:4769`
+- **What:** The worker-author route validates prompt/mode, then calls `create_run()` and `start_run()` directly. It does not call `_enforce_draft_rate_limit()` or `_enforce_run_create_quota()`.
+- **Impact:** Expensive worker-author runs can be spammed; one simple live prompt took 88.136s and used OpenAI + multiple E2B sandboxes.
+- **Status:** OPEN
+
+### M53 — P2: Worker-author slow path is real and caused by full smoke/repair validation
+- **Where:** live prod behavior; local worker output declared at `workers/worker-author/worker.yml:83`
+- **What:** Live run `run_a0836db867db` completed, but only after LLM generation plus generated-worker smoke, repair, and second smoke. Poll observed terminal state at 90.0s.
+- **Impact:** User-facing generate flow can sit near or above 90s even when healthy, conflicting with the quick draft UX.
+- **Status:** OPEN
+
+### M54 — P2: Worker-author references missing `RUN_PY_TEMPLATE.py`
+- **Where:** `workers/worker-author/SKILL.md:42`, `workers/worker-author/run.py:353`
+- **What:** The worker-author instructions and prompt builder reference `contexts/worker-author-style/RUN_PY_TEMPLATE.py`, but that file is absent from `contexts/worker-author-style/`.
+- **Impact:** Script-mode generation silently loses a referenced run.py template guardrail.
+- **Status:** OPEN
+
+### M55 — P2: Run detail returns `input={}` while UI exports it as full-fidelity debug data
+- **Where:** `apps/api/main.py:5113`, `apps/api/main.py:5175`; UI expectation at `apps/web/components/RunDetailSplitPane.tsx:474` and `apps/web/components/RunDetailSplitPane.tsx:556`
+- **What:** `GET /runs/{run_id}` hardcodes `input={}` for every run, even though the UI raw/metadata views include `run.input` in their debug/export payload.
+- **Impact:** Users cannot inspect the actual run inputs when debugging failures or exporting run evidence.
+- **Status:** OPEN
+
+### M56 — P2: `/workers/from-bundle` has no uncompressed zip limits
+- **Where:** `apps/api/main.py:4345`
+- **What:** The endpoint limits compressed request body size and blocks traversal/symlinks, but it does not cap uncompressed size, file count, per-file size, or cumulative extracted bytes before `zf.read(zip_name)` writes files to disk.
+- **Impact:** A small auth-gated upload can expand into a large worker directory and consume disk/CPU.
+- **Status:** OPEN
+
+## [2026-06-05] Deep UI walk triage (N1–N27, doc: deep-ui-walk-2026-06-05.md)
+- **N1 (P0) No Emily CHAT UI in the web app** — `/assistant` is config-only (Instructions + Final-prompt tabs); no message thread/input. Emily reachable only via API/Slack/MCP, not the dashboard. VERIFIED (no chat components in apps/web). Investigate: regression vs never-built; if regressed, restore; if scope question, flag Federico.
+- **N2 (P1) Live persona polluted with Codex build-note** ("Source note... pass 2 brief... worktree") — readable by authed users. VERIFIED in GET /workspace. pass-3 (M31 persona→global) must write a CLEAN persona; verify after it lands and scrub if still present.
+- **N4 — FALSE/INVALID:** walk claimed gpt-5.4-mini "isn't a real model"; it IS (verified live, Emily replies on it). Disregard.
+- **N6 — DUPLICATE of M49** (junk/test workers in catalog; ~5 obvious: b12-live-worker-051059, bundle-test, test, emoji-test, outbound-approval-demo). Cleanup queued.
+- **N3 (P1) High failure rate** (~290 failed/24h reported) — likely the pre-fix from-prompt temperature failures; re-measure after the from-prompt fix + pass-3 settle.
+- **Real frontend N-issues → UI fix lane:** N5 (Overview→/ route), N7 (missing-secret quick-fix CTA), N8 (webhook placeholder looks real), N10/N11 (brain pack "0 attached" while 2 packs; pack w/ 0 files but 2 workers), N13 (Last-used blank pre-load), N17 (Cmd-K vs sidebar nav inconsistency), N23 (share modal clips under sidebar @1280), N25 (Save shown w/ no edits), N27 (run "Edit" misleads to source editor). N18/N7 (needs-attention has no reason shown).
+
+## [2026-06-05] Federico live-test batch (M57–M67) — DOCUMENTED before changes
+- **M57 (P1) Connection OAuth callback dumps to the Sign-in page.** After connecting a tool, `workers.floom.dev/api/proxy/connections/callback?status=success` renders the "Enter your access secret" sign-in screen instead of returning to /connections — session lost on the OAuth round-trip. [Image #123]
+- **M58 (P1) Connected tool does not appear in connections.** Connected Outlook; it does not show up in the connections list (connection didn't persist or isn't rendered).
+- **M59 (P2) Connection adding is slow.**
+- **M60 (task) MCP list is EMPTY — add MCP server(s) for Federico and TEST that MCP adding actually works end-to-end.**
+- **M61 (P2, UI) "Add MCP server" should DEFAULT to the JSON-config paste, not the "enter details" form.**
+- **M62 (P1, UI) Visibility Share→Private switches instantly — must show a CONFIRM modal** before changing visibility (breaks shared links). Applies to visibility changes generally.
+- **M63 (P1, UI) Version rollback uses the browser/device-native confirm dialog — must use the app's OWN designed modal**, not `window.confirm`.
+- **M64 (P1, UI) Worker-detail SOURCE view must match the Brain view: preview on the left, raw on the right (same toggle/layout).** Current YAML preview "makes no sense", shows too much underlying info — wants a cleaner, prettier rendering. Must be consistent with Brain.
+- **M65 (P1, UI) run.py and requirements.txt have NO preview on worker detail, but Brain files do.** Inconsistent — add preview, align everything (source views == brain views).
+- **M66 (verify→answer) Persona location.** CONFIRMED: a global base persona EXISTS in engine code (`chat_service.py:38 EMILY_BASE_PERSONA`) — so M31 (global) is done at the code level. BUT the live `workspace.md` (user layer) STILL holds the full polluted v5 (incl the "Source note" build-note) = redundant + polluted (N2 still live). pass3-verify lane is scrubbing it; MUST ensure v5's substance is preserved in the global base before removing it from workspace.md (so v5 isn't lost). The "final prompt looks short" needs the lane to confirm the assembled prompt (global base + workspace.md + SKILL.md).
+- **M67 (answer) Version roll-forward = YES.** 20 versions preserved in history; rollback is append-only (`rollback_workspace_instructions` main.py:17485 doesn't delete forward versions). So you CAN restore the version you were on (v24) after rolling back to v23. (Pairs with M63: needs the app's own modal, not browser dialog.)
+
+## [2026-06-05] M68 — Persona = TWO separate layers (Federico refinement)
+The persona/system-prompt must be TWO clearly-distinct, separately-editable things in UI + backend:
+1. **Base system prompt** — Workeros ships a proper DEFAULT (our `EMILY_BASE_PERSONA`); the user can ADJUST/override it (edit the base). "Adjusting what we have right now."
+2. **Workspace instructions** — ADDITIONAL rules the user layers ON TOP of the base. "Adding rules."
+Assembled prompt = (base, default=ours, editable) + (additional workspace instructions) + SKILL.md. UI must show both as separate fields/editors with the distinction obvious (adjust-the-default vs add-on-top). Supersedes the single workspace.md model; pairs with M31/M66. Backend = split storage + assembly; UI = two editors. Versioning (M67) applies to both.
+
+## [2026-06-05] Chat prototype — APPROVED direction (Vercel AI Elements), iterate:
+Federico: "chat looks fine by me, make it more digestible, easy to digest, but it looks very native to shadcn/prompt-kit so stick to what I have 100%." + "file upload has to be possible" + "fully work on this on the branch." So: keep AI Elements 100% native, increase digestibility (lower density), ADD file upload, stay on the emily-chat-prototype branch.
+
+## [2026-06-05] M69–M71 (Federico) — DOCUMENTED before changes
+- **M69 (URGENT) Deploy loop blocks the app from deploying; Vivek pushed a fix to main.** Investigate the loop CAREFULLY (take time), verify Vivek's fix on main, THEN deploy — for the Cloud version. (Cloud + Workeros must stay in sync — the Cloud-sync lane is on this.)
+- **M70 (feature) Brain items need shareable UNINDEXED links** (noindex), same mechanism as the per-approval shareable links (M12). A "generate link" / share action on brain files/packs that produces a non-search-indexed shareable URL.
+- **M71 (P1, design) Emily chat prototype does NOT align with the app's design system.** It adds icons we don't need/use and doesn't use the designs we DO use. KEEP the AI Elements agentic STRUCTURE (Tool/Task/Approval composition) but RE-SKIN to the Workeros design system: our icons, our card styles, our tokens — drop AI Elements' default chrome/icons. (Refines the earlier "stick to AI Elements 100%" — structure yes, default look no.)
+
+## [2026-06-05] M71 specifics (chat prototype design-system alignment) — Federico
+- **Markdown NOT rendering:** assistant text shows raw `**bold**` and list syntax instead of rendered markdown [Image #125]. Wire the proper markdown renderer for message content.
+- **Icons not ours:** AI Elements decorative icons (e.g. the blue sparkle on cards [Image #126]) don't match our design system. Replace with OUR icons (match the app's lucide/icon usage); drop AI Elements default chrome icons.
+- **Brand logos for connections:** "Connect Gmail" must use the real Gmail logo (and Slack→Slack, Stripe→Stripe, GitHub→GitHub) sourced as real SVGs (SimpleIcons/svgl/gilbarbara per logos rule) — NOT generic icons or text-in-circles.
+- **Em dashes** in the mock conversation text — remove (Emily = zero em dashes), even in mock data.
+
+## [2026-06-05] M72 + audit Rounds 5-20 reconcile (Federico, 600+ probes)
+- **M50 trigger-reconciliation: CLOSED** — Vivek fixed `update_worker` (now calls reconcile_triggers_conn). Also closes webhook-rotate-after-PATCH (same root cause). Auth trailing-space: now strict-compared (closed, belt-and-suspenders).
+- **M72 (P0, SECURITY) 64 dependency vulns in 18 packages** — CRITICAL: authlib JWT forgery (CVE-2026-27962)→≥1.6.12, pyjwt algo-bypass+SSRF→≥2.13.0, python-multipart DoS→≥0.0.27, cryptography buffer-overflow→≥46.0.7, lxml XXE→≥6.1.0, +13 more. JWT-forgery/algo-bypass = auth-bypass class = HARD launch blocker. Upgrade engine apps/api deps (Cloud picks up via engine bump). CAREFUL: auth/crypto-critical deps — test auth/JWT after.
+- **Remaining P1s:** Composio-crash-without-key 502→needs graceful 503 (fold into bug-pass); draft-and-create 422 (improved from 500, acceptable); approval-system "by design"→needs DOCS (not a bug — document the approval model).
+
+## [2026-06-05] CLOUD launch-readiness: 35/100 BLOCKED (5 P0s) — docs/CLOUD_LAUNCH_READINESS_2026-06-05.md
+- **C-P0-1 (SECURITY, live tenant-data leak) Anonymous Supabase/PostgREST reads expose Cloud tenant data** — `asset_versions` + `workspace_agent_settings` readable by anon (an RLS policy `USING(true)` grants public roles, not service-role-scoped). Multi-tenant data exposure. Fix RLS (service-role-scope / force RLS). URGENT.
+- **C-P0-2 Dashboard 508 NOT actually fixed** — apex AND dashboard alias both still HTTP 508 INFINITE_LOOP (the earlier CLI-deploy fix did not hold / alias didn't move to the fixed build).
+- **C-P0-3 Vercel TEAM_ACCESS still blocks the git deploy** (Vivek not a team member) — the fix must ship via CLI (token-authored) and the alias reassigned.
+- **C-P0-4 Engine sync stale** (Cloud pins b30c53f, OS is 06cf0a9) + the unsafe cloud-engine-sync branch reintroduces web/vercel.json — must rebase on the 508 fix.
+- **C-P0-5 Cloud API deps unresolvable** — supabase==2.15.3 conflicts with openai-agents==0.17.4; can't even audit the Cloud API's 64-vuln set until resolved.
+
+## [2026-06-05] Federico live-walk batch (workeros.floom.dev) — DOCUMENTED before changes
+- **Emily v5 — CONFIRMED CORRECT (not a bug):** design-doc v5 (emily-persona-research-2026-06-04 §3) IS canonical (no richer version hidden in past sessions — verified via transcript grep). PR #443 (merged) wired it faithfully: `EMILY_BASE_PERSONA` = v5 generic (tenant-safe, first-person "I'm Emily"), `workspace.md` = Federico context incl "Workers are your swarm", `SKILL.md` double-identity line trimmed. Live OS API serves v5 behavior (bare greeting leads with workspace state, no "Let me check"). Reaches live Cloud via the convergence engine bump.
+- **M73 (P0) Worker creation times out — FIXED/DEPLOYED (engine PR #447, squash `e4df683`):** root cause was the `/workers/new` prompt UI falling back from async `POST /workers/new/from-prompt` into legacy sync `POST /workers/draft-and-create`, where `gpt-5.5` codegen plus smoke/gate work can exceed the 60s Next/Vercel proxy `maxDuration`. The page also hardcoded `/api/proxy` for SSE instead of the configured proxy base. Fix: prompt creation is async-only after `newFromPrompt`; SSE paths use the configured API proxy and preserve workspace query state. OS API deployed via `/opt/workeros-api-deploy/ops/deploy-api.sh`, then `systemctl restart workeros-api`; active process cwd `/opt/workeros-api-deploy/apps/api`, repo SHA `e4df683`, health ok. Live verification: `POST https://workers-api.floom.dev/workers/new/from-prompt` returned run ids in `0.253s` and `0.285s`; the background codegen runs took `92.555s` and `177.564s`, proving the timeout-prone work is no longer on the HTTP request path. Both generated workers were deleted after verification. Separate follow-up: worker-author smoke quality still produced disabled workers in those probes, unrelated to the HTTP timeout root cause.
+- **M74 (P0) Worker detail infinite loop — FIXED/DEPLOYED (Cloud PR #87 `403cfd5`, PR #88 `9df73dd`; engine submodule `e4df683`):** two root causes. First, exact Cloud worker lookups were scoped to the active workspace cookie; with stale/default workspace `ws_aac663b43cb542`, the owned worker in `ws_b79e570aad8349` missed and surfaced as a not-found/bad-state detail. Second, Cloud middleware hardcoded `/app/login` while the dashboard runs under Next `basePath=/app`, producing Vercel `508 INFINITE_LOOP` in the authenticated browser path. Fix: `SupabaseWorkerRepository.get()` now retries exact id + owner on an active-workspace miss, and Cloud middleware strips/adds `/app` once while redirecting to internal `/login`. Cloud dashboard prod deploy `dpl_DRXeHuz6PQbqSaHzqdk2VFbZCXsz`; Cloud API restarted on `/opt/workeros-cloud-deploy` at `9df73dd`. Live route check now redirects once to `/app/login?next=...` and returns HTTP 200, no `x-vercel-error: INFINITE_LOOP`. Deployed repo probe with stale workspace found `granola-hubspot-meeting-actions`; public Cloud API detail request with a temporary token returned the worker detail, and the token was deleted.
+- **M75 (P0) "Run not found" — FIXED/DEPLOYED (Cloud PR #87 `403cfd5`, PR #88 `9df73dd`; engine submodule `e4df683`):** root cause was the same exact-detail workspace scoping bug for runs. The real run exists in Cloud Supabase as `run_8290101e249b`, worker `granola-hubspot-meeting-sync`, status `failed`, duration `4436ms`, workspace `ws_b79e570aad8349`; stale/default workspace context made `runs.get()` return not found. Fix: `SupabaseRunRepository.get()` now retries exact run id + owner after an active-workspace miss. Cloud API deployed and restarted; deployed repo probe with stale workspace found `run_8290101e249b` with status `failed`. Public Cloud API detail request with a temporary token returned the run detail (`failed`, `4436ms`) and the token was deleted. Public deep link now redirects once to login and returns HTTP 200 instead of looping. Authenticated browser screenshot is pending Federico completing the broker login handoff.
+- **M76 (P1, UI) Tool/app logos missing — FIXED (PR #446, merged 947bb0f):** worker cards + popular-workflow cards + overview activity/coming-up lists showed generic trigger glyphs not app logos. Now: real brand logos derived from `WorkerSummary.connections` (data-driven), real Granola SVG added (granola.ai official marque, not fabricated). Reaches live Cloud via convergence bump.
+- **Inline prompt-text tool highlight — DONE (PR #442, merged d700d1f):** known tool names in prompt text get an inline brand icon + faint badge; Granola now shows its real logo (via #446).
+- **M77 (cleanup) Duplicate junk workers** — 3 near-identical "Granola to HubSpot Daily Meeting" workers (Emily created dupes). M49-class cleanup; fold into a dedupe pass after the P0s.
+
+## [2026-06-05] Federico live-walk batch 2 (connections/channels) — DOCUMENTED before changes
+- **Emily v5 — CONFIRMED LIVE on Cloud (not just merged):** Cloud API restarted 22:39 CEST, after engine bumped to e4df683 (v5) at 21:36; deployed chat_service.py has the v5 "I'm Emily" persona. The assistant#prompt tab serves v5 live. (Definitive yes.)
+- **M78 (P1, FEATURE — main complaint) No proper Slack/WhatsApp onboarding.** assistant#channels has only a barebones Slack form (paste Channel ID manually); WhatsApp absent entirely from the codebase. Wants guided Slack + WhatsApp onboarding, reachable from the landing directly. Build: Slack OAuth -> live channel-picker (no manual ID); WhatsApp mechanism TBD (Composio? Twilio? OpenClaw gateway — scope first, flag if it needs a Federico decision). Lane dispatched.
+- **M79 (bug) apex /connections/* 404.** workeros.floom.dev/connections/browse = 404, /connections = 404 (apex, no /app); /app/connections/browse = 307 works. Bare links don't resolve into the dashboard. Fix: apex redirect /connections,/connections/* -> /app/<same>. Lane dispatched.
+- **M80 (perf) "Redirecting to Composio" slow.** Root cause CONFIRMED: apps/web/app/connections/redirect/page.tsx hardcodes setTimeout(redirect, 3000) — a 3-second artificial delay. Fix: redirect as soon as the auth URL is ready. Lane dispatched.
+
+## [2026-06-05] Federico live-walk batch 3 (account / mcp / brain / sharing) — DOCUMENTED before changes
+NOTE: 4 screenshots referenced (Mac Desktop paths) could NOT be retrieved (ssh mac down). M82/M84 are screenshot-only — working from descriptions; M82 needs Federico to name the control.
+- **M81 (bug) Account does not show my email.** The account section/footer does not display the signed-in user's email. (Screenshot 13.38.03)
+- **M82 (P1 bug) "these dont do anything" — VIEWED:** the connections-table row "⋯" Actions menu items **Test connection / Refresh status / Disconnect** are all dead on click. Lane dispatched (connections-detail).
+- **VIEWED-PRECISION (2026-06-05, screenshots now readable via sshfs):** M81 = the connection ROW shows "account …ea71f1" (internal id) not the email + stuck "Connecting" (separate from the now-fixed sidebar footer email). M84 = the worker "Add tool" app picker is a plain TEXT dropdown, no brand logos (separate from the now-fixed MCP-server-add JSON). M86 = worker Share is a cramped modal with a raw hash token, not a Floom-style standalone page (standalone-share lane covers it).
+- **M83 (UX, REPEATED feedback) MCP connections should default to JSON, not a form** — https://workeros.floom.dev/app/connections/mcp — MCP servers are configured via JSON; the add UI must default to a JSON config input. Federico gave this before; not delivered. OWN IT.
+- **M84 (UX) "add a tool" UI sucks** (Screenshot 13.39.23) — likely the MCP/tool add form; make it JSON-based + clean. (Could not view screenshot.)
+- **M85 BRAIN / CONTEXT cluster:**
+  - M85a (P0 bug) **brain attach throws HTTP 500 on Cloud.**
+  - M85b (bug) download a brain file -> {"detail":"Context not found"} (confusing/broken). Source: apps/api/main.py + workeros-cloud/apps/api/routes/context_previews.py.
+  - M85c (UX) drag-drop a file into the brain should JUST WORK and auto-create a pack if none exists (auto-name it). Currently can't just drop a file.
+  - M85d (feature) **standalone noindex share links for individual FILES** (like the approvals shareable links / M12) — currently can only share a pack, not a file standalone; and even pack sharing "links to the platform" rather than being a true standalone page. Wants standalone noindex pages. (Expands M70.)
+  - M85e (feature) brain/context is **read-only — wants WRITE** (add/edit files).
+- **M86 (UX, REPEATED feedback) Worker-card share page is weird; must match the Floom share reference** — target design: https://floom.dev/s/fls_A7lOwwSGOct63FCNC_-4CWlryYf8VddxfTCRxsmVk10 . Federico gave this reference BEFORE; I did not pick it up. The worker share + all standalone share pages (worker/brain-file/pack) should look like that Floom standalone share page. OWN IT — build against the reference this time.
+
+## [2026-06-07] Federico live-test FL3 + FL5 — DOCUMENTED before changes
+- **FL3 (P1 auth/cloud) Cloud login returns to home after sign-in.** Root cause in this checkout: the Next proxy forwarded proxied `/auth/login` responses without preserving upstream `Set-Cookie`, so the `wos_session` cookie created by FastAPI could be lost at the browser boundary. Also no OSS `/auth/login` page existed in `apps/web/app`, leaving the expected post-login copy/redirect implicit. Fix in progress: proxy forwards cookies both ways, successful `/auth/login` returns `redirect_to: "/overview"`, and the web login page copy is "Sign in to your Workeros workspace" with successful sign-in navigating to `/overview` or a safe local `return_to`.
+- **FL5 (P1 brain upload) 1.4 MB image returned raw "Request body too large"; first upload flaky without a folder.** Root cause in this checkout: the Next proxy streamed only exact `/uploads`, so `/contexts/{name}/upload` was buffered; the backend had a 25 MB generic `/uploads` cap but no Brain-specific friendly limit, and missing Brain folders only auto-created when the client sent `create_if_missing=true`. Fix in progress: context uploads stream through the proxy, Brain upload limit defaults to 25 MB with friendly 413 copy, missing folders auto-create by default, and the Brain UI creates a new user folder when only system/read-only packs exist.

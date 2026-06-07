@@ -81,6 +81,8 @@ def discover_workers(use_cache: bool = False) -> List[Dict[str, Any]]:
                 "example_output": contract.example_output,
                 "how_it_works": contract.how_it_works,
                 "is_example": contract.is_example,
+                "archived": contract.archived,
+                "archive_reason": contract.archive_reason,
                 "tags": contract.tags or [],
                 "folder": contract.folder,
                 "config": config.model_dump(),

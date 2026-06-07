@@ -88,6 +88,37 @@ class WorkerRepository(Protocol):
 
     def delete_webhook_secret(self, *, worker_id: str) -> bool: ...
 
+    # -- worker_triggers (normalized multi-trigger rows) ---------------------
+
+    def reconcile_triggers(
+        self,
+        *,
+        worker_id: str,
+        triggers: list[dict[str, Any]],
+        external_trigger_id: str | None = None,
+        enabled: bool = True,
+    ) -> list[RowDict]: ...
+
+    def list_trigger_rows(self, *, worker_id: str) -> list[RowDict]: ...
+
+    def list_due_schedule_triggers(self, *, now_iso: str) -> list[RowDict]: ...
+
+    def set_trigger_next_run_at(self, *, trigger_id: str, next_run_at: str | None) -> None: ...
+
+    def mark_trigger_fired(
+        self,
+        *,
+        trigger_id: str,
+        last_fired_at: str,
+        next_run_at: str | None,
+    ) -> None: ...
+
+    def find_trigger_by_external_id(self, *, external_trigger_id: str) -> RowDict | None: ...
+
+    def find_trigger_for_webhook(self, *, worker_id: str) -> RowDict | None: ...
+
+    def count_schedule_trigger_rows(self) -> int: ...
+
 
 class RunRepository(Protocol):
     def list_for_worker(
@@ -147,6 +178,16 @@ class RunRepository(Protocol):
 
     def list_logs(self, *, user_id: str, run_id: str) -> list[RowDict]: ...
 
+    def list_logs_for_worker(
+        self,
+        *,
+        user_id: str,
+        worker_id: str,
+        level: str | None = None,
+        since: str | None = None,
+        limit: int = 200,
+    ) -> list[RowDict]: ...
+
     def add_artifact(
         self,
         *,
@@ -186,6 +227,15 @@ class RunRepository(Protocol):
 
     def fail_running(self, *, user_id: str, error: str, error_code: str | None = None) -> list[str]: ...
 
+    def fail_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[RowDict]: ...
+
 
 class ConnectionRepository(Protocol):
     def list(self, *, user_id: str) -> list[RowDict]: ...
@@ -193,6 +243,15 @@ class ConnectionRepository(Protocol):
     def get(self, *, user_id: str, composio_id: str) -> RowDict | None: ...
 
     def get_by_composio_connection_id(self, *, composio_connection_id: str) -> RowDict | None: ...
+
+    def find_by_app_account(
+        self,
+        *,
+        user_id: str,
+        app_name: str,
+        account_label: str,
+        exclude_id: str | None = None,
+    ) -> RowDict | None: ...
 
     def upsert(self, *, user_id: str, **fields: Any) -> RowDict: ...
 
@@ -219,6 +278,41 @@ class SecretRepository(Protocol):
     def resolve(self, *, user_id: str, names: Iterable[str]) -> dict[str, str]: ...
 
 
+class ApprovalRepository(Protocol):
+    def create(self, *, owner_id: str, **fields: Any) -> RowDict: ...
+
+    def get(self, *, owner_id: str, approval_id: str) -> RowDict | None: ...
+
+    def get_public(self, *, approval_id: str) -> RowDict | None: ...
+
+    def get_by_run_id(self, *, run_id: str) -> RowDict | None: ...
+
+    def list_pending(self, *, owner_id: str) -> list[RowDict]: ...
+
+    def count_pending(self, *, owner_id: str) -> int: ...
+
+    def approve(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        edited_output_json: str | None = None,
+        follow_up_run_id: str | None = None,
+        annotations_json: str | None = None,
+    ) -> RowDict | None: ...
+
+    def reject(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        reason: str | None = None,
+        annotations_json: str | None = None,
+    ) -> RowDict | None: ...
+
+
 class CliAuthRepository(Protocol):
     def create_device(self, *, user_id: str, **fields: Any) -> RowDict: ...
 
@@ -237,3 +331,196 @@ class CliAuthRepository(Protocol):
     def delete(self, *, device_code: str) -> bool: ...
 
     def prune_expired(self, *, now_ts: float) -> list[str]: ...
+
+
+class VersionRepository(Protocol):
+    """Immutable snapshots of worker, brain-pack, and workspace-instruction state for rollback."""
+
+    def create(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        user_id: str,
+        snapshot_json: str,
+        change_source: str,
+        keep: int | None = 20,
+    ) -> RowDict: ...
+
+    def list(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        limit: int = 50,
+    ) -> list[RowDict]: ...
+
+    def get(self, *, version_id: str) -> RowDict | None: ...
+
+    def prune(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        keep: int = 20,
+    ) -> int: ...
+
+    def delete_for_asset(self, *, asset_type: str, asset_id: str) -> int: ...
+
+    def delete_for_context(self, *, name: str) -> int: ...
+
+
+class McpToolRepository(Protocol):
+    """Custom MCP tools backed by workers, scoped per user/workspace."""
+
+    def list(self, *, user_id: str) -> list[RowDict]: ...
+
+    def get(self, *, user_id: str, tool_id: str) -> RowDict | None: ...
+
+    def get_by_name(self, *, user_id: str, name: str) -> RowDict | None: ...
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        worker_id: str,
+    ) -> RowDict: ...
+
+    def update(self, *, user_id: str, tool_id: str, **fields: Any) -> RowDict | None: ...
+
+    def delete(self, *, user_id: str, tool_id: str) -> bool: ...
+
+
+class WorkspaceMemberRepository(Protocol):
+    """Workspace-level RBAC membership.
+
+    Roles: owner / admin / member. Status: active / invited / removed.
+    On the OSS single-owner engine this collapses to exactly one active owner
+    row per workspace; Cloud implements the same Protocol against Supabase with
+    RLS keyed off these rows. ``actor_id`` is the user performing a mutation, so
+    implementations enforce the permission matrix (only owner changes roles /
+    transfers ownership; owner+admin invite/remove members; admin cannot target
+    owner/admin) rather than trusting the caller.
+    """
+
+    def list(self, *, workspace_id: str) -> list[RowDict]: ...
+
+    def get(self, *, workspace_id: str, user_id: str) -> RowDict | None: ...
+
+    def invite(self, *, workspace_id: str, email: str, role: str, invited_by: str) -> RowDict: ...
+
+    def set_role(self, *, workspace_id: str, actor_id: str, user_id: str, role: str) -> RowDict | None: ...
+
+    def remove(self, *, workspace_id: str, actor_id: str, user_id: str) -> bool: ...
+
+    def transfer_owner(self, *, workspace_id: str, actor_id: str, new_owner_id: str) -> RowDict: ...
+
+
+class AssetAccessRepository(Protocol):
+    """Per-asset visibility + computed permissions.
+
+    ``get_permissions`` resolves the (can_edit/can_run/can_delete/can_share)
+    matrix for ``user_id`` against an asset, combining the asset's owner_id +
+    visibility with the user's workspace role. ``set_visibility`` flips an
+    asset between private / workspace (specific_people reserved). On the OSS
+    single-owner engine the actor is always the owner, so every permission is
+    granted for their own assets and private assets stay invisible to non-owners.
+    ``asset_type`` is currently ``"worker"`` (brain/assistant land in later steps).
+    """
+
+    def get_permissions(
+        self, *, workspace_id: str, user_id: str, asset_type: str, asset_id: str
+    ) -> RowDict: ...
+
+    def set_visibility(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, visibility: str
+    ) -> RowDict | None: ...
+
+    def transfer_asset_owner(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, new_owner_id: str
+    ) -> RowDict | None: ...
+
+
+class UserRepository(Protocol):
+    """Local user accounts for multi-member OSS deployments (migration 59)."""
+
+    def count(self) -> int: ...
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        username: str,
+        display_name: str | None,
+        password_hash: str,
+        role: str,
+    ) -> RowDict: ...
+
+    def get(self, *, user_id: str) -> RowDict | None: ...
+
+    def get_by_username(self, *, username: str) -> RowDict | None: ...
+
+    def list(self) -> list[RowDict]: ...
+
+    def update(self, *, user_id: str, **fields: Any) -> RowDict | None: ...
+
+    def delete(self, *, user_id: str) -> bool: ...
+
+
+class PersonalAccessTokenRepository(Protocol):
+    """Per-user long-lived API tokens for API/MCP access (migration 59)."""
+
+    def create(
+        self,
+        *,
+        token_id: str,
+        user_id: str,
+        name: str,
+        token_hash: str,
+        expires_at: str | None,
+    ) -> RowDict: ...
+
+    def get_by_hash(self, *, token_hash: str) -> RowDict | None: ...
+
+    def list(self, *, user_id: str) -> list[RowDict]: ...
+
+    def delete(self, *, token_id: str, user_id: str) -> bool: ...
+
+    def touch_last_used(self, *, token_id: str, last_used_at: str) -> None: ...
+
+
+class UserSessionRepository(Protocol):
+    """Server-side sessions for cookie-based web UI auth (migration 59)."""
+
+    def create(self, *, session_id: str, user_id: str, expires_at: str) -> RowDict: ...
+
+    def get(self, *, session_id: str) -> RowDict | None: ...
+
+    def delete(self, *, session_id: str) -> bool: ...
+
+    def prune_expired(self, *, now_iso: str) -> int: ...
+
+
+class AlertRepository(Protocol):
+    """Webhook and email alert registrations per-worker."""
+
+    def add(
+        self,
+        *,
+        alert_id: str,
+        worker_id: str,
+        url: str | None,
+        email_to: str | None,
+        events: str,
+        description: str | None,
+        created_at: str,
+    ) -> RowDict: ...
+
+    def list(self, *, worker_id: str) -> list[RowDict]: ...
+
+    def get(self, *, alert_id: str) -> RowDict | None: ...
+
+    def delete(self, *, alert_id: str, worker_id: str) -> bool: ...

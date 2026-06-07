@@ -20,10 +20,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from models import WorkerConfig, WorkerResult
-from runner_utils import ARTIFACTS_DIR, _validate_output_schema
+from contexts import (
+    context_dir,
+    context_scope_for_user,
+    iter_context_files,
+    normalize_context_mount,
+    use_context_scope,
+)
+from models import (
+    WorkerConfig,
+    WorkerResult,
+)
+from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR
 
+from . import agent_capabilities
+from .agent_capabilities import WORKER_POLICY, MCPConnectionError
 from .base import SandboxDriver
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
@@ -111,14 +123,19 @@ class _AgentRunState:
     bundle_dir: Path
     input_dir: Path
     output_dir: Path
+    context_dir: Path
     outputs: Dict[str, Any]
     artifacts: list[Dict[str, Any]]
     timeout_seconds: int
+    connection_ids: Dict[str, str]
+    user_id: str | None = None
     finished: bool = False
 
 
-class _MCPConnectionError(RuntimeError):
-    pass
+# Backwards-compatible alias: the shared capability module now owns this error
+# type. Existing `_MCPConnectionError` references (raises + excepts) keep working
+# because it is the SAME class.
+_MCPConnectionError = MCPConnectionError
 
 
 class AgentDriver(SandboxDriver):
@@ -140,6 +157,7 @@ class AgentDriver(SandboxDriver):
         timeout_seconds: int = 300,
         config: Optional[WorkerConfig] = None,
         connection_ids: Optional[Dict[str, str]] = None,
+        user_id: str | None = None,
     ) -> WorkerResult:
         try:
             return self._run_coro_sync(
@@ -152,9 +170,23 @@ class AgentDriver(SandboxDriver):
                     trace_id=trace_id,
                     timeout_seconds=timeout_seconds,
                     config=config,
+                    connection_ids=connection_ids or {},
+                    user_id=user_id,
                 )
             )
         except Exception as exc:
+            exc_str = str(exc)
+            if "response.incomplete" in exc_str or "max_output_tokens" in exc_str.lower():
+                log_fn(f"Output token limit reached: {exc}", "error")
+                return WorkerResult(
+                    status="error",
+                    error=(
+                        "The model's response exceeded the per-turn output token limit. "
+                        "Increase max_output_tokens in the worker's limits or simplify the task."
+                    ),
+                    error_code="output_token_limit",
+                    retryable=False,
+                )
             logger.exception("Agent driver failed for worker %s run %s", worker_id, run_id)
             log_fn(f"Agent runtime error: {exc}", "error")
             return WorkerResult(
@@ -195,6 +227,8 @@ class AgentDriver(SandboxDriver):
         trace_id: str,
         timeout_seconds: int,
         config: Optional[WorkerConfig],
+        connection_ids: Dict[str, str],
+        user_id: str | None,
     ) -> WorkerResult:
         if not config or not config.runtime:
             return WorkerResult(status="error", error="Worker config not found", error_code="invalid_worker")
@@ -212,6 +246,8 @@ class AgentDriver(SandboxDriver):
                     trace_id=trace_id,
                     timeout_seconds=timeout_seconds,
                     config=config,
+                    connection_ids=connection_ids,
+                    user_id=user_id,
                 ),
                 timeout=timeout_seconds,
             )
@@ -232,6 +268,8 @@ class AgentDriver(SandboxDriver):
         trace_id: str,
         timeout_seconds: int,
         config: WorkerConfig,
+        connection_ids: Dict[str, str],
+        user_id: str | None,
     ) -> WorkerResult:
         from agents import Agent, ModelSettings, RunConfig
 
@@ -247,9 +285,21 @@ class AgentDriver(SandboxDriver):
         artifact_dir = _safe_path(ARTIFACTS_DIR, run_id)
         input_dir = _safe_path(artifact_dir, "inputs")
         output_dir = _safe_path(artifact_dir, "outputs")
+        context_root = _safe_path(artifact_dir, "context")
         input_dir.mkdir(parents=True, exist_ok=True)
         output_dir.mkdir(parents=True, exist_ok=True)
-        _safe_path(input_dir, "inputs.json").write_text(json.dumps(inputs, indent=2))
+        _safe_path(input_dir, "inputs.json").write_text(json.dumps(inputs, indent=2), encoding="utf-8")
+
+        # Stage attached brain packs (config.contexts) into a per-run context/
+        # tree the agent's file tools can read, mirroring the e2b driver's
+        # {workdir}/context/<name>/... layout. Owner-scoped: a run only ever
+        # sees ITS attached packs, never another tenant's.
+        staged_context_packs = self._stage_contexts(
+            config=config,
+            context_root=context_root,
+            user_id=user_id,
+            log_fn=log_fn,
+        )
 
         outputs: Dict[str, Any] = {}
         artifacts: list[Dict[str, Any]] = []
@@ -265,12 +315,15 @@ class AgentDriver(SandboxDriver):
             bundle_dir=bundle_dir,
             input_dir=input_dir,
             output_dir=output_dir,
+            context_dir=context_root,
             outputs=outputs,
             artifacts=artifacts,
             timeout_seconds=timeout_seconds,
+            connection_ids=connection_ids,
+            user_id=user_id,
         )
 
-        system_prompt = self._load_system_prompt(bundle_dir, config)
+        system_prompt = self._load_system_prompt(bundle_dir, config, staged_context_packs)
         run_input: str | list[dict[str, Any]] = json.dumps(
             {
                 "worker_id": worker_id,
@@ -287,11 +340,21 @@ class AgentDriver(SandboxDriver):
             max_tokens=limits.max_output_tokens,
             include_usage=True,
         )
+        # Per-run, loop-local OpenAI client. The SDK's default provider shares a
+        # process-wide httpx client bound to the first loop that uses it; each
+        # worker run executes in its own fresh asyncio loop (see
+        # _run_coro_sync -> asyncio.run), so the shared client raises
+        # "Event loop is closed" when concurrent runs overlap. Binding a fresh
+        # client to THIS run's loop fully isolates concurrent runs.
+        from .loop_local_provider import LoopLocalModelProvider
+
+        loop_local_provider = LoopLocalModelProvider()
         run_config = RunConfig(
             workflow_name=f"workeros:{worker_id}",
             trace_id=trace_id,
             trace_metadata={"worker_id": worker_id, "run_id": run_id},
             model_settings=model_settings,
+            model_provider=loop_local_provider.provider,
         )
 
         total_tokens = 0
@@ -406,16 +469,19 @@ class AgentDriver(SandboxDriver):
             if last_result is not None:
                 transcript.append({"type": "final_output", "content": str(getattr(last_result, "final_output", ""))})
             self._persist_transcript(output_dir, transcript, artifacts)
-            schema_error = _validate_output_schema(worker_id, outputs, log_fn, config=config)
-            if schema_error:
-                log_fn(f"Schema validation failed: {schema_error}", level="error")
-                return WorkerResult(
-                    status="failed",
-                    outputs=outputs,
-                    artifacts=artifacts,
-                    error=f"Output schema violation: {schema_error}",
-                    error_code="schema_violation",
-                )
+            # Output-schema enforcement is now centralized at the common
+            # completion gate in run_service.execute_run (one path for all three
+            # drivers). The driver returns success with the outputs; the gate
+            # validates declared type/columns/required-keys and FAILS the run on
+            # a mismatch. See run_service.py (_validate_output_schema call).
+            # Persist any edits the run made to writeable:true packs back to the
+            # local store before returning success (mirrors e2b_driver).
+            self._persist_writeable_contexts(
+                config=config,
+                context_root=context_root,
+                user_id=user_id,
+                log_fn=log_fn,
+            )
             return WorkerResult(status="success", outputs=outputs, artifacts=artifacts)
         except _MCPConnectionError as exc:
             log_fn(str(exc), level="error")
@@ -426,6 +492,10 @@ class AgentDriver(SandboxDriver):
             )
         finally:
             await self._cleanup_mcp_servers(mcp_servers, log_fn)
+            # Close the per-run OpenAI + httpx client while THIS run's loop is
+            # still alive, so the connection pool is released cleanly (no leaks,
+            # no "Event loop is closed" teardown warnings).
+            await loop_local_provider.aclose()
 
     async def _run_streamed(self, agent: Any, run_input: Any, max_turns: int, run_config: Any) -> Any:
         from agents import Runner
@@ -666,7 +736,98 @@ class AgentDriver(SandboxDriver):
         except Exception:
             return False
 
-    def _load_system_prompt(self, bundle_dir: Path, config: WorkerConfig) -> str:
+    def _stage_contexts(
+        self,
+        *,
+        config: Optional[WorkerConfig],
+        context_root: Path,
+        user_id: str | None,
+        log_fn: Callable[[str, str], None],
+    ) -> list[str]:
+        """Stage attached brain packs (delegates to the shared builder).
+
+        Owner-scoped, per-pack ``context/<name>`` layout, git contexts skipped.
+        See :func:`agent_capabilities.stage_context_packs`.
+        """
+        return agent_capabilities.stage_context_packs(
+            config=config,
+            context_root=context_root,
+            user_id=user_id,
+            log_fn=log_fn,
+        )
+
+    def _persist_writeable_contexts(
+        self,
+        *,
+        config: Optional[WorkerConfig],
+        context_root: Path,
+        user_id: str | None,
+        log_fn: Callable[[str, str], None],
+    ) -> None:
+        """Write back edits an agent-mode run made to ``writeable:true`` packs.
+
+        Mirrors ``E2BSandboxDriver._persist_writeable_contexts`` (N3-2 / #364):
+        agent-mode stages packs into ``context_root/<name>/...`` and the file
+        tools are read-only, but a worker can still mutate staged files via
+        ``run_command`` (shell). Without this, those edits are discarded on run
+        end. We copy each ``writeable:true`` local pack's staged tree back over
+        the canonical pack (``context_dir(name)``), owner-scoped — same scope,
+        same per-pack layout, same source rules as e2b. Git packs are skipped
+        (writeback target is the local store only). Only called on a successful
+        run, matching the e2b trigger (``status not in ("error","failed")``).
+        """
+        if not config or not config.contexts:
+            return
+
+        with use_context_scope(context_scope_for_user(user_id)):
+            for raw_context in config.contexts:
+                try:
+                    context = normalize_context_mount(raw_context)
+                except ValueError as exc:
+                    log_fn(f"[agent] Skipping invalid writeable context: {exc}", "warning")
+                    continue
+                if not context["writeable"]:
+                    continue
+                if context["source"] != "local":
+                    log_fn(
+                        f"[agent] Skipping writeback for git context {context['name']!r}",
+                        "warning",
+                    )
+                    continue
+
+                name = context["name"]
+                staged_pack = _safe_path(context_root, name)
+                if not staged_pack.is_dir():
+                    log_fn(f"[agent] Writeable context {name!r} missing in staging", "warning")
+                    continue
+
+                try:
+                    dest_root = context_dir(name)
+                    dest_root.mkdir(parents=True, exist_ok=True)
+                    # Mirror the staged tree onto the pack: write current staged
+                    # files (covers edits + new files) then prune pack files the
+                    # run deleted, so the persisted state matches the sandbox.
+                    staged_rels: set[str] = set()
+                    for fpath in iter_context_files(staged_pack):
+                        rel = fpath.relative_to(staged_pack).as_posix()
+                        staged_rels.add(rel)
+                        target = _safe_path(dest_root, rel)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(fpath.read_bytes())
+                    for existing in iter_context_files(dest_root):
+                        rel = existing.relative_to(dest_root).as_posix()
+                        if rel not in staged_rels:
+                            existing.unlink(missing_ok=True)
+                    log_fn(f"[agent] Persisted writeable context {name!r}", "info")
+                except Exception as exc:
+                    log_fn(f"[agent] Failed to persist writeable context {name!r}: {exc}", "warning")
+
+    def _load_system_prompt(
+        self,
+        bundle_dir: Path,
+        config: WorkerConfig,
+        staged_context_packs: list[str] | None = None,
+    ) -> str:
         prompt_parts: list[str] = []
         if config.runtime.system_prompt:
             prompt_parts.append(config.runtime.system_prompt.strip())
@@ -679,6 +840,16 @@ class AgentDriver(SandboxDriver):
             prompt_parts.append(entrypoint_path.read_text())
         elif config.runtime.type != "none":
             raise FileNotFoundError(f"Agent entrypoint not found: {entrypoint}")
+        if staged_context_packs:
+            names = ", ".join(sorted(staged_context_packs))
+            prompt_parts.append(
+                "## Attached context packs\n\n"
+                f"The following brain packs are attached: {names}. Their files are "
+                "available under `context/<name>/` and readable with list_dir and "
+                "read_file (e.g. list_dir('context'), read_file('context/"
+                f"{sorted(staged_context_packs)[0]}/<file>')). Consult them as "
+                "reference knowledge for this run."
+            )
         prompt_parts.append(
             "Use tools to inspect bundle files as needed. "
             "Use web_search for fresh or external facts unless disabled. "
@@ -865,25 +1036,7 @@ class AgentDriver(SandboxDriver):
                 },
             },
         ]
-        for app in self._composio_connection_names(config):
-            safe_app = "".join(ch if ch.isalnum() else "_" for ch in app.lower())
-            tools.append(
-                {
-                    "type": "function",
-                    "function": {
-                        "name": f"composio__{safe_app}__execute",
-                        "description": f"Execute a {app} tool as integration.{app}.<tool>(arguments).",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "tool": {"type": "string"},
-                                "arguments": {"type": "object"},
-                            },
-                            "required": ["tool", "arguments"],
-                        },
-                    },
-                }
-            )
+        tools.extend(agent_capabilities.composio_tool_schemas(config, WORKER_POLICY))
         disabled = self._disabled_tool_names(config)
         if disabled:
             tools = [tool for tool in tools if not self._tool_is_disabled(tool, disabled)]
@@ -895,65 +1048,34 @@ class AgentDriver(SandboxDriver):
         secrets: Dict[str, str],
         log_fn: Callable[[str, str], None],
     ) -> list[Any]:
-        servers = []
+        servers: list[Any] = []
         for connection in self._mcp_connections(config):
             try:
                 server = self._make_mcp_server(connection, secrets)
                 await server.connect()
                 log_fn(f"Connected MCP server {connection.label}", "debug")
                 servers.append(server)
-            except _MCPConnectionError:
-                raise
-            except Exception as exc:
-                raise _MCPConnectionError(f"MCP connection failed for {connection.label}: {exc}") from exc
+            except Exception as exc:  # noqa: BLE001 - normalize reload-split MCP errors
+                if exc.__class__.__name__ == "MCPConnectionError":
+                    raise _MCPConnectionError(str(exc)) from exc
+                raise _MCPConnectionError(
+                    f"MCP connection failed for {connection.label}: {exc}"
+                ) from exc
         return servers
 
     async def _cleanup_mcp_servers(self, servers: list[Any], log_fn: Callable[[str, str], None]) -> None:
-        for server in reversed(servers):
-            try:
-                await server.cleanup()
-            except Exception as exc:
-                log_fn(f"MCP cleanup failed for {getattr(server, 'name', 'unknown')}: {exc}", "warning")
+        await agent_capabilities.cleanup_mcp_servers(servers, log_fn)
 
     def _make_mcp_server(self, connection: Any, secrets: Dict[str, str]) -> Any:
-        from agents.mcp import MCPServerStreamableHttp
-
-        params: Dict[str, Any] = {"url": connection.url}
-        headers = self._mcp_auth_headers(connection, secrets)
-        if headers:
-            params["headers"] = headers
-
-        tool_filter = None
-        if connection.allowed_tools:
-            tool_filter = {"allowed_tool_names": list(connection.allowed_tools)}
-
-        return MCPServerStreamableHttp(
-            name=connection.label,
-            params=params,
-            cache_tools_list=True,
-            tool_filter=tool_filter,
-            require_approval=connection.require_approval,
-        )
-
-    def _mcp_auth_headers(self, connection: Any, secrets: Dict[str, str]) -> Dict[str, str]:
-        auth = getattr(connection, "auth", None)
-        if not auth:
-            return {}
-        scheme, secret_name = auth.split(":", 1)
-        if scheme != "bearer":
-            raise _MCPConnectionError(f"Unsupported MCP auth for {connection.label}: {scheme}")
-        token = secrets.get(secret_name)
-        if not token:
-            raise _MCPConnectionError(f"MCP connection {connection.label} is missing secret {secret_name}")
-        return {"Authorization": f"Bearer {token}"}
+        try:
+            return agent_capabilities.make_mcp_server(connection, secrets, WORKER_POLICY)
+        except Exception as exc:  # noqa: BLE001 - normalize reload-split MCP errors
+            if exc.__class__.__name__ == "MCPConnectionError":
+                raise _MCPConnectionError(str(exc)) from exc
+            raise
 
     def _mcp_connections(self, config: WorkerConfig) -> list[Any]:
-        connections: list[Any] = []
-        for connection in config.connections:
-            mcp = self._object_get(connection, "mcp")
-            if mcp is not None:
-                connections.append(mcp)
-        return connections
+        return agent_capabilities.mcp_connections(config)
 
     def _sdk_tools(self, config: WorkerConfig, state: _AgentRunState) -> list[Any]:
         from agents import FunctionTool, WebSearchTool
@@ -992,6 +1114,9 @@ class AgentDriver(SandboxDriver):
                     outputs=state.outputs,
                     artifacts=state.artifacts,
                     timeout_seconds=state.timeout_seconds,
+                    context_dir=state.context_dir,
+                    connection_ids=state.connection_ids,
+                    user_id=state.user_id,
                 )
                 if tool_name == "finish_with_outputs" and result.get("ok"):
                     state.finished = True
@@ -1009,11 +1134,7 @@ class AgentDriver(SandboxDriver):
         return sdk_tools
 
     def _composio_connection_names(self, config: WorkerConfig) -> list[str]:
-        names: list[str] = []
-        for connection in config.connections:
-            if isinstance(connection, str):
-                names.append(connection)
-        return names
+        return agent_capabilities.composio_connection_names(config)
 
     def _disabled_tool_names(self, config: WorkerConfig) -> set[str]:
         disabled = getattr(config.runtime, "disable_tools", None) or []
@@ -1050,12 +1171,15 @@ class AgentDriver(SandboxDriver):
         outputs: Dict[str, Any],
         artifacts: list[Dict[str, Any]],
         timeout_seconds: int,
+        context_dir: Path,
+        connection_ids: Optional[Dict[str, str]] = None,
+        user_id: str | None = None,
     ) -> Dict[str, Any]:
         try:
             if name == "list_dir":
-                return self._list_dir(bundle_dir, str(args.get("path") or "."))
+                return self._list_dir(bundle_dir, str(args.get("path") or "."), context_dir)
             if name == "read_file":
-                return self._read_file(bundle_dir, str(args.get("path") or ""))
+                return self._read_file(bundle_dir, str(args.get("path") or ""), context_dir)
             if name == "write_output":
                 return self._write_output(args, output_dir, outputs, artifacts, config)
             if name == "finish_with_outputs":
@@ -1071,19 +1195,34 @@ class AgentDriver(SandboxDriver):
                     timeout_seconds=timeout_seconds,
                 )
             if name == "invoke_worker":
-                return self._invoke_worker(args)
+                return self._invoke_worker(args, state_user_id=user_id)
             if name == "log":
                 level = str(args.get("level") or "info")
                 log_fn(str(args.get("message") or ""), level)
                 return {"ok": True}
             if name.startswith("composio__") or name.startswith("composio."):
-                return self._composio_execute(name, args, worker_id, log_fn)
+                return self._composio_execute(name, args, worker_id, log_fn, config, connection_ids or {}, user_id)
             return {"ok": False, "error": f"Unknown tool: {name}"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def _list_dir(self, bundle_dir: Path, path: str) -> Dict[str, Any]:
-        target = _safe_path(bundle_dir, path)
+    def _resolve_read_path(self, bundle_dir: Path, context_dir: Path, path: str) -> Path:
+        """Resolve a file-tool path to the bundle, or the staged context tree.
+
+        Attached brain packs live under ``context/<name>/...`` (mirroring the
+        e2b driver). ``context`` itself and any ``context/...`` path resolve
+        against the per-run staged context root; everything else resolves
+        against the read-only bundle. Both roots are path-traversal-guarded.
+        """
+        normalized = Path(path or ".").as_posix().strip("/")
+        if normalized == "context":
+            return context_dir.resolve()
+        if normalized.startswith("context/"):
+            return _safe_path(context_dir, normalized[len("context/") :])
+        return _safe_path(bundle_dir, path)
+
+    def _list_dir(self, bundle_dir: Path, path: str, context_dir: Path) -> Dict[str, Any]:
+        target = self._resolve_read_path(bundle_dir, context_dir, path)
         if not target.is_dir():
             return {"ok": False, "error": f"Not a directory: {path}"}
         entries = []
@@ -1091,8 +1230,8 @@ class AgentDriver(SandboxDriver):
             entries.append({"name": child.name, "type": "dir" if child.is_dir() else "file"})
         return {"ok": True, "entries": entries}
 
-    def _read_file(self, bundle_dir: Path, path: str) -> Dict[str, Any]:
-        target = _safe_path(bundle_dir, path)
+    def _read_file(self, bundle_dir: Path, path: str, context_dir: Path) -> Dict[str, Any]:
+        target = self._resolve_read_path(bundle_dir, context_dir, path)
         if not target.is_file():
             return {"ok": False, "error": f"File not found: {path}"}
         return {"ok": True, "content": target.read_text()}
@@ -1123,7 +1262,7 @@ class AgentDriver(SandboxDriver):
         relative_path = declared.path if declared and declared.path else f"outputs/{name}.txt"
         path = _safe_path(artifact_root, relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(serialized)
+        path.write_text(serialized, encoding="utf-8")
         artifact = {
             "name": relative_path,
             "type": self._artifact_media_type(declared),
@@ -1211,7 +1350,7 @@ class AgentDriver(SandboxDriver):
         artifacts: list[Dict[str, Any]],
     ) -> None:
         transcript_path = _safe_path(output_dir, "transcript.jsonl")
-        transcript_path.write_text("\n".join(json.dumps(message, default=str) for message in messages) + "\n")
+        transcript_path.write_text("\n".join(json.dumps(message, default=str) for message in messages) + "\n", encoding="utf-8")
         artifacts[:] = [item for item in artifacts if item.get("path") != str(transcript_path)]
         artifacts.append(
             {
@@ -1383,28 +1522,38 @@ class AgentDriver(SandboxDriver):
     def _shell_quote(self, value: str) -> str:
         return "'" + value.replace("'", "'\"'\"'") + "'"
 
-    def _invoke_worker(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def _invoke_worker(self, args: Dict[str, Any], *, state_user_id: str | None) -> Dict[str, Any]:
         target_id = str(args.get("id") or "")
         target_inputs = args.get("inputs") or {}
         if not target_id:
             return {"ok": False, "error": "id is required"}
         if not isinstance(target_inputs, dict):
             return {"ok": False, "error": "inputs must be an object"}
-        from db import get_db
+        if not state_user_id:
+            return {"ok": False, "error": "invoke_worker requires an authenticated owner"}
+        from db import get_repositories
         from run_service import create_run, execute_run
 
-        child_run_id = create_run(target_id, target_inputs, trigger_source="invoke_worker")
-        execute_run(child_run_id, target_id, target_inputs)
-        with get_db() as conn:
-            row = conn.execute("SELECT status, output_json, error FROM runs WHERE id = ?", (child_run_id,)).fetchone()
+        repos = get_repositories()
+        if repos.workers.get(user_id=state_user_id, worker_id=target_id) is None:
+            return {"ok": False, "error": f"Worker not found or not owned by this run: {target_id}"}
+        child_run_id = create_run(
+            target_id,
+            target_inputs,
+            trigger_source="invoke_worker",
+            user_id=state_user_id,
+            repos=repos,
+        )
+        execute_run(child_run_id, target_id, target_inputs, user_id=state_user_id, repos=repos)
+        row = repos.runs.get(user_id=state_user_id, run_id=child_run_id)
         if not row:
             return {"ok": False, "error": f"Child run not found: {child_run_id}"}
         return {
             "ok": row["status"] in {"completed", "pending_approval"},
             "run_id": child_run_id,
             "status": row["status"],
-            "outputs": json.loads(row["output_json"] or "{}"),
-            "error": row["error"],
+            "outputs": json.loads(row.get("output_json") or "{}"),
+            "error": row.get("error"),
         }
 
     def _composio_execute(
@@ -1413,57 +1562,22 @@ class AgentDriver(SandboxDriver):
         args: Dict[str, Any],
         worker_id: str,
         log_fn: Callable[[str, str], None],
+        config: WorkerConfig,
+        connection_ids: Dict[str, str],
+        user_id: str | None,
     ) -> Dict[str, Any]:
-        tool = str(args.get("tool") or "")
-        arguments = args.get("arguments") or {}
-        if not tool:
-            return {"ok": False, "error": "tool is required"}
-        if not isinstance(arguments, dict):
-            return {"ok": False, "error": "arguments must be an object"}
-        from db import get_db
-        import requests
-
-        app_name = ""
-        if name.startswith("composio__"):
-            parts = name.split("__")
-            app_name = parts[1] if len(parts) >= 3 else ""
-        elif name.startswith("composio."):
-            parts = name.split(".")
-            app_name = parts[1] if len(parts) >= 3 else ""
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT composio_connection_id FROM composio_connections WHERE app_name = ? AND status = 'active'",
-                (app_name.lower(),),
-            ).fetchone()
-        if not row:
-            return {"ok": False, "error": f"Missing active Composio connection for {app_name}"}
-        api_key = os.environ.get("COMPOSIO_API_KEY")
-        if not api_key:
-            return {"ok": False, "error": "COMPOSIO_API_KEY is not configured"}
-        log_fn(f"Executing Composio tool {tool}", "debug")
-        # Composio v3 requires entity_id alongside connected_account_id, even
-        # for single-tenant. Smoke run_c4d428a0d4f4 failed every call with
-        # `ActionExecute_ConnectedAccountEntityIdRequired` until we started
-        # passing one. Workeros is single-user; "federico" matches what the
-        # OAuth flow uses on auth-config setup.
-        entity_id = os.environ.get("FLOOM_USER_ID", "federico")
-        response = requests.post(
-            f"https://backend.composio.dev/api/v3/tools/execute/{tool}",
-            headers={"x-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "connected_account_id": row["composio_connection_id"],
-                "entity_id": entity_id,
-                "arguments": arguments,
-            },
-            timeout=30,
+        # Autonomous workers run under the full WORKER_POLICY (worker.yml scopes
+        # govern). The interactive assistant runs the same shared execute path
+        # under a read-only policy.
+        return agent_capabilities.composio_execute(
+            name=name,
+            args=args,
+            config=config,
+            policy=WORKER_POLICY,
+            connection_ids=connection_ids or {},
+            user_id=user_id,
+            log_fn=log_fn,
         )
-        if response.status_code >= 400:
-            return {
-                "ok": False,
-                "error": f"{response.status_code} {response.reason}: {response.text[:400]}",
-            }
-        result = response.json()
-        return {"ok": True, "result": result}
 
     def _usage_tokens(self, usage: Any) -> int:
         if usage is None:

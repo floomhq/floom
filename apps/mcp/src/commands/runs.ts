@@ -158,11 +158,19 @@ export async function runsLogsCommand(runId: string, options: { follow?: boolean
       return 0;
     }
 
-    const response = await fetch(`${credentials.api_base}/runs/${encodeURIComponent(runId)}/events`, {
+    // SSE follow needs a raw fetch (not requestJson), but we still want the
+    // cloud JWT + workspace header in cloud mode and x-floom-secret in OSS
+    // mode. authHeaders() resolves the right pair; the engine is mounted
+    // under /api on the cloud app, so prefix the events path there.
+    const eventsPath = credentials.mode === "cloud"
+      ? `/api/runs/${encodeURIComponent(runId)}/events`
+      : `/runs/${encodeURIComponent(runId)}/events`;
+    const authHeaders = await client.authHeaders();
+    const response = await fetch(`${credentials.api_base}${eventsPath}`, {
       method: "GET",
       headers: {
         accept: "text/event-stream",
-        "x-floom-secret": credentials.api_secret,
+        ...authHeaders,
       },
     });
     if (!response.ok) {

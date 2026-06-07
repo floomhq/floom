@@ -287,7 +287,21 @@ trigger:
 ### Connections (Composio)
 
 - Composio connections (Gmail, Calendar, GitHub, etc.) are passed to the worker as objects on `context.connections[<provider>]`.
-- Required connections are declared via `triggers` (`composio` event-triggered) or implicitly by the SKILL.md tool list (agent mode). Future: explicit `requires_connections: [gmail]`.
+- Required connections are declared in `connections:` for tool access and in `triggers` for Composio event-triggered workers.
+- The Connections UI and `connections__list` agent tool expose app slug, connected account label, status, scopes, and MCP allowed tools so the author can pick the right account.
+- Legacy `connections: [gmail]` grants the worker access to any Gmail Composio tool that matches the app namespace.
+- Use structured connection declarations to scope a full OAuth connection down to specific tools for one worker:
+
+```yaml
+connections:
+  - app: gmail
+    allowed_tools:
+      - GMAIL_FETCH_EMAILS
+      - GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID
+```
+
+- The E2B Composio proxy rejects undeclared apps and rejects tool slugs outside `allowed_tools`. This is platform-level enforcement against prompt injection or worker bugs; it does not shrink the underlying OAuth refresh token. For true OAuth least privilege, create a separate Composio auth config with narrower scopes such as Gmail readonly.
+- E2B `run.py` workers call `POST /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}` through `WORKEROS_API_URL`; they do not shell out to `composio execute` or carry `COMPOSIO_API_KEY` in the sandbox.
 
 ### Triggers
 
@@ -298,9 +312,84 @@ trigger:
 
 A worker can have multiple triggers (use the `triggers:` plural form). Federico tip: keep it to one when possible; two becomes confusing fast.
 
-### Approvals
+Use `type: schedule` for cron workers. Legacy manifests with `type: cron` are accepted and normalized to `schedule`, but new templates must emit `schedule`.
 
-When `approvals.required: true`, the run pauses before completing. The Approvals queue surfaces it; a reviewer Approves or Rejects from the UI. The worker code calls `context.approve(message)` to insert the gate.
+### Approvals (S47 two-run HITL model)
+
+When `approvals.required: true`, runs use a **two-phase respawn model**:
+
+1. **Run 1 — propose.** The worker does its work, drafts the action, then writes
+   `decision_required` to `result.json` before exiting. The engine intercepts this,
+   lands the run as `PENDING_APPROVAL`, and creates an approval record in the database.
+   **Run 1 must NOT perform the real side-effect** (send email, delete data, spend money).
+
+2. **Human decision.** The `/approvals` page (or the inline card on `/runs/[id]`) shows
+   the pending approval. The reviewer can Approve, Edit-then-approve, or Reject.
+
+3. **Run 2 — execute.** On approval, the engine spawns a fresh run of the same worker
+   with the original inputs merged with `{decision: "approved", approved_output: <edited or original output>}`.
+   Run 2 reads `inputs.decision` and `inputs.approved_output` and performs the real action.
+
+#### result.json shape for Run 1
+
+```json
+{
+  "status": "success",
+  "outputs": { "message_draft": "..." },
+  "decision_required": {
+    "label": "Approve outbound message before sending",
+    "preview": "Full message text shown on the approval card"
+  }
+}
+```
+
+#### Run 2 inputs
+
+```python
+# Workeros passes inputs as an inputs.json FILE in the working dir — NOT an env var.
+with open("inputs.json") as f:
+    inputs = json.load(f)
+decision = inputs.get("decision")        # "approved"
+approved_output = inputs.get("approved_output")  # the (possibly edited) proposed output
+```
+
+#### Idempotency constraint (mandatory)
+
+Workers that use `approvals.required: true` MUST be **re-entrant**:
+
+- Run 1 proposes, never executes.
+- Run 2 executes, using `inputs.approved_output` as the source of truth.
+- If Run 2 crashes and is retried, it must not double-fire the side-effect. Design
+  your side-effect to be idempotent, or check a flag file / database record before acting.
+
+#### Example worker structure (see `workers/outbound-approval-demo/`)
+
+```yaml
+approvals:
+  required: true
+  label: "Approve outbound message before sending"
+```
+
+```python
+# run.py
+decision = inputs.get("decision")
+if decision == "approved":
+    # Phase 2: execute
+    message = inputs["approved_output"]
+    send_email(message)  # real side-effect happens here
+    ...
+else:
+    # Phase 1: propose
+    draft = compose_draft(inputs)
+    result = {
+        "status": "success",
+        "outputs": {"message_draft": draft},
+        "decision_required": {"label": "Approve before sending", "preview": draft},
+    }
+```
+
+Reject path: the approval row is marked rejected, no follow-up run is spawned, and
+the original run stays at PENDING_APPROVAL terminal state.
 
 ---
 
@@ -338,8 +427,15 @@ If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the pa
    trigger:
      type: manual
    ```
-3. `POST /workers/reload` (or restart the API) so the worker registry picks it up.
-4. Run from the UI to smoke-test.
+3. Validate and deploy the local bundle:
+   ```bash
+   workeros workers validate workers/my-skill
+   workeros workers push workers/my-skill
+   ```
+4. Run from the UI, CLI, or MCP to smoke-test:
+   ```bash
+   workeros run my-skill --input topic="Smoke test"
+   ```
 
 **Gotchas:**
 
@@ -347,7 +443,11 @@ If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the pa
 - Skills that depend on Claude-Code-only tools (Read, Edit, Bash that hits the host filesystem) won't work — the runner exposes a different tool set. Audit the skill's tool calls before porting.
 - Heavy Python deps (torch, transformers) won't fit in the E2B template. Either trim the deps or use `runner: local` and accept the bigger trust surface.
 
-The CLI sync target (`floom workeros sync ~/.claude/skills/<name>`) is the long-term path here; not yet built. For now, copy + edit `worker.yml`.
+`workeros workers push` creates a new worker id with `POST /workers` and updates
+an existing worker id with `PUT /workers/<id>` when the target API supports
+in-place source updates. If the API returns "does not support in-place worker
+source updates", keep the validated bundle and deploy it under a new worker id
+or upgrade the API.
 
 ---
 
@@ -357,19 +457,32 @@ The CLI sync target (`floom workeros sync ~/.claude/skills/<name>`) is the long-
 
 ```bash
 npm i -g @floomhq/workeros
-floom login                                  # paste WORKEROS_API_SECRET when prompted
-floom workers list
-floom workers run <id> --input topic="AI tools"
-floom workers create --prompt "make me a worker that ..."   # async-draft path
+workeros login                              # browser/device auth flow
+workeros doctor
+workeros workers list
+workeros workers validate ./workers/<id>
+workeros workers push ./workers/<id>
+workeros run <id> --input topic="AI tools"
 ```
+
+The package also installs `floom` as a compatible alias. Use `workeros` when a
+separate Floom CLI is already present on the machine.
 
 ### MCP (for Claude Code / Cursor agents)
 
 ```bash
-npx @floomhq/workeros install --target claude
+npx -y @floomhq/workeros mcp install --target claude
 ```
 
-Exposes tools the agent can call to create, update, run, watch, and delete workers without leaving the chat. Use `WORKEROS_API_SECRET` env var to skip the install-time prompt.
+Exposes tools the agent can call to create, update settings, run, watch, and
+delete workers without leaving the chat. Use `WORKEROS_API_SECRET` env var to
+skip the install-time prompt.
+
+Current MCP source creation accepts `worker_yml` plus `run_py`. Use CLI
+`workeros workers push <dir>` for local `SKILL.md` agent-mode bundles and for
+source edits after the first deploy. MCP `workers.update` is for trigger,
+cron, saved input defaults, documented capabilities, and webhook secret
+rotation.
 
 ### API direct (for scripts / CI)
 

@@ -10,12 +10,24 @@ from ._legacy_sqlite import (
 from .dependency import get_repos
 from .factory import Repositories, get_repositories, register_repositories
 from .interface import (
+    AssetAccessRepository,
     CliAuthRepository,
     ConnectionRepository,
+    PersonalAccessTokenRepository,
     RowDict,
     RunRepository,
     SecretRepository,
+    UserRepository,
+    UserSessionRepository,
     WorkerRepository,
+    WorkspaceMemberRepository,
+)
+from .sqlite import (
+    VISIBILITY_VALUES,
+    assistant_row_id,
+    derive_workspace_id,
+    secret_store_env_path,
+    secret_store_read_paths,
 )
 
 __all__ = [
@@ -36,4 +48,14 @@ __all__ = [
     "ConnectionRepository",
     "SecretRepository",
     "CliAuthRepository",
+    "WorkspaceMemberRepository",
+    "AssetAccessRepository",
+    "UserRepository",
+    "PersonalAccessTokenRepository",
+    "UserSessionRepository",
+    "VISIBILITY_VALUES",
+    "assistant_row_id",
+    "derive_workspace_id",
+    "secret_store_env_path",
+    "secret_store_read_paths",
 ]

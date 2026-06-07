@@ -6,6 +6,7 @@ from typing import Callable
 
 from .interface import AuthProvider
 from .local import SharedSecretAuthProvider
+from .multi_member import MultiMemberAuthProvider
 
 # Registry of AuthProvider factories keyed by WORKEROS_DEPLOY value.
 # workeros (OSS) ships with "local" built in.
@@ -13,7 +14,7 @@ from .local import SharedSecretAuthProvider
 # register_auth_provider("cloud", ...) — keeping Supabase deps out of
 # the OSS engine entirely.
 _provider_factories: dict[str, Callable[[], AuthProvider]] = {
-    "local": lambda: SharedSecretAuthProvider(),
+    "local": lambda: MultiMemberAuthProvider(),
 }
 
 

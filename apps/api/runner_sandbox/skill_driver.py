@@ -12,7 +12,13 @@ from typing import Any, Callable, Dict, Iterable, Optional
 import requests
 
 from .base import SandboxDriver
-from models import WorkerConfig, WorkerResult
+from models import (
+    WorkerConfig,
+    WorkerResult,
+    composio_tool_allowed_by_scope,
+    declared_composio_connection_scopes,
+    declared_composio_connections,
+)
 from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.skill")
@@ -68,6 +74,31 @@ def _object_get(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, dict):
         return value.get(key, default)
     return getattr(value, key, default)
+
+
+def _is_unsupported_temperature_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return (
+        "temperature" in msg
+        and (
+            "unsupported" in msg
+            or "does not support" in msg
+            or "only the default" in msg
+            or "only temperature=1" in msg
+        )
+    )
+
+
+def _chat_completions_create_temperature_safe(client: Any, **kwargs: Any) -> Any:
+    """Retry once without non-default temperature for models that reject it."""
+    try:
+        return client.chat.completions.create(**kwargs)
+    except Exception as exc:  # noqa: BLE001 - inspect the provider error, then retry once
+        if "temperature" in kwargs and _is_unsupported_temperature_error(exc):
+            retry_kwargs = dict(kwargs)
+            retry_kwargs.pop("temperature", None)
+            return client.chat.completions.create(**retry_kwargs)
+        raise
 
 
 def _message_to_dict(message: Any) -> Dict[str, Any]:
@@ -171,6 +202,7 @@ class SkillRuntimeDriver(SandboxDriver):
         timeout_seconds: int = 300,
         config: Optional[WorkerConfig] = None,
         connection_ids: Optional[Dict[str, str]] = None,
+        user_id: str | None = None,
     ) -> WorkerResult:
         try:
             return self._run_skill(worker_id, run_id, inputs, secrets, log_fn, timeout_seconds, config)
@@ -194,9 +226,28 @@ class SkillRuntimeDriver(SandboxDriver):
         timeout_seconds: int,
         config: Optional[WorkerConfig],
     ) -> WorkerResult:
-        worker_dir = _worker_dir_for_run(worker_id, config)
+        try:
+            worker_dir = _worker_dir_for_run(worker_id, config)
+        except ValueError as exc:
+            # bundle_path escaped the allowed root (path traversal). Surface a
+            # clean, specific error_code rather than the generic
+            # skill_runtime_error so callers can distinguish a rejected path
+            # from a real runtime failure. Security is unchanged: the path is
+            # still refused and never resolved.
+            return WorkerResult(
+                status="error",
+                error=str(exc),
+                error_code="skill_path_invalid",
+            )
         entrypoint = config.runtime.entrypoint if config and config.runtime else "SKILL.md"
-        skill_path = _safe_path(worker_dir, entrypoint or "SKILL.md")
+        try:
+            skill_path = _safe_path(worker_dir, entrypoint or "SKILL.md")
+        except ValueError as exc:
+            return WorkerResult(
+                status="error",
+                error=str(exc),
+                error_code="skill_path_invalid",
+            )
         if not skill_path.is_file():
             return WorkerResult(
                 status="error",
@@ -228,7 +279,8 @@ class SkillRuntimeDriver(SandboxDriver):
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             try:
-                completion = client.chat.completions.create(
+                completion = _chat_completions_create_temperature_safe(
+                    client,
                     model=model,
                     messages=messages,
                     tools=tools,
@@ -324,17 +376,10 @@ class SkillRuntimeDriver(SandboxDriver):
         transcript_artifact = self._write_transcript(run_id, artifact_dir, transcript, secrets)
         artifacts = output_artifacts + [transcript_artifact]
 
-        schema_error = self._validate_outputs(worker_id, outputs, log_fn, config)
-        if schema_error:
-            log_fn(f"Schema validation failed: {schema_error}", "error")
-            return WorkerResult(
-                status="failed",
-                outputs=outputs,
-                artifacts=artifacts,
-                error=f"Output schema violation: {schema_error}",
-                error_code="schema_violation",
-            )
-
+        # Output-schema enforcement is centralized at the common completion gate
+        # in run_service.execute_run (one path for all three drivers). Return
+        # success with the captured outputs; the gate validates declared
+        # type/columns/required-keys and FAILS the run on a mismatch.
         log_fn("[skill] Run completed", "info")
         return WorkerResult(
             status="success",
@@ -355,7 +400,7 @@ class SkillRuntimeDriver(SandboxDriver):
         return OpenAI(api_key=api_key)
 
     def _model_for(self, config: Optional[WorkerConfig]) -> str:
-        return (config.model if config and config.model else None) or os.environ.get("OPENAI_DEFAULT_MODEL") or "gpt-4.1"
+        return (config.model if config and config.model else None) or os.environ.get("OPENAI_DEFAULT_MODEL") or "gpt-5-mini"
 
     def _build_tools(self, config: Optional[WorkerConfig]) -> list[Dict[str, Any]]:
         tools = [
@@ -562,6 +607,25 @@ class SkillRuntimeDriver(SandboxDriver):
                 }
 
         # Fail fast if the required Composio connection is not active — mirrors runner_utils.py:224.
+        allowed_tools = declared_composio_connections(config).get(app_name)
+        if allowed_tools is not None and tool_slug.upper() not in allowed_tools:
+            logger.warning(
+                "composio tool denied: worker=%s app=%s tool=%s blocked by allowlist",
+                worker_id, app_name, tool_slug.upper(),
+            )
+            log_fn(f"Tool {tool_slug} blocked by allowlist for connection {app_name}", "warning")
+            return {
+                "ok": False,
+                "error": f"Tool {tool_slug} is not allowed for worker connection {app_name}",
+                "error_code": "tool_outside_connection_scope",
+            }
+        declared_scopes = declared_composio_connection_scopes(config)
+        if not composio_tool_allowed_by_scope(app_name, tool_slug, declared_scopes.get(app_name)):
+            return {
+                "ok": False,
+                "error": f"Tool {tool_slug} is outside the worker connection scope for {app_name}",
+                "error_code": "tool_outside_connection_scope",
+            }
         connection_id = self._connection_id_for(app_name, worker_id, config)
         if connection_id is None:
             return {
@@ -638,9 +702,7 @@ class SkillRuntimeDriver(SandboxDriver):
         return None
 
     def _declared_connections(self, config: Optional[WorkerConfig]) -> list[str]:
-        if not config:
-            return []
-        return sorted({app.lower() for app in (config.connections or []) if app})
+        return sorted(declared_composio_connections(config).keys())
 
     def _filename_for_output(self, name: str, config: Optional[WorkerConfig]) -> str:
         output = self._declared_output(name, config)
@@ -666,17 +728,6 @@ class SkillRuntimeDriver(SandboxDriver):
             if output.name == name:
                 return output
         return None
-
-    def _validate_outputs(
-        self,
-        worker_id: str,
-        outputs: Dict[str, Any],
-        log_fn: Callable[[str, str], None],
-        config: Optional[WorkerConfig],
-    ) -> Optional[str]:
-        from runner_utils import _validate_output_schema
-
-        return _validate_output_schema(worker_id, outputs, log_fn, config=config)
 
     def _logical_tool_name(self, name: str, args: Dict[str, Any]) -> str:
         if name == "floom__skills__invoke":

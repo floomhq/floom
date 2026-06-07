@@ -1,0 +1,99 @@
+schema_version: '0.3'
+is_example: true
+name: outbound-approval-demo
+title: Outbound approval demo
+description: Demonstrates the two-run HITL approval pattern. Run 1 drafts an outbound message and proposes it for approval. Run 2 (spawned after approval) executes the approved message by writing it to a context file.
+long_description: |
+  This worker proves the S47 HITL approval flow end-to-end.
+
+  Phase 1 (run 1): draft an outbound message for a given prospect and emit
+  decision_required so a human can review before anything is sent.
+
+  Phase 2 (run 2): reads inputs.decision and inputs.approved_output, then
+  executes the approved message and records the side-effect as the output
+  fields sent=true + sent_message.
+
+  Idempotency constraint: only run 2 fires the side-effect. Run 1 NEVER
+  sends anything.
+use_cases:
+- Approve outbound recruiting emails before they reach candidates.
+- Gate any worker side-effect behind a human decision step.
+- Test the two-run HITL respawn flow in a safe, harmless way.
+example_input:
+  prospect_name: Acme Corp
+  role: Senior Engineer
+how_it_works: |
+  Run 1: draft message -> emit decision_required -> land PENDING_APPROVAL
+  Human: approve (optionally edit) or reject via /approvals
+  Run 2 (spawned): read approved_output -> record sent=true + sent_message
+version: 0.1.0
+folder: Demo
+tags:
+- demo
+- hitl
+- approvals
+targets:
+- generic
+exec:
+  mode: pure-script
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  entry: run.py
+  inputs:
+  - name: prospect_name
+    kind: scalar
+    type: string
+    required: true
+    label: Prospect name
+    placeholder: e.g. Acme Corp
+  - name: role
+    kind: scalar
+    type: string
+    required: false
+    label: Target role
+    placeholder: e.g. Senior Engineer
+    default: Engineer
+  - name: decision
+    kind: scalar
+    type: string
+    required: false
+    label: Approval decision (set by system on run 2)
+    description: Set to "approved" by the approval system when spawning run 2.
+  - name: approved_output
+    kind: scalar
+    type: string
+    required: false
+    label: Approved output (set by system on run 2)
+    description: The approved (possibly edited) output from run 1.
+  outputs:
+  - name: message_draft
+    kind: scalar
+    type: text
+    required: false
+    label: Drafted message
+  - name: phase
+    kind: scalar
+    type: text
+    required: true
+    label: Run phase
+  - name: sent
+    kind: scalar
+    type: text
+    required: false
+    label: Sent (run 2 only)
+  - name: sent_message
+    kind: scalar
+    type: text
+    required: false
+    label: Sent message (run 2 only)
+limits:
+  max_tool_iterations: 4
+  max_output_tokens: 2048
+  max_total_tokens: 10000
+  timeout_seconds: 60
+approvals:
+  required: true
+  label: Approve outbound message before sending
+trigger:
+  type: manual

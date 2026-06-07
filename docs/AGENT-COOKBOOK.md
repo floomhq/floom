@@ -6,12 +6,25 @@ If you only have time for one doc, read this. If you want the full schema refere
 
 ---
 
-## 0. Install + verify (one-time)
+## 0. Fresh-agent path
+
+Use this path when you have a blank shell, a Workeros secret, and a prompt to
+create or edit a worker.
+
+### 0.1 Install + verify MCP
+
+The npm package exposes three binaries:
+
+- `workeros` — preferred CLI name in these docs.
+- `floom` — compatible alias for existing Floom operator workflows.
+- `workeros-mcp` — stdio MCP server binary used by client config.
+
+If a different local `floom` command exists, use `workeros`.
 
 ```bash
-npx @floomhq/workeros install --target claude
+npx -y @floomhq/workeros mcp install --target claude
 # OR
-npx @floomhq/workeros install --target cursor
+npx -y @floomhq/workeros mcp install --target cursor
 ```
 
 Set `WORKEROS_API_SECRET` in env before install to skip the prompt. Verify:
@@ -21,6 +34,76 @@ Set `WORKEROS_API_SECRET` in env before install to skip the prompt. Verify:
 workers.list
 # Expect: array of {id, name, status, ...}. If it returns an error, the secret is wrong.
 ```
+
+For CLI use outside an MCP client:
+
+```bash
+npm i -g @floomhq/workeros@latest
+workeros login
+workeros doctor
+workeros workers list
+```
+
+Cloud workspaces use the cloud login flow:
+
+```bash
+workeros login --cloud
+workeros workspaces list
+workeros workspaces use <workspace-name-or-id>
+```
+
+Credentials live in `~/.config/workeros/credentials.json`.
+
+### 0.2 Create, edit, deploy, and run from a local bundle
+
+For a local worker directory, the deploy command is `workeros workers push`.
+It creates the worker when the id is new and updates it when the id already
+exists on an API that supports in-place source updates.
+
+```bash
+mkdir -p workers/text-summarizer
+# write workers/text-summarizer/worker.yml
+# write workers/text-summarizer/run.py OR workers/text-summarizer/SKILL.md
+
+workeros workers validate workers/text-summarizer
+workeros workers push workers/text-summarizer
+workeros run text-summarizer --input text="Long text here..."
+workeros runs show <run_id> --json
+```
+
+`workers validate` checks the local bundle shape before any network write. It
+also catches Composio-in-E2B mistakes such as shelling out to `composio execute`
+instead of using the Workeros proxy.
+
+When `workers push` reports that the API does not support in-place source
+updates, the local source is valid but the target API cannot overwrite that
+worker id. Use a new worker id on that deployment or upgrade the API.
+
+### 0.3 Create and run through MCP
+
+The current MCP source-creation tool accepts `worker_yml` plus `run_py`:
+
+```
+workers.create({ worker_yml: "<yaml>", run_py: "<python source>" })
+workers.run({ id: "text-summarizer", inputs: { text: "Long text here..." } })
+runs.watch({ id: "<run_id>" })
+```
+
+Use CLI `workeros workers push <dir>` for `SKILL.md` agent-mode bundles. The
+MCP `workers.update` tool edits instance settings such as trigger, cron, saved
+input defaults, capabilities, and webhook secret rotation; it does not replace
+`run.py`, `SKILL.md`, or `worker.yml` source.
+
+### 0.4 Raw source vs rendered surfaces
+
+- `worker.yml`, `run.py`, `SKILL.md`, and `requirements.txt` are raw bundle
+  source. Edit these files locally, validate, then push.
+- Overview cards render manifest fields such as `long_description`,
+  `use_cases`, `example_output`, and `how_it_works`.
+- Run outputs render according to `exec.outputs[].media_type`; markdown renders
+  inline, JSON is pretty-printed, and other media types are downloadable.
+- Select input labels are humanized in the UI, but the raw enum value is what
+  reaches `run(inputs, context)`.
 
 ---
 
@@ -36,7 +119,7 @@ def run(inputs, context):
     text = inputs["text"]
     client = context.openai()
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-5-mini",
         messages=[
             {"role": "system", "content": "Summarize the user's text in 3 bullets."},
             {"role": "user", "content": text},
@@ -66,7 +149,7 @@ example_output: |
   - Second key point.
   - Third key point.
 how_it_works: |
-  Text -> OpenAI gpt-4.1-mini chat completion -> 3-bullet summary.
+  Text -> OpenAI gpt-5-mini chat completion -> 3-bullet summary.
 folder: Productivity
 tags: [summarize, text, openai]
 version: 0.1.0
@@ -109,7 +192,6 @@ openai==1.51.0
 
 ```
 workers.create({
-  name: "text-summarizer",
   worker_yml: "<paste the YAML above>",
   run_py: "<paste the Python above>",
 })
@@ -118,8 +200,8 @@ workers.create({
 ### 1.3 Smoke-test
 
 ```
-workers.run({ worker_id: "text-summarizer", inputs: { text: "Long text here..." } })
-runs.watch({ run_id: "<returned-id>" })
+workers.run({ id: "text-summarizer", inputs: { text: "Long text here..." } })
+runs.watch({ id: "<returned-id>" })
 ```
 
 Watch streams parts until `finish`. Look for `tool-result` with the OpenAI completion and the final `summary` output.
@@ -242,7 +324,8 @@ trigger:
   timezone: "Europe/Berlin"
 ```
 
-The scheduler service picks up the worker on the cron tick and calls `runs.create` with the worker's default inputs (set via `workers.update({ default_inputs: {...} })`).
+The scheduler service picks up the worker on the cron tick and starts a run
+with the worker's saved default inputs.
 
 Live reference: [workers/github-digest/](../workers/github-digest/) (cron + Composio GitHub connection).
 
@@ -311,19 +394,18 @@ Heuristics:
 - Network egress: true if any external API is referenced.
 - Trigger: `manual` (let the user choose schedule/webhook/composio after deploy).
 
-### 7.3 Deploy via MCP
+### 7.3 Deploy via CLI
 
-```
-workers.create({
-  name: "my-skill",
-  worker_yml: "<generated YAML>",
-  skill_md: "<verbatim from ~/.claude/skills/my-skill/SKILL.md>",
-})
+```bash
+workeros workers validate workers/my-skill
+workeros workers push workers/my-skill
 ```
 
 ### 7.4 Verify
 
-Smoke-test with `runs.create` + `runs.watch`. If the skill referenced `~/.claude/skills/...` absolute paths, those will fail in the sandbox — patch to relative paths first.
+Smoke-test with `workeros run` or MCP `workers.run` + `runs.watch`. If the
+skill referenced `~/.claude/skills/...` absolute paths, those will fail in the
+sandbox; patch to relative paths first.
 
 **Gotchas:**
 - Claude-Code-only tools (Read/Edit/Bash on host filesystem) are not available in the sandbox runtime. Audit the skill's tool calls before porting.
@@ -356,14 +438,14 @@ workers.get({ id: "text-summarizer" })
 
 ### workers.create
 
-**Args:** `{ name, worker_yml, run_py?, skill_md? }`
-- Use `run_py` for script mode, `skill_md` for agent mode. Mutually exclusive.
+**Args:** `{ worker_yml, run_py }`
+- MCP creation currently accepts script-mode Python source. Use CLI
+  `workeros workers push <dir>` for `SKILL.md` agent-mode bundles.
 
 **Returns:** `{ worker: { id, ... } }`
 
 ```
 workers.create({
-  name: "my-worker",
   worker_yml: "schema_version: '0.3'\nname: my-worker\n...",
   run_py: "def run(inputs, context): ...",
 })
@@ -371,13 +453,15 @@ workers.create({
 
 ### workers.update
 
-**Args:** `{ id, trigger?, cron?, timezone?, default_inputs?, ... }`
+**Args:** `{ id, trigger_type?, cron_expr?, cron_timezone?, input_values?, capabilities?, webhook_secret_rotate? }`
 
 ```
 workers.update({
   id: "text-summarizer",
-  trigger: { type: "schedule", cron: "0 9 * * *", timezone: "Europe/Berlin" },
-  default_inputs: { text: "Daily standup notes..." },
+  trigger_type: "schedule",
+  cron_expr: "0 9 * * *",
+  cron_timezone: "Europe/Berlin",
+  input_values: { text: "Daily standup notes..." },
 })
 ```
 
@@ -389,12 +473,12 @@ workers.delete({ id: "text-summarizer" })
 
 ### workers.run
 
-**Args:** `{ worker_id, inputs }`
+**Args:** `{ id, inputs, trigger_source? }`
 **Returns:** `{ run_id, status }`
 
 ```
 const { run_id } = await workers.run({
-  worker_id: "text-summarizer",
+  id: "text-summarizer",
   inputs: { text: "long text here..." },
 })
 ```
@@ -456,6 +540,18 @@ connections.list()
 triggers.list({ worker_id: "text-summarizer" })
 ```
 
+When authoring a worker with Composio tools, declare both the app and the exact tools the worker may call:
+
+```yaml
+connections:
+  - app: google_search_console
+    allowed_tools:
+      - GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY
+      - GOOGLE_SEARCH_CONSOLE_LIST_SITEMAPS
+```
+
+Run `workeros workers validate ./workers/<id>` before pushing. It catches E2B anti-patterns like `subprocess.run(["composio", "execute", ...])`, missing `connections:`, and tool slugs not listed in `allowed_tools`.
+
 ---
 
 ## 9. The agent-side draft contract
@@ -469,18 +565,20 @@ When an agent is asked "build me a worker that does X", produce:
 5. **`approvals.required: true`** for any worker that sends, deletes, or pays.
 6. **Default `trigger: manual`** unless the prompt explicitly says "every X" or "when Y arrives".
 7. **Pin dep versions** exactly (`openai==1.51.0`, not `openai`).
-8. **Use `gpt-4.1-mini` or `gpt-4o-mini` by default**; reserve larger models for prompts that explicitly need them.
+8. **Use `gpt-5-mini` by default**; reserve larger models for prompts that explicitly need them.
 
 After writing, ALWAYS:
 
-- Call `workers.create` (not write to disk + hope).
-- Call `runs.create` with `example_input` to smoke-test.
+- Call `workers.create` for script-mode MCP creation, or `workeros workers push`
+  for local bundles and `SKILL.md` workers.
+- Call `workers.run` with `example_input` to smoke-test.
 - Call `runs.watch` and confirm terminal status === "succeeded".
 - Report back to the user with the worker URL + run URL + run duration.
 
 If smoke-test fails:
 - Read the logs with `runs.get`.
-- Patch and `workers.update` (don't recreate from scratch).
+- Patch settings with `workers.update`, or patch source locally and run
+  `workeros workers push <dir>`.
 - Re-test.
 
 ---

@@ -1,0 +1,58 @@
+display_information:
+  name: Workeros
+  description: Slack-native AI workforce for Workeros workers, approvals, and workspace agent chat.
+  background_color: "#111827"
+
+features:
+  bot_user:
+    display_name: Workeros
+    always_online: true
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  assistant_view:
+    assistant_description: Emily is your personal Chief-of-Staff. She routes tasks to a swarm of always-on agents/workers. DM her or @mention her.
+    suggested_prompts:
+      - title: Pending approvals
+        message: Show my pending approvals.
+      - title: Worker status
+        message: Summarize the current worker status.
+  slash_commands:
+    - command: /floom
+      url: https://workers-api.floom.dev/slack/events
+      description: Ask the Workeros workspace agent or manage pending approvals.
+      usage_hint: "approvals | <request>"
+      should_escape: false
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - assistant:write
+      - chat:write
+      - commands
+      - im:history
+      - im:write
+      # Channel reading (consent = invite). The bot can only read channels it
+      # has been invited to (/invite @Emily). These scopes let the workspace
+      # agent list its memberships and read a channel's recent history on demand.
+      - channels:read
+      - channels:history
+      - groups:read
+      - groups:history
+
+settings:
+  event_subscriptions:
+    request_url: https://workers-api.floom.dev/slack/events
+    bot_events:
+      - app_mention
+      - assistant_thread_started
+      - assistant_thread_context_changed
+      - message.im
+  interactivity:
+    is_enabled: true
+    request_url: https://workers-api.floom.dev/slack/events
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

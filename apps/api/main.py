@@ -11,7 +11,28 @@ import hmac
 import base64
 import io
 import shutil
-import fcntl
+try:
+    import fcntl as _fcntl_mod
+    def _flock(fd, op): _fcntl_mod.flock(fd, op)
+    _LOCK_EX = _fcntl_mod.LOCK_EX
+    _LOCK_UN = _fcntl_mod.LOCK_UN
+except ImportError:
+    # Windows: no fcntl, so use msvcrt or fall back to a no-op for single-process dev.
+    try:
+        import msvcrt as _msvcrt
+        def _flock(fd, op):
+            if op == 1:
+                _msvcrt.locking(fd.fileno(), _msvcrt.LK_NBLCK, 1)
+            else:
+                _msvcrt.locking(fd.fileno(), _msvcrt.LK_UNLCK, 1)
+    except Exception:
+        def _flock(fd, op): pass
+    class _fcntl_mod:  # type: ignore[no-redef]
+        LOCK_EX = 1; LOCK_SH = 0; LOCK_UN = 8; LOCK_NB = 4
+        @staticmethod
+        def flock(fd, op): _flock(fd, op)
+    _LOCK_EX = 1
+    _LOCK_UN = 8
 import re
 import sys
 import time
@@ -19,43 +40,67 @@ import collections
 import threading
 import tempfile
 import secrets as pysecrets
+import subprocess
 import uuid as _uuid_mod
 import zipfile
+import urllib.parse
 import ipaddress
+import math
 import requests
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional, TypedDict
+from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, TypedDict
 
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.responses import StreamingResponse
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from dotenv import load_dotenv
 
 from auth import AuthContext, get_auth_context, get_auth_provider
+from auth.context import current_auth_context, current_auth_user_id, set_current_auth_context
+from auth.local_workspaces import (
+    DEFAULT_WORKSPACE_ID,
+    create_local_workspace,
+    get_local_workspace,
+    list_local_workspaces,
+    local_workspace_base_user_id,
+    local_workspace_user_id,
+    requested_local_workspace_id,
+)
 from contexts import (
     MAX_CONTEXT_BYTES,
     CONTEXTS_DIR,
+    context_scope_for_user,
     context_dir,
     context_file_metadata,
+    context_owner_id,
     context_mount_names,
     context_total_size,
     context_updated_at,
+    current_contexts_root,
     delete_context_metadata,
     ensure_contexts_dir,
     guess_mime_type,
+    is_active_markup,
     is_binary_file,
     iter_context_files,
     load_context_metadata,
+    normalize_context_mount,
     normalize_context_file_path,
     safe_context_file_path,
+    set_context_scope_resolver,
+    set_context_file_metadata,
+    set_context_file_secret_flag,
     set_context_metadata,
+    use_context_scope,
     validate_context_name,
 )
 
@@ -64,12 +109,18 @@ try:
 except Exception:  # pragma: no cover - fallback only used when dependency is absent locally
     _slowapi_get_remote_address = None
 
-from db import DB_PATH, Repositories, get_db, get_repos, get_repositories, init_db, now_iso, sqlite_runtime_settings
+from db import DB_PATH, Repositories, WorkspaceMemberRepository, assistant_row_id, derive_workspace_id, get_db, get_repos, get_repositories, init_db, now_iso, sqlite_runtime_settings
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
+from secret_scan import scan_bytes
 from models import (
+    AssetPermissions,
     RunCreate,
+    WorkerVisibilityUpdate,
     WorkerSummary,
     WorkerDetail,
+    PublicWorker,
+    PublicWorkerInput,
+    PublicWorkerOutput,
     WorkerFile,
     RunSummary,
     RunDetail,
@@ -79,14 +130,33 @@ from models import (
     SecretItem,
     ReloadResponse,
     ActionResponse,
+    McpToolItem,
+    McpToolCreate,
+    McpToolUpdate,
     RunStatus,
     SecretStatus,
     WorkerStatus,
     WorkerConfig,
+    WorkerInput,
+    WorkerSummaryInput,
     WorkerUpdateRequest,
     RecentStats,
     TriggerSpec,
     TimeseriesDay,
+    WorkerAlert,
+    WorkerAlertCreate,
+    WorkerStats,
+    WorkspaceStats,
+    UnsafeMCPUrlError,
+    UnsafeOutboundUrlError,
+    assert_safe_outbound_mcp_url,
+    assert_safe_outbound_url,
+    composio_app_for_tool_slug,
+    composio_tool_allowed_by_scope,
+    declared_composio_connections,
+    declared_composio_connection_scopes,
+    read_only_preset_for_app,
+    read_only_presets,
 )
 from worker_registry import (
     WORKERS_DIR,
@@ -103,17 +173,25 @@ from run_service import (
     update_run_status,
     request_active_run_shutdown,
     start_drain_loop,
+    start_run_reaper_loop,
     stop_drain_loop,
+    stop_run_reaper_loop,
     queued_run_position,
+    smoke_and_gate_generated_worker,
     InsufficientDiskSpaceError,
 )
 from run_service import register_sse_publisher, register_part_publisher
 
 load_dotenv()
-api_env_path = Path("/root/.config/workeros/api.env")
-if api_env_path.is_file():
-    load_dotenv(api_env_path, override=False)
+try:
+    api_env_path = Path.home() / ".config" / "workeros" / "api.env"
+    if api_env_path.is_file():
+        load_dotenv(api_env_path, override=False)
+except OSError:
+    pass
 init_db()
+
+PUBLIC_SHARE_TEXT_PREVIEW_LIMIT = 512 * 1024
 
 # ---------------------------------------------------------------------------
 # App & middleware
@@ -152,6 +230,7 @@ async def lifespan(app: FastAPI):
         fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
         re_enqueue_queued_runs_on_startup()
         start_drain_loop()
+        start_run_reaper_loop()
         from scheduler import start_scheduler
 
         start_scheduler()
@@ -160,6 +239,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     if deploy == "local":
+        stop_run_reaper_loop(timeout=5.0)
         stop_drain_loop(timeout=5.0)
         from scheduler import stop_scheduler
 
@@ -184,10 +264,33 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Floom API",
-    version="0.1.0",
+    version="0.2.0",
     description="Open-source self-hosted runtime for AI workers",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def versioned_api_alias_middleware(request: Request, call_next):
+    """Accept conventional /api/v1 and /v1 prefixes without duplicating routes."""
+    path = request.scope.get("path", "")
+    for prefix in ("/api/v1", "/v1"):
+        if path == prefix:
+            request.scope["path"] = "/"
+            request.scope["raw_path"] = b"/"
+            break
+        if path.startswith(f"{prefix}/"):
+            stripped = path[len(prefix):] or "/"
+            request.scope["path"] = stripped
+            raw_path = request.scope.get("raw_path")
+            if isinstance(raw_path, bytes):
+                raw_prefix = prefix.encode("utf-8")
+                if raw_path == raw_prefix:
+                    request.scope["raw_path"] = b"/"
+                elif raw_path.startswith(raw_prefix + b"/"):
+                    request.scope["raw_path"] = raw_path[len(raw_prefix):]
+            break
+    return await call_next(request)
 
 
 @app.exception_handler(InsufficientDiskSpaceError)
@@ -200,15 +303,52 @@ async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDi
 
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
+DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024
+# A workspace template bundles every operator worker + knowledge pack, so it is
+# larger than a single worker bundle. Cap it generously but bounded.
+WORKSPACE_IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024
+DEFAULT_CHAT_MESSAGE_MAX_CHARS = 20_000
 DEFAULT_RATE_LIMIT = (60, 60.0)
 BODYLESS_METHODS = {"GET", "HEAD", "OPTIONS"}
 RATE_LIMIT_RULES = [
     (re.compile(r"^/cli-auth/devices$"), (5, 60.0)),
     (re.compile(r"^/workers/from-bundle$"), (10, 60.0)),
+    (re.compile(r"^/workspace/import$"), (10, 60.0)),
+    (re.compile(r"^/workspace/export$"), (20, 60.0)),
     (re.compile(r"^/workers$"), (20, 60.0)),
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
     (re.compile(r"^/connections$"), (20, 60.0)),
 ]
+
+
+def _context_upload_limit_bytes() -> int:
+    try:
+        configured = int(os.environ.get("WORKEROS_CONTEXT_UPLOAD_MAX_BYTES", ""))
+    except ValueError:
+        configured = 0
+    return configured if configured > 0 else DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES
+
+
+def _context_upload_body_limit_bytes() -> int:
+    # Multipart framing adds a small amount of overhead beyond file bytes.
+    return _context_upload_limit_bytes() + (1024 * 1024)
+
+
+def _format_limit_mb(size_bytes: int) -> str:
+    mb = size_bytes / (1024 * 1024)
+    return f"{mb:.0f} MB" if mb.is_integer() else f"{mb:.1f} MB"
+
+
+def _context_upload_too_large_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=413,
+        content={
+            "detail": (
+                "Brain upload is too large. Upload files up to "
+                f"{_format_limit_mb(_context_upload_limit_bytes())}."
+            )
+        },
+    )
 
 PROTECTED_STOCK_WORKER_IDS = frozenset(
     {
@@ -217,13 +357,97 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "dach_compliance",
         "github-digest",
         "gmail_intake_brief",
+        "gmail_inbox_manager",
+        "kugelaudio-bug-intake",
+        "kugelaudio-meeting-pipeline",
+        "linkedin-post-engagements",
+        "node-smoke-test",
         "openblog",
         "opendraft",
+        "outbound-approval-demo",
         "research_brief",
         "reverse_match_crm",
+        "search_console_insights",
+        "slack-listener",
+        "weekly_update",
+        "whatsapp-listener",
+        "worker-author",
+        "workspace-agent",
+    }
+)
+
+PUBLIC_STOCK_WORKER_IDS = frozenset(
+    {
+        "csv_enricher",
+        "cv_writeup",
+        "dach_compliance",
+        "github-digest",
+        "gmail_intake_brief",
+        "gmail_inbox_manager",
+        "linkedin-post-engagements",
+        "node-smoke-test",
+        "openblog",
+        "opendraft",
+        "outbound-approval-demo",
+        "research_brief",
+        "reverse_match_crm",
+        "search_console_insights",
         "weekly_update",
     }
 )
+
+_INTERNAL_WORKER_ID_PREFIXES = (
+    "_mcp_",
+    "audit-local-",
+    "smoke-",
+)
+
+# Engine/system knowledge packs that power Workeros itself (e.g. the
+# worker-generation style guide). They are internal config, not operator
+# content, so they are hidden from the /contexts operator view — the contexts
+# equivalent of system_worker:true. A pack can also opt in via metadata
+# {"system": true}.
+SYSTEM_CONTEXT_PACKS = frozenset({"worker-author-style"})
+
+# One-line, operator-facing descriptions for system packs that ship without a
+# README.md. Surfaced read-only on the /contexts page so operators understand
+# what each engine pack does.
+SYSTEM_CONTEXT_DESCRIPTIONS: dict[str, str] = {
+    "worker-author-style": (
+        "Engine style guide and schema the worker author follows when "
+        "generating new workers from your prompts (read-only)."
+    ),
+}
+
+
+def _system_context_description(name: str) -> Optional[str]:
+    try:
+        safe_name = validate_context_name(name)
+    except ValueError:
+        return None
+    return SYSTEM_CONTEXT_DESCRIPTIONS.get(safe_name)
+
+# 1.5.2: trigger sources that belong in the operator /runs view. Everything
+# else (audit, test, smoke runs like s35_concurrency_*, synthetic data, etc.)
+# is internal telemetry and is hidden from the default view. Data is preserved
+# and reachable via GET /runs?include_system=true.
+_OPERATOR_TRIGGER_SOURCES = frozenset({
+    "manual",
+    "schedule",
+    "approval",
+    "composio",
+    "webhook",
+    "workspace-agent",
+})
+
+
+def _is_operator_run(row: Any) -> bool:
+    source = (row_to_dict(row).get("trigger_source") or "").strip().lower()
+    # Treat unknown/empty as operator-facing only if explicitly allowlisted;
+    # blank trigger_source is legacy "manual" and stays visible.
+    if not source:
+        return True
+    return source in _OPERATOR_TRIGGER_SOURCES
 
 
 def _cors_allowed_origins() -> List[str]:
@@ -256,6 +480,13 @@ app.add_middleware(
 )
 
 
+def _active_context_scope() -> str | None:
+    return context_scope_for_user(current_auth_user_id())
+
+
+set_context_scope_resolver(_active_context_scope)
+
+
 def _validate_startup_configuration() -> None:
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy != "local":
@@ -278,6 +509,412 @@ async def require_secret(request: Request) -> str:
     """DEPRECATED: use Depends(get_auth_context) instead."""
     ctx = await get_auth_context(request)
     return ctx.user_id
+
+
+class LocalWorkspaceCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+
+
+class LocalWorkspaceOut(BaseModel):
+    id: str
+    name: str
+    owner_user_id: str
+    created_at: str
+
+
+class LocalWorkspaceListResponse(BaseModel):
+    workspaces: List[LocalWorkspaceOut]
+    active_id: str
+
+
+class CurrentUserResponse(BaseModel):
+    user_id: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    workspace_id: Optional[str] = None
+    scopes: List[str] = []
+    role: str = "admin"
+    username: Optional[str] = None
+
+
+class WorkspaceAgentSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    brain_read: Optional[bool] = None
+    brain_write: Optional[bool] = None
+    connections_read: Optional[bool] = None
+    connections_use: Optional[bool] = None
+    connections_add: Optional[bool] = None
+
+
+def _local_workspace_out(row: Dict[str, Any]) -> LocalWorkspaceOut:
+    return LocalWorkspaceOut(
+        id=str(row["id"]),
+        name=str(row["name"]),
+        owner_user_id=str(row["owner_user_id"]),
+        created_at=str(row["created_at"]),
+    )
+
+
+def _active_local_workspace_id(auth: AuthContext) -> str:
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    if auth.user_id == base_user_id:
+        return DEFAULT_WORKSPACE_ID
+    marker = "__"
+    return auth.user_id.split(marker, 1)[1]
+
+
+def _require_local_workspace_mode() -> None:
+    if _is_cloud_deploy():
+        raise HTTPException(status_code=404, detail="not found")
+
+
+@app.get("/me", response_model=CurrentUserResponse)
+def get_current_user(auth: AuthContext = Depends(get_auth_context)) -> CurrentUserResponse:
+    return CurrentUserResponse(
+        user_id=auth.user_id,
+        email=auth.email,
+        display_name=auth.email or auth.username or auth.user_id,
+        workspace_id=_active_local_workspace_id(auth) if not _is_cloud_deploy() else None,
+        scopes=list(auth.scopes or ()),
+        role=auth.role,
+        username=auth.username,
+    )
+
+
+@app.get("/workspaces", response_model=LocalWorkspaceListResponse)
+def list_workspaces(auth: AuthContext = Depends(get_auth_context)) -> LocalWorkspaceListResponse:
+    """List local OSS workspaces for the single-user dashboard."""
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    rows = list_local_workspaces(base_user_id)
+    return LocalWorkspaceListResponse(
+        workspaces=[_local_workspace_out(row) for row in rows],
+        active_id=_active_local_workspace_id(auth),
+    )
+
+
+@app.post("/workspaces", response_model=LocalWorkspaceOut)
+def create_workspace(
+    payload: LocalWorkspaceCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> LocalWorkspaceOut:
+    """Create a local OSS workspace.
+
+    Selection is client-side for OSS: the web app stores the active workspace id
+    and sends it as x-workeros-workspace on every proxied request.
+    """
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    return _local_workspace_out(create_local_workspace(base_user_id, payload.name))
+
+
+@app.post("/workspaces/{workspace_id}/select", response_model=LocalWorkspaceOut)
+def select_workspace(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> LocalWorkspaceOut:
+    """Validate and echo a local OSS workspace selection."""
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    workspace = get_local_workspace(base_user_id, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    return _local_workspace_out(workspace)
+
+
+def _duplicate_workspace_name(name: str) -> str:
+    """``"Acme"`` -> ``"Acme (copy)"`` (clamped to the 80-char name limit)."""
+    base = (name or "").strip() or "Untitled"
+    suffix = " (copy)"
+    if len(base) + len(suffix) > 80:
+        base = base[: 80 - len(suffix)].rstrip()
+    return f"{base}{suffix}"
+
+
+@app.post("/workspaces/{workspace_id}/duplicate", response_model=LocalWorkspaceOut)
+def duplicate_workspace(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> LocalWorkspaceOut:
+    """Duplicate a local OSS workspace into a new ``"<name> (copy)"`` sibling.
+
+    Owner-scoped: the source workspace must belong to the caller's local base
+    user, otherwise 404. On this single-tenant OSS instance, workers and
+    knowledge packs live in a shared on-disk pool (not per-workspace storage),
+    so duplication mints a new workspace row that surfaces the same worker pool.
+    Use Export → Import (the template round-trip) to move workers between
+    instances.
+    """
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    source = get_local_workspace(base_user_id, workspace_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    created = create_local_workspace(
+        base_user_id, _duplicate_workspace_name(source.get("name") or "")
+    )
+    return _local_workspace_out(created)
+
+
+# ---------------------------------------------------------------------------
+# Workspace members (STEP 2 — Codex members design, build-order step 2).
+#
+# Engine-owned membership endpoints calling the step-1
+# ``WorkspaceMemberRepository``. ONE model for BOTH products: the OSS engine is
+# the single-owner degenerate case (one active owner = the local user), Cloud
+# implements the same Protocol against Supabase. The role matrix lives in the
+# repository layer (owner-only role/transfer; owner+admin invite/remove; admin
+# cannot target owner/admin); these endpoints map repository PermissionError /
+# ValueError to 403 / 400 and never trust the client for authority.
+# ---------------------------------------------------------------------------
+
+class WorkspaceMemberOut(BaseModel):
+    workspace_id: str
+    user_id: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Literal["owner", "admin", "member"]
+    status: Literal["active", "invited", "removed"] = "active"
+    invited_by: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class WorkspaceMembersResponse(BaseModel):
+    """Members list + the caller's own identity/role so the web UI gates the
+    invite / change-role / remove / transfer affordances without re-deriving
+    authority from member rows."""
+
+    members: List[WorkspaceMemberOut]
+    workspace_id: str
+    my_user_id: str
+    my_role: Optional[Literal["owner", "admin", "member"]] = None
+
+
+class WorkspaceMemberInviteRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    # ``owner`` is rejected (use transfer ownership); default to the least
+    # privileged role, matching Notion/Linear invite defaults.
+    role: Literal["admin", "member"] = "member"
+
+
+class WorkspaceMemberRoleUpdate(BaseModel):
+    role: Literal["admin", "member"]
+
+
+class WorkspaceTransferOwnerRequest(BaseModel):
+    new_owner_id: str = Field(..., min_length=1)
+
+
+def _member_out(row: Dict[str, Any]) -> WorkspaceMemberOut:
+    return WorkspaceMemberOut(
+        workspace_id=str(row.get("workspace_id") or ""),
+        user_id=str(row.get("user_id") or ""),
+        email=row.get("email"),
+        display_name=row.get("display_name"),
+        role=str(row.get("role") or "member"),  # type: ignore[arg-type]
+        status=str(row.get("status") or "active"),  # type: ignore[arg-type]
+        invited_by=row.get("invited_by"),
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
+    )
+
+
+def _require_members_repo(repos: Repositories) -> WorkspaceMemberRepository:
+    members = getattr(repos, "members", None)
+    if members is None:
+        raise HTTPException(status_code=501, detail="Membership not available")
+    return members
+
+
+def _ensure_owner_membership(
+    repos: Repositories, *, workspace_id: str, auth: AuthContext
+) -> None:
+    """Idempotently guarantee the caller has an active owner row in this workspace.
+
+    OS degenerate case: the local user is the single owner. The step-1 migration
+    backfills an owner row per local workspace keyed by ``owner_user_id`` (the
+    base user) — but a freshly created (non-default) workspace, or a workspace
+    with no workers, may not have a row keyed by the *scoped* request identity
+    (``auth.user_id``). Without this, the Members page would render empty on the
+    very instance that is supposed to always show "you = Owner". So we upsert the
+    owner row keyed by the request identity, carrying the caller's email when the
+    auth context has one. Cloud overrides membership via its own repo + RLS, so
+    this no-ops there (cloud deploy short-circuits before calling it).
+    """
+    if _is_cloud_deploy():
+        return
+    try:
+        existing = repos.members.get(workspace_id=workspace_id, user_id=auth.user_id)
+    except Exception:
+        return
+    if existing is not None:
+        # Backfill a missing email once the auth context carries one, so the row
+        # the UI shows isn't a bare id. Never downgrade an existing value.
+        if auth.email and not existing.get("email"):
+            try:
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE workspace_members SET email = ?, updated_at = ? "
+                        "WHERE workspace_id = ? AND user_id = ? AND (email IS NULL OR email = '')",
+                        (auth.email, now_iso(), workspace_id, auth.user_id),
+                    )
+            except Exception:
+                logger.debug("could not backfill owner email", exc_info=True)
+        return
+    # No row for this identity yet: insert the owner row. The partial unique
+    # index forbids a second active owner, so guard with INSERT OR IGNORE and
+    # only when no active owner exists for the workspace.
+    try:
+        with get_db() as conn:
+            owner = conn.execute(
+                "SELECT 1 FROM workspace_members "
+                "WHERE workspace_id = ? AND role = 'owner' AND status = 'active' LIMIT 1",
+                (workspace_id,),
+            ).fetchone()
+            if owner is not None:
+                return
+            now = now_iso()
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO workspace_members
+                    (workspace_id, user_id, email, display_name, role,
+                     status, invited_by, created_at, updated_at)
+                VALUES (?, ?, ?, NULL, 'owner', 'active', NULL, ?, ?)
+                """,
+                (workspace_id, auth.user_id, auth.email, now, now),
+            )
+    except Exception:
+        logger.debug("could not ensure owner membership", exc_info=True)
+
+
+@app.get("/workspace/members", response_model=WorkspaceMembersResponse)
+def list_workspace_members(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceMembersResponse:
+    """List the active members of the caller's current workspace + their role.
+
+    OS single-owner: returns one row (you = Owner). The invite affordance is
+    gated client-side on ``my_role`` (owner/admin), and the page renders
+    identically to what Cloud will show with real members — one model, no fork.
+    """
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    rows = members_repo.list(workspace_id=workspace_id)
+    me = members_repo.get(workspace_id=workspace_id, user_id=auth.user_id)
+    return WorkspaceMembersResponse(
+        members=[_member_out(r) for r in rows],
+        workspace_id=workspace_id,
+        my_user_id=auth.user_id,
+        my_role=(me.get("role") if me else None),  # type: ignore[arg-type]
+    )
+
+
+@app.post("/workspace/members", response_model=WorkspaceMemberOut, status_code=201)
+def invite_workspace_member(
+    payload: WorkspaceMemberInviteRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceMemberOut:
+    """Invite a member by email (owner/admin only). The repository enforces the
+    matrix and rejects a second owner; we map its errors to 403/400."""
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    try:
+        row = members_repo.invite(
+            workspace_id=workspace_id,
+            email=payload.email.strip(),
+            role=payload.role,
+            invited_by=auth.user_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _member_out(row)
+
+
+@app.patch("/workspace/members/{user_id}", response_model=WorkspaceMemberOut)
+def set_workspace_member_role(
+    user_id: str,
+    payload: WorkspaceMemberRoleUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceMemberOut:
+    """Promote/demote a member between admin and member (owner only). Owner role
+    is changed only via transfer-owner; the repository rejects it."""
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    try:
+        row = members_repo.set_role(
+            workspace_id=workspace_id,
+            actor_id=auth.user_id,
+            user_id=user_id,
+            role=payload.role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return _member_out(row)
+
+
+@app.delete("/workspace/members/{user_id}", status_code=204)
+def remove_workspace_member(
+    user_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Remove a member (owner/admin only; admins can't remove owner/admins; the
+    owner can't be removed — transfer ownership first)."""
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    try:
+        removed = members_repo.remove(
+            workspace_id=workspace_id,
+            actor_id=auth.user_id,
+            user_id=user_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return Response(status_code=204)
+
+
+@app.post("/workspace/members/transfer-owner", response_model=WorkspaceMemberOut)
+def transfer_workspace_owner(
+    payload: WorkspaceTransferOwnerRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceMemberOut:
+    """Transfer ownership to another active member (current owner only). The
+    current owner is demoted to admin; the partial unique index keeps exactly
+    one active owner per workspace."""
+    members_repo = _require_members_repo(repos)
+    workspace_id = _active_local_workspace_id(auth)
+    _ensure_owner_membership(repos, workspace_id=workspace_id, auth=auth)
+    try:
+        row = members_repo.transfer_owner(
+            workspace_id=workspace_id,
+            actor_id=auth.user_id,
+            new_owner_id=payload.new_owner_id.strip(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _member_out(row)
 
 
 def _connection_row_for_user(
@@ -365,11 +1002,29 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
     path = request.url.path
     if path == "/workers/from-bundle":
         return FROM_BUNDLE_BODY_LIMIT_BYTES
+    if path == "/workspace/import":
+        return WORKSPACE_IMPORT_BODY_LIMIT_BYTES
     if path.startswith("/uploads"):
+        return None
+    # X4: approval-scoped screenshot uploads stream a multipart image body; the
+    # /uploads handler enforces its own size + quota caps, so exempt them from
+    # the small JSON default here (authed owner + signed-link public reviewer).
+    if path.endswith("/uploads") and (
+        path.startswith("/approvals/") or path.startswith("/approvals/public/")
+    ):
         return None
     if path.startswith("/contexts"):
         return None
     return DEFAULT_JSON_BODY_LIMIT_BYTES
+
+
+def _is_context_upload_request(request: Request) -> bool:
+    path = request.url.path
+    return (
+        request.method.upper() == "POST"
+        and path.startswith("/contexts/")
+        and path.endswith("/upload")
+    )
 
 
 @app.middleware("http")
@@ -387,6 +1042,15 @@ async def request_body_size_middleware(request: Request, call_next):
         return await call_next(request)
 
     max_bytes = _body_limit_for_request(request)
+    if _is_context_upload_request(request):
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > _context_upload_body_limit_bytes():
+                    return _context_upload_too_large_response()
+            except ValueError:
+                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+
     if max_bytes is None:
         return await call_next(request)
 
@@ -394,13 +1058,29 @@ async def request_body_size_middleware(request: Request, call_next):
     if content_length:
         try:
             if int(content_length) > max_bytes:
-                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": (
+                            "Request body is too large. Reduce the payload size "
+                            "and try again."
+                        )
+                    },
+                )
         except ValueError:
             return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
 
     body = await request.body()
     if len(body) > max_bytes:
-        return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        return JSONResponse(
+            status_code=413,
+            content={
+                "detail": (
+                    "Request body is too large. Reduce the payload size "
+                    "and try again."
+                )
+            },
+        )
     return await call_next(request)
 
 
@@ -434,9 +1114,9 @@ def _rate_caller_keys(request: Request, path: str) -> List[str]:
 
 def _run_create_quota_config() -> tuple[int, float]:
     try:
-        limit = int(os.environ.get("WORKEROS_RUN_CREATE_RATE_LIMIT", "30"))
+        limit = int(os.environ.get("WORKEROS_RUN_CREATE_RATE_LIMIT", "10"))
     except ValueError:
-        limit = 30
+        limit = 10
     try:
         window = float(os.environ.get("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60"))
     except ValueError:
@@ -444,18 +1124,32 @@ def _run_create_quota_config() -> tuple[int, float]:
     return max(0, limit), max(1.0, window)
 
 
-def _run_create_quota_key(auth: AuthContext, worker_id: str) -> str:
-    return f"user:{auth.user_id}:worker:{worker_id}"
+def _run_create_per_worker_limit() -> int:
+    raw = os.environ.get("WORKEROS_RUN_CREATE_PER_WORKER_RATE_LIMIT")
+    if raw is None:
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
 
 
-def _enforce_run_create_quota(auth: AuthContext, worker_id: str) -> None:
-    limit, window = _run_create_quota_config()
+def _run_replay_per_run_limit() -> int:
+    raw = os.environ.get("WORKEROS_RUN_REPLAY_PER_RUN_RATE_LIMIT")
+    if raw is None:
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
+def _claim_run_create_quota_slot(key: str, *, limit: int, window: float) -> Optional[int]:
     if limit <= 0:
-        return
+        return None
 
     now = time.time()
     cutoff = now - window
-    key = _run_create_quota_key(auth, worker_id)
     with get_db() as conn:
         conn.execute(
             """
@@ -476,13 +1170,87 @@ def _enforce_run_create_quota(auth: AuthContext, worker_id: str) -> None:
         count = int(row["count"] or 0) if row else 0
         if count >= limit:
             oldest_ts = float(row["oldest_ts"] or now) if row else now
-            retry_after = max(1, int(window - (now - oldest_ts)))
-            raise HTTPException(
-                status_code=429,
-                detail=f"Run creation rate limit exceeded: {limit}/{int(window)}s",
-                headers={"Retry-After": str(retry_after)},
-            )
+            retry_after = max(1, int(math.ceil((oldest_ts + window) - now)))
+            return retry_after
         conn.execute("INSERT INTO run_create_rate_limits (key, ts) VALUES (?, ?)", (key, now))
+    return None
+
+
+def _raise_run_create_quota(limit: int, window: float, retry_after: int) -> None:
+    raise HTTPException(
+        status_code=429,
+        detail=f"Run creation rate limit exceeded: {limit}/{int(window)}s",
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+def _enforce_run_create_quota(auth: AuthContext, worker_id: str) -> None:
+    limit, window = _run_create_quota_config()
+    retry_after = _claim_run_create_quota_slot(
+        f"user:{auth.user_id}:runs",
+        limit=limit,
+        window=window,
+    )
+    if retry_after is not None:
+        _raise_run_create_quota(limit, window, retry_after)
+
+    per_worker_limit = _run_create_per_worker_limit()
+    retry_after = _claim_run_create_quota_slot(
+        f"user:{auth.user_id}:worker:{worker_id}",
+        limit=per_worker_limit,
+        window=window,
+    )
+    if retry_after is not None:
+        _raise_run_create_quota(per_worker_limit, window, retry_after)
+
+
+def _enforce_run_replay_quota(auth: AuthContext, worker_id: str, source_run_id: str) -> None:
+    replay_limit = _run_replay_per_run_limit()
+    if replay_limit <= 0:
+        return
+    _limit, window = _run_create_quota_config()
+    retry_after = _claim_run_create_quota_slot(
+        f"user:{auth.user_id}:worker:{worker_id}:replay:{source_run_id}",
+        limit=replay_limit,
+        window=window,
+    )
+    if retry_after is not None:
+        _raise_run_create_quota(replay_limit, window, retry_after)
+
+
+def _chat_quota_config() -> tuple[int, float]:
+    """Per-user /chat quota.
+
+    /chat calls OpenAI on every request (the workspace agent), so an
+    unbounded caller can run up a real LLM bill. The shared IP rate limiter
+    (60/60s) is too loose for a paid-LLM path; enforce a tighter per-user cap
+    keyed on the authenticated user, durable across restarts via the same
+    DB-backed sliding window used for run-create.
+    """
+    try:
+        limit = int(os.environ.get("WORKEROS_CHAT_RATE_LIMIT", "20"))
+    except ValueError:
+        limit = 20
+    try:
+        window = float(os.environ.get("WORKEROS_CHAT_RATE_WINDOW_SECONDS", "60"))
+    except ValueError:
+        window = 60.0
+    return max(0, limit), max(1.0, window)
+
+
+def _enforce_chat_quota(auth: AuthContext) -> None:
+    limit, window = _chat_quota_config()
+    retry_after = _claim_run_create_quota_slot(
+        f"user:{auth.user_id}:chat",
+        limit=limit,
+        window=window,
+    )
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Chat rate limit exceeded: {limit}/{int(window)}s",
+            headers={"Retry-After": str(retry_after)},
+        )
 
 
 @app.middleware("http")
@@ -517,35 +1285,119 @@ async def auth_middleware(request: Request, call_next):
     """Require x-floom-secret on ALL requests except exempt paths.
 
     Exempt paths (no internal secret needed):
-      - /webhooks/*       — HMAC-authed by per-worker secret
-      - /healthz          — liveness probe, no secret
-      - /composio-events  — Composio webhook receiver
+      - /webhooks/*         — HMAC-authed by per-worker secret
+      - /healthz            — liveness probe, no secret
+      - /composio-events    — Composio webhook receiver
       - /connections/callback — OAuth browser redirect validates connection state
-      - OPTIONS           — CORS preflight
+      - OPTIONS             — CORS preflight
+
+    Run-scoped tokens (X-Workeros-Run-Token header):
+      Sandbox workers receive a WORKEROS_RUN_TOKEN env var — a short-lived
+      HMAC-signed token that permits ONLY /runs/{id}/composio-execute/* calls.
+      Presenting a run token on ANY other endpoint returns 403, making it
+      cryptographically impossible for sandboxed worker code to delete workers,
+      modify other workers, or access the operator API.
 
     When FLOOM_SECRET is not set (localhost dev mode), all requests pass.
-    Previously GET/HEAD were exempt; this was a security hole — MCP read
-    tools were effectively unauthenticated.
     """
+    from fastapi.responses import JSONResponse as _JSONResponse  # noqa: PLC0415
+    from run_token import verify_run_token  # noqa: PLC0415
+
     secret = os.environ.get("FLOOM_SECRET", "")
-    if secret and request.method != "OPTIONS":
-        path = request.url.path
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    path = request.url.path
+
+    # Run-scoped token check — always evaluated, even in dev mode. A run token
+    # is a narrow sandbox capability: it can only call its own Composio proxy
+    # path. Worker-to-worker orchestration and destructive actions use the
+    # authenticated operator/server paths, never this sandbox token.
+    run_token_header = request.headers.get("x-workeros-run-token", "")
+    if run_token_header:
+        run_id_from_token = verify_run_token(run_token_header, secret=secret)
+        if run_id_from_token is None:
+            return _JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or expired run token"},
+            )
+        if not _RE_RUN_COMPOSIO_PROXY.match(path):
+            return _JSONResponse(
+                status_code=403,
+                content={"detail": "Run tokens are only valid for Composio proxy calls"},
+            )
+        path_run_id = path.split("/", 3)[2] if path.startswith("/runs/") else ""
+        if path_run_id != run_id_from_token:
+            return _JSONResponse(
+                status_code=403,
+                content={"detail": "Run token does not match request run_id"},
+            )
+        return await call_next(request)
+
+    if secret:
         if (
             path.startswith("/webhooks/")
             or path in {"/healthz", "/health"}
             or path == "/composio-events"
+            or path == "/slack/events"
+            or path == "/slack/commands"
+            or path == "/slack/interactivity"
+            or path == "/slack/oauth/callback"
+            or path == "/whatsapp/webhook"
+            or path == "/mcp"
+            or path == "/api/mcp"
+            or path == "/mcp/setup/langdock"
+            or path == "/api/mcp/setup/langdock"
+            or path == "/langdock/mcp"
+            or path == "/workspace-agent/mcp"
+            or path == "/api/langdock/mcp"
+            or path == "/api/workspace-agent/mcp"
             or path == "/connections/callback"
+            or path.startswith("/approvals/public/")
+            or path.startswith("/workers/public/")
+            or path.startswith("/workers/short-links/")
+            or path.startswith("/s/")
+            or path.startswith("/workspace/template/")
             or path == "/cli-auth/devices"
             or path.startswith("/cli-auth/poll/")
+            or _RE_RUN_COMPOSIO_PROXY.match(path)
+            # Multi-member: login/setup paths always exempt so users can authenticate without secret
+            or path in {"/auth/setup", "/auth/login", "/auth/logout", "/auth/me", "/auth/setup-required"}
         ):
             return await call_next(request)
-        header = request.headers.get("x-floom-secret", "")
-        if header != secret:
-            from fastapi.responses import JSONResponse as _JSONResponse
+        raw_secret = None
+        bearer_token = None
+        session_cookie = None
+        for key, value in request.scope.get("headers", []):
+            if key.lower() == b"x-floom-secret":
+                raw_secret = value
+            elif key.lower() == b"authorization":
+                auth_value = value.decode("latin-1", errors="replace")
+                if auth_value.startswith("Bearer "):
+                    bearer_token = auth_value[7:].strip()
+            elif key.lower() == b"cookie":
+                # Parse backend session cookie from Cookie header (wos_session is the backend multi-member session)
+                cookie_str = value.decode("latin-1", errors="replace")
+                for part in cookie_str.split(";"):
+                    part = part.strip()
+                    if part.startswith("wos_session="):
+                        session_cookie = part.split("=", 1)[1]
+        # Multi-member auth: Bearer PAT or session cookie bypass x-floom-secret
+        if bearer_token or session_cookie:
+            return await call_next(request)
+        expected = secret.encode("latin-1")
+        if raw_secret is None:
             return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+        if not hmac.compare_digest(raw_secret, expected):
+            return _JSONResponse(status_code=403, content={"detail": "Forbidden"})
     return await call_next(request)
 
 logger = logging.getLogger("floom.api")
+
+# Regex for run-authenticated Composio proxy (no x-floom-secret required;
+# auth is by X-Workeros-Run-Token, scoped to the run_id in the path).
+import re as _re
+_RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
 
 # Process start time for /system/metrics uptime reporting.
 _PROCESS_START_TIME = time.time()
@@ -581,6 +1433,59 @@ _TERMINAL_STATUSES = frozenset({
 })
 
 
+# ---------------------------------------------------------------------------
+# Per-user concurrent SSE stream cap (Round 16 DoS finding)
+# ---------------------------------------------------------------------------
+# Unlimited concurrent SSE streams (/runs/<id>/stream + /runs/<id>/events) are
+# a DoS vector: each open stream holds a connection + queue + worker slot. Cap
+# the number of simultaneous streams per user with a simple in-process counter
+# keyed by user_id. The slot is always released on disconnect via the
+# contextmanager's finally block, so a dropped client frees its slot.
+_sse_user_stream_counts: Dict[str, int] = {}
+_sse_stream_count_lock = threading.Lock()
+
+
+def _max_concurrent_streams() -> int:
+    try:
+        return max(1, int(os.environ.get("WORKEROS_MAX_CONCURRENT_STREAMS", "10")))
+    except (TypeError, ValueError):
+        return 10
+
+
+def _sse_stream_acquire(user_id: str) -> str:
+    """Reserve a per-user SSE stream slot or raise 429 if the cap is exceeded.
+
+    Returns the registry key to pass to _sse_stream_release. Acquisition happens
+    synchronously in the endpoint body so the 429 is returned before any
+    StreamingResponse is constructed.
+    """
+    cap = _max_concurrent_streams()
+    key = user_id or "anonymous"
+    with _sse_stream_count_lock:
+        current = _sse_user_stream_counts.get(key, 0)
+        if current >= cap:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many concurrent streams. Close existing streams and retry.",
+            )
+        _sse_user_stream_counts[key] = current + 1
+    return key
+
+
+def _sse_stream_release(key: str) -> None:
+    """Free a previously reserved per-user SSE stream slot.
+
+    Called from the generator's finally block so a dropped/disconnected client
+    always frees its slot.
+    """
+    with _sse_stream_count_lock:
+        remaining = _sse_user_stream_counts.get(key, 0) - 1
+        if remaining <= 0:
+            _sse_user_stream_counts.pop(key, None)
+        else:
+            _sse_user_stream_counts[key] = remaining
+
+
 def _sse_publish(run_id: str, event: Dict[str, Any]) -> None:
     """Publish an SSE event to all active consumers for a run.
 
@@ -588,10 +1493,11 @@ def _sse_publish(run_id: str, event: Dict[str, Any]) -> None:
     asyncio.Queue is not thread-safe, so we route the put through each
     queue's bound loop via call_soon_threadsafe.
     """
+    public_event = _public_sse_event(event)
     with _sse_lock:
         entries = list(_sse_queues.get(run_id, []))
     for q, loop in entries:
-        def _put(q=q, event=event):
+        def _put(q=q, event=public_event):
             try:
                 q.put_nowait(event)
             except asyncio.QueueFull:
@@ -652,17 +1558,18 @@ def _schedule_run_part_cleanup(run_id: str) -> None:
 
 def _run_part_publish(run_id: str, part: Dict[str, Any]) -> None:
     """Publish one AI SDK part to the replay buffer and active consumers."""
+    public_part = _public_run_part(part)
     with _run_part_lock:
         state = _run_part_state(run_id)
         event_id = state["next_id"]
         state["next_id"] = event_id + 1
-        state["parts"].append((event_id, part))
-        if _run_part_is_finish(part):
+        state["parts"].append((event_id, public_part))
+        if _run_part_is_finish(public_part):
             state["finished_at"] = time.time()
         entries = list(state["queues"])
 
     for q, loop in entries:
-        def _put(q=q, event_id=event_id, part=part):
+        def _put(q=q, event_id=event_id, part=public_part):
             try:
                 q.put_nowait((event_id, part))
             except asyncio.QueueFull:
@@ -673,7 +1580,7 @@ def _run_part_publish(run_id: str, part: Dict[str, Any]) -> None:
         except RuntimeError:
             pass
 
-    if _run_part_is_finish(part):
+    if _run_part_is_finish(public_part):
         _schedule_run_part_cleanup(run_id)
 
 
@@ -726,7 +1633,7 @@ def _finish_part_from_run_row(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     if status == RunStatus.FAILED.value:
         part: Dict[str, Any] = {"type": "finish", "status": "failed"}
         if row["error"]:
-            part["error"] = row["error"]
+            part["error"] = _redact_public_log_message(str(row["error"]))
         return part
     return None
 
@@ -746,16 +1653,22 @@ def _log_replay_parts(repos: "Repositories", user_id: str, run_id: str) -> List[
     except Exception:
         logger.exception("Failed to load logs for SSE replay (run %s)", run_id)
         return parts
+    # G5 P1: collapse the e2b stderr code-echo on the RAW ordered rows FIRST,
+    # THEN per-row redact, so the rebuilt transcript is as calm as the live panel.
+    _raw_parts: List[Dict[str, Any]] = []
     for r in rows:
         row = row_to_dict(r)
-        parts.append(
+        _raw_parts.append(
             {
                 "type": "log",
                 "level": row.get("level"),
-                "message": _redact_public_log_message(row.get("message") or ""),
+                "message": row.get("message") or "",
                 "timestamp": row.get("timestamp"),
             }
         )
+    for part in _collapse_stderr_code_echo_rows(_raw_parts):
+        part["message"] = _redact_public_log_message(part["message"])
+        parts.append(part)
     return parts
 
 
@@ -771,6 +1684,29 @@ def _health_check_db() -> Dict[str, Any]:
     with get_db() as conn:
         conn.execute("SELECT 1").fetchone()
     return {"ok": True}
+
+
+# Minimum free disk before /health flips to degraded. A full disk silently
+# corrupts SQLite writes and 507s worker-create while /health stayed "ok" at
+# 0 bytes free (2026-06-02 P1). Override with HEALTH_MIN_FREE_DISK_GB.
+_HEALTH_MIN_FREE_DISK_GB = float(os.environ.get("HEALTH_MIN_FREE_DISK_GB", "5") or "5")
+
+
+def _health_check_disk() -> Dict[str, Any]:
+    """Warn before the disk fills. Checks the filesystem holding the SQLite DB."""
+    db_path = str(DB_PATH)
+    target = db_path if os.path.exists(db_path) else (os.path.dirname(db_path) or "/")
+    usage = shutil.disk_usage(target if os.path.exists(target) else "/")
+    free_gb = usage.free / (1024**3)
+    ok = free_gb >= _HEALTH_MIN_FREE_DISK_GB
+    result: Dict[str, Any] = {
+        "ok": ok,
+        "free_gb": round(free_gb, 2),
+        "min_free_gb": _HEALTH_MIN_FREE_DISK_GB,
+    }
+    if not ok:
+        result["error"] = f"low disk: {free_gb:.2f}GB free < {_HEALTH_MIN_FREE_DISK_GB}GB"
+    return result
 
 
 def _health_check_e2b() -> Dict[str, Any]:
@@ -815,6 +1751,7 @@ def _run_health_checks() -> Dict[str, Any]:
     checks: Dict[str, Any] = {}
     for name, fn in {
         "db": _health_check_db,
+        "disk": _health_check_disk,
         "e2b": _health_check_e2b,
         "openai": _health_check_openai,
         "composio": _health_check_composio,
@@ -919,7 +1856,9 @@ def _normalize_run_status(status_value: str) -> str:
     value = (status_value or "").lower()
     if value in {"completed", "approved", "success"}:
         return "success"
-    if value in {"running", "queued", "pending_approval"}:
+    if value == "pending_approval":
+        return "pending_approval"
+    if value in {"running", "queued"}:
         return "running"
     return "error"
 
@@ -935,6 +1874,7 @@ def _resolve_run_status_filters(raw_status: Optional[str]) -> List[str]:
         "completed": ["completed"],
         "failed": ["failed"],
         "queued": ["queued"],
+        "pending_approval": ["pending_approval"],
     }
     statuses: List[str] = []
     for token in raw_status.split(","):
@@ -978,6 +1918,39 @@ def _is_sensitive_artifact_row(row: Any) -> bool:
 def _raise_if_protected_worker_mutation(worker_id: str) -> None:
     if worker_id in PROTECTED_STOCK_WORKER_IDS:
         raise HTTPException(status_code=403, detail="Stock workers cannot be modified through the API")
+
+
+def _canonical_worker_id(value: str) -> str:
+    text = (value or "").strip()
+    if text in PROTECTED_STOCK_WORKER_IDS:
+        return text
+    return _slugify_worker_id(text)
+
+
+def _require_worker_write_workspace_context(request: Request) -> None:
+    require_explicit = os.environ.get("WORKEROS_REQUIRE_WORKSPACE_HEADER_FOR_WRITES") == "1"
+    if _is_cloud_deploy():
+        raw_workspace = (
+            request.headers.get("x-workeros-workspace")
+            or request.query_params.get("workspace_id")
+            or ""
+        ).strip()
+        if not raw_workspace:
+            raise HTTPException(
+                status_code=400,
+                detail="x-workeros-workspace header is required for worker writes.",
+            )
+        return
+    if not require_explicit:
+        return
+    if requested_local_workspace_id(request) is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A valid x-workeros-workspace header or workspace_id query parameter "
+                "is required for worker writes."
+            ),
+        )
 
 
 def _extract_primary_output_file(output_payload: Dict[str, Any]) -> Optional[tuple[str, bytes]]:
@@ -1071,7 +2044,6 @@ def _make_run_summary(row: Any) -> RunSummary:
         "rejected": RunStatus.FAILED.value,
         "error": RunStatus.FAILED.value,
         "cancelled": RunStatus.FAILED.value,
-        "pending_approval": RunStatus.RUNNING.value,
     }
     normalized_status = status_aliases.get(status_value, status_value or RunStatus.FAILED.value)
     return RunSummary(
@@ -1084,9 +2056,91 @@ def _make_run_summary(row: Any) -> RunSummary:
         started_at=d.get("started_at"),
         completed_at=d.get("completed_at"),
         duration_ms=d.get("duration_ms"),
-        error=d.get("error"),
+        error=_operator_error_message(d.get("error"), d.get("error_code")),
         error_code=d.get("error_code"),
     )
+
+
+def _resolve_worker_status(
+    worker: Dict[str, Any],
+    *,
+    config: Optional["WorkerConfig"],
+    available_secret_names: Iterable[str],
+    last_run_status: Optional[RunStatus],
+    has_run: bool,
+) -> WorkerStatus:
+    """Single source of truth for an operator-facing worker status.
+
+    Used by BOTH the LIST path (``list_workers``) and the DETAIL path
+    (``_build_worker_detail``) so the two surfaces can never disagree for the
+    same worker. The full honesty downgrade ladder, in order:
+
+    1. MISSING_SECRET — a required secret is not configured.
+    2. NEEDS_ATTENTION — the most recent run FAILED.
+    3. NEEDS_ATTENTION — the worker is durably disabled (``enabled is False``,
+       e.g. smoke-gated on creation). A disabled worker is broken, not healthy.
+    4. READY — the worker has never run, so "healthy" (which implies a
+       verified-working worker) has not been EARNED. READY renders identically
+       to HEALTHY in the quiet UI; this only keeps the API claim honest.
+
+    Archived workers are intentionally inactive and keep their stored status
+    (they surface via the archived badge, not needs_attention).
+    Already-broken raw states (e.g. "error") are preserved as-is — we only
+    ever downgrade FROM healthy, never fabricate health.
+    """
+    raw = worker.get("status") or WorkerStatus.HEALTHY.value
+    try:
+        status = WorkerStatus(raw)
+    except ValueError:
+        status = WorkerStatus.ERROR
+    is_archived = bool(worker.get("archived", False))
+    # `enabled` defaults to True: stock/filesystem workers have no recipe row
+    # and are not durably disable-able, so absence means "enabled".
+    enabled = bool(worker.get("enabled", True))
+    secret_set = set(available_secret_names)
+
+    if config and config.secrets:
+        missing = [s for s in config.secrets if s not in secret_set]
+        if missing:
+            status = WorkerStatus.MISSING_SECRET
+
+    if (
+        not is_archived
+        and status == WorkerStatus.HEALTHY
+        and last_run_status == RunStatus.FAILED
+    ):
+        status = WorkerStatus.NEEDS_ATTENTION
+
+    if (
+        not is_archived
+        and status == WorkerStatus.HEALTHY
+        and not enabled
+    ):
+        status = WorkerStatus.NEEDS_ATTENTION
+
+    if (
+        status == WorkerStatus.HEALTHY
+        and not has_run
+        and not is_archived
+        and enabled
+    ):
+        status = WorkerStatus.READY
+
+    return status
+
+
+def _available_secret_names_for_user(user_id: str, repos: Repositories) -> set[str]:
+    names = set(repos.secrets.list_names(user_id=user_id))
+    try:
+        from run_service import _platform_worker_secret_names
+        names.update(
+            name
+            for name in _platform_worker_secret_names()
+            if (os.environ.get(name) or "").strip()
+        )
+    except Exception:
+        pass
+    return names
 
 
 def _get_stats_batch(
@@ -1133,9 +2187,7 @@ def get_worker_timeseries(
     repos: Repositories = Depends(get_repos),
 ) -> List[TimeseriesDay]:
     """Return per-day run counts for the last N days (default 14). Zero-filled."""
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     batch = _get_timeseries_batch(
@@ -1147,9 +2199,980 @@ def get_worker_timeseries(
     return batch.get(worker_id, [])
 
 
+# ---------------------------------------------------------------------------
+# Monitoring: GET /workers/{id}/stats
+# ---------------------------------------------------------------------------
+
+@app.get("/workers/{worker_id}/stats", response_model=WorkerStats)
+def get_worker_stats(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerStats:
+    """Extended health and run statistics for a single worker."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    stats_7d = repos.workers.stats_batch(
+        user_id=auth.user_id, worker_ids=[worker_id], days=7
+    ).get(worker_id)
+    stats_30d = repos.workers.stats_batch(
+        user_id=auth.user_id, worker_ids=[worker_id], days=30
+    ).get(worker_id)
+
+    # Aggregate duration and last failure from raw run rows
+    runs_30d_rows, _ = repos.runs.list(
+        user_id=auth.user_id,
+        worker_id=worker_id,
+        limit=200,
+    )
+    durations = [
+        r["duration_ms"]
+        for r in runs_30d_rows
+        if r.get("duration_ms") is not None
+    ]
+    avg_duration_ms: Optional[float] = (
+        sum(durations) / len(durations) if durations else None
+    )
+    p95_duration_ms: Optional[float] = None
+    if durations:
+        sorted_d = sorted(durations)
+        idx = max(0, int(len(sorted_d) * 0.95) - 1)
+        p95_duration_ms = float(sorted_d[idx])
+
+    failed_rows = [
+        r for r in runs_30d_rows if r.get("status") == RunStatus.FAILED.value
+    ]
+    last_failure = failed_rows[0] if failed_rows else None
+
+    return WorkerStats(
+        worker_id=worker_id,
+        last_run_at=stats_7d.last_run_at if stats_7d else None,
+        runs_7d=stats_7d.runs_7d if stats_7d else 0,
+        success_rate_7d=stats_7d.success_rate_7d if stats_7d else None,
+        success_rate_change_7d=stats_7d.success_rate_change_7d if stats_7d else None,
+        runs_30d=stats_30d.runs_7d if stats_30d else 0,
+        success_rate_30d=stats_30d.success_rate_7d if stats_30d else None,
+        avg_duration_ms=avg_duration_ms,
+        p95_duration_ms=p95_duration_ms,
+        total_failures=len(failed_rows),
+        last_error=last_failure.get("error") if last_failure else None,
+        last_error_at=last_failure.get("completed_at") or last_failure.get("created_at") if last_failure else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Monitoring: GET /stats (workspace-level aggregate)
+# ---------------------------------------------------------------------------
+
+@app.get("/stats", response_model=WorkspaceStats)
+def get_workspace_stats(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceStats:
+    """Aggregate health and run statistics across the entire workspace."""
+    workers = repos.workers.list(user_id=auth.user_id)
+    worker_ids = [w["id"] for w in workers if not w.get("archived")]
+    total_workers = len(worker_ids)
+
+    if not worker_ids:
+        return WorkspaceStats(total_workers=total_workers)
+
+    stats_map = repos.workers.stats_batch(
+        user_id=auth.user_id, worker_ids=worker_ids, days=7
+    )
+
+    total_runs_7d = sum(s.runs_7d for s in stats_map.values())
+    active_workers = sum(1 for s in stats_map.values() if s.runs_7d > 0)
+
+    all_completions = sum(
+        int((s.success_rate_7d or 0) * s.runs_7d)
+        for s in stats_map.values()
+        if s.success_rate_7d is not None
+    )
+    success_rate_7d: Optional[float] = (
+        all_completions / total_runs_7d if total_runs_7d > 0 else None
+    )
+
+    most_active = max(stats_map.items(), key=lambda kv: kv[1].runs_7d, default=None)
+    most_active_worker_id = most_active[0] if most_active and most_active[1].runs_7d > 0 else None
+    most_active_worker_name: Optional[str] = None
+    if most_active_worker_id:
+        w_row = next((w for w in workers if w["id"] == most_active_worker_id), None)
+        most_active_worker_name = w_row.get("name") if w_row else None
+
+    # Avg duration across recent runs
+    runs_rows, _ = repos.runs.list(
+        user_id=auth.user_id, limit=200
+    )
+    durations = [r["duration_ms"] for r in runs_rows if r.get("duration_ms") is not None]
+    avg_duration_ms: Optional[float] = sum(durations) / len(durations) if durations else None
+
+    return WorkspaceStats(
+        total_workers=total_workers,
+        active_workers=active_workers,
+        total_runs_7d=total_runs_7d,
+        success_rate_7d=success_rate_7d,
+        avg_duration_ms=avg_duration_ms,
+        most_active_worker_id=most_active_worker_id,
+        most_active_worker_name=most_active_worker_name,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Monitoring: GET /workers/{id}/logs (cross-run logs)
+# ---------------------------------------------------------------------------
+
+@app.get("/workers/{worker_id}/logs", response_model=List[Dict[str, Any]])
+def get_worker_logs(
+    worker_id: str,
+    level: Optional[str] = Query(None, description="Filter by log level (info, warning, error, debug)"),
+    since: Optional[str] = Query(None, description="ISO 8601 timestamp lower bound"),
+    limit: int = Query(200, ge=1, le=1000),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[Dict[str, Any]]:
+    """Cross-run logs for a worker, optionally filtered by level and start time."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    since_dt = _parse_iso8601(since) if since else None
+    if since and since_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid since value")
+    rows = repos.runs.list_logs_for_worker(
+        user_id=auth.user_id,
+        worker_id=worker_id,
+        level=level,
+        since=since_dt.isoformat() if since_dt else None,
+        limit=limit,
+    )
+    return [
+        {
+            "run_id": r.get("run_id"),
+            "level": r.get("level"),
+            "message": _redact_public_log_message(r.get("message", "")),
+            "timestamp": r.get("timestamp"),
+            "trace_id": r.get("trace_id"),
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Alerts: POST/GET/DELETE /workers/{id}/alerts
+# ---------------------------------------------------------------------------
+
+@app.post("/workers/{worker_id}/alerts", response_model=WorkerAlert, status_code=201)
+def create_worker_alert(
+    worker_id: str,
+    body: WorkerAlertCreate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerAlert:
+    """Register a webhook endpoint to be called when this worker's runs terminate."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    if not body.url and not body.email_to:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of url (webhook) or email_to (email recipients) is required.",
+        )
+    # SSRF guard at store time: a webhook URL pointing at an internal /
+    # loopback / link-local / metadata target is rejected on save (400), so a
+    # bad URL never lands in the DB to be POSTed to later. The webhook delivery
+    # path re-checks at send time (DNS-rebinding defense in depth).
+    if body.url:
+        try:
+            body.url = assert_safe_outbound_url(body.url, label="Alert webhook URL")
+        except UnsafeOutboundUrlError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    valid_events = {"failed", "completed"}
+    invalid = [e for e in body.on if e not in valid_events]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid events: {invalid}. Allowed: {sorted(valid_events)}",
+        )
+    import json as _json
+    alert_id = f"alrt_{_uuid_mod.uuid4().hex[:12]}"
+    email_to_json = _json.dumps(body.email_to) if body.email_to else None
+    row = repos.alerts.add(
+        alert_id=alert_id,
+        worker_id=worker_id,
+        url=body.url,
+        email_to=email_to_json,
+        events=",".join(body.on),
+        description=body.description,
+        created_at=now_iso(),
+    )
+    _et = row.get("email_to")
+    return WorkerAlert(
+        id=row["id"],
+        worker_id=row["worker_id"],
+        url=row.get("url"),
+        email_to=_json.loads(_et) if _et else None,
+        on=row["events"].split(","),
+        description=row.get("description"),
+        created_at=row["created_at"],
+    )
+
+
+@app.get("/workers/{worker_id}/alerts", response_model=List[WorkerAlert])
+def list_worker_alerts(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[WorkerAlert]:
+    """List all registered webhook alerts for a worker."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    import json as _json
+    rows = repos.alerts.list(worker_id=worker_id)
+    return [
+        WorkerAlert(
+            id=r["id"],
+            worker_id=r["worker_id"],
+            url=r.get("url"),
+            email_to=_json.loads(r["email_to"]) if r.get("email_to") else None,
+            on=r["events"].split(","),
+            description=r.get("description"),
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
+@app.delete("/workers/{worker_id}/alerts/{alert_id}", status_code=204)
+def delete_worker_alert(
+    worker_id: str,
+    alert_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    """Remove a registered webhook alert."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    deleted = repos.alerts.delete(alert_id=alert_id, worker_id=worker_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+
+# ---------------------------------------------------------------------------
+# Versioning: GET /workers/{id}/versions, POST /workers/{id}/rollback/{vid}
+#             GET /contexts/{name}/versions, POST /contexts/{name}/rollback/{vid}
+#             GET /workspace/versions, POST /workspace/rollback/{vid}
+# ---------------------------------------------------------------------------
+
+_WORKSPACE_INSTRUCTIONS_ASSET_TYPE = "workspace_instructions"
+_WORKSPACE_BASE_PERSONA_ASSET_TYPE = "workspace_base_persona"
+
+
+def _workspace_instructions_asset_id(request: Request | None = None) -> str:
+    """Scope version history per cloud workspace when x-workeros-workspace is set."""
+    if request is not None:
+        workspace_id = (request.headers.get("x-workeros-workspace") or "").strip()
+        if workspace_id and workspace_id != "local-default":
+            return workspace_id
+    return "default"
+
+
+def _workspace_base_persona_asset_id(request: Request | None = None) -> str:
+    """Scope base-persona version history per cloud workspace."""
+    return _workspace_instructions_asset_id(request)
+
+
+def _snapshot_workspace_instructions(
+    *,
+    user_id: str,
+    repos: Repositories,
+    asset_id: str,
+    content: str | None = None,
+    change_source: str = "user",
+) -> None:
+    """Create a version snapshot of workspace.md (Agent → Instructions)."""
+    import json as _json
+
+    from chat_service import get_workspace_md
+
+    try:
+        md = content if content is not None else get_workspace_md()
+        snapshot = {"content": md}
+        repos.versions.create(
+            asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
+            asset_id=asset_id,
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(
+            asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
+            asset_id=asset_id,
+            keep=20,
+        )
+    except Exception as _exc:
+        logger.warning("version snapshot failed for workspace instructions: %s", _exc)
+
+
+def _snapshot_workspace_base_persona(
+    *,
+    user_id: str,
+    repos: Repositories,
+    asset_id: str,
+    content: str | None = None,
+    change_source: str = "user",
+) -> None:
+    """Create a version snapshot of workspace.base.md."""
+    import json as _json
+
+    from chat_service import get_workspace_base_persona
+
+    try:
+        md = content if content is not None else get_workspace_base_persona()
+        snapshot = {"content": md}
+        repos.versions.create(
+            asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE,
+            asset_id=asset_id,
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(
+            asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE,
+            asset_id=asset_id,
+            keep=20,
+        )
+    except Exception as _exc:
+        logger.warning("version snapshot failed for workspace base persona: %s", _exc)
+
+
+def _snapshot_worker_version(
+    worker_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+    change_source: str = "user",
+) -> None:
+    """Create a version snapshot of a worker's current source files."""
+    import json as _json
+    from worker_registry import WORKERS_DIR
+
+    try:
+        files_snapshot = []
+        worker_dir = WORKERS_DIR / worker_id
+        if worker_dir.is_dir():
+            for fp in sorted(worker_dir.rglob("*")):
+                if not fp.is_file():
+                    continue
+                try:
+                    rel = fp.relative_to(worker_dir).as_posix()
+                except ValueError:
+                    continue
+                if _should_ignore_worker_file(rel):
+                    continue
+                try:
+                    files_snapshot.append({"path": rel, "content": fp.read_text(encoding="utf-8")})
+                except Exception:
+                    pass
+        snapshot = {
+            "worker": repos.workers.get(user_id=user_id, worker_id=worker_id),
+            "files": files_snapshot,
+        }
+        repos.versions.create(
+            asset_type="worker",
+            asset_id=worker_id,
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
+    except Exception as _exc:
+        logger.warning("version snapshot failed for worker %s: %s", worker_id, _exc)
+
+class VersionSummary(BaseModel):
+    id: str
+    asset_type: str
+    asset_id: str
+    version_number: int
+    change_source: str
+    created_at: str
+
+
+class ContextWorkerRef(BaseModel):
+    worker_id: str
+    worker_name: str
+
+
+class ContextSummary(BaseModel):
+    name: str
+    file_count: int
+    total_size_bytes: int
+    updated_at: Optional[str] = None
+    writeable: bool = False
+    worker_count: int = 0
+    description: Optional[str] = None
+    # Engine/system knowledge packs (e.g. worker-author-style) are surfaced
+    # read-only so operators can SEE what shapes worker generation, but cannot
+    # edit or delete them. Operator-created packs have system=False.
+    system: bool = False
+    read_only: bool = False
+    # Members STEP 4: ownership + per-asset visibility + computed permissions.
+    # Mirrors the worker surface so the same Share control renders on brain packs.
+    owner_id: Optional[str] = None
+    visibility: str = "private"
+    permissions: AssetPermissions = Field(default_factory=AssetPermissions)
+
+
+class ContextVisibilityUpdate(BaseModel):
+    """Set a brain pack's visibility. ``specific_people`` reserved (UI hides it)."""
+    visibility: Literal["private", "workspace", "specific_people"]
+
+
+class AssistantVisibilityUpdate(BaseModel):
+    """Set the workspace assistant's visibility. ``specific_people`` reserved."""
+    visibility: Literal["private", "workspace", "specific_people"]
+
+
+class SecretWarning(BaseModel):
+    """A masked secret-detection finding. NEVER carries the raw value."""
+
+    pattern: str
+    line: int
+    masked: str
+
+
+class ContextFileItem(BaseModel):
+    path: str
+    size: int
+    mime_type: str
+    updated_at: str
+    is_binary: bool
+    description: Optional[str] = None
+    display_type: str = "File"
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Set when the file's content matched a high-confidence secret pattern.
+    # The UI badges these so operators can move the credential to Secrets.
+    has_secret_warning: bool = False
+    # Populated only on the write/upload response (and the audit scan), so the
+    # operator sees WHAT was detected (masked) without re-scanning. Never
+    # persisted to disk, never contains the raw value.
+    secret_warnings: List[SecretWarning] = Field(default_factory=list)
+    # Set on a restore response when the restored version was a "deleted"
+    # snapshot, so the History UI knows the file was removed (not written).
+    deleted: bool = False
+
+
+class ContextDetail(ContextSummary):
+    files: List[ContextFileItem] = Field(default_factory=list)
+    used_by: List[ContextWorkerRef] = Field(default_factory=list)
+
+
+class ContextCreateRequest(BaseModel):
+    writeable: bool = False
+
+
+class ContextTextWriteRequest(BaseModel):
+    content: str
+    tags: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ContextDeleteResponse(BaseModel):
+    status: str
+    referenced_by: List[str] = Field(default_factory=list)
+
+
+class ContextUploadResponse(BaseModel):
+    files: List[ContextFileItem]
+    total_size_bytes: int
+
+
+class ContextSecretScanFile(BaseModel):
+    path: str
+    secret_warnings: List[SecretWarning] = Field(default_factory=list)
+
+
+class ContextSecretScanResponse(BaseModel):
+    name: str
+    scanned_files: int
+    flagged_files: List[ContextSecretScanFile] = Field(default_factory=list)
+
+
+@app.get("/workers/{worker_id}/versions", response_model=List[VersionSummary])
+def list_worker_versions(
+    worker_id: str,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions of a worker (newest first)."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    rows = repos.versions.list(asset_type="worker", asset_id=worker_id, limit=min(limit, 100))
+    if not rows:
+        _snapshot_worker_version(
+            worker_id,
+            user_id=auth.user_id,
+            repos=repos,
+            change_source="baseline",
+        )
+        rows = repos.versions.list(asset_type="worker", asset_id=worker_id, limit=min(limit, 100))
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.get("/workers/{worker_id}/versions/{version_id}")
+def get_worker_version(
+    worker_id: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the file snapshot for a specific worker version."""
+    import json as _json
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    version = repos.versions.get(version_id=version_id)
+    if not version or version.get("asset_type") != "worker" or version.get("asset_id") != worker_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"files": snapshot.get("files") or []}
+
+
+@app.post("/workers/{worker_id}/rollback/{version_id}", response_model=WorkerDetail)
+def rollback_worker(
+    worker_id: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """Restore a worker to the state captured in the given version snapshot."""
+    import json as _json
+    import shutil as _shutil
+    from worker_registry import WORKERS_DIR
+
+    worker_id = _canonical_worker_id(worker_id)
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    version = repos.versions.get(version_id=version_id)
+    if not version or version.get("asset_type") != "worker" or version.get("asset_id") != worker_id:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    files = snapshot.get("files") or []
+    if not files:
+        raise HTTPException(status_code=422, detail="Version snapshot contains no files")
+
+    target_dir = WORKERS_DIR / worker_id
+    if not target_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Worker directory not found")
+
+    # Write snapshot files atomically (same strategy as update_worker_files)
+    pid = os.getpid()
+    tmp_dir = WORKERS_DIR / f".{worker_id}.rollback.{pid}"
+    if tmp_dir.exists():
+        _shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True)
+    backed_up: List[tuple] = []
+    try:
+        for f in files:
+            dest = tmp_dir / f["path"]
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(f.get("content") or "", encoding="utf-8")
+
+        existing_files = list(target_dir.rglob("*"))
+        new_paths = {f["path"] for f in files}
+        for existing in existing_files:
+            if not existing.is_file():
+                continue
+            try:
+                rel = existing.relative_to(target_dir).as_posix()
+            except ValueError:
+                continue
+            if rel not in new_paths and not _should_ignore_worker_file(rel):
+                bak = existing.with_suffix(existing.suffix + f".bak{pid}")
+                existing.rename(bak)
+                backed_up.append((existing, bak))
+
+        for f in files:
+            dest = target_dir / f["path"]
+            if dest.exists():
+                bak = dest.with_suffix(dest.suffix + f".bak{pid}")
+                dest.rename(bak)
+                backed_up.append((dest, bak))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _shutil.copy2(tmp_dir / f["path"], dest)
+
+        invalidate_worker_cache()
+        workers = discover_workers()
+        this_worker_list = [w for w in workers if w["id"] == worker_id]
+        if not this_worker_list:
+            raise HTTPException(status_code=500, detail=f"Worker {worker_id!r} not found after rollback")
+        with get_db() as conn:
+            _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
+
+        for _orig, bak in backed_up:
+            bak.unlink(missing_ok=True)
+        backed_up.clear()
+
+        # Record the rollback as its own version
+        try:
+            import json as _json2
+            rollback_snapshot = {
+                "worker": repos.workers.get(user_id=auth.user_id, worker_id=worker_id),
+                "files": files,
+            }
+            repos.versions.create(
+                asset_type="worker",
+                asset_id=worker_id,
+                user_id=auth.user_id,
+                snapshot_json=_json2.dumps(rollback_snapshot),
+                change_source=f"rollback:{version_id}",
+            )
+            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
+        except Exception as _ver_exc:
+            logger.warning("version snapshot after rollback failed for %s: %s", worker_id, _ver_exc)
+
+        return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+    except HTTPException:
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                bak.rename(orig)
+            except Exception:
+                pass
+        raise
+    except Exception as exc:
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                bak.rename(orig)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Rollback failed: {exc}") from exc
+    finally:
+        if tmp_dir.exists():
+            try:
+                _shutil.rmtree(tmp_dir)
+            except Exception:
+                pass
+
+
+@app.get("/contexts/{name}/versions", response_model=List[VersionSummary])
+def list_context_versions(
+    name: str,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions of a brain pack (newest first)."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    rows = repos.versions.list(asset_type="brain_pack", asset_id=safe_name, limit=min(limit, 100))
+    if not rows:
+        _snapshot_brain_pack_version(
+            safe_name,
+            user_id=auth.user_id,
+            repos=repos,
+            change_source="baseline",
+        )
+        rows = repos.versions.list(asset_type="brain_pack", asset_id=safe_name, limit=min(limit, 100))
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.get("/contexts/{name}/versions/{version_id}")
+def get_context_version(
+    name: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the file snapshot for a specific brain pack version."""
+    import json as _json
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    version = repos.versions.get(version_id=version_id)
+    if not version or version.get("asset_type") != "brain_pack" or version.get("asset_id") != safe_name:
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"files": snapshot.get("files") or []}
+
+
+def _brain_file_asset_id(name: str, rel: str) -> str:
+    return f"{name}:{rel}"
+
+
+def _encode_context_file_snapshot(root: Path, path: Path, rel: str) -> Dict[str, Any]:
+    import base64
+
+    raw = path.read_bytes()
+    try:
+        content = raw.decode("utf-8")
+        encoding = "utf-8"
+    except UnicodeDecodeError:
+        content = base64.b64encode(raw).decode("ascii")
+        encoding = "base64"
+    return {"path": rel, "content": content, "encoding": encoding}
+
+
+def _snapshot_brain_file_version(
+    name: str,
+    rel: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+    change_source: str = "user",
+    deleted: bool = False,
+) -> None:
+    """Create a version snapshot for one brain-pack file."""
+    import json as _json
+
+    try:
+        root = context_dir(name)
+        target = safe_context_file_path(name, rel)
+        file_snapshot: Dict[str, Any]
+        if deleted or not target.is_file():
+            file_snapshot = {"path": rel, "deleted": True}
+        else:
+            file_snapshot = _encode_context_file_snapshot(root, target, rel)
+        snapshot = {"pack": {"name": name}, "file": file_snapshot}
+        repos.versions.create(
+            asset_type="brain_file",
+            asset_id=_brain_file_asset_id(name, rel),
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(asset_type="brain_file", asset_id=_brain_file_asset_id(name, rel), keep=20)
+    except Exception as _exc:
+        logger.warning("version snapshot failed for brain_file %s/%s: %s", name, rel, _exc)
+
+
+@app.get("/contexts/{name}/files/{file_path:path}/versions", response_model=List[VersionSummary])
+def list_context_file_versions(
+    name: str,
+    file_path: str,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions for one brain-pack file (newest first)."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    rel = _context_file_path_or_400(file_path)
+    rows = repos.versions.list(
+        asset_type="brain_file",
+        asset_id=_brain_file_asset_id(safe_name, rel),
+        limit=min(limit, 100),
+    )
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.get("/contexts/{name}/files/{file_path:path}/versions/{version_id}")
+def get_context_file_version(
+    name: str,
+    file_path: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the saved snapshot for one brain-pack file version."""
+    import json as _json
+
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    rel = _context_file_path_or_400(file_path)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != "brain_file"
+        or version.get("asset_id") != _brain_file_asset_id(safe_name, rel)
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"file": snapshot.get("file") or {}}
+
+
+@app.post("/contexts/{name}/files/{file_path:path}/restore/{version_id}", response_model=ContextFileItem)
+def restore_context_file_version(
+    name: str,
+    file_path: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextFileItem:
+    """Restore one brain-pack file to a specific saved version (C-BINREST, #348).
+
+    The per-file PUT path only accepts UTF-8 text (``ContextTextWriteRequest``),
+    so a binary file revision (image/PDF/etc., stored as base64 in the snapshot)
+    could never be restored through it. This endpoint decodes the stored
+    snapshot — base64 OR utf-8 — back to raw bytes and writes them atomically,
+    owner-scoped. Restoring a snapshot whose file was ``deleted`` removes the
+    current file.
+    """
+    import base64
+    import json as _json
+
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    rel = _context_file_path_or_400(file_path)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != "brain_file"
+        or version.get("asset_id") != _brain_file_asset_id(safe_name, rel)
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    file_snapshot = snapshot.get("file") or {}
+
+    if file_snapshot.get("deleted"):
+        target = _safe_context_file_or_400(safe_name, rel)
+        if target.is_file():
+            target.unlink()
+            for parent in target.parents:
+                if parent == context_dir(safe_name):
+                    break
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+        _snapshot_brain_file_version(
+            safe_name, rel, user_id=auth.user_id, repos=repos,
+            change_source=f"restore:{version_id}", deleted=True,
+        )
+        _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+        # No current file to describe; surface a minimal deleted marker.
+        return ContextFileItem(
+            path=rel, size=0, mime_type=guess_mime_type(rel),
+            updated_at=now_iso(),
+            is_binary=is_binary_file(rel, guess_mime_type(rel)),
+            display_type=context_file_display_type(rel, guess_mime_type(rel)),
+            deleted=True,
+        )
+
+    raw_content = file_snapshot.get("content") or ""
+    encoding = file_snapshot.get("encoding")
+    if encoding == "base64":
+        try:
+            data = base64.b64decode(raw_content)
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail="Version snapshot is corrupt") from exc
+    else:
+        data = str(raw_content).encode("utf-8")
+
+    result = _write_context_file(safe_name, rel, data, user_id=auth.user_id)
+    _snapshot_brain_file_version(
+        safe_name, rel, user_id=auth.user_id, repos=repos,
+        change_source=f"restore:{version_id}",
+    )
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+    return result
+
+
+@app.post("/contexts/{name}/rollback/{version_id}")
+def rollback_context(
+    name: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Restore a brain pack to the state captured in the given version snapshot."""
+    import base64
+    import json as _json
+
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    version = repos.versions.get(version_id=version_id)
+    if not version or version.get("asset_type") != "brain_pack" or version.get("asset_id") != safe_name:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    files = snapshot.get("files") or []
+
+    root = context_dir(safe_name)
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Context not found")
+
+    # Delete all existing files then restore from snapshot
+    existing = list(iter_context_files(root))
+    backed_up: List[tuple] = []
+    try:
+        for path in existing:
+            bak = path.with_suffix(path.suffix + f".bak{os.getpid()}")
+            path.rename(bak)
+            backed_up.append((path, bak))
+
+        for f in files:
+            dest = root / f["path"]
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            raw_content = f.get("content") or ""
+            if f.get("encoding") == "base64":
+                dest.write_bytes(base64.b64decode(raw_content))
+            else:
+                dest.write_text(raw_content, encoding="utf-8")
+
+        # Clean up backups
+        for _orig, bak in backed_up:
+            bak.unlink(missing_ok=True)
+        backed_up.clear()
+
+        set_context_metadata(safe_name, owner_id=auth.user_id)
+
+        # Snapshot the rollback
+        try:
+            rollback_snapshot = {"pack": snapshot.get("pack"), "files": files}
+            repos.versions.create(
+                asset_type="brain_pack",
+                asset_id=safe_name,
+                user_id=auth.user_id,
+                snapshot_json=_json.dumps(rollback_snapshot),
+                change_source=f"rollback:{version_id}",
+            )
+            repos.versions.prune(asset_type="brain_pack", asset_id=safe_name, keep=20)
+        except Exception as _exc:
+            logger.warning("version snapshot after context rollback failed: %s", _exc)
+
+        return _context_detail(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+
+    except HTTPException:
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                bak.rename(orig)
+            except Exception:
+                pass
+        raise
+    except Exception as exc:
+        for orig, bak in reversed(backed_up):
+            try:
+                if orig.exists():
+                    orig.unlink()
+                bak.rename(orig)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Context rollback failed: {exc}") from exc
+
+
+def _normalize_trigger_type(value: Any) -> str:
+    normalized = str(value or "manual").strip().lower()
+    if normalized in {"cron", "scheduled"}:
+        return "schedule"
+    return normalized or "manual"
+
+
 def _trigger_label(trigger: Dict[str, Any]) -> str:
     """Return a human-readable label for one trigger dict."""
-    t_type = (trigger.get("type") or "manual").lower()
+    t_type = _normalize_trigger_type(trigger.get("type"))
     if t_type == "manual":
         return "Manual"
     if t_type in ("schedule", "scheduled"):
@@ -1195,7 +3218,7 @@ def _build_triggers_spec(worker: Dict[str, Any]) -> List[TriggerSpec]:
                     if not isinstance(t, dict):
                         continue
                     specs.append(TriggerSpec(
-                        type=t.get("type", "manual"),
+                        type=_normalize_trigger_type(t.get("type")),
                         cron=t.get("cron"),
                         timezone=t.get("timezone"),
                         webhook=t.get("webhook"),
@@ -1209,7 +3232,7 @@ def _build_triggers_spec(worker: Dict[str, Any]) -> List[TriggerSpec]:
     # Fall back to single trigger from config
     config: Dict[str, Any] = worker.get("config") or {}
     trigger: Dict[str, Any] = config.get("trigger") or {}
-    trigger_type = (worker.get("trigger_type") or trigger.get("type") or "manual").lower()
+    trigger_type = _normalize_trigger_type(worker.get("trigger_type") or trigger.get("type"))
     return [TriggerSpec(
         type=trigger_type,
         cron=trigger.get("cron"),
@@ -1238,11 +3261,37 @@ def _build_triggers_list(worker: Dict[str, Any]) -> List[str]:
     # Fall back to single-trigger logic from config
     config: Dict[str, Any] = worker.get("config") or {}
     trigger: Dict[str, Any] = config.get("trigger") or {}
-    trigger_type = (worker.get("trigger_type") or trigger.get("type") or "manual").lower()
+    trigger_type = _normalize_trigger_type(worker.get("trigger_type") or trigger.get("type"))
     trigger_with_type = dict(trigger)
     trigger_with_type.setdefault("type", trigger_type)
     label = _trigger_label(trigger_with_type)
     return [label] if label else [trigger_type.title()]
+
+
+def _connection_slug_for_worker_card(connection: Any) -> Optional[str]:
+    """Return a display slug for list-card connection icons.
+
+    Worker manifests have accepted several connection shapes over time:
+    plain app slugs, typed app dicts, and MCP dicts. A malformed/null entry in
+    one worker must not take down the whole `/workers` list endpoint.
+    """
+    if isinstance(connection, str):
+        return connection
+    if not isinstance(connection, dict):
+        return None
+
+    mcp = connection.get("mcp")
+    if isinstance(mcp, dict):
+        label = mcp.get("label")
+        if isinstance(label, str) and label.strip():
+            return label
+
+    for key in ("app", "slug", "toolkit", "label", "name"):
+        value = connection.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+
+    return None
 
 
 def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Dict[str, Any]]:
@@ -1296,7 +3345,32 @@ def _composio_webhook_url() -> str:
 
 
 def _bootstrap_user_id() -> str:
-    return "federico"
+    configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
+    return configured or "federico"
+
+
+def _resolve_composio_connection_id(connection_ref: str) -> str:
+    """Resolve a trigger's connection reference to the raw Composio ``ca_*`` id.
+
+    NEW-7 (2026-06-02): the raw ``ca_*`` id is no longer exposed via GET /connections,
+    so the worker form now references a connection by its internal Floom UUID ``id``.
+    Existing worker.yml files still carry the raw ``ca_*`` value, so this resolver is
+    backward-compatible: a ``ca_*`` ref passes through unchanged, anything else is
+    looked up by internal id. Composio's enable_trigger needs the raw ``ca_*`` value.
+    """
+    ref = (connection_ref or "").strip()
+    if not ref or ref.startswith("ca_"):
+        return ref
+    try:
+        repos = get_repositories()
+        row = repos.connections.get(user_id=_bootstrap_user_id(), composio_id=ref)
+        if row and row.get("composio_connection_id"):
+            return str(row["composio_connection_id"])
+    except Exception:
+        logger.exception("Failed to resolve composio connection ref %s", ref)
+    # Fall back to the original ref so the upstream call surfaces a clear error
+    # instead of silently dropping the connection.
+    return ref
 
 
 def _composio_trigger_signature(config: Optional[WorkerConfig]) -> Optional[Dict[str, Any]]:
@@ -1365,7 +3439,7 @@ def _enable_composio_trigger(config: WorkerConfig, worker_id: str) -> str:
         from composio_client import enable_trigger
         return enable_trigger(
             signature["event"],
-            signature["connection_id"],
+            _resolve_composio_connection_id(signature["connection_id"]),
             _composio_webhook_url(),
             signature["filters"],
         )
@@ -1416,18 +3490,23 @@ def _extract_triggers_from_manifest(manifest: Dict[str, Any], config: Dict[str, 
     Checks manifest.triggers first (new format), then manifest.trigger,
     then config.trigger as fallback.
     """
+    def normalize_trigger(trigger: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(trigger)
+        normalized["type"] = _normalize_trigger_type(normalized.get("type"))
+        return normalized
+
     # New format: manifest.triggers list
     raw_triggers = manifest.get("triggers")
     if isinstance(raw_triggers, list) and raw_triggers:
-        return [t for t in raw_triggers if isinstance(t, dict)]
+        return [normalize_trigger(t) for t in raw_triggers if isinstance(t, dict)]
     # Old format: manifest.trigger single object
     manifest_trigger = manifest.get("trigger")
     if isinstance(manifest_trigger, dict) and manifest_trigger:
-        return [manifest_trigger]
+        return [normalize_trigger(manifest_trigger)]
     # Fallback: config.trigger
     config_trigger = config.get("trigger")
     if isinstance(config_trigger, dict) and config_trigger:
-        return [config_trigger]
+        return [normalize_trigger(config_trigger)]
     return [{"type": "manual"}]
 
 
@@ -1462,7 +3541,9 @@ def _persist_discovered_workers(
         triggers_json_str = json.dumps(triggers_list)
         # Primary trigger type is the first trigger's type
         primary_trigger_type = triggers_list[0].get("type") if triggers_list else "manual"
-        enabled_value = 0 if manifest.get("paused") is True or manifest.get("enabled") is False else 1
+        # Archived workers are disabled from the scheduler: they never fire cron runs.
+        is_archived = manifest.get("archived") is True
+        enabled_value = 0 if is_archived or manifest.get("paused") is True or manifest.get("enabled") is False else 1
 
         conn.execute(
             """
@@ -1497,7 +3578,7 @@ def _persist_discovered_workers(
                 cron_expr=excluded.cron_expr,
                 cron_timezone=excluded.cron_timezone,
                 enabled=excluded.enabled,
-                owner_id=excluded.owner_id,
+                owner_id=workers.owner_id,
                 composio_trigger_id=excluded.composio_trigger_id,
                 composio_event=excluded.composio_event,
                 triggers_json=excluded.triggers_json
@@ -1519,6 +3600,31 @@ def _persist_discovered_workers(
                 triggers_json_str,
             ),
         )
+
+        # Reconcile the normalized worker_triggers rows so EVERY declared
+        # trigger (not just the primary one) becomes an independently
+        # schedulable / resolvable row. Existing single-trigger workers get
+        # exactly one row, preserving backward-compat. The composio
+        # registration id is stamped on the composio row for event resolution.
+        # Local SQLite writes through the already-open `conn` (a second
+        # connection here would deadlock with `database is locked`); the
+        # non-SQLite mirror happens in the canonical block below.
+        try:
+            from db.sqlite import SqliteWorkerRepository
+
+            SqliteWorkerRepository.reconcile_triggers_conn(
+                conn,
+                worker_id=worker_id,
+                triggers=triggers_list,
+                external_trigger_id=composio_trigger_id,
+                enabled=bool(enabled_value),
+            )
+        except Exception:
+            logger.exception(
+                "reconcile_triggers failed for worker %s — multi-trigger rows "
+                "may be stale (scheduler falls back to the worker scalar)",
+                worker_id,
+            )
 
         # Mirror to the canonical repository so non-local deployments
         # (e.g. workeros-cloud -> Supabase) actually persist the row.
@@ -1552,6 +3658,25 @@ def _persist_discovered_workers(
                     composio_event=composio_event,
                     triggers_json=triggers_list,
                 )
+                # Non-SQLite (cloud) reconcile: SQLite already reconciled via
+                # the open `conn` above. Guarded separately so a cloud repo that
+                # has not yet shipped reconcile_triggers degrades to the legacy
+                # single-trigger behaviour instead of failing the worker upsert.
+                reconcile = getattr(canonical_workers, "reconcile_triggers", None)
+                if callable(reconcile):
+                    try:
+                        reconcile(
+                            worker_id=worker_id,
+                            triggers=triggers_list,
+                            external_trigger_id=composio_trigger_id,
+                            enabled=bool(enabled_value),
+                        )
+                    except Exception:
+                        logger.exception(
+                            "cloud reconcile_triggers failed for worker %s — "
+                            "multi-trigger rows may be stale",
+                            worker_id,
+                        )
         except Exception:
             logger.exception(
                 "repos.workers.upsert failed for worker %s (user %s) — "
@@ -1562,41 +3687,168 @@ def _persist_discovered_workers(
             raise
 
 
-def _db_worker_from_row(row: sqlite3.Row) -> Dict[str, Any]:
-    d = row_to_dict(row)
-    config = get_worker_config_for_run(d["id"])
-    manifest = json.loads(d.get("manifest_json") or "{}")
-    manifest_dict = manifest if isinstance(manifest, dict) else {}
-    return {
-        "id": d["id"],
-        "name": d["name"],
-        "description": manifest_dict.get("description"),
-        "long_description": manifest_dict.get("long_description"),
-        "use_cases": manifest_dict.get("use_cases"),
-        "example_input": manifest_dict.get("example_input"),
-        "example_output": manifest_dict.get("example_output"),
-        "how_it_works": manifest_dict.get("how_it_works"),
-        "is_example": manifest_dict.get("is_example"),
-        "tags": manifest_dict.get("tags") or [],
-        "folder": manifest_dict.get("folder"),
-        "status": "healthy",
-        "trigger_type": d.get("trigger_type") or (config.trigger.type if config else "manual"),
-        "runner": config.runtime.runner if config and config.runtime else "local",
-        "config": config.model_dump(mode="json") if config else {},
-        "manifest": manifest_dict,
-        "triggers_json": d.get("triggers_json"),
-    }
-
-
 def _list_db_workers(
     *,
     user_id: str,
     repos: Repositories,
+    role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     try:
-        return repos.workers.list(user_id=user_id)
+        return repos.workers.list(user_id=user_id, role=role)
     except sqlite3.OperationalError:
         return []
+
+
+def _worker_access_user_id(auth: AuthContext) -> str:
+    """Resolve the engine owner id for worker visibility checks.
+
+    Legacy OSS databases store the single local workspace owner as the literal
+    username `federico`, while newer login sessions use UUID user ids. Keep the
+    auth identity unchanged for account routes, but use the legacy owner id for
+    worker access when the logged-in username is the active local-default owner.
+    """
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    username = (auth.username or "").strip()
+    if deploy != "local" or not username or username == auth.user_id:
+        return auth.user_id
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_members
+                WHERE workspace_id = ?
+                  AND user_id = ?
+                  AND role IN ('owner', 'admin')
+                  AND status = 'active'
+                LIMIT 1
+                """,
+                (DEFAULT_WORKSPACE_ID, username),
+            ).fetchone()
+            if row is not None:
+                return username
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM local_workspaces
+                WHERE id = ? AND owner_user_id = ?
+                LIMIT 1
+                """,
+                (DEFAULT_WORKSPACE_ID, username),
+            ).fetchone()
+            if row is not None:
+                return username
+    except Exception:
+        logger.debug("worker access user-id compatibility lookup failed", exc_info=True)
+    return auth.user_id
+
+
+def _user_scoped_local_mode() -> bool:
+    return os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1"
+
+
+def _shared_filesystem_fallback_allowed() -> bool:
+    return not _is_cloud_deploy() and not _user_scoped_local_mode()
+
+
+@lru_cache(maxsize=1)
+def _tracked_worker_ids() -> frozenset[str]:
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(repo_root), "ls-files", "workers/*/worker.yml"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        worker_ids = {
+            worker_yml.parent.name
+            for worker_yml in (repo_root / "workers").glob("*/worker.yml")
+            if worker_yml.is_file()
+        }
+    else:
+        worker_ids = {
+            Path(line.strip()).parent.name
+            for line in tracked.stdout.splitlines()
+            if line.strip().endswith("/worker.yml")
+        }
+    return frozenset(worker_ids)
+
+
+def _worker_hidden_from_api(worker_id: str) -> bool:
+    if worker_id.startswith("."):
+        return True
+    if any(worker_id.startswith(prefix) for prefix in _INTERNAL_WORKER_ID_PREFIXES):
+        return True
+    tracked_ids = _tracked_worker_ids()
+    if worker_id in tracked_ids:
+        return worker_id not in PUBLIC_STOCK_WORKER_IDS
+    return False
+
+
+def _worker_source_visible_to_api(worker_id: str) -> bool:
+    if _worker_hidden_from_api(worker_id):
+        return False
+    # Public stock/example workers ship their source on purpose — the Source
+    # tab is meant to show run.py / SKILL.md / worker.yml so users can learn
+    # from and fork them. These are git-tracked, so the generic
+    # "not tracked" rule below would hide them (R3: /workers/<stock>#code was
+    # empty for every example worker). Make stock source explicitly visible.
+    if worker_id in PUBLIC_STOCK_WORKER_IDS:
+        return True
+    return worker_id not in _tracked_worker_ids()
+
+
+def _stock_workers_from_filesystem(*, use_cache: bool = True) -> List[Dict[str, Any]]:
+    return [
+        worker
+        for worker in discover_workers(use_cache=use_cache)
+        if worker["id"] in PUBLIC_STOCK_WORKER_IDS
+    ]
+
+
+def _list_visible_workers(
+    *,
+    user_id: str,
+    repos: Repositories,
+    use_cache: bool = True,
+    role: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    visible = {
+        worker["id"]: worker
+        for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
+        if not str(worker.get("id") or "").startswith(".")
+    }
+    for worker in _stock_workers_from_filesystem(use_cache=use_cache):
+        visible.setdefault(worker["id"], worker)
+    if _shared_filesystem_fallback_allowed():
+        for worker in discover_workers(use_cache=use_cache):
+            worker_id = str(worker.get("id") or "")
+            if worker_id and not _worker_hidden_from_api(worker_id):
+                visible.setdefault(worker_id, worker)
+    return list(visible.values())
+
+
+def _list_operator_workers(
+    *,
+    user_id: str,
+    repos: Repositories,
+    use_cache: bool = True,
+) -> List[Dict[str, Any]]:
+    """Workers shown in the operator's default view.
+
+    Same filter as the default GET /workers view: visible (non-hidden) workers,
+    minus system_worker:true and archived. Shared by /workers and the overview
+    'Workers active' count so the two numbers cannot drift (1.5.4).
+    """
+    workers = _list_visible_workers(user_id=user_id, repos=repos, use_cache=use_cache)
+    workers = [
+        w for w in workers
+        if not (w.get("manifest") or {}).get("system_worker", False)
+    ]
+    workers = [w for w in workers if not w.get("archived", False)]
+    return workers
 
 
 def _get_db_worker(
@@ -1604,11 +3856,175 @@ def _get_db_worker(
     *,
     user_id: str,
     repos: Repositories,
+    role: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     try:
-        return repos.workers.get(user_id=user_id, worker_id=worker_id)
+        return repos.workers.get(user_id=user_id, worker_id=worker_id, role=role)
     except sqlite3.OperationalError:
         return None
+
+
+def _archived_tracked_worker(worker_id: str) -> Optional[Dict[str, Any]]:
+    """Return a tracked worker's filesystem record iff it is archived.
+
+    Archived workers are intentionally inactive but NOT deleted: the detail
+    page must still render them (archived badge + reason + Restore) instead of
+    404ing (1.5.3). Only archived workers get this fallback — other hidden
+    tracked workers stay hidden.
+    """
+    if worker_id not in _tracked_worker_ids():
+        return None
+    worker = get_worker(worker_id)
+    if worker is not None and worker.get("archived"):
+        return worker
+    return None
+
+
+def _get_visible_worker(
+    worker_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+    role: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos, role=role)
+    if worker is not None:
+        if _worker_hidden_from_api(worker["id"]):
+            # Archived workers stay reachable for detail rendering (not 404).
+            if worker.get("archived"):
+                return worker
+            archived = _archived_tracked_worker(worker["id"])
+            if archived is not None:
+                return archived
+            return None
+        return worker
+    if _worker_hidden_from_api(worker_id):
+        # 1.5.3: archived tracked workers must render, not 404. Archived means
+        # inactive, not deleted.
+        archived = _archived_tracked_worker(worker_id)
+        if archived is not None:
+            return archived
+        return None
+    if _shared_filesystem_fallback_allowed() or worker_id in PUBLIC_STOCK_WORKER_IDS:
+        return get_worker(worker_id)
+    return None
+
+
+def _run_visible_to_api(row: Any, *, user_id: str, repos: Repositories) -> bool:
+    worker_id = str(row_to_dict(row).get("worker_id") or "")
+    if not worker_id:
+        return False
+    return _get_visible_worker(worker_id, user_id=user_id, repos=repos) is not None
+
+
+def _get_visible_run(
+    run_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Any:
+    row = repos.runs.get(user_id=user_id, run_id=run_id)
+    if row is None or not _run_visible_to_api(row, user_id=user_id, repos=repos):
+        return None
+    return row
+
+
+# Hidden/system workers whose runs the operator nonetheless drives directly by
+# run_id through the product UI, so single-run-by-id reads must NOT be filtered
+# out the way the LIST view filters them. Currently just the generation
+# meta-worker: POST /workers/new/from-prompt returns its run_id and the
+# /workers/new GeneratingPanel polls GET /runs/{id} + /stream + /events + /logs.
+#
+# This is deliberately an ALLOWLIST, not "any hidden worker": internal infra
+# workers (e.g. the slack-listener trigger) stay inaccessible by id — see
+# test_round8_worker_authz.test_hidden_internal_worker_runs_stay_inaccessible.
+# "worker-author" — kept as a literal because _WORKER_AUTHOR_ID is defined
+# later in the module; asserted equal in a test.
+_OPERATOR_REACHABLE_HIDDEN_WORKER_IDS = frozenset({"worker-author"})
+
+
+def _get_run_by_explicit_id(
+    run_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Any:
+    """Fetch a run by its EXACT id, scoped to the caller's workspace.
+
+    Returns the run if EITHER:
+      - it passes the normal visibility filter (``_get_visible_run``), OR
+      - its worker is in ``_OPERATOR_REACHABLE_HIDDEN_WORKER_IDS`` (the
+        generation meta-worker), which the operator drives directly by run_id
+        from the product UI.
+
+    The system/audit visibility filter (``_run_visible_to_api`` ->
+    ``_worker_hidden_from_api``) is for the LIST view: it keeps meta/system runs
+    out of the operator's default /runs listing. But the /workers/new generation
+    UI already holds the precise worker-author ``run_id`` (returned by POST
+    /workers/new/from-prompt) and must be able to read its
+    detail/logs/output/stream/events to drive the GeneratingPanel. Filtering
+    those out returned a spurious 404 and hung generation (regression from PR
+    #231/#235).
+
+    This stays an allowlist so internal infra workers (slack-listener etc.)
+    remain inaccessible by id. Authorization is enforced via the user-scoped
+    ``repos.runs.get``.
+    """
+    row = repos.runs.get(user_id=user_id, run_id=run_id)
+    if row is None:
+        return None
+    if _run_visible_to_api(row, user_id=user_id, repos=repos):
+        return row
+    worker_id = str(row_to_dict(row).get("worker_id") or "")
+    if worker_id in _OPERATOR_REACHABLE_HIDDEN_WORKER_IDS:
+        return row
+    return None
+
+
+def _list_visible_runs(
+    *,
+    user_id: str,
+    repos: Repositories,
+    worker_id: str | None = None,
+    statuses: list[str] | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    include_system: bool = False,
+) -> tuple[list[Any], int]:
+    batch_size = max(limit, 100)
+    raw_offset = 0
+    raw_total_count: int | None = None
+    visible_total = 0
+    visible_rows: list[Any] = []
+
+    while raw_total_count is None or raw_offset < raw_total_count:
+        rows, raw_total_count = repos.runs.list(
+            user_id=user_id,
+            worker_id=worker_id,
+            statuses=statuses,
+            since=since,
+            until=until,
+            limit=batch_size,
+            offset=raw_offset,
+        )
+        if not rows:
+            break
+        raw_offset += len(rows)
+        for row in rows:
+            if not _run_visible_to_api(row, user_id=user_id, repos=repos):
+                continue
+            # 1.5.2: hide audit/system/test telemetry from the default
+            # operator view unless explicitly requested.
+            if not include_system and not _is_operator_run(row):
+                continue
+            visible_total += 1
+            if visible_total <= offset:
+                continue
+            if len(visible_rows) < limit:
+                visible_rows.append(row)
+    return visible_rows, visible_total
 
 
 # ---------------------------------------------------------------------------
@@ -1712,6 +4128,53 @@ def _read_worker_files(worker_dir: Path) -> List[WorkerFile]:
     return raw_files
 
 
+def _worker_files_from_manifest(worker: Dict[str, Any]) -> List[WorkerFile]:
+    """Build the minimal editable source view for DB-backed workers without a bundle dir."""
+    import yaml as pyyaml
+
+    files: List[WorkerFile] = []
+    manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+    if manifest:
+        try:
+            manifest_yaml = pyyaml.safe_dump(manifest, sort_keys=False)
+            files.append(
+                WorkerFile(
+                    path="worker.yml",
+                    language=_language_for_path("worker.yml"),
+                    content=manifest_yaml,
+                    binary=False,
+                    size=len(manifest_yaml.encode("utf-8")),
+                )
+            )
+        except Exception:
+            pass
+
+    config = worker.get("config") or {}
+    runtime = config.get("runtime") if isinstance(config, dict) else {}
+    entrypoint = ""
+    if isinstance(runtime, dict):
+        entrypoint = str(runtime.get("entrypoint") or "")
+    for rel in ("SKILL.md", "run.py"):
+        content = ""
+        if isinstance(manifest, dict):
+            files_section = manifest.get("files")
+            if isinstance(files_section, dict) and isinstance(files_section.get(rel), str):
+                content = files_section[rel]
+        if not content and rel == "run.py" and entrypoint == "run.py":
+            content = _DEFAULT_RUN_PY_STUB
+        if content:
+            files.append(
+                WorkerFile(
+                    path=rel,
+                    language=_language_for_path(rel),
+                    content=content,
+                    binary=False,
+                    size=len(content.encode("utf-8")),
+                )
+            )
+    return files
+
+
 def _worker_bundle_dir(worker_id: str, config: WorkerConfig) -> Path:
     bundle_path = config.runtime.bundle_path if config and config.runtime else None
     if bundle_path:
@@ -1732,28 +4195,23 @@ _ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifact
 
 
 def _increment_file_ref_counts(file_ids: List[str]) -> None:
-    """Increment file ref_counts in one short transaction tolerant of run bursts."""
+    """Increment file ref_counts in one short transaction tolerant of run bursts.
+
+    Uses ``get_db()`` so the DB path is resolved dynamically from the configured
+    ``WORKEROS_DB``/``FLOOM_DB`` env (the canonical resolution every other read
+    path uses), instead of the module-import-time ``DB_PATH`` global. The stale
+    global could diverge from the live path (deploy-dir swaps / test suites that
+    re-pin the DB), silently writing ref_count updates to the wrong database.
+    """
     if not file_ids:
         return
-    db_dir = os.path.dirname(DB_PATH)
-    if db_dir:
-        os.makedirs(db_dir, exist_ok=True)
     counts = collections.Counter(file_ids)
-    conn = sqlite3.connect(DB_PATH, timeout=30, detect_types=sqlite3.PARSE_DECLTYPES)
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 30000")
+    with get_db() as conn:
         for file_id, count in counts.items():
             conn.execute(
                 "UPDATE files SET ref_count = ref_count + ? WHERE id = ?",
                 (count, file_id),
             )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
 
 
 def _resolve_file_input_references(
@@ -1838,7 +4296,7 @@ def _resolve_file_input_references(
 
             # Fix 5: File ownership audit — log cross-user bindings (non-blocking per T1c).
             file_owner = row["uploaded_by"] or "anonymous"
-            if file_owner != bound_by:
+            if not _user_owns_uploaded_file(conn, row["id"], bound_by):
                 logger.info(
                     "file_binding_audit: run=%s worker=%s input=%s sha=%s "
                     "uploaded_by=%r bound_by=%r",
@@ -1880,44 +4338,84 @@ _UPLOAD_HOURLY_WINDOW_SECONDS = 3600.0
 _UPLOAD_ALLOWED_MEDIA_TYPES = frozenset({
     "application/json",
     "application/pdf",
+    "application/rtf",
+    "application/sql",
+    "application/toml",
+    "application/typescript",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/x-yaml",
+    "application/xml",
     "application/yaml",
     "application/zip",
     "image/gif",
     "image/jpeg",
     "image/png",
     "image/webp",
+    "text/css",
     "text/csv",
+    "text/html",
     "text/markdown",
     "text/plain",
+    "text/tab-separated-values",
+    "text/x-python",
+    "text/xml",
+    "text/yaml",
 })
+# Text/code/data/doc/image formats a worker can read as context or a user can
+# attach. Mirrors what Mac/GitHub treat as ordinary repo files. True
+# executables / scripts stay in the blocklist below.
 _UPLOAD_ALLOWED_EXTENSIONS = frozenset({
-    ".csv",
-    ".docx",
-    ".gif",
-    ".jpeg",
-    ".jpg",
-    ".json",
-    ".md",
-    ".markdown",
+    ".c", ".cpp", ".cc", ".h", ".hpp",
+    ".csv", ".tsv",
+    ".css", ".scss",
+    ".docx", ".pptx", ".xlsx", ".rtf", ".odt",
+    ".gif", ".jpeg", ".jpg", ".png", ".webp",
+    ".go", ".rs", ".rb", ".java", ".kt", ".swift",
+    ".htm", ".html", ".xml",
+    ".ini", ".toml", ".env", ".conf", ".cfg",
+    ".ipynb",
+    ".json", ".jsonl", ".ndjson",
+    ".log",
+    ".md", ".markdown", ".mdx", ".rst",
     ".pdf",
-    ".png",
-    ".txt",
-    ".webp",
-    ".xlsx",
-    ".yaml",
-    ".yml",
+    ".py",
+    ".sql",
+    ".ts", ".tsx", ".jsx",
+    ".txt", ".text",
+    ".yaml", ".yml",
     ".zip",
 })
+# Declared media types we reject outright (defense-in-depth), even when the
+# file extension is benign — these signal an executable/script payload.
+_UPLOAD_DANGEROUS_MEDIA_TYPES = frozenset({
+    "application/javascript",
+    "image/svg+xml",
+    "image/svg",
+    "application/x-dosexec",
+    "application/x-executable",
+    "application/x-msdownload",
+    "application/x-msdos-program",
+    "application/x-sh",
+    "application/x-shellscript",
+    "application/vnd.microsoft.portable-executable",
+    "text/javascript",
+})
+# Active/executable formats: blocked regardless of the allowlist (a blocked
+# extension always wins, see _validate_upload_filename).
 _UPLOAD_BLOCKED_EXTENSIONS = frozenset({
     ".bat",
+    ".svg",
     ".cmd",
+    ".com",
     ".dll",
     ".exe",
     ".js",
+    ".mjs",
     ".php",
     ".ps1",
+    ".scr",
     ".sh",
 })
 _upload_quota_lock = threading.Lock()
@@ -1933,6 +4431,10 @@ def _positive_int_env(name: str, default: int) -> int:
     except ValueError:
         return default
     return value if value > 0 else default
+
+
+def _chat_message_max_chars() -> int:
+    return _positive_int_env("WORKEROS_CHAT_MESSAGE_MAX_CHARS", DEFAULT_CHAT_MESSAGE_MAX_CHARS)
 
 
 def _upload_max_bytes() -> int:
@@ -1993,6 +4495,13 @@ def _validate_upload_filename(raw_filename: str) -> None:
             status_code=400,
             detail="filename must not contain path separators, leading dots, or '..' segments",
         )
+    suffixes = [suffix.lower() for suffix in Path(raw_filename).suffixes]
+    for inner_suffix in suffixes[:-1]:
+        if inner_suffix in _UPLOAD_BLOCKED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Upload filename contains blocked inner extension {inner_suffix!r}",
+            )
     suffix = Path(raw_filename).suffix.lower()
     if suffix in _UPLOAD_BLOCKED_EXTENSIONS or suffix not in _UPLOAD_ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -2064,13 +4573,37 @@ def _verify_upload_download_token(file_id: str, token: str) -> str:
     return uploaded_by
 
 
-@app.post("/uploads")
-async def upload_file(
+def _user_owns_uploaded_file(conn: sqlite3.Connection, file_id: str, user_id: str) -> bool:
+    owner_row = conn.execute(
+        "SELECT 1 FROM file_owners WHERE file_id = ? AND user_id = ? LIMIT 1",
+        (file_id, user_id),
+    ).fetchone()
+    if owner_row is not None:
+        return True
+    legacy_row = conn.execute(
+        "SELECT 1 FROM files WHERE id = ? AND COALESCE(uploaded_by, 'anonymous') = ? LIMIT 1",
+        (file_id, user_id),
+    ).fetchone()
+    return legacy_row is not None
+
+
+async def _store_uploaded_blob(
     request: Request,
-    file: UploadFile = File(...),
-    max_size_mb: Optional[float] = Form(None),
-    accepts: Optional[str] = Form(None),
+    file: UploadFile,
+    uploaded_by: str,
+    *,
+    max_size_mb: Optional[float] = None,
+    accepts: Optional[str] = None,
+    allowed_media_prefixes: Optional[tuple[str, ...]] = None,
 ) -> Dict[str, Any]:
+    """Validate + content-address one uploaded file under `uploaded_by`.
+
+    Shared by the authed `/uploads` route and the approval-scoped upload routes
+    (authed owner + signed-link public reviewer). The same extension allowlist,
+    size/quota caps, and content-addressed dedup apply on every path, so the
+    public no-auth reviewer cannot smuggle in an executable or oversized blob.
+    `allowed_media_prefixes` further restricts the upload to e.g. image/* only.
+    """
     if max_size_mb is not None and max_size_mb <= 0:
         raise HTTPException(status_code=400, detail="max_size_mb must be greater than 0")
 
@@ -2080,10 +4613,30 @@ async def upload_file(
     media_type = normalize_media_type(
         file.content_type or mimetypes.guess_type(raw_filename)[0]
     )
-    if media_type not in _UPLOAD_ALLOWED_MEDIA_TYPES:
+    suffix = Path(raw_filename).suffix.lower()
+    if media_type in _UPLOAD_DANGEROUS_MEDIA_TYPES:
         raise HTTPException(
             status_code=400,
             detail=f"Upload media type {media_type!r} is not allowed",
+        )
+    media_type_ok = (
+        media_type in _UPLOAD_ALLOWED_MEDIA_TYPES
+        or suffix in _UPLOAD_ALLOWED_EXTENSIONS
+        or media_type in {"application/octet-stream", ""}
+        or media_type.startswith("text/")
+    )
+    if not media_type_ok:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload media type {media_type!r} is not allowed",
+        )
+
+    if allowed_media_prefixes is not None and not any(
+        media_type.startswith(prefix) for prefix in allowed_media_prefixes
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload media type {media_type!r} is not accepted here",
         )
 
     accepted = _parse_accepts(accepts)
@@ -2101,9 +4654,6 @@ async def upload_file(
 
     hasher = hashlib.sha256()
     size = 0
-    # Stream directly to a temp file to avoid memory buffering.
-    # Use BLOBS_DIR from files.py (already env-resolved) so the temp file is on
-    # the same filesystem as the final target, making os.replace atomic.
     from files import BLOBS_DIR as _BLOBS_DIR
     _BLOBS_DIR.mkdir(parents=True, exist_ok=True)
     tmp_upload = None
@@ -2153,10 +4703,8 @@ async def upload_file(
             final_tmp.unlink(missing_ok=True)
             tmp_upload.unlink(missing_ok=True)
     else:
-        # Blob already exists — dedup; remove the temp file.
         tmp_upload.unlink(missing_ok=True)
 
-    uploaded_by = request.headers.get("x-floom-user") or "anonymous"
     uploaded_at = now_iso()
     filename = file.filename or sha256
     with get_db() as conn:
@@ -2175,6 +4723,14 @@ async def upload_file(
             """,
             (sha256, filename, media_type, size, uploaded_by, uploaded_at),
         )
+        conn.execute(
+            """
+            INSERT INTO file_owners (file_id, user_id, first_uploaded_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(file_id, user_id) DO NOTHING
+            """,
+            (sha256, uploaded_by, uploaded_at),
+        )
 
     download_token = _make_upload_download_token(sha256, uploaded_by)
     upload_url = f"/uploads/{sha256}?download_token={download_token}"
@@ -2187,18 +4743,36 @@ async def upload_file(
     }
 
 
+@app.post("/uploads")
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    max_size_mb: Optional[float] = Form(None),
+    accepts: Optional[str] = Form(None),
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    return await _store_uploaded_blob(
+        request,
+        file,
+        auth.user_id or "anonymous",
+        max_size_mb=max_size_mb,
+        accepts=accepts,
+    )
+
+
 @app.get("/uploads/{file_id}")
 def download_upload(
     file_id: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> FileResponse:
-    _ = auth
     if not is_sha256(file_id):
         raise HTTPException(status_code=404, detail="Uploaded file not found")
 
     download_token = request.query_params.get("download_token", "")
-    _verify_upload_download_token(file_id, download_token)
+    token_user_id = _verify_upload_download_token(file_id, download_token)
+    if auth.user_id != token_user_id:
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
     with get_db() as conn:
         row = conn.execute(
             """
@@ -2208,6 +4782,8 @@ def download_upload(
             """,
             (file_id,),
         ).fetchone()
+        if row is not None and not _user_owns_uploaded_file(conn, file_id, auth.user_id):
+            raise HTTPException(status_code=404, detail="Uploaded file not found")
 
     path = blob_path(file_id)
     if row is None or not path.exists():
@@ -2223,56 +4799,113 @@ def download_upload(
     )
 
 
+@app.delete("/uploads/{file_id}", status_code=204)
+def delete_upload(
+    file_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+):
+    """Owner-scoped delete of an uploaded blob.
+
+    F4 (2026-06-03): uploaded blobs (approval screenshots, file inputs) with
+    ``ref_count = 0`` previously lingered on disk forever — no cleanup route
+    existed, so orphaned blobs accumulated. This route lets an owner release a
+    blob and GCs it when it is truly unreferenced.
+
+    Semantics (blobs are content-addressed + can be shared across owners and
+    bound to runs):
+      - The caller MUST own the file (file_owners row, or legacy uploaded_by).
+      - The caller's ownership is dropped.
+      - The physical blob + files row are deleted ONLY when no owners remain AND
+        ``ref_count == 0`` (i.e. not bound to any run). If another owner holds it
+        or a run still references it, the blob is kept; the caller simply no
+        longer owns it.
+
+    Returns 204 on success (idempotent for the caller's own ownership);
+    404 if the caller does not own the file (no existence oracle for others'
+    files — same 404 as a genuinely-missing file).
+    """
+    if not is_sha256(file_id):
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+
+    user_id = auth.user_id or "anonymous"
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT ref_count FROM files WHERE id = ? LIMIT 1",
+            (file_id,),
+        ).fetchone()
+        if row is None or not _user_owns_uploaded_file(conn, file_id, user_id):
+            raise HTTPException(status_code=404, detail="Uploaded file not found")
+
+        # Drop the caller's ownership (both the explicit row and any legacy
+        # uploaded_by anchor that made them an owner).
+        conn.execute(
+            "DELETE FROM file_owners WHERE file_id = ? AND user_id = ?",
+            (file_id, user_id),
+        )
+        conn.execute(
+            "UPDATE files SET uploaded_by = NULL WHERE id = ? AND COALESCE(uploaded_by, 'anonymous') = ?",
+            (file_id, user_id),
+        )
+
+        remaining_owners = conn.execute(
+            "SELECT 1 FROM file_owners WHERE file_id = ? LIMIT 1",
+            (file_id,),
+        ).fetchone()
+        ref_count = int(row["ref_count"] or 0)
+
+        if remaining_owners is None and ref_count <= 0:
+            # No owners + not bound to any run → safe to GC the blob + row.
+            conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+            _delete_blob_file(file_id)
+
+    return Response(status_code=204)
+
+
+def _delete_blob_file(file_id: str) -> None:
+    """Best-effort removal of a content-addressed blob from disk."""
+    try:
+        path = blob_path(file_id)
+    except ValueError:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Failed to remove orphan blob %s: %s", file_id, exc)
+
+
+def _gc_orphan_blobs(*, limit: int = 500) -> int:
+    """Sweep ``ref_count = 0`` blobs that also have NO owners, deleting the row
+    and the on-disk blob. Returns the number of blobs reclaimed.
+
+    Idempotent + bounded. Safe to call from a periodic sweep. Blobs that are
+    still bound to a run (ref_count > 0) or still owned by anyone are left
+    untouched.
+    """
+    reclaimed = 0
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT f.id AS id
+            FROM files f
+            WHERE COALESCE(f.ref_count, 0) <= 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM file_owners o WHERE o.file_id = f.id
+              )
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        for row in rows:
+            fid = row["id"]
+            conn.execute("DELETE FROM files WHERE id = ?", (fid,))
+            _delete_blob_file(fid)
+            reclaimed += 1
+    return reclaimed
+
+
 # ---------------------------------------------------------------------------
 # Contexts — filesystem-backed worker knowledge/state folders
 # ---------------------------------------------------------------------------
-
-class ContextSummary(BaseModel):
-    name: str
-    file_count: int
-    total_size_bytes: int
-    updated_at: Optional[str] = None
-    writeable: bool = False
-    worker_count: int = 0
-    description: Optional[str] = None
-
-
-class ContextWorkerRef(BaseModel):
-    worker_id: str
-    worker_name: str
-
-
-class ContextFileItem(BaseModel):
-    path: str
-    size: int
-    mime_type: str
-    updated_at: str
-    is_binary: bool
-    description: Optional[str] = None
-    display_type: str = "Binary"
-
-
-class ContextDetail(ContextSummary):
-    files: List[ContextFileItem] = Field(default_factory=list)
-    used_by: List[ContextWorkerRef] = Field(default_factory=list)
-
-
-class ContextCreateRequest(BaseModel):
-    writeable: bool = False
-
-
-class ContextTextWriteRequest(BaseModel):
-    content: str
-
-
-class ContextDeleteResponse(BaseModel):
-    status: str
-    referenced_by: List[str] = Field(default_factory=list)
-
-
-class ContextUploadResponse(BaseModel):
-    files: List[ContextFileItem]
-    total_size_bytes: int
 
 
 def _context_name_or_400(name: str) -> str:
@@ -2296,147 +4929,421 @@ def _safe_context_file_or_400(name: str, path: str) -> Path:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _extract_md_description(text: str, max_chars: int = 80) -> Optional[str]:
-    """Extract a 1-line description from markdown: first H1 or first non-empty paragraph."""
-    for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("# "):
-            desc = line[2:].strip()
-            return desc[:max_chars] if desc else None
-        if line and not line.startswith("#"):
-            return line[:max_chars]
-    return None
+def _unowned_contexts_visible_to_caller() -> bool:
+    return os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") != "1" and not _is_cloud_deploy()
 
 
-def _extract_yml_description(text: str) -> Optional[str]:
-    """Extract description or title field from YAML front matter."""
+def _is_system_context_pack(
+    name: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    """True for engine/system packs that must be hidden from operators."""
     try:
-        import yaml as _yaml
-        data = _yaml.safe_load(text)
-        if isinstance(data, dict):
-            for key in ("description", "title", "name"):
-                val = data.get(key)
-                if isinstance(val, str) and val.strip():
-                    return val.strip()[:80]
-    except Exception:
-        pass
-    return None
+        safe_name = validate_context_name(name)
+    except ValueError:
+        return False
+    if safe_name in SYSTEM_CONTEXT_PACKS:
+        return True
+    meta = metadata if metadata is not None else load_context_metadata()
+    return bool((meta.get(safe_name) or {}).get("system"))
 
 
-def _file_display_type(path: str, mime_type: str) -> str:
-    """Return a human-friendly file type label."""
-    p = path.lower()
-    if p.endswith(".md") or p.endswith(".mdx"):
-        return "Markdown"
-    if p.endswith(".yml") or p.endswith(".yaml"):
-        return "YAML"
-    if p.endswith(".py"):
-        return "Python"
-    if p.endswith(".js") or p.endswith(".jsx"):
-        return "JavaScript"
-    if p.endswith(".ts") or p.endswith(".tsx"):
-        return "TypeScript"
-    if p.endswith(".json"):
-        return "JSON"
-    if p.endswith(".sh"):
-        return "Shell"
-    if p.endswith(".sql"):
-        return "SQL"
-    if p.endswith(".txt"):
-        return "Text"
-    if p.endswith(".csv"):
-        return "CSV"
-    if p.endswith(".html") or p.endswith(".htm"):
-        return "HTML"
-    if p.endswith(".pdf"):
-        return "PDF"
-    mime = mime_type.lower()
-    if mime.startswith("image/"):
-        return "Image"
-    if "text/" in mime:
-        return "Text"
-    return "Binary"
+def _context_visible_to_user(
+    name: str,
+    *,
+    user_id: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+    repos: Optional[Repositories] = None,
+) -> bool:
+    safe_name = validate_context_name(name)
+    meta = metadata if metadata is not None else load_context_metadata()
+    # Engine/system packs are internal config, never operator-facing.
+    if _is_system_context_pack(safe_name, meta):
+        return False
+    owner_id = context_owner_id(safe_name, meta)
+    if owner_id:
+        if owner_id == user_id:
+            return True
+        # Members STEP 4: a pack shared with the workspace is visible to members.
+        # Only consult the access mirror when repos is available (the OSS list /
+        # detail / require paths pass it); background paths without repos keep the
+        # strict owner-only check so nothing widens silently.
+        if repos is not None and _brain_pack_visibility(
+            safe_name, meta, repos=repos
+        ) == "workspace":
+            return True
+        return False
+    return _unowned_contexts_visible_to_caller()
 
 
-def _file_description(root: Path, path: Path) -> Optional[str]:
-    """Auto-extract a 1-line description from a file."""
-    rel = path.relative_to(root).as_posix().lower()
+def _require_context_for_user(
+    name: str,
+    *,
+    user_id: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+    repos: Optional[Repositories] = None,
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    """Mutate access: the caller must be able to EDIT the pack (owner, or
+    owner/admin for a workspace-shared pack). A workspace member who can only
+    read a shared pack gets 404 here (the same not-found shape the read path
+    uses, never revealing edit-gated state). On the OSS single-owner engine the
+    local user owns their packs, so this is unchanged.
+    """
+    safe_name = _context_name_or_400(name)
+    meta = metadata if metadata is not None else load_context_metadata()
+    if not context_dir(safe_name).is_dir() or not _context_visible_to_user(
+        safe_name,
+        user_id=user_id,
+        metadata=meta,
+        repos=repos,
+    ):
+        raise HTTPException(status_code=404, detail="Context not found")
+    # When the pack is visible only because it is workspace-shared (not owned),
+    # gate mutation on can_edit so a plain member cannot edit someone else's pack.
+    owner_id = context_owner_id(safe_name, meta)
+    if repos is not None and owner_id and owner_id != user_id:
+        _owner, _vis, perms = _brain_pack_access(
+            safe_name, meta, user_id=user_id, repos=repos
+        )
+        if not perms.can_edit:
+            raise HTTPException(status_code=404, detail="Context not found")
+    return safe_name, meta
+
+
+def _require_readable_context_for_user(
+    name: str,
+    *,
+    user_id: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+    repos: Optional[Repositories] = None,
+) -> tuple[str, dict[str, dict[str, Any]]]:
+    """Read access: operator-visible packs OR read-only system packs.
+
+    Mutating endpoints must keep using ``_require_context_for_user`` so system
+    packs stay non-editable (it returns 404 for them).
+    """
+    safe_name = _context_name_or_400(name)
+    meta = metadata if metadata is not None else load_context_metadata()
+    if not context_dir(safe_name).is_dir():
+        raise HTTPException(status_code=404, detail="Context not found")
+    if _is_system_context_pack(safe_name, meta):
+        return safe_name, meta
+    if not _context_visible_to_user(
+        safe_name, user_id=user_id, metadata=meta, repos=repos
+    ):
+        raise HTTPException(status_code=404, detail="Context not found")
+    return safe_name, meta
+
+
+def _context_worker_counts(repos: Optional[Repositories], user_id: str) -> dict[str, int]:
+    """Map context-pack name -> number of workers that mount it.
+
+    Computed from a single ``workers.list`` call so the LIST endpoint stays
+    O(workers) instead of O(packs * workers). Mirrors the per-pack ``used_by``
+    computation in ``_context_detail`` so list == detail.
+    """
+    counts: dict[str, int] = {}
+    if repos is None:
+        return counts
     try:
-        if rel.endswith(".md") or rel.endswith(".mdx"):
-            text = path.read_text(encoding="utf-8", errors="replace")
-            return _extract_md_description(text)
-        if rel.endswith(".yml") or rel.endswith(".yaml"):
-            text = path.read_text(encoding="utf-8", errors="replace")
-            return _extract_yml_description(text)
+        workers = repos.workers.list(user_id=user_id)
     except Exception:
-        pass
-    return None
-
-
-def _context_readme_description(root: Path) -> Optional[str]:
-    """Extract description from README.md in context root."""
-    for name in ("README.md", "readme.md", "README.MD"):
-        readme = root / name
-        if readme.is_file():
-            try:
-                text = readme.read_text(encoding="utf-8", errors="replace")
-                return _extract_md_description(text, max_chars=120)
-            except Exception:
-                pass
-    return None
-
-
-def _workers_using_context(name: str) -> List[ContextWorkerRef]:
-    """Return list of workers that reference this context via contexts: field."""
-    refs: List[ContextWorkerRef] = []
-    for worker in discover_workers(use_cache=False):
+        return counts
+    for worker in workers:
         try:
             contexts = (worker.get("config") or {}).get("contexts") or []
-            if name in context_mount_names(contexts):
-                refs.append(ContextWorkerRef(
-                    worker_id=str(worker["id"]),
-                    worker_name=str(worker.get("name") or worker["id"]),
-                ))
+            for ctx_name in context_mount_names(contexts):
+                counts[ctx_name] = counts.get(ctx_name, 0) + 1
         except Exception:
             continue
-    return refs
+    return counts
 
 
-def _context_summary(name: str, metadata: dict[str, dict[str, Any]]) -> ContextSummary:
+def _ensure_brain_pack_row(
+    name: str,
+    *,
+    owner_id: str | None,
+    repos: Optional[Repositories],
+) -> Optional[dict[str, Any]]:
+    """Lazily upsert + return the brain_packs access-control mirror row.
+
+    Brain packs are filesystem dirs; their owner lives in the per-workspace
+    ``.workeros-contexts.json``. The first time the API touches a pack's
+    visibility it materializes the row (default ``private``) so the generic
+    ``AssetAccessRepository`` can resolve permissions exactly like a worker. The
+    pack id is the pack name (one pack per name per workspace). Never raises —
+    visibility is a UI affordance, not a hard gate (the FS owner check below
+    still governs read access).
+    """
+    if repos is None or not owner_id:
+        return None
+    asset_access = getattr(repos, "asset_access", None)
+    ensure = getattr(asset_access, "ensure_brain_pack", None)
+    if ensure is None:
+        return None
+    try:
+        return ensure(
+            pack_id=name,
+            workspace_id=derive_workspace_id(owner_id),
+            owner_id=owner_id,
+            name=name,
+        )
+    except Exception:
+        logger.debug("ensure brain_pack row failed for %s", name, exc_info=True)
+        return None
+
+
+def _brain_pack_access(
+    name: str,
+    metadata: dict[str, dict[str, Any]] | None,
+    *,
+    user_id: str,
+    repos: Optional[Repositories],
+) -> tuple[Optional[str], str, AssetPermissions]:
+    """Resolve (owner_id, visibility, permissions) for a brain pack.
+
+    Delegates to the AssetAccessRepository (engine-owned, Cloud-mirrorable). Falls
+    back to the FS-metadata owner with owner-permissive defaults when no row /
+    repo is available, so the OSS single-owner UX is unchanged. Never raises.
+    """
+    meta = metadata if metadata is not None else load_context_metadata()
+    owner_id = context_owner_id(name, meta)
+    asset_access = getattr(repos, "asset_access", None) if repos is not None else None
+    if asset_access is not None and owner_id:
+        _ensure_brain_pack_row(name, owner_id=owner_id, repos=repos)
+        try:
+            perms = asset_access.get_permissions(
+                workspace_id=derive_workspace_id(owner_id),
+                user_id=user_id,
+                asset_type="brain_pack",
+                asset_id=name,
+            )
+            return (
+                owner_id,
+                str(perms.get("visibility") or "private"),
+                AssetPermissions(
+                    is_owner=bool(perms.get("is_owner", owner_id == user_id)),
+                    can_view=bool(perms.get("can_view", True)),
+                    can_edit=bool(perms.get("can_edit", True)),
+                    can_run=bool(perms.get("can_run", True)),
+                    can_delete=bool(perms.get("can_delete", True)),
+                    can_share=bool(perms.get("can_share", True)),
+                ),
+            )
+        except Exception:
+            logger.debug("brain_pack permission probe failed for %s", name, exc_info=True)
+    # Fallback: no DB row (unowned pack) — the viewer who can see it is owner.
+    is_owner = (not owner_id) or owner_id == user_id
+    return (
+        owner_id,
+        "private",
+        AssetPermissions(
+            is_owner=is_owner,
+            can_view=is_owner,
+            can_edit=is_owner,
+            can_run=is_owner,
+            can_delete=is_owner,
+            can_share=is_owner,
+        ),
+    )
+
+
+def _brain_pack_visibility(
+    name: str,
+    metadata: dict[str, dict[str, Any]] | None,
+    *,
+    repos: Optional[Repositories],
+) -> str:
+    """Current visibility string for a pack from the access mirror row.
+
+    Returns ``private`` when there is no row yet (the secure default, matching the
+    pre-STEP-4 owner-only behaviour). Used by the visibility gate in
+    ``_context_visible_to_user`` so a ``workspace`` pack is visible to members.
+    """
+    meta = metadata if metadata is not None else load_context_metadata()
+    owner_id = context_owner_id(name, meta)
+    asset_access = getattr(repos, "asset_access", None) if repos is not None else None
+    if asset_access is None or not owner_id:
+        return "private"
+    try:
+        row = _ensure_brain_pack_row(name, owner_id=owner_id, repos=repos)
+        if row:
+            return str(row.get("visibility") or "private")
+    except Exception:
+        logger.debug("brain_pack visibility lookup failed for %s", name, exc_info=True)
+    return "private"
+
+
+def _ensure_assistant_row(
+    *,
+    user_id: str,
+    repos: Optional[Repositories],
+) -> Optional[dict[str, Any]]:
+    """Lazily upsert + return the workspace assistant's access mirror row.
+
+    The assistant is one shared tool per workspace (default ``workspace``). The
+    owner is the workspace owner; on the OSS single-owner engine that is the local
+    user. Never raises.
+    """
+    if repos is None or not user_id:
+        return None
+    asset_access = getattr(repos, "asset_access", None)
+    ensure = getattr(asset_access, "ensure_assistant", None)
+    if ensure is None:
+        return None
+    workspace_id = derive_workspace_id(user_id)
+    try:
+        return ensure(
+            assistant_id=assistant_row_id(workspace_id),
+            workspace_id=workspace_id,
+            owner_id=user_id,
+        )
+    except Exception:
+        logger.debug("ensure assistant row failed for %s", user_id, exc_info=True)
+        return None
+
+
+def _assistant_access(
+    *,
+    user_id: str,
+    repos: Optional[Repositories],
+) -> tuple[Optional[str], str, AssetPermissions]:
+    """Resolve (owner_id, visibility, permissions) for the workspace assistant.
+
+    Delegates to the AssetAccessRepository. Falls back to owner-permissive
+    workspace defaults when no repo/row is available (OSS single-owner: the local
+    user owns + can share the assistant). Never raises.
+    """
+    asset_access = getattr(repos, "asset_access", None) if repos is not None else None
+    workspace_id = derive_workspace_id(user_id)
+    aid = assistant_row_id(workspace_id)
+    if asset_access is not None:
+        _ensure_assistant_row(user_id=user_id, repos=repos)
+        try:
+            perms = asset_access.get_permissions(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                asset_type="assistant",
+                asset_id=aid,
+            )
+            return (
+                str(perms.get("owner_id") or user_id),
+                str(perms.get("visibility") or "workspace"),
+                AssetPermissions(
+                    is_owner=bool(perms.get("is_owner", True)),
+                    can_view=bool(perms.get("can_view", True)),
+                    can_edit=bool(perms.get("can_edit", True)),
+                    can_run=bool(perms.get("can_run", True)),
+                    can_delete=bool(perms.get("can_delete", True)),
+                    can_share=bool(perms.get("can_share", True)),
+                ),
+            )
+        except Exception:
+            logger.debug("assistant permission probe failed", exc_info=True)
+    return (user_id, "workspace", AssetPermissions())
+
+
+def _context_summary(
+    name: str,
+    metadata: dict[str, dict[str, Any]],
+    *,
+    worker_count: int = 0,
+    repos: Optional[Repositories] = None,
+    user_id: Optional[str] = None,
+) -> ContextSummary:
     root = context_dir(name)
     files = list(iter_context_files(root))
     total_size = sum(path.stat().st_size for path in files)
-    workers = _workers_using_context(name)
+    is_system = _is_system_context_pack(name, metadata)
+    description = _context_description(root)
+    if description is None and is_system:
+        description = _system_context_description(name)
+    # Members STEP 4: ownership + visibility + computed permissions. System packs
+    # are read-only engine config — surface their FS owner but no share rights.
+    owner_id = context_owner_id(name, metadata)
+    visibility = "private"
+    permissions = AssetPermissions()
+    if not is_system and user_id is not None:
+        owner_id, visibility, permissions = _brain_pack_access(
+            name, metadata, user_id=user_id, repos=repos
+        )
+    elif is_system:
+        permissions = AssetPermissions(
+            can_edit=False, can_delete=False, can_share=False
+        )
     return ContextSummary(
         name=name,
         file_count=len(files),
         total_size_bytes=total_size,
         updated_at=context_updated_at(root),
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
-        worker_count=len(workers),
-        description=_context_readme_description(root),
+        worker_count=worker_count,
+        description=description,
+        system=is_system,
+        read_only=is_system,
+        owner_id=owner_id,
+        visibility=visibility,
+        permissions=permissions,
     )
 
 
-def _context_file_item(root: Path, path: Path) -> ContextFileItem:
-    base = context_file_metadata(root, path)
-    desc = _file_description(root, path)
-    display_type = _file_display_type(base["path"], base["mime_type"])
-    return ContextFileItem(**base, description=desc, display_type=display_type)
+def _context_description(root: Path) -> Optional[str]:
+    """Return the first non-empty line of README.md as the context description, or None."""
+    readme = root / "README.md"
+    if not readme.is_file():
+        return None
+    try:
+        for line in readme.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = line.lstrip("#").strip()
+            if stripped:
+                return stripped[:500]
+    except Exception:
+        pass
+    return None
 
 
-def _context_detail(name: str, metadata: dict[str, dict[str, Any]] | None = None) -> ContextDetail:
+def _context_detail(
+    name: str,
+    metadata: dict[str, dict[str, Any]] | None = None,
+    *,
+    repos: Optional[Repositories] = None,
+    user_id: str = "federico",
+) -> ContextDetail:
     root = context_dir(name)
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="Context not found")
     meta = metadata if metadata is not None else load_context_metadata()
     files = [
-        _context_file_item(root, path)
+        ContextFileItem(**context_file_metadata(root, path, pack_metadata=meta.get(name) or {}))
         for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
     ]
-    used_by = _workers_using_context(name)
-    summary = _context_summary(name, meta)
-    return ContextDetail(**summary.model_dump(), files=files, used_by=used_by)
+    summary = _context_summary(name, meta, repos=repos, user_id=user_id)
+    # Compute used_by and worker_count when repos is available.
+    used_by: List[ContextWorkerRef] = []
+    if repos is not None:
+        try:
+            for worker in repos.workers.list(user_id=user_id):
+                try:
+                    contexts = (worker.get("config") or {}).get("contexts") or []
+                    if name in context_mount_names(contexts):
+                        used_by.append(ContextWorkerRef(
+                            worker_id=str(worker["id"]),
+                            worker_name=str(worker.get("name") or worker["id"]),
+                        ))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    description = _context_description(root)
+    if description is None and summary.system:
+        description = _system_context_description(name)
+    summary.worker_count = len(used_by)
+    summary.description = description
+    return ContextDetail(
+        **summary.model_dump(),
+        files=files,
+        used_by=used_by,
+    )
 
 
 def _raise_context_quota_if_needed(name: str) -> None:
@@ -2448,10 +5355,53 @@ def _raise_context_quota_if_needed(name: str) -> None:
         )
 
 
-def _write_context_file(name: str, file_path: str, data: bytes) -> ContextFileItem:
+def _block_secrets_in_contexts() -> bool:
+    """Strict mode (default OFF): reject context writes that contain a live
+    credential instead of warning. Env-gated so existing installs see no
+    behavior change."""
+    return os.environ.get("WORKEROS_BLOCK_SECRETS_IN_CONTEXTS") == "1"
+
+
+def _scan_context_write(file_path: str, data: bytes) -> List[SecretWarning]:
+    """Scan context-write bytes for high-confidence secrets. Returns masked
+    warnings only — the raw secret value is never returned or logged.
+
+    In strict mode (WORKEROS_BLOCK_SECRETS_IN_CONTEXTS=1) a non-empty result
+    raises 400; the detail names the pattern (masked) and points the operator
+    at the Secrets vault.
+    """
+    findings = scan_bytes(data)
+    if not findings:
+        return []
+    warnings = [SecretWarning(**f.to_dict()) for f in findings]
+    if _block_secrets_in_contexts():
+        first = warnings[0]
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This file appears to contain a live credential "
+                f"({first.pattern}: {first.masked}). Store secrets in "
+                f"Settings → Secrets, not in a Brain pack."
+            ),
+        )
+    return warnings
+
+
+def _write_context_file(
+    name: str,
+    file_path: str,
+    data: bytes,
+    *,
+    user_id: str,
+    tags: List[str] | None = None,
+    file_metadata: Dict[str, Any] | None = None,
+) -> ContextFileItem:
     root = context_dir(name)
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="Context not found")
+    # Detective control at the write boundary: scan BEFORE persisting so strict
+    # mode can reject without ever writing the secret to disk.
+    secret_warnings = _scan_context_write(file_path, data)
     destination = _safe_context_file_or_400(name, file_path)
     previous = destination.read_bytes() if destination.exists() else None
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -2464,13 +5414,48 @@ def _write_context_file(name: str, file_path: str, data: bytes) -> ContextFileIt
         else:
             destination.write_bytes(previous)
         raise
-    set_context_metadata(name)
-    return _context_file_item(root, destination)
+    if tags is not None or file_metadata is not None:
+        pack_meta = set_context_file_metadata(
+            name,
+            file_path,
+            tags=tags,
+            file_metadata=file_metadata,
+            owner_id=user_id,
+        )
+    else:
+        set_context_metadata(name, owner_id=user_id)
+        pack_meta = load_context_metadata().get(name) or {}
+    # Persist the warning flag so list/detail views badge the file even after
+    # the write response is gone. (Cleared when a later write comes back clean.)
+    set_context_file_secret_flag(name, file_path, bool(secret_warnings))
+    pack_meta = load_context_metadata().get(name) or pack_meta
+    item = ContextFileItem(**context_file_metadata(root, destination, pack_metadata=pack_meta))
+    item.secret_warnings = secret_warnings
+    item.has_secret_warning = bool(secret_warnings)
+    return item
 
 
-def _workers_referencing_context(name: str) -> List[str]:
+async def _read_context_upload_bytes(upload: UploadFile, remaining_bytes: int) -> bytes:
+    data = bytearray()
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > remaining_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Brain upload is too large. Upload files up to "
+                    f"{_format_limit_mb(_context_upload_limit_bytes())}."
+                ),
+            )
+    return bytes(data)
+
+
+def _workers_referencing_context(name: str, *, user_id: str, repos: Repositories) -> List[str]:
     referenced_by: List[str] = []
-    for worker in discover_workers(use_cache=False):
+    for worker in repos.workers.list(user_id=user_id):
         try:
             contexts = (worker.get("config") or {}).get("contexts") or []
             if name in context_mount_names(contexts):
@@ -2483,16 +5468,38 @@ def _workers_referencing_context(name: str) -> List[str]:
 @app.get("/contexts", response_model=List[ContextSummary])
 def list_contexts(
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> List[ContextSummary]:
-    _ = auth
     ensure_contexts_dir()
     metadata = load_context_metadata()
-    items = [
-        _context_summary(folder.name, metadata)
-        for folder in sorted(CONTEXTS_DIR.iterdir(), key=lambda p: p.name)
-        if folder.is_dir() and not folder.is_symlink()
-    ]
-    return items
+    root = current_contexts_root()
+    # Compute worker_count for every pack from a single workers.list() call so
+    # the LIST row matches the DETAIL view (used_by) without N+1 queries.
+    worker_counts = _context_worker_counts(repos, auth.user_id)
+    operator_items: List[ContextSummary] = []
+    system_items: List[ContextSummary] = []
+    for folder in sorted(root.iterdir(), key=lambda p: p.name):
+        if not folder.is_dir() or folder.is_symlink() or folder.name.startswith("."):
+            continue
+        # System/engine packs are surfaced read-only so operators can see what
+        # shapes worker generation; they cannot be edited or deleted.
+        if _is_system_context_pack(folder.name, metadata):
+            system_items.append(_context_summary(
+                folder.name, metadata, worker_count=worker_counts.get(folder.name, 0)
+            ))
+            continue
+        if _context_visible_to_user(
+            folder.name, user_id=auth.user_id, metadata=metadata, repos=repos
+        ):
+            operator_items.append(_context_summary(
+                folder.name,
+                metadata,
+                worker_count=worker_counts.get(folder.name, 0),
+                repos=repos,
+                user_id=auth.user_id,
+            ))
+    # Operator packs first, then read-only system packs.
+    return operator_items + system_items
 
 
 @app.post("/contexts/{name}", response_model=ContextDetail)
@@ -2500,24 +5507,85 @@ def create_context(
     name: str,
     payload: Optional[ContextCreateRequest] = Body(default=None),
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
-    _ = auth
     safe_name = _context_name_or_400(name)
     root = context_dir(safe_name)
+    metadata = load_context_metadata()
     if root.exists():
+        if not _context_visible_to_user(
+            safe_name, user_id=auth.user_id, metadata=metadata, repos=repos
+        ):
+            raise HTTPException(status_code=404, detail="Context not found")
         raise HTTPException(status_code=409, detail="Context already exists")
     root.mkdir(parents=True)
-    set_context_metadata(safe_name, writeable=bool(payload.writeable) if payload else False)
-    return _context_detail(safe_name)
+    set_context_metadata(
+        safe_name,
+        writeable=bool(payload.writeable) if payload else False,
+        owner_id=auth.user_id,
+    )
+    # Materialize the access-control mirror row (default private) so the Share
+    # control + permission checks work immediately. Members STEP 4.
+    _ensure_brain_pack_row(safe_name, owner_id=auth.user_id, repos=repos)
+    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
 @app.get("/contexts/{name}", response_model=ContextDetail)
 def get_context(
     name: str,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
-    _ = auth
-    return _context_detail(_context_name_or_400(name))
+    safe_name, metadata = _require_readable_context_for_user(
+        name, user_id=auth.user_id, repos=repos
+    )
+    return _context_detail(safe_name, metadata, repos=repos, user_id=auth.user_id)
+
+
+@app.put("/contexts/{name}/visibility", response_model=ContextDetail)
+def set_context_visibility(
+    name: str,
+    payload: ContextVisibilityUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextDetail:
+    """Set a brain pack's visibility (Private <-> Shared with workspace).
+
+    Owner/admin only. The AssetAccessRepository enforces ``can_share`` + the enum;
+    a non-owner without share rights gets 403. On the OSS single-owner engine the
+    local user owns their packs, so this always succeeds for them. System/engine
+    packs are read-only (404 from the require helper). 404 for an invisible pack.
+    """
+    safe_name, metadata = _require_context_for_user(
+        name, user_id=auth.user_id, repos=repos
+    )
+    asset_access = getattr(repos, "asset_access", None)
+    if asset_access is None or not hasattr(asset_access, "set_visibility"):
+        raise HTTPException(status_code=501, detail="Visibility control not available")
+
+    owner_id = context_owner_id(safe_name, metadata)
+    if not owner_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This pack is read-only and its visibility cannot be changed.",
+        )
+    # Ensure the mirror row exists before flipping visibility.
+    _ensure_brain_pack_row(safe_name, owner_id=owner_id, repos=repos)
+    try:
+        result = asset_access.set_visibility(
+            workspace_id=derive_workspace_id(owner_id),
+            actor_id=auth.user_id,
+            asset_type="brain_pack",
+            asset_id=safe_name,
+            visibility=payload.visibility,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Context not found")
+    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
 @app.delete("/contexts/{name}", response_model=ContextDeleteResponse)
@@ -2525,13 +5593,11 @@ def delete_context(
     name: str,
     force: bool = Query(False),
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextDeleteResponse:
-    _ = auth
-    safe_name = _context_name_or_400(name)
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     root = context_dir(safe_name)
-    if not root.is_dir():
-        raise HTTPException(status_code=404, detail="Context not found")
-    referenced_by = _workers_referencing_context(safe_name)
+    referenced_by = _workers_referencing_context(safe_name, user_id=auth.user_id, repos=repos)
     if referenced_by and not force:
         raise HTTPException(
             status_code=409,
@@ -2539,6 +5605,13 @@ def delete_context(
         )
     shutil.rmtree(root)
     delete_context_metadata(safe_name)
+    # Prune the brain-pack + brain-file version snapshots so they don't orphan
+    # in asset_versions (the keep-20 cap never fires once the context is gone) —
+    # 2026-06-02 P2.
+    try:
+        repos.versions.delete_for_context(name=safe_name)
+    except Exception as exc:
+        logger.warning("Could not prune asset_versions for context %s: %s", safe_name, exc)
     return ContextDeleteResponse(status="deleted", referenced_by=referenced_by)
 
 
@@ -2548,8 +5621,7 @@ def get_context_file(
     file_path: str,
     auth: AuthContext = Depends(get_auth_context),
 ):
-    _ = auth
-    safe_name = _context_name_or_400(name)
+    safe_name, _metadata = _require_readable_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
     target = _safe_context_file_or_400(safe_name, rel)
     if not target.is_file():
@@ -2559,7 +5631,65 @@ def get_context_file(
     if is_binary_file(rel, mime_type):
         headers["Content-Disposition"] = f'attachment; filename="{Path(rel).name}"'
         return FileResponse(target, media_type=mime_type, headers=headers)
+    # Active markup (html, svg, xhtml, xml) is "text" but a browser would
+    # EXECUTE it inline — that is stored XSS for an uploaded context file.
+    # Force download AND neutralize the content-type so it can never run in
+    # our origin. Safe-preview text (md/txt/json/py/yaml/...) still serves
+    # inline below.
+    if is_active_markup(rel, mime_type):
+        headers["Content-Disposition"] = f'attachment; filename="{Path(rel).name}"'
+        headers["X-Content-Type-Options"] = "nosniff"
+        return Response(
+            content=target.read_bytes(),
+            media_type="text/plain; charset=utf-8",
+            headers=headers,
+        )
     return Response(content=target.read_bytes(), media_type=mime_type, headers=headers)
+
+
+def _snapshot_brain_pack_version(
+    name: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+    change_source: str = "user",
+) -> None:
+    """Create a version snapshot of a brain pack's current files."""
+    import base64
+    import json as _json
+
+    try:
+        root = context_dir(name)
+        files_snapshot = []
+        for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix()):
+            rel = path.relative_to(root).as_posix()
+            try:
+                raw = path.read_bytes()
+                try:
+                    content = raw.decode("utf-8")
+                    encoding = "utf-8"
+                except UnicodeDecodeError:
+                    content = base64.b64encode(raw).decode("ascii")
+                    encoding = "base64"
+            except Exception:
+                continue
+            files_snapshot.append({"path": rel, "content": content, "encoding": encoding})
+        metadata = load_context_metadata()
+        pack_meta = metadata.get(name) or {}
+        snapshot = {
+            "pack": {"name": name, "description": pack_meta.get("description")},
+            "files": files_snapshot,
+        }
+        repos.versions.create(
+            asset_type="brain_pack",
+            asset_id=name,
+            user_id=user_id,
+            snapshot_json=_json.dumps(snapshot),
+            change_source=change_source,
+        )
+        repos.versions.prune(asset_type="brain_pack", asset_id=name, keep=20)
+    except Exception as _exc:
+        logger.warning("version snapshot failed for brain_pack %s: %s", name, _exc)
 
 
 @app.put("/contexts/{name}/files/{file_path:path}", response_model=ContextFileItem)
@@ -2568,9 +5698,9 @@ async def put_context_file(
     file_path: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextFileItem:
-    _ = auth
-    safe_name = _context_name_or_400(name)
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
     content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     if content_type == "application/json":
@@ -2579,9 +5709,23 @@ async def put_context_file(
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}") from exc
         data = payload.content.encode("utf-8")
+        tags = payload.tags
+        file_metadata = payload.metadata
     else:
         data = await request.body()
-    return _write_context_file(safe_name, rel, data)
+        tags = None
+        file_metadata = None
+    result = _write_context_file(
+        safe_name,
+        rel,
+        data,
+        user_id=auth.user_id,
+        tags=tags,
+        file_metadata=file_metadata,
+    )
+    _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos)
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+    return result
 
 
 @app.delete("/contexts/{name}/files/{file_path:path}", response_model=ContextDetail)
@@ -2589,9 +5733,9 @@ def delete_context_file(
     name: str,
     file_path: str,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
-    _ = auth
-    safe_name = _context_name_or_400(name)
+    safe_name, metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
     target = _safe_context_file_or_400(safe_name, rel)
     if not target.is_file():
@@ -2604,8 +5748,10 @@ def delete_context_file(
             parent.rmdir()
         except OSError:
             break
-    set_context_metadata(safe_name)
-    return _context_detail(safe_name)
+    set_context_file_metadata(safe_name, rel, tags=[], file_metadata={}, owner_id=auth.user_id)
+    _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos, deleted=True)
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
+    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
 @app.post("/contexts/{name}/upload", response_model=ContextUploadResponse)
@@ -2613,89 +5759,209 @@ async def upload_context_files(
     name: str,
     files: List[UploadFile] = File(...),
     path_prefix: str = Form(""),
+    tags_json: str = Form(""),
+    metadata_json: str = Form(""),
+    create_if_missing: bool = Form(True),
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> ContextUploadResponse:
-    _ = auth
     safe_name = _context_name_or_400(name)
+    root = context_dir(safe_name)
+    if root.is_dir():
+        safe_name, _metadata = _require_context_for_user(
+            safe_name,
+            user_id=auth.user_id,
+            repos=repos,
+        )
+    elif create_if_missing:
+        root.mkdir(parents=True, exist_ok=True)
+        set_context_metadata(safe_name, writeable=True, owner_id=auth.user_id)
+        _ensure_brain_pack_row(safe_name, owner_id=auth.user_id, repos=repos)
+    else:
+        raise HTTPException(status_code=404, detail="Context not found")
     raw_prefix = path_prefix.strip().strip("/")
     prefix = _context_file_path_or_400(raw_prefix) if raw_prefix else ""
+    upload_tags: List[str] | None = None
+    upload_metadata: Dict[str, Any] | None = None
+    if tags_json.strip():
+        try:
+            parsed_tags = json.loads(tags_json)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid tags_json: {exc}") from exc
+        if not isinstance(parsed_tags, list):
+            raise HTTPException(status_code=400, detail="tags_json must be a JSON array")
+        upload_tags = [str(tag) for tag in parsed_tags]
+    if metadata_json.strip():
+        try:
+            parsed_metadata = json.loads(metadata_json)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid metadata_json: {exc}") from exc
+        if not isinstance(parsed_metadata, dict):
+            raise HTTPException(status_code=400, detail="metadata_json must be a JSON object")
+        upload_metadata = dict(parsed_metadata)
     written: List[ContextFileItem] = []
+    written_paths: List[str] = []
+    total_upload_bytes = 0
+    upload_limit = _context_upload_limit_bytes()
     for upload in files:
         filename = _context_file_path_or_400(upload.filename or "upload.bin")
         rel = f"{prefix}/{filename}" if prefix else filename
-        data = await upload.read()
-        written.append(_write_context_file(safe_name, rel, data))
+        data = await _read_context_upload_bytes(upload, upload_limit - total_upload_bytes)
+        total_upload_bytes += len(data)
+        written.append(
+            _write_context_file(
+                safe_name,
+                rel,
+                data,
+                user_id=auth.user_id,
+                tags=upload_tags,
+                file_metadata=upload_metadata,
+            )
+        )
+        written_paths.append(rel)
+    for rel in written_paths:
+        _snapshot_brain_file_version(safe_name, rel, user_id=auth.user_id, repos=repos)
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos)
     return ContextUploadResponse(
         files=written,
         total_size_bytes=context_total_size(context_dir(safe_name)),
     )
 
 
+@app.get("/contexts/{name}/secret-scan", response_model=ContextSecretScanResponse)
+def scan_context_for_secrets(
+    name: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> ContextSecretScanResponse:
+    """Audit a Brain pack's CURRENT files for stored live credentials.
+
+    Owner-gated (operator must own/see the pack; the whole /contexts surface
+    also requires x-floom-secret). This is the control that would have caught
+    keys already stored as readable context content. Returns only masked
+    findings — never the raw value — and refreshes the persisted
+    has_secret_warning flag so the UI badge stays accurate.
+    """
+    safe_name, _metadata = _require_readable_context_for_user(name, user_id=auth.user_id)
+    root = context_dir(safe_name)
+    scanned = 0
+    flagged: List[ContextSecretScanFile] = []
+    for path in iter_context_files(root):
+        rel = path.relative_to(root).as_posix()
+        mime_type = guess_mime_type(rel)
+        if is_binary_file(rel, mime_type):
+            continue
+        scanned += 1
+        try:
+            data = path.read_bytes()
+        except Exception:
+            continue
+        findings = scan_bytes(data)
+        warnings = [SecretWarning(**f.to_dict()) for f in findings]
+        # Refresh the persisted flag so list/detail badges reflect reality.
+        try:
+            set_context_file_secret_flag(safe_name, rel, bool(warnings))
+        except Exception:
+            pass
+        if warnings:
+            flagged.append(ContextSecretScanFile(path=rel, secret_warnings=warnings))
+    return ContextSecretScanResponse(
+        name=safe_name,
+        scanned_files=scanned,
+        flagged_files=flagged,
+    )
+
+
 @app.get("/workers", response_model=List[WorkerSummary])
 def list_workers(
     include_system: bool = False,
+    include_archived: bool = False,
     shape: str = "full",
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[WorkerSummary]:
     """List workers.
 
-    ?shape=list  — trimmed payload (~15 KB for 18 workers) for the web UI list view.
-                   Drops: long_description, use_cases, example_input, example_output,
-                   how_it_works, timeseries. Keeps all fields needed to render the card.
-    ?shape=full  — full payload (default, backwards-compat for CLI + MCP consumers).
+    ?shape=list           — trimmed payload (~15 KB for 18 workers) for the web UI list view.
+                            Drops: long_description, use_cases, example_input, example_output,
+                            how_it_works, timeseries. Keeps all fields needed to render the card.
+    ?shape=full           — full payload (default, backwards-compat for CLI + MCP consumers).
+    ?include_archived=true — include archived workers (archived:true in worker.yml).
+                             Default: excluded from All/Starred/Recent; shown only in Archived view.
     """
-    db_workers = _list_db_workers(user_id=auth.user_id, repos=repos)
-    # In cloud (multi-tenant) mode never fall back to the shared filesystem,
-    # which would expose another tenant's bundles. Local single-tenant mode
-    # keeps the old behavior so a fresh install with no DB rows yet still
-    # enumerates the on-disk workers for first-time UX.
-    workers = db_workers if (db_workers or _is_cloud_deploy()) else discover_workers(use_cache=True)
+    worker_user_id = _worker_access_user_id(auth)
+    workers = _list_visible_workers(user_id=worker_user_id, repos=repos, use_cache=True, role=auth.role)
     # Filter out system_worker: true workers unless explicitly requested.
     if not include_system:
         workers = [
             w for w in workers
             if not (w.get("manifest") or {}).get("system_worker", False)
         ]
+    # Filter out archived workers unless explicitly requested.
+    # NOTE: when include_system and include_archived are both False this matches
+    # _list_operator_workers exactly (shared filter, see 1.5.4).
+    if not include_archived:
+        workers = [w for w in workers if not w.get("archived", False)]
     worker_ids = [w["id"] for w in workers]
-    stats_by_id = _get_stats_batch(worker_ids, user_id=auth.user_id, repos=repos)
+    stats_by_id = _get_stats_batch(worker_ids, user_id=worker_user_id, repos=repos)
     # S44 Win 3: skip expensive timeseries fetch when list shape requested.
     list_shape = shape == "list"
     timeseries_by_id = (
         {} if list_shape
-        else _get_timeseries_batch(worker_ids, user_id=auth.user_id, repos=repos, days=14)
+        else _get_timeseries_batch(worker_ids, user_id=worker_user_id, repos=repos, days=14)
     )
-    available_secret_names = repos.secrets.list_names(user_id=auth.user_id)
+    available_secret_names = _available_secret_names_for_user(worker_user_id, repos)
     result: List[WorkerSummary] = []
     for w in workers:
-        last_run_row = _get_last_run_for_worker(w["id"], user_id=auth.user_id, repos=repos)
+        last_run_row = _get_last_run_for_worker(w["id"], user_id=worker_user_id, repos=repos)
         last_run = _make_run_summary(last_run_row) if last_run_row else None
 
-        # Check secrets
+        # Resolve status via the SHARED resolver so LIST and DETAIL agree
+        # exactly for the same worker (full honesty ladder: missing-secret /
+        # failed-run / disabled / never-run, see _resolve_worker_status).
         config = get_worker_config_for_run(w["id"])
-        status = WorkerStatus(w["status"])
-        if config and config.secrets:
-            missing = [s for s in config.secrets if s not in available_secret_names]
-            if missing:
-                status = WorkerStatus.MISSING_SECRET
-        if (
-            status == WorkerStatus.HEALTHY
-            and last_run
-            and last_run.status == RunStatus.FAILED
-        ):
-            status = WorkerStatus.NEEDS_ATTENTION
+        is_archived = w.get("archived", False)
+        status = _resolve_worker_status(
+            w,
+            config=config,
+            available_secret_names=available_secret_names,
+            last_run_status=last_run.status if last_run else None,
+            has_run=last_run is not None,
+        )
 
         triggers = _build_triggers_list(w)
         triggers_spec = _build_triggers_spec(w)
         recent_stats = stats_by_id.get(w["id"])
         timeseries = timeseries_by_id.get(w["id"])
 
-        # Extract Composio app slug connections for the card tool-logo strip.
-        conn_slugs: list[str] = []
-        if config and config.connections:
-            for c in config.connections:
-                if isinstance(c, str):
-                    conn_slugs.append(c)
+        # Extract connection slugs and runtime from worker config dict.
+        # These are lightweight and needed for the worker card tool-logo strip.
+        _worker_config_dict = w.get("config") or {}
+        _raw_connections = _worker_config_dict.get("connections") or w.get("connections") or []
+        _conn_slugs = [
+            slug
+            for c in _raw_connections
+            if (slug := _connection_slug_for_worker_card(c))
+        ]
+        _raw_runtime = _worker_config_dict.get("runtime") or {}
+        _runtime_type = (
+            _raw_runtime.get("type") if isinstance(_raw_runtime, dict)
+            else (str(_raw_runtime) if _raw_runtime else None)
+        )
+        _inputs = []
+        for _raw_input in _worker_config_dict.get("inputs") or []:
+            if isinstance(_raw_input, dict):
+                try:
+                    if list_shape:
+                        _inputs.append(
+                            WorkerSummaryInput(
+                                name=str(_raw_input["name"]),
+                                type=str(_raw_input["type"]),
+                            )
+                        )
+                    else:
+                        _inputs.append(WorkerInput(**_raw_input))
+                except Exception:
+                    continue
 
         result.append(
             WorkerSummary(
@@ -2709,6 +5975,9 @@ def list_workers(
                 example_output=None if list_shape else w.get("example_output"),
                 how_it_works=None if list_shape else w.get("how_it_works"),
                 is_example=w.get("is_example"),
+                system=bool((w.get("manifest") or {}).get("system_worker", False)),
+                archived=is_archived,
+                archive_reason=_sanitize_operator_text(w.get("archive_reason")),
                 tags=w.get("tags") or [],
                 folder=w.get("folder"),
                 status=status,
@@ -2719,11 +5988,327 @@ def list_workers(
                 triggers_spec=triggers_spec,
                 recent_stats=recent_stats,
                 timeseries=None if list_shape else timeseries,
-                connections=conn_slugs,
-                runtime=config.runtime.type if config else None,
+                # B7: always include connection slugs and runtime for worker card tool strip.
+                connections=_conn_slugs,
+                inputs=_inputs,
+                runtime=_runtime_type,
+                public_link=_worker_public_link(w),
+                owner_id=w.get("owner_id"),
+                visibility=str(w.get("visibility") or "private"),
+                permissions=_worker_permissions(w, user_id=worker_user_id, repos=repos),
             )
         )
     return result
+
+
+def _worker_public_payload(worker: Dict[str, Any]) -> str:
+    """Stable HMAC payload for a worker share link.
+
+    Bound to both the worker id AND its owner so a link minted for one owner's
+    worker can never resolve a same-id worker owned by someone else (defense in
+    depth alongside the owner-scoped detail build).
+    """
+    return ".".join(
+        ("worker", str(worker.get("id") or ""), str(worker.get("owner_id") or ""))
+    )
+
+
+def _worker_public_token(worker: Dict[str, Any]) -> str:
+    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    return hmac.new(
+        secret.encode("utf-8"),
+        _worker_public_payload(worker).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _worker_public_link(worker: Dict[str, Any]) -> Optional[str]:
+    """Owner-only standalone share URL for a worker (or None if id is missing)."""
+    worker_id = str(worker.get("id") or "")
+    if not worker_id:
+        return None
+    token = _worker_public_token(worker)
+    return f"{_frontend_base_url()}/w/{worker_id}?token={token}"
+
+
+def _standalone_share_url(token: str) -> str:
+    return f"{_frontend_base_url()}/s/{urllib.parse.quote(token, safe='')}"
+
+
+def _public_noindex_headers() -> Dict[str, str]:
+    return {
+        "X-Robots-Tag": "noindex, nofollow",
+        "Cache-Control": "no-store",
+    }
+
+
+def _short_link_base_url() -> str:
+    return (os.environ.get("WORKEROS_SHORT_LINK_BASE_URL") or "https://floom.dev/s").rstrip("/")
+
+
+def _mint_worker_short_id() -> str:
+    return f"fls_{pysecrets.token_urlsafe(8).replace('-', '').replace('_', '')[:10]}"
+
+
+def _mint_standalone_share_token() -> str:
+    return f"fls_{pysecrets.token_urlsafe(18).replace('-', '').replace('_', '')[:24]}"
+
+
+def _ensure_standalone_share_links_table() -> None:
+    with get_db() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS standalone_share_links (
+                token TEXT PRIMARY KEY,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT NOT NULL,
+                file_path TEXT NOT NULL DEFAULT '',
+                owner_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(entity_type, entity_id, file_path, owner_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity
+                ON standalone_share_links(entity_type, entity_id, file_path, owner_id);
+            """
+        )
+
+
+def _create_or_get_standalone_share_link(
+    *,
+    entity_type: Literal["worker", "brain_file", "brain_pack"],
+    entity_id: str,
+    owner_id: str,
+    file_path: str = "",
+) -> Dict[str, str]:
+    safe_file_path = file_path or ""
+    if not entity_id or not owner_id:
+        raise HTTPException(status_code=409, detail="Item cannot be shared")
+    _ensure_standalone_share_links_table()
+    with get_db() as conn:
+        existing = conn.execute(
+            """
+            SELECT token FROM standalone_share_links
+            WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
+            LIMIT 1
+            """,
+            (entity_type, entity_id, safe_file_path, owner_id),
+        ).fetchone()
+        if existing:
+            token = str(existing["token"])
+        else:
+            token = ""
+            ts = now_iso()
+            for _ in range(8):
+                candidate = _mint_standalone_share_token()
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO standalone_share_links
+                            (token, entity_type, entity_id, file_path, owner_id, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (candidate, entity_type, entity_id, safe_file_path, owner_id, ts),
+                    )
+                    token = candidate
+                    break
+                except sqlite3.IntegrityError:
+                    dup = conn.execute(
+                        """
+                        SELECT token FROM standalone_share_links
+                        WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
+                        LIMIT 1
+                        """,
+                        (entity_type, entity_id, safe_file_path, owner_id),
+                    ).fetchone()
+                    if dup:
+                        token = str(dup["token"])
+                        break
+            if not token:
+                raise HTTPException(status_code=500, detail="Could not create share link")
+    return {
+        "token": token,
+        "url": _standalone_share_url(token),
+        "entity_type": entity_type,
+    }
+
+
+def _ensure_worker_short_links_table() -> None:
+    with get_db() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS worker_short_links (
+                short_id TEXT PRIMARY KEY,
+                worker_id TEXT NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+                owner_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(worker_id, owner_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_worker_short_links_worker_owner
+                ON worker_short_links(worker_id, owner_id);
+            """
+        )
+
+
+def _worker_short_link_response(worker: Dict[str, Any]) -> Dict[str, str]:
+    worker_id = str(worker.get("id") or "")
+    owner_id = str(worker.get("owner_id") or "")
+    if not worker_id or not owner_id:
+        raise HTTPException(status_code=409, detail="Worker cannot be shared")
+    _ensure_worker_short_links_table()
+    with get_db() as conn:
+        existing = conn.execute(
+            """
+            SELECT short_id FROM worker_short_links
+            WHERE worker_id = ? AND owner_id = ?
+            LIMIT 1
+            """,
+            (worker_id, owner_id),
+        ).fetchone()
+        if existing:
+            short_id = str(existing["short_id"])
+        else:
+            ts = now_iso()
+            for _ in range(5):
+                short_id = _mint_worker_short_id()
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO worker_short_links (short_id, worker_id, owner_id, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (short_id, worker_id, owner_id, ts),
+                    )
+                    break
+                except sqlite3.IntegrityError:
+                    owner_existing = conn.execute(
+                        """
+                        SELECT short_id FROM worker_short_links
+                        WHERE worker_id = ? AND owner_id = ?
+                        LIMIT 1
+                        """,
+                        (worker_id, owner_id),
+                    ).fetchone()
+                    if owner_existing:
+                        short_id = str(owner_existing["short_id"])
+                        break
+                    short_id = ""
+            if not short_id:
+                raise HTTPException(status_code=500, detail="Could not mint short link")
+    return {"short_id": short_id, "short_url": f"{_short_link_base_url()}/{short_id}"}
+
+
+def _worker_permissions(
+    worker: Dict[str, Any],
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> AssetPermissions:
+    """Compute the requesting user's access matrix for a worker.
+
+    Delegates to the AssetAccessRepository when available (the engine-owned,
+    Cloud-mirrorable rule). Falls back to an owner-permissive default for
+    filesystem/stock workers that have no DB row (the caller is the de-facto
+    owner of a stock worker they can see), so the OSS single-owner UX is
+    unchanged. Never raises — a permission probe must not break a list/detail.
+    """
+    asset_access = getattr(repos, "asset_access", None)
+    worker_id = str(worker.get("id") or "")
+    owner_id = worker.get("owner_id")
+    visibility = str(worker.get("visibility") or "private")
+    if asset_access is not None and worker_id and owner_id:
+        try:
+            perms = asset_access.get_permissions(
+                workspace_id=str(worker.get("workspace_id") or "local-default"),
+                user_id=user_id,
+                asset_type="worker",
+                asset_id=worker_id,
+            )
+            return AssetPermissions(
+                is_owner=bool(perms.get("is_owner", owner_id == user_id)),
+                can_view=bool(perms.get("can_view", True)),
+                can_edit=bool(perms.get("can_edit", True)),
+                can_run=bool(perms.get("can_run", True)),
+                can_delete=bool(perms.get("can_delete", True)),
+                can_share=bool(perms.get("can_share", True)),
+            )
+        except Exception:
+            logger.debug("permission probe failed for worker %s", worker_id, exc_info=True)
+    # Fallback: stock/FS worker (no DB row) — the viewer who can see it is the
+    # de-facto owner on the single-owner engine.
+    is_owner = (not owner_id) or owner_id == user_id
+    shared = visibility == "workspace"
+    return AssetPermissions(
+        is_owner=is_owner,
+        can_view=is_owner or shared,
+        can_edit=is_owner,
+        can_run=is_owner or shared,
+        can_delete=is_owner,
+        can_share=is_owner,
+    )
+
+
+def _public_connection_labels(config: WorkerConfig) -> List[str]:
+    """Public, display-only tool/connection identifiers.
+
+    Composio connections are plain app slugs (safe). MCP connections expose only
+    their human LABEL — never the server url, env, command, args, or auth value,
+    which can carry internal infrastructure detail or credentials.
+    """
+    labels: List[str] = []
+    for connection in (config.connections or []):
+        if isinstance(connection, str):
+            slug = connection.strip()
+            if slug:
+                labels.append(slug)
+        else:
+            # WorkerConnection(mcp=WorkerMCPConnection(...)) — expose the human
+            # label only, never the url/env/command/auth.
+            mcp = getattr(connection, "mcp", None)
+            label = (getattr(mcp, "label", "") or "").strip() if mcp else ""
+            if label:
+                labels.append(label)
+    return labels
+
+
+def _public_worker_response(worker: Dict[str, Any], config: WorkerConfig) -> PublicWorker:
+    """Project a full worker dict + parsed config into the public allow-list.
+
+    NOTHING outside the ``PublicWorker`` field set leaves this function: no
+    secrets, no source files, no run history, no owner id, no webhook url, no
+    config internals (bundle paths, MCP urls/env). Inputs and outputs are
+    re-projected through ``PublicWorkerInput`` / ``PublicWorkerOutput`` so a
+    future sensitive field on ``WorkerInput`` is not auto-forwarded.
+    """
+    return PublicWorker(
+        id=str(worker.get("id") or config.id),
+        name=str(worker.get("name") or config.name),
+        description=worker.get("description"),
+        long_description=worker.get("long_description"),
+        use_cases=worker.get("use_cases"),
+        how_it_works=worker.get("how_it_works"),
+        is_example=worker.get("is_example"),
+        tags=worker.get("tags") or [],
+        example_input=worker.get("example_input"),
+        example_output=worker.get("example_output"),
+        trigger_type=str(worker.get("trigger_type") or "manual"),
+        runtime=(config.runtime.type if config.runtime else None),
+        connections=_public_connection_labels(config),
+        inputs=[
+            PublicWorkerInput(
+                name=inp.name,
+                label=inp.label,
+                type=inp.type,
+                required=inp.required,
+                description=inp.description,
+                options=inp.options,
+            )
+            for inp in (config.inputs or [])
+        ],
+        outputs=[
+            PublicWorkerOutput(name=out.name, label=out.label, type=out.type)
+            for out in (config.outputs or [])
+        ],
+    )
 
 
 def _build_worker_detail(
@@ -2731,10 +6316,9 @@ def _build_worker_detail(
     *,
     user_id: str,
     repos: Repositories,
+    role: Optional[str] = None,
 ) -> WorkerDetail:
-    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=user_id, repos=repos, role=role)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -2759,55 +6343,73 @@ def _build_worker_detail(
             runtime={"type": "python", "entrypoint": "run.py"},
         )
 
-    status = WorkerStatus(worker["status"])
-    if config and config.secrets:
-        available_secret_names = repos.secrets.list_names(user_id=user_id)
-        missing = [s for s in config.secrets if s not in available_secret_names]
-        if missing:
-            status = WorkerStatus.MISSING_SECRET
-    if (
-        status == WorkerStatus.HEALTHY
-        and recent_runs
-        and recent_runs[0].status == RunStatus.FAILED
-    ):
-        status = WorkerStatus.NEEDS_ATTENTION
+    # Resolve status via the SHARED resolver so DETAIL and LIST agree exactly
+    # for the same worker (full honesty ladder: missing-secret / failed-run /
+    # disabled / never-run, see _resolve_worker_status). The worker dict already
+    # carries `enabled` (same w.enabled column get_recipe reads), so no separate
+    # recipe fetch is needed.
+    available_secret_names = _available_secret_names_for_user(user_id, repos)
+    status = _resolve_worker_status(
+        worker,
+        config=config,
+        available_secret_names=available_secret_names,
+        last_run_status=recent_runs[0].status if recent_runs else None,
+        has_run=bool(recent_runs),
+    )
+    # `enabled` mirrors the same w.enabled column the resolver reads; stock /
+    # filesystem workers carry no enabled flag and are treated as enabled.
+    worker_enabled = bool(worker.get("enabled", True))
 
-    # Read all files from the worker directory for Code tab and edit page
     manifest_yaml: Optional[str] = None
     run_py: Optional[str] = None
     skill_md_content: Optional[str] = None
     run_py_content: Optional[str] = None
     worker_files: List[WorkerFile] = []
-    try:
-        from worker_registry import WORKERS_DIR
-        worker_dir = WORKERS_DIR / worker_id
-        yml_path = worker_dir / "worker.yml"
-        run_path = worker_dir / "run.py"
-        skill_path = worker_dir / "SKILL.md"
-        if yml_path.is_file():
-            manifest_yaml = yml_path.read_text()
-        elif worker.get("manifest"):
-            import yaml as pyyaml
-            manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
-        if run_path.is_file():
-            run_py = run_path.read_text()
-            run_py_content = run_py
-        if skill_path.is_file():
-            skill_md_content = skill_path.read_text()
-        worker_files = _read_worker_files(worker_dir)
-    except Exception:
-        pass
+    if _worker_source_visible_to_api(worker_id):
+        try:
+            worker_dir = _worker_bundle_dir(worker_id, config)
+            yml_path = worker_dir / "worker.yml"
+            run_path = worker_dir / "run.py"
+            skill_path = worker_dir / "SKILL.md"
+            if yml_path.is_file():
+                manifest_yaml = yml_path.read_text(encoding='utf-8')
+            elif worker.get("manifest"):
+                import yaml as pyyaml
+                manifest_yaml = pyyaml.safe_dump(worker["manifest"], sort_keys=False)
+            if run_path.is_file():
+                run_py = run_path.read_text(encoding='utf-8')
+                run_py_content = run_py
+            if skill_path.is_file():
+                skill_md_content = skill_path.read_text(encoding='utf-8')
+            worker_files = _read_worker_files(worker_dir)
+            if not worker_files:
+                worker_files = _worker_files_from_manifest(worker)
+        except Exception:
+            worker_files = _worker_files_from_manifest(worker)
 
     # Build webhook URL if this worker has a webhook trigger
     from webhook_service import build_webhook_url as _build_webhook_url
     webhook_url: Optional[str] = None
     if _worker_has_webhook_trigger(worker, config):
         try:
-            webhook_url = _build_webhook_url(worker["id"])
+            # Token derives from the worker's current rotatable secret (backfilled
+            # lazily if absent), so this always surfaces the working current URL.
+            webhook_url = _build_webhook_url(worker["id"], repos=repos)
         except Exception:
-            pass
+            logger.warning("Could not build webhook URL for %s", worker["id"], exc_info=True)
 
     triggers_spec = _build_triggers_spec(worker)
+
+    # P2 (2026-05-29): runtime.bundle_path carries the absolute host path
+    # (/root/workeros/workers/<id>) and is serialized into the public `config`.
+    # The UI never renders it, but the API exposed the deploy dir + storage
+    # layout. Relativise to the bundle BASENAME (the worker id) so the value
+    # stays self-consistent (worker_registry resolves it under WORKERS_DIR
+    # server-side) without disclosing the host path. `config` here is freshly
+    # constructed for this response only; mutating it does not affect any
+    # server-side bundle resolution (which reads from disk / a fresh config).
+    if config and config.runtime and config.runtime.bundle_path:
+        config.runtime.bundle_path = Path(config.runtime.bundle_path).name
 
     return WorkerDetail(
         id=worker["id"],
@@ -2819,6 +6421,9 @@ def _build_worker_detail(
         example_output=worker.get("example_output"),
         how_it_works=worker.get("how_it_works"),
         is_example=worker.get("is_example"),
+        archived=bool(worker.get("archived", False)),
+        enabled=worker_enabled,
+        archive_reason=_sanitize_operator_text(worker.get("archive_reason")),
         tags=worker.get("tags") or [],
         folder=worker.get("folder"),
         status=status,
@@ -2826,6 +6431,7 @@ def _build_worker_detail(
         runner=worker["runner"],
         config=config,
         recent_runs=recent_runs,
+        recent_stats=_get_stats_batch([worker_id], user_id=user_id, repos=repos).get(worker_id),
         manifest_yaml=manifest_yaml,
         run_py=run_py,
         skill_md_content=skill_md_content,
@@ -2833,7 +6439,382 @@ def _build_worker_detail(
         files=worker_files,
         webhook_url=webhook_url,
         triggers_spec=triggers_spec,
+        public_link=_worker_public_link(worker),
+        owner_id=worker.get("owner_id"),
+        visibility=str(worker.get("visibility") or "private"),
+        permissions=_worker_permissions(worker, user_id=user_id, repos=repos),
     )
+
+
+def _load_public_worker(worker_id: str, token: str, repos: Repositories) -> Dict[str, Any]:
+    """Resolve + authenticate a worker for a signed public share link.
+
+    Missing worker -> 404. Forged/missing token -> 401 (constant-time compare).
+    Returns the full worker dict (owner-scoped projection happens in the route).
+    """
+    try:
+        worker = repos.workers.get_any(worker_id=worker_id)
+    except Exception:
+        worker = None
+    if worker is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    expected = _worker_public_token(worker)
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid worker link")
+    return worker
+
+
+def _load_short_link_public_worker(short_id: str, repos: Repositories) -> Dict[str, Any]:
+    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,64}", short_id or ""):
+        raise HTTPException(status_code=404, detail="Short link not found")
+    _ensure_worker_short_links_table()
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT worker_id, owner_id
+            FROM worker_short_links
+            WHERE short_id = ?
+            LIMIT 1
+            """,
+            (short_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Short link not found")
+    worker = repos.workers.get_any(worker_id=str(row["worker_id"]))
+    if not worker or str(worker.get("owner_id") or "") != str(row["owner_id"]):
+        raise HTTPException(status_code=404, detail="Short link not found")
+    return worker
+
+
+@app.get("/workers/public/{worker_id}", response_model=PublicWorker)
+def get_public_worker(
+    worker_id: str,
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> PublicWorker:
+    """Return a read-only, allow-listed projection of a worker for a signed link.
+
+    Authenticated solely by the HMAC ``token`` (no app login). The response is
+    a strict ``PublicWorker`` allow-list — no secrets, source, run history,
+    owner id, or webhook url. See ``_public_worker_response``.
+    """
+    worker = _load_public_worker(worker_id, token, repos)
+    config_dict = worker.get("config", {})
+    try:
+        config = WorkerConfig(**config_dict)
+    except Exception:
+        config = WorkerConfig(
+            id=str(worker.get("id") or worker_id),
+            name=str(worker.get("name") or worker_id),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
+    return _public_worker_response(worker, config)
+
+
+@app.post("/workers/{worker_id}/short-link")
+def create_worker_short_link(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return _worker_short_link_response(worker)
+
+
+@app.get("/workers/short-links/{short_id}", response_model=PublicWorker)
+def resolve_worker_short_link(
+    short_id: str,
+    repos: Repositories = Depends(get_repos),
+) -> PublicWorker:
+    worker = _load_short_link_public_worker(short_id, repos)
+    try:
+        config = WorkerConfig(**(worker.get("config") or {}))
+    except Exception:
+        config = WorkerConfig(
+            id=str(worker.get("id") or short_id),
+            name=str(worker.get("name") or short_id),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
+    return _public_worker_response(worker, config)
+
+
+def _json_noindex(payload: Dict[str, Any], *, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(payload, status_code=status_code, headers=_public_noindex_headers())
+
+
+def _file_has_share_blocking_secret(rel: str, data: bytes) -> bool:
+    return bool(_scan_context_write(rel, data))
+
+
+def _assert_context_file_shareable(rel: str, target: Path) -> None:
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    try:
+        data = target.read_bytes()
+    except OSError:
+        raise HTTPException(status_code=404, detail="Context file not found")
+    if _file_has_share_blocking_secret(rel, data):
+        raise HTTPException(
+            status_code=409,
+            detail="Move detected secrets to the Secrets vault before sharing this file",
+        )
+
+
+def _assert_context_pack_shareable(name: str) -> None:
+    root = context_dir(name)
+    for path in iter_context_files(root):
+        rel = path.relative_to(root).as_posix()
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if _file_has_share_blocking_secret(rel, data):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Move detected secrets to the Secrets vault before sharing {rel}",
+            )
+
+
+def _public_file_entry(name: str, root: Path, path: Path, token: str | None = None) -> Dict[str, Any]:
+    rel = path.relative_to(root).as_posix()
+    meta = context_file_metadata(root, path, pack_metadata=load_context_metadata().get(name) or {})
+    raw = path.read_bytes()
+    mime_type = str(meta.get("mime_type") or guess_mime_type(rel))
+    binary = bool(meta.get("is_binary")) or is_binary_file(rel, mime_type)
+    content_text: str | None = None
+    if not binary and len(raw) <= PUBLIC_SHARE_TEXT_PREVIEW_LIMIT:
+        content_text = raw.decode("utf-8", errors="replace")
+    entry = {
+        "path": rel,
+        "size": int(meta.get("size") or len(raw)),
+        "mime_type": mime_type,
+        "display_type": meta.get("display_type") or "File",
+        "is_binary": binary,
+        "updated_at": meta.get("updated_at"),
+        "description": meta.get("description"),
+        "tags": meta.get("tags") or [],
+        "metadata": meta.get("metadata") or {},
+        "content_text": content_text,
+    }
+    if token:
+        entry["download_url"] = f"{_frontend_base_url()}/s/{urllib.parse.quote(token, safe='')}/download"
+    return entry
+
+
+def _public_brain_file_share(row: Dict[str, Any]) -> Dict[str, Any]:
+    owner_id = str(row.get("owner_id") or "")
+    name = str(row.get("entity_id") or "")
+    rel = str(row.get("file_path") or "")
+    token = str(row.get("token") or "")
+    with use_context_scope(context_scope_for_user(owner_id)):
+        safe_name = _context_name_or_400(name)
+        rel = _context_file_path_or_400(rel)
+        target = _safe_context_file_or_400(safe_name, rel)
+        _assert_context_file_shareable(rel, target)
+        root = context_dir(safe_name)
+        summary = _context_summary(safe_name, load_context_metadata(), user_id=owner_id)
+        file_entry = _public_file_entry(safe_name, root, target, token)
+    return {
+        "entity_type": "brain_file",
+        "title": Path(rel).name,
+        "description": f"{safe_name} / {rel}",
+        "pack": {
+            "name": summary.name,
+            "description": summary.description,
+            "file_count": summary.file_count,
+            "total_size_bytes": summary.total_size_bytes,
+        },
+        "file": file_entry,
+        "files": [file_entry],
+    }
+
+
+def _public_brain_pack_share(row: Dict[str, Any]) -> Dict[str, Any]:
+    owner_id = str(row.get("owner_id") or "")
+    name = str(row.get("entity_id") or "")
+    with use_context_scope(context_scope_for_user(owner_id)):
+        safe_name = _context_name_or_400(name)
+        _assert_context_pack_shareable(safe_name)
+        root = context_dir(safe_name)
+        if not root.is_dir():
+            raise HTTPException(status_code=404, detail="Brain pack not found")
+        metadata = load_context_metadata()
+        summary = _context_summary(safe_name, metadata, user_id=owner_id)
+        files = [
+            _public_file_entry(safe_name, root, path)
+            for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
+        ]
+    preview_file = next((f for f in files if f.get("content_text")), files[0] if files else None)
+    return {
+        "entity_type": "brain_pack",
+        "title": summary.name,
+        "description": summary.description or f"{summary.file_count} files",
+        "pack": {
+            "name": summary.name,
+            "description": summary.description,
+            "file_count": summary.file_count,
+            "total_size_bytes": summary.total_size_bytes,
+            "updated_at": summary.updated_at,
+        },
+        "file": preview_file,
+        "files": files,
+    }
+
+
+def _public_worker_share_from_worker(worker: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        config = WorkerConfig(**(worker.get("config") or {}))
+    except Exception:
+        config = WorkerConfig(
+            id=str(worker.get("id") or ""),
+            name=str(worker.get("name") or ""),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
+    public = _public_worker_response(worker, config).model_dump()
+    return {
+        "entity_type": "worker",
+        "title": public.get("name"),
+        "description": public.get("description") or public.get("long_description"),
+        "worker": public,
+        "files": [],
+    }
+
+
+def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
+    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
+        raise HTTPException(status_code=404, detail="Share link not found")
+    _ensure_standalone_share_links_table()
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT token, entity_type, entity_id, file_path, owner_id, created_at
+            FROM standalone_share_links
+            WHERE token = ?
+            LIMIT 1
+            """,
+            (token,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _standalone_share_payload(token: str, repos: Repositories) -> Dict[str, Any]:
+    row = _load_standalone_share_row(token)
+    if row:
+        entity_type = str(row.get("entity_type") or "")
+        if entity_type == "worker":
+            worker = repos.workers.get_any(worker_id=str(row.get("entity_id") or ""))
+            if not worker or str(worker.get("owner_id") or "") != str(row.get("owner_id") or ""):
+                raise HTTPException(status_code=404, detail="Share link not found")
+            return _public_worker_share_from_worker(worker)
+        if entity_type == "brain_file":
+            return _public_brain_file_share(row)
+        if entity_type == "brain_pack":
+            return _public_brain_pack_share(row)
+        raise HTTPException(status_code=404, detail="Share link not found")
+
+    # Backward compatibility for worker short links created before the unified
+    # share table existed.
+    worker = _load_short_link_public_worker(token, repos)
+    return _public_worker_share_from_worker(worker)
+
+
+@app.post("/workers/{worker_id}/share-link")
+def create_worker_share_link(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    perms = _worker_permissions(worker, user_id=auth.user_id, repos=repos)
+    if not perms.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this worker")
+    return _create_or_get_standalone_share_link(
+        entity_type="worker",
+        entity_id=str(worker["id"]),
+        owner_id=str(worker.get("owner_id") or auth.user_id),
+    )
+
+
+@app.post("/contexts/{name}/share-link")
+def create_brain_pack_share_link(
+    name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    summary = _context_summary(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+    if not summary.permissions.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this brain pack")
+    _assert_context_pack_shareable(safe_name)
+    return _create_or_get_standalone_share_link(
+        entity_type="brain_pack",
+        entity_id=safe_name,
+        owner_id=auth.user_id,
+    )
+
+
+@app.post("/contexts/{name}/files/{file_path:path}/share-link")
+def create_brain_file_share_link(
+    name: str,
+    file_path: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    summary = _context_summary(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+    if not summary.permissions.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this brain file")
+    rel = _context_file_path_or_400(file_path)
+    target = _safe_context_file_or_400(safe_name, rel)
+    _assert_context_file_shareable(rel, target)
+    return _create_or_get_standalone_share_link(
+        entity_type="brain_file",
+        entity_id=safe_name,
+        file_path=rel,
+        owner_id=auth.user_id,
+    )
+
+
+@app.get("/s/{token}/download")
+def download_standalone_share_file(
+    token: str,
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    row = _load_standalone_share_row(token)
+    if not row or row.get("entity_type") != "brain_file":
+        raise HTTPException(status_code=404, detail="Download not found")
+    owner_id = str(row.get("owner_id") or "")
+    safe_name = str(row.get("entity_id") or "")
+    rel = str(row.get("file_path") or "")
+    with use_context_scope(context_scope_for_user(owner_id)):
+        safe_name = _context_name_or_400(safe_name)
+        rel = _context_file_path_or_400(rel)
+        target = _safe_context_file_or_400(safe_name, rel)
+        _assert_context_file_shareable(rel, target)
+        mime_type = guess_mime_type(rel)
+        headers = {
+            **_public_noindex_headers(),
+            "Content-Disposition": f'attachment; filename="{_sanitize_download_name(Path(rel).name)}"',
+            "X-Content-Type-Options": "nosniff",
+        }
+        return FileResponse(target, media_type=mime_type, headers=headers)
+
+
+@app.get("/s/{token}")
+def get_standalone_share(
+    token: str,
+    repos: Repositories = Depends(get_repos),
+) -> JSONResponse:
+    return _json_noindex(_standalone_share_payload(token, repos))
 
 
 @app.get("/workers/{worker_id}", response_model=WorkerDetail)
@@ -2842,7 +6823,307 @@ def get_worker_detail(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
+    canonical_id = _canonical_worker_id(worker_id)
+    return _build_worker_detail(
+        canonical_id,
+        user_id=_worker_access_user_id(auth),
+        repos=repos,
+        role=auth.role,
+    )
+
+
+@app.put("/workers/{worker_id}/visibility", response_model=WorkerDetail)
+def set_worker_visibility(
+    worker_id: str,
+    payload: WorkerVisibilityUpdate,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """Set a worker's visibility (Private <-> Shared with workspace).
+
+    Owner/admin only. The AssetAccessRepository enforces ``can_share`` and the
+    enum; a non-owner without share rights gets 403. On the OSS single-owner
+    engine the local user owns their workers, so this always succeeds for them
+    and is a no-op-shaped toggle for the one-member workspace. 404 for an
+    invisible/unknown worker (never reveals another owner's private worker).
+    """
+    _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    asset_access = getattr(repos, "asset_access", None)
+    if asset_access is None:
+        raise HTTPException(status_code=501, detail="Visibility control not available")
+
+    owner_id = worker.get("owner_id")
+    if not owner_id:
+        # Stock/filesystem worker with no DB row — not an editable asset.
+        raise HTTPException(
+            status_code=409,
+            detail="This worker is read-only and its visibility cannot be changed.",
+        )
+
+    try:
+        result = asset_access.set_visibility(
+            workspace_id=str(worker.get("workspace_id") or "local-default"),
+            actor_id=auth.user_id,
+            asset_type="worker",
+            asset_id=worker_id,
+            visibility=payload.visibility,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+def _set_db_manifest_archived(
+    worker_id: str,
+    *,
+    archived: bool,
+    user_id: str,
+    repos: Repositories,
+) -> None:
+    """Mirror a worker's archived flag into its DB manifest (skill_versions.manifest_json).
+
+    The API resolves ``archived`` from the DB manifest (via ``repos.workers.get``),
+    not from worker.yml on disk. Archive/restore write worker.yml for restart
+    durability, so the DB copy must be updated in lockstep or the detail response,
+    the Archived list view, and the Restore button all read stale state.
+
+    No-op (and non-fatal) for filesystem-only workers that have no DB row — those
+    are served from disk via ``discover_workers`` after cache invalidation.
+    """
+    try:
+        db_worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
+    except sqlite3.OperationalError:
+        db_worker = None
+    if db_worker is None:
+        return
+    manifest = dict(db_worker.get("manifest") or {})
+    if archived:
+        manifest["archived"] = True
+    else:
+        # Restore: drop the flag entirely so it defaults to false, matching the
+        # worker.yml write which removes/clears archived + archive_reason.
+        manifest.pop("archived", None)
+        manifest.pop("archive_reason", None)
+    repos.workers.update(user_id=user_id, worker_id=worker_id, manifest_json=manifest)
+
+
+@app.post("/workers/{worker_id}/restore", response_model=WorkerDetail)
+def restore_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """Restore an archived worker (set archived: false in worker.yml).
+
+    Writes back to the bundle file so the change survives server restarts.
+    Invalidates the worker cache so the worker reappears in the default list.
+    """
+    from worker_registry import WORKERS_DIR as _WORKERS_DIR
+    import re as _re
+
+    worker_id = _canonical_worker_id(worker_id)
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
+    if not worker_yml_path.exists():
+        raise HTTPException(status_code=404, detail="Worker not found")
+    try:
+        raw_yml = worker_yml_path.read_text(encoding='utf-8')
+        # Remove or set archived to false. Match both `archived: true` and `archived:true`.
+        updated = _re.sub(r"(?m)^(archived:\s*)true\s*$", r"\1false\n", raw_yml)
+        if updated == raw_yml:
+            # Field may be missing — just remove it (defaults to false)
+            updated = raw_yml  # already not archived
+        # Also remove archive_reason line when restoring
+        updated = _re.sub(r"(?m)^archive_reason:.*\n?", "", updated)
+        worker_yml_path.write_text(updated, encoding='utf-8')
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
+    # Mirror the cleared archived flag into the DB manifest (see archive_worker:
+    # the API reads `archived` from the DB, not disk).
+    _set_db_manifest_archived(worker_id, archived=False, user_id=auth.user_id, repos=repos)
+    invalidate_worker_cache()
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+@app.post("/workers/{worker_id}/archive", response_model=WorkerDetail)
+def archive_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """Archive a worker (set archived: true in worker.yml).
+
+    Reversible counterpart to /restore. Writes back to the bundle file so the
+    change survives server restarts, and invalidates the worker cache so the
+    worker drops out of the default list (it stays reachable under the Archived
+    view + by direct link, where Restore is offered).
+    """
+    from worker_registry import WORKERS_DIR as _WORKERS_DIR
+    import re as _re
+
+    worker_id = _canonical_worker_id(worker_id)
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
+    if not worker_yml_path.exists():
+        raise HTTPException(status_code=404, detail="Worker not found")
+    try:
+        raw_yml = worker_yml_path.read_text(encoding='utf-8')
+        # Flip an existing `archived: false` to true; otherwise append the field.
+        # Match both `archived: true` and `archived:true` spacing, same as restore.
+        updated, n = _re.subn(r"(?m)^(archived:\s*)false\s*$", r"\1true\n", raw_yml)
+        if n == 0 and not _re.search(r"(?m)^archived:\s*true\s*$", raw_yml):
+            # Field missing entirely — append it (default was false).
+            if not updated.endswith("\n"):
+                updated += "\n"
+            updated += "archived: true\n"
+        worker_yml_path.write_text(updated, encoding='utf-8')
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
+    # Persist the archived flag to the DB manifest too. The API reads `archived`
+    # from skill_versions.manifest_json (via repos.workers.get), NOT from disk —
+    # writing worker.yml alone left the detail response, the Archived view, and
+    # the Restore button stale (archived:false) for DB-tracked workers, because
+    # invalidate_worker_cache() only clears the filesystem discovery cache.
+    _set_db_manifest_archived(worker_id, archived=True, user_id=auth.user_id, repos=repos)
+    invalidate_worker_cache()
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+class _WorkerSuggestion(BaseModel):
+    field: str
+    current: str
+    suggested: str
+    reason: str
+
+class _WorkerSuggestResponse(BaseModel):
+    has_conflicts: bool
+    suggestions: list[_WorkerSuggestion]
+
+class _WorkerSuggestRequest(BaseModel):
+    new_description: str
+
+@app.post("/workers/{worker_id}/suggest", response_model=_WorkerSuggestResponse)
+async def suggest_worker_updates(
+    worker_id: str,
+    payload: _WorkerSuggestRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _WorkerSuggestResponse:
+    """Compare a new description against the current worker config and surface conflicts.
+
+    Makes a single focused OpenAI call. Returns structured suggestions so the UI
+    can show a conflict-resolution modal before the user saves.
+    """
+    import json as _json
+    import os as _os
+    from openai import OpenAI as _OpenAI
+    from worker_registry import WORKERS_DIR as _WORKERS_DIR
+
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
+    current_yml = worker_yml_path.read_text(encoding="utf-8") if worker_yml_path.exists() else (
+        getattr(worker, "manifest_yaml", "") or ""
+    )
+
+    api_key = _os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return _WorkerSuggestResponse(has_conflicts=False, suggestions=[])
+
+    prompt = (
+        "You are reviewing a Workeros worker configuration for consistency with a new description.\n\n"
+        f"New description from user:\n{payload.new_description}\n\n"
+        f"Current worker.yml:\n{current_yml}\n\n"
+        "Identify ONLY real conflicts between the new description and the existing config.\n"
+        "Focus on: trigger schedule/type, required inputs, connections, and secrets.\n"
+        "Ignore stylistic or wording differences — only flag functional mismatches.\n"
+        "If the description does not clearly imply a change, do NOT flag a conflict.\n\n"
+        'Return JSON: {"has_conflicts": bool, "suggestions": [{"field": str, "current": str, "suggested": str, "reason": str}]}\n'
+        'If no conflicts: {"has_conflicts": false, "suggestions": []}'
+    )
+
+    try:
+        client = _OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0,
+            max_tokens=512,
+        )
+        raw = response.choices[0].message.content or "{}"
+        result = _json.loads(raw)
+        return _WorkerSuggestResponse(
+            has_conflicts=bool(result.get("has_conflicts", False)),
+            suggestions=[_WorkerSuggestion(**s) for s in result.get("suggestions", [])],
+        )
+    except Exception as exc:
+        logger.warning("suggest_worker_updates LLM call failed: %s", exc)
+        return _WorkerSuggestResponse(has_conflicts=False, suggestions=[])
+
+
+@app.get("/workers/{worker_id}/sample-input")
+def get_worker_sample_input(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Any:
+    """Return the sample input JSON for a worker.
+
+    Resolution order (consistent for ALL workers, not just stock ones):
+      1. A static docs/workers/inputs/<worker_id>.json file, if present (stock
+         workers ship curated samples there).
+      2. The worker's own ``example_input`` from its manifest (every generated /
+         user worker has this — it's what the UI prefills with).
+    Returns 404 only when the worker has no sample input from EITHER source, so
+    an API consumer gets the same answer the UI shows instead of a spurious 404
+    on generated workers (the manifest example_input was always available).
+    """
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+
+    safe_id = worker_id.replace("..", "").replace("/", "").replace("\\", "")
+    # Walk from WORKERS_DIR up one level to the repo root, then into docs/workers/inputs/
+    sample_path = WORKERS_DIR.parent / "docs" / "workers" / "inputs" / f"{safe_id}.json"
+    if sample_path.is_file():
+        try:
+            return json.loads(sample_path.read_text(encoding='utf-8'))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to parse sample input: {exc}") from exc
+
+    # Fall back to the worker's manifest example_input (consistent with the UI,
+    # which prefers example_input and only used this endpoint as a fallback).
+    example_input = (worker.get("manifest") or {}).get("example_input")
+    if example_input is None:
+        example_input = worker.get("example_input")
+    if example_input is not None:
+        return example_input
+
+    raise HTTPException(status_code=404, detail=f"No sample input found for worker {worker_id!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -2853,6 +7134,7 @@ def get_worker_detail(
 def update_worker(
     worker_id: str,
     payload: WorkerUpdateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -2862,33 +7144,27 @@ def update_worker(
     secret once in the response (new_webhook_secret field) — it is never
     stored in plaintext.
     """
+    _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
-    # Validate cron expression if provided
+    # Validate cron expression if provided. Shares the exact same validator
+    # the create path (WorkerTrigger/WorkerContractTrigger) uses — single
+    # source of truth in cron_utils.is_valid_cron_expr.
     new_cron_expr = payload.cron_expr
     if new_cron_expr is not None:
-        try:
-            from scheduler import compute_next_run_at
-            from datetime import datetime, timezone
-            test_dt = datetime.now(timezone.utc)
-            if compute_next_run_at(new_cron_expr, test_dt) is None:
-                raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
-        except ImportError:
-            # croniter not available — try basic validation via regex
-            # Standard cron has 5 space-separated fields
-            import re as _re
-            if not _re.fullmatch(r"[\d\*\-\,\/]+(?: [\d\*\-\,\/]+){4}", new_cron_expr.strip()):
-                raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
+        from cron_utils import is_valid_cron_expr
+        if not is_valid_cron_expr(new_cron_expr):
+            raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
 
     updates: Dict[str, Any] = {}
 
     if payload.trigger_type is not None:
-        updates["trigger_type"] = payload.trigger_type
+        # "cron" is an accepted alias for "schedule"
+        updates["trigger_type"] = "schedule" if payload.trigger_type == "cron" else payload.trigger_type
 
     if new_cron_expr is not None:
         updates["cron_expr"] = new_cron_expr
@@ -2934,22 +7210,45 @@ def update_worker(
         or payload.cron_timezone is not None
     )
     if trigger_changed:
+        base_trigger = (worker.get("config") or {}).get("trigger") or {}
+        effective_type = (
+            payload.trigger_type
+            or worker.get("trigger_type")
+            or base_trigger.get("type")
+            or "manual"
+        )
+        effective_type = "schedule" if effective_type == "cron" else effective_type
+        effective_cron = (
+            new_cron_expr
+            if new_cron_expr is not None
+            else (worker.get("cron_expr") or base_trigger.get("cron"))
+        )
+        effective_tz = (
+            payload.cron_timezone
+            if payload.cron_timezone is not None
+            else (worker.get("cron_timezone") or base_trigger.get("timezone") or "UTC")
+        )
+        declared_trigger: Dict[str, Any] = {"type": effective_type}
+        if effective_type == "schedule":
+            declared_trigger["cron"] = effective_cron or "0 9 * * *"
+            declared_trigger["timezone"] = effective_tz or "UTC"
+        declared_triggers = [declared_trigger]
+        repos.workers.update(
+            user_id=auth.user_id,
+            worker_id=worker_id,
+            triggers_json=declared_triggers,
+        )
+        repos.workers.reconcile_triggers(
+            worker_id=worker_id,
+            triggers=declared_triggers,
+            enabled=bool(worker.get("enabled", True)),
+        )
+
         from worker_registry import WORKERS_DIR
         worker_yml_path = WORKERS_DIR / worker_id / "worker.yml"
         if worker_yml_path.exists():
             try:
-                existing_yml = worker_yml_path.read_text()
-                # Build the updated trigger block from DB state so the single
-                # source of truth (DB) is serialised back to disk.
-                effective_type = payload.trigger_type or (
-                    worker.get("config", {}).get("trigger", {}).get("type", "manual")
-                )
-                effective_cron = new_cron_expr or (
-                    worker.get("config", {}).get("trigger", {}).get("cron")
-                )
-                effective_tz = payload.cron_timezone or (
-                    worker.get("config", {}).get("trigger", {}).get("timezone", "UTC")
-                )
+                existing_yml = worker_yml_path.read_text(encoding='utf-8')
                 trigger_lines = [f"trigger:", f"  type: {effective_type}"]
                 if effective_type == "schedule":
                     cron_val = effective_cron or "0 9 * * *"
@@ -2976,7 +7275,7 @@ def update_worker(
                 else:
                     # No trigger block found — append
                     updated_yml = existing_yml.rstrip("\n") + "\n\n" + new_trigger_yaml + "\n"
-                worker_yml_path.write_text(updated_yml)
+                worker_yml_path.write_text(updated_yml, encoding='utf-8')
                 logger.info(
                     "PATCH %s: wrote trigger changes to worker.yml on disk (type=%s, cron=%s)",
                     worker_id,
@@ -2994,6 +7293,43 @@ def update_worker(
     detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
     if new_raw_secret is not None:
         detail.new_webhook_secret = new_raw_secret
+
+    # Snapshot metadata changes for versioning (fire-and-forget)
+    if updates:
+        try:
+            import json as _json
+            from worker_registry import WORKERS_DIR
+            files_snapshot = []
+            worker_dir = WORKERS_DIR / worker_id
+            if worker_dir.is_dir():
+                for fp in sorted(worker_dir.rglob("*")):
+                    if not fp.is_file():
+                        continue
+                    try:
+                        rel = fp.relative_to(worker_dir).as_posix()
+                    except ValueError:
+                        continue
+                    if _should_ignore_worker_file(rel):
+                        continue
+                    try:
+                        files_snapshot.append({"path": rel, "content": fp.read_text(encoding="utf-8")})
+                    except Exception:
+                        pass
+            snapshot = {
+                "worker": repos.workers.get(user_id=auth.user_id, worker_id=worker_id),
+                "files": files_snapshot,
+            }
+            repos.versions.create(
+                asset_type="worker",
+                asset_id=worker_id,
+                user_id=auth.user_id,
+                snapshot_json=_json.dumps(snapshot),
+                change_source="user",
+            )
+            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
+        except Exception as _ver_exc:
+            logger.warning("version snapshot on PATCH failed for %s: %s", worker_id, _ver_exc)
+
     return detail
 
 
@@ -3001,23 +7337,19 @@ def update_worker(
 # DELETE /workers/{worker_id}
 # ---------------------------------------------------------------------------
 
-@app.delete("/workers/{worker_id}", status_code=204)
-def delete_worker(
-    worker_id: str,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-):
-    """Delete a worker and all dependent rows (runs, artifacts, logs).
-
-    - Dependent run, artifact, log, and webhook rows are removed with the worker.
-    - Cancels any in-progress run gracefully (marks failed).
-    - Cleans up webhook secret.
-    - Removes scheduler slot (next_run_at cleared before delete).
-    - skill_version is preserved if other workers share it.
-    """
+def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> None:
+    """Core delete-worker logic, shared by the DELETE endpoint and approval execution."""
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
-    worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_id)
+    worker = repos.workers.get(user_id=owner_id, worker_id=worker_id)
     if not worker:
+        from worker_registry import WORKERS_DIR
+        bundle_dir = WORKERS_DIR / worker_id
+        if bundle_dir.is_dir():
+            shutil.rmtree(bundle_dir, ignore_errors=True)
+            invalidate_worker_cache()
+            logger.info("Removed orphaned worker bundle dir %s", bundle_dir)
+            return
         raise HTTPException(status_code=404, detail="Worker not found")
     skill_version_id = worker.get("skill_version_id")
     config = get_worker_config_for_run(worker_id)
@@ -3038,7 +7370,7 @@ def delete_worker(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Cancel any in-progress runs gracefully before deletion
-    active_runs = repos.workers.list_active_run_ids(user_id=auth.user_id, worker_id=worker_id)
+    active_runs = repos.workers.list_active_run_ids(user_id=owner_id, worker_id=worker_id)
 
     for run_id in active_runs:
         try:
@@ -3046,7 +7378,7 @@ def delete_worker(
                 run_id,
                 RunStatus.FAILED.value,
                 error="Worker deleted",
-                user_id=auth.user_id,
+                user_id=owner_id,
                 repos=repos,
             )
             logger.info("Cancelled active run %s before worker deletion", run_id)
@@ -3061,11 +7393,16 @@ def delete_worker(
         logger.warning("Could not delete webhook secret for %s: %s", worker_id, exc)
 
     # Delete the worker (FK CASCADE removes runs/artifacts/logs/webhooks)
-    repos.workers.delete(user_id=auth.user_id, worker_id=worker_id)
+    repos.workers.delete(user_id=owner_id, worker_id=worker_id)
+
+    # Prune the worker's version snapshots so they don't orphan in asset_versions
+    # (the keep-20 cap never fires once the worker is gone) — 2026-06-02 P2.
+    try:
+        repos.versions.delete_for_asset(asset_type="worker", asset_id=worker_id)
+    except Exception as exc:
+        logger.warning("Could not prune asset_versions for worker %s: %s", worker_id, exc)
 
     # Check if skill_version is still referenced by other workers; preserve if so.
-    # If unreferenced, also delete the skill_versions row so name+version can
-    # be reused when the user recreates a worker with the same ID (N5 fix).
     ref_count = repos.workers.get_skill_version_ref_count(skill_version_id=skill_version_id)
     if ref_count == 0 and skill_version_id:
         repos.workers.delete_skill_version(skill_version_id=skill_version_id)
@@ -3076,7 +7413,6 @@ def delete_worker(
     bundle_dir = WORKERS_DIR / worker_id
     if ref_count == 0 and bundle_dir.is_dir():
         try:
-            import shutil
             shutil.rmtree(bundle_dir)
             logger.info("Removed bundle dir %s", bundle_dir)
         except Exception as exc:
@@ -3085,6 +7421,25 @@ def delete_worker(
         logger.info("skill_version %s still referenced by %d workers, bundle preserved", skill_version_id, ref_count)
 
     invalidate_worker_cache()
+
+
+@app.delete("/workers/{worker_id}", status_code=204)
+def delete_worker(
+    worker_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Delete a worker and all dependent rows (runs, artifacts, logs).
+
+    - Dependent run, artifact, log, and webhook rows are removed with the worker.
+    - Cancels any in-progress run gracefully (marks failed).
+    - Cleans up webhook secret.
+    - Removes scheduler slot (next_run_at cleared before delete).
+    - skill_version is preserved if other workers share it.
+    """
+    _require_worker_write_workspace_context(request)
+    _delete_worker_impl(worker_id, auth.user_id, repos)
     # 204 No Content — FastAPI returns empty body automatically for status_code=204
     return None
 
@@ -3094,6 +7449,8 @@ def delete_worker(
 # ---------------------------------------------------------------------------
 
 class WorkerCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worker_yml: str
     run_py: str
     skill_md: Optional[str] = None
@@ -3235,16 +7592,22 @@ files:
       type: manual
   run.py: |
     import json, csv, io, os
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(".env.local")
-    except ImportError:
-        pass
-    inputs = json.load(open("inputs.json"))
-    # process inputs["csv_data"] ...
-    json.dump({"status": "completed", "outputs": {}, "artifacts": []}, open("result.json", "w"))
+    from pathlib import Path
+    inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+    csv_path = inputs["csv_data"]            # FILE input -> value IS the path
+    rows = list(csv.reader(open(csv_path, encoding="utf-8")))
+    # ...enrich rows...
+    os.makedirs("out", exist_ok=True)
+    out_path = "out/result.csv"
+    with open(out_path, "w", newline="", encoding="utf-8") as fh:
+        csv.writer(fh).writerows(rows)
+    Path("result.json").write_text(json.dumps({
+        "status": "success",
+        "outputs": {"result": out_path},
+        "artifacts": [{"name": out_path, "relative_path": out_path, "type": "text/csv"}],
+    }, encoding='utf-8'), encoding="utf-8")
   requirements.txt: |
-    python-dotenv>=1.0.0
+    # stdlib only — no third-party deps needed
 
 Example C (script that calls an LLM):
 files:
@@ -3280,11 +7643,7 @@ files:
     Input: meeting transcript. Output JSON: {"summary": str, "action_items": [str]}.
   run.py: |
     import json, os
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(".env.local")
-    except ImportError:
-        pass
+    from pathlib import Path
     from agent import run as run_agent
     from lib.granola_client import fetch_recent_meetings
     from lib.hubspot_client import create_note
@@ -3351,8 +7710,55 @@ Respond with ONLY valid JSON (no markdown fences). The `files` array is mandator
   "required_connections": ["<oauth-app-slugs>"],
   "required_secrets": ["<UPPER_SNAKE_CASE_API_KEY>"],
   "inputs": [{"name": "field_name", "type": "string", "label": "Human label", "required": false, "default": null}],
-  "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}]
+  "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}],
+  "sample_input_json": "<JSON object string with a realistic value for EVERY input>"
 }
+
+=== SAMPLE INPUT RULE (so the worker is one-click runnable) ===
+- ALWAYS return `sample_input_json`: a JSON object string with one realistic
+  value for EVERY input the worker declares, scalar AND file.
+- For a FILE input, the value MUST be the file's INLINE TEXT CONTENT as a string
+  (e.g. a small CSV "name\\nalice\\nbob\\n"), NEVER a path or placeholder. The
+  platform turns it into a real uploaded file so the operator can run the worker
+  immediately with no manual upload.
+
+=== RUN.PY CONTRACT (script mode — these EXACT mistakes crash generated workers) ===
+When you emit run.py, follow this contract EXACTLY:
+- Read inputs: `inputs = json.loads(Path("inputs.json").read_text(encoding='utf-8'))`. A SCALAR
+  input is the literal value inline (use it directly, never open() it). A FILE
+  input's value IS already the relative path (e.g. "inputs/csv_file") — open() it
+  directly; NEVER os.path.join("inputs", value) (double-prepend is a top crash).
+- Use ONLY the Python standard library unless you ALSO list the package in
+  requirements.txt. NEVER `import dotenv` / `from dotenv import ...` (NOT installed
+  -> ModuleNotFoundError). Read secrets from os.environ with a secrets.json fallback.
+- import EVERY module you reference (os, json, csv, io, re, statistics, ...).
+- OUTPUT CONTRACT (scalar vs file): a SCALAR output -> outputs[name] is the LITERAL
+  VALUE (string/number), NEVER a path, no out/ file, no artifact (e.g.
+  outputs={"reversed":"olleh"}). A FILE output -> write under out/ (mkdir it) and
+  put the relative path in outputs[name] + one artifacts[] entry.
+- IMPLEMENT EVERY declared output FULLY: if the prompt asks for several results
+  (words AND sentences AND average length), compute ALL of them — never return
+  only the first.
+- Write result.json to the WORKING DIRECTORY ("result.json", NOT "out/result.json")
+  on BOTH success and error: {"status":"success"|"error","outputs":{...},
+  "artifacts":[{"name","relative_path","type"}],"error":<msg-on-error>}.
+- End with `if __name__ == "__main__": main()`.
+
+Worked run.py examples (copy the matching shape):
+  # reverse a string (scalar in -> scalar out):
+  #   import json; from pathlib import Path
+  #   inputs = json.loads(Path("inputs.json").read_text(encoding='utf-8'))
+  #   Path("result.json").write_text(json.dumps({"status":"success",
+  #     "outputs":{"reversed": str(inputs["text"], encoding='utf-8')[::-1]}, "artifacts":[], "error":None}))
+  # word+char+sentence count (scalar in -> json file out, ALL three computed):
+  #   import json, re, os; from pathlib import Path
+  #   t = str(json.loads(Path("inputs.json").read_text(encoding='utf-8')).get("text") or "")
+  #   c = {"words":len(t.split()),"chars":len(t),
+  #        "sentences":len([s for s in re.split(r"[.!?]+",t) if s.strip()])}
+  #   os.makedirs("out",exist_ok=True); Path("out/counts.json").write_text(json.dumps(c), encoding='utf-8')
+  #   Path("result.json").write_text(json.dumps({"status":"success",
+  #     "outputs":{"counts":"out/counts.json"},
+  #     "artifacts":[{"name":"out/counts.json","relative_path":"out/counts.json","type":"application/json"}],"error":None}), encoding='utf-8')
 
 Only include files that are needed. Omit run.py for agent-only (A), omit SKILL.md for pure-script (B).
 The `requirements` array is the authoritative source. `required_connections` = oauth slugs only. `required_secrets` = API_KEY names only."""
@@ -3557,14 +7963,16 @@ def _call_draft_llm(
         system_prompt = f"{system_prompt}\n\n{extra_system_instructions}"
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        from codegen_model import chat_completion_codegen
+
+        response = chat_completion_codegen(
+            client,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
             temperature=0.2,
-            max_tokens=3000,
+            max_output_tokens=8000,
             response_format={"type": "json_object"},
         )
     except Exception as exc:
@@ -3904,23 +8312,78 @@ class DraftAndCreateRequest(BaseModel):
 
 class DraftAndCreateResponse(BaseModel):
     worker_id: str
+    # FIX 4 (2026-05-29): both creation paths run the smoke+repair safety net.
+    # smoke_status: "passed" | "failed" | "skipped" | None. When "failed" the
+    # worker is created but DISABLED (stays editable) — surface the reason so
+    # the caller does not present it as a clean, ready worker.
+    smoke_status: Optional[str] = None
+    smoke_reason: Optional[str] = None
 
 
-def _free_worker_id(base_id: str) -> str:
-    """Return a worker id that does not collide with an existing worker dir.
+def _slugify_worker_id(value: str) -> str:
+    """Coerce an arbitrary id into a SLUG_PATTERN-valid slug.
+
+    ``SLUG_PATTERN`` (``^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$``) forbids
+    underscores, uppercase, leading/trailing hyphens, and ids shorter than 3
+    chars. The 8 stock workers are underscore-named (``weekly_update`` etc.), so
+    a clone base of ``weekly_update-copy`` is NOT a valid slug and would be
+    rejected at registration with HTTP 400. Lowercase, replace every invalid
+    character with a hyphen, collapse runs of hyphens, and strip leading/trailing
+    hyphens so the result always matches SLUG_PATTERN (e.g. ``weekly_update`` ->
+    ``weekly-update``). A too-short result is padded so the min-length rule holds.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    if len(slug) < 3:
+        slug = (slug + "-worker").strip("-")
+    return slug
+
+
+def _free_worker_id(base_id: str, repos: "Repositories | None" = None) -> str:
+    """Return a worker id that does not collide with an existing worker.
 
     The LLM author frequently returns the same suggested id (e.g.
     "applicant-followup") regardless of prompt, which made every second
     draft-and-create 409 (#186). Instead of failing, derive a free id by
     appending ``-2``, ``-3``, ... and finally a short random suffix so the
     create always succeeds. Protected stock ids are never reused.
+
+    #54 (follow-up to #200): in a multi-tenant deploy (workeros-cloud) the
+    canonical worker store is the DB, not the request's ephemeral filesystem
+    view, and the worker id is a GLOBAL primary key (``id TEXT PRIMARY KEY``
+    on the ``workers`` table — not a ``(owner_id, id)`` composite). A collision
+    can therefore come from a DB row in a DIFFERENT workspace that is not on
+    this request's filesystem. Checking only the filesystem let the dedupe
+    return an id that then collided on insert (or whose workspace-scoped
+    post-insert ``get`` returned None), producing a hard 409
+    "failed to upsert <id>".
+
+    The repository ``get_any`` is an UNSCOPED, global existence check (by ``id``
+    only). Consulting it in addition to the filesystem makes the dedupe correct
+    for the global id namespace in both modes: in local OSS mode ``repos`` is
+    the SQLite repo (and the filesystem is the source of truth anyway); in
+    cloud mode ``repos`` is the Supabase repo and is the source of truth.
     """
     from worker_registry import WORKERS_DIR
 
     def _is_free(candidate: str) -> bool:
         if candidate in PROTECTED_STOCK_WORKER_IDS:
             return False
-        return not (WORKERS_DIR / candidate).exists()
+        if (WORKERS_DIR / candidate).exists():
+            return False
+        if repos is not None:
+            try:
+                if repos.workers.get_any(worker_id=candidate) is not None:
+                    return False
+            except Exception:
+                # A repo lookup failure must never make dedupe falsely report
+                # an id as free; fall back to filesystem-only for this check.
+                logger.warning(
+                    "repos.workers.get_any failed during dedupe for %r; "
+                    "falling back to filesystem-only availability",
+                    candidate,
+                    exc_info=True,
+                )
+        return True
 
     if _is_free(base_id):
         return base_id
@@ -3956,6 +8419,292 @@ def _rewrite_worker_yml_id(worker_yml: str, new_id: str) -> str:
     return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
 
 
+def _set_worker_yml_is_example(worker_yml: str, is_example: bool) -> str:
+    """Set the manifest ``is_example`` flag (used when forking a stock worker).
+
+    A clone-on-edit copy is a user-owned working worker, not a stock example,
+    so its manifest must carry ``is_example: false`` instead of inheriting the
+    stock source's ``is_example: true``.
+    """
+    import yaml as pyyaml
+
+    raw = pyyaml.safe_load(worker_yml)
+    if not isinstance(raw, dict):
+        return worker_yml
+    raw["is_example"] = is_example
+    return pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False)
+
+
+def _worker_record_from_worker_yml(worker_id: str, worker_yml: str) -> Dict[str, Any]:
+    import yaml as pyyaml
+    from models import (
+        WorkerContract,
+        parse_worker_manifest,
+        worker_config_to_worker_contract,
+        worker_contract_to_worker_config,
+    )
+
+    raw = pyyaml.safe_load(worker_yml)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
+    parsed = parse_worker_manifest(raw)
+    if isinstance(parsed, WorkerContract):
+        contract = parsed
+        config = worker_contract_to_worker_config(contract, worker_id)
+    else:
+        config = parsed
+        contract = worker_config_to_worker_contract(config)
+    return {
+        "id": worker_id,
+        "name": config.name,
+        "description": config.description,
+        "long_description": contract.long_description,
+        "use_cases": contract.use_cases,
+        "example_input": contract.example_input,
+        "example_output": contract.example_output,
+        "how_it_works": contract.how_it_works,
+        "is_example": contract.is_example,
+        "archived": contract.archived,
+        "archive_reason": contract.archive_reason,
+        "tags": contract.tags or [],
+        "folder": contract.folder,
+        "config": config.model_dump(),
+        "manifest": contract.model_dump(mode="json", exclude_none=True),
+        "status": "healthy",
+        "trigger_type": config.trigger.type,
+        "runner": config.runtime.runner,
+    }
+
+
+def _raw_worker_id_from_worker_yml(worker_yml: str) -> str:
+    import yaml as pyyaml
+
+    try:
+        raw = pyyaml.safe_load(worker_yml)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
+    return str(raw.get("id") or raw.get("name") or "").strip()
+
+
+def _write_worker_bundle_files(
+    target_dir: Path,
+    *,
+    worker_yml: str,
+    run_py: str,
+    skill_md: Optional[str],
+    config: WorkerConfig,
+) -> None:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "worker.yml").write_text(worker_yml, encoding="utf-8")
+    (target_dir / "run.py").write_text(run_py, encoding="utf-8")
+    (target_dir / "requirements.txt").write_text("", encoding="utf-8")
+    if skill_md:
+        (target_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+    else:
+        (target_dir / "SKILL.md").write_text(
+            f"# {config.name}\n\n"
+            "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
+            "Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+            encoding="utf-8",
+        )
+
+
+def _cleanup_worker_create_state(
+    *,
+    worker_id: str,
+    user_id: str,
+    repos: Repositories,
+    staging_dir: Optional[Path] = None,
+    target_dir: Optional[Path] = None,
+    skill_version_id: Optional[str] = None,
+) -> None:
+    for path in (staging_dir, target_dir):
+        if path and path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+    try:
+        repos.workers.delete(user_id=user_id, worker_id=worker_id)
+    except Exception:
+        logger.debug("worker create cleanup repo delete failed for %s", worker_id, exc_info=True)
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM worker_triggers WHERE worker_id = ?", (worker_id,))
+            conn.execute("DELETE FROM workers WHERE id = ? AND owner_id = ?", (worker_id, user_id))
+            if skill_version_id:
+                conn.execute(
+                    """
+                    DELETE FROM skill_versions
+                    WHERE id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM workers WHERE skill_version_id = ?
+                      )
+                    """,
+                    (skill_version_id, skill_version_id),
+                )
+    except Exception:
+        logger.debug("worker create cleanup sqlite delete failed for %s", worker_id, exc_info=True)
+    invalidate_worker_cache()
+
+
+# Placeholder run.py for a script worker created without code (e.g. the
+# worker-author drafted a script-mode worker but returned no run_code, or a
+# .md upload). It MUST satisfy BOTH execution contracts:
+#   - E2B pure-script (the default runner): `python run.py` must WRITE
+#     result.json with {"status","outputs","artifacts"} or the run fails with
+#     error_code=missing_result (live-found 2026-05-29 — a runnable worker is
+#     part of the wedge gate).
+#   - Legacy local runner: a `run(inputs, context)` callable.
+_DEFAULT_RUN_PY_STUB = (
+    "import json\n"
+    "from pathlib import Path\n"
+    "from typing import Dict, Any\n\n\n"
+    "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
+    "    # Placeholder worker — edit run.py to do the real work.\n"
+    "    return {\"status\": \"success\", \"outputs\": {}, \"artifacts\": []}\n\n\n"
+    "if __name__ == \"__main__\":\n"
+    "    # E2B pure-script entry: write result.json so the run does not fail\n"
+    "    # with missing_result. Edit this to produce real outputs.\n"
+    "    Path(\"result.json\").write_text(\n"
+    "        json.dumps({\"status\": \"success\", \"outputs\": {}, \"artifacts\": []}),\n"
+    "        encoding='utf-8',\n"
+    "    )\n"
+)
+
+
+def _register_worker_from_files(
+    files: List[DraftFile],
+    *,
+    user_id: str | None,
+    repos: "Repositories | None" = None,
+    dedupe_id: bool = False,
+) -> str:
+    """Write a worker bundle (``files``) to disk and register it in the DB.
+
+    This is the single, shared registration path used by BOTH the
+    ``/workers/draft-and-create`` files branch AND the worker-author
+    post-completion hook (``run_service._register_authored_worker``) so the
+    prompt-to-worker flow yields a real, editable, runnable worker rather than
+    dead-ending on a drafted bundle.json.
+
+    ``files`` must include ``worker.yml``. ``run.py`` and ``requirements.txt``
+    are backfilled with safe defaults when absent (matching the upload flow).
+
+    When ``dedupe_id`` is True (the author hook), a colliding worker id is
+    rewritten to a free id instead of raising 409 — the worker-author LLM
+    frequently reuses a suggested id, and a generation must never fail just
+    because the slug is taken (#186 pattern).
+
+    Returns the registered ``worker_id``. Raises ``HTTPException`` on invalid
+    YAML / write failure / DB conflict so the existing endpoint behaviour is
+    unchanged.
+    """
+    from worker_registry import WORKERS_DIR
+
+    draft_files: List[DraftFile] = []
+    for f in files:
+        path = (f.path or "").strip()
+        parts = path.replace("\\", "/").split("/")
+        if any(p in ("", "..") for p in parts):
+            raise HTTPException(status_code=400, detail=f"Invalid path: {path!r}")
+        draft_files.append(f)
+
+    worker_yml_file = next((f for f in draft_files if f.path == "worker.yml"), None)
+    if not worker_yml_file:
+        raise HTTPException(status_code=400, detail="files must include worker.yml")
+
+    worker_id, _config = _parse_worker_payload(worker_yml_file.content, user_id=user_id)
+
+    # The author hook can collide on a reused suggested id; allocate a free id
+    # and rewrite the manifest identity so dir + worker.yml + DB row all agree.
+    if dedupe_id:
+        free_id = _free_worker_id(worker_id, repos=repos)
+        if free_id != worker_id:
+            new_yml = _rewrite_worker_yml_id(worker_yml_file.content, free_id)
+            worker_id = free_id
+            worker_yml_file.content = new_yml
+
+    target_dir = WORKERS_DIR / worker_id
+    if target_dir.exists():
+        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+
+    target_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        for f in draft_files:
+            parts = f.path.replace("\\", "/").split("/")
+            dest = target_dir
+            for part in parts[:-1]:
+                dest = dest / part
+                dest.mkdir(exist_ok=True)
+            (dest / parts[-1]).write_text(f.content, encoding='utf-8')
+
+        if not (target_dir / "run.py").exists():
+            (target_dir / "run.py").write_text(_DEFAULT_RUN_PY_STUB, encoding='utf-8')
+        if not (target_dir / "requirements.txt").exists():
+            (target_dir / "requirements.txt").write_text("", encoding='utf-8')
+    except HTTPException:
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise
+    except Exception as exc:
+        import shutil
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=f"Failed to write files: {exc}") from exc
+
+    invalidate_worker_cache()
+    workers = discover_workers()
+    with get_db() as conn:
+        try:
+            _persist_discovered_workers(conn, workers, user_id=user_id)
+        except (sqlite3.IntegrityError, RuntimeError) as exc:
+            import shutil
+            shutil.rmtree(target_dir, ignore_errors=True)
+            invalidate_worker_cache()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return worker_id
+
+
+def persist_worker_run_py(worker_id: str, run_py: str, *, user_id: str | None) -> None:
+    """Persist a repaired ``run.py`` for ``worker_id`` through the canonical path.
+
+    This is the SAME on-disk-write + cache-invalidate + re-discover + recipe
+    re-persist that the editor (`update_worker_files`) uses, factored out so the
+    smoke-repair loop persists a fix exactly the way a manual edit would. The
+    executor reads ``run.py`` from disk (`WORKERS_DIR/worker_id`) on every run, so
+    writing the file here is what reaches the run; the discover+persist keeps the
+    registered recipe/cache in sync so the worker is never registered against a
+    stale manifest after a repair.
+
+    Raises on failure (path-traversal, write error, persist error) so the caller
+    can treat an un-persisted repair as a smoke FAILURE (disable the worker)
+    instead of silently shipping the worker against unverified disk state.
+    """
+    from worker_registry import WORKERS_DIR
+
+    target_dir = (WORKERS_DIR / worker_id).resolve()
+    run_py_path = (target_dir / "run.py").resolve()
+    # Path-safety: the resolved file must stay inside the worker's own dir.
+    try:
+        run_py_path.relative_to(target_dir)
+    except ValueError as exc:
+        raise ValueError(
+            f"refusing to write run.py outside worker dir: {run_py_path}"
+        ) from exc
+    if not target_dir.is_dir():
+        raise FileNotFoundError(f"worker directory not found: {target_dir}")
+
+    run_py_path.write_text(run_py, encoding="utf-8")
+
+    invalidate_worker_cache()
+    workers = discover_workers()
+    this_worker_list = [w for w in workers if w["id"] == worker_id]
+    if not this_worker_list:
+        raise RuntimeError(f"worker {worker_id!r} not found after repair persist")
+    with get_db() as conn:
+        _persist_discovered_workers(conn, this_worker_list, user_id=user_id)
+
+
 @app.post("/workers/draft-and-create", response_model=DraftAndCreateResponse)
 async def draft_and_create_worker(
     payload: DraftAndCreateRequest,
@@ -3973,68 +8722,84 @@ async def draft_and_create_worker(
     import yaml as pyyaml
     from models import parse_worker_manifest
 
+    async def _smoke_gate_and_respond(
+        created_worker_id: str,
+        sample_input: Any,
+        *,
+        allow_code_repair: bool,
+    ) -> DraftAndCreateResponse:
+        # Wedge safety net (FIX 4, 2026-05-29): unify the raw create path with the
+        # UI worker-author path. Prove the SCRIPT-mode worker actually RUNS,
+        # validate it produces real output, and gate it: a smoke-failed worker is
+        # DISABLED (not deleted — stays editable) so it is never presented as a
+        # clean, ready worker. Runs on a worker thread so the E2B run does not
+        # block the event loop. Never fails the create.
+        #
+        # allow_code_repair (least-surprise, 2026-05-29): TRUE only for the
+        # LLM-generated draft (Path B), where bounded auto-repair of run.py is the
+        # wedge. FALSE for USER-SUPPLIED uploads (Path A) — those are smoked and
+        # gated but the user's run.py is NEVER rewritten.
+        smoke_result: Optional[Dict[str, Any]] = None
+        try:
+            smoke_bundle: Dict[str, Any] = {}
+            if isinstance(sample_input, dict):
+                smoke_bundle["example_input"] = sample_input
+            try:
+                manifest_text = (WORKERS_DIR / created_worker_id / "worker.yml").read_text(encoding="utf-8")
+                smoke_bundle["worker_yml"] = manifest_text
+            except OSError:
+                pass
+
+            def _draft_smoke_log(msg: str, level: str = "info") -> None:
+                logger.info("draft-and-create smoke %s: %s", created_worker_id, msg)
+
+            smoke_result = await asyncio.to_thread(
+                smoke_and_gate_generated_worker,
+                created_worker_id,
+                smoke_bundle,
+                user_id=auth.user_id,
+                repos=repos,
+                log_fn=_draft_smoke_log,
+                allow_code_repair=allow_code_repair,
+            )
+        except Exception:
+            logger.exception("draft-and-create smoke+gate failed for %s", created_worker_id)
+
+        if isinstance(smoke_result, dict) and smoke_result.get("status") == "failed":
+            return DraftAndCreateResponse(
+                worker_id=created_worker_id,
+                smoke_status="failed",
+                smoke_reason=(
+                    humanize_smoke_reason(smoke_result.get("reason"))
+                    or "This worker's first test run failed. Edit it, then re-run."
+                ),
+            )
+        return DraftAndCreateResponse(
+            worker_id=created_worker_id,
+            smoke_status=(smoke_result.get("status") if isinstance(smoke_result, dict) else None),
+        )
+
     # ----------------------------------------------------------------
     # Path A: pre-supplied files (upload flow — skip LLM)
     # ----------------------------------------------------------------
     if payload.files:
         _enforce_draft_rate_limit(request)
-        draft_files = []
-        for f in payload.files:
-            path = (f.path or "").strip()
-            parts = path.replace("\\", "/").split("/")
-            if any(p in ("", "..") for p in parts):
-                raise HTTPException(status_code=400, detail=f"Invalid path: {path!r}")
-            draft_files.append(f)
-
-        worker_yml_file = next((f for f in draft_files if f.path == "worker.yml"), None)
-        if not worker_yml_file:
-            raise HTTPException(status_code=400, detail="files must include worker.yml")
-
-        worker_id, _config = _parse_worker_payload(worker_yml_file.content)
-
-        target_dir = WORKERS_DIR / worker_id
-        if target_dir.exists():
-            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
-
-        target_dir.mkdir(parents=True, exist_ok=False)
+        worker_id = _register_worker_from_files(
+            payload.files,
+            user_id=auth.user_id,
+            repos=repos,
+        )
+        sample_input = None
         try:
-            for f in draft_files:
-                parts = f.path.replace("\\", "/").split("/")
-                dest = target_dir
-                for part in parts[:-1]:
-                    dest = dest / part
-                    dest.mkdir(exist_ok=True)
-                (dest / parts[-1]).write_text(f.content)
-
-            if not (target_dir / "run.py").exists():
-                (target_dir / "run.py").write_text(
-                    "from typing import Dict, Any\n\n"
-                    "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
-                    "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
-                )
-            if not (target_dir / "requirements.txt").exists():
-                (target_dir / "requirements.txt").write_text("")
-        except HTTPException:
-            import shutil
-            shutil.rmtree(target_dir, ignore_errors=True)
-            raise
-        except Exception as exc:
-            import shutil
-            shutil.rmtree(target_dir, ignore_errors=True)
-            raise HTTPException(status_code=400, detail=f"Failed to write files: {exc}") from exc
-
-        invalidate_worker_cache()
-        workers = discover_workers()
-        with get_db() as conn:
-            try:
-                _persist_discovered_workers(conn, workers, user_id=auth.user_id)
-            except (sqlite3.IntegrityError, RuntimeError) as exc:
-                import shutil
-                shutil.rmtree(target_dir, ignore_errors=True)
-                invalidate_worker_cache()
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-        return DraftAndCreateResponse(worker_id=worker_id)
+            cfg = get_worker_config_for_run(worker_id)
+            sample_input = getattr(cfg, "example_input", None)
+        except Exception:
+            sample_input = None
+        # Path A is USER-SUPPLIED code: smoke + gate it, but never rewrite the
+        # user's run.py (least-surprise).
+        return await _smoke_gate_and_respond(
+            worker_id, sample_input, allow_code_repair=False
+        )
 
     # ----------------------------------------------------------------
     # Path B: LLM draft from prompt
@@ -4091,35 +8856,6 @@ async def draft_and_create_worker(
             raw_manifest = pyyaml.safe_load(worker_yml_str)
             if not isinstance(raw_manifest, dict):
                 raise ValueError("worker_yml must be a YAML mapping")
-            # Auto-repair: the LLM frequently emits exec.mode=pure-script
-            # without exec.command, which the strict validator rejects. The
-            # platform's pure-script convention is `python run.py`, so when
-            # both mode=pure-script and command is missing AND entry/runner
-            # match the convention, inject the canonical command rather than
-            # burning another LLM retry. Same patch for "hybrid". This was
-            # the dominant failure path that caused /api/workers/draft-and-create
-            # to 502 (Bug #38).
-            exec_block = raw_manifest.get("exec")
-            if isinstance(exec_block, dict):
-                exec_mode = (exec_block.get("mode") or "").strip().lower()
-                exec_command = (exec_block.get("command") or "").strip()
-                exec_entry = (exec_block.get("entry") or "").strip()
-                if exec_mode in ("pure-script", "hybrid") and not exec_command:
-                    inferred_entry = exec_entry or "run.py"
-                    if inferred_entry.endswith(".py"):
-                        exec_block["command"] = f"python {inferred_entry}"
-                        if not exec_block.get("entry"):
-                            exec_block["entry"] = inferred_entry
-                        # Re-serialize so downstream code sees the repaired yml
-                        worker_yml_str = pyyaml.safe_dump(
-                            raw_manifest, sort_keys=False, default_flow_style=False
-                        )
-                        logger.info(
-                            "draft-and-create auto-repair: injected "
-                            "exec.command=%r for mode=%r",
-                            exec_block["command"],
-                            exec_mode,
-                        )
             parse_worker_manifest(raw_manifest)
             last_yaml_error = None
             break
@@ -4163,15 +8899,33 @@ async def draft_and_create_worker(
             draft_files_from_llm.append(DraftFile(path="SKILL.md", content=skill_md_str))
 
     # Parse worker_id from validated YAML
-    worker_id, _config2 = _parse_worker_payload(worker_yml_str)
+    worker_id, _config2 = _parse_worker_payload(worker_yml_str, user_id=auth.user_id)
 
     # #186: the LLM author often returns the same suggested id regardless of
     # prompt. Rather than 409 on collision, allocate a free id and rewrite the
     # manifest identity so the worker.yml, the dir, and the DB row all agree.
-    free_id = _free_worker_id(worker_id)
+    free_id = _free_worker_id(worker_id, repos=repos)
     if free_id != worker_id:
         worker_id = free_id
         worker_yml_str = _rewrite_worker_yml_id(worker_yml_str, worker_id)
+        for f in draft_files_from_llm:
+            if f.path == "worker.yml":
+                f.content = worker_yml_str
+
+    # G5 FIX 4: guarantee a runnable "Fill with sample input" even when the LLM
+    # omits example_input — backfill it into the worker.yml from the bundle's
+    # sample_input_json (the realistic values it already produced). Mirrors the
+    # worker-author run path (_backfill_example_input).
+    from run_service import _backfill_example_input as _backfill_ex
+
+    def _draft_backfill_log(msg: str, level: str = "info") -> None:
+        logger.info("draft-and-create %s: %s", worker_id, msg)
+
+    backfilled_yml = _backfill_ex(
+        worker_yml_str, parsed_llm.get("sample_input_json"), _draft_backfill_log
+    )
+    if backfilled_yml != worker_yml_str:
+        worker_yml_str = backfilled_yml
         for f in draft_files_from_llm:
             if f.path == "worker.yml":
                 f.content = worker_yml_str
@@ -4188,16 +8942,12 @@ async def draft_and_create_worker(
             for part in parts[:-1]:
                 dest = dest / part
                 dest.mkdir(exist_ok=True)
-            (dest / parts[-1]).write_text(f.content)
+            (dest / parts[-1]).write_text(f.content, encoding='utf-8')
 
         if not (target_dir / "run.py").exists():
-            (target_dir / "run.py").write_text(
-                "from typing import Dict, Any\n\n"
-                "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
-                "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
-            )
+            (target_dir / "run.py").write_text(_DEFAULT_RUN_PY_STUB, encoding='utf-8')
         if not (target_dir / "requirements.txt").exists():
-            (target_dir / "requirements.txt").write_text("")
+            (target_dir / "requirements.txt").write_text("", encoding='utf-8')
     except Exception as exc:
         import shutil
         shutil.rmtree(target_dir, ignore_errors=True)
@@ -4214,10 +8964,26 @@ async def draft_and_create_worker(
             invalidate_worker_cache()
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    return DraftAndCreateResponse(worker_id=worker_id)
+    sample_input = None
+    try:
+        # Read the freshly-persisted config so the smoke run uses the
+        # backfilled example_input (G5 FIX 4), not the pre-backfill parse.
+        _persisted_cfg = get_worker_config_for_run(worker_id)
+        sample_input = getattr(_persisted_cfg, "example_input", None)
+    except Exception:
+        sample_input = getattr(_config2, "example_input", None)
+    # Path B is LLM-GENERATED code: bounded auto-repair of run.py is the wedge.
+    return await _smoke_gate_and_respond(
+        worker_id, sample_input, allow_code_repair=True
+    )
 
 
-def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
+def _parse_worker_payload(
+    worker_yml: str,
+    *,
+    user_id: str | None = None,
+    allow_protected_worker_id: bool = False,
+) -> tuple[str, WorkerConfig]:
     import yaml as pyyaml
 
     try:
@@ -4227,7 +8993,7 @@ def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="worker_yml must contain a YAML mapping")
     raw_worker_id = str(raw.get("id") or raw.get("name") or "").strip()
-    if raw_worker_id in PROTECTED_STOCK_WORKER_IDS:
+    if raw_worker_id in PROTECTED_STOCK_WORKER_IDS and not allow_protected_worker_id:
         _raise_if_protected_worker_mutation(raw_worker_id)
 
     # P1-3: reject path-traversal in caller-supplied bundle_path BEFORE schema parsing
@@ -4268,74 +9034,120 @@ def _parse_worker_payload(worker_yml: str) -> tuple[str, WorkerConfig]:
 
     if not re.fullmatch(r"[a-z0-9_-]+", worker_id):
         raise HTTPException(status_code=400, detail=f"Worker ID must be lowercase kebab/snake-case: {worker_id!r}")
-    _raise_if_protected_worker_mutation(worker_id)
+    if len(worker_id) > 64:
+        raise HTTPException(status_code=422, detail=f"Worker ID must be 64 characters or fewer (got {len(worker_id)})")
+    if user_id:
+        with use_context_scope(context_scope_for_user(user_id)):
+            metadata = load_context_metadata()
+            for raw_context in config.contexts or []:
+                try:
+                    context = normalize_context_mount(raw_context)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                if context["source"] != "local":
+                    continue
+                context_name = context["name"]
+                context_is_mountable = _is_system_context_pack(
+                    context_name,
+                    metadata,
+                ) or _context_visible_to_user(
+                    context_name,
+                    user_id=user_id,
+                    metadata=metadata,
+                )
+                if not context_dir(context_name).is_dir() or not context_is_mountable:
+                    raise HTTPException(status_code=400, detail=f"Context not found: {context_name}")
+    if worker_id in PROTECTED_STOCK_WORKER_IDS and not allow_protected_worker_id:
+        _raise_if_protected_worker_mutation(worker_id)
     return worker_id, config
 
 
 @app.post("/workers", response_model=WorkerDetail)
 def create_worker(
     payload: WorkerCreateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     """Create a new worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
-    worker_id, config = _parse_worker_payload(payload.worker_yml)
+    _require_worker_write_workspace_context(request)
+
+    worker_yml = payload.worker_yml
+    raw_worker_id = _raw_worker_id_from_worker_yml(worker_yml)
+    if raw_worker_id in PROTECTED_STOCK_WORKER_IDS:
+        worker_id = _free_worker_id(f"{_slugify_worker_id(raw_worker_id)}-copy", repos=repos)
+        worker_yml = _set_worker_yml_is_example(
+            _rewrite_worker_yml_id(worker_yml, worker_id),
+            False,
+        )
+    else:
+        worker_id = _canonical_worker_id(raw_worker_id)
+        if worker_id != raw_worker_id:
+            worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
         raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
-
-    # Write files
     try:
-        target_dir.mkdir(parents=True, exist_ok=False)
-    except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists") from exc
-    (target_dir / "worker.yml").write_text(payload.worker_yml)
-    (target_dir / "run.py").write_text(payload.run_py)
-    (target_dir / "requirements.txt").write_text("")
-    if payload.skill_md:
-        (target_dir / "SKILL.md").write_text(payload.skill_md)
-    else:
-        (target_dir / "SKILL.md").write_text(
-            f"# {config.name}\n\n"
-            "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
-            "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
+        if repos.workers.get_any(worker_id=worker_id) is not None:
+            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("worker existence lookup failed for %s", worker_id, exc_info=True)
+
+    staging_dir = Path(tempfile.mkdtemp(prefix=f".{worker_id}.", dir=str(WORKERS_DIR.parent)))
+    worker_record: Optional[Dict[str, Any]] = None
+    skill_version_id: Optional[str] = None
+    create_complete = False
+    target_committed = False
+    try:
+        _write_worker_bundle_files(
+            staging_dir,
+            worker_yml=worker_yml,
+            run_py=payload.run_py,
+            skill_md=payload.skill_md,
+            config=config,
         )
-
-    # Register
-    invalidate_worker_cache()
-    workers = discover_workers()
-
-    # Persist to DB
-    with get_db() as conn:
-        try:
-            _persist_discovered_workers(conn, workers, user_id=auth.user_id)
-        except sqlite3.IntegrityError as exc:
-            # Orphaned skill_versions row from a previously-deleted worker with
-            # the same name+version caused a FK or UNIQUE conflict. Clean up
-            # and return a user-friendly 409 (N5 fix).
-            import shutil
-            shutil.rmtree(target_dir, ignore_errors=True)
-            invalidate_worker_cache()
-            raise HTTPException(
-                status_code=409,
-                detail=f"Worker {worker_id!r} already exists or conflicts with a previous version. "
-                       "Delete the old worker first, then recreate.",
-            ) from exc
-        except RuntimeError as exc:
-            import shutil
-            shutil.rmtree(target_dir, ignore_errors=True)
-            invalidate_worker_cache()
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    # Return the new worker detail
-    return _build_worker_detail(
-        worker_id,
-        user_id=auth.user_id,
-        repos=repos,
-    )
+        worker_record = _worker_record_from_worker_yml(worker_id, worker_yml)
+        skill_version_id = _skill_version_id(worker_id, worker_record.get("manifest") or {})
+        invalidate_worker_cache()
+        with get_db() as conn:
+            _persist_discovered_workers(conn, [worker_record], user_id=auth.user_id)
+        _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+        os.replace(staging_dir, target_dir)
+        target_committed = True
+        invalidate_worker_cache()
+        detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+        create_complete = True
+        return detail
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Worker {worker_id!r} already exists or conflicts with a previous version. "
+                "Delete the old worker first, then recreate."
+            ),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create worker {worker_id!r}: {exc}") from exc
+    finally:
+        if not create_complete:
+            _cleanup_worker_create_state(
+                worker_id=worker_id,
+                user_id=auth.user_id,
+                repos=repos,
+                staging_dir=staging_dir,
+                target_dir=target_dir if target_committed else None,
+                skill_version_id=skill_version_id,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -4365,10 +9177,33 @@ async def create_worker_from_bundle(
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=400, detail=f"Not a valid zip file: {exc}")
 
-    for info in zf.infolist():
+    # Zip-bomb guards: cap total uncompressed size and entry count BEFORE
+    # extracting so a tiny zip cannot exhaust memory/disk. ZipInfo.file_size
+    # is the declared uncompressed size; we pre-check the sum, then re-guard
+    # the running total during extraction in case a header lies.
+    _MAX_BUNDLE_UNCOMPRESSED_BYTES = 50 * 1024 * 1024  # 50 MB
+    _MAX_BUNDLE_ENTRIES = 2000
+
+    infolist = zf.infolist()
+    if len(infolist) > _MAX_BUNDLE_ENTRIES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Bundle has too many entries ({len(infolist)} > {_MAX_BUNDLE_ENTRIES})",
+        )
+    declared_total = 0
+    for info in infolist:
         file_type = (info.external_attr >> 16) & 0o170000
         if file_type == 0o120000:
             raise HTTPException(status_code=400, detail=f"Bundle contains unsupported symlink: {info.filename!r}")
+        declared_total += info.file_size
+        if declared_total > _MAX_BUNDLE_UNCOMPRESSED_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Bundle too large: uncompressed size exceeds "
+                    f"{_MAX_BUNDLE_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                ),
+            )
 
     names = zf.namelist()
 
@@ -4391,7 +9226,7 @@ async def create_worker_from_bundle(
     worker_yml_path_in_zip = f"{prefix}worker.yml"
     worker_yml = zf.read(worker_yml_path_in_zip).decode("utf-8")
 
-    worker_id, config = _parse_worker_payload(worker_yml)
+    worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
 
     target_dir = WORKERS_DIR / worker_id
     if target_dir.exists():
@@ -4403,6 +9238,7 @@ async def create_worker_from_bundle(
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists") from exc
     try:
+        extracted_total = 0
         for zip_name in names:
             if not zip_name.startswith(prefix):
                 continue
@@ -4413,11 +9249,23 @@ async def create_worker_from_bundle(
             parts = rel.split("/")
             if any(p in ("", "..") for p in parts):
                 raise HTTPException(status_code=400, detail=f"Invalid path in bundle: {rel!r}")
+            data = zf.read(zip_name)
+            # Re-guard the running total in case a ZipInfo header under-reported
+            # the real uncompressed size (defends against a lying header).
+            extracted_total += len(data)
+            if extracted_total > _MAX_BUNDLE_UNCOMPRESSED_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"Bundle too large: uncompressed size exceeds "
+                        f"{_MAX_BUNDLE_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                    ),
+                )
             dest = target_dir
             for part in parts[:-1]:
                 dest = dest / part
                 dest.mkdir(exist_ok=True)
-            (dest / parts[-1]).write_bytes(zf.read(zip_name))
+            (dest / parts[-1]).write_bytes(data)
     except HTTPException:
         import shutil
         shutil.rmtree(target_dir, ignore_errors=True)
@@ -4430,16 +9278,12 @@ async def create_worker_from_bundle(
     # Ensure run.py exists (stub if absent)
     run_py_path = target_dir / "run.py"
     if not run_py_path.exists():
-        run_py_path.write_text(
-            "from typing import Dict, Any\n\n"
-            "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
-            "    return {'status': 'success', 'outputs': {}, 'artifacts': []}\n"
-        )
+        run_py_path.write_text(_DEFAULT_RUN_PY_STUB, encoding='utf-8')
 
     # Ensure requirements.txt exists
     req_path = target_dir / "requirements.txt"
     if not req_path.exists():
-        req_path.write_text("")
+        req_path.write_text("", encoding='utf-8')
 
     # Register
     invalidate_worker_cache()
@@ -4460,6 +9304,534 @@ async def create_worker_from_bundle(
     )
 
 
+# ---------------------------------------------------------------------------
+# Workspace duplicate (Notion-template style): export the operator's whole
+# workspace (workers + knowledge packs + workspace-agent config) as a single
+# downloadable .zip template, and import such a template into another
+# workspace. A workspace = operator WORKERS + operator KNOWLEDGE PACKS +
+# workspace.md. Reuses the per-worker bundle layout, the contexts create/upload
+# path, and _register_worker_from_files for import.
+#
+# SECURITY: the export NEVER contains secret VALUES or connection tokens. It
+# only carries the worker bundle files (worker.yml/run.py/SKILL.md/...) which
+# declare required secrets/connections by NAME, plus operator knowledge-pack
+# files (operator content), plus workspace.md. The importer reconnects secrets
+# and connections itself. See _collect_workspace_secret_names() for the manifest
+# names surface, and the test suite for the no-secret-value guarantee.
+# ---------------------------------------------------------------------------
+
+WORKSPACE_TEMPLATE_SCHEMA_VERSION = 1
+
+
+def _is_exportable_operator_worker(w: Dict[str, Any]) -> bool:
+    """True for a worker that belongs in a workspace template.
+
+    Excludes example/stock workers and system workers. ``_list_operator_workers``
+    already drops system_worker:true + archived + hidden; this adds the
+    example/stock filter so a template carries only the operator's OWN authored
+    workers (mirrors _is_example_worker in the overview).
+    """
+    wid = w.get("id")
+    if not wid:
+        return False
+    if w.get("is_example") is True:
+        return False
+    manifest = w.get("manifest")
+    if isinstance(manifest, dict) and manifest.get("is_example") is True:
+        return False
+    if wid in PUBLIC_STOCK_WORKER_IDS or wid in PROTECTED_STOCK_WORKER_IDS:
+        return False
+    if (manifest or {}).get("system_worker", False):
+        return False
+    return True
+
+
+def _worker_required_secret_names(w: Dict[str, Any]) -> List[str]:
+    """Required secret NAMES declared by a worker manifest (never values).
+
+    The normalized ``WorkerConfig`` surfaces secrets at the top level
+    (``config["secrets"]``); raw manifests may also nest them under
+    ``capabilities.secrets`` / ``exec.secrets``. Read all three so the name list
+    is complete regardless of which shape we got.
+    """
+    names: List[str] = []
+    config = w.get("config") or {}
+    for s in config.get("secrets") or []:
+        if isinstance(s, str) and s.strip():
+            names.append(s.strip())
+    cap = config.get("capabilities") or {}
+    for s in cap.get("secrets") or []:
+        if isinstance(s, str) and s.strip():
+            names.append(s.strip())
+    exec_block = config.get("exec") or {}
+    for s in exec_block.get("secrets") or []:
+        if isinstance(s, str) and s.strip():
+            names.append(s.strip())
+    # de-dup, preserve order
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            ordered.append(n)
+    return ordered
+
+
+def _worker_connection_slugs(w: Dict[str, Any]) -> List[str]:
+    """Required connection slugs declared by a worker manifest (never tokens)."""
+    config = w.get("config") or {}
+    raw = config.get("connections") or []
+    slugs: List[str] = []
+    for c in raw:
+        if isinstance(c, str) and c.strip():
+            slugs.append(c.strip())
+        elif isinstance(c, dict):
+            label = (c.get("mcp", {}) or {}).get("label") or c.get("app") or c.get("slug")
+            if isinstance(label, str) and label.strip():
+                slugs.append(label.strip())
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for s in slugs:
+        if s not in seen:
+            seen.add(s)
+            ordered.append(s)
+    return ordered
+
+
+# Filenames / patterns that may hold secret VALUES and must NEVER be exported in
+# a workspace template. A worker bundle is worker.yml + run.py / SKILL.md +
+# requirements.txt + lib/*; a .env (or similar) is operator credential state,
+# not bundle content. Defense-in-depth: a real worker dir should not contain
+# these, but if one does we drop it rather than leak a secret value.
+_WORKSPACE_EXPORT_SECRET_BASENAMES = frozenset({
+    ".env",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "credentials",
+    "credentials.json",
+    "secrets.json",
+    "secrets.yaml",
+    "secrets.yml",
+    ".secrets",
+})
+
+
+def _is_secret_bearing_export_path(rel: str) -> bool:
+    """True if a worker-dir file may carry secret values (excluded from export)."""
+    base = rel.rsplit("/", 1)[-1].lower()
+    if base in _WORKSPACE_EXPORT_SECRET_BASENAMES:
+        return True
+    # .env, .env.local, .env.production, foo.env, etc.
+    if base == ".env" or base.startswith(".env.") or base.endswith(".env"):
+        return True
+    # Private keys / certs.
+    if base.endswith((".pem", ".key", ".p12", ".pfx")):
+        return True
+    return False
+
+
+def _iter_worker_dir_files(worker_id: str):
+    """Yield (relpath, bytes) for every exportable file in a worker's dir.
+
+    Skips symlinks (security), __pycache__ / *.pyc cruft, and any
+    secret-bearing file (``.env`` and friends — see
+    ``_is_secret_bearing_export_path``) so a template never carries a secret
+    VALUE.
+    """
+    from worker_registry import WORKERS_DIR
+
+    base = (WORKERS_DIR / worker_id).resolve()
+    if not base.is_dir():
+        return
+    for path in sorted(base.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        rel = path.relative_to(base).as_posix()
+        parts = rel.split("/")
+        if "__pycache__" in parts or rel.endswith(".pyc"):
+            continue
+        if _is_secret_bearing_export_path(rel):
+            continue
+        yield rel, path.read_bytes()
+
+
+def _build_workspace_template_zip(
+    *,
+    user_id: str,
+    repos: Repositories,
+    exported_at: Optional[str] = None,
+) -> bytes:
+    """Build the workspace template .zip and return its raw bytes.
+
+    Shared by the authenticated ``GET /workspace/export`` download and the
+    signed public ``GET /workspace/template/{token}`` share-link download so the
+    bundle layout, the example/system exclusions, and the no-secret-value
+    guarantee live in exactly ONE place.
+    """
+    # ---- workers --------------------------------------------------------
+    all_operator = _list_operator_workers(user_id=user_id, repos=repos)
+    workers = [w for w in all_operator if _is_exportable_operator_worker(w)]
+
+    worker_manifest_entries: List[Dict[str, Any]] = []
+    # Build the zip in memory.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for w in workers:
+            wid = w["id"]
+            file_count = 0
+            for rel, data in _iter_worker_dir_files(wid):
+                zf.writestr(f"workers/{wid}/{rel}", data)
+                file_count += 1
+            if file_count == 0:
+                # No on-disk files (shouldn't happen for a real worker); skip so
+                # we never emit an empty, un-importable worker entry.
+                continue
+            worker_manifest_entries.append({
+                "id": wid,
+                "name": w.get("name") or wid,
+                "trigger_type": w.get("trigger_type"),
+                "required_secrets": _worker_required_secret_names(w),
+                "required_connections": _worker_connection_slugs(w),
+                "file_count": file_count,
+            })
+
+        # ---- operator knowledge packs (contexts) ----------------------
+        context_manifest_entries: List[Dict[str, Any]] = []
+        ensure_contexts_dir()
+        meta = load_context_metadata()
+        root = current_contexts_root()
+        if root.is_dir():
+            for folder in sorted(root.iterdir(), key=lambda p: p.name):
+                if not folder.is_dir() or folder.is_symlink() or folder.name.startswith("."):
+                    continue
+                # EXCLUDE system/engine packs and other users' packs.
+                if _is_system_context_pack(folder.name, meta):
+                    continue
+                if not _context_visible_to_user(folder.name, user_id=user_id, metadata=meta):
+                    continue
+                pack_files = 0
+                for fpath in iter_context_files(folder):
+                    rel = fpath.relative_to(folder).as_posix()
+                    parts = rel.split("/")
+                    if "__pycache__" in parts or rel.endswith(".pyc"):
+                        continue
+                    # Defense-in-depth: never export a secret-bearing file even
+                    # if an operator dropped one into a knowledge pack.
+                    if _is_secret_bearing_export_path(rel):
+                        continue
+                    zf.writestr(f"contexts/{folder.name}/{rel}", fpath.read_bytes())
+                    pack_files += 1
+                writeable = bool((meta.get(folder.name) or {}).get("writeable", False))
+                context_manifest_entries.append({
+                    "name": folder.name,
+                    "file_count": pack_files,
+                    "writeable": writeable,
+                })
+
+        # ---- workspace-agent config (workspace.md) --------------------
+        from chat_service import WORKSPACE_MD_PATH as _WS_MD_PATH
+        has_workspace_md = bool(_WS_MD_PATH.is_file())
+        if has_workspace_md:
+            zf.writestr("workspace.md", _WS_MD_PATH.read_bytes())
+
+        # ---- manifest -------------------------------------------------
+        # Aggregate the full set of secret/connection NAMES to reconnect.
+        all_secret_names: set[str] = set()
+        all_conn_slugs: set[str] = set()
+        for entry in worker_manifest_entries:
+            all_secret_names.update(entry["required_secrets"])
+            all_conn_slugs.update(entry["required_connections"])
+
+        manifest = {
+            "schema_version": WORKSPACE_TEMPLATE_SCHEMA_VERSION,
+            "exported_at": (exported_at or datetime.now(timezone.utc).isoformat()),
+            "workers": worker_manifest_entries,
+            "contexts": context_manifest_entries,
+            "has_workspace_md": has_workspace_md,
+            "required_secrets": sorted(all_secret_names),
+            "required_connections": sorted(all_conn_slugs),
+            "counts": {
+                "workers": len(worker_manifest_entries),
+                "contexts": len(context_manifest_entries),
+            },
+        }
+        zf.writestr("workspace.json", json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    return buf.getvalue()
+
+
+WORKSPACE_TEMPLATE_FILENAME = "workeros-workspace-template.zip"
+
+
+def _workspace_template_response(payload: bytes) -> Response:
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{WORKSPACE_TEMPLATE_FILENAME}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.get("/workspace/export")
+def export_workspace(
+    exported_at: Optional[str] = Query(None),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Export this workspace as a single downloadable .zip template.
+
+    Bundles every NON-EXAMPLE, non-system operator worker (worker.yml + run.py /
+    SKILL.md + requirements.txt + lib/*), every OPERATOR knowledge pack
+    (contexts; system packs like worker-author-style and other users' packs are
+    excluded), the workspace-agent config (workspace.md if present), and a
+    ``workspace.json`` manifest.
+
+    NO secret values or connection tokens are ever written — only the NAMES of
+    required secrets/connections so the importer knows what to reconnect.
+    """
+    payload = _build_workspace_template_zip(
+        user_id=auth.user_id, repos=repos, exported_at=exported_at
+    )
+    return _workspace_template_response(payload)
+
+
+# ---------------------------------------------------------------------------
+# Workspace share link (W9b): mint a signed, login-free URL that lets a
+# recipient DOWNLOAD this workspace's template .zip, then import it into their
+# own instance. Mirrors the worker share-link HMAC pattern
+# (``_worker_public_token``): the token is bound to the owner so it can never
+# resolve a different operator's template, and the public download carries the
+# SAME no-secret-value guarantee as the authenticated export (it reuses
+# ``_build_workspace_template_zip``).
+# ---------------------------------------------------------------------------
+
+
+def _workspace_share_payload(user_id: str) -> str:
+    """Stable HMAC payload for an owner's workspace template share link."""
+    return ".".join(("workspace-template", str(user_id or "")))
+
+
+def _workspace_share_token(user_id: str) -> str:
+    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    return hmac.new(
+        secret.encode("utf-8"),
+        _workspace_share_payload(user_id).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+class WorkspaceShareLinkResponse(BaseModel):
+    url: str
+    token: str
+
+
+@app.get("/workspace/share-link", response_model=WorkspaceShareLinkResponse)
+def workspace_share_link(
+    auth: AuthContext = Depends(get_auth_context),
+) -> WorkspaceShareLinkResponse:
+    """Return a signed, login-free URL to download this workspace as a template.
+
+    The recipient opens the URL, downloads the .zip, and imports it via
+    ``POST /workspace/import`` on their own instance. The link carries no secret
+    values (see ``_build_workspace_template_zip``); the HMAC token is bound to
+    the owner id so it cannot resolve another operator's workspace.
+    """
+    token = _workspace_share_token(auth.user_id)
+    owner_q = urllib.parse.quote(auth.user_id, safe="")
+    url = f"{_public_api_base_url()}/workspace/template/{token}?owner={owner_q}"
+    return WorkspaceShareLinkResponse(url=url, token=token)
+
+
+@app.get("/workspace/template/{token}")
+def download_shared_workspace_template(
+    token: str,
+    owner: str = Query(..., min_length=1),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Download a workspace template via a signed share link (no app login).
+
+    Authenticated solely by the HMAC ``token`` bound to ``owner`` (constant-time
+    compare). Reuses ``_build_workspace_template_zip`` so the public bundle is
+    byte-for-byte the same allow-listed, secret-free template as the
+    authenticated export.
+    """
+    expected = _workspace_share_token(owner)
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid workspace link")
+    payload = _build_workspace_template_zip(user_id=owner, repos=repos)
+    return _workspace_template_response(payload)
+
+
+class WorkspaceImportResponse(BaseModel):
+    workers_imported: List[str] = []
+    contexts_imported: List[str] = []
+    skipped: List[Dict[str, str]] = []
+    id_remaps: Dict[str, str] = {}
+    required_secrets: List[str] = []
+    required_connections: List[str] = []
+    workspace_md_present: bool = False
+
+
+def _safe_zip_rel(name: str) -> Optional[str]:
+    """Sanitize a zip member name; reject traversal/absolute paths.
+
+    Returns the cleaned posix-relative path, or None if the member should be
+    skipped (directory entry) or rejected.
+    """
+    cleaned = (name or "").replace("\\", "/")
+    if not cleaned or cleaned.endswith("/"):
+        return None
+    if cleaned.startswith("/"):
+        raise HTTPException(status_code=400, detail=f"Unsafe path in zip: {name!r}")
+    parts = cleaned.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise HTTPException(status_code=400, detail=f"Unsafe path in zip: {name!r}")
+    return cleaned
+
+
+@app.post("/workspace/import", response_model=WorkspaceImportResponse)
+async def import_workspace(
+    bundle: UploadFile = File(...),
+    request: Request = None,  # type: ignore[assignment]
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceImportResponse:
+    """Import a workspace template .zip produced by GET /workspace/export.
+
+    Unpacks the template, registers each worker via the shared
+    ``_register_worker_from_files`` path (id-deduped — never clobbers an
+    existing worker), and creates each knowledge pack + files. Returns a summary
+    plus the list of secrets/connections the operator still needs to reconnect.
+    """
+    if request is not None:
+        _enforce_draft_rate_limit(request)
+
+    raw_bytes = await bundle.read()
+    if len(raw_bytes) > WORKSPACE_IMPORT_BODY_LIMIT_BYTES:
+        raise HTTPException(status_code=413, detail="Workspace template too large")
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw_bytes))
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail=f"Not a valid zip file: {exc}")
+
+    # Reject symlink members (security).
+    for info in zf.infolist():
+        file_type = (info.external_attr >> 16) & 0o170000
+        if file_type == 0o120000:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Template contains unsupported symlink: {info.filename!r}",
+            )
+
+    names = zf.namelist()
+
+    # ---- group members by worker id / context name ---------------------
+    worker_files: Dict[str, List[DraftFile]] = collections.OrderedDict()
+    context_files: Dict[str, List[tuple[str, bytes]]] = collections.OrderedDict()
+    for name in names:
+        rel = _safe_zip_rel(name)
+        if rel is None:
+            continue
+        parts = rel.split("/")
+        if parts[0] == "workers" and len(parts) >= 3:
+            wid = parts[1]
+            inner = "/".join(parts[2:])
+            # Decode worker bundle files as text (they are YAML/py/md/txt).
+            try:
+                content = zf.read(name).decode("utf-8")
+            except UnicodeDecodeError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Worker file {rel!r} is not valid UTF-8 text",
+                )
+            worker_files.setdefault(wid, []).append(DraftFile(path=inner, content=content))
+        elif parts[0] == "contexts" and len(parts) >= 3:
+            cname = parts[1]
+            inner = "/".join(parts[2:])
+            context_files.setdefault(cname, []).append((inner, zf.read(name)))
+        # workspace.md / workspace.json and anything else are intentionally
+        # ignored for import (workspace.md is operator-agent config that the
+        # importer reviews, not auto-overwritten).
+
+    workers_imported: List[str] = []
+    contexts_imported: List[str] = []
+    skipped: List[Dict[str, str]] = []
+    id_remaps: Dict[str, str] = {}
+
+    # ---- register workers (id-dedup, never clobber) --------------------
+    for wid, files in worker_files.items():
+        if not any(f.path == "worker.yml" for f in files):
+            skipped.append({"type": "worker", "id": wid, "reason": "missing worker.yml"})
+            continue
+        try:
+            new_id = _register_worker_from_files(
+                files,
+                user_id=auth.user_id,
+                repos=repos,
+                dedupe_id=True,
+            )
+        except HTTPException as exc:
+            skipped.append({"type": "worker", "id": wid, "reason": str(exc.detail)})
+            continue
+        workers_imported.append(new_id)
+        if new_id != wid:
+            id_remaps[wid] = new_id
+
+    # ---- create knowledge packs (skip existing, never clobber) ---------
+    meta = load_context_metadata()
+    for cname, files in context_files.items():
+        try:
+            safe_name = validate_context_name(cname)
+        except ValueError:
+            skipped.append({"type": "context", "id": cname, "reason": "invalid pack name"})
+            continue
+        try:
+            dir_path = context_dir(safe_name)
+        except ValueError:
+            skipped.append({"type": "context", "id": cname, "reason": "invalid pack name"})
+            continue
+        if dir_path.exists():
+            skipped.append({"type": "context", "id": safe_name, "reason": "already exists"})
+            continue
+        dir_path.mkdir(parents=True)
+        set_context_metadata(safe_name, writeable=False, owner_id=auth.user_id)
+        for inner, data in files:
+            try:
+                _write_context_file(safe_name, inner, data, user_id=auth.user_id)
+            except (HTTPException, ValueError) as exc:
+                skipped.append({
+                    "type": "context_file",
+                    "id": f"{safe_name}/{inner}",
+                    "reason": str(getattr(exc, "detail", exc)),
+                })
+        contexts_imported.append(safe_name)
+
+    # ---- surface what to reconnect, from the manifest if present -------
+    required_secrets: List[str] = []
+    required_connections: List[str] = []
+    if "workspace.json" in names:
+        try:
+            mani = json.loads(zf.read("workspace.json").decode("utf-8"))
+            if isinstance(mani, dict):
+                required_secrets = [s for s in (mani.get("required_secrets") or []) if isinstance(s, str)]
+                required_connections = [s for s in (mani.get("required_connections") or []) if isinstance(s, str)]
+        except Exception:
+            pass
+
+    return WorkspaceImportResponse(
+        workers_imported=workers_imported,
+        contexts_imported=contexts_imported,
+        skipped=skipped,
+        id_remaps=id_remaps,
+        required_secrets=required_secrets,
+        required_connections=required_connections,
+        workspace_md_present=("workspace.md" in names),
+    )
+
+
 @app.put("/workers/{worker_id}", response_model=WorkerDetail)
 def update_worker(
     worker_id: str,
@@ -4470,13 +9842,38 @@ def update_worker(
     """Update an existing worker from YAML + Python source."""
     from worker_registry import WORKERS_DIR
 
-    _raise_if_protected_worker_mutation(worker_id)
-    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml)
-    if parsed_worker_id != worker_id:
+    worker_id = _canonical_worker_id(worker_id)
+    raw_worker_id = _raw_worker_id_from_worker_yml(payload.worker_yml)
+    if raw_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"worker_yml name {raw_worker_id!r} does not match path worker_id {worker_id!r}",
+        )
+    if worker_id in PROTECTED_STOCK_WORKER_IDS:
+        edited_files = [
+            WorkerFilePatch(path="worker.yml", content=payload.worker_yml),
+            WorkerFilePatch(path="run.py", content=payload.run_py),
+        ]
+        if payload.skill_md is not None:
+            edited_files.append(WorkerFilePatch(path="SKILL.md", content=payload.skill_md))
+        new_id = _clone_protected_worker_for_edit(
+            worker_id,
+            edited_files,
+            user_id=auth.user_id,
+            repos=repos,
+        )
+        detail = _build_worker_detail(new_id, user_id=auth.user_id, repos=repos)
+        detail.cloned_from = worker_id
+        return detail
+
+    parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
+    if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
             detail=f"worker_yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
         )
+    if _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
 
     target_dir = WORKERS_DIR / worker_id
     if not target_dir.exists():
@@ -4486,23 +9883,23 @@ def update_worker(
     run_py_path = target_dir / "run.py"
     requirements_path = target_dir / "requirements.txt"
     skill_path = target_dir / "SKILL.md"
-    old_worker_yml = worker_yml_path.read_text() if worker_yml_path.exists() else None
-    old_run_py = run_py_path.read_text() if run_py_path.exists() else None
+    old_worker_yml = worker_yml_path.read_text(encoding='utf-8') if worker_yml_path.exists() else None
+    old_run_py = run_py_path.read_text(encoding='utf-8') if run_py_path.exists() else None
     had_requirements = requirements_path.exists()
-    old_skill = skill_path.read_text() if skill_path.exists() else None
+    old_skill = skill_path.read_text(encoding='utf-8') if skill_path.exists() else None
 
-    worker_yml_path.write_text(payload.worker_yml)
-    run_py_path.write_text(payload.run_py)
+    worker_yml_path.write_text(payload.worker_yml, encoding='utf-8')
+    run_py_path.write_text(payload.run_py, encoding='utf-8')
     if not requirements_path.exists():
-        requirements_path.write_text("")
+        requirements_path.write_text("", encoding='utf-8')
     if payload.skill_md:
-        skill_path.write_text(payload.skill_md)
+        skill_path.write_text(payload.skill_md, encoding='utf-8')
     elif not skill_path.exists():
         skill_path.write_text(
             f"# {_config.name}\n\n"
             "This WorkerContract entrypoint is a placeholder for the markdown skill runtime. "
             "Current Workeros execution uses `exec.command` from `worker.yml`.\n"
-        )
+        , encoding='utf-8')
 
     invalidate_worker_cache()
     workers = discover_workers()
@@ -4511,13 +9908,13 @@ def update_worker(
             _persist_discovered_workers(conn, workers, user_id=auth.user_id)
         except RuntimeError as exc:
             if old_worker_yml is not None:
-                worker_yml_path.write_text(old_worker_yml)
+                worker_yml_path.write_text(old_worker_yml, encoding='utf-8')
             if old_run_py is not None:
-                run_py_path.write_text(old_run_py)
+                run_py_path.write_text(old_run_py, encoding='utf-8')
             if not had_requirements and requirements_path.exists():
                 requirements_path.unlink()
             if old_skill is not None:
-                skill_path.write_text(old_skill)
+                skill_path.write_text(old_skill, encoding='utf-8')
             elif skill_path.exists():
                 skill_path.unlink()
             invalidate_worker_cache()
@@ -4554,10 +9951,94 @@ def _validate_worker_file_path(path: str) -> None:
         raise HTTPException(status_code=400, detail=f"file path must be relative: {path!r}")
 
 
+def _clone_protected_worker_for_edit(
+    worker_id: str,
+    edited_files: List[WorkerFilePatch],
+    *,
+    user_id: str,
+    repos: "Repositories",
+) -> str:
+    """Fork a read-only stock worker into a user-owned editable copy (clone-on-edit).
+
+    Stock/example workers (``PROTECTED_STOCK_WORKER_IDS``) are git-tracked shared
+    templates: writing the operator's edit back into the stock worker dir would
+    corrupt the template for every user. Instead of erroring, the FIRST edit of a
+    stock worker transparently creates a copy the operator owns, applies the edit
+    to the copy, and returns the new id so the caller keeps working on "their"
+    version.
+
+    ``edited_files`` is the operator's already-mutated bundle (e.g. worker.yml
+    with the new ``contexts`` / ``connections`` block). It is overlaid on the
+    stock worker's source files (so files the editor did not send — run.py,
+    SKILL.md, lib/* — are carried over), the manifest identity is rewritten to a
+    free id (``<id>-copy``, ``-copy-2``, ...), and the bundle is registered via
+    the shared ``_register_worker_from_files`` path. The stock template on disk is
+    never touched.
+
+    Returns the new worker id.
+    """
+    from worker_registry import WORKERS_DIR
+
+    # Source-of-truth files for the stock worker (the bundle the editor was viewing).
+    stock = _get_visible_worker(worker_id, user_id=user_id, repos=repos)
+    if not stock:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    try:
+        stock_config = WorkerConfig(**(stock.get("config") or {}))
+    except Exception:
+        stock_config = None
+    base_files: Dict[str, str] = {}
+    if stock_config is not None:
+        try:
+            bundle_dir = _worker_bundle_dir(worker_id, stock_config)
+            for wf in _read_worker_files(bundle_dir):
+                if not wf.binary and wf.content is not None:
+                    base_files[wf.path] = wf.content
+        except Exception:
+            base_files = {}
+    if not base_files:
+        # DB-backed worker with no on-disk bundle: fall back to the manifest view.
+        for wf in _worker_files_from_manifest(stock):
+            if not wf.binary and wf.content is not None:
+                base_files[wf.path] = wf.content
+
+    # Overlay the operator's edited files on top of the stock bundle.
+    for item in edited_files:
+        base_files[item.path] = item.content
+
+    worker_yml = base_files.get("worker.yml")
+    if not worker_yml:
+        raise HTTPException(status_code=400, detail="files must include worker.yml")
+
+    # Allocate a free, non-protected id and rewrite the manifest identity so the
+    # new dir + worker.yml + DB row all agree. _register_worker_from_files parses
+    # the manifest id eagerly (and re-rejects protected ids), so the rewrite MUST
+    # happen before registration. The base MUST be slugified first: the 8 stock
+    # workers are underscore-named (``weekly_update`` ...), and ``<id>-copy`` is
+    # then NOT a valid SLUG_PATTERN id, so registration would 400. Slugify maps
+    # ``weekly_update`` -> ``weekly-update`` -> ``weekly-update-copy``.
+    new_id = _free_worker_id(f"{_slugify_worker_id(worker_id)}-copy", repos=repos)
+    rewritten_yml = _rewrite_worker_yml_id(worker_yml, new_id)
+    # A user's working copy is not a stock example: clear ``is_example`` so the
+    # copy renders as a real owned worker (not in the example gallery) — it would
+    # otherwise inherit ``is_example: true`` from the stock source manifest.
+    base_files["worker.yml"] = _set_worker_yml_is_example(rewritten_yml, False)
+
+    draft_files = [DraftFile(path=path, content=content) for path, content in base_files.items()]
+    created_id = _register_worker_from_files(
+        draft_files,
+        user_id=user_id,
+        repos=repos,
+        dedupe_id=True,
+    )
+    return created_id
+
+
 @app.put("/workers/{worker_id}/files", response_model=WorkerDetail)
 def update_worker_files(
     worker_id: str,
     payload: WorkerFilesUpdateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -4572,21 +10053,17 @@ def update_worker_files(
     """
     from worker_registry import WORKERS_DIR
 
-    _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
-
-    target_dir = WORKERS_DIR / worker_id
-    if not target_dir.is_dir():
-        raise HTTPException(status_code=404, detail="Worker directory not found")
 
     if not payload.files:
         raise HTTPException(status_code=400, detail="files list must not be empty")
 
-    # Validate all paths upfront before touching the filesystem
+    # Validate all paths upfront before touching the filesystem (also gates the
+    # clone-on-edit path below — a stock fork must not carry invalid paths).
     seen_paths: set = set()
     for item in payload.files:
         _validate_worker_file_path(item.path)
@@ -4594,18 +10071,52 @@ def update_worker_files(
             raise HTTPException(status_code=400, detail=f"duplicate file path: {item.path!r}")
         seen_paths.add(item.path)
 
+    # Stock/example workers are read-only shared templates: instead of erroring on
+    # a brain attach / tool add, transparently fork the worker into a user-owned
+    # editable copy and apply the edit there (clone-on-edit). The response carries
+    # `cloned_from` + a different `id` so the UI redirects to the new worker.
+    if worker_id in PROTECTED_STOCK_WORKER_IDS:
+        if "worker.yml" not in seen_paths:
+            raise HTTPException(status_code=400, detail="files must include worker.yml")
+        new_id = _clone_protected_worker_for_edit(
+            worker_id,
+            payload.files,
+            user_id=auth.user_id,
+            repos=repos,
+        )
+        detail = _build_worker_detail(new_id, user_id=auth.user_id, repos=repos)
+        detail.cloned_from = worker_id
+        return detail
+
+    config_dict = worker.get("config") or {}
+    try:
+        existing_config = WorkerConfig(**config_dict)
+    except Exception:
+        existing_config = None
+    target_dir = WORKERS_DIR / worker_id
+    if existing_config is not None:
+        try:
+            configured_dir = _worker_bundle_dir(worker_id, existing_config)
+            if configured_dir.is_dir():
+                target_dir = configured_dir
+        except HTTPException:
+            raise
+        except Exception:
+            target_dir = WORKERS_DIR / worker_id
+
     # Must include worker.yml
     if "worker.yml" not in seen_paths:
         raise HTTPException(status_code=400, detail="files must include worker.yml")
 
     # Validate worker.yml is parseable
     yml_item = next(f for f in payload.files if f.path == "worker.yml")
-    parsed_worker_id, _config = _parse_worker_payload(yml_item.content)
-    if parsed_worker_id != worker_id:
+    parsed_worker_id, _config = _parse_worker_payload(yml_item.content, user_id=auth.user_id)
+    if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
         raise HTTPException(
             status_code=400,
             detail=f"worker.yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
         )
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     # Atomic write strategy:
     #   1. Write all new file contents to a temp staging dir (same filesystem).
@@ -4685,6 +10196,24 @@ def update_worker_files(
             bak.unlink(missing_ok=True)
         backed_up.clear()
 
+        # Snapshot for versioning (fire-and-forget; never block the save)
+        try:
+            import json as _json
+            snapshot = {
+                "worker": repos.workers.get(user_id=auth.user_id, worker_id=worker_id),
+                "files": [{"path": f.path, "content": f.content} for f in payload.files],
+            }
+            repos.versions.create(
+                asset_type="worker",
+                asset_id=worker_id,
+                user_id=auth.user_id,
+                snapshot_json=_json.dumps(snapshot),
+                change_source="user",
+            )
+            repos.versions.prune(asset_type="worker", asset_id=worker_id, keep=20)
+        except Exception as _ver_exc:
+            logger.warning("version snapshot failed for worker %s: %s", worker_id, _ver_exc)
+
         return _build_worker_detail(
             worker_id,
             user_id=auth.user_id,
@@ -4743,11 +10272,24 @@ def create_worker_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+
+    # B-P1-1 (2026-05-29): a smoke-disabled worker must NOT run on demand. The
+    # smoke+gate disables a worker whose first test run failed (enabled=False);
+    # honour that here so a broken worker cannot be run from the UI/API to a
+    # green-but-empty no-op. Reject with 409 + the worker_disabled headline.
+    try:
+        recipe = repos.workers.get_recipe(worker_id=worker_id, user_id=auth.user_id)
+    except Exception:
+        recipe = None
+    if isinstance(recipe, dict) and recipe.get("enabled") is False:
+        raise HTTPException(
+            status_code=409,
+            detail=_OPERATOR_ERROR_CODE_HEADLINES["worker_disabled"],
+        )
 
     # P1-2: Validate required inputs at the request boundary before creating a run row.
     # Use the same WorkerConfig the runner will see — get_worker_config_for_run resolves
@@ -4773,10 +10315,11 @@ def create_worker_run(
         worker_id,
         payload.inputs,
         payload.trigger_source,
+        status=RunStatus.RUNNING.value,
         user_id=auth.user_id,
         repos=repos,
     )
-    bound_by = request.headers.get("x-floom-user") or "anonymous"
+    bound_by = auth.user_id or "anonymous"
     try:
         resolved_inputs = _resolve_file_input_references(
             worker_id, run_id, payload.inputs, bound_by=bound_by
@@ -4802,6 +10345,12 @@ def create_worker_run(
     # Persist resolved inputs (absolute file paths replace SHA values) so that
     # GET /runs/:id returns the staged paths, not raw SHA strings.
     repos.runs.set_input_json(user_id=auth.user_id, run_id=run_id, input_json=resolved_inputs)
+    repos.runs.update(
+        user_id=auth.user_id,
+        run_id=run_id,
+        status=RunStatus.QUEUED.value,
+        started_at=None,
+    )
     start_run(run_id, worker_id, resolved_inputs, user_id=auth.user_id, repos=repos)
     return ActionResponse(status="running", run_id=run_id)
 
@@ -4814,9 +10363,7 @@ def replay_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -4829,6 +10376,7 @@ def replay_run(
     source_inputs = json.loads(row["input_json"] or "{}")
     replay_inputs = json.loads(json.dumps(source_inputs))
     _enforce_run_create_quota(auth, worker_id)
+    _enforce_run_replay_quota(auth, worker_id, run_id)
     new_run_id = create_run(
         worker_id,
         replay_inputs,
@@ -4849,6 +10397,10 @@ def list_runs(
     until: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    include_system: bool = Query(
+        False,
+        description="Include internal/system runs (audit, test, smoke). Hidden by default.",
+    ),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[RunSummary]:
@@ -4862,17 +10414,66 @@ def list_runs(
     if since_dt and until_dt and since_dt > until_dt:
         raise HTTPException(status_code=400, detail="since must be before until")
 
-    rows, total_count = repos.runs.list(
+    if worker_id and _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
+        response.headers["X-Total-Count"] = "0"
+        return []
+
+    visible_rows, visible_total = _list_visible_runs(
         user_id=auth.user_id,
+        repos=repos,
         worker_id=worker_id,
         statuses=statuses,
         since=since_dt.isoformat() if since_dt else None,
         until=until_dt.isoformat() if until_dt else None,
         limit=limit,
         offset=offset,
+        include_system=include_system,
     )
-    response.headers["X-Total-Count"] = str(int(total_count or 0))
-    return [_make_run_summary(r) for r in rows]
+    response.headers["X-Total-Count"] = str(visible_total)
+    return [_make_run_summary(r) for r in visible_rows]
+
+
+_DEFAULT_PRECLEAR_BACKUP_DIR = "/root/backups/manual"
+
+
+def _preclear_backup_dir() -> str:
+    return os.environ.get("WORKEROS_PRECLEAR_BACKUP_DIR") or _DEFAULT_PRECLEAR_BACKUP_DIR
+
+
+def _live_db_file_path() -> Optional[str]:
+    """Resolve the on-disk path of the main SQLite database, or None for
+    an in-memory DB. Uses PRAGMA database_list so it reflects the connection
+    actually in use rather than a possibly-stale module global."""
+    with get_db() as conn:
+        for row in conn.execute("PRAGMA database_list").fetchall():
+            # row: (seq, name, file). The main schema is named 'main'.
+            if row["name"] == "main":
+                file_path = row["file"]
+                return file_path or None
+    return None
+
+
+def _backup_db_before_clear() -> str:
+    """Snapshot the live DB to a timestamped file before a destructive clear.
+
+    Uses SQLite ``VACUUM INTO`` for an atomic, WAL-consistent single-file copy.
+    Raises on any failure so the caller can ABORT the clear (never wipe without
+    a verified backup). Returns the backup file path.
+    """
+    db_file = _live_db_file_path()
+    if not db_file:
+        raise RuntimeError("cannot back up an in-memory database before clear")
+    backup_dir = _preclear_backup_dir()
+    os.makedirs(backup_dir, exist_ok=True)
+    backup_path = os.path.join(
+        backup_dir, f"floom-preclear-{int(time.time())}.db"
+    )
+    with get_db() as conn:
+        # VACUUM INTO writes a fresh, fully-consistent copy (no WAL sidecar).
+        conn.execute("VACUUM INTO ?", (backup_path,))
+    if not os.path.isfile(backup_path) or os.path.getsize(backup_path) == 0:
+        raise RuntimeError(f"backup file missing or empty after VACUUM INTO: {backup_path}")
+    return backup_path
 
 
 @app.post("/runs/clear")
@@ -4881,25 +10482,53 @@ def clear_runs(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    """Wipe all run history.
+    """Clear the caller's run history.
 
     Destructive operation. Requires explicit `?confirm=yes-wipe-all-runs`
     query param to proceed.
+
+    Hardened (post-incident 2026-05-29):
+    - Backs up the full DB to ``/root/backups/manual/floom-preclear-<epoch>.db``
+      BEFORE deleting anything. If the backup fails, the clear is ABORTED.
+    - Scopes deletion to the caller (``owner_id``) only — never a global wipe
+      of every user's runs.
     """
     if confirm != "yes-wipe-all-runs":
         raise HTTPException(
             status_code=400,
             detail=(
                 "Destructive endpoint. Append ?confirm=yes-wipe-all-runs to "
-                "proceed. This wipes every run, log, and artifact record."
+                "proceed. This backs up the DB, then clears YOUR run/log/"
+                "artifact history."
             ),
         )
+    try:
+        backup_path = _backup_db_before_clear()
+    except Exception as exc:
+        logger.error("Aborting /runs/clear: pre-clear backup failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pre-clear backup failed; clear aborted (no data deleted): {exc}",
+        ) from exc
+    # clear_all is owner-scoped (WHERE w.owner_id = ?), so this never touches
+    # other tenants' runs.
     deleted_count = repos.runs.clear_all(user_id=auth.user_id)
-    logger.warning("All run history cleared (%d runs deleted)", deleted_count)
-    return {"status": "cleared", "deleted_runs": deleted_count}
+    logger.warning(
+        "Run history cleared for user %s (%d runs deleted, backup at %s)",
+        auth.user_id,
+        deleted_count,
+        backup_path,
+    )
+    return {
+        "status": "cleared",
+        "cleared_count": deleted_count,
+        # Back-compat alias for pre-hardening callers.
+        "deleted_runs": deleted_count,
+        "backup_path": backup_path,
+    }
 
 
-_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed"})
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "pending_approval"})
 
 
 @app.post("/runs/{run_id}/cancel", response_model=ActionResponse)
@@ -4921,7 +10550,11 @@ def cancel_run(
     Returns 404 if no cancellable run is visible, 200 if cancellation was
     recorded.
     """
-    row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    # Cancellation operates on the caller's own run by explicit id, so it must
+    # work for system/meta runs too (e.g. aborting a worker-author generation
+    # from the /workers/new GeneratingPanel). The system/audit visibility filter
+    # is for the LIST view only.
+    row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if row["status"] in _TERMINAL_RUN_STATUSES:
@@ -4953,13 +10586,831 @@ def cancel_run(
     return ActionResponse(status="cancel_requested", run_id=run_id)
 
 
+# ---------------------------------------------------------------------------
+# S47 HITL — approval endpoints
+# ---------------------------------------------------------------------------
+
+# --- X4: structured reviewer annotations -----------------------------------
+# Caps keep a malicious/fat-fingered reviewer from persisting an unbounded blob
+# onto the approval row. These are deliberately generous for a review pass but
+# hard ceilings.
+_ANNOTATION_MAX_TEXT_ITEMS = 200
+_ANNOTATION_MAX_IMAGE_ITEMS = 30
+_ANNOTATION_MAX_PINS_PER_IMAGE = 50
+_ANNOTATION_MAX_STR = 8000
+_ANNOTATION_MAX_JSON_BYTES = 256 * 1024
+
+
+def _clean_annotation_str(value: Any, *, limit: int = _ANNOTATION_MAX_STR) -> str:
+    if not isinstance(value, str):
+        return ""
+    # Strip control chars (defense-in-depth — this text is rendered back to the
+    # owner) but keep newlines/tabs which are legitimate in a comment.
+    cleaned = "".join(ch for ch in value if ch in "\n\t" or ord(ch) >= 32)
+    return cleaned[:limit].strip()
+
+
+def _safe_annotation_image_url(value: Any) -> Optional[str]:
+    """Only accept image refs that point at OUR content-addressed upload store.
+
+    The reviewer can only attach images they uploaded through the approval-scoped
+    upload endpoints, which return `/uploads/<sha256>?download_token=...`. We
+    refuse arbitrary http(s) URLs so a persisted annotation can never become an
+    SSRF vector or an off-site beacon when the owner later views the feedback.
+    """
+    if not isinstance(value, str):
+        return None
+    ref = value.strip()
+    if not ref.startswith("/uploads/"):
+        return None
+    path_part = ref.split("?", 1)[0]
+    file_id = path_part[len("/uploads/"):]
+    if not is_sha256(file_id):
+        return None
+    return ref[:_ANNOTATION_MAX_STR]
+
+
+def _sanitize_annotations(raw: Any) -> Optional[Dict[str, Any]]:
+    """Coerce reviewer-supplied annotations into a bounded, safe shape.
+
+    Returns None when there is no usable content (so we don't persist `{}`).
+    Shape:
+      {"text":  [{"quote", "comment"}],
+       "images":[{"url", "caption", "pins":[{"x","y","comment"}]}]}
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    text_out: list[Dict[str, Any]] = []
+    for item in (raw.get("text") or [])[:_ANNOTATION_MAX_TEXT_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        quote = _clean_annotation_str(item.get("quote"))
+        comment = _clean_annotation_str(item.get("comment"))
+        if not quote and not comment:
+            continue
+        text_out.append({"quote": quote, "comment": comment})
+
+    images_out: list[Dict[str, Any]] = []
+    for item in (raw.get("images") or [])[:_ANNOTATION_MAX_IMAGE_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        url = _safe_annotation_image_url(item.get("url"))
+        if not url:
+            continue
+        caption = _clean_annotation_str(item.get("caption"))
+        pins_out: list[Dict[str, Any]] = []
+        for pin in (item.get("pins") or [])[:_ANNOTATION_MAX_PINS_PER_IMAGE]:
+            if not isinstance(pin, dict):
+                continue
+            try:
+                x = float(pin.get("x"))
+                y = float(pin.get("y"))
+            except (TypeError, ValueError):
+                continue
+            # Pins are normalized 0..1 coordinates over the image.
+            x = min(1.0, max(0.0, x))
+            y = min(1.0, max(0.0, y))
+            pins_out.append({
+                "x": round(x, 4),
+                "y": round(y, 4),
+                "comment": _clean_annotation_str(pin.get("comment")),
+            })
+        images_out.append({"url": url, "caption": caption, "pins": pins_out})
+
+    if not text_out and not images_out:
+        return None
+    return {"text": text_out, "images": images_out}
+
+
+def _annotations_json_or_none(raw: Any) -> Optional[str]:
+    """Sanitize + serialize annotations to a JSON string, or None.
+
+    Enforces a hard byte ceiling on the serialized blob as a final backstop.
+    """
+    sanitized = _sanitize_annotations(raw)
+    if sanitized is None:
+        return None
+    encoded = json.dumps(sanitized, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > _ANNOTATION_MAX_JSON_BYTES:
+        raise HTTPException(status_code=400, detail="Annotations payload is too large")
+    return encoded
+
+
+class ApproveRequest(BaseModel):
+    edited_output: Optional[Dict[str, Any]] = None
+    annotations: Optional[Dict[str, Any]] = None
+
+
+class RejectRequest(BaseModel):
+    reason: Optional[str] = None
+    annotations: Optional[Dict[str, Any]] = None
+
+
+@app.get("/approvals")
+def list_approvals(
+    status: Optional[str] = Query(None, description="Filter by status (default: pending)"),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """List approval requests for the authenticated user."""
+    status_filter = (status or "pending").lower()
+    if status_filter == "pending":
+        rows = repos.approvals.list_pending(owner_id=auth.user_id)
+    else:
+        # For non-pending statuses, query directly
+        with get_db() as conn:
+            rows = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT a.*, w.name AS worker_name
+                    FROM approvals a
+                    LEFT JOIN workers w ON w.id = a.worker_id
+                    WHERE a.owner_id = ? AND a.status = ?
+                    ORDER BY a.created_at DESC
+                    """,
+                    (auth.user_id, status_filter),
+                ).fetchall()
+            ]
+    return [_approval_response(dict(row), repos) for row in rows]
+
+
+@app.get("/approvals/count")
+def count_pending_approvals(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Return count of pending approvals for the authenticated user."""
+    count = repos.approvals.count_pending(owner_id=auth.user_id)
+    return {"pending": count}
+
+
+def _approval_artifacts_for_response(
+    approval: Dict[str, Any],
+    repos: Repositories,
+) -> list[Dict[str, Any]]:
+    owner_id = str(approval.get("owner_id") or "")
+    run_id = str(approval.get("run_id") or "")
+    if not owner_id or not run_id:
+        return []
+    try:
+        rows = repos.runs.list_artifacts(user_id=owner_id, run_id=run_id)
+    except Exception:
+        logger.exception("Failed to load approval artifacts for run %s", run_id)
+        return []
+    artifacts: list[Dict[str, Any]] = []
+    for row in rows:
+        if _is_sensitive_artifact_row(row):
+            continue
+        art = row_to_dict(row)
+        artifacts.append(
+            {
+                "id": art.get("id"),
+                "run_id": art.get("run_id"),
+                "name": art.get("name"),
+                "type": art.get("type"),
+                "path": art.get("path"),
+                "relative_path": art.get("relative_path"),
+                "size_bytes": art.get("size_bytes"),
+                "created_at": art.get("created_at"),
+            }
+        )
+    return artifacts
+
+
+def _approval_response(
+    approval: Dict[str, Any],
+    repos: Repositories,
+) -> Dict[str, Any]:
+    response = dict(approval)
+    response["artifacts"] = _approval_artifacts_for_response(response, repos)
+    # X4: surface the structured reviewer feedback (highlight+comment / screenshot
+    # pins) as a parsed object so the owner sees it on the run/approval, not just
+    # the free-text reason. The raw JSON column is dropped from the response.
+    raw_annotations = response.pop("annotations_json", None)
+    parsed_annotations: Optional[Dict[str, Any]] = None
+    if raw_annotations:
+        try:
+            parsed_annotations = json.loads(raw_annotations)
+        except Exception:
+            parsed_annotations = None
+    response["annotations"] = parsed_annotations
+    # Standalone share/review link for the authenticated owner. The token is the
+    # same deterministic HMAC the /approvals/public/* routes verify, so the owner
+    # can copy this URL to open the approval full-page (no app chrome) or share it
+    # with an external approver. Mirrors the chat tool's `link` field.
+    response["public_link"] = (
+        f"{_frontend_base_url()}/approvals/review"
+        f"?id={response.get('id')}&token={_approval_public_token(dict(approval))}"
+    )
+    return response
+
+
+def _publish_approval_terminal_status(
+    run_id: str,
+    decision: str,
+    user_id: str,
+    repos: Repositories,
+    *,
+    follow_up_run_id: str | None = None,
+) -> None:
+    """Publish a terminal `status` SSE event for an approve/reject decision.
+
+    The original run has just transitioned off PENDING_APPROVAL to COMPLETED.
+    Live SSE consumers (the run page) track `type:"status"` events; the
+    `approval_decided` event alone does not move their status, so without this
+    the UI would never observe the run leaving pending_approval.
+    """
+    completed_at: str | None = None
+    try:
+        run_row = repos.runs.get(user_id=user_id, run_id=run_id)
+        if run_row is not None:
+            completed_at = row_to_dict(run_row).get("completed_at")
+    except Exception:
+        completed_at = None
+    event: Dict[str, Any] = {
+        "type": "status",
+        "run_id": run_id,
+        "status": decision,
+        "completed_at": completed_at,
+    }
+    if follow_up_run_id is not None:
+        event["follow_up_run_id"] = follow_up_run_id
+    _sse_publish(run_id, event)
+
+
+def _approval_public_payload(approval: Dict[str, Any]) -> str:
+    return ".".join(
+        str(approval.get(key) or "")
+        for key in ("id", "run_id", "owner_id")
+    )
+
+
+def _approval_public_token(approval: Dict[str, Any]) -> str:
+    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    return hmac.new(
+        secret.encode("utf-8"),
+        _approval_public_payload(approval).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+# F3 (2026-06-03): the public approval endpoints must NOT leak which approval
+# ids exist. Returning 404 for "no such approval" but 401 for "exists but bad
+# token" is an existence oracle: an attacker can enumerate valid approval ids by
+# diffing the status codes. We return the SAME response for both — a missing
+# approval and a present-but-wrong-token approval are indistinguishable. We also
+# always run an HMAC comparison (against a dummy expected value when the row is
+# missing) so the two paths do roughly the same work and don't open a coarse
+# timing oracle either.
+_PUBLIC_APPROVAL_DENIED = HTTPException(
+    status_code=401, detail="Invalid or expired approval link"
+)
+
+
+def _load_public_approval(
+    approval_id: str,
+    token: str,
+    repos: Repositories,
+) -> Dict[str, Any]:
+    approval = repos.approvals.get_public(approval_id=approval_id)
+    if approval is None:
+        # Burn an equivalent HMAC compare so a missing approval and a
+        # present-but-wrong-token approval are indistinguishable (no oracle).
+        hmac.compare_digest(token or "", "0" * 64)
+        raise _PUBLIC_APPROVAL_DENIED
+    expected = _approval_public_token(dict(approval))
+    if not token or not hmac.compare_digest(token, expected):
+        # Identical response to the not-found case — no existence oracle.
+        raise _PUBLIC_APPROVAL_DENIED
+    return dict(approval)
+
+
+def _public_approval_response(approval: Dict[str, Any], repos: Repositories) -> Dict[str, Any]:
+    public = _approval_response(approval, repos)
+    public.pop("owner_id", None)
+    # The owner-only share link (and its token) is not echoed back to external
+    # signed-link approvers — they already hold the token they arrived with.
+    public.pop("public_link", None)
+    return public
+
+
+def _artifact_file_response(row: Any) -> StreamingResponse:
+    if _is_sensitive_artifact_row(row):
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    art = row_to_dict(row)
+    path_str = str(art.get("path") or "")
+
+    from runner_utils import ARTIFACTS_DIR
+
+    try:
+        artifacts_dir = ARTIFACTS_DIR.resolve()
+        stored_path = Path(path_str)
+        resolved = (
+            stored_path.resolve()
+            if stored_path.is_absolute()
+            else (artifacts_dir / stored_path).resolve()
+        )
+        resolved.relative_to(artifacts_dir)
+    except Exception:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not resolved.is_file():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    name = str(art.get("name") or resolved.name)
+    content_type, _ = mimetypes.guess_type(name)
+    content_type = content_type or "application/octet-stream"
+    filename = _sanitize_download_name(name)
+
+    def iter_file():
+        with open(resolved, "rb") as f:
+            while chunk := f.read(65536):
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class PublicApprovalDecisionRequest(BaseModel):
+    reason: str | None = None
+    edited_output: Dict[str, Any] | None = None
+    annotations: Dict[str, Any] | None = None
+
+
+@app.get("/approvals/public/{approval_id}")
+def get_public_approval(
+    approval_id: str,
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+):
+    """Return one approval for a signed standalone review link."""
+    approval = _load_public_approval(approval_id, token, repos)
+    return _public_approval_response(approval, repos)
+
+
+@app.get("/approvals/public/{approval_id}/artifacts/{artifact_id}/download")
+def download_public_approval_artifact(
+    approval_id: str,
+    artifact_id: str,
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+):
+    """Download a non-sensitive run artifact from a signed standalone approval link."""
+    approval = _load_public_approval(approval_id, token, repos)
+    owner_id = str(approval.get("owner_id") or "")
+    run_id = str(approval.get("run_id") or "")
+    row = next(
+        (
+            artifact
+            for artifact in repos.runs.list_artifacts(user_id=owner_id, run_id=run_id)
+            if artifact["id"] == artifact_id
+        ),
+        None,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return _artifact_file_response(row)
+
+
+@app.post("/approvals/public/{approval_id}/approve", response_model=ActionResponse)
+def approve_public_approval(
+    approval_id: str,
+    body: PublicApprovalDecisionRequest = Body(default_factory=PublicApprovalDecisionRequest),
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Approve from a signed standalone link without requiring app navigation."""
+    approval = _load_public_approval(approval_id, token, repos)
+    auth = AuthContext(user_id=str(approval["owner_id"]), email=None, scopes=("approval",))
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") == "destructive_delete":
+        result = approve_destructive_action(
+            approval_id,
+            auth,
+            repos,
+            annotations=body.annotations,
+        )
+        return ActionResponse(status=str(result.get("status") or "approved"), run_id=str(approval["run_id"]))
+    return approve_run(
+        str(approval["run_id"]),
+        ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
+        auth,
+        repos,
+    )
+
+
+@app.post("/approvals/public/{approval_id}/reject", response_model=ActionResponse)
+def reject_public_approval(
+    approval_id: str,
+    body: PublicApprovalDecisionRequest = Body(default_factory=PublicApprovalDecisionRequest),
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Reject from a signed standalone link without requiring app navigation."""
+    approval = _load_public_approval(approval_id, token, repos)
+    auth = AuthContext(user_id=str(approval["owner_id"]), email=None, scopes=("approval",))
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") == "destructive_delete":
+        result = reject_destructive_action(
+            approval_id,
+            RejectRequest(reason=body.reason, annotations=body.annotations),
+            auth,
+            repos,
+        )
+        return ActionResponse(status=str(result.get("status") or "rejected"), run_id=str(approval["run_id"]))
+    return reject_run(
+        str(approval["run_id"]),
+        RejectRequest(reason=body.reason, annotations=body.annotations),
+        auth,
+        repos,
+    )
+
+
+# X4: screenshot uploads attached to a review. Both endpoints store the blob
+# under the APPROVAL OWNER's user_id so the resulting `/uploads/<sha>` ref is
+# readable by the owner when they later view the annotations on the run — even
+# when an external signed-link reviewer did the upload. The same extension /
+# size / quota gates as `/uploads` apply, and `allowed_media_prefixes` pins the
+# upload to images so a reviewer can't smuggle in a non-image blob here.
+@app.post("/approvals/{approval_id}/uploads")
+async def upload_approval_screenshot(
+    approval_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Authed owner uploads a review screenshot for one of their approvals."""
+    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return await _store_uploaded_blob(
+        request,
+        file,
+        auth.user_id or "anonymous",
+        allowed_media_prefixes=("image/",),
+    )
+
+
+@app.post("/approvals/public/{approval_id}/uploads")
+async def upload_public_approval_screenshot(
+    approval_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Signed-link (no-auth) reviewer uploads a review screenshot.
+
+    The link IS the credential: a valid per-approval HMAC token unlocks the
+    upload, and the blob is owned by the approval owner so they can read it back.
+    """
+    approval = _load_public_approval(approval_id, token, repos)
+    owner_id = str(approval.get("owner_id") or "")
+    return await _store_uploaded_blob(
+        request,
+        file,
+        owner_id or "anonymous",
+        allowed_media_prefixes=("image/",),
+    )
+
+
+@app.post("/runs/{run_id}/approve", response_model=ActionResponse)
+def approve_run(
+    run_id: str,
+    body: ApproveRequest = Body(default_factory=ApproveRequest),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Approve a PENDING_APPROVAL run and spawn a follow-up execution run.
+
+    The follow-up run receives all original inputs merged with:
+      - decision: "approved"
+      - approved_output: the (optionally edited) proposed output
+    """
+    run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    if run_row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if row_to_dict(run_row).get("status") != RunStatus.PENDING_APPROVAL.value:
+        raise HTTPException(status_code=409, detail="Run is not awaiting approval")
+
+    approval_row = repos.approvals.get_by_run_id(run_id=run_id)
+    if approval_row is None:
+        raise HTTPException(status_code=404, detail="Approval record not found")
+    if approval_row.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    # Load original inputs
+    original_inputs: Dict[str, Any] = {}
+    raw_decision_input = approval_row.get("decision_input_json")
+    if raw_decision_input:
+        try:
+            original_inputs = json.loads(raw_decision_input)
+        except Exception:
+            original_inputs = {}
+
+    # Load proposed output
+    run_data = row_to_dict(run_row)
+    proposed_output: Dict[str, Any] = {}
+    raw_output = run_data.get("output_json")
+    if raw_output:
+        try:
+            proposed_output = json.loads(raw_output)
+        except Exception:
+            proposed_output = {}
+
+    # Build follow-up inputs
+    edited_output = body.edited_output if body.edited_output is not None else proposed_output
+    follow_up_inputs = {
+        **original_inputs,
+        "decision": "approved",
+        "approved_output": edited_output,
+    }
+
+    # Create the follow-up run
+    worker_id = run_data["worker_id"]
+    try:
+        follow_up_run_id = create_run(
+            worker_id,
+            follow_up_inputs,
+            trigger_source="approval",
+            user_id=auth.user_id,
+            repos=repos,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to spawn follow-up run: {exc}") from exc
+
+    decided_at = now_iso()
+    edited_output_json = json.dumps(edited_output) if body.edited_output is not None else None
+    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
+    repos.approvals.approve(
+        owner_id=auth.user_id,
+        run_id=run_id,
+        decided_at=decided_at,
+        edited_output_json=edited_output_json,
+        follow_up_run_id=follow_up_run_id,
+        annotations_json=annotations_json,
+    )
+
+    # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
+    # state. Without this the original run is stuck at pending_approval forever
+    # (zombie approval); the decision is recorded in the approvals table.
+    repos.runs.update_status(
+        user_id=auth.user_id,
+        run_id=run_id,
+        status=RunStatus.COMPLETED.value,
+    )
+
+    # Kick off the follow-up run
+    start_run(follow_up_run_id, worker_id, follow_up_inputs, user_id=auth.user_id, repos=repos)
+
+    # Broadcast the decision
+    _sse_publish(run_id, {
+        "type": "approval_decided",
+        "run_id": run_id,
+        "decision": "approved",
+        "follow_up_run_id": follow_up_run_id,
+    })
+
+    # Emit a terminal status event so live SSE consumers (the run page) observe
+    # the original run leaving pending_approval. The frontend tracks
+    # `type:"status"` events; without this it never sees the resolution.
+    _publish_approval_terminal_status(
+        run_id, "approved", auth.user_id, repos, follow_up_run_id=follow_up_run_id
+    )
+
+    return ActionResponse(status="approved", run_id=follow_up_run_id)
+
+
+@app.post("/runs/{run_id}/reject", response_model=ActionResponse)
+def reject_run(
+    run_id: str,
+    body: RejectRequest = Body(default_factory=RejectRequest),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Reject a PENDING_APPROVAL run. No follow-up run is spawned."""
+    run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    if run_row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if row_to_dict(run_row).get("status") != RunStatus.PENDING_APPROVAL.value:
+        raise HTTPException(status_code=409, detail="Run is not awaiting approval")
+
+    approval_row = repos.approvals.get_by_run_id(run_id=run_id)
+    if approval_row is None:
+        raise HTTPException(status_code=404, detail="Approval record not found")
+    if approval_row.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    decided_at = now_iso()
+    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
+    repos.approvals.reject(
+        owner_id=auth.user_id,
+        run_id=run_id,
+        decided_at=decided_at,
+        reason=body.reason,
+        annotations_json=annotations_json,
+    )
+
+    # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
+    # state so it is not stuck forever (zombie approval). The rejection itself
+    # is recorded in the approvals table (status='rejected' + reason).
+    repos.runs.update_status(
+        user_id=auth.user_id,
+        run_id=run_id,
+        status=RunStatus.COMPLETED.value,
+    )
+
+    _sse_publish(run_id, {
+        "type": "approval_decided",
+        "run_id": run_id,
+        "decision": "rejected",
+        "reason": body.reason,
+    })
+
+    # Emit a terminal status event so live SSE consumers (the run page) observe
+    # the original run leaving pending_approval. The frontend tracks
+    # `type:"status"` events; without this it never sees the resolution.
+    _publish_approval_terminal_status(run_id, "rejected", auth.user_id, repos)
+
+    return ActionResponse(status="rejected", run_id=run_id)
+
+
+# ---------------------------------------------------------------------------
+# Destructive-action approvals (kind=destructive_delete)
+# ---------------------------------------------------------------------------
+# When a sandboxed worker issues DELETE, the middleware queues an approval
+# instead of executing immediately. The operator decides here.
+
+import re as _re_action
+
+_RE_DELETE_WORKER = _re_action.compile(r"^/workers/([^/]+)$")
+_RE_DELETE_CONTEXT = _re_action.compile(r"^/contexts/([^/]+)$")
+_RE_DELETE_CONTEXT_FILE = _re_action.compile(r"^/contexts/([^/]+)/files/(.+)$")
+
+
+def _execute_destructive_delete(path: str, owner_id: str, repos: Repositories) -> str:
+    """Execute a pre-approved destructive delete and return a description."""
+    m = _RE_DELETE_WORKER.match(path)
+    if m:
+        worker_id = m.group(1)
+        _delete_worker_impl(worker_id, owner_id, repos)
+        return f"Worker '{worker_id}' deleted"
+
+    m = _RE_DELETE_CONTEXT.match(path)
+    if m:
+        name = m.group(1)
+        ctx = repos.contexts.get(owner_id=owner_id, name=name) if hasattr(repos, "contexts") else None
+        if ctx is None:
+            raise HTTPException(status_code=404, detail=f"Brain pack '{name}' not found")
+        repos.contexts.delete(owner_id=owner_id, name=name)
+        try:
+            repos.versions.delete_for_context(name=name)
+        except Exception as exc:
+            logger.warning("Could not prune asset_versions for context %s: %s", name, exc)
+        return f"Brain pack '{name}' deleted"
+
+    m = _RE_DELETE_CONTEXT_FILE.match(path)
+    if m:
+        name, file_path = m.group(1), m.group(2)
+        from worker_registry import WORKERS_DIR  # noqa: PLC0415
+        context_dir = WORKERS_DIR.parent / "contexts" / name
+        target = context_dir / file_path
+        if not target.exists():
+            raise HTTPException(status_code=404, detail=f"File '{file_path}' not found in brain pack '{name}'")
+        target.unlink()
+        return f"File '{file_path}' deleted from brain pack '{name}'"
+
+    raise HTTPException(
+        status_code=422,
+        detail=f"Approved delete path '{path}' could not be matched to a known resource type.",
+    )
+
+
+class ApproveActionRequest(BaseModel):
+    annotations: Optional[Dict[str, Any]] = None
+
+
+@app.post("/approvals/{approval_id}/approve-action")
+def approve_destructive_action(
+    approval_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+    body: ApproveActionRequest = Body(default_factory=ApproveActionRequest),
+    annotations: Optional[Dict[str, Any]] = None,
+):
+    """Approve and execute a sandboxed-worker DELETE request.
+
+    Only works for approvals created by the run-token middleware (kind=destructive_delete).
+    The optional `annotations` keyword lets the public-link forwarder pass
+    reviewer feedback without a request body; the route body carries it for
+    authed callers.
+    """
+    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") != "destructive_delete":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval is not a destructive-action request. Use POST /runs/{run_id}/approve instead.",
+        )
+
+    path = decision_input.get("path", "")
+    description = _execute_destructive_delete(path, auth.user_id, repos)
+
+    annotations_json = _annotations_json_or_none(
+        annotations if annotations is not None else body.annotations
+    )
+    repos.approvals.approve(
+        owner_id=auth.user_id,
+        run_id=approval["run_id"],
+        decided_at=now_iso(),
+        annotations_json=annotations_json,
+    )
+
+    _sse_publish(approval["run_id"], {
+        "type": "approval_decided",
+        "run_id": approval["run_id"],
+        "decision": "approved",
+        "detail": description,
+    })
+
+    return {"status": "approved", "executed": path, "detail": description}
+
+
+@app.post("/approvals/{approval_id}/reject-action")
+def reject_destructive_action(
+    approval_id: str,
+    body: RejectRequest = Body(default_factory=RejectRequest),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Reject a sandboxed-worker DELETE request without executing it."""
+    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") != "destructive_delete":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval is not a destructive-action request. Use POST /runs/{run_id}/reject instead.",
+        )
+
+    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
+    repos.approvals.reject(
+        owner_id=auth.user_id,
+        run_id=approval["run_id"],
+        decided_at=now_iso(),
+        reason=body.reason,
+        annotations_json=annotations_json,
+    )
+
+    _sse_publish(approval["run_id"], {
+        "type": "approval_decided",
+        "run_id": approval["run_id"],
+        "decision": "rejected",
+        "reason": body.reason,
+    })
+
+    return {"status": "rejected", "path": decision_input.get("path", ""), "reason": body.reason}
+
+
 @app.get("/runs/{run_id}/download")
 def download_run_bundle(
     run_id: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if not run_row:
         raise HTTPException(status_code=404, detail="Run not found")
     artifact_rows = repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
@@ -5030,6 +11481,8 @@ def get_run_bundle_file(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
+    if _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos) is None:
+        raise HTTPException(status_code=404, detail="Bundle file not found")
     snapshot_path = repos.runs.get_bundle_snapshot_path(user_id=auth.user_id, run_id=run_id)
     if snapshot_path is None:
         raise HTTPException(status_code=404, detail="Bundle file not found")
@@ -5056,6 +11509,8 @@ def download_artifact(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
+    if _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos) is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
     row = next(
         (
             artifact
@@ -5066,48 +11521,7 @@ def download_artifact(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Artifact not found")
-    if _is_sensitive_artifact_row(row):
-        raise HTTPException(status_code=404, detail="Artifact not found")
-
-    art = row_to_dict(row)
-    path_str = art["path"]
-
-    from runner_utils import ARTIFACTS_DIR
-    from pathlib import Path
-    try:
-        artifacts_dir = ARTIFACTS_DIR.resolve()
-        resolved = Path(path_str).resolve()
-    except Exception:
-        raise HTTPException(status_code=403, detail="Invalid path")
-
-    try:
-        resolved.relative_to(artifacts_dir)
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    if not resolved.is_file():
-        raise HTTPException(status_code=404, detail="File not found on disk")
-
-    content_type, _ = mimetypes.guess_type(art["name"])
-    content_type = content_type or "application/octet-stream"
-    filename = (
-        str(art["name"])
-        .replace("\\", "_")
-        .replace('"', "_")
-        .replace("\r", "_")
-        .replace("\n", "_")
-    )
-
-    def iter_file():
-        with open(resolved, "rb") as f:
-            while chunk := f.read(65536):
-                yield chunk
-
-    return StreamingResponse(
-        iter_file(),
-        media_type=content_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return _artifact_file_response(row)
 
 
 @app.get("/runs/{run_id}", response_model=RunDetail, response_model_exclude_none=True)
@@ -5116,7 +11530,7 @@ def get_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> RunDetail:
-    run = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    run = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -5134,13 +11548,19 @@ def get_run(
                 value=raw_output.get(out.name),
             ))
 
+    # G5 P1: collapse the e2b stderr code-echo on the RAW ordered rows FIRST
+    # (frame + caret anchors intact), THEN per-row redact each survivor.
+    _raw_log_rows = [
+        {"level": r["level"], "message": r["message"], "timestamp": r["timestamp"]}
+        for r in repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
+    ]
     logs = [
         LogEntry(
-            level=r["level"],
-            message=_redact_public_log_message(r["message"]),
-            timestamp=r["timestamp"],
+            level=row["level"],
+            message=_redact_public_log_message(row["message"]),
+            timestamp=row["timestamp"],
         )
-        for r in repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
+        for row in _collapse_stderr_code_echo_rows(_raw_log_rows)
     ]
 
     artifacts = [
@@ -5149,7 +11569,11 @@ def get_run(
             run_id=r["run_id"],
             name=r["name"],
             type=row_to_dict(r).get("type"),
-            path=r["path"],
+            # PATH-1: never return the absolute host path; expose only the path
+            # relative to the artifacts root. Download resolves the real path
+            # server-side from the artifact id.
+            path=_public_artifact_path(r["path"]),
+            relative_path=_public_artifact_path(r["path"]),
             size_bytes=row_to_dict(r).get("size_bytes"),
             created_at=r["created_at"],
         )
@@ -5178,7 +11602,12 @@ def get_run(
         logs=logs,
         artifacts=artifacts,
         transcript=transcript,
-        error=run.get("error"),
+        error=_operator_error_message(run.get("error"), run.get("error_code")),
+        # Raw error/traceback kept only for the debug "Raw" tab, secrets redacted.
+        # Surfaced separately so it is never the operator-facing headline. We keep
+        # it whenever the operator headline differs from the raw text (artifact,
+        # runtime jargon, or error_code mapping) so engineers can still see it.
+        error_raw=_run_error_raw(run.get("error"), run.get("error_code")),
         error_code=run.get("error_code"),
         started_at=run.get("started_at"),
         completed_at=run.get("completed_at"),
@@ -5196,57 +11625,64 @@ async def stream_run_parts(
     repos: Repositories = Depends(get_repos),
 ):
     """Server-Sent Events stream of AI SDK parts for a single run."""
-    row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if not row:
         raise HTTPException(status_code=404, detail="Run not found")
 
     last_seen = _parse_last_event_id(request.headers.get("last-event-id"))
 
+    # Per-user concurrent-stream cap (Round 16 DoS finding). Acquire
+    # synchronously so the 429 is returned before the StreamingResponse.
+    stream_slot = _sse_stream_acquire(auth.user_id)
+
     async def event_generator():
-        snapshot = _run_part_snapshot(run_id)
-        if snapshot is None:
-            final_part = _finish_part_from_run_row(row)
-            if final_part is not None:
-                # #188: the in-memory part buffer is gone (terminal run past its
-                # TTL, or a fresh server process). Replay persisted log rows so
-                # the client reconstructs the transcript instead of receiving a
-                # bare finish event.
-                event_id = 0
-                for log_part in _log_replay_parts(repos, auth.user_id, run_id):
-                    if event_id > last_seen:
-                        yield _format_run_part_sse(event_id, log_part)
-                    event_id += 1
-                if event_id > last_seen:
-                    yield _format_run_part_sse(event_id, final_part)
-                return
-            snapshot = {"parts": [], "finished": False}
-
-        for event_id, part in snapshot["parts"]:
-            if event_id > last_seen:
-                yield _format_run_part_sse(event_id, part)
-
-        if snapshot["finished"]:
-            return
-
-        q: asyncio.Queue = asyncio.Queue(maxsize=512)
-        loop = asyncio.get_running_loop()
-        _run_part_register(run_id, q, loop)
         try:
-            while True:
-                if await request.is_disconnected():
-                    break
+            snapshot = _run_part_snapshot(run_id)
+            if snapshot is None:
+                final_part = _finish_part_from_run_row(row)
+                if final_part is not None:
+                    # #188: the in-memory part buffer is gone (terminal run past its
+                    # TTL, or a fresh server process). Replay persisted log rows so
+                    # the client reconstructs the transcript instead of receiving a
+                    # bare finish event.
+                    event_id = 0
+                    for log_part in _log_replay_parts(repos, auth.user_id, run_id):
+                        if event_id > last_seen:
+                            yield _format_run_part_sse(event_id, log_part)
+                        event_id += 1
+                    if event_id > last_seen:
+                        yield _format_run_part_sse(event_id, final_part)
+                    return
+                snapshot = {"parts": [], "finished": False}
 
-                try:
-                    event_id, part = await asyncio.wait_for(q.get(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-                    continue
+            for event_id, part in snapshot["parts"]:
+                if event_id > last_seen:
+                    yield _format_run_part_sse(event_id, part)
 
-                yield _format_run_part_sse(event_id, part)
-                if _run_part_is_finish(part):
-                    break
+            if snapshot["finished"]:
+                return
+
+            q: asyncio.Queue = asyncio.Queue(maxsize=512)
+            loop = asyncio.get_running_loop()
+            _run_part_register(run_id, q, loop)
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+
+                    try:
+                        event_id, part = await asyncio.wait_for(q.get(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    yield _format_run_part_sse(event_id, part)
+                    if _run_part_is_finish(part):
+                        break
+            finally:
+                _run_part_cleanup(run_id, q)
         finally:
-            _run_part_cleanup(run_id, q)
+            _sse_stream_release(stream_slot)
 
     return StreamingResponse(
         event_generator(),
@@ -5279,59 +11715,66 @@ async def stream_run_events(
     - If run is already terminal when client connects, current state is emitted
       immediately then the stream closes.
     """
-    # Check run exists
-    run_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+    run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
     if not run_row:
         raise HTTPException(status_code=404, detail="Run not found")
 
     initial_status = run_row["status"]
     already_terminal = initial_status in _TERMINAL_STATUSES
 
+    # Per-user concurrent-stream cap (Round 16 DoS finding). Acquire
+    # synchronously so the 429 is returned before the StreamingResponse.
+    stream_slot = _sse_stream_acquire(auth.user_id)
+
     async def event_generator():
-        q: asyncio.Queue = asyncio.Queue(maxsize=512)
-
-        # If run already terminal, emit current state and close immediately
-        if already_terminal:
-            final_row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
-            if final_row:
-                evt = {
-                    "type": "status",
-                    "run_id": run_id,
-                    "status": final_row["status"],
-                    "error": final_row["error"],
-                    "completed_at": final_row["completed_at"],
-                }
-                yield f"data: {json.dumps(evt)}\n\n"
-            yield "data: {\"type\": \"close\"}\n\n"
-            return
-
-        # Register the consumer queue with its bound event loop
-        loop = asyncio.get_running_loop()
-        with _sse_lock:
-            _sse_queues.setdefault(run_id, []).append((q, loop))
-
         try:
-            while True:
-                # Check for client disconnect
-                if await request.is_disconnected():
-                    break
+            q: asyncio.Queue = asyncio.Queue(maxsize=512)
 
-                try:
-                    event = await asyncio.wait_for(q.get(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    # Send keepalive comment
-                    yield ": keepalive\n\n"
-                    continue
+            # If run already terminal, emit current state and close immediately
+            if already_terminal:
+                final_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+                if final_row:
+                    evt = _public_sse_event({
+                        "type": "status",
+                        "run_id": run_id,
+                        "status": final_row["status"],
+                        "error": final_row["error"],
+                        "completed_at": final_row["completed_at"],
+                        "duration_ms": final_row["duration_ms"],
+                    })
+                    yield f"data: {json.dumps(evt)}\n\n"
+                yield "data: {\"type\": \"close\"}\n\n"
+                return
 
-                yield f"data: {json.dumps(event)}\n\n"
+            # Register the consumer queue with its bound event loop
+            loop = asyncio.get_running_loop()
+            with _sse_lock:
+                _sse_queues.setdefault(run_id, []).append((q, loop))
 
-                # Close stream if run reached terminal state
-                evt_type = event.get("type")
-                evt_status = event.get("status", "")
-                if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
-                    break
+            try:
+                while True:
+                    # Check for client disconnect
+                    if await request.is_disconnected():
+                        break
+
+                    try:
+                        event = await asyncio.wait_for(q.get(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        # Send keepalive comment
+                        yield ": keepalive\n\n"
+                        continue
+
+                    yield f"data: {json.dumps(event)}\n\n"
+
+                    # Close stream if run reached terminal state
+                    evt_type = event.get("type")
+                    evt_status = event.get("status", "")
+                    if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
+                        break
+            finally:
+                _sse_cleanup(run_id, q)
         finally:
-            _sse_cleanup(run_id, q)
+            _sse_stream_release(stream_slot)
 
     return StreamingResponse(
         event_generator(),
@@ -5347,38 +11790,872 @@ _INTERNAL_LOG_TOKEN_RE = re.compile(
     r"\b(?:trace_[A-Za-z0-9_.:-]+|(?:thread|step|run|call|msg|tool)_[A-Za-z0-9][A-Za-z0-9_-]{7,})\b"
 )
 _LOG_METADATA_RE = re.compile(r"\b(?:mode|runner)=[^\s,;]+", re.IGNORECASE)
+_MISSING_SECRETS_RE = re.compile(r"Missing secrets?:\s*[A-Z0-9_, ]+", re.IGNORECASE)
+_ENV_SECRET_CONFIG_RE = re.compile(
+    r"\b[A-Z][A-Z0-9]{1,63}(?:_[A-Z0-9]{1,64})+\b(?:\s+is)?\s+(?:not set|not configured|missing)\b(?:\.[^\n]*)?",
+    re.IGNORECASE,
+)
+
+
+_CALM_CODE_ERROR_LOG = "Worker code raised an error (see the Error card for details)."
+# A single traceback FRAME line: '  File "...", line N, in name' or the bare
+# source line printed under it. After path-scrubbing these become noise like
+# 'File "[worker file]", line 9, in main'.
+_TRACEBACK_FRAME_LINE_RE = re.compile(r'File\s+"[^"]*",\s*line\s+\d+', re.IGNORECASE)
+# A final 'ExcClass: message' line (TypeError: ...), or a bare Traceback header.
+_TRACEBACK_HEADER_RE = re.compile(r"Traceback \(most recent call last\)", re.IGNORECASE)
+
+# G5 P1 (2026-05-29): the residual e2b stderr code-echo. Each stderr line is
+# emitted as a SEPARATE log row (e2b_driver._emit_command_output splits + strips
+# per line), so the multiline-collapse in _redact_runtime_jargon_in_log never
+# sees the block, and the single-line branch only matched traceback/exc regexes.
+# Three line classes still leaked verbatim to the operator "Recent logs" panel:
+#   - the caret marker line  '~~~~~~~~^~~~~~~~~'  (Python 3.11+ error-pointer)
+#   - the Command-exit boilerplate  'Command exited with code 1'
+#   - the source-line echo  'quotient = number1 / number2' (the line above the caret)
+# The caret line is the unambiguous anchor: Python ALWAYS prints the offending
+# source line immediately ABOVE the caret. So we collapse these at the ORDERED
+# log-list level (where adjacency is preserved) with ZERO false positives — a
+# clean stderr print only gets collapsed if it is itself caret-only or the row
+# directly followed by a caret row.
+_CARET_ONLY_RE = re.compile(r"^[\s~^|+]*[~^][\s~^|+]*$")
+_COMMAND_EXIT_RE = re.compile(r"\bCommand exited with code\s+\d+\b", re.IGNORECASE)
+# Strip the streaming '[e2b] stderr: ' / '[e2b] ' prefix so the markers above
+# match the content even after the driver prepends a channel label.
+_E2B_LOG_PREFIX_RE = re.compile(r"^\[e2b\](?:\s+stderr:)?\s*")
+
+
+def _e2b_log_content(message: str) -> str:
+    """Content of an e2b log row with the streaming channel prefix removed."""
+    return _E2B_LOG_PREFIX_RE.sub("", str(message or "")).strip()
+
+
+def _is_caret_marker_line(message: str) -> bool:
+    content = _e2b_log_content(message)
+    return bool(content) and bool(_CARET_ONLY_RE.match(content))
+
+
+def _is_command_exit_line(message: str) -> bool:
+    return bool(_COMMAND_EXIT_RE.search(_e2b_log_content(message)))
+
+
+def _collapse_stderr_code_echo_rows(
+    rows: List[Dict[str, Any]], message_key: str = "message"
+) -> List[Dict[str, Any]]:
+    """Drop the residual e2b stderr code-echo from an ORDERED list of RAW log-row
+    dicts (call this BEFORE per-row redaction so the 'File ... line N' frame and
+    caret anchors are still intact). Anchored on the two unambiguous traceback
+    markers Python emits, so it is leak-proof with no false positives:
+
+      - a 'File "...", line N' FRAME row -> the row DIRECTLY AFTER it is the
+        echoed source line (Python prints frame then source); drop the echo,
+      - a CARET row ('~~~^~~~') -> drop it AND the row directly above it (the
+        echoed source line, when not already dropped),
+      - a 'Command exited with code N' row -> drop it.
+
+    The frame row / traceback header / exception line themselves are left in
+    place — per-row redaction (run AFTER this) collapses them into the single
+    calm 'Worker code raised an error' note. Clean rows ('Run started',
+    'Worker completed: 9 words') never match these anchors, so they pass through.
+    Preserves level/timestamp on surviving rows."""
+    n = len(rows)
+    drop = [False] * n
+    msgs = [str(row.get(message_key) or "") for row in rows]
+    for i, msg in enumerate(msgs):
+        content = _e2b_log_content(msg)
+        if _is_caret_marker_line(msg):
+            drop[i] = True
+            if i > 0 and not drop[i - 1]:
+                drop[i - 1] = True
+        elif _is_command_exit_line(msg):
+            drop[i] = True
+        elif _TRACEBACK_FRAME_LINE_RE.search(content):
+            # The line Python prints directly under a frame is the echoed
+            # source. Only drop it if it is itself a stderr/e2b row (so we never
+            # eat an unrelated subsequent log line) and not already a frame.
+            if i + 1 < n:
+                nxt = msgs[i + 1]
+                nxt_content = _e2b_log_content(nxt)
+                is_e2b_row = _E2B_LOG_PREFIX_RE.match(nxt) is not None
+                if (
+                    is_e2b_row
+                    and not _TRACEBACK_FRAME_LINE_RE.search(nxt_content)
+                    and not _TRACEBACK_HEADER_RE.search(nxt_content)
+                    and not _WORKER_CODE_TRACEBACK_RE.search(nxt_content)
+                    and not _is_caret_marker_line(nxt)
+                    and not _is_command_exit_line(nxt)
+                ):
+                    drop[i + 1] = True
+    survivors = [row for i, row in enumerate(rows) if not drop[i]]
+    # Dedupe CONSECUTIVE rows that per-row redaction will collapse into the same
+    # calm note (the traceback header + each frame + the exception line each
+    # become _CALM_CODE_ERROR_LOG), so the operator panel shows ONE calm note
+    # for the whole traceback block, not five. Only collapses adjacent rows that
+    # ALREADY redact to the calm note; unrelated rows are never merged.
+    deduped: List[Dict[str, Any]] = []
+    prev_calm = False
+    for row in survivors:
+        redacts_calm = (
+            _redact_public_log_message(str(row.get(message_key) or "")) == _CALM_CODE_ERROR_LOG
+        )
+        if redacts_calm and prev_calm:
+            continue
+        deduped.append(row)
+        prev_calm = redacts_calm
+    return deduped
+
+
+def _redact_runtime_jargon_in_log(message: str) -> str:
+    """Collapse Python traceback frames + bare-exception jargon in an operator
+    log line into a single calm note (G5 P1-A). The raw text stays available to
+    engineers on the run's debug 'Raw' tab (error_raw); the operator-facing log
+    surface must read like the calm Error card, never a Python traceback.
+
+    Line-aware so a normal log line ('Worker completed: 9 words') is untouched."""
+    if not message:
+        return message
+    lines = message.splitlines()
+    if len(lines) <= 1:
+        text = message.strip()
+        # Single-line: only rewrite when it is unmistakably runtime jargon
+        # (traceback header, a frame line, an exception class/message). A clean
+        # operator log line never matches these.
+        if (
+            _TRACEBACK_HEADER_RE.search(text)
+            or _TRACEBACK_FRAME_LINE_RE.search(text)
+            or _WORKER_CODE_TRACEBACK_RE.search(text)
+            or _BARE_PYTHON_EXC_MSG_RE.search(text)
+        ):
+            return _CALM_CODE_ERROR_LOG
+        return message
+    out: List[str] = []
+    collapsed = False
+    for line in lines:
+        if (
+            _TRACEBACK_HEADER_RE.search(line)
+            or _TRACEBACK_FRAME_LINE_RE.search(line)
+            or _WORKER_CODE_TRACEBACK_RE.search(line)
+            or _BARE_PYTHON_EXC_MSG_RE.search(line)
+        ):
+            # Emit ONE calm note for the whole traceback block, drop the rest.
+            if not collapsed:
+                out.append(_CALM_CODE_ERROR_LOG)
+                collapsed = True
+            continue
+        out.append(line)
+    return "\n".join(out).strip() or _CALM_CODE_ERROR_LOG
 
 
 def _redact_public_log_message(message: str) -> str:
-    redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", message or "")
+    redacted = _MISSING_SECRETS_RE.sub("Missing required secrets", message or "")
+    redacted = _ENV_SECRET_CONFIG_RE.sub("Required platform secret is not configured", redacted)
+    redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", redacted)
     redacted = _LOG_METADATA_RE.sub("[redacted-metadata]", redacted)
+    # PATH-1 (2026-05-29): logs[].message still leaked host paths
+    # (/root/workeros/...) and sandbox paths (/home/user/worker/run.py),
+    # unlike error_raw which already strips them. Apply the SAME redaction so
+    # the log surface never discloses the deploy dir or sandbox topology.
+    redacted = _SANDBOX_PATH_RE.sub("[worker file]", redacted)
+    # G5 P1-A (2026-05-29): the e2b driver streams the worker's raw stderr
+    # (Traceback + 'TypeError: unsupported operand ...') into the run logs. The
+    # "Recent logs" panel rendered that verbatim, undercutting the calm Error
+    # card. Collapse runtime jargon/tracebacks into one calm note here — the
+    # single chokepoint for every operator-facing log read.
+    redacted = _redact_runtime_jargon_in_log(redacted)
     return redacted
+
+
+def _public_artifact_path(raw_path: Optional[str]) -> str:
+    """Return an artifact path safe to expose in an API response (PATH-1).
+
+    The artifacts table stores the absolute host path
+    (e.g. /root/workeros/data/artifacts/run_x/out/sorted.csv). Returning it
+    discloses the deploy dir + storage layout. Strip the artifacts-root prefix
+    so callers see only the relative path (run_x/out/sorted.csv). The download
+    endpoint resolves the real on-disk path server-side from the artifact id,
+    so relativising here does not break downloads.
+    """
+    raw = str(raw_path or "").strip()
+    if not raw:
+        return ""
+    try:
+        from runner_utils import ARTIFACTS_DIR
+
+        resolved = Path(raw).resolve()
+        rel = resolved.relative_to(ARTIFACTS_DIR.resolve())
+        return rel.as_posix()
+    except Exception:
+        # Not under the artifacts root (or unresolvable) — never leak an
+        # absolute path; fall back to the basename only.
+        return Path(raw).name
+
+
+# ---------------------------------------------------------------------------
+# Operator-surface hygiene (G5): nothing internal is ever shown to operators.
+#
+# Raw Python tracebacks, sandbox paths (/home/user/worker/run.py), and env-var
+# names must never be the operator-facing error or archive reason. We map them
+# to a calm, human, actionable headline. The raw text is preserved separately
+# (run.error_raw / the Logs tab) for engineers who need it.
+# ---------------------------------------------------------------------------
+
+# Sandbox/runtime paths that should never appear in an operator string.
+_SANDBOX_PATH_RE = re.compile(r"(?:/(?:home|root|tmp|usr|opt|app|workspace)\b[^\s\"']*)")
+# Bare ALL_CAPS env-var-style identifiers (FOO_BAR_TOKEN), 2+ segments so we
+# don't eat normal words like "OK" or "JSON".
+_ENV_VAR_NAME_RE = re.compile(r"\b[A-Z][A-Z0-9]{1,40}(?:_[A-Z0-9]{1,40}){1,8}\b")
+# Internal git branch / lane identifiers (lane/x, feat/x, fix/x, chore/x, …).
+_GIT_BRANCH_RE = re.compile(
+    r"\b(?:lane|feat|feature|fix|hotfix|chore|recover|docs|polish|backend|land)/[A-Za-z0-9._/-]+"
+)
+
+# Structured error_code -> calm operator headline. This is the PRIMARY mapping:
+# the run pipeline already classifies every failure into this taxonomy, so we
+# key the operator headline off the code FIRST (before any free-text matching).
+# That guarantees no raw runtime/sandbox jargon reaches the operator surface,
+# even when the raw string carries no traceback / path / env-var artifact.
+#
+# Any code not listed here falls through to _OPERATOR_ERROR_RULES (free-text)
+# and then to the generic fallback, so every failure gets a clean headline.
+_TIMEOUT_HEADLINE = "This worker took too long and was stopped. Try again, or simplify the input."
+_RUNTIME_HEADLINE = (
+    "This worker hit an internal error and stopped. Check the run logs, then edit or re-run the worker."
+)
+_CONNECTION_HEADLINE = "This worker needs an account connected before it can run. Connect it, then re-run."
+_AUTH_HEADLINE = "A connected account or key was rejected. Reconnect the account this worker uses, then re-run."
+_INPUT_HEADLINE = "This worker is missing a required input. Add it, then re-run."
+_SECRET_HEADLINE = "This worker is missing a required credential. Add it in settings, then re-run."
+_OUTPUT_HEADLINE = "This worker finished but its result didn't pass validation. Check the run logs, then re-run."
+_CODE_HEADLINE = "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it."
+_CANCELLED_HEADLINE = "This run was cancelled before it finished."
+
+_OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
+    # Runtime / agent / sandbox internals (the residual G5 leak class).
+    "agent_runtime_error": _RUNTIME_HEADLINE,
+    "run_execution_exception": _RUNTIME_HEADLINE,
+    "execution_error": _RUNTIME_HEADLINE,
+    "skill_runtime_error": _RUNTIME_HEADLINE,
+    "openai_call_failed": _RUNTIME_HEADLINE,
+    "interrupted_by_restart": "This run was interrupted while the service restarted. Re-run the worker.",
+    "context_mount_failed": _RUNTIME_HEADLINE,
+    "mcp_connect_failed": _CONNECTION_HEADLINE,
+    # Sandbox / timeout / resource.
+    "e2b_sandbox_error": _TIMEOUT_HEADLINE,
+    "timeout": _TIMEOUT_HEADLINE,
+    "sandbox_oom": "This worker ran out of memory and was stopped. Try simplifying the input.",
+    "token_cap_exceeded": "This worker reached its output limit and was stopped. Try simplifying the task.",
+    "tool_iteration_cap_exceeded": "This worker took too many steps and was stopped. Try simplifying the task.",
+    "tool_loop_exhausted": "This worker took too many steps and was stopped. Try simplifying the task.",
+    "missing_e2b_key": _RUNTIME_HEADLINE,
+    # Setup / configuration.
+    "missing_connection": _CONNECTION_HEADLINE,
+    "missing_secret": _SECRET_HEADLINE,
+    "missing_required_input": _INPUT_HEADLINE,
+    "install_failed": "This worker is missing a required package. Add it to the worker's requirements and re-run.",
+    "invalid_worker": _CODE_HEADLINE,
+    "skill_not_found": _CODE_HEADLINE,
+    "worker_not_found": "This worker no longer exists.",
+    "worker_disabled": "This worker is paused. Turn it on to run it again.",
+    # Output / result.
+    "output_validation_failed": _OUTPUT_HEADLINE,
+    "schema_violation": _OUTPUT_HEADLINE,
+    "quality_gate_failed": "This worker's result didn't meet its quality bar. Check the run logs, then re-run.",
+    "missing_result": "This worker finished but didn't produce a result. Check the run logs, then re-run.",
+    # Cancellation (not a true failure; kept calm).
+    "cancelled": _CANCELLED_HEADLINE,
+    "cancelled_queued": _CANCELLED_HEADLINE,
+    "cancelled_before_start": _CANCELLED_HEADLINE,
+}
+
+# Generic fallback for any unknown / future error_code — never raw jargon.
+_OPERATOR_ERROR_GENERIC = (
+    "This worker failed to run. Check the run logs for details, then edit or re-run the worker."
+)
+
+# Ordered (pattern, operator-message) map. First hit wins for the headline.
+# Free-text fallback used only when error_code is absent or unrecognised.
+_OPERATOR_ERROR_RULES: List[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bSyntaxError\b|\bIndentationError\b", re.IGNORECASE),
+     _CODE_HEADLINE),
+    (re.compile(r"\bModuleNotFoundError\b|\bImportError\b", re.IGNORECASE),
+     "This worker is missing a required package. Add it to the worker's requirements and re-run."),
+    (re.compile(r"\b(?:401|403|Unauthorized|Forbidden|invalid[_ ]?token|authentication)\b", re.IGNORECASE),
+     _AUTH_HEADLINE),
+    (re.compile(r"Event loop is closed|\basyncio\b|coroutine|RuntimeError", re.IGNORECASE),
+     _RUNTIME_HEADLINE),
+    (re.compile(
+        r"\bKeyError\b|\bNameError\b|\bAttributeError\b|\bTypeError\b|\bValueError\b"
+        r"|\bFileNotFoundError\b|\bUnboundLocalError\b|\bIndexError\b|\bOSError\b",
+        re.IGNORECASE,
+     ),
+     _CODE_HEADLINE),
+    (re.compile(r"\b(?:Timed?\s?out|timeout|deadline exceeded)\b", re.IGNORECASE),
+     _TIMEOUT_HEADLINE),
+    (re.compile(r"\b(?:Connection|Network|DNS|getaddrinfo|ECONN|socket)\b", re.IGNORECASE),
+     "This worker couldn't reach an external service. Check the connection, then re-run."),
+    (re.compile(r"SHA-256 reference|from /uploads", re.IGNORECASE),
+     "This worker needs a file uploaded for one of its inputs. Upload the file, then re-run."),
+]
+
+
+# A worker's OWN code crashing (NameError, FileNotFoundError, etc. raised inside
+# its run.py) must read as a CODE error the operator can fix/re-generate, NOT as
+# a platform "internal error" and NEVER as "took too long". The E2B driver wraps
+# such a crash as error_code=execution_error (non-zero exit) or e2b_sandbox_error
+# with the exception class name in the raw string. Detect those classes so we can
+# route them to _CODE_HEADLINE before the generic code-taxonomy mapping.
+_WORKER_CODE_TRACEBACK_RE = re.compile(
+    r"\b(?:"
+    r"NameError|FileNotFoundError|AttributeError|TypeError|ValueError|KeyError"
+    r"|UnboundLocalError|IndexError|ZeroDivisionError|NotImplementedError|RuntimeError"
+    r"|SyntaxError|IndentationError|TabError|RecursionError|AssertionError"
+    r"|ModuleNotFoundError|ImportError|OSError|IOError|JSONDecodeError"
+    r"|UnicodeDecodeError|UnicodeEncodeError"
+    r")\b"
+)
+# Bare Python exception MESSAGES that carry no exception-class name (so
+# _WORKER_CODE_TRACEBACK_RE misses them) yet are unmistakably worker-code-crash
+# jargon. e.g. a TypeError stringified as just its message
+# ("unsupported operand type(s) for /: 'str' and 'float'") with error_code=None.
+# These must read as a CODE error, never leak verbatim to the operator (P0-2).
+_BARE_PYTHON_EXC_MSG_RE = re.compile(
+    r"(?i:"
+    r"unsupported operand type\(s\)"
+    r"|can't multiply sequence by non-int"
+    r"|cannot multiply sequence by non-int"
+    r"|object cannot be interpreted as an integer"
+    r"|object is not (?:subscriptable|callable|iterable|reversible)"
+    r"|object has no attribute"
+    r"|object of type .* has no len"
+    r"|(?:list|string|tuple|dict) index out of range"
+    r"|index out of range"
+    r"|division by zero"
+    r"|float division by zero"
+    r"|integer division or modulo by zero"
+    r"|cannot unpack non-iterable"
+    r"|(?:not enough|too many) values to unpack"
+    r"|takes (?:no|exactly|at least|at most|from) .* argument"
+    r"|missing \d+ required (?:positional|keyword-only) argument"
+    r"|got an unexpected keyword argument"
+    r"|positional argument(?:s)? but \d+ (?:was|were) given"
+    r"|could not convert string to float"
+    r"|invalid literal for int\(\) with base"
+    r"|string indices must be integers"
+    r"|'[^']*' is not defined"
+    r"|name '[^']*' is not defined"
+    r"|can only concatenate"
+    r"|unhashable type"
+    r"|'NoneType' object"
+    r")"
+)
+
+# Error codes whose raw text can legitimately carry a worker-code traceback
+# (the worker's run.py crashed). For these, a code-class traceback in the raw
+# string outranks the generic headline so the operator sees "code has an error".
+_WORKER_CODE_ERROR_CODES = frozenset({"execution_error", "e2b_sandbox_error", "timeout"})
+
+
+def _looks_like_worker_code_error(text: str) -> bool:
+    """True when the raw error text contains a Python exception class raised by
+    the worker's own code (so the operator headline should be _CODE_HEADLINE).
+
+    Also matches BARE exception messages that carry no class name (a stringified
+    TypeError/ValueError message), which the class-name regex would otherwise
+    miss and let leak verbatim to the operator surface."""
+    if not text:
+        return False
+    return bool(
+        _WORKER_CODE_TRACEBACK_RE.search(text)
+        or _BARE_PYTHON_EXC_MSG_RE.search(text)
+    )
+
+
+def _has_internal_artifact(text: str) -> bool:
+    """True when the string contains a traceback, sandbox path, env-var name,
+    or git branch — anything that must never reach an operator surface."""
+    if not text:
+        return False
+    if "Traceback (most recent call last)" in text:
+        return True
+    if _SANDBOX_PATH_RE.search(text):
+        return True
+    if _GIT_BRANCH_RE.search(text):
+        return True
+    if _ENV_VAR_NAME_RE.search(text):
+        return True
+    return False
+
+
+def _operator_error_message(
+    raw_error: Optional[str], error_code: Optional[str] = None
+) -> Optional[str]:
+    """Map a run error to a calm, operator-readable headline.
+
+    Resolution order (so NO raw runtime/sandbox jargon ever reaches an operator,
+    even when the raw string carries no traceback/path/env-var artifact):
+
+    1. Structured ``error_code`` taxonomy (PRIMARY). The pipeline classifies
+       every failure into a known code; we map the code to a fixed headline.
+    2. A small set of operator-clean structured messages that are safe to show
+       verbatim ("Missing required inputs: prospect_name", "Invalid value 'en';
+       expected one of: …", etc.) pass through unchanged.
+    3. Free-text rules (``_OPERATOR_ERROR_RULES``) for codeless errors.
+    4. Generic fallback. Never the raw string when it looks like jargon.
+
+    Returns None when raw_error is empty.
+    """
+    code = (error_code or "").strip().lower()
+
+    # A worker's OWN code crash must read as a CODE error (fixable / re-generable),
+    # not a platform "internal error" and never "took too long". When the raw text
+    # carries a Python exception class AND the code is one that wraps worker
+    # execution (execution_error / e2b_sandbox_error) or is absent, route to the
+    # code headline before the generic taxonomy. Setup codes (missing_secret,
+    # missing_connection, etc.) are unaffected — they never carry a traceback.
+    if (not code or code in _WORKER_CODE_ERROR_CODES) and _looks_like_worker_code_error(str(raw_error or "")):
+        return _CODE_HEADLINE
+
+    if code and code in _OPERATOR_ERROR_CODE_HEADLINES:
+        return _OPERATOR_ERROR_CODE_HEADLINES[code]
+
+    if raw_error is None:
+        # No raw text but an unrecognised code -> generic operator headline.
+        return _OPERATOR_ERROR_GENERIC if code else None
+    text = str(raw_error).strip()
+    if not text:
+        return _OPERATOR_ERROR_GENERIC if code else None
+
+    # Light log redaction first (maps "Missing secrets: X" -> generic, etc.).
+    redacted = _redact_public_log_message(text)
+
+    # Operator-clean structured messages may pass through verbatim ONLY when
+    # they carry no internal artifact AND are not raw runtime/sandbox jargon.
+    if not _has_internal_artifact(redacted) and not _looks_like_runtime_jargon(redacted):
+        return redacted
+
+    # Free-text fallback for codeless / unrecognised-code errors.
+    for pattern, message in _OPERATOR_ERROR_RULES:
+        if pattern.search(text):
+            return message
+    return _OPERATOR_ERROR_GENERIC
+
+
+# The smoke pipeline builds its `reason` as "<raw error> (error_code=<code>)"
+# (run_service `smoke_and_gate_generated_worker`). The raw error can carry a
+# sandbox path (/home/user/worker/run.py) or a bare Python exception, so the
+# reason must never leave the backend verbatim — it reaches the operator via
+# the draft-and-create response and the worker-author SSE event.
+_SMOKE_REASON_CODE_RE = re.compile(r"\s*\(error_code=([A-Za-z0-9_]+)\)\s*$")
+
+# The smoke pipeline also builds reasons as "<code>: <raw error>" (e.g.
+# "output_validation_failed: worker reported success but produced no real
+# output"). The leading code prefix must be stripped and routed through the
+# operator-headline path too, never leaked verbatim.
+_SMOKE_REASON_LEADING_CODE_RE = re.compile(r"^([a-z][a-z0-9_]+):\s*")
+
+
+def humanize_smoke_reason(reason: Optional[str]) -> Optional[str]:
+    """Calm, operator-safe rendering of a smoke `reason` string.
+
+    Splits off the trailing "(error_code=…)" the smoke pipeline appends, then
+    routes the raw text + code through the SAME operator-headline/redaction path
+    used for run errors. Guarantees no sandbox path or raw Python jargon escapes
+    on the create/SSE surfaces (G5 P1-A)."""
+    if reason is None:
+        return None
+    text = str(reason).strip()
+    if not text:
+        return None
+    code: Optional[str] = None
+    m = _SMOKE_REASON_CODE_RE.search(text)
+    if m:
+        code = m.group(1)
+        if code.lower() in ("unknown", "none", ""):
+            code = None
+        text = _SMOKE_REASON_CODE_RE.sub("", text).strip()
+    # No trailing code? The pipeline may instead prefix the reason as
+    # "<code>: <raw error>" (e.g. "output_validation_failed: …"). Treat the
+    # leading prefix as the code and strip it so it never reaches the operator
+    # verbatim, then route through the same headline/redaction path.
+    if code is None:
+        lead = _SMOKE_REASON_LEADING_CODE_RE.match(text)
+        if lead:
+            lead_code = lead.group(1)
+            if lead_code.lower() not in ("unknown", "none", ""):
+                code = lead_code
+            text = _SMOKE_REASON_LEADING_CODE_RE.sub("", text).strip()
+    # A bare quoted token (e.g. "'name'") is a stripped KeyError arg — meaningless
+    # to an operator. Treat it as a worker-code error rather than letting the bare
+    # key pass through verbatim.
+    if re.fullmatch(r"""['"][^'"]*['"]""", text):
+        return _CODE_HEADLINE
+    headline = _operator_error_message(text, code)
+    if headline is None:
+        # No raw text resolved to a headline; never return the raw string —
+        # scrub any residual path/jargon defensively.
+        return _redact_public_log_message(text) or _OPERATOR_ERROR_GENERIC
+    return headline
+
+
+# Raw runtime/sandbox boilerplate that is artifact-free (no traceback/path/env)
+# yet pure jargon to an operator. Used to stop these from passing through
+# verbatim when an error_code is missing or unrecognised.
+_RUNTIME_JARGON_RE = re.compile(
+    r"(?i:Event loop is closed"
+    r"|context deadline exceeded"
+    r"|process or directory watch"
+    r"|use '0' to disable"
+    r"|\basyncio\b"
+    r"|\bcoroutine\b"
+    r"|SHA-256 reference"
+    r"|\bTraceback\b)"
+    # Bare Python exception class names (RuntimeError, KeyError, …) are jargon
+    # even without a traceback wrapper. CamelCase, case-sensitive, so we do NOT
+    # eat the ordinary lowercase word "error" in a clean operator message.
+    r"|\b[A-Z][A-Za-z0-9]*(?:Error|Exception)\b",
+)
+
+
+def _looks_like_runtime_jargon(text: str) -> bool:
+    """True for artifact-free strings that are still pure runtime/sandbox jargon
+    (e.g. 'Event loop is closed', E2B deadline boilerplate). These must not pass
+    through verbatim to the operator surface.
+
+    Also true for bare Python exception MESSAGES with no class name
+    ("unsupported operand type(s) for /: 'str' and 'float'") so they never leak
+    verbatim when an error_code is missing or unrecognised (P0-2)."""
+    if not text:
+        return False
+    return bool(
+        _RUNTIME_JARGON_RE.search(text) or _BARE_PYTHON_EXC_MSG_RE.search(text)
+    )
+
+
+def _run_error_raw(
+    raw_error: Optional[str], error_code: Optional[str] = None
+) -> Optional[str]:
+    """Redacted raw error for the debug 'Raw' tab. Returned only when the
+    operator-facing headline differs from the raw text (i.e. we rewrote it),
+    so engineers can still inspect what really happened. When the raw text is
+    already operator-clean and shown verbatim, there is nothing extra to keep."""
+    raw = str(raw_error or "").strip()
+    if not raw:
+        return None
+    headline = _operator_error_message(raw, error_code)
+    if headline is None or headline == raw:
+        return None
+    redacted = _redact_public_log_message(raw)
+    # FIX 5 (2026-05-29): the debug 'Raw' tab still leaked real filesystem paths
+    # (sandbox /home/user/worker/, server /root/workeros/...). error_raw must
+    # never carry a real path. Strip them — the operator headline is unchanged.
+    redacted = _SANDBOX_PATH_RE.sub("[worker file]", redacted)
+    return redacted or None
+
+
+def _sanitize_operator_text(text: Optional[str]) -> Optional[str]:
+    """Strip internal artifacts from a short operator-facing string (archive
+    reasons, status notes). Never alters strings that are already clean."""
+    if text is None:
+        return None
+    value = str(text).strip()
+    if not value:
+        return None
+    if not _has_internal_artifact(value):
+        return value
+    value = _GIT_BRANCH_RE.sub("an internal change", value)
+    value = _SANDBOX_PATH_RE.sub("the worker's files", value)
+    value = _ENV_VAR_NAME_RE.sub("a required credential", value)
+    value = re.sub(r"\bTraceback \(most recent call last\):.*", "", value, flags=re.DOTALL)
+    value = re.sub(r"\s{2,}", " ", value).strip(" .,;:") + "."
+    return value
+
+
+def _public_error_field(raw_error: Any, error_code: Any = None) -> str:
+    """Map a part/event 'error' field to the calm operator HEADLINE — the SAME
+    text the Error card and GET /runs error show (G5 P1). Before this, the SSE
+    finish 'error' was only path/traceback-scrubbed (_redact_public_log_message),
+    so a bare 'ZeroDivisionError: division by zero' / 'Run failed: <raw>' read as
+    jargon to a recruiter. Now it carries the headline, then the redactor as a
+    belt-and-braces fallback so no internal artifact can ever slip through."""
+    raw = str(raw_error or "")
+    # A bare 'Command exited with code N' is the non-zero-exit signal of a
+    # crashed worker — calm it like any other code error before mapping.
+    if _COMMAND_EXIT_RE.search(_e2b_log_content(raw)) and not _looks_like_worker_code_error(raw):
+        return _CODE_HEADLINE
+    headline = _operator_error_message(raw, str(error_code) if error_code else None)
+    redacted = _redact_public_log_message(headline or raw)
+    # Final belt-and-braces: never let the exit boilerplate slip through.
+    if _COMMAND_EXIT_RE.search(_e2b_log_content(redacted)):
+        return _CODE_HEADLINE
+    return redacted
+
+
+def _run_event_metadata(run_id: Any) -> Dict[str, Any]:
+    run_id_text = str(run_id or "").strip()
+    if not run_id_text:
+        return {}
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT r.worker_id, r.completed_at, r.duration_ms,
+                       COALESCE(w.name, r.worker_id) AS worker_name
+                FROM runs r
+                LEFT JOIN workers w ON w.id = r.worker_id
+                WHERE r.id = ?
+                """,
+                (run_id_text,),
+            ).fetchone()
+        return dict(row) if row else {}
+    except Exception:
+        return {}
+
+
+def _public_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    public_event = dict(event)
+    run_id = public_event.get("run_id")
+    run_meta = _run_event_metadata(run_id)
+    if run_meta:
+        public_event.setdefault("worker_id", run_meta.get("worker_id"))
+        public_event.setdefault("worker_name", run_meta.get("worker_name"))
+        if public_event.get("type") == "status" and public_event.get("status") in _TERMINAL_STATUSES:
+            public_event.setdefault("completed_at", run_meta.get("completed_at"))
+            public_event.setdefault("duration_ms", run_meta.get("duration_ms"))
+    artifact = public_event.get("artifact")
+    if isinstance(artifact, dict) and run_id:
+        artifact_id = artifact.get("id")
+        if artifact_id:
+            artifact.setdefault(
+                "download_url",
+                f"/runs/{run_id}/artifacts/{artifact_id}/download",
+            )
+        if run_meta:
+            artifact.setdefault("worker_id", run_meta.get("worker_id"))
+            artifact.setdefault("worker_name", run_meta.get("worker_name"))
+    if "message" in public_event:
+        public_event["message"] = _redact_public_log_message(str(public_event.get("message") or ""))
+    if public_event.get("error") is not None:
+        public_event["error"] = _public_error_field(
+            public_event["error"], public_event.get("error_code")
+        )
+    public_event.pop("trace_id", None)
+    return public_event
+
+
+def _public_run_part(part: Dict[str, Any]) -> Dict[str, Any]:
+    public_part = dict(part)
+    if "message" in public_part:
+        public_part["message"] = _redact_public_log_message(str(public_part.get("message") or ""))
+    if public_part.get("error") is not None:
+        public_part["error"] = _public_error_field(
+            public_part["error"], public_part.get("error_code")
+        )
+    return public_part
 
 
 @app.get("/runs/{run_id}/logs")
 def get_run_logs(
     run_id: str,
+    level: Optional[str] = Query(None, description="Filter by log level (info, warning, error, debug)"),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[Dict[str, Any]]:
-    if repos.runs.get(user_id=auth.user_id, run_id=run_id) is None:
+    if _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos) is None:
         raise HTTPException(status_code=404, detail="Run not found")
     rows = repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)
-    return [
-        {
-            "level": r["level"],
-            "message": _redact_public_log_message(r["message"]),
-            "timestamp": r["timestamp"],
-        }
+    # G5 P1: collapse the e2b stderr code-echo on RAW ordered rows FIRST, THEN
+    # per-row redact, so GET /runs/{id}/logs matches the calm panel.
+    raw = [
+        {"level": r["level"], "message": r["message"], "timestamp": r["timestamp"]}
         for r in rows
     ]
+    collapsed = _collapse_stderr_code_echo_rows(raw)
+    if level:
+        collapsed = [row for row in collapsed if row.get("level") == level]
+    return [
+        {
+            "level": row["level"],
+            "message": _redact_public_log_message(row["message"]),
+            "timestamp": row["timestamp"],
+        }
+        for row in collapsed
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Run-authenticated Composio tool-execute proxy
+# ---------------------------------------------------------------------------
+# Workers inside E2B sandboxes cannot hold COMPOSIO_API_KEY (platform secret).
+# Instead, they call POST /runs/{run_id}/composio-execute/{tool_slug} using
+# their own WORKEROS_RUN_TOKEN header.  The API validates the signed run token,
+# validates the run_id is in RUNNING status, looks up the connection for the
+# requested app, and proxies the Composio v3 tool-execute call server-side.
+#
+# Auth: no x-floom-secret (the path is middleware-exempt). The signed run token
+# is a short-lived bearer credential and is valid only for this endpoint.
+
+class _ComposioProxyRequest(BaseModel):
+    # Composio tool-execute body fields (all optional; forwarded as-is)
+    connected_account_id: Optional[str] = None
+    user_id: Optional[str] = None
+    arguments: Optional[Dict[str, Any]] = None
+
+
+@app.post("/runs/{run_id}/composio-execute/{tool_slug}")
+def composio_execute_proxy(
+    request: Request,
+    run_id: str,
+    tool_slug: str,
+    body: _ComposioProxyRequest,
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Server-side proxy for Composio tool execution — called from worker sandboxes.
+
+    The worker sends its FLOOM_RUN_ID as the path parameter.  The API:
+      1. Validates run_id exists and is in RUNNING status.
+      2. Resolves the connected_account_id from the run's worker connections
+         (unless caller supplies it explicitly).
+      3. Proxies the call to Composio v3 /tools/execute/{tool_slug} with the
+         server-side COMPOSIO_API_KEY.
+      4. Returns Composio's JSON response verbatim.
+    """
+    import requests as _req_lib
+    from run_token import verify_run_token as _verify_run_token
+
+    token_run_id = _verify_run_token(request.headers.get("x-workeros-run-token", ""))
+    if token_run_id is None:
+        raise HTTPException(status_code=401, detail="Missing or invalid run token")
+    if token_run_id != run_id:
+        raise HTTPException(status_code=403, detail="Run token does not match request run_id")
+
+    # 1. Validate run_id — must exist in DB and be RUNNING.
+    #    NOTE: get_any() is the UNSCOPED run lookup. That is correct *here* and
+    #    only here on an HTTP path: this endpoint is the sandbox→API callback,
+    #    middleware-exempt, and authorized by possession of a live run_id (the
+    #    capability), not by an operator auth context. The run_id is only a valid
+    #    capability while the run is RUNNING — a missing/garbage/terminal run is
+    #    rejected below, so get_any() never doubles as an authed read path here.
+    #    Do NOT use get_any() on any operator-facing read endpoint; those scope
+    #    by user_id via repos.runs.get(user_id=...).
+    run_row = repos.runs.get_any(run_id=run_id)
+    if run_row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run_row.get("status") != RunStatus.RUNNING.value:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Run is not currently running (status={run_row.get('status')})",
+        )
+
+    # 2. Resolve COMPOSIO_API_KEY from server env
+    composio_key = os.environ.get("COMPOSIO_API_KEY", "")
+    if not composio_key:
+        raise HTTPException(status_code=503, detail="COMPOSIO_API_KEY not configured on server")
+
+    # 3. Authorize the worker's tool call against its declared connection scope.
+    #    SECURITY (multi-tenant): a run_id is a sandbox capability, not carte
+    #    blanche to drive every owner connection. The worker manifest must
+    #    declare the Composio app, and structured declarations can restrict the
+    #    exact tool slugs available to this worker.
+    worker_id = run_row.get("worker_id", "")
+    worker_row = repos.workers.get_any(worker_id=worker_id) if worker_id else None
+    if worker_row is None:
+        raise HTTPException(status_code=404, detail="Run worker not found")
+    owner_id = worker_row.get("owner_id") or ""
+    if not owner_id:
+        raise HTTPException(status_code=403, detail="Run owner could not be resolved")
+
+    config = get_worker_config_for_run(worker_id)
+    declared_connections = declared_composio_connections(config)
+    declared_scopes = declared_composio_connection_scopes(config)
+    tool_prefix = composio_app_for_tool_slug(tool_slug, list(declared_connections.keys()))
+    if not tool_prefix:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Worker did not declare a connection matching tool {tool_slug}",
+        )
+    allowed_tools = declared_connections.get(tool_prefix)
+    if allowed_tools is not None and tool_slug.upper() not in allowed_tools:
+        logger.warning(
+            "composio tool denied: worker=%s app=%s tool=%s blocked by allowlist",
+            worker_id, tool_prefix, tool_slug.upper(),
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tool {tool_slug} is not allowed for worker connection {tool_prefix}",
+        )
+    if not composio_tool_allowed_by_scope(tool_prefix, tool_slug, declared_scopes.get(tool_prefix)):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tool {tool_slug} is outside the worker connection scope for {tool_prefix}",
+        )
+
+    # 4. Resolve connected_account_id. If the worker supplies one from
+    #    connections.json, verify it still belongs to the run owner and app.
+    #    Otherwise pick the run-owner's active connection for the declared app.
+    connected_account_id = body.connected_account_id
+    active_owner_connections = [
+        conn_row for conn_row in repos.connections.list(user_id=owner_id)
+        if conn_row.get("app_name") == tool_prefix and conn_row.get("status") == "active"
+    ]
+    if connected_account_id:
+        if not any(conn_row.get("composio_connection_id") == connected_account_id for conn_row in active_owner_connections):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Connection is not active for owner/app {tool_prefix}",
+            )
+    elif active_owner_connections:
+        connected_account_id = active_owner_connections[0].get("composio_connection_id")
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail=f"No active Composio connection found for app {tool_prefix}",
+        )
+
+    if body.user_id and body.user_id != owner_id:
+        raise HTTPException(status_code=403, detail="Proxy user_id must match the run owner")
+
+    # 5. Build and forward the Composio request
+    proxy_body: Dict[str, Any] = {}
+    if connected_account_id:
+        proxy_body["connected_account_id"] = connected_account_id
+        # Composio v3 requires the owner entity alongside a connected account.
+        # The sandbox cannot pick this safely; the server derives it from the run.
+        proxy_body["entity_id"] = owner_id
+    if body.arguments is not None:
+        proxy_body["arguments"] = body.arguments
+    else:
+        proxy_body["arguments"] = {}
+
+    try:
+        r = _req_lib.post(
+            f"https://backend.composio.dev/api/v3/tools/execute/{tool_slug}",
+            headers={"x-api-key": composio_key, "Content-Type": "application/json"},
+            json=proxy_body,
+            timeout=30,
+        )
+        # Return Composio's response as-is (success or error)
+        return r.json()
+    except _req_lib.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Composio proxy error: {exc}")
 
 
 # ---------------------------------------------------------------------------
 # Secrets — CRUD + test
 # ---------------------------------------------------------------------------
 
-# Path to the .env file used by the API
+# Path to the .env file used by the API. Overridable via WORKEROS_API_ENV_FILE /
+# FLOOM_API_ENV_FILE (same knob the db.sqlite secrets writer honours) so tests
+# can redirect secret persistence away from the checkout's apps/api/.env.
+def _env_file_path() -> Path:
+    override = (
+        os.environ.get("WORKEROS_API_ENV_FILE")
+        or os.environ.get("FLOOM_API_ENV_FILE")
+    )
+    if override:
+        return Path(override)
+    return Path(__file__).parent / ".env"
+
+
 _ENV_PATH = Path(__file__).parent / ".env"
 
 
@@ -5394,24 +12671,30 @@ class SecretTestResult(BaseModel):
 SecretName = Annotated[str, PathParam(min_length=1, max_length=64, pattern=r"^[A-Z][A-Z0-9_]*$")]
 
 
+def _secret_value_has_control_chars(value: str) -> bool:
+    return any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+
+
 def _read_env_lines() -> list[str]:
     """Read .env lines; return [] if file does not exist."""
-    if not _ENV_PATH.exists():
+    env_path = _env_file_path()
+    if not env_path.exists():
         return []
-    with open(_ENV_PATH, "r") as f:
+    with open(env_path, "r") as f:
         return f.readlines()
 
 
 def _write_env_lines(lines: list[str]) -> None:
-    """Atomically write .env lines with fcntl lock."""
-    _ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_ENV_PATH, "a+") as lock_fd:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    """Atomically write .env lines with file lock."""
+    env_path = _env_file_path()
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(env_path, "a+") as lock_fd:
+        _fcntl_mod.flock(lock_fd, _LOCK_EX)
         try:
-            with open(_ENV_PATH, "w") as f:
+            with open(env_path, "w") as f:
                 f.writelines(lines)
         finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            _fcntl_mod.flock(lock_fd, _LOCK_UN)
 
 
 def _upsert_env_var(name: str, value: str) -> None:
@@ -5423,11 +12706,11 @@ def _upsert_env_var(name: str, value: str) -> None:
         raise ValueError(f"Invalid secret name: {name!r}")
     if len(value) < 1 or len(value) > 32 * 1024:
         raise ValueError("Secret value must be 1-32768 characters")
-    # Reject values that contain newline or null bytes — they corrupt the .env
-    # file by injecting extra lines (newline injection attack).
-    if any(c in value for c in ("\n", "\r", "\x00")):
+    # Reject control characters. Newline/CR corrupt the env file by injecting
+    # extra lines; other controls make later rendering/logging unsafe.
+    if _secret_value_has_control_chars(value):
         raise ValueError(
-            "Secret value must not contain newline or null characters"
+            "Secret value must not contain newline or control characters"
         )
 
     lines = _read_env_lines()
@@ -5485,6 +12768,11 @@ def upsert_secret(
                 "secrets API. See ARCHITECTURE.md."
             ),
         )
+    if _secret_value_has_control_chars(payload.value):
+        raise HTTPException(
+            status_code=400,
+            detail="Secret value must not contain newline or control characters",
+        )
     repos.secrets.set(
         user_id=auth.user_id,
         name=name,
@@ -5530,13 +12818,18 @@ def test_secret(
     """Test a user-managed secret without exposing provider details or values."""
     if name in PLATFORM_SECRETS:
         raise HTTPException(status_code=404, detail="Secret not found")
-    if repos.secrets.get(user_id=auth.user_id, name=name) is None:
-        raise HTTPException(status_code=404, detail="Secret not found")
-    value = repos.secrets.read_value(user_id=auth.user_id, name=name)
-    if not value:
-        raise HTTPException(status_code=404, detail="Secret not found")
-
-    return SecretTestResult(status="valid", reason="Secret is configured.")
+    db_row = repos.secrets.get(user_id=auth.user_id, name=name)
+    if db_row is not None:
+        value = repos.secrets.read_value(user_id=auth.user_id, name=name)
+        if not value:
+            raise HTTPException(status_code=404, detail="Secret not found")
+        return SecretTestResult(status="valid", reason="Secret is configured.")
+    # Secret not in DB — check if it is available via environment (e.g. set as a
+    # platform env var that the list endpoint also surfaces as SET).
+    available = _available_secret_names_for_user(auth.user_id, repos)
+    if name in available:
+        return SecretTestResult(status="valid", reason="Secret is configured.")
+    raise HTTPException(status_code=404, detail="Secret not found")
 
 
 # ---------------------------------------------------------------------------
@@ -5624,8 +12917,18 @@ INFRA_PATH_SPECS: list[PlatformSecretSpec] = [
     },
 ]
 
-# Set of platform secret names for fast membership checks (used in list_secrets filtering)
-PLATFORM_SECRETS: frozenset[str] = frozenset(s["name"] for s in PLATFORM_SECRET_SPECS)
+# Set of platform-managed names for fast membership checks. Used to keep
+# system/infra vars out of the operator-facing /secrets list and to refuse
+# upsert/delete/test on them.
+#
+# P1-8 (audit 2026-05-29): this previously covered only PLATFORM_SECRET_SPECS,
+# so the INFRA_PATH_SPECS vars (FLOOM_DB, FLOOM_WORKERS_DIR, FLOOM_ARTIFACTS_DIR,
+# FLOOM_CONTEXTS_DIR, FLOOM_RUN_TIMEOUT) leaked into the user Secrets list with a
+# Delete action — deleting FLOOM_DB from the UI could break the running system.
+# Both spec lists are platform-managed and must be excluded from the user API.
+PLATFORM_SECRETS: frozenset[str] = frozenset(
+    s["name"] for s in (PLATFORM_SECRET_SPECS + INFRA_PATH_SPECS)
+)
 
 
 @app.get("/secrets", response_model=List[SecretItem])
@@ -5638,11 +12941,8 @@ def list_secrets(
         for row in repos.secrets.list(user_id=auth.user_id)
     }
 
-    db_workers = _list_db_workers(user_id=auth.user_id, repos=repos)
-    # Same cloud-tenant scoping as /workers above: never enumerate the
-    # shared filesystem in cloud mode (would surface another tenant's
-    # worker.yml secret declarations to this user).
-    workers = db_workers if (db_workers or _is_cloud_deploy()) else discover_workers(use_cache=True)
+    workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True)
+    platform_available = _available_secret_names_for_user(auth.user_id, repos) - set(db_secrets)
 
     # (a) All secrets declared by any worker.yml
     worker_secret_names: set[str] = set()
@@ -5661,6 +12961,8 @@ def list_secrets(
         status_value = str(db_row.get("status") or "").lower()
         if status_value in SecretStatus._value2member_map_:
             status = SecretStatus(status_value)
+        elif name in platform_available:
+            status = SecretStatus.SET
         else:
             status = SecretStatus.SET if value else SecretStatus.MISSING
         used_by = []
@@ -5691,15 +12993,23 @@ class ConnectionInitRequest(BaseModel):
 
 class MCPConnectionCreateRequest(BaseModel):
     label: str
-    url: str
+    transport: Literal["streamable_http", "sse", "stdio"] = "streamable_http"
+    url: Optional[str] = None
+    command: Optional[str] = None
+    args: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
+    cwd: Optional[str] = None
     auth_secret: Optional[str] = None
     allowed_tools: List[str] = Field(default_factory=list)
 
 
 class ConnectionItem(BaseModel):
+    # NEW-7 (2026-06-02): the raw Composio ``ca_*`` connection id is no longer
+    # exposed. Clients reference a connection by the internal Floom UUID ``id``;
+    # the API resolves it to the raw ``ca_*`` server-side (with the server-held
+    # COMPOSIO_API_KEY) when registering triggers / fetching account info.
     id: str
     app_name: str
-    composio_connection_id: str
     status: str
     created_at: str
     updated_at: str
@@ -5711,6 +13021,11 @@ class ConnectionItem(BaseModel):
     last_check_status: Optional[str] = None
     mcp_label: Optional[str] = None
     mcp_url: Optional[str] = None
+    mcp_transport: str = "streamable_http"
+    mcp_command: Optional[str] = None
+    mcp_args: List[str] = []
+    mcp_env: Dict[str, str] = {}
+    mcp_cwd: Optional[str] = None
     mcp_auth_secret: Optional[str] = None
     mcp_allowed_tools: List[str] = []
 
@@ -5754,6 +13069,20 @@ def _get_callback_url() -> str:
     return f"{base}/connections/callback"
 
 
+def _raise_composio_unavailable(exc: Exception) -> None:
+    from composio_client import ComposioConfigurationError
+
+    if isinstance(exc, ComposioConfigurationError):
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "Unable to reach the integration provider right now. "
+            "Try again later or use an API-key connection if this app does not support OAuth."
+        ),
+    ) from exc
+
+
 @app.get("/integrations/catalog", response_model=IntegrationCatalogResponse)
 def integrations_catalog(
     page: int = Query(1, ge=1),
@@ -5766,7 +13095,7 @@ def integrations_catalog(
     When ``category`` contains multiple comma-separated slugs, results from each
     slug are fetched separately and merged (union, de-duplicated by app slug).
     """
-    from composio_client import list_catalog_apps
+    from composio_client import ComposioConfigurationError, list_catalog_apps
 
     # Split comma-separated categories for OR-merge support.
     category_slugs = [s.strip() for s in category.split(",") if s.strip()] if category.strip() else []
@@ -5784,6 +13113,7 @@ def integrations_catalog(
         else:
             # Multi-category: fetch each slug and merge (de-duplicated by app slug).
             seen: Dict[str, Any] = {}
+            first_error: Exception | None = None
             for slug in category_slugs:
                 try:
                     partial = list_catalog_apps(
@@ -5795,8 +13125,14 @@ def integrations_catalog(
                     for item in partial.get("items") or []:
                         if item["slug"] not in seen:
                             seen[item["slug"]] = item
+                except ComposioConfigurationError:
+                    raise
                 except Exception:
+                    if first_error is None:
+                        first_error = sys.exc_info()[1]
                     logger.warning("Failed to fetch category %s from Composio", slug)
+            if first_error is not None and not seen:
+                raise first_error
 
             all_items = list(seen.values())
             total_items = len(all_items)
@@ -5818,8 +13154,31 @@ def integrations_catalog(
         raise
     except Exception as exc:
         logger.exception("Failed to load Composio catalog")
-        raise HTTPException(status_code=502, detail=f"Composio catalog error: {exc}") from exc
+        _raise_composio_unavailable(exc)
     return IntegrationCatalogResponse(**result)
+
+
+class CatalogToolItem(BaseModel):
+    name: str
+    description: str
+
+
+@app.get("/integrations/catalog/{slug}/tools", response_model=List[CatalogToolItem])
+def integrations_catalog_tools(slug: str, limit: int = 100) -> List[CatalogToolItem]:
+    """Return up to `limit` tools for a Composio toolkit slug, cached 1 h.
+
+    Designed for the Browse catalog tools modal. Default limit raised to 100
+    so the modal can show the full tool list (e.g. Gmail has 85+ tools).
+    Returns [] when Composio is unreachable so the UI degrades gracefully.
+    """
+    from composio_client import list_toolkit_tools
+    effective_limit = max(1, min(200, limit))
+    try:
+        items = list_toolkit_tools(slug, limit=effective_limit)
+    except Exception as exc:
+        logger.warning("Failed to fetch toolkit tools for %s: %s", slug, exc)
+        items = []
+    return [CatalogToolItem(**item) for item in items]
 
 
 def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
@@ -5849,7 +13208,7 @@ def _parse_json_string_list(value: Optional[str]) -> List[str]:
 
 _CONNECTION_LIST_REFRESH_STATUSES = {"initiated", "pending"}
 _CONNECTION_LIST_REFRESH_INTERVAL = timedelta(seconds=30)
-_COMPOSIO_ACTIVE_STATUSES = {"active", "valid"}
+_COMPOSIO_ACTIVE_STATUSES = {"active", "valid", "connected", "enabled", "success"}
 
 
 def _normalize_composio_connection_status(status: Optional[str]) -> str:
@@ -5857,6 +13216,46 @@ def _normalize_composio_connection_status(status: Optional[str]) -> str:
     if normalized in _COMPOSIO_ACTIVE_STATUSES:
         return "active"
     return normalized
+
+
+def _account_label_from_info(info: Dict[str, Any]) -> str:
+    for key in ("email", "account_label", "handle", "username", "login"):
+        value = info.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _cache_connection_account_info(
+    *,
+    repos: Repositories,
+    user_id: str,
+    connection_id: str,
+    composio_connection_id: str,
+    now: str,
+) -> Dict[str, Any]:
+    info = _fetch_composio_account_info(composio_connection_id, user_id=user_id)
+    if not info:
+        return {}
+
+    updates: Dict[str, Any] = {"updated_at": now}
+    account_label = _account_label_from_info(info)
+    if account_label:
+        updates["account_label"] = account_label
+    if info.get("scopes") is not None:
+        updates["scopes_json"] = info.get("scopes") or []
+
+    remote_status = _normalize_composio_connection_status(info.get("status"))
+    if remote_status and remote_status != "not_found":
+        updates["status"] = remote_status
+
+    if len(updates) > 1:
+        repos.connections.update(
+            user_id=user_id,
+            composio_id=connection_id,
+            **updates,
+        )
+    return info
 
 
 def _connection_list_refresh_due(row: Dict[str, Any], now: datetime) -> bool:
@@ -5924,6 +13323,14 @@ def _refresh_connection_status_for_list(
 
 
 def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
+    """Mask an account identity for any CROSS-USER / multi-tenant surface.
+
+    Workeros OS is single-tenant: the owner is the only principal and MUST see
+    their own account identity (the GitHub login, the connected Google email).
+    This helper is retained for a future multi-tenant / shared path where one
+    user must NOT see another user's account identity — call it only there.
+    For the owner's own connections use ``_normalize_owner_account_label``.
+    """
     if not value:
         return None
     text = str(value).strip()
@@ -5934,18 +13341,41 @@ def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
     return text[:32]
 
 
+def _normalize_owner_account_label(value: Optional[str]) -> Optional[str]:
+    """Return the owner's own account identity verbatim (single-tenant view).
+
+    No redaction: in single-tenant the owner is entitled to see their real
+    GitHub login / Google email. The placeholder "Connected account" string is
+    treated as "no real label yet" so the UI can fall back to other fields.
+    """
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text or text == "Connected account":
+        return None
+    return text
+
+
 def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
     item = dict(data)
+    # NEW-7: never surface the raw Composio ``ca_*`` id to clients.
+    item.pop("composio_connection_id", None)
     item["kind"] = item.get("kind") or "composio"
-    # E2 fix: display_name carries the real unredacted email/login so the UI
-    # can show "user@example.com" instead of "Connected account".
-    # Prefer the explicit display_name column; fall back to account_label
-    # (which may be raw email from the sweeper). account_label is kept as-is
-    # for backward compat with any callers that already parse it.
-    raw_display = item.get("display_name") or item.get("account_label") or ""
-    item["display_name"] = raw_display.strip() or None
-    item["account_label"] = _redact_connection_account_label(item.get("account_label"))
+    # Single-tenant owner view: show the owner their OWN account identity.
+    # display_name carries the real label when present; fall back to
+    # account_label. Both are the owner's own data, so no redaction.
+    raw_label = item.get("display_name") or item.get("account_label")
+    normalized = _normalize_owner_account_label(raw_label)
+    item["account_label"] = normalized
+    item["display_name"] = normalized
     item["mcp_allowed_tools"] = _parse_json_string_list(item.pop("mcp_allowed_tools_json", None))
+    item["mcp_args"] = _parse_json_string_list(item.pop("mcp_args_json", None))
+    try:
+        raw_env = json.loads(item.pop("mcp_env_json", None) or "{}")
+        item["mcp_env"] = raw_env if isinstance(raw_env, dict) else {}
+    except Exception:
+        item["mcp_env"] = {}
+    item["mcp_transport"] = item.get("mcp_transport") or "streamable_http"
     return ConnectionItem(**item)
 
 
@@ -5957,21 +13387,71 @@ def _normalize_mcp_connection_payload(payload: MCPConnectionCreateRequest) -> Di
             detail="MCP label must be 1-64 letters, digits, underscores, or hyphens",
         )
 
-    url = payload.url.strip()
-    if not url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="MCP URL must start with http:// or https://")
+    transport = payload.transport or "streamable_http"
+    if transport not in {"streamable_http", "sse", "stdio"}:
+        raise HTTPException(status_code=400, detail="MCP transport must be streamable_http, sse, or stdio")
+
+    url = (payload.url or "").strip() or None
+    command = (payload.command or "").strip() or None
+    cwd = (payload.cwd or "").strip() or None
+    if transport in {"streamable_http", "sse"}:
+        if not url:
+            raise HTTPException(status_code=400, detail="MCP URL is required for HTTP/SSE transports")
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="MCP URL must start with http:// or https://")
+        # SSRF deny-list: reject internal/loopback/link-local (incl. cloud
+        # metadata 169.254.169.254) and RFC1918 targets at registration time.
+        # Re-checked at dial time in the agent driver (DNS can rebind).
+        try:
+            url = assert_safe_outbound_mcp_url(url)
+        except UnsafeMCPUrlError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if command:
+            raise HTTPException(status_code=400, detail="MCP command is only valid for stdio transport")
+    if transport == "stdio":
+        if not command:
+            raise HTTPException(status_code=400, detail="MCP command is required for stdio transport")
+        if url:
+            raise HTTPException(status_code=400, detail="MCP URL is not valid for stdio transport")
 
     auth_secret = (payload.auth_secret or "").strip() or None
     if auth_secret and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", auth_secret):
         raise HTTPException(status_code=400, detail="MCP auth secret must be a valid secret name")
+    if auth_secret and transport == "stdio":
+        raise HTTPException(status_code=400, detail="MCP auth secret is only valid for HTTP/SSE transports")
 
     allowed_tools = [tool.strip() for tool in payload.allowed_tools if tool and tool.strip()]
     if len(allowed_tools) != len(payload.allowed_tools):
         raise HTTPException(status_code=400, detail="MCP allowed tools must be non-empty")
+    args = [str(arg).strip() for arg in payload.args if str(arg).strip()]
+    env: Dict[str, str] = {}
+    for key, raw in payload.env.items():
+        name = str(key).strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise HTTPException(status_code=400, detail="MCP env keys must be valid environment variable names")
+        value = str(raw).strip()
+        if value:
+            if not value.startswith("secret:"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="MCP env values must reference secrets as secret:SECRET_NAME",
+                )
+            secret_name = value.split(":", 1)[1]
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", secret_name):
+                raise HTTPException(
+                    status_code=400,
+                    detail="MCP env secret references must use valid secret names",
+                )
+            env[name] = value
 
     return {
         "label": label,
+        "transport": transport,
         "url": url,
+        "command": command,
+        "args": args,
+        "env": env,
+        "cwd": cwd,
         "auth_secret": auth_secret,
         "allowed_tools": allowed_tools,
     }
@@ -5997,7 +13477,7 @@ def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str, user_id: str
         "linkedin": ("LINKEDIN_GET_MY_INFO", lambda d: d.get("email")),
         "hubspot": ("HUBSPOT_GET_OWNER_BY_ID", lambda d: d.get("email")),
         "slack": ("SLACK_USERS_INFO", lambda d: ((d.get("user") or {}).get("profile") or {}).get("email")),
-        "github": ("GITHUB_GET_THE_AUTHENTICATED_USER", lambda d: d.get("email") or (d.get("login") and f"{d['login']}@github")),
+        "github": ("GITHUB_GET_THE_AUTHENTICATED_USER", lambda d: d.get("email") or d.get("login")),
     }
     spec = PROVIDER_IDENTITY_TOOLS.get(toolkit_slug)
     if not spec:
@@ -6056,34 +13536,57 @@ def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict
         if not isinstance(account, dict):
             return {}
 
-        params = account.get("params") or {}
-        metadata = account.get("metadata") or {}
         email = (
             account.get("email")
             or account.get("account_email")
-            or params.get("userEmail")
-            or params.get("email")
             or (account.get("connection_data") or {}).get("email")
             or (account.get("data") or {}).get("email")
-            or metadata.get("email")
+            or (account.get("metadata") or {}).get("email")
             or (account.get("user") or {}).get("email")
         )
-        # Composio v3: granted scopes may be in params.scopes, metadata.scopes,
-        # or the top-level scopes array.
-        raw_scopes = (
-            account.get("scopes")
-            or params.get("scopes")
-            or metadata.get("scopes")
-            or []
+        account_label = (
+            email
+            or account.get("handle")
+            or account.get("username")
+            or account.get("login")
+            or (account.get("connection_data") or {}).get("handle")
+            or (account.get("connection_data") or {}).get("username")
+            or (account.get("data") or {}).get("handle")
+            or (account.get("data") or {}).get("username")
+            or (account.get("data") or {}).get("login")
+            or (account.get("metadata") or {}).get("handle")
+            or (account.get("metadata") or {}).get("username")
+            or (account.get("metadata") or {}).get("login")
+            or (account.get("user") or {}).get("login")
+            or (account.get("user") or {}).get("name")
         )
-        if not isinstance(raw_scopes, list):
-            raw_scopes = []
-        scopes = [s for s in raw_scopes if isinstance(s, str)]
-        # Composio v3: entity_id is often the user's email for OAuth integrations.
-        entity_id = account.get("entity_id") or ""
-        if not email and "@" in entity_id:
-            email = entity_id
-
+        # Scopes: Composio v3 does NOT return a `scopes` list on the
+        # connected_account. The real granted scopes live as a delimited
+        # `scope` STRING under data/params/state.val (verified 2026-05-29):
+        #   github -> "codespace,gist,repo,..."           (comma-delimited)
+        #   google -> "https://.../auth/x https://.../y"  (space-delimited)
+        # Parse whichever container is present and split on comma OR whitespace.
+        scopes: List[str] = []
+        raw_scopes = account.get("scopes")
+        if isinstance(raw_scopes, list):
+            scopes = [s for s in raw_scopes if isinstance(s, str) and s]
+        if not scopes:
+            scope_str = ""
+            for container in (
+                account.get("data"),
+                account.get("params"),
+                (account.get("state") or {}).get("val"),
+            ):
+                if isinstance(container, dict):
+                    candidate = container.get("scope") or container.get("scopes")
+                    if isinstance(candidate, str) and candidate.strip():
+                        scope_str = candidate
+                        break
+                    if isinstance(candidate, list) and candidate:
+                        scopes = [s for s in candidate if isinstance(s, str) and s]
+                        break
+            if scope_str and not scopes:
+                scopes = [s for s in re.split(r"[,\s]+", scope_str.strip()) if s]
         # Fallback: Composio doesn't return email for managed-OAuth connections
         # and masks the raw access_token, so we cannot call provider userinfo
         # directly. Use Composio's /tools/execute proxy to invoke a per-provider
@@ -6093,8 +13596,10 @@ def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict
             toolkit_slug = ((account.get("toolkit") or {}).get("slug") or "").lower()
             if toolkit_slug and composio_conn_id:
                 email = _fetch_provider_email(toolkit_slug, composio_conn_id, user_id)
+                account_label = email or account_label
         return {
             "email": email,
+            "account_label": account_label,
             "scopes": scopes,
             "user_id": account.get("user_id") or account.get("userId"),
             "auth_config_id": (
@@ -6108,6 +13613,24 @@ def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict
         return {}
 
 
+@app.get("/connections/tool-presets")
+def list_connection_tool_presets(
+    app: Optional[str] = None,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Curated read-only tool presets for the Tools-tab allowlist editor (C-B9).
+
+    The UI's "Read-only" preset button calls this to fill a worker connection's
+    ``allowed_tools`` with the curated read subset for the app. When ``app`` is
+    given, returns the single preset (``tools: null`` when no curated preset
+    exists, signalling the UI to fall back to the generic read_only scope).
+    Without ``app``, returns every preset keyed by canonical app slug.
+    """
+    if app:
+        return {"app": app, "tools": read_only_preset_for_app(app)}
+    return {"presets": read_only_presets()}
+
+
 @app.get("/connections", response_model=List[ConnectionItem])
 def list_connections(
     auth: AuthContext = Depends(get_auth_context),
@@ -6116,13 +13639,82 @@ def list_connections(
     rows = repos.connections.list(user_id=auth.user_id)
     now = datetime.now(timezone.utc)
 
-    result = []
+    refreshed: List[Dict[str, Any]] = []
     for row in rows:
         d = row_to_dict(row)
         d = _refresh_connection_status_for_list(d, user_id=auth.user_id, repos=repos, now=now)
         d["scopes"] = _parse_scopes_json(d.pop("scopes_json", None))
+        refreshed.append(d)
+
+    # Hide superseded dead rows: once an app has a live (active/valid) composio
+    # connection, its leftover expired/initiated/pending/error siblings are dead
+    # Composio sessions from earlier reconnects and only confuse the operator
+    # ("reconnect did nothing — still Expired"). Suppress them. API-key rows and
+    # apps with no live connection are always kept.
+    def _is_live(status: object) -> bool:
+        return str(status or "").lower() in ("active", "valid", "connected")
+
+    live_apps = {
+        d.get("app_name")
+        for d in refreshed
+        if (d.get("kind") or "composio") == "composio" and _is_live(d.get("status"))
+    }
+    result = []
+    for d in refreshed:
+        if (
+            (d.get("kind") or "composio") == "composio"
+            and d.get("app_name") in live_apps
+            and not _is_live(d.get("status"))
+        ):
+            continue
         result.append(_public_connection_item(d))
     return result
+
+
+@app.get("/connections/by-app/{app_name}")
+def get_connection_for_app(
+    app_name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the live connection (if any) for ``app_name``.
+
+    Powers the "Already connected as <email>" state on the connect screen so a
+    user who re-clicks Connect on an app they already authorized is shown the
+    existing account + a Reconnect option, instead of silently kicking off a
+    fresh OAuth round-trip that would spawn a duplicate connected account.
+    """
+    slug = (app_name or "").lower().strip()
+    if not slug:
+        return {"connected": False}
+
+    def _is_live(status: object) -> bool:
+        return str(status or "").lower() in ("active", "valid", "connected")
+
+    rows = repos.connections.list(user_id=auth.user_id)
+    matches = [
+        r
+        for r in rows
+        if (r.get("kind") or "composio") == "composio"
+        and str(r.get("app_name") or "").lower() == slug
+        and _is_live(r.get("status"))
+    ]
+    if not matches:
+        return {"connected": False}
+
+    accounts = [
+        {
+            "id": r["id"],
+            "account_label": r.get("account_label") or None,
+            "status": str(r.get("status") or "").lower(),
+        }
+        for r in matches
+    ]
+    return {
+        "connected": True,
+        "app_name": slug,
+        "accounts": accounts,
+    }
 
 
 @app.post("/connections", response_model=ConnectionInitResponse)
@@ -6149,12 +13741,15 @@ def initiate_connection(
         ) from exc
     except Exception as exc:
         logger.exception("Failed to initiate Composio connection for %s", app_name)
-        raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
+        _raise_composio_unavailable(exc)
 
     composio_conn_id = result["composio_connection_id"]
     redirect_url = result["redirect_url"]
     # Always insert a new row — multiple accounts per app are allowed.
     # Each Composio connected_account is a distinct row identified by its own UUID.
+    # (Stale expired siblings are hidden from the UI by list_connections once an
+    # active connection exists for the app — see the suppression there. We do NOT
+    # reuse/replace rows here, which would break genuine multi-account support.)
     conn_id = str(_uuid_mod.uuid4())
     now = now_iso()
     repos.connections.upsert(
@@ -6193,6 +13788,9 @@ def create_mcp_connection(
     conn_id = str(_uuid_mod.uuid4())
     now = now_iso()
     app_name = f"mcp:{label.lower()}"
+    account_label = normalized["url"] or " ".join(
+        [normalized["command"] or "", *normalized["args"]]
+    ).strip()
     row = repos.connections.upsert(
         user_id=auth.user_id,
         id=conn_id,
@@ -6202,9 +13800,14 @@ def create_mcp_connection(
         created_at=now,
         updated_at=now,
         kind="mcp",
-        account_label=normalized["url"],
+        account_label=account_label,
         mcp_label=label,
         mcp_url=normalized["url"],
+        mcp_transport=normalized["transport"],
+        mcp_command=normalized["command"],
+        mcp_args_json=normalized["args"],
+        mcp_env_json=normalized["env"],
+        mcp_cwd=normalized["cwd"],
         mcp_auth_secret=normalized["auth_secret"],
         mcp_allowed_tools_json=normalized["allowed_tools"],
     )
@@ -6214,7 +13817,7 @@ def create_mcp_connection(
 
 
 @app.get("/connections/callback")
-def connections_callback(connection_id: str = "", status: str = ""):
+def connections_callback(request: Request, connection_id: str = "", status: str = ""):
     """OAuth callback landing — Composio redirects here after user authorizes.
 
     Composio sends: ?connection_id=<composio_conn_id>&status=<status>
@@ -6222,40 +13825,166 @@ def connections_callback(connection_id: str = "", status: str = ""):
     """
     from fastapi.responses import RedirectResponse
 
-    if connection_id:
+    frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    # The floom UUID of the row the user should land on / see highlighted, plus
+    # the app slug, are forwarded to the connections page for post-connect
+    # feedback ("Connected <App> as <email>"). Filled in below once known.
+    landing_id = ""
+    landing_app = ""
+
+    callback_connection_id = (
+        connection_id
+        or request.query_params.get("connected_account_id", "")
+        or request.query_params.get("connectedAccountId", "")
+        or request.query_params.get("connectionId", "")
+        or request.query_params.get("id", "")
+    )
+
+    if callback_connection_id:
         repos = get_repositories()
         existing = repos.connections.get_by_composio_connection_id(
-            composio_connection_id=connection_id,
+            composio_connection_id=callback_connection_id,
         )
 
+        # F2 (2026-06-03) — connection-existence timing oracle: ACCEPTED.
+        #
+        # The lookup above is an indexed, parameterized SQL equality (`= ?`), not
+        # a per-character string comparison, so there is NO classic
+        # non-constant-time secret-compare oracle here. The only observable
+        # difference between a known and an unknown connection_id is control
+        # flow: a KNOWN id triggers a downstream Composio `check_status` network
+        # round-trip + DB writes (slow), while an UNKNOWN id returns immediately
+        # (fast). The RESPONSE is identical in both cases (the same
+        # `?connected=1` redirect below), so only a coarse timing signal remains.
+        #
+        # We accept this residual timing oracle rather than forcing constant time
+        # because:
+        #   1. The id space is unguessable — Composio connection ids are random
+        #      high-entropy `ca_*` handles, so an attacker cannot meaningfully
+        #      enumerate them via timing.
+        #   2. This is an intentionally UNAUTHENTICATED OAuth-callback landing
+        #      (Composio redirects the browser here); padding it to constant time
+        #      would mean either always doing the slow remote call (a DoS amp /
+        #      SSRF-ish lever for unauth callers) or never doing it (breaking the
+        #      legitimate post-OAuth status refresh). Both are worse than the
+        #      low-value timing leak they would close.
+        # If the id space ever becomes guessable, revisit and pad the hit path.
+        #
         # Ignore unknown callback IDs; known IDs are validated by persisted state.
         if not existing:
-            frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
             return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
+
+        landing_id = existing["id"]
+        landing_app = existing.get("app_name") or ""
 
         # Try to refresh from Composio first
         try:
             from composio_client import check_status
-            remote_status = _normalize_composio_connection_status(check_status(connection_id))
+            remote_status = _normalize_composio_connection_status(check_status(callback_connection_id))
         except Exception:
             remote_status = ""
 
+        callback_status = _normalize_composio_connection_status(status)
         final_status = (
-            remote_status
+            "active"
+            if callback_status == "active" and remote_status in ("", "initiated", "pending", "unknown", "not_found")
+            else remote_status
             if remote_status and remote_status != "not_found"
-            else (status or existing["status"])
+            else callback_status
+            if callback_status
+            else existing["status"]
         )
         now = now_iso()
         repos.connections.update(
             user_id=existing["user_id"],
             composio_id=existing["id"],
             status=final_status,
-            composio_connection_id=connection_id,
+            composio_connection_id=callback_connection_id,
             updated_at=now,
         )
 
-    frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
-    return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
+        # N5-1 dedupe: now that the OAuth round-trip is complete we can learn the
+        # real account identity (e.g. the Gmail address) from Composio. If the
+        # user just re-authorized an app+account they had ALREADY connected, an
+        # older canonical row for the same (user, app, account_label) exists.
+        # Merge into it — repoint that row at the fresh composio_connection_id
+        # and refresh its status — then delete THIS freshly-created reconnect
+        # row, so the (app, account) pair always collapses to a single row.
+        landing_id, landing_app = _dedupe_connection_account(
+            repos=repos,
+            row=existing,
+            connection_id=callback_connection_id,
+            final_status=final_status,
+            now=now,
+        )
+
+    redirect_qs = "connected=1"
+    if landing_app:
+        redirect_qs += f"&app={urllib.parse.quote(landing_app)}"
+    if landing_id:
+        redirect_qs += f"&connection_id={urllib.parse.quote(landing_id)}"
+    return RedirectResponse(url=f"{frontend_url}/connections?{redirect_qs}")
+
+
+def _dedupe_connection_account(
+    *,
+    repos: Any,
+    row: Dict[str, Any],
+    connection_id: str,
+    final_status: str,
+    now: str,
+) -> tuple[str, str]:
+    """Collapse a reconnect into the canonical (user, app, account) row.
+
+    Returns ``(landing_floom_id, app_name)`` — the floom UUID the connections
+    page should highlight (the surviving canonical row) and its app slug. On any
+    failure it degrades gracefully to the row that was passed in.
+    """
+    user_id = row["user_id"]
+    app_name = row.get("app_name") or ""
+    new_id = row["id"]
+    landing_id = new_id
+    try:
+        info = _fetch_composio_account_info(connection_id, user_id=user_id)
+        account_label = _account_label_from_info(info)
+        if not account_label:
+            return landing_id, app_name
+
+        # Cache the freshly learned identity on this row regardless of merge.
+        repos.connections.update(
+            user_id=user_id,
+            composio_id=new_id,
+            account_label=account_label,
+            scopes_json=info.get("scopes") or [],
+            updated_at=now,
+        )
+
+        canonical = repos.connections.find_by_app_account(
+            user_id=user_id,
+            app_name=app_name,
+            account_label=account_label,
+            exclude_id=new_id,
+        )
+        if not canonical:
+            # First time this (app, account) is seen — the new row IS canonical.
+            return new_id, app_name
+
+        # Re-point the older canonical row at the new live Composio account and
+        # refresh its status + scopes, then drop the duplicate just created.
+        repos.connections.update(
+            user_id=user_id,
+            composio_id=canonical["id"],
+            composio_connection_id=connection_id,
+            status=final_status,
+            account_label=account_label,
+            scopes_json=info.get("scopes") or [],
+            updated_at=now,
+        )
+        repos.connections.delete(user_id=user_id, composio_id=new_id)
+        landing_id = canonical["id"]
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Connection dedupe failed for %s: %s", connection_id, exc)
+    return landing_id, app_name
 
 
 @app.get(
@@ -6266,8 +13995,8 @@ def connections_callback(connection_id: str = "", status: str = ""):
         "The existing /connections/callback route remains the primary callback URL."
     ),
 )
-def connections_callback_alias(connection_id: str = "", status: str = ""):
-    return connections_callback(connection_id=connection_id, status=status)
+def connections_callback_alias(request: Request, connection_id: str = "", status: str = ""):
+    return connections_callback(request=request, connection_id=connection_id, status=status)
 
 
 @app.get("/connections/{connection_id}/status", response_model=ConnectionItem)
@@ -6292,23 +14021,34 @@ def get_connection_status(
         return _public_connection_item(item)
 
     # Refresh from Composio
+    now = now_iso()
+    updated_row: Optional[Dict[str, Any]] = None
     try:
         from composio_client import check_status
         remote_status = _normalize_composio_connection_status(
             check_status(item["composio_connection_id"])
         )
-        if remote_status and remote_status != item["status"]:
-            now = now_iso()
-            repos.connections.update(
+        if remote_status and remote_status != "not_found" and remote_status != item["status"]:
+            updated_row = repos.connections.update(
                 user_id=user_id,
                 composio_id=connection_id,
                 status=remote_status,
                 updated_at=now,
             )
-            item["status"] = remote_status
-            item["updated_at"] = now
     except Exception as exc:
         logger.warning("Could not refresh Composio status for %s: %s", connection_id, exc)
+
+    _cache_connection_account_info(
+        repos=repos,
+        user_id=user_id,
+        connection_id=connection_id,
+        composio_connection_id=item["composio_connection_id"],
+        now=now,
+    )
+    updated_row = repos.connections.get(user_id=user_id, composio_id=connection_id) or updated_row
+    if updated_row:
+        item = row_to_dict(updated_row)
+        item["scopes"] = _parse_scopes_json(item.pop("scopes_json", None))
 
     return _public_connection_item(item)
 
@@ -6355,28 +14095,32 @@ def get_connection_account_info(
         repos=repos,
     )
 
+    if not os.environ.get("COMPOSIO_API_KEY", "").strip():
+        raise HTTPException(
+            status_code=503,
+            detail="Composio is not configured on this server. Set COMPOSIO_API_KEY to enable connections.",
+        )
     composio_conn_id = row["composio_connection_id"]
     info = _fetch_composio_account_info(composio_conn_id, user_id=auth.user_id)
     if not info:
-        raise HTTPException(status_code=502, detail="Unable to fetch account info from upstream")
+        raise HTTPException(status_code=503, detail="Unable to fetch account info from upstream")
 
-    # Cache scopes + account_label in DB for list endpoint.
-    # E2 fix: also write display_name (unredacted email) so the list
-    # endpoint can surface the real identity without stripping it.
-    if info.get("scopes") is not None or info.get("email"):
+    # Cache scopes + account_label in DB for the list endpoint.
+    account_label = _account_label_from_info(info)
+    if info.get("scopes") is not None or account_label:
         now = now_iso()
-        account_label = info.get("email") or ""
         repos.connections.update(
             user_id=auth.user_id,
             composio_id=connection_id,
             scopes_json=info.get("scopes") or [],
             account_label=account_label,
-            display_name=account_label or None,
             updated_at=now,
         )
 
+    # Single-tenant owner view: return the owner's own account identity so the
+    # UI can render the real GitHub login / Google email instead of a placeholder.
     return {
-        "email": None,
+        "email": account_label or None,
         "scopes": info.get("scopes") or [],
         "connected_at": row["created_at"],
     }
@@ -6492,7 +14236,7 @@ def test_connection(
     tested_at = now_iso()
 
     if (row.get("kind") or "composio") != "composio":
-        _write_connection_check(connection_id, "valid", None, tested_at, repos=repos)
+        _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
         return ConnectionTestResult(
             status="valid",
             reason="MCP server is saved; runtime connection is checked when a worker runs.",
@@ -6503,7 +14247,7 @@ def test_connection(
         from composio_client import check_status
         remote_status = _normalize_composio_connection_status(check_status(composio_conn_id))
     except Exception as exc:
-        _write_connection_check(connection_id, "failed", str(exc), tested_at, repos=repos)
+        _write_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
         return ConnectionTestResult(
             status="failed",
             reason=f"Upstream check failed: {exc}",
@@ -6516,6 +14260,7 @@ def test_connection(
             "failed",
             "Connection not found in upstream",
             tested_at,
+            status="failed",
             repos=repos,
         )
         return ConnectionTestResult(
@@ -6529,6 +14274,7 @@ def test_connection(
             remote_status,
             f"Status: {remote_status}",
             tested_at,
+            status=remote_status,
             repos=repos,
         )
         return ConnectionTestResult(
@@ -6537,7 +14283,14 @@ def test_connection(
             tested_at=tested_at,
         )
     if remote_status == "active":
-        _write_connection_check(connection_id, "valid", None, tested_at, repos=repos)
+        _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
+        _cache_connection_account_info(
+            repos=repos,
+            user_id=auth.user_id,
+            connection_id=connection_id,
+            composio_connection_id=composio_conn_id,
+            now=tested_at,
+        )
         return ConnectionTestResult(
             status="valid",
             reason="Connection is active",
@@ -6550,7 +14303,15 @@ def test_connection(
         "valid",
         f"Status: {remote_status}",
         tested_at,
+        status="active",
         repos=repos,
+    )
+    _cache_connection_account_info(
+        repos=repos,
+        user_id=auth.user_id,
+        connection_id=connection_id,
+        composio_connection_id=composio_conn_id,
+        now=tested_at,
     )
     return ConnectionTestResult(
         status="valid",
@@ -6572,6 +14333,8 @@ def _write_connection_check(
     check_status: str,
     error: Optional[str],
     checked_at: str,
+    *,
+    status: Optional[str] = None,
     repos: Repositories | None = None,
 ) -> None:
     """Persist health-check result to the DB row."""
@@ -6579,21 +14342,22 @@ def _write_connection_check(
     row = _connection_by_id(connection_id, repos_obj)
     if row is None:
         return
-    repos_obj.connections.update(
-        user_id=row["user_id"],
-        composio_id=connection_id,
-        last_checked_at=checked_at,
-        last_check_status=check_status,
-        last_check_error=error,
-        updated_at=checked_at,
-    )
+    updates: Dict[str, Any] = {
+        "last_checked_at": checked_at,
+        "last_check_status": check_status,
+        "last_check_error": error,
+        "updated_at": checked_at,
+    }
+    if status:
+        updates["status"] = status
+    repos_obj.connections.update(user_id=row["user_id"], composio_id=connection_id, **updates)
 
 
-async def _run_connection_sweep() -> None:
+async def _run_connection_sweep(*, user_id: str | None = None) -> None:
     """Background task: test every connection and update last_checked_at columns."""
     logger.info("Connection health sweep starting")
     repos = get_repositories()
-    rows = repos.connections.list_all()
+    rows = repos.connections.list(user_id=user_id) if user_id else repos.connections.list_all()
 
     for row in rows:
         if (row.get("kind") or "composio") != "composio":
@@ -6623,19 +14387,21 @@ async def _run_connection_sweep() -> None:
             try:
                 info = _fetch_composio_account_info(composio_conn_id, user_id=row["user_id"])
                 email_or_user = info.get("email") or info.get("user_id") or ""
+                scopes = info.get("scopes") or []
+                update_kwargs: Dict[str, Any] = {}
                 if email_or_user:
-                    # E2 fix: write to both account_label (legacy) and
-                    # display_name (new, unredacted) so the list endpoint
-                    # surfaces the real email without stripping it.
+                    update_kwargs["account_label"] = email_or_user
+                if scopes:
+                    update_kwargs["scopes_json"] = scopes
+                if update_kwargs:
                     repos.connections.update(
                         user_id=row["user_id"],
                         composio_id=conn_id,
-                        account_label=email_or_user,
-                        display_name=email_or_user,
                         updated_at=tested_at,
+                        **update_kwargs,
                     )
             except Exception as exc:
-                logger.debug("account_label refresh failed for %s: %s", conn_id, exc)
+                logger.debug("account_label/scopes refresh failed for %s: %s", conn_id, exc)
         logger.debug("Swept connection %s: %s", conn_id, check)
         await asyncio.sleep(0.5)  # Rate-limit Composio calls
 
@@ -6643,7 +14409,7 @@ async def _run_connection_sweep() -> None:
 
 
 _connection_sweep_gate_lock = threading.Lock()
-_connection_sweep_last_started_at = 0.0
+_connection_sweep_last_started_at_by_user: Dict[str, float] = {}
 
 
 def _connection_sweep_cooldown_seconds() -> float:
@@ -6658,21 +14424,21 @@ async def sweep_connections_endpoint(
     auth: AuthContext = Depends(get_auth_context),
 ):
     """Trigger a health-check sweep for all connections. Called by external cron."""
-    _ = auth
-    global _connection_sweep_last_started_at
     now = time.monotonic()
     cooldown = _connection_sweep_cooldown_seconds()
+    user_key = auth.user_id or "anonymous"
     with _connection_sweep_gate_lock:
-        elapsed = now - _connection_sweep_last_started_at
-        if cooldown > 0 and _connection_sweep_last_started_at and elapsed < cooldown:
+        last_started_at = _connection_sweep_last_started_at_by_user.get(user_key, 0.0)
+        elapsed = now - last_started_at
+        if cooldown > 0 and last_started_at and elapsed < cooldown:
             retry_after = max(1, int(cooldown - elapsed))
             raise HTTPException(
                 status_code=429,
                 detail="Connection sweep already started recently",
                 headers={"Retry-After": str(retry_after)},
             )
-        _connection_sweep_last_started_at = now
-    asyncio.create_task(_run_connection_sweep())
+        _connection_sweep_last_started_at_by_user[user_key] = now
+    asyncio.create_task(_run_connection_sweep(user_id=auth.user_id))
     return {"status": "sweep_started"}
 
 
@@ -6700,7 +14466,10 @@ def _trigger_item_app_slug(item: Dict[str, Any]) -> str:
 
 
 @app.get("/integrations/triggers")
-def list_integration_triggers(app: Optional[str] = Query(None, description="Filter by app slug (e.g. 'gmail')")):
+def list_integration_triggers(
+    app: Optional[str] = Query(None, description="Filter by app slug (e.g. 'gmail')"),
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Proxy Composio's trigger catalog, cached for one hour.
 
     Pass ?app=<slug> to return only triggers for that integration.
@@ -6724,7 +14493,7 @@ def list_integration_triggers(app: Optional[str] = Query(None, description="Filt
         items = list_triggers()
     except Exception as exc:
         logger.exception("Failed to fetch Composio trigger catalog")
-        raise HTTPException(status_code=502, detail=f"Composio error: {exc}") from exc
+        _raise_composio_unavailable(exc)
 
     with _trigger_catalog_lock:
         _trigger_catalog_cache["items"] = items
@@ -6777,6 +14546,36 @@ def _verify_composio_signature(body: bytes, request: Request, signing_key: str) 
         hmac.compare_digest(expected, provided)
         for provided in _signature_values(signature_header)
     )
+
+
+def _webhook_receipt_ttl_seconds() -> int:
+    try:
+        return max(3600, int(os.environ.get("WORKEROS_WEBHOOK_RECEIPT_TTL_SECONDS", "604800")))
+    except ValueError:
+        return 604800
+
+
+def _claim_webhook_delivery(source: str, delivery_id: str) -> bool:
+    if not delivery_id:
+        return True
+    now_ts = time.time()
+    cutoff = now_ts - _webhook_receipt_ttl_seconds()
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM webhook_delivery_receipts WHERE source = ? AND received_at <= ?",
+            (source, cutoff),
+        )
+        try:
+            conn.execute(
+                """
+                INSERT INTO webhook_delivery_receipts (source, delivery_id, received_at)
+                VALUES (?, ?, ?)
+                """,
+                (source, delivery_id, now_ts),
+            )
+        except sqlite3.IntegrityError:
+            return False
+    return True
 
 
 def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]:
@@ -6874,12 +14673,39 @@ async def composio_events(request: Request) -> ActionResponse:
     else:
         payload = {}
 
-    worker_id = _find_worker_for_composio_event(payload, request)
+    # Resolve the specific worker_triggers row (by external/composio trigger id)
+    # so the run is tagged with WHICH trigger fired and dedupe is scoped to that
+    # trigger. Fall back to the worker-scalar lookup for legacy DBs.
+    repos = get_repositories()
+    trigger_ref: Optional[str] = None
+    worker_id: Optional[str] = None
+    for candidate in _candidate_composio_trigger_ids(payload, request):
+        try:
+            row = repos.workers.find_trigger_by_external_id(external_trigger_id=candidate)
+        except Exception:
+            row = None
+        if row:
+            trigger_ref = row["id"]
+            worker_id = row["worker_id"]
+            break
+    if not worker_id:
+        worker_id = _find_worker_for_composio_event(payload, request)
     if not worker_id:
         raise HTTPException(status_code=404, detail="No worker registered for Composio trigger")
 
+    delivery_id = (
+        request.headers.get("webhook-id")
+        or (payload.get("id") if isinstance(payload, dict) else "")
+        or ""
+    )
+    # Dedupe by (trigger, delivery_id): a redelivery of the same event to the
+    # same trigger fires at most one run.
+    dedupe_key = f"composio:{trigger_ref or worker_id}"
+    if not _claim_webhook_delivery(dedupe_key, str(delivery_id)):
+        return ActionResponse(status="duplicate_ignored")
+
     inputs = {"event": payload}
-    run_id = create_run(worker_id, inputs, trigger_source="composio")
+    run_id = create_run(worker_id, inputs, trigger_source="composio", trigger_ref=trigger_ref)
     start_run(run_id, worker_id, inputs)
     return ActionResponse(status="queued", run_id=run_id)
 
@@ -6898,6 +14724,2484 @@ async def composio_events_alias(request: Request) -> ActionResponse:
 
 
 # ---------------------------------------------------------------------------
+# Slack Events API
+# ---------------------------------------------------------------------------
+
+DEFAULT_SLACK_INSTALL_SCOPES = [
+    "app_mentions:read",
+    "assistant:write",
+    "chat:write",
+    "commands",
+    "im:history",
+    "im:write",
+]
+
+SLACK_SETUP_ENV_ALLOWLIST = frozenset({
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_EVENTS_ENABLED",
+})
+
+
+class SlackSetupConfigRequest(BaseModel):
+    client_id: Optional[str] = None
+    client_secret: Optional[str] = None
+    signing_secret: Optional[str] = None
+    events_enabled: Optional[bool] = None
+
+
+class SlackSetupStatus(BaseModel):
+    configured: bool
+    missing: List[str]
+    client_id_set: bool
+    client_secret_set: bool
+    signing_secret_set: bool
+    events_enabled: bool
+    callback_url: str
+    events_url: str
+    command_url: str
+    interactivity_url: str
+    install_url: Optional[str]
+    installed_teams: List[Dict[str, Any]]
+    allowed_team_ids: List[str]
+
+
+class SlackInstallUrlResponse(BaseModel):
+    install_url: str
+    expires_at: str
+
+
+class SlackSetupConfigResponse(BaseModel):
+    status: str
+    updated: List[str]
+    setup: SlackSetupStatus
+
+
+def _public_api_base_url() -> str:
+    raw = (
+        os.environ.get("WORKEROS_PUBLIC_API_URL")
+        or os.environ.get("WORKEROS_API_URL")
+        or os.environ.get("WORKERS_API_URL")
+        or "https://workers-api.floom.dev"
+    )
+    return raw.rstrip("/")
+
+
+def _frontend_base_url() -> str:
+    return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
+
+
+def _slack_oauth_callback_url() -> str:
+    return f"{_public_api_base_url()}/slack/oauth/callback"
+
+
+def _slack_events_url() -> str:
+    return f"{_public_api_base_url()}/slack/events"
+
+
+def _slack_commands_url() -> str:
+    return f"{_public_api_base_url()}/slack/commands"
+
+
+def _slack_interactivity_url() -> str:
+    return f"{_public_api_base_url()}/slack/interactivity"
+
+
+def _slack_install_scopes() -> List[str]:
+    raw = os.environ.get("SLACK_INSTALL_SCOPES", "").strip()
+    if not raw:
+        return list(DEFAULT_SLACK_INSTALL_SCOPES)
+    scopes: List[str] = []
+    seen = set()
+    for part in re.split(r"[,\s]+", raw):
+        scope = part.strip()
+        if scope and scope not in seen:
+            scopes.append(scope)
+            seen.add(scope)
+    return scopes or list(DEFAULT_SLACK_INSTALL_SCOPES)
+
+
+def _slack_state_secret() -> str:
+    secret = (os.environ.get("FLOOM_SECRET") or os.environ.get("SLACK_CLIENT_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="FLOOM_SECRET or SLACK_CLIENT_SECRET is required for Slack OAuth state")
+    return secret
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    padded = value + ("=" * (-len(value) % 4))
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def _issue_slack_oauth_state(*, user_id: str, return_to: Optional[str] = None, ttl_seconds: int = 600) -> tuple[str, datetime]:
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    payload = {
+        "user_id": user_id,
+        "return_to": return_to or "/connections/slack",
+        "nonce": pysecrets.token_urlsafe(18),
+        "exp": int(expires_at.timestamp()),
+    }
+    encoded = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    signature = hmac.new(_slack_state_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}", expires_at
+
+
+def _consume_slack_oauth_state(state: str) -> Dict[str, Any]:
+    try:
+        encoded, signature = state.split(".", 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack OAuth state") from exc
+    expected = hmac.new(_slack_state_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=400, detail="Invalid Slack OAuth state")
+    try:
+        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack OAuth state") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid Slack OAuth state")
+    if int(payload.get("exp") or 0) < int(time.time()):
+        raise HTTPException(status_code=400, detail="Slack OAuth state expired")
+    return payload
+
+
+def _slack_install_url(*, state: str) -> str:
+    client_id = os.environ.get("SLACK_CLIENT_ID", "").strip()
+    if not client_id:
+        raise HTTPException(status_code=503, detail="SLACK_CLIENT_ID is not configured")
+    params = urllib.parse.urlencode({
+        "client_id": client_id,
+        "scope": ",".join(_slack_install_scopes()),
+        "redirect_uri": _slack_oauth_callback_url(),
+        "state": state,
+    })
+    return f"https://slack.com/oauth/v2/authorize?{params}"
+
+
+def _safe_slack_team_env_suffix(team_id: str) -> str:
+    suffix = re.sub(r"[^A-Za-z0-9_]", "_", team_id.strip()).upper()
+    if not suffix:
+        raise HTTPException(status_code=400, detail="Slack team_id is required")
+    return suffix
+
+
+def _slack_team_bot_token_env_key(team_id: str) -> str:
+    return f"SLACK_BOT_TOKEN_{_safe_slack_team_env_suffix(team_id)}"
+
+
+def _append_slack_allowed_team_id(team_id: str) -> None:
+    allowed = _slack_allowed_team_ids()
+    if team_id in allowed:
+        return
+    allowed.add(team_id)
+    _upsert_env_var("SLACK_ALLOWED_TEAM_IDS", ",".join(sorted(allowed)))
+
+
+def _list_slack_installations() -> List[Dict[str, Any]]:
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT team_id, team_name, enterprise_id, enterprise_name, app_id,
+                       bot_user_id, bot_token_env_key, scopes_json, installer_user_id,
+                       status, installed_by_user_id, created_at, updated_at,
+                       last_checked_at, last_check_status, last_check_error
+                FROM slack_installations
+                ORDER BY updated_at DESC, team_id
+                """
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    items: List[Dict[str, Any]] = []
+    for row in rows:
+        item = row_to_dict(row)
+        item["scopes"] = _parse_json_string_list(item.pop("scopes_json", None))
+        item["bot_token_set"] = bool(os.environ.get(item.get("bot_token_env_key") or ""))
+        item.pop("bot_token_env_key", None)
+        items.append(item)
+    return items
+
+
+def _get_slack_installation(team_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT team_id, team_name, enterprise_id, enterprise_name, app_id,
+                       bot_user_id, bot_token_env_key, scopes_json, installer_user_id,
+                       status, installed_by_user_id, created_at, updated_at,
+                       last_checked_at, last_check_status, last_check_error
+                FROM slack_installations
+                WHERE team_id = ?
+                LIMIT 1
+                """,
+                (team_id,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    return row_to_dict(row) if row else None
+
+
+def _upsert_slack_installation(
+    *,
+    team_id: str,
+    team_name: Optional[str],
+    enterprise_id: Optional[str],
+    enterprise_name: Optional[str],
+    app_id: Optional[str],
+    bot_user_id: Optional[str],
+    bot_token_env_key: str,
+    scopes: List[str],
+    installer_user_id: Optional[str],
+    installed_by_user_id: str,
+    status: str = "active",
+) -> Dict[str, Any]:
+    now = now_iso()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO slack_installations
+                (team_id, team_name, enterprise_id, enterprise_name, app_id,
+                 bot_user_id, bot_token_env_key, scopes_json, installer_user_id,
+                 status, installed_by_user_id, created_at, updated_at,
+                 last_checked_at, last_check_status, last_check_error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(team_id) DO UPDATE SET
+                team_name = excluded.team_name,
+                enterprise_id = excluded.enterprise_id,
+                enterprise_name = excluded.enterprise_name,
+                app_id = excluded.app_id,
+                bot_user_id = excluded.bot_user_id,
+                bot_token_env_key = excluded.bot_token_env_key,
+                scopes_json = excluded.scopes_json,
+                installer_user_id = excluded.installer_user_id,
+                status = excluded.status,
+                installed_by_user_id = excluded.installed_by_user_id,
+                updated_at = excluded.updated_at,
+                last_checked_at = excluded.last_checked_at,
+                last_check_status = excluded.last_check_status,
+                last_check_error = excluded.last_check_error
+            """,
+            (
+                team_id,
+                team_name,
+                enterprise_id,
+                enterprise_name,
+                app_id,
+                bot_user_id,
+                bot_token_env_key,
+                json.dumps(scopes, separators=(",", ":")),
+                installer_user_id,
+                status,
+                installed_by_user_id,
+                now,
+                now,
+                now,
+                "valid",
+                None,
+            ),
+        )
+    row = _get_slack_installation(team_id)
+    if row is None:
+        raise RuntimeError(f"failed to persist Slack installation for {team_id}")
+    return row
+
+
+def _slack_bot_token_for_team(team_id: Optional[str]) -> str:
+    if team_id:
+        install = _get_slack_installation(team_id)
+        if install:
+            token = os.environ.get(str(install.get("bot_token_env_key") or ""), "").strip()
+            if token:
+                return token
+    return os.environ.get("SLACK_BOT_TOKEN", "").strip()
+
+
+def _slack_setup_status_for_user(user_id: str) -> SlackSetupStatus:
+    missing = [
+        name
+        for name in ("SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET", "SLACK_SIGNING_SECRET")
+        if not os.environ.get(name, "").strip()
+    ]
+    install_url = None
+    if not missing:
+        try:
+            state, _expires_at = _issue_slack_oauth_state(user_id=user_id)
+            install_url = _slack_install_url(state=state)
+        except HTTPException:
+            install_url = None
+    return SlackSetupStatus(
+        configured=not missing,
+        missing=missing,
+        client_id_set=bool(os.environ.get("SLACK_CLIENT_ID", "").strip()),
+        client_secret_set=bool(os.environ.get("SLACK_CLIENT_SECRET", "").strip()),
+        signing_secret_set=bool(os.environ.get("SLACK_SIGNING_SECRET", "").strip()),
+        events_enabled=_slack_events_enabled(),
+        callback_url=_slack_oauth_callback_url(),
+        events_url=_slack_events_url(),
+        command_url=_slack_commands_url(),
+        interactivity_url=_slack_interactivity_url(),
+        install_url=install_url,
+        installed_teams=_list_slack_installations(),
+        allowed_team_ids=sorted(_slack_allowed_team_ids()),
+    )
+
+
+def _extract_slack_oauth_scopes(payload: Dict[str, Any]) -> List[str]:
+    raw = payload.get("scope") or payload.get("scopes") or ""
+    if isinstance(raw, list):
+        return [str(item) for item in raw if str(item).strip()]
+    return [part for part in re.split(r"[,\s]+", str(raw).strip()) if part]
+
+
+def _exchange_slack_oauth_code(code: str) -> Dict[str, Any]:
+    client_id = os.environ.get("SLACK_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("SLACK_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="Slack OAuth client is not configured")
+    response = requests.post(
+        "https://slack.com/api/oauth.v2.access",
+        data={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "redirect_uri": _slack_oauth_callback_url(),
+        },
+        timeout=15,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Slack OAuth returned a non-JSON response") from exc
+    if not response.ok or not payload.get("ok"):
+        raise HTTPException(status_code=502, detail=f"Slack OAuth failed: {payload.get('error') or response.status_code}")
+    return payload
+
+
+def _slack_auth_test(bot_token: str) -> Dict[str, Any]:
+    response = requests.get(
+        "https://slack.com/api/auth.test",
+        headers={"Authorization": f"Bearer {bot_token}"},
+        timeout=10,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Slack auth.test returned a non-JSON response") from exc
+    if not response.ok or not payload.get("ok"):
+        raise HTTPException(status_code=502, detail=f"Slack auth.test failed: {payload.get('error') or response.status_code}")
+    return payload
+
+
+@app.get("/slack/setup/status", response_model=SlackSetupStatus)
+def slack_setup_status(auth: AuthContext = Depends(get_auth_context)) -> SlackSetupStatus:
+    return _slack_setup_status_for_user(auth.user_id)
+
+
+@app.post("/slack/setup/config", response_model=SlackSetupConfigResponse)
+def slack_setup_config(
+    payload: SlackSetupConfigRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> SlackSetupConfigResponse:
+    # Locked: Slack app credentials (client id/secret/signing secret) are now
+    # provided by the platform as environment variables, not entered by users.
+    # The "Add to Slack" one-app OAuth flow (/slack/oauth/install ->
+    # /slack/oauth/callback) is the only supported install path. This endpoint
+    # is disabled to prevent per-user credential entry from the UI.
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Slack credentials are managed by the platform. Use 'Add to Slack' on "
+            "the Assistant to connect a workspace."
+        ),
+    )
+
+
+@app.post("/slack/oauth/install", response_model=SlackInstallUrlResponse)
+def slack_oauth_install(
+    return_to: Optional[str] = Body(default="/assistant", embed=True),
+    auth: AuthContext = Depends(get_auth_context),
+) -> SlackInstallUrlResponse:
+    state, expires_at = _issue_slack_oauth_state(user_id=auth.user_id, return_to=return_to)
+    return SlackInstallUrlResponse(
+        install_url=_slack_install_url(state=state),
+        expires_at=expires_at.isoformat(),
+    )
+
+
+@app.get("/slack/oauth/callback")
+def slack_oauth_callback(code: str = "", state: str = "", error: str = ""):
+    from fastapi.responses import RedirectResponse
+
+    frontend_url = _frontend_base_url()
+    if error:
+        return RedirectResponse(url=f"{frontend_url}/assistant?slack_error={urllib.parse.quote(error)}")
+    if not code or not state:
+        return RedirectResponse(url=f"{frontend_url}/assistant?slack_error=missing_code_or_state")
+
+    state_payload = _consume_slack_oauth_state(state)
+    installed_by_user_id = str(state_payload.get("user_id") or _bootstrap_user_id())
+    oauth_payload = _exchange_slack_oauth_code(code)
+    bot_token = str(oauth_payload.get("access_token") or "").strip()
+    if not bot_token:
+        raise HTTPException(status_code=502, detail="Slack OAuth response did not include a bot token")
+
+    team = oauth_payload.get("team") if isinstance(oauth_payload.get("team"), dict) else {}
+    enterprise = oauth_payload.get("enterprise") if isinstance(oauth_payload.get("enterprise"), dict) else {}
+    authed_user = oauth_payload.get("authed_user") if isinstance(oauth_payload.get("authed_user"), dict) else {}
+    auth_test = _slack_auth_test(bot_token)
+    team_id = str(team.get("id") or auth_test.get("team_id") or "").strip()
+    if not team_id:
+        raise HTTPException(status_code=502, detail="Slack OAuth response did not include a team id")
+
+    bot_token_env_key = _slack_team_bot_token_env_key(team_id)
+    _upsert_env_var(bot_token_env_key, bot_token)
+    _upsert_env_var("SLACK_BOT_TOKEN", bot_token)
+    _append_slack_allowed_team_id(team_id)
+
+    _upsert_slack_installation(
+        team_id=team_id,
+        team_name=str(team.get("name") or auth_test.get("team") or ""),
+        enterprise_id=str(enterprise.get("id") or "") or None,
+        enterprise_name=str(enterprise.get("name") or "") or None,
+        app_id=str(oauth_payload.get("app_id") or "") or None,
+        bot_user_id=str(oauth_payload.get("bot_user_id") or auth_test.get("user_id") or "") or None,
+        bot_token_env_key=bot_token_env_key,
+        scopes=_extract_slack_oauth_scopes(oauth_payload),
+        installer_user_id=str(authed_user.get("id") or "") or None,
+        installed_by_user_id=installed_by_user_id,
+    )
+
+    return_to = str(state_payload.get("return_to") or "/assistant")
+    safe_return_to = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/assistant"
+    return RedirectResponse(url=f"{frontend_url}{safe_return_to}?slack_connected=1&team_id={urllib.parse.quote(team_id)}")
+
+
+def _slack_events_enabled() -> bool:
+    value = os.environ.get("SLACK_EVENTS_ENABLED", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _slack_signature_tolerance_seconds() -> int:
+    try:
+        return max(0, int(os.environ.get("SLACK_SIGNATURE_TOLERANCE_SECONDS", "300")))
+    except ValueError:
+        return 300
+
+
+def _verify_slack_signature(body: bytes, request: Request, signing_secret: str) -> bool:
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    signature = request.headers.get("X-Slack-Signature", "")
+    if not timestamp or not signature or not signing_secret:
+        return False
+    try:
+        ts = int(timestamp)
+    except ValueError:
+        return False
+    tolerance = _slack_signature_tolerance_seconds()
+    if tolerance > 0 and abs(time.time() - ts) > tolerance:
+        return False
+    base = b"v0:" + timestamp.encode("utf-8") + b":" + body
+    expected = "v0=" + hmac.new(signing_secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+def _slack_allowed_team_ids() -> set[str]:
+    raw = os.environ.get("SLACK_ALLOWED_TEAM_IDS", "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _clean_slack_agent_prompt(text: str, bot_user_id: Optional[str]) -> str:
+    cleaned = text.replace("@floom", "").replace("@Floom", "").replace("<!here>", "")
+    if bot_user_id:
+        cleaned = cleaned.replace(f"<@{bot_user_id}>", "")
+    cleaned = re.sub(r"<@[A-Z0-9]+>", "", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+async def _collect_workspace_agent_reply_for_slack(
+    *,
+    message: str,
+    user_id: str,
+    conversation_id: Optional[str],
+    source: str = "slack",
+) -> str:
+    from chat_service import stream_chat
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
+    task = asyncio.create_task(
+        stream_chat(
+            message=message,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            part_queue=queue,
+            source=source,
+        )
+    )
+    text_parts: list[str] = []
+    try:
+        while True:
+            part = await queue.get()
+            if part.get("type") == "text":
+                text_parts.append(str(part.get("text") or ""))
+            if part.get("type") == "error":
+                raise RuntimeError(str(part.get("error") or "workspace agent failed"))
+            if part.get("type") == "finish":
+                break
+        await task
+    finally:
+        if not task.done():
+            task.cancel()
+    from chat_service import strip_em_dashes
+    return strip_em_dashes("".join(text_parts).strip())
+
+
+def _slack_reaction(action: str, *, channel: str, ts: str, emoji: str, bot_token: Optional[str] = None) -> None:
+    """Add or remove a reaction emoji on a Slack message. Best-effort — never raises."""
+    token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
+    if not token:
+        return
+    try:
+        requests.post(
+            f"https://slack.com/api/reactions.{action}",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+            json={"channel": channel, "timestamp": ts, "name": emoji},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
+def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str, bot_token: Optional[str] = None) -> None:
+    bot_token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
+    if not bot_token:
+        raise RuntimeError("SLACK_BOT_TOKEN is not configured")
+    response = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={
+            "Authorization": f"Bearer {bot_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        json={
+            "channel": channel,
+            "thread_ts": thread_ts,
+            "text": text or "(No reply)",
+            "unfurl_links": False,
+            "unfurl_media": False,
+        },
+        timeout=15,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"Slack post failed with HTTP {response.status_code}") from exc
+    if not response.ok or not payload.get("ok"):
+        error = str(payload.get("error") or f"HTTP {response.status_code}")
+        raise RuntimeError(f"Slack post failed: {error}")
+
+
+def _set_slack_assistant_status(*, channel: str, thread_ts: str, status: str, bot_token: Optional[str] = None) -> None:
+    bot_token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
+    if not bot_token:
+        raise RuntimeError("SLACK_BOT_TOKEN is not configured")
+    response = requests.post(
+        "https://slack.com/api/assistant.threads.setStatus",
+        headers={
+            "Authorization": f"Bearer {bot_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        json={
+            "channel_id": channel,
+            "thread_ts": thread_ts,
+            "status": status,
+        },
+        timeout=15,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"Slack assistant status failed with HTTP {response.status_code}") from exc
+    if not response.ok or not payload.get("ok"):
+        error = str(payload.get("error") or f"HTTP {response.status_code}")
+        raise RuntimeError(f"Slack assistant status failed: {error}")
+
+
+def _post_slack_response_url(*, response_url: str, text: str, response_type: str = "ephemeral") -> None:
+    if not response_url:
+        raise RuntimeError("Slack response_url is required")
+    response = requests.post(
+        response_url,
+        json={
+            "response_type": response_type,
+            "text": text or "(No reply)",
+        },
+        timeout=15,
+    )
+    if not response.ok:
+        raise RuntimeError(f"Slack response_url post failed with HTTP {response.status_code}")
+
+
+def _slack_workspace_user_id() -> str:
+    return (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
+
+
+def _parse_slack_form_body(body: bytes) -> Dict[str, str]:
+    parsed = urllib.parse.parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
+    return {key: values[-1] if values else "" for key, values in parsed.items()}
+
+
+def _approval_action_value(run_id: str) -> str:
+    return json.dumps({"run_id": run_id}, separators=(",", ":"))
+
+
+def _approval_action_run_id(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return raw
+    if isinstance(parsed, dict):
+        return str(parsed.get("run_id") or "")
+    return raw
+
+
+def _approve_pending_run_for_slack(*, run_id: str, user_id: str, repos: Repositories) -> ActionResponse:
+    return approve_run(
+        run_id,
+        ApproveRequest(),
+        AuthContext(user_id=user_id, email=None, scopes=("slack",)),
+        repos,
+    )
+
+
+def _reject_pending_run_for_slack(
+    *,
+    run_id: str,
+    user_id: str,
+    repos: Repositories,
+    reason: str,
+) -> ActionResponse:
+    return reject_run(
+        run_id,
+        RejectRequest(reason=reason),
+        AuthContext(user_id=user_id, email=None, scopes=("slack",)),
+        repos,
+    )
+
+
+def _slack_pending_approvals_response(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not rows:
+        return {
+            "response_type": "ephemeral",
+            "text": "No pending approvals.",
+        }
+
+    blocks: List[Dict[str, Any]] = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "Pending approvals", "emoji": True},
+        },
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": "Approve or reject directly from Slack."}
+            ],
+        },
+    ]
+    for row in rows[:5]:
+        run_id = str(row.get("run_id") or "")
+        worker_name = str(row.get("worker_name") or row.get("worker_id") or "Worker")
+        label = str(row.get("label") or "Approval requested")
+        preview = str(row.get("preview") or "").strip()
+        preview_text = f"\n>{preview[:500]}" if preview else ""
+        blocks.extend([
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{worker_name}* — {label}{preview_text}\n`{run_id}`",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Approve", "emoji": True},
+                        "style": "primary",
+                        "action_id": "workeros_approval_approve",
+                        "value": _approval_action_value(run_id),
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Reject", "emoji": True},
+                        "style": "danger",
+                        "action_id": "workeros_approval_reject",
+                        "value": _approval_action_value(run_id),
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Dismiss", "emoji": True},
+                        "action_id": "workeros_approval_dismiss",
+                        "value": _approval_action_value(run_id),
+                    },
+                ],
+            },
+        ])
+
+    if len(rows) > 5:
+        blocks.append({
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": f"Showing 5 of {len(rows)} pending approvals."}
+            ],
+        })
+    return {
+        "response_type": "ephemeral",
+        "text": f"{len(rows)} pending approval(s).",
+        "blocks": blocks,
+    }
+
+
+async def _handle_slack_app_mention(
+    *,
+    event: Dict[str, Any],
+    prompt: str,
+    user_id: str,
+    bot_token: Optional[str] = None,
+) -> None:
+    channel = str(event.get("channel") or "")
+    thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
+    if not channel or not thread_ts:
+        logger.warning("Slack app_mention missing channel/thread timestamp")
+        return
+    conversation_id = f"slack:{channel}:{thread_ts}"
+    msg_ts = str(event.get("ts") or thread_ts)
+    _slack_reaction("add", channel=channel, ts=msg_ts, emoji="eyes", bot_token=bot_token)
+    try:
+        reply = await _collect_workspace_agent_reply_for_slack(
+            message=prompt,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        _slack_reaction("remove", channel=channel, ts=msg_ts, emoji="eyes", bot_token=bot_token)
+        _slack_reaction("add", channel=channel, ts=msg_ts, emoji="white_check_mark", bot_token=bot_token)
+        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply, bot_token=bot_token)
+    except Exception:
+        logger.exception("Slack app_mention processing failed")
+        _slack_reaction("remove", channel=channel, ts=msg_ts, emoji="eyes", bot_token=bot_token)
+        _slack_reaction("add", channel=channel, ts=msg_ts, emoji="x", bot_token=bot_token)
+        if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
+            try:
+                _post_slack_thread_reply(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    text="I could not complete that request. The failure was logged for the workspace operator.",
+                    bot_token=bot_token,
+                )
+            except Exception:
+                logger.exception("Slack error reply failed")
+
+
+async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any], bot_token: Optional[str] = None) -> None:
+    assistant_thread = event.get("assistant_thread") if isinstance(event.get("assistant_thread"), dict) else {}
+    channel = str(assistant_thread.get("channel_id") or "")
+    thread_ts = str(assistant_thread.get("thread_ts") or "")
+    if not channel or not thread_ts:
+        logger.warning("Slack assistant_thread_started missing channel/thread timestamp")
+        return
+    try:
+        _post_slack_thread_reply(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=(
+                "I'm Emily, your personal Chief-of-Staff. I route tasks to a "
+                "swarm of always-on agents and workers. DM me or @mention me."
+            ),
+            bot_token=bot_token,
+        )
+    except Exception:
+        logger.exception("Slack assistant thread greeting failed")
+
+
+async def _handle_slack_direct_message(
+    *,
+    event: Dict[str, Any],
+    prompt: str,
+    user_id: str,
+    bot_token: Optional[str] = None,
+) -> None:
+    channel = str(event.get("channel") or "")
+    thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
+    if not channel or not thread_ts:
+        logger.warning("Slack direct message missing channel/thread timestamp")
+        return
+    conversation_id = f"slack-assistant:{channel}:{thread_ts}"
+    try:
+        try:
+            _set_slack_assistant_status(
+                channel=channel,
+                thread_ts=thread_ts,
+                status="is working on your request...",
+                bot_token=bot_token,
+            )
+        except Exception:
+            logger.exception("Slack assistant status update failed")
+        reply = await _collect_workspace_agent_reply_for_slack(
+            message=prompt,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply, bot_token=bot_token)
+    except Exception:
+        logger.exception("Slack direct message processing failed")
+        if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
+            try:
+                _post_slack_thread_reply(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    text="I could not complete that request. The failure was logged for the workspace operator.",
+                    bot_token=bot_token,
+                )
+            except Exception:
+                logger.exception("Slack direct message error reply failed")
+
+
+async def _handle_slack_command_message(
+    *,
+    prompt: str,
+    response_url: str,
+    user_id: str,
+    channel_id: str,
+) -> None:
+    conversation_id = f"slack-command:{channel_id}" if channel_id else "slack-command"
+    try:
+        reply = await _collect_workspace_agent_reply_for_slack(
+            message=prompt,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        _post_slack_response_url(response_url=response_url, text=reply or "(No reply)")
+    except Exception:
+        logger.exception("Slack command processing failed")
+        try:
+            _post_slack_response_url(
+                response_url=response_url,
+                text="I could not complete that request. The failure was logged for the workspace operator.",
+            )
+        except Exception:
+            logger.exception("Slack command error reply failed")
+
+
+async def _slack_command_response_from_form(
+    form: Dict[str, str],
+    background_tasks: BackgroundTasks,
+) -> Response:
+    team_id = str(form.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    text = str(form.get("text") or "").strip()
+    response_url = str(form.get("response_url") or "")
+    channel_id = str(form.get("channel_id") or "")
+    user_id = _slack_workspace_user_id()
+    command = text.lower()
+
+    if command in {"", "help"}:
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": "Try `/floom approvals` or `/floom <question for your workspace agent>`.",
+        })
+
+    if command in {"approvals", "approval", "pending approvals"}:
+        repos = get_repositories()
+        rows = repos.approvals.list_pending(owner_id=user_id)
+        return JSONResponse(_slack_pending_approvals_response(rows))
+
+    if not response_url:
+        raise HTTPException(status_code=400, detail="Slack response_url is required")
+
+    background_tasks.add_task(
+        _handle_slack_command_message,
+        prompt=text,
+        response_url=response_url,
+        user_id=user_id,
+        channel_id=channel_id,
+    )
+    return JSONResponse({
+        "response_type": "ephemeral",
+        "text": "Working on it...",
+    })
+
+
+def _slack_interactivity_response_from_form(form: Dict[str, str]) -> Response:
+    raw_payload = form.get("payload") or ""
+    try:
+        payload = json.loads(raw_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack interaction payload") from exc
+
+    team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
+    team_id = str(team.get("id") or payload.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    actions = payload.get("actions")
+    action = actions[0] if isinstance(actions, list) and actions else {}
+    if not isinstance(action, dict):
+        return JSONResponse({"replace_original": False, "text": "No Slack action found."})
+
+    action_id = str(action.get("action_id") or "")
+    run_id = _approval_action_run_id(str(action.get("value") or ""))
+    slack_user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+    slack_user_id = str(slack_user.get("id") or "unknown")
+    user_id = _slack_workspace_user_id()
+
+    if action_id == "workeros_approval_dismiss":
+        return JSONResponse({
+            "replace_original": True,
+            "text": f"Dismissed approval `{run_id}`.",
+        })
+
+    if action_id not in {"workeros_approval_approve", "workeros_approval_reject"}:
+        return JSONResponse({
+            "replace_original": False,
+            "text": f"Unsupported Slack action: {action_id or 'unknown'}",
+        })
+    if not run_id:
+        return JSONResponse({
+            "replace_original": False,
+            "text": "Missing run_id for Slack approval action.",
+        })
+
+    repos = get_repositories()
+    try:
+        if action_id == "workeros_approval_approve":
+            result = _approve_pending_run_for_slack(run_id=run_id, user_id=user_id, repos=repos)
+            return JSONResponse({
+                "replace_original": True,
+                "text": f"Approved `{run_id}` from Slack. Follow-up run: `{result.run_id}`.",
+            })
+        _reject_pending_run_for_slack(
+            run_id=run_id,
+            user_id=user_id,
+            repos=repos,
+            reason=f"Rejected from Slack by {slack_user_id}",
+        )
+        return JSONResponse({
+            "replace_original": True,
+            "text": f"Rejected `{run_id}` from Slack.",
+        })
+    except HTTPException as exc:
+        return JSONResponse({
+            "replace_original": False,
+            "text": f"Could not apply Slack approval action: {exc.detail}",
+        })
+
+
+@app.post("/slack/events")
+async def slack_events(request: Request, background_tasks: BackgroundTasks) -> Response:
+    """Receive native Slack Events API callbacks.
+
+    The route verifies Slack's HMAC signature, handles Slack URL verification,
+    deduplicates event callbacks by event_id, and forwards app mentions to the
+    workspace agent in the background so Slack receives a fast acknowledgement.
+    """
+    if not _slack_events_enabled():
+        raise HTTPException(status_code=503, detail="Slack Events API is disabled")
+    signing_secret = os.environ.get("SLACK_SIGNING_SECRET", "").strip()
+    if not signing_secret:
+        raise HTTPException(status_code=503, detail="SLACK_SIGNING_SECRET is not configured")
+
+    body = await request.body()
+    if not _verify_slack_signature(body, request, signing_secret):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/x-www-form-urlencoded" in content_type:
+        form = _parse_slack_form_body(body)
+        if "payload" in form:
+            return _slack_interactivity_response_from_form(form)
+        return await _slack_command_response_from_form(form, background_tasks)
+
+    try:
+        payload: Dict[str, Any] = json.loads(body.decode("utf-8") or "{}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack JSON payload") from exc
+
+    payload_type = str(payload.get("type") or "")
+    if payload_type == "url_verification":
+        challenge = str(payload.get("challenge") or "")
+        return PlainTextResponse(challenge, media_type="text/plain")
+    if payload_type != "event_callback":
+        return JSONResponse({"ok": True, "ignored": payload_type or "unknown"})
+
+    team_id = str(payload.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+    event_type = str(event.get("type") or "")
+    is_direct_message = event_type == "message" and str(event.get("channel_type") or "") == "im"
+    supported_event_types = {"app_mention", "assistant_thread_started", "assistant_thread_context_changed"}
+    if event_type not in supported_event_types and not is_direct_message:
+        return JSONResponse({"ok": True, "ignored": event_type or "unknown"})
+
+    bot_token = _slack_bot_token_for_team(team_id)
+    if not bot_token:
+        raise HTTPException(status_code=503, detail="SLACK_BOT_TOKEN is not configured")
+
+    event_id = str(payload.get("event_id") or request.headers.get("X-Slack-Retry-Num") or "")
+    if event_id and not _claim_webhook_delivery("slack:events", event_id):
+        return JSONResponse({"ok": True, "duplicate": True})
+
+    if event_type == "assistant_thread_started":
+        background_tasks.add_task(_handle_slack_assistant_thread_started, event=event, bot_token=bot_token)
+        return JSONResponse({"ok": True, "status": "queued"})
+
+    if event_type == "assistant_thread_context_changed":
+        return JSONResponse({"ok": True, "status": "context_updated"})
+
+    if is_direct_message:
+        subtype = str(event.get("subtype") or "")
+        if subtype or event.get("bot_id"):
+            return JSONResponse({"ok": True, "ignored": subtype or "bot_message"})
+        prompt = _clean_slack_agent_prompt(str(event.get("text") or ""), None)
+        if not prompt:
+            return JSONResponse({"ok": True, "ignored": "empty_prompt"})
+        user_id = (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
+        background_tasks.add_task(
+            _handle_slack_direct_message,
+            event=event,
+            prompt=prompt,
+            user_id=user_id,
+            bot_token=bot_token,
+        )
+        return JSONResponse({"ok": True, "status": "queued"})
+
+    authorizations = payload.get("authorizations")
+    bot_user_id = None
+    if isinstance(authorizations, list) and authorizations:
+        first_authorization = authorizations[0]
+        if isinstance(first_authorization, dict):
+            bot_user_id = str(first_authorization.get("user_id") or "") or None
+    prompt = _clean_slack_agent_prompt(str(event.get("text") or ""), bot_user_id)
+    if not prompt:
+        return JSONResponse({"ok": True, "ignored": "empty_prompt"})
+
+    user_id = (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
+    background_tasks.add_task(
+        _handle_slack_app_mention,
+        event=event,
+        prompt=prompt,
+        user_id=user_id,
+        bot_token=bot_token,
+    )
+    return JSONResponse({"ok": True, "status": "queued"})
+
+
+@app.post("/slack/commands")
+async def slack_commands(request: Request, background_tasks: BackgroundTasks) -> Response:
+    """Receive Slack slash-command requests for the workspace agent."""
+    if not _slack_events_enabled():
+        raise HTTPException(status_code=503, detail="Slack integration is disabled")
+    signing_secret = os.environ.get("SLACK_SIGNING_SECRET", "").strip()
+    if not signing_secret:
+        raise HTTPException(status_code=503, detail="SLACK_SIGNING_SECRET is not configured")
+
+    body = await request.body()
+    if not _verify_slack_signature(body, request, signing_secret):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    form = _parse_slack_form_body(body)
+    team_id = str(form.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    text = str(form.get("text") or "").strip()
+    response_url = str(form.get("response_url") or "")
+    channel_id = str(form.get("channel_id") or "")
+    user_id = _slack_workspace_user_id()
+    command = text.lower()
+
+    if command in {"", "help"}:
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": "Try `/floom approvals` or `/floom <question for your workspace agent>`.",
+        })
+
+    if command in {"approvals", "approval", "pending approvals"}:
+        repos = get_repositories()
+        rows = repos.approvals.list_pending(owner_id=user_id)
+        return JSONResponse(_slack_pending_approvals_response(rows))
+
+    if not response_url:
+        raise HTTPException(status_code=400, detail="Slack response_url is required")
+
+    background_tasks.add_task(
+        _handle_slack_command_message,
+        prompt=text,
+        response_url=response_url,
+        user_id=user_id,
+        channel_id=channel_id,
+    )
+    return JSONResponse({
+        "response_type": "ephemeral",
+        "text": "Working on it...",
+    })
+
+
+@app.post("/slack/interactivity")
+async def slack_interactivity(request: Request) -> Response:
+    """Receive Slack Block Kit action payloads."""
+    if not _slack_events_enabled():
+        raise HTTPException(status_code=503, detail="Slack integration is disabled")
+    signing_secret = os.environ.get("SLACK_SIGNING_SECRET", "").strip()
+    if not signing_secret:
+        raise HTTPException(status_code=503, detail="SLACK_SIGNING_SECRET is not configured")
+
+    body = await request.body()
+    if not _verify_slack_signature(body, request, signing_secret):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    form = _parse_slack_form_body(body)
+    raw_payload = form.get("payload") or ""
+    try:
+        payload = json.loads(raw_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid Slack interaction payload") from exc
+
+    team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
+    team_id = str(team.get("id") or payload.get("team_id") or "")
+    allowed_team_ids = _slack_allowed_team_ids()
+    if allowed_team_ids and team_id not in allowed_team_ids:
+        raise HTTPException(status_code=403, detail="Slack team is not allowed")
+
+    actions = payload.get("actions")
+    action = actions[0] if isinstance(actions, list) and actions else {}
+    if not isinstance(action, dict):
+        return JSONResponse({"replace_original": False, "text": "No Slack action found."})
+
+    action_id = str(action.get("action_id") or "")
+    run_id = _approval_action_run_id(str(action.get("value") or ""))
+    slack_user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+    slack_user_id = str(slack_user.get("id") or "unknown")
+    user_id = _slack_workspace_user_id()
+
+    if action_id == "workeros_approval_dismiss":
+        return JSONResponse({
+            "replace_original": True,
+            "text": f"Dismissed approval `{run_id}`.",
+        })
+
+    if action_id not in {"workeros_approval_approve", "workeros_approval_reject"}:
+        return JSONResponse({
+            "replace_original": False,
+            "text": f"Unsupported Slack action: {action_id or 'unknown'}",
+        })
+    if not run_id:
+        return JSONResponse({
+            "replace_original": False,
+            "text": "Missing run_id for Slack approval action.",
+        })
+
+    repos = get_repositories()
+    try:
+        if action_id == "workeros_approval_approve":
+            result = _approve_pending_run_for_slack(run_id=run_id, user_id=user_id, repos=repos)
+            return JSONResponse({
+                "replace_original": True,
+                "text": f"Approved `{run_id}` from Slack. Follow-up run: `{result.run_id}`.",
+            })
+        _reject_pending_run_for_slack(
+            run_id=run_id,
+            user_id=user_id,
+            repos=repos,
+            reason=f"Rejected from Slack by {slack_user_id}",
+        )
+        return JSONResponse({
+            "replace_original": True,
+            "text": f"Rejected `{run_id}` from Slack.",
+        })
+    except HTTPException as exc:
+        return JSONResponse({
+            "replace_original": False,
+            "text": f"Could not apply Slack approval action: {exc.detail}",
+        })
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp integration (Meta WhatsApp Business Cloud API)
+# ---------------------------------------------------------------------------
+#
+# Emily is reachable on WhatsApp, mirroring the Slack integration: Meta hosts
+# the connection and POSTs inbound messages to /whatsapp/webhook. We verify the
+# X-Hub-Signature-256 HMAC against the raw body, parse the
+# whatsapp_business_account envelope, dedup retries, ACK 200 fast, and process
+# the reply in a background task via the SAME stream_chat pipeline as web/Slack.
+#
+# Everything is inert and fails closed when the WhatsApp env vars are absent, so
+# deploying with no Meta credentials cannot break the app. Wiring to a real
+# number works once the 4 Meta env values (PHONE_ID/TOKEN/APP_SECRET/VERIFY_TOKEN)
+# are set.
+
+WHATSAPP_TEXT_MAX = 4096
+
+
+def _whatsapp_graph_version() -> str:
+    return (os.environ.get("WHATSAPP_GRAPH_VERSION") or "v23.0").strip() or "v23.0"
+
+
+def _whatsapp_phone_id() -> str:
+    return (os.environ.get("WHATSAPP_PHONE_ID") or "").strip()
+
+
+def _whatsapp_token() -> str:
+    return (os.environ.get("WHATSAPP_TOKEN") or "").strip()
+
+
+def _whatsapp_app_secret() -> str:
+    return (os.environ.get("WHATSAPP_APP_SECRET") or "").strip()
+
+
+def _whatsapp_webhook_verify_token() -> str:
+    return (os.environ.get("WHATSAPP_WEBHOOK_VERIFY_TOKEN") or "").strip()
+
+
+def _whatsapp_enabled() -> bool:
+    """Feature flag, mirrors _slack_events_enabled.
+
+    Defaults ON, but the endpoints additionally fail closed when the concrete
+    Meta credentials (phone id + token) are absent, so an enabled-but-unconfigured
+    deploy is still inert.
+    """
+    value = os.environ.get("WHATSAPP_ENABLED", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _whatsapp_configured() -> bool:
+    """True only when the outbound send path is usable (phone id + token)."""
+    return bool(_whatsapp_phone_id() and _whatsapp_token())
+
+
+def _normalize_whatsapp_wa_id(wa_id: str) -> str:
+    return re.sub(r"\D", "", str(wa_id or ""))
+
+
+def _whatsapp_claim_url(token: str) -> str:
+    base = (
+        os.environ.get("WORKERS_FRONTEND_URL")
+        or os.environ.get("WORKEROS_PUBLIC_URL")
+        or "https://workers.floom.dev"
+    ).rstrip("/")
+    return f"{base}/settings?whatsapp_claim={urllib.parse.quote(token)}"
+
+
+def _whatsapp_binding_user_id(wa_id: str) -> Optional[str]:
+    normalized = _normalize_whatsapp_wa_id(wa_id)
+    if not normalized:
+        return None
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT user_id
+                FROM whatsapp_sender_bindings
+                WHERE wa_id = ? AND status = 'active' AND user_id IS NOT NULL
+                """,
+                (normalized,),
+            ).fetchone()
+            if row and row["user_id"]:
+                conn.execute(
+                    "UPDATE whatsapp_sender_bindings SET last_seen_at = ?, updated_at = ? WHERE wa_id = ?",
+                    (now_iso(), now_iso(), normalized),
+                )
+                return str(row["user_id"])
+    except Exception:
+        logger.exception("WhatsApp sender binding lookup failed")
+    return None
+
+
+def _whatsapp_create_claim(wa_id: str, profile_name: str = "") -> Dict[str, str]:
+    normalized = _normalize_whatsapp_wa_id(wa_id)
+    if not normalized:
+        raise ValueError("WhatsApp sender id missing")
+    token = pysecrets.token_urlsafe(24)
+    now_ts = now_iso()
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at, last_seen_at)
+            VALUES (?, NULL, ?, 'pending', ?, ?, ?, ?, ?)
+            ON CONFLICT(wa_id) DO UPDATE SET
+                profile_name = excluded.profile_name,
+                status = CASE
+                    WHEN whatsapp_sender_bindings.status = 'active'
+                    THEN whatsapp_sender_bindings.status
+                    ELSE 'pending'
+                END,
+                claim_token = CASE
+                    WHEN whatsapp_sender_bindings.status = 'active'
+                    THEN whatsapp_sender_bindings.claim_token
+                    ELSE excluded.claim_token
+                END,
+                claim_expires_at = CASE
+                    WHEN whatsapp_sender_bindings.status = 'active'
+                    THEN whatsapp_sender_bindings.claim_expires_at
+                    ELSE excluded.claim_expires_at
+                END,
+                updated_at = excluded.updated_at,
+                last_seen_at = excluded.last_seen_at
+            """,
+            (normalized, profile_name or None, token, expires_at, now_ts, now_ts, now_ts),
+        )
+        row = conn.execute(
+            "SELECT claim_token, claim_expires_at, status FROM whatsapp_sender_bindings WHERE wa_id = ?",
+            (normalized,),
+        ).fetchone()
+    claim_token = str(row["claim_token"] or token) if row else token
+    return {
+        "wa_id": normalized,
+        "claim_token": claim_token,
+        "claim_url": _whatsapp_claim_url(claim_token),
+        "claim_expires_at": str(row["claim_expires_at"] if row else expires_at),
+        "status": str(row["status"] if row else "pending"),
+    }
+
+
+class WhatsAppClaimRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str
+
+
+@app.post("/whatsapp/bindings/claim")
+def claim_whatsapp_sender(
+    payload: WhatsAppClaimRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    token = (payload.token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="token is required")
+    now_dt = datetime.now(timezone.utc)
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT wa_id, status, claim_expires_at
+            FROM whatsapp_sender_bindings
+            WHERE claim_token = ?
+            """,
+            (token,),
+        ).fetchone()
+        if not row or row["status"] == "active":
+            raise HTTPException(status_code=404, detail="WhatsApp claim not found")
+        try:
+            expires = datetime.fromisoformat(str(row["claim_expires_at"]))
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+        except Exception:
+            expires = now_dt - timedelta(seconds=1)
+        if expires < now_dt:
+            raise HTTPException(status_code=410, detail="WhatsApp claim expired")
+        conn.execute(
+            """
+            UPDATE whatsapp_sender_bindings
+            SET user_id = ?, status = 'active', updated_at = ?
+            WHERE claim_token = ?
+            """,
+            (auth.user_id, now_iso(), token),
+        )
+    return {"ok": True, "wa_id": row["wa_id"], "user_id": auth.user_id}
+
+
+def _verify_whatsapp_signature(body: bytes, request: Request, app_secret: str) -> bool:
+    """Verify Meta's X-Hub-Signature-256 header (sha256=HMAC(app_secret, raw_body)).
+
+    Fails closed: a missing/malformed header or missing secret returns False.
+    """
+    if not app_secret:
+        return False
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if not signature or not signature.startswith("sha256="):
+        return False
+    expected = "sha256=" + hmac.new(app_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+def _split_whatsapp_text(text: str) -> List[str]:
+    """Chunk text to the 4096-char WhatsApp limit, preferring paragraph/sentence
+    boundaries (ported from the staged whatsapp.ts reference)."""
+    raw = (text or "").replace("\r\n", "\n").strip()
+    raw = re.sub(r"\n{3,}", "\n\n", raw)
+    if not raw:
+        return []
+    if len(raw) <= WHATSAPP_TEXT_MAX:
+        return [raw]
+
+    chunks: List[str] = []
+    paragraphs = [part.strip() for part in re.split(r"\n{2,}", raw) if part.strip()]
+    for paragraph in paragraphs:
+        if len(paragraph) <= WHATSAPP_TEXT_MAX:
+            chunks.append(paragraph)
+            continue
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", paragraph) if part.strip()]
+        current = ""
+        for sentence in sentences:
+            candidate = f"{current} {sentence}" if current else sentence
+            if len(candidate) > WHATSAPP_TEXT_MAX and current:
+                chunks.append(current)
+                current = sentence
+            elif len(candidate) > WHATSAPP_TEXT_MAX:
+                # Single sentence longer than the limit: hard-split.
+                index = 0
+                while index < len(sentence):
+                    chunks.append(sentence[index:index + WHATSAPP_TEXT_MAX])
+                    index += WHATSAPP_TEXT_MAX
+                current = ""
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
+    return [chunk for chunk in chunks if chunk]
+
+
+def _send_whatsapp_json(payload: Dict[str, Any]) -> None:
+    phone_id = _whatsapp_phone_id()
+    token = _whatsapp_token()
+    if not phone_id or not token:
+        raise RuntimeError("WhatsApp is not configured (WHATSAPP_PHONE_ID / WHATSAPP_TOKEN missing)")
+    response = requests.post(
+        f"https://graph.facebook.com/{_whatsapp_graph_version()}/{phone_id}/messages",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=15,
+    )
+    if not response.ok:
+        try:
+            body = response.json()
+            error = str((body.get("error") or {}).get("message") or f"HTTP {response.status_code}")
+        except Exception:
+            error = f"HTTP {response.status_code}"
+        raise RuntimeError(f"WhatsApp API error: {error}")
+
+
+def send_whatsapp_text(to: str, text: str) -> None:
+    """Send a text message via the Graph API, chunked to 4096 chars."""
+    if not to:
+        raise RuntimeError("WhatsApp recipient missing")
+    chunks = _split_whatsapp_text(text)
+    if not chunks:
+        chunks = ["(No reply)"]
+    for chunk in chunks:
+        _send_whatsapp_json({
+            "messaging_product": "whatsapp",
+            "to": to,
+            "type": "text",
+            "text": {"body": chunk},
+        })
+
+
+def _send_whatsapp_typing_indicator(message_id: str) -> None:
+    """Mark the inbound message read + show a typing indicator (best-effort)."""
+    trimmed = (message_id or "").strip()
+    if not trimmed:
+        return
+    _send_whatsapp_json({
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": trimmed,
+        "typing_indicator": {"type": "text"},
+    })
+
+
+def _parse_whatsapp_inbound(payload: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Normalize a Meta whatsapp_business_account webhook body into a flat list of
+    text messages: [{wa_id, text, message_id, profile_name}]. Non-text messages
+    and status callbacks are ignored gracefully."""
+    if not isinstance(payload, dict):
+        return []
+    if str(payload.get("object") or "").strip().lower() != "whatsapp_business_account":
+        return []
+
+    events: List[Dict[str, str]] = []
+    for entry in payload.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        for change in entry.get("changes") or []:
+            if not isinstance(change, dict):
+                continue
+            if str(change.get("field") or "").strip().lower() != "messages":
+                continue
+            value = change.get("value") if isinstance(change.get("value"), dict) else {}
+
+            profiles_by_wa_id: Dict[str, str] = {}
+            for contact in value.get("contacts") or []:
+                if not isinstance(contact, dict):
+                    continue
+                wa_id = re.sub(r"\D", "", str(contact.get("wa_id") or ""))
+                name = str(((contact.get("profile") or {}) if isinstance(contact.get("profile"), dict) else {}).get("name") or "")
+                if wa_id:
+                    profiles_by_wa_id[wa_id] = name
+
+            for message in value.get("messages") or []:
+                if not isinstance(message, dict):
+                    continue
+                if str(message.get("type") or "").strip().lower() != "text":
+                    # Non-text (image/audio/document/etc.) and status callbacks
+                    # are ignored gracefully for this text-only assistant.
+                    continue
+                wa_id = re.sub(r"\D", "", str(message.get("from") or ""))
+                message_id = str(message.get("id") or "").strip()
+                text_body = str(((message.get("text") or {}) if isinstance(message.get("text"), dict) else {}).get("body") or "").strip()
+                if not wa_id or not message_id or not text_body:
+                    continue
+                events.append({
+                    "wa_id": wa_id,
+                    "text": text_body,
+                    "message_id": message_id,
+                    "profile_name": profiles_by_wa_id.get(wa_id, ""),
+                })
+    return events
+
+
+async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, profile_name: str = "") -> None:
+    """Run the inbound text through the shared assistant pipeline and reply."""
+    normalized_wa_id = _normalize_whatsapp_wa_id(wa_id)
+    user_id = _whatsapp_binding_user_id(normalized_wa_id)
+    if not user_id:
+        try:
+            claim = _whatsapp_create_claim(normalized_wa_id, profile_name)
+            send_whatsapp_text(
+                normalized_wa_id,
+                (
+                    "Link this WhatsApp number to your Workeros workspace before "
+                    "I can access any workers, runs, brain packs, or connections.\n\n"
+                    f"{claim['claim_url']}\n\n"
+                    "This link expires in 24 hours."
+                ),
+            )
+        except Exception:
+            logger.exception("WhatsApp unbound sender claim prompt failed")
+        return
+    conversation_id = f"whatsapp:{normalized_wa_id}"
+    try:
+        try:
+            _send_whatsapp_typing_indicator(message_id)
+        except Exception:
+            logger.exception("WhatsApp typing indicator failed")
+        reply = await _collect_workspace_agent_reply_for_slack(
+            message=text,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            source="whatsapp",
+        )
+        send_whatsapp_text(normalized_wa_id, reply)
+    except Exception:
+        logger.exception("WhatsApp message processing failed")
+        if os.environ.get("WHATSAPP_POST_ERRORS_TO_CHAT", "1").strip().lower() not in {"0", "false", "no", "off"}:
+            try:
+                send_whatsapp_text(
+                    normalized_wa_id,
+                    "I could not complete that request. The failure was logged for the workspace operator.",
+                )
+            except Exception:
+                logger.exception("WhatsApp error reply failed")
+
+
+@app.get("/whatsapp/webhook")
+async def whatsapp_webhook_verify(request: Request) -> Response:
+    """Answer Meta's one-time webhook verification challenge.
+
+    Returns hub.challenge as plain text (200) only when hub.mode == subscribe
+    and hub.verify_token matches WHATSAPP_WEBHOOK_VERIFY_TOKEN. Fails closed
+    (403) otherwise, including when no verify token is configured.
+    """
+    if not _whatsapp_enabled():
+        raise HTTPException(status_code=503, detail="WhatsApp integration is disabled")
+    mode = request.query_params.get("hub.mode", "")
+    token = request.query_params.get("hub.verify_token", "")
+    challenge = request.query_params.get("hub.challenge", "")
+    expected = _whatsapp_webhook_verify_token()
+    if mode == "subscribe" and expected and token and hmac.compare_digest(token, expected):
+        return PlainTextResponse(challenge, media_type="text/plain")
+    raise HTTPException(status_code=403, detail="WhatsApp webhook verification failed")
+
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks) -> Response:
+    """Receive Meta WhatsApp Cloud API inbound message callbacks.
+
+    Verifies the X-Hub-Signature-256 HMAC against the raw body, dedups Meta
+    retries, ACKs 200 fast, and forwards each text message to the shared
+    assistant pipeline in a background task. Inert when WhatsApp env vars are
+    absent (503), so an unconfigured deploy cannot break.
+    """
+    if not _whatsapp_enabled():
+        raise HTTPException(status_code=503, detail="WhatsApp integration is disabled")
+
+    body = await request.body()
+
+    app_secret = _whatsapp_app_secret()
+    if not app_secret or not _whatsapp_configured():
+        # No credentials yet: accept nothing, do nothing, but do not 500. Fail
+        # closed on signature (can't verify) while keeping the app healthy.
+        raise HTTPException(status_code=503, detail="WhatsApp integration is not configured")
+
+    if not _verify_whatsapp_signature(body, request, app_secret):
+        raise HTTPException(status_code=401, detail="Invalid WhatsApp signature")
+
+    try:
+        payload: Dict[str, Any] = json.loads(body.decode("utf-8") or "{}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid WhatsApp JSON payload") from exc
+
+    events = _parse_whatsapp_inbound(payload)
+    if not events:
+        # Status callbacks, non-text messages, or empty envelopes: ACK and ignore.
+        return JSONResponse({"ok": True, "ignored": True})
+
+    queued = 0
+    for event in events:
+        message_id = event["message_id"]
+        # Dedup on Meta's stable message id (Meta retries on timeout).
+        if message_id and not _claim_webhook_delivery("whatsapp:messages", message_id):
+            continue
+        background_tasks.add_task(
+            _handle_whatsapp_message,
+            wa_id=event["wa_id"],
+            text=event["text"],
+            message_id=message_id,
+            profile_name=event.get("profile_name") or "",
+        )
+        queued += 1
+
+    return JSONResponse({"ok": True, "queued": queued})
+
+
+# ---------------------------------------------------------------------------
+# Workspace Agent MCP API
+# ---------------------------------------------------------------------------
+
+_WORKSPACE_AGENT_MCP_TOOL_NAME = "ask_workspace_agent"
+_WORKSPACE_AGENT_MCP_LEGACY_TOOL_NAME = "ask_workeros_workspace_agent"
+_WORKSPACE_AGENT_MCP_PROTOCOL_VERSION = "2024-11-05"
+_WORKEROS_REMOTE_MCP_NAME = "workeros"
+_WORKEROS_REMOTE_MCP_VERSION = "0.2.0"
+_MCP_TERMINAL_RUN_STATUSES = {"completed", "failed", "pending_approval", "approved", "rejected", "success", "error"}
+
+
+def _workspace_agent_mcp_enabled() -> bool:
+    value = os.environ.get("WORKSPACE_AGENT_MCP_ENABLED", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _workspace_agent_mcp_tokens() -> List[str]:
+    tokens: List[str] = []
+    for name in (
+        "WORKSPACE_AGENT_MCP_TOKEN",
+        "LANGDOCK_WORKEROS_MCP_TOKEN",
+        "WORKEROS_API_SECRET",
+        "WORKEROS_API_TOKEN",
+        "FLOOM_SECRET",
+    ):
+        value = (os.environ.get(name) or "").strip()
+        if value and value not in tokens:
+            tokens.append(value)
+    return tokens
+
+
+def _verify_workspace_agent_mcp_auth(request: Request) -> bool:
+    expected_tokens = _workspace_agent_mcp_tokens()
+    if not expected_tokens:
+        return False
+    authorization = request.headers.get("authorization", "").strip()
+    bearer = ""
+    if authorization.lower().startswith("bearer "):
+        bearer = authorization[7:].strip()
+    api_key = request.headers.get("x-api-key", "").strip()
+    floom_secret = request.headers.get("x-floom-secret", "").strip()
+    floom_token = request.headers.get("x-floom-token", "").strip()
+    candidates = [value for value in (bearer, api_key, floom_secret, floom_token) if value]
+    return bool(
+        any(hmac.compare_digest(candidate, expected) for candidate in candidates for expected in expected_tokens)
+    )
+
+
+def _workspace_agent_mcp_user_id() -> str:
+    return (
+        os.environ.get("WORKSPACE_AGENT_MCP_USER_ID")
+        or os.environ.get("LANGDOCK_WORKEROS_USER_ID")
+        or _bootstrap_user_id()
+    ).strip() or _bootstrap_user_id()
+
+
+def _workspace_agent_mcp_auth_context() -> AuthContext:
+    existing = current_auth_context()
+    if existing is not None:
+        return existing
+    user_id = _workspace_agent_mcp_user_id()
+    if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local":
+        user_id = local_workspace_user_id(local_workspace_base_user_id(user_id), DEFAULT_WORKSPACE_ID)
+    ctx = AuthContext(user_id=user_id, email=None, scopes=("admin", "mcp"))
+    set_current_auth_context(ctx)
+    return ctx
+
+
+async def _workspace_agent_mcp_cloud_auth_context(request: Request) -> Optional[AuthContext]:
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy != "cloud":
+        return None
+    authorization = request.headers.get("authorization", "").strip()
+    bearer = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    token = (
+        request.headers.get("x-floom-token", "").strip()
+        or request.headers.get("x-api-key", "").strip()
+        or bearer
+    )
+    if not token:
+        return None
+    scope = dict(request.scope)
+    headers = [
+        (key, value)
+        for key, value in scope.get("headers", [])
+        if key.lower() != b"x-floom-token"
+    ]
+    headers.append((b"x-floom-token", token.encode("utf-8")))
+    scope["headers"] = headers
+    ctx = await get_auth_provider().verify(Request(scope, request.receive))
+    set_current_auth_context(ctx)
+    return ctx
+
+
+def _workspace_agent_mcp_conversation_id(raw: Any) -> str:
+    value = str(raw or "default").strip() or "default"
+    safe = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", value)[:160].strip("._:-")
+    return f"langdock:{safe or 'default'}"
+
+
+def _workspace_agent_mcp_discovery() -> Dict[str, Any]:
+    return {
+        "name": _WORKEROS_REMOTE_MCP_NAME,
+        "version": _WORKEROS_REMOTE_MCP_VERSION,
+        "protocol": _WORKSPACE_AGENT_MCP_PROTOCOL_VERSION,
+        "transport": "streamable-http",
+        "endpoint": "POST /api/mcp",
+        "tools": [tool["name"] for tool in _workeros_remote_mcp_tool_definitions()],
+    }
+
+
+def _workspace_agent_mcp_setup_card() -> Dict[str, Any]:
+    tools = [tool["name"] for tool in _workeros_remote_mcp_tool_definitions()]
+    recommended_prompt = (
+        "You are the Workeros Agent. Use Workeros MCP actions to inspect workers, "
+        "runs, brain packs, connections, and secrets. Use ask_workspace_agent for "
+        "broad delegation and direct tools for precise operations. Confirm before "
+        "destructive actions such as deleting workers or secrets."
+    )
+    return {
+        "name": "Workeros",
+        "description": "Remote MCP setup for Langdock, Claude Code, Cursor, and other agent clients.",
+        "server_url": "https://workeros-api.floom.dev/api/mcp",
+        "transport": "STREAMABLE_HTTP",
+        "authentication": {
+            "method": "API Key",
+            "header_options": [
+                "Authorization: Bearer <WORKEROS_API_TOKEN>",
+                "x-api-key: <WORKEROS_API_TOKEN>",
+            ],
+            "accepts_existing_workeros_token": True,
+            "token_configured": bool(_workspace_agent_mcp_tokens()),
+        },
+        "recommended_langdock_agent": {
+            "name": "Workeros Agent",
+            "instructions": recommended_prompt,
+        },
+        "tools": tools,
+        "checklist": [
+            "Create or copy a Workeros API token.",
+            "In Langdock Integrations, add an MCP integration.",
+            "Use the Workeros server URL and API key authentication.",
+            "Test the connection and save the discovered tools.",
+            "Create a Langdock custom agent named Workeros Agent.",
+            "Attach the Workeros MCP actions to that agent.",
+            "Smoke test: list workers and summarize the latest failed runs.",
+        ],
+    }
+
+
+async def _collect_workspace_agent_reply_for_langdock(
+    *,
+    message: str,
+    user_id: str,
+    conversation_id: Optional[str],
+) -> str:
+    return await _collect_workspace_agent_reply_for_slack(
+        message=message,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        source="mcp",
+    )
+
+
+def _mcp_result(request_id: Any, result: Dict[str, Any]) -> Dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": request_id, "result": jsonable_encoder(result)}
+
+
+def _mcp_error(request_id: Any, code: int, message: str) -> Dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {"code": code, "message": message},
+    }
+
+
+def _mcp_tool_error(message: str) -> Dict[str, Any]:
+    return {
+        "content": [{"type": "text", "text": message}],
+        "isError": True,
+    }
+
+
+def _mcp_redact(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_mcp_redact(item) for item in value]
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, nested in value.items():
+            if re.search(r"(secret|token|password|api[_-]?key)", str(key), re.IGNORECASE):
+                redacted[str(key)] = "[redacted]"
+            else:
+                redacted[str(key)] = _mcp_redact(nested)
+        return redacted
+    return value
+
+
+def _mcp_text(data: Any, summary: Optional[str] = None) -> str:
+    safe = _mcp_redact(jsonable_encoder(data))
+    rendered = json.dumps(safe, ensure_ascii=False, indent=2)
+    return f"{summary}\n{rendered}" if summary else rendered
+
+
+def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]:
+    structured = jsonable_encoder(data)
+    if not isinstance(structured, dict):
+        structured = {"data": structured}
+    return {
+        "content": [{"type": "text", "text": _mcp_text(data, summary)}],
+        "structuredContent": structured,
+        "isError": False,
+    }
+
+
+def _mcp_http_error_result(exc: HTTPException) -> Dict[str, Any]:
+    detail = exc.detail if isinstance(exc.detail, str) else json.dumps(jsonable_encoder(exc.detail), ensure_ascii=False)
+    return {
+        "content": [{"type": "text", "text": detail}],
+        "structuredContent": {"status": exc.status_code, "detail": jsonable_encoder(exc.detail)},
+        "isError": True,
+    }
+
+
+def _mcp_json_schema(properties: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required or [],
+        "additionalProperties": False,
+    }
+
+
+def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
+    worker_contract_yaml_description = (
+        'WorkerContract YAML content. Required top-level fields: schema_version: "0.3", '
+        "name, title, description, version, exec, and trigger. For script workers, "
+        'exec must include entry: "run.py", runtime: "python311", runner: "e2b", '
+        'command: "python run.py", plus exec.inputs and exec.outputs arrays. '
+        "Script workers read inputs.json and write result.json at the worker root."
+    )
+    workspace_schema = _mcp_json_schema(
+        {
+            "message": {
+                "type": "string",
+                "description": "The instruction or question for the Workeros workspace agent.",
+            },
+            "conversation_id": {
+                "type": "string",
+                "description": "Optional stable client thread or chat id for continuity.",
+            },
+        },
+        ["message"],
+    )
+    return [
+        {
+            "name": _WORKSPACE_AGENT_MCP_TOOL_NAME,
+            "description": (
+                "Ask the Workeros workspace agent to inspect or operate the workspace: "
+                "workers, runs, approvals, brain packs, connections, and secret names."
+            ),
+            "inputSchema": workspace_schema,
+        },
+        {
+            "name": "workers.list",
+            "description": "List Workeros workers.",
+            "inputSchema": _mcp_json_schema({
+                "include_system": {"type": "boolean", "default": False},
+                "include_archived": {"type": "boolean", "default": False},
+            }),
+        },
+        {
+            "name": "workers.get",
+            "description": "Get a Workeros worker by id.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "workers.create",
+            "description": "Create a Workeros worker from WorkerContract YAML and Python source.",
+            "inputSchema": _mcp_json_schema(
+                {
+                    "worker_yml": {"type": "string", "description": worker_contract_yaml_description},
+                    "run_py": {"type": "string", "description": "Python source for run.py."},
+                    "skill_md": {"type": "string", "description": "Optional SKILL.md content."},
+                },
+                ["worker_yml", "run_py"],
+            ),
+        },
+        {
+            "name": "workers.update",
+            "description": "Update worker settings such as trigger, cron, defaults, and capabilities.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "trigger_type": {"type": "string"},
+                "cron_expr": {"type": "string"},
+                "cron_timezone": {"type": "string"},
+                "input_values": {"type": "object"},
+                "capabilities": {"type": "object"},
+                "webhook_secret_rotate": {"type": "boolean"},
+            }, ["id"]),
+        },
+        {
+            "name": "workers.run",
+            "description": "Start a manual Workeros worker run.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "inputs": {"type": "object", "default": {}},
+                "trigger_source": {"type": "string", "default": "manual"},
+            }, ["id"]),
+        },
+        {
+            "name": "runs.list",
+            "description": "List Workeros runs, optionally filtered by worker id or status.",
+            "inputSchema": _mcp_json_schema({
+                "worker_id": {"type": "string"},
+                "status": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+                "offset": {"type": "integer", "minimum": 0, "default": 0},
+                "include_system": {"type": "boolean", "default": False},
+            }),
+        },
+        {
+            "name": "runs.get",
+            "description": "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.",
+            "inputSchema": _mcp_json_schema({"id": {"type": "string"}}, ["id"]),
+        },
+        {
+            "name": "runs.watch",
+            "description": "Poll a Workeros run until terminal status or timeout.",
+            "inputSchema": _mcp_json_schema({
+                "id": {"type": "string"},
+                "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 600000, "default": 120000},
+            }, ["id"]),
+        },
+        {
+            "name": "secrets.list",
+            "description": "List configured secret names and status. Values are never returned.",
+            "inputSchema": _mcp_json_schema({}),
+        },
+        {
+            "name": "secrets.set",
+            "description": "Create or update a secret value.",
+            "inputSchema": _mcp_json_schema({
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+            }, ["key", "value"]),
+        },
+        {
+            "name": "connections.list",
+            "description": "List configured app and MCP connections.",
+            "inputSchema": _mcp_json_schema({}),
+        },
+        {
+            "name": "connections.add_mcp",
+            "description": "Save an MCP server connection for workers to use at run time.",
+            "inputSchema": _mcp_json_schema({
+                "label": {"type": "string"},
+                "transport": {"type": "string", "enum": ["streamable_http", "sse", "stdio"], "default": "streamable_http"},
+                "url": {"type": "string"},
+                "command": {"type": "string"},
+                "args": {"type": "array", "items": {"type": "string"}, "default": []},
+                "env": {"type": "object", "additionalProperties": {"type": "string"}, "default": {}},
+                "cwd": {"type": "string"},
+                "auth_secret": {"type": "string"},
+                "allowed_tools": {"type": "array", "items": {"type": "string"}, "default": []},
+            }, ["label"]),
+        },
+        {
+            "name": "contexts.list",
+            "description": "List Workeros brain packs.",
+            "inputSchema": _mcp_json_schema({}),
+        },
+        {
+            "name": "contexts.read",
+            "description": "Read a UTF-8 brain-pack file, or return metadata for binary files.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string"},
+                "path": {"type": "string"},
+            }, ["name", "path"]),
+        },
+        {
+            "name": "contexts.write",
+            "description": "Create or update a UTF-8 text file inside a brain pack.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string"},
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            }, ["name", "path", "content"]),
+        },
+    ]
+
+
+def _mcp_arg(arguments: Dict[str, Any], name: str) -> str:
+    value = str(arguments.get(name) or "").strip()
+    if not value:
+        raise ValueError(f"Tool argument '{name}' is required")
+    return value
+
+
+async def _mcp_call_workspace_agent(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    message = str(arguments.get("message") or "").strip()
+    if not message:
+        return _mcp_tool_error("Tool argument 'message' is required")
+    if len(message) > 20000:
+        return _mcp_tool_error("Tool argument 'message' is too long")
+
+    conversation_id = _workspace_agent_mcp_conversation_id(arguments.get("conversation_id"))
+    reply = await _collect_workspace_agent_reply_for_langdock(
+        message=message,
+        user_id=current_auth_user_id() or _workspace_agent_mcp_auth_context().user_id,
+        conversation_id=conversation_id,
+    )
+    return {
+        "content": [{"type": "text", "text": reply or "(No reply)"}],
+        "structuredContent": {"conversation_id": conversation_id},
+        "isError": False,
+    }
+
+
+def _mcp_call_workers_list(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_workers(
+        include_system=bool(arguments.get("include_system", False)),
+        include_archived=bool(arguments.get("include_archived", False)),
+        shape="full",
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(data)
+
+
+def _mcp_call_workers_get(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = get_worker_detail(_mcp_arg(arguments, "id"), auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+def _mcp_call_workers_create(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    payload = WorkerCreateRequest(
+        worker_yml=_mcp_arg(arguments, "worker_yml"),
+        run_py=_mcp_arg(arguments, "run_py"),
+        skill_md=arguments.get("skill_md"),
+    )
+    data = create_worker(payload, auth=auth, repos=repos)
+    return _mcp_call_result(data, "Worker created.")
+
+
+def _mcp_call_workers_update(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    worker_id = _mcp_arg(arguments, "id")
+    update_args = {k: v for k, v in arguments.items() if k != "id"}
+    payload = WorkerUpdateRequest(**update_args)
+    data = update_worker(worker_id, payload, auth=auth, repos=repos)
+    return _mcp_call_result(data, "Worker updated.")
+
+
+def _mcp_call_workers_run(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    payload = RunCreate(
+        inputs=arguments.get("inputs") if isinstance(arguments.get("inputs"), dict) else {},
+        trigger_source=str(arguments.get("trigger_source") or "manual"),
+    )
+    data = create_worker_run(_mcp_arg(arguments, "id"), payload, request=None, auth=auth, repos=repos)
+    return _mcp_call_result(data, "Worker run started.")
+
+
+def _mcp_call_runs_list(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_runs(
+        Response(),
+        worker_id=arguments.get("worker_id") or None,
+        status=arguments.get("status") or None,
+        limit=min(max(int(arguments.get("limit") or 50), 1), 200),
+        offset=max(int(arguments.get("offset") or 0), 0),
+        include_system=bool(arguments.get("include_system", False)),
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(data)
+
+
+def _mcp_call_runs_get(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = get_run(_mcp_arg(arguments, "id"), auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+async def _mcp_call_runs_watch(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    run_id = _mcp_arg(arguments, "id")
+    timeout_ms = min(max(int(arguments.get("timeout_ms") or 120000), 1000), 600000)
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    last: Dict[str, Any] = {}
+    while True:
+        row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Run not found")
+        last = row_to_dict(row)
+        status = str(last.get("status") or "")
+        if status in _MCP_TERMINAL_RUN_STATUSES or time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(1.0)
+    logs = [
+        {"level": r["level"], "message": _redact_public_log_message(r["message"]), "timestamp": r["timestamp"]}
+        for r in repos.runs.list_logs(user_id=auth.user_id, run_id=run_id)[-50:]
+    ]
+    return _mcp_call_result({"run_id": run_id, "status": last.get("status"), "run": last, "logs": logs}, "Run watch completed.")
+
+
+def _mcp_call_secrets_list(auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_secrets(auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+def _mcp_call_secrets_set(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    key = _mcp_arg(arguments, "key").upper()
+    payload = SecretUpsertRequest(value=_mcp_arg(arguments, "value"))
+    data = upsert_secret(key, payload, auth=auth, repos=repos)
+    return _mcp_call_result(data, "Secret saved.")
+
+
+def _mcp_call_connections_list(auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_connections(auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+def _mcp_call_connections_add_mcp(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    payload = MCPConnectionCreateRequest(
+        label=_mcp_arg(arguments, "label"),
+        transport=arguments.get("transport") or "streamable_http",
+        url=arguments.get("url"),
+        command=arguments.get("command"),
+        args=arguments.get("args") if isinstance(arguments.get("args"), list) else [],
+        env=arguments.get("env") if isinstance(arguments.get("env"), dict) else {},
+        cwd=arguments.get("cwd"),
+        auth_secret=arguments.get("auth_secret"),
+        allowed_tools=arguments.get("allowed_tools") if isinstance(arguments.get("allowed_tools"), list) else [],
+    )
+    data = create_mcp_connection(payload, auth=auth, repos=repos)
+    return _mcp_call_result(data, "MCP connection saved.")
+
+
+def _mcp_call_contexts_list(auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    data = list_contexts(auth=auth, repos=repos)
+    return _mcp_call_result(data)
+
+
+def _mcp_call_contexts_read(arguments: Dict[str, Any], auth: AuthContext) -> Dict[str, Any]:
+    name = _mcp_arg(arguments, "name")
+    rel = _mcp_arg(arguments, "path")
+    safe_name, _metadata = _require_readable_context_for_user(name, user_id=auth.user_id)
+    target = _safe_context_file_or_400(safe_name, _context_file_path_or_400(rel))
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    mime_type = guess_mime_type(rel)
+    if is_binary_file(rel, mime_type):
+        return _mcp_call_result({
+            "name": safe_name,
+            "path": rel,
+            "size": target.stat().st_size,
+            "mime_type": mime_type,
+            "is_binary": True,
+            "note": "Binary brain-pack file. Use the Workeros HTTP API to download bytes.",
+        })
+    return _mcp_call_result({
+        "name": safe_name,
+        "path": rel,
+        "size": target.stat().st_size,
+        "mime_type": mime_type,
+        "is_binary": False,
+        "content": target.read_text(errors="replace"),
+    })
+
+
+def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    name = _mcp_arg(arguments, "name")
+    rel = _mcp_arg(arguments, "path")
+    content = str(arguments.get("content") or "")
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    result = _write_context_file(
+        safe_name,
+        _context_file_path_or_400(rel),
+        content.encode("utf-8"),
+        user_id=auth.user_id,
+    )
+    _snapshot_brain_pack_version(safe_name, user_id=auth.user_id, repos=repos, change_source="ai")
+    message = "Context file saved."
+    if result.secret_warnings:
+        patterns = ", ".join(sorted({w.pattern for w in result.secret_warnings}))
+        message = (
+            f"Context file saved. WARNING: this file looks like it contains a live "
+            f"credential ({patterns}). Brain packs are readable by anyone with workspace "
+            f"access — store secrets in Settings → Secrets, not in a Brain pack."
+        )
+    return _mcp_call_result(result, message)
+
+
+async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    auth = _workspace_agent_mcp_auth_context()
+    repos = get_repositories()
+    try:
+        if tool_name in {_WORKSPACE_AGENT_MCP_TOOL_NAME, _WORKSPACE_AGENT_MCP_LEGACY_TOOL_NAME, "workspace.chat"}:
+            return await _mcp_call_workspace_agent(arguments)
+        if tool_name == "workers.list":
+            return _mcp_call_workers_list(arguments, auth, repos)
+        if tool_name == "workers.get":
+            return _mcp_call_workers_get(arguments, auth, repos)
+        if tool_name == "workers.create":
+            return _mcp_call_workers_create(arguments, auth, repos)
+        if tool_name == "workers.update":
+            return _mcp_call_workers_update(arguments, auth, repos)
+        if tool_name == "workers.run":
+            return _mcp_call_workers_run(arguments, auth, repos)
+        if tool_name == "runs.list":
+            return _mcp_call_runs_list(arguments, auth, repos)
+        if tool_name == "runs.get":
+            return _mcp_call_runs_get(arguments, auth, repos)
+        if tool_name == "runs.watch":
+            return await _mcp_call_runs_watch(arguments, auth, repos)
+        if tool_name == "secrets.list":
+            return _mcp_call_secrets_list(auth, repos)
+        if tool_name == "secrets.set":
+            return _mcp_call_secrets_set(arguments, auth, repos)
+        if tool_name == "connections.list":
+            return _mcp_call_connections_list(auth, repos)
+        if tool_name == "connections.add_mcp":
+            return _mcp_call_connections_add_mcp(arguments, auth, repos)
+        if tool_name == "contexts.list":
+            return _mcp_call_contexts_list(auth, repos)
+        if tool_name == "contexts.read":
+            return _mcp_call_contexts_read(arguments, auth)
+        if tool_name == "contexts.write":
+            return _mcp_call_contexts_write(arguments, auth, repos)
+        return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
+    except ValueError as exc:
+        return _mcp_tool_error(str(exc))
+    except HTTPException as exc:
+        return _mcp_http_error_result(exc)
+
+
+def _workspace_agent_mcp_tool_definition() -> Dict[str, Any]:
+    return {
+        "name": _WORKSPACE_AGENT_MCP_TOOL_NAME,
+        "description": (
+            "Ask the Workeros workspace agent to inspect or operate the workspace: "
+            "workers, runs, approvals, brain packs, connections, and secret names."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The instruction or question for the Workeros workspace agent.",
+                },
+                "conversation_id": {
+                    "type": "string",
+                    "description": "Optional stable Langdock thread or chat id for continuity.",
+                },
+            },
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+    }
+
+
+async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    request_id = payload.get("id")
+    method = str(payload.get("method") or "")
+    if "id" not in payload and method.startswith("notifications/"):
+        return None
+    if method == "initialize":
+        return _mcp_result(
+            request_id,
+            {
+                "protocolVersion": _WORKSPACE_AGENT_MCP_PROTOCOL_VERSION,
+                "capabilities": {"tools": {}},
+                "serverInfo": {
+                    "name": _WORKEROS_REMOTE_MCP_NAME,
+                    "version": _WORKEROS_REMOTE_MCP_VERSION,
+                },
+            },
+        )
+    if method == "tools/list":
+        return _mcp_result(request_id, {"tools": _workeros_remote_mcp_tool_definitions()})
+    if method != "tools/call":
+        return _mcp_error(request_id, -32601, f"Unsupported MCP method: {method or 'unknown'}")
+
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    tool_name = str(params.get("name") or "")
+    arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+    try:
+        return _mcp_result(request_id, await _call_workeros_remote_mcp_tool(tool_name, arguments))
+    except Exception as exc:
+        return _mcp_error(request_id, -32603, f"Workeros MCP tool call failed: {exc}")
+
+
+async def _workspace_agent_mcp_post(request: Request) -> Response:
+    if not _workspace_agent_mcp_enabled():
+        raise HTTPException(status_code=503, detail="Workeros Remote MCP is disabled")
+    static_tokens = _workspace_agent_mcp_tokens()
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if not static_tokens and deploy != "cloud":
+        raise HTTPException(status_code=503, detail="No Workeros MCP/API token is configured")
+    if _verify_workspace_agent_mcp_auth(request):
+        _workspace_agent_mcp_auth_context()
+    else:
+        cloud_ctx = await _workspace_agent_mcp_cloud_auth_context(request)
+        if cloud_ctx is None:
+            raise HTTPException(status_code=401, detail="Invalid Workeros MCP token")
+
+    body = await request.body()
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid MCP JSON payload") from exc
+
+    if isinstance(payload, list):
+        responses = []
+        for item in payload:
+            if not isinstance(item, dict):
+                responses.append(_mcp_error(None, -32600, "Invalid JSON-RPC request"))
+                continue
+            try:
+                response = await _handle_workspace_agent_mcp_message(item)
+            except Exception as exc:
+                response = _mcp_error(item.get("id"), -32603, f"Internal error: {exc}")
+            if response is not None:
+                responses.append(response)
+        if not responses:
+            return Response(status_code=204)
+        return JSONResponse(responses)
+
+    if not isinstance(payload, dict):
+        return JSONResponse(_mcp_error(None, -32600, "Invalid JSON-RPC request"), status_code=400)
+    try:
+        response = await _handle_workspace_agent_mcp_message(payload)
+    except Exception as exc:
+        response = _mcp_error(payload.get("id"), -32603, f"Internal error: {exc}")
+    if response is None:
+        return Response(status_code=204)
+    return JSONResponse(response)
+
+
+@app.get("/api/mcp")
+async def workspace_agent_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/mcp")
+async def workspace_agent_mcp_mount_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/api/mcp/setup/langdock")
+async def workspace_agent_mcp_langdock_setup() -> Response:
+    return JSONResponse(_workspace_agent_mcp_setup_card())
+
+
+@app.get("/mcp/setup/langdock")
+async def workspace_agent_mcp_mount_langdock_setup() -> Response:
+    return JSONResponse(_workspace_agent_mcp_setup_card())
+
+
+@app.get("/langdock/mcp")
+async def langdock_workspace_agent_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/workspace-agent/mcp")
+async def workspace_agent_named_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/api/langdock/mcp")
+async def api_langdock_workspace_agent_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.get("/api/workspace-agent/mcp")
+async def api_workspace_agent_named_mcp_discovery() -> Response:
+    return JSONResponse(_workspace_agent_mcp_discovery())
+
+
+@app.post("/api/mcp")
+async def api_workspace_agent_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/mcp")
+async def workspace_agent_mcp_mount(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/langdock/mcp")
+async def langdock_workspace_agent_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/workspace-agent/mcp")
+async def workspace_agent_named_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/api/langdock/mcp")
+async def api_langdock_workspace_agent_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+@app.post("/api/workspace-agent/mcp")
+async def api_workspace_agent_named_mcp(request: Request) -> Response:
+    return await _workspace_agent_mcp_post(request)
+
+
+# ---------------------------------------------------------------------------
 # System
 # ---------------------------------------------------------------------------
 
@@ -6913,6 +17217,11 @@ class OverviewStats(BaseModel):
     runs_24h_sparkline: List[int]
     runs_7d_sparkline: List["OverviewSparklineBucket"]
     success_rate_7d: Optional[float] = None
+    # G5 FIX 3: success_rate_7d is scoped to ACTIVE, real (non-example,
+    # non-system, non-paused) workers so the headline reflects what a partner's
+    # live workers actually do — not legacy/paused/example churn. This label
+    # tells the UI which denominator the rate represents.
+    success_rate_scope: str = "active_workers"
     active_workers_count: int
     paused_workers_count: int
     connections_healthy: int
@@ -7001,14 +17310,105 @@ def _overview_human_error_code(error_code: Optional[str]) -> str:
 
 
 def _overview_failure_cause(row: Dict[str, Any]) -> str:
-    error_code = _overview_human_error_code(row.get("error_code"))
-    error_message = str(row.get("error") or "").strip()
+    raw_error_code = row.get("error_code")
+    error_code = _overview_human_error_code(raw_error_code)
+    raw_message = str(row.get("error") or "").strip()
+    # Operator hygiene (G5): never let a raw traceback / sandbox path / env-var
+    # name OR artifact-free runtime jargon ("Event loop is closed", E2B deadline
+    # boilerplate) surface in the overview failure cause. The code-keyed
+    # sanitizer maps any recognised error_code, and any remaining jargon, to a
+    # calm headline before we ever fall through to "<code>: <raw message>".
+    code = str(raw_error_code or "").strip().lower()
+    if code and code in _OPERATOR_ERROR_CODE_HEADLINES:
+        return _OPERATOR_ERROR_CODE_HEADLINES[code]
+    if raw_message and (
+        _has_internal_artifact(raw_message) or _looks_like_runtime_jargon(raw_message)
+    ):
+        return _operator_error_message(raw_message, raw_error_code) or error_code
+    error_message = raw_message
     if error_message:
         first_line = error_message.splitlines()[0].strip()
         if len(first_line) > 140:
             first_line = first_line[:137].rstrip() + "..."
+        # Avoid duplicated label prefixes, e.g. error_code "missing_secret"
+        # humanizes to "Missing secret" while the message already starts with
+        # "Missing secrets: …" — concatenating yields the doubled label
+        # "Missing secret: Missing secrets: …". When the message already leads
+        # with the (loosely-matched) humanized code, return the message alone.
+        normalized_code = re.sub(r"[^a-z]", "", error_code.lower())
+        normalized_msg_prefix = re.sub(
+            r"[^a-z]", "", first_line.lower().split(":", 1)[0]
+        )
+        if normalized_code and normalized_msg_prefix.startswith(normalized_code):
+            return first_line
         return f"{error_code}: {first_line}"
     return error_code
+
+
+def _overview_consecutive_failure_threshold() -> int:
+    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "3")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 3
+
+
+def _overview_consecutive_failure_items(
+    *,
+    runs: List[Dict[str, Any]],
+    worker_names: Dict[str, str],
+    threshold: int,
+) -> List[OverviewAttentionItem]:
+    by_worker: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for row in runs:
+        worker_id = row.get("worker_id")
+        if worker_id:
+            by_worker[str(worker_id)].append(row)
+
+    def _run_time(row: Dict[str, Any]) -> datetime:
+        parsed = _parse_iso8601(row.get("started_at") or row.get("completed_at") or row.get("created_at"))
+        return parsed or datetime.min.replace(tzinfo=timezone.utc)
+
+    items: List[OverviewAttentionItem] = []
+    for worker_id, rows in by_worker.items():
+        ordered = sorted(rows, key=_run_time, reverse=True)
+        consecutive = 0
+        latest_failure: Dict[str, Any] | None = None
+        for row in ordered:
+            status = str(row.get("status") or "").lower()
+            if status in {"failed", "error", "cancelled", "rejected", "timeout"}:
+                consecutive += 1
+                if latest_failure is None:
+                    latest_failure = row
+                continue
+            break
+        if consecutive < threshold or latest_failure is None:
+            continue
+        last_failed_at = (
+            latest_failure.get("started_at")
+            or latest_failure.get("completed_at")
+            or latest_failure.get("created_at")
+        )
+        items.append(
+            OverviewAttentionItem(
+                type="consecutive_failures",
+                kind="failing",
+                worker_id=worker_id,
+                worker_name=worker_names.get(worker_id, worker_id),
+                message=f"{consecutive} consecutive failures",
+                cause=_overview_failure_cause(latest_failure),
+                error_code=latest_failure.get("error_code"),
+                recent_failure_count=consecutive,
+                last_failed_at=last_failed_at,
+                suggested_actions=["view_logs", "retry", "disable"],
+                action_url=f"/workers/{worker_id}",
+            )
+        )
+    return sorted(
+        items,
+        key=lambda item: (item.recent_failure_count or 0, item.last_failed_at or ""),
+        reverse=True,
+    )
 
 
 def _overview_schedule_triggers(worker: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -7148,10 +17548,47 @@ def system_overview(
             )
         )
 
-    workers = repos.workers.list(user_id=auth.user_id)
-    active_workers_count = sum(1 for row in workers if row.get("enabled") and not _overview_worker_paused(row))
+    # 1.5.4: use the SAME operator-visible filter as the default GET /workers
+    # view so the overview 'Workers active' count matches the /workers list
+    # (previously this used the unfiltered repos.workers.list() which counted
+    # hidden/system/internal workers, e.g. 24 vs 11). Prefer the DB row (which
+    # carries `enabled`) for each operator-visible worker, falling back to the
+    # filesystem record for stock workers that have no DB row yet, so the
+    # enabled/paused logic stays correct and the total equals /workers.
+    _db_workers_by_id = {
+        row["id"]: row
+        for row in repos.workers.list(user_id=auth.user_id)
+        if row.get("id")
+    }
+    workers = [
+        _db_workers_by_id.get(w["id"], w)
+        for w in _list_operator_workers(user_id=auth.user_id, repos=repos)
+        if w.get("id")
+    ]
+    active_workers_count = sum(1 for row in workers if not _overview_worker_paused(row))
     paused_workers_count = max(0, len(workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
+
+    # G5 FIX 3: the headline success rate must reflect the partner's ACTIVE,
+    # real workers — not legacy/paused/example/system churn that drags the
+    # aggregate down (the 54.6% both scorers flagged). Build the set of
+    # worker_ids that count: operator-visible (already excludes system/hidden),
+    # not paused, and not an example/stock worker.
+    def _is_example_worker(row: Dict[str, Any]) -> bool:
+        if row.get("is_example") is True:
+            return True
+        manifest = row.get("manifest")
+        if isinstance(manifest, dict) and manifest.get("is_example") is True:
+            return True
+        return row.get("id") in PUBLIC_STOCK_WORKER_IDS or row.get("id") in PROTECTED_STOCK_WORKER_IDS
+
+    _active_real_worker_ids = {
+        row["id"]
+        for row in workers
+        if row.get("id")
+        and not _overview_worker_paused(row)
+        and not _is_example_worker(row)
+    }
 
     outcome_counts: Dict[str, int] = collections.Counter(
         row["worker_id"]
@@ -7182,7 +17619,15 @@ def system_overview(
         and row.get("last_check_status") in (None, "valid")
     )
 
-    recent_rows, _ = repos.runs.list(user_id=auth.user_id, limit=10, offset=0)
+    # Orphaned-run fix (2026-06-04): the "Worker activity" feed links each row to
+    # /runs/{id}, but GET /runs/{id} 404s any run whose worker is no longer
+    # API-visible (deleted/hidden internal listeners like slack-listener /
+    # whatsapp-listener whose orphaned failed runs survive worker deletion).
+    # Surfacing those rows produced clickable links that hit a "Run not found"
+    # 404 wall. They are not actionable operator activity, so exclude them here.
+    # We over-fetch then filter to keep up to 10 visible rows. The run rows are
+    # NOT deleted — this is a serving filter, not a data wipe (no-wipe guardrail).
+    recent_rows, _ = repos.runs.list(user_id=auth.user_id, limit=100, offset=0)
     recent_runs = [
         OverviewRunItem(
             run_id=row["id"],
@@ -7194,7 +17639,8 @@ def system_overview(
             trigger_source=row.get("trigger_source") or "manual",
         )
         for row in recent_rows
-    ]
+        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+    ][:10]
 
     scheduled_today: List[OverviewScheduledItem] = []
     try:
@@ -7232,6 +17678,32 @@ def system_overview(
         limit=100000,
         offset=0,
     )
+    # Orphaned-run fix (2026-06-04): failure clusters link to /workers/{id}, which
+    # 404s for deleted/hidden workers (slack-listener, whatsapp-listener, …). A
+    # deleted worker's failures are not actionable "attention" — drop runs whose
+    # worker is no longer API-visible so the cluster + its link cannot 404.
+    failure_runs = [
+        row for row in failure_runs
+        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+    ]
+    visible_terminal_runs = [
+        row for row in runs_14d_rows
+        if str(row.get("status") or "").lower()
+        in {"completed", "approved", "success", "succeeded", "failed", "error", "cancelled", "rejected", "timeout"}
+        and _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+    ]
+    attention_items.extend(
+        _overview_consecutive_failure_items(
+            runs=visible_terminal_runs,
+            worker_names=worker_names,
+            threshold=_overview_consecutive_failure_threshold(),
+        )
+    )
+    _consecutive_failure_worker_ids = {
+        item.worker_id
+        for item in attention_items
+        if item.type == "consecutive_failures" and item.worker_id
+    }
     failure_counts: Dict[str, int] = collections.Counter(row["worker_id"] for row in failure_runs if row.get("worker_id"))
     latest_failure_by_worker: Dict[str, Dict[str, Any]] = {}
     for row in failure_runs:
@@ -7248,6 +17720,8 @@ def system_overview(
         key=lambda item: item[1],
         reverse=True,
     )[:3]:
+        if worker_id in _consecutive_failure_worker_ids:
+            continue
         latest_failure = latest_failure_by_worker.get(worker_id) or {}
         last_failed_at = latest_failure.get("started_at") or latest_failure.get("completed_at") or latest_failure.get("created_at")
         cause = _overview_failure_cause(latest_failure)
@@ -7263,9 +17737,35 @@ def system_overview(
                 recent_failure_count=int(failure_count),
                 last_failed_at=last_failed_at,
                 suggested_actions=["view_logs", "retry", "disable"],
-                action_url=f"/runs?worker={worker_id}&status=failed",
+                action_url=f"/workers/{worker_id}",
             )
         )
+
+    # B-P1-2 (2026-05-29): surface smoke-disabled workers (enabled=False, not
+    # archived) so a freshly-generated broken worker is visible even when it has
+    # NO failed runs (the smoke gate disables it before any real run). Skip any
+    # worker already surfaced above as a failure cluster to avoid duplicates.
+    _already_surfaced = {item.worker_id for item in attention_items if item.worker_id}
+    for worker in workers:
+        wid = worker.get("id")
+        if not wid or wid in _already_surfaced:
+            continue
+        manifest = worker.get("manifest") or {}
+        if manifest.get("archived") is True or worker.get("archived"):
+            continue
+        if worker.get("enabled") is False or manifest.get("enabled") is False:
+            attention_items.append(
+                OverviewAttentionItem(
+                    type="worker_disabled",
+                    kind="paused",
+                    worker_id=wid,
+                    worker_name=worker_names.get(wid, wid),
+                    message="Paused — its first test run failed. Edit or re-generate it, then turn it on.",
+                    error_code="worker_disabled",
+                    suggested_actions=["view_logs", "edit"],
+                    action_url=f"/workers/{wid}",
+                )
+            )
 
     for row in sorted(
         (
@@ -7317,8 +17817,45 @@ def system_overview(
             )
         )
 
-    completed_or_failed_7d = sum(1 for row in _runs_7d_rows if _is_completed(row) or _is_failed(row))
-    success_rate_7d = completed_7d / completed_or_failed_7d if completed_or_failed_7d else None
+    # G5 FIX 3: scope the headline success rate to runs from active, real
+    # workers (see _active_real_worker_ids). This excludes paused, example,
+    # system, and stock-worker runs so the number a partner sees reflects their
+    # live workers, not legacy/test churn. The 24h/7d run COUNTS and sparklines
+    # are intentionally left unscoped (they are activity volume, not quality).
+    _success_scope_rows = [
+        row for row in _runs_7d_rows if row.get("worker_id") in _active_real_worker_ids
+    ]
+    _scoped_completed_7d = sum(1 for row in _success_scope_rows if _is_completed(row))
+    completed_or_failed_7d = sum(
+        1 for row in _success_scope_rows if _is_completed(row) or _is_failed(row)
+    )
+    success_rate_7d = (
+        _scoped_completed_7d / completed_or_failed_7d if completed_or_failed_7d else None
+    )
+
+    # IA-fix 2026-06-02: the FLAGSHIP outcome tiles (work_shipped_7d /
+    # completed_today / failed_today) were computed over ALL runs, so failing
+    # internal listener workers (slack-listener, whatsapp-listener,
+    # ai-news-discord-digest, …) that fail every ~10min on config gaps dragged
+    # the headline "work shipped" metric to a near-total failure read. Those
+    # workers are NOT real user outcomes. Scope the OUTCOME tiles to the same
+    # active-real-worker set already trusted for success_rate_7d (no new
+    # denylist — reuses _active_real_worker_ids, which excludes paused/example/
+    # system/stock/listener workers). The failing listeners are NOT hidden: they
+    # still surface in needs_attention (failure clusters / disabled workers
+    # above), so the operator can see and fix them. runs_today / runs_24h stay
+    # unscoped — those are raw activity volume, not user-outcome quality.
+    _today_real_rows = [
+        row for row in today_rows if row.get("worker_id") in _active_real_worker_ids
+    ]
+    completed_7d = sum(1 for row in _success_scope_rows if _is_completed(row))
+    completed_previous_7d = sum(
+        1
+        for row in previous_7d_rows
+        if _is_completed(row) and row.get("worker_id") in _active_real_worker_ids
+    )
+    completed_today = sum(1 for row in _today_real_rows if _is_completed(row))
+    failed_today = sum(1 for row in _today_real_rows if _is_failed(row))
 
     return OverviewResponse(
         stats=OverviewStats(
@@ -7326,6 +17863,7 @@ def system_overview(
             runs_24h_sparkline=sparkline,
             runs_7d_sparkline=runs_7d_sparkline,
             success_rate_7d=success_rate_7d,
+            success_rate_scope="active_workers",
             active_workers_count=active_workers_count,
             paused_workers_count=paused_workers_count,
             connections_healthy=connections_healthy,
@@ -7348,7 +17886,7 @@ def system_overview(
 
 
 @app.get("/system/platform-config", response_model=PlatformConfig)
-def platform_config():
+def platform_config(auth: AuthContext = Depends(get_auth_context)):
     """Return a redacted platform-config summary.
 
     PR S13: keep this minimal shape stable. The old settings page and the S12
@@ -7367,12 +17905,135 @@ def platform_config():
 
 
 @app.get("/system/info")
-def system_info():
+def system_info(auth: AuthContext = Depends(get_auth_context)):
     return {
         "version": app.version,
         "started_at": _PROCESS_STARTED_AT,
         "python_version": sys.version.split()[0],
         "runner": "e2b",
+    }
+
+
+@app.get("/system/workspace-agent")
+def system_workspace_agent(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Read-only view of the workspace agent that powers /chat.
+
+    GAP #5: operators had no way to see the assistant's system instructions or
+    which management tools it can call. Returns the resolved system prompt
+    (workspace.md + engine SKILL.md + live workspace snapshot) and the tool
+    names + one-line descriptions. Never returns secret values.
+    """
+    from chat_service import workspace_agent_info
+
+    info = workspace_agent_info(auth.user_id)
+    owner_id, visibility, permissions = _assistant_access(
+        user_id=auth.user_id, repos=repos
+    )
+    return {
+        "agent_id": info["agent_id"],
+        "model": info["model"],
+        "system_prompt": info["system_prompt"],
+        "tools": info["tools"],
+        "settings": info.get("settings") or {},
+        "channels": info["channels"],
+        # Members STEP 5: ownership + per-asset visibility + computed permissions.
+        # The assistant is a shared workspace tool — default visibility=workspace.
+        "owner_id": owner_id,
+        "visibility": visibility,
+        "permissions": permissions.model_dump(),
+    }
+
+
+@app.put("/system/workspace-agent/settings")
+def update_workspace_agent_settings(
+    payload: WorkspaceAgentSettingsUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Update per-user workspace-agent capability flags."""
+    from chat_service import set_workspace_agent_settings
+
+    settings = set_workspace_agent_settings(
+        auth.user_id,
+        payload.model_dump(exclude_unset=True),
+    )
+    return {"settings": settings}
+
+
+@app.put("/system/workspace-agent/visibility")
+def set_workspace_agent_visibility(
+    payload: AssistantVisibilityUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Set the workspace assistant's visibility (Private <-> Shared with workspace).
+
+    Owner/admin only (AssetAccessRepository enforces ``can_share`` + the enum).
+    The assistant defaults to ``workspace`` (a shared tool); an owner can make it
+    private. On the OSS single-owner engine the local user owns it, so this always
+    succeeds. Returns the refreshed assistant view.
+    """
+    asset_access = getattr(repos, "asset_access", None)
+    if asset_access is None or not hasattr(asset_access, "set_visibility"):
+        raise HTTPException(status_code=501, detail="Visibility control not available")
+    owner_id = auth.user_id
+    workspace_id = derive_workspace_id(owner_id)
+    aid = assistant_row_id(workspace_id)
+    _ensure_assistant_row(user_id=owner_id, repos=repos)
+    try:
+        result = asset_access.set_visibility(
+            workspace_id=workspace_id,
+            actor_id=owner_id,
+            asset_type="assistant",
+            asset_id=aid,
+            visibility=payload.visibility,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Assistant not found")
+    return system_workspace_agent(auth=auth, repos=repos)
+
+
+@app.get("/system/alerts")
+def system_alerts(auth: AuthContext = Depends(get_auth_context)):
+    """Return open (unresolved) alert incidents.
+
+    Returns a list of {worker_id, incident_key, reason, details, fired_at} for
+    incidents that have not yet been resolved.  Used for diagnostics and the
+    test harness.
+    """
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, worker_id, incident_key, reason, details, fired_at, resolved_at
+                FROM alert_incidents
+                ORDER BY fired_at DESC
+                LIMIT 200
+                """
+            ).fetchall()
+    except Exception:
+        # Table may not exist yet if migrations haven't run (e.g., test env)
+        return {"incidents": []}
+    return {
+        "incidents": [
+            {
+                "id": row["id"],
+                "worker_id": row["worker_id"],
+                "incident_key": row["incident_key"],
+                "reason": row["reason"],
+                "details": row["details"],
+                "fired_at": row["fired_at"],
+                "resolved_at": row["resolved_at"],
+                "open": row["resolved_at"] is None,
+            }
+            for row in rows
+        ]
     }
 
 
@@ -7569,6 +18230,9 @@ def _check_webhook_rate_limit(key: str) -> bool:
 class WebhookSecretResponse(BaseModel):
     worker_id: str
     secret: Optional[str] = None  # Only present on generation/rotation
+    # The CURRENT webhook URL after rotation. Rotating changes the URL token
+    # (it derives from the rotatable secret), so the user must re-register this.
+    webhook_url: Optional[str] = None
 
 
 def _worker_has_webhook_trigger(worker: Dict[str, Any], config: Optional["WorkerConfig"]) -> bool:
@@ -7614,9 +18278,7 @@ async def webhook_trigger(
     if not _check_webhook_rate_limit(rl_key):
         raise HTTPException(status_code=429, detail="Too many webhook requests")
 
-    worker = repos.workers.get_any(worker_id=worker_id)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = repos.workers.get_any(worker_id=worker_id) or get_worker(worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -7632,8 +18294,9 @@ async def webhook_trigger(
 
     # Authentication: token query param takes priority over signature header.
     if token is not None:
-        # Deterministic token auth — reject on mismatch
-        if not verify_webhook_token(worker_id, token):
+        # Deterministic token auth — derived from the worker's CURRENT rotatable
+        # secret, so a rotated/leaked URL stops authorizing. Reject on mismatch.
+        if not verify_webhook_token(worker_id, token, repos=repos):
             raise HTTPException(status_code=401, detail="Invalid webhook token")
     else:
         # Signature verification (only when webhook.secret=true on first trigger)
@@ -7651,6 +18314,31 @@ async def webhook_trigger(
             sig_header = request.headers.get("X-Floom-Signature", "")
             if not verify_signature(body, sig_header, secret_hash):
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    # Resolve the specific webhook trigger row so the run is tagged with WHICH
+    # trigger fired (multi-trigger workers can declare a webhook alongside other
+    # triggers). Falls back to None for legacy DBs without normalized rows.
+    trigger_ref: Optional[str] = None
+    try:
+        trigger_row = repos.workers.find_trigger_for_webhook(worker_id=worker_id)
+        if trigger_row:
+            trigger_ref = trigger_row["id"]
+    except Exception:
+        trigger_ref = None
+
+    # Dedupe by (trigger, delivery_id): a redelivery carrying the same delivery
+    # id fires at most one run. Senders that don't supply a delivery id are not
+    # deduped (delivery_id == "" → always allowed).
+    delivery_id = (
+        request.headers.get("webhook-id")
+        or request.headers.get("X-Delivery-Id")
+        or request.headers.get("X-GitHub-Delivery")
+        or ""
+    )
+    if delivery_id and not _claim_webhook_delivery(
+        f"webhook:{trigger_ref or worker_id}", str(delivery_id)
+    ):
+        return ActionResponse(status="duplicate_ignored")
 
     # Parse body as JSON inputs (or empty dict)
     inputs: Dict[str, Any] = {}
@@ -7670,6 +18358,7 @@ async def webhook_trigger(
         inputs,
         trigger_source="webhook",
         user_id=user_id,
+        trigger_ref=trigger_ref,
         repos=repos,
     )
     start_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
@@ -7686,13 +18375,14 @@ def rotate_webhook_secret(
     """Rotate the webhook HMAC secret for a worker.
 
     Returns the new raw secret exactly once — it is never stored in plaintext.
+    Rotation also changes the webhook URL token (it derives from the rotatable
+    secret), so the new ``webhook_url`` is returned for the user to re-register;
+    the previous URL stops authorizing.
     """
-    from webhook_service import generate_webhook_secret
+    from webhook_service import build_webhook_url, generate_webhook_secret
 
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker and not _is_cloud_deploy():
-        worker = get_worker(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -7704,7 +18394,12 @@ def rotate_webhook_secret(
         )
 
     raw_secret = generate_webhook_secret(worker_id, repos=repos)
-    return WebhookSecretResponse(worker_id=worker_id, secret=raw_secret)
+    new_url: Optional[str] = None
+    try:
+        new_url = build_webhook_url(worker_id, repos=repos)
+    except Exception:
+        logger.warning("Could not build webhook URL after rotation for %s", worker_id, exc_info=True)
+    return WebhookSecretResponse(worker_id=worker_id, secret=raw_secret, webhook_url=new_url)
 
 
 # ---------------------------------------------------------------------------
@@ -7876,6 +18571,1357 @@ def deny_cli_device(
         secret=None,
     )
     return {"ok": True, "client_name": record.get("client_name") or "unknown"}
+
+
+# ---------------------------------------------------------------------------
+# S37 — Workspace agent /chat endpoint + conversation history
+# ---------------------------------------------------------------------------
+
+
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: str
+    conversation_id: Optional[str] = None
+    source: Literal["web", "slack", "mcp", "whatsapp"] = "web"
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: Optional[str] = None
+    created_at: str
+    updated_at: str
+    message_count: int
+
+
+class ConversationDetail(BaseModel):
+    id: str
+    title: Optional[str] = None
+    created_at: str
+    updated_at: str
+    messages: List[Dict[str, Any]]
+
+
+@app.get("/workspace")
+async def get_workspace(auth: AuthContext = Depends(get_auth_context)) -> PlainTextResponse:
+    """Return the current workspace.md content."""
+    from chat_service import get_workspace_md
+    return PlainTextResponse(get_workspace_md(), media_type="text/markdown")
+
+
+@app.get("/workspace/base")
+async def get_workspace_base_persona(auth: AuthContext = Depends(get_auth_context)) -> PlainTextResponse:
+    """Return the resolved editable base persona.
+
+    If no override has been saved, this returns the built-in Emily base persona.
+    Workspace custom instructions remain on /workspace.
+    """
+    from chat_service import get_workspace_base_persona
+
+    return PlainTextResponse(get_workspace_base_persona(), media_type="text/markdown")
+
+
+@app.get("/workspace/base/state")
+async def get_workspace_base_persona_state(
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Return the resolved base persona plus whether it is a custom override.
+
+    ``content`` is what currently applies to every conversation. ``is_custom``
+    is True when an override has been saved; False means the built-in engine
+    default is in effect. ``default`` is the built-in default, used by the UI to
+    preview what a reset would restore.
+    """
+    from chat_service import (
+        EMILY_BASE_PERSONA,
+        base_persona_is_custom,
+        get_workspace_base_persona,
+    )
+
+    return {
+        "content": get_workspace_base_persona(),
+        "is_custom": base_persona_is_custom(),
+        "default": EMILY_BASE_PERSONA,
+    }
+
+
+@app.delete("/workspace/base", status_code=204)
+async def reset_workspace_base_persona(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Remove the base-persona override, restoring the built-in engine default.
+
+    Snapshots the built-in default so the reset itself is in version history.
+    """
+    from chat_service import (
+        base_persona_is_custom,
+        clear_workspace_base_persona,
+        get_workspace_base_persona,
+    )
+
+    was_custom = base_persona_is_custom()
+    clear_workspace_base_persona()
+    if was_custom:
+        _snapshot_workspace_base_persona(
+            user_id=auth.user_id,
+            repos=repos,
+            asset_id=_workspace_base_persona_asset_id(request),
+            content=get_workspace_base_persona(),
+            change_source="reset-to-default",
+        )
+    return Response(status_code=204)
+
+
+@app.get("/workspace/base/versions", response_model=List[VersionSummary])
+def list_workspace_base_persona_versions(
+    request: Request,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions of the editable base persona (newest first)."""
+    asset_id = _workspace_base_persona_asset_id(request)
+    rows = repos.versions.list(
+        asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE,
+        asset_id=asset_id,
+        limit=min(limit, 100),
+    )
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.get("/workspace/base/versions/{version_id}")
+def get_workspace_base_persona_version(
+    version_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the content snapshot for a base-persona version."""
+    import json as _json
+
+    asset_id = _workspace_base_persona_asset_id(request)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != _WORKSPACE_BASE_PERSONA_ASSET_TYPE
+        or version.get("asset_id") != asset_id
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"content": snapshot.get("content") or ""}
+
+
+@app.post("/workspace/base/rollback/{version_id}")
+async def rollback_workspace_base_persona(
+    version_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> PlainTextResponse:
+    """Restore workspace.base.md to a previous version snapshot."""
+    import json as _json
+
+    from chat_service import set_workspace_base_persona
+
+    asset_id = _workspace_base_persona_asset_id(request)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != _WORKSPACE_BASE_PERSONA_ASSET_TYPE
+        or version.get("asset_id") != asset_id
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    content = snapshot.get("content")
+    if content is None or not str(content).strip():
+        raise HTTPException(status_code=422, detail="Version snapshot contains no content")
+
+    set_workspace_base_persona(str(content))
+    _snapshot_workspace_base_persona(
+        user_id=auth.user_id,
+        repos=repos,
+        asset_id=asset_id,
+        content=str(content),
+        change_source=f"rollback:{version_id}",
+    )
+    return PlainTextResponse(str(content), media_type="text/markdown")
+
+
+@app.put("/workspace/base", status_code=204)
+async def put_workspace_base_persona(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Update workspace.base.md, the editable base persona override.
+
+    Accepts raw markdown or the same ``{"content": "..."}`` JSON envelope as
+    /workspace. This file is layered before workspace custom instructions and
+    the workspace-agent SKILL.md.
+    """
+    from chat_service import set_workspace_base_persona, unwrap_workspace_body
+
+    body = await request.body()
+    content = unwrap_workspace_body(body.decode("utf-8", errors="replace"))
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="workspace base persona cannot be empty")
+    set_workspace_base_persona(content)
+    change_source = "ai" if request.headers.get("x-workeros-run-token") else "user"
+    _snapshot_workspace_base_persona(
+        user_id=auth.user_id,
+        repos=repos,
+        asset_id=_workspace_base_persona_asset_id(request),
+        content=content,
+        change_source=change_source,
+    )
+    return Response(status_code=204)
+
+
+@app.get("/workspace/versions", response_model=List[VersionSummary])
+def list_workspace_versions(
+    request: Request,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[VersionSummary]:
+    """List saved versions of workspace instructions (newest first)."""
+    asset_id = _workspace_instructions_asset_id(request)
+    rows = repos.versions.list(
+        asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE,
+        asset_id=asset_id,
+        limit=min(limit, 100),
+    )
+    return [VersionSummary(**r) for r in rows]
+
+
+@app.get("/workspace/versions/{version_id}")
+def get_workspace_version(
+    version_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the content snapshot for a specific workspace instructions version."""
+    import json as _json
+
+    asset_id = _workspace_instructions_asset_id(request)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != _WORKSPACE_INSTRUCTIONS_ASSET_TYPE
+        or version.get("asset_id") != asset_id
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+    snapshot = _json.loads(version["snapshot_json"])
+    return {"content": snapshot.get("content") or ""}
+
+
+@app.post("/workspace/rollback/{version_id}")
+async def rollback_workspace_instructions(
+    version_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> PlainTextResponse:
+    """Restore workspace.md to a previous version snapshot."""
+    import json as _json
+
+    from chat_service import set_workspace_md
+
+    asset_id = _workspace_instructions_asset_id(request)
+    version = repos.versions.get(version_id=version_id)
+    if (
+        not version
+        or version.get("asset_type") != _WORKSPACE_INSTRUCTIONS_ASSET_TYPE
+        or version.get("asset_id") != asset_id
+    ):
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    snapshot = _json.loads(version["snapshot_json"])
+    content = snapshot.get("content")
+    if content is None or not str(content).strip():
+        raise HTTPException(status_code=422, detail="Version snapshot contains no content")
+
+    set_workspace_md(str(content))
+    _snapshot_workspace_instructions(
+        user_id=auth.user_id,
+        repos=repos,
+        asset_id=asset_id,
+        content=str(content),
+        change_source=f"rollback:{version_id}",
+    )
+    return PlainTextResponse(str(content), media_type="text/markdown")
+
+
+@app.put("/workspace", status_code=204)
+async def put_workspace(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """Update workspace.md (replaces entire content).
+
+    Accepts BOTH a raw ``text/markdown`` body (the OSS contract) AND a JSON
+    ``{"content": "..."}`` envelope (sent by the Cloud wrapper / some clients).
+    The envelope is unwrapped to its inner markdown so a JSON PUT can no longer
+    corrupt the stored instructions (N3-1).
+    """
+    from chat_service import set_workspace_md, unwrap_workspace_body
+
+    body = await request.body()
+    content = unwrap_workspace_body(body.decode("utf-8", errors="replace"))
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="workspace.md content cannot be empty")
+    set_workspace_md(content)
+    change_source = "ai" if request.headers.get("x-workeros-run-token") else "user"
+    _snapshot_workspace_instructions(
+        user_id=auth.user_id,
+        repos=repos,
+        asset_id=_workspace_instructions_asset_id(request),
+        content=content,
+        change_source=change_source,
+    )
+    return Response(status_code=204)
+
+
+@app.post("/chat")
+async def post_chat(
+    payload: ChatRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> StreamingResponse:
+    """Stream a workspace agent response as Server-Sent Events.
+
+    Each SSE event is a JSON-encoded AI SDK part:
+      {"type": "text", "text": "..."}
+      {"type": "tool-call", "toolName": "...", "args": {...}, "callId": "..."}
+      {"type": "tool-result", "callId": "...", "result": {...}}
+      {"type": "finish", "conversation_id": "...", "message_id": "..."}
+    """
+    import asyncio
+    from chat_service import stream_chat
+
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+    max_chars = _chat_message_max_chars()
+    if len(message) > max_chars:
+        raise HTTPException(
+            status_code=413,
+            detail=f"message exceeds {max_chars} character limit",
+        )
+    # /chat calls OpenAI per request; enforce a per-user quota so a single
+    # caller cannot run up an unbounded LLM bill (the shared IP limiter is too
+    # loose for a paid-LLM path).
+    _enforce_chat_quota(auth)
+
+    part_queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
+    loop = asyncio.get_running_loop()
+
+    async def _run_in_thread():
+        """Execute the agent in a thread (agent driver is sync-bridged)."""
+        try:
+            await stream_chat(
+                message=message,
+                user_id=auth.user_id,
+                conversation_id=payload.conversation_id,
+                part_queue=part_queue,
+                source=payload.source,
+            )
+        except Exception as exc:
+            logger.exception("chat background task failed")
+            try:
+                await part_queue.put({"type": "error", "error": str(exc)})
+                await part_queue.put({"type": "finish", "conversation_id": None, "message_id": None})
+            except Exception:
+                pass
+
+    task = loop.create_task(_run_in_thread())
+
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                task.cancel()
+                break
+            try:
+                part = await asyncio.wait_for(part_queue.get(), timeout=5.0)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            yield f"data: {json.dumps(part, default=str)}\n\n"
+            if part.get("type") == "finish":
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/conversations", response_model=List[ConversationSummary])
+async def list_conversations(
+    auth: AuthContext = Depends(get_auth_context),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> List[Dict[str, Any]]:
+    """List conversations for the authenticated user."""
+    from chat_service import list_conversations as _list
+    return _list(auth.user_id, limit=limit)
+
+
+@app.get("/conversations/{conversation_id}")
+async def get_conversation_detail(
+    conversation_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Get a conversation with its messages."""
+    from chat_service import get_conversation, list_conversation_messages, list_conversation_tool_cards
+    conv = get_conversation(conversation_id, auth.user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    messages = list_conversation_messages(conversation_id, auth.user_id)
+    tool_cards = list_conversation_tool_cards(conversation_id, auth.user_id)
+    return {**conv, "messages": messages, "tool_cards": tool_cards}
+
+
+# ---------------------------------------------------------------------------
+# MCP tool CRUD endpoints
+# ---------------------------------------------------------------------------
+
+def _mcp_input_schema_from_worker_record(worker: Dict[str, Any]) -> Dict[str, Any]:
+    config = worker.get("config") or {}
+    inputs = config.get("inputs") if isinstance(config, dict) else []
+    if not isinstance(inputs, list):
+        return {"type": "object", "properties": {}}
+    properties: Dict[str, Any] = {}
+    required: List[str] = []
+    type_map = {
+        "string": "string",
+        "text": "string",
+        "markdown": "string",
+        "number": "number",
+        "integer": "integer",
+        "boolean": "boolean",
+        "bool": "boolean",
+        "object": "object",
+        "json": "object",
+        "array": "array",
+    }
+    for item in inputs:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        raw_type = str(item.get("type") or item.get("kind") or "string").lower()
+        prop: Dict[str, Any] = {"type": type_map.get(raw_type, "string")}
+        if item.get("description"):
+            prop["description"] = str(item["description"])
+        if isinstance(item.get("options"), list):
+            prop["enum"] = [str(option) for option in item["options"]]
+        properties[name] = prop
+        if item.get("required"):
+            required.append(name)
+    schema: Dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+    return schema
+
+
+@app.get("/mcp-tools", response_model=List[McpToolItem])
+@app.get("/mcp/tools", response_model=List[McpToolItem])
+def list_mcp_tools(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[McpToolItem]:
+    return repos.mcp_tools.list(user_id=auth.user_id)
+
+
+@app.post("/mcp-tools", response_model=McpToolItem)
+@app.post("/mcp/tools", response_model=McpToolItem)
+def create_mcp_tool(
+    payload: McpToolCreate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> McpToolItem:
+    worker = repos.workers.get(user_id=auth.user_id, worker_id=payload.worker_id)
+    if not worker:
+        all_workers = repos.workers.list(user_id=auth.user_id)
+        worker = next((w for w in all_workers if w["name"] == payload.worker_id), None)
+    if not worker:
+        raise HTTPException(status_code=404, detail=f"Worker {payload.worker_id!r} not found")
+
+    if repos.mcp_tools.get_by_name(user_id=auth.user_id, name=payload.name):
+        raise HTTPException(status_code=409, detail=f"A tool named {payload.name!r} already exists")
+
+    input_schema = payload.input_schema
+    if not input_schema:
+        input_schema = _mcp_input_schema_from_worker_record(worker)
+
+    return repos.mcp_tools.create(
+        user_id=auth.user_id,
+        name=payload.name,
+        description=payload.description,
+        input_schema=input_schema,
+        worker_id=worker["id"],
+    )
+
+
+@app.put("/mcp-tools/{tool_id}", response_model=McpToolItem)
+@app.put("/mcp/tools/{tool_id}", response_model=McpToolItem)
+def update_mcp_tool(
+    tool_id: str,
+    payload: McpToolUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> McpToolItem:
+    if not repos.mcp_tools.get(user_id=auth.user_id, tool_id=tool_id):
+        raise HTTPException(status_code=404, detail="MCP tool not found")
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    updated = repos.mcp_tools.update(user_id=auth.user_id, tool_id=tool_id, **updates)
+    return updated
+
+
+@app.delete("/mcp-tools/{tool_id}", response_model=ActionResponse)
+@app.delete("/mcp/tools/{tool_id}", response_model=ActionResponse)
+def delete_mcp_tool(
+    tool_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    if not repos.mcp_tools.get(user_id=auth.user_id, tool_id=tool_id):
+        raise HTTPException(status_code=404, detail="MCP tool not found")
+    repos.mcp_tools.delete(user_id=auth.user_id, tool_id=tool_id)
+    return ActionResponse(status="deleted")
+
+
+# ---------------------------------------------------------------------------
+# HTTP MCP server — JSON-RPC 2.0 over streamable HTTP
+# Exposes default WorkerOS management tools + custom workspace tools.
+# OSS:   POST /mcp-tools/serve   (x-floom-secret auth)
+# Cloud: POST /mcp/{workspace_id} (PAT Bearer auth, added in workeros-cloud)
+# All default tools proxy to the existing REST API via httpx ASGITransport
+# (in-process, no network round-trip).  Custom tools trigger a worker run.
+# ---------------------------------------------------------------------------
+
+def _enc(s: str) -> str:
+    from urllib.parse import quote
+    return quote(str(s), safe="")
+
+
+async def _api_call(
+    method: str,
+    path: str,
+    request: Request,
+    *,
+    body: Any = None,
+    params: dict | None = None,
+) -> tuple[Any, int]:
+    import httpx
+    _AUTH_HEADERS = {"x-floom-secret", "x-floom-token", "authorization", "cookie", "x-workeros-workspace"}
+    auth_headers = {k: v for k, v in request.headers.items() if k.lower() in _AUTH_HEADERS}
+    clean_params = {k: str(v) for k, v in (params or {}).items() if v is not None}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://asgi",
+    ) as client:
+        resp = await client.request(method, path, headers=auth_headers, json=body, params=clean_params)
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"detail": resp.text}
+    return data, resp.status_code
+
+
+_MCP_DEFAULT_TOOLS: List[dict] = [
+    # --- workers ---
+    {"name": "workers.list", "description": "List Workeros workers.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workers.get", "description": "Get a Workeros worker by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
+    {"name": "workers.create", "description": "Create a Workeros worker from WorkerContract YAML. For script-mode workers supply run_py. For agent/skill-mode workers supply skill_md and a minimal run_py stub.", "inputSchema": {"type": "object", "properties": {"worker_yml": {"type": "string", "description": "WorkerContract YAML content."}, "run_py": {"type": "string", "description": "Python source for run.py."}, "skill_md": {"type": "string", "description": "Agent system prompt (SKILL.md) for skill-mode workers. Omit for script-mode."}}, "required": ["worker_yml", "run_py"]}},
+    {"name": "workers.update", "description": "Update worker instance settings such as trigger, cron, input defaults, and documented capabilities.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "trigger_type": {"type": "string"}, "cron_expr": {"type": "string"}, "cron_timezone": {"type": "string"}, "input_values": {"type": "object"}, "capabilities": {"type": "object"}, "webhook_secret_rotate": {"type": "boolean"}}, "required": ["id"]}},
+    {"name": "workers.delete", "description": "Delete a Workeros worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}}, "required": ["id"]}},
+    {"name": "workers.run", "description": "Start a manual Workeros worker run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "inputs": {"type": "object", "default": {}, "description": "Input values for this run."}, "trigger_source": {"type": "string", "default": "manual"}}, "required": ["id"]}},
+    {"name": "workers.write_file", "description": "Write or update source files inside a worker directory (worker.yml, SKILL.md, run.py, requirements.txt). Must include worker.yml.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "description": "Worker ID."}, "files": {"type": "array", "items": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]}, "description": "Files to write. Must include worker.yml."}}, "required": ["id", "files"]}},
+    {"name": "workers.logs", "description": "Fetch cross-run logs for a worker, optionally filtered by level or time.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "level": {"type": "string", "enum": ["info", "warning", "error", "debug"]}, "since": {"type": "string", "description": "ISO 8601 timestamp."}, "limit": {"type": "integer", "default": 200}}, "required": ["id"]}},
+    {"name": "workers.stats", "description": "Get run statistics for a specific worker — success rate, error rate, average duration for the last 7 days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.timeseries", "description": "Get daily run counts and success/failure breakdown for a worker over the last N days.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "days": {"type": "integer", "default": 30, "description": "Days of history (1–90)."}}, "required": ["id"]}},
+    {"name": "workers.versions", "description": "List saved versions of a worker, newest first.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["id"]}},
+    {"name": "workers.rollback", "description": "Restore a worker to a previous version. Use workers.versions to find the version_id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "version_id": {"type": "string"}}, "required": ["id", "version_id"]}},
+    {"name": "workers.archive", "description": "Archive a worker so it no longer appears in the active list or runs on schedule.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.restore", "description": "Restore an archived worker back to active status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.reload", "description": "Reload all workers from disk. Use after manually editing worker files on an OSS self-hosted deployment.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workers.sample_input", "description": "Get example input values for a worker's input fields.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.alerts.list", "description": "List configured alerts for a worker (email/webhook on failure, success, etc.).", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "workers.alerts.create", "description": "Add an alert to a worker — fires on specified events via webhook or email.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "on": {"type": "array", "items": {"type": "string"}, "description": "Events to alert on, e.g. ['failed', 'approval_required']."}, "url": {"type": "string"}, "email_to": {"type": "array", "items": {"type": "string"}}}, "required": ["id", "on"]}},
+    {"name": "workers.alerts.delete", "description": "Remove a worker alert by its ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "alert_id": {"type": "string"}}, "required": ["id", "alert_id"]}},
+    # --- runs ---
+    {"name": "runs.list", "description": "List Workeros runs, optionally filtered by worker id.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "status": {"type": "string"}, "limit": {"type": "integer", "default": 50}, "offset": {"type": "integer", "default": 0}}}},
+    {"name": "runs.get", "description": "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "runs.cancel", "description": "Cancel an in-progress run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "runs.replay", "description": "Replay a completed or failed run with the same inputs.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "run_id": {"type": "string"}}, "required": ["worker_id", "run_id"]}},
+    {"name": "runs.watch", "description": "Poll a run until it reaches a terminal status. Blocks up to timeout_ms.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["id"]}},
+    # --- secrets ---
+    {"name": "secrets.list", "description": "List configured secret names and status.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "secrets.set", "description": "Create or update a secret value.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}},
+    {"name": "secrets.delete", "description": "Delete a secret by key.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}},
+    {"name": "secrets.test", "description": "Verify a secret exists and is reachable without revealing its value.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}}, "required": ["key"]}},
+    # --- connections ---
+    {"name": "connections.list", "description": "List configured app connections.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "connections.add_mcp", "description": "Save an MCP server connection. Supports streamable_http, sse, and stdio transports.", "inputSchema": {"type": "object", "properties": {"label": {"type": "string"}, "transport": {"type": "string", "enum": ["streamable_http", "sse", "stdio"], "default": "streamable_http"}, "url": {"type": "string"}, "command": {"type": "string"}, "args": {"type": "array", "items": {"type": "string"}, "default": []}, "env": {"type": "object", "default": {}}, "cwd": {"type": "string"}, "auth_secret": {"type": "string"}, "allowed_tools": {"type": "array", "items": {"type": "string"}, "default": []}}, "required": ["label"]}},
+    {"name": "connections.delete", "description": "Remove a configured app connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
+    {"name": "connections.status", "description": "Check the health and auth status of a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
+    {"name": "connections.test", "description": "Run a live connectivity check on a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
+    # --- contexts ---
+    {"name": "contexts.list", "description": "List Workeros context folders.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}}, "required": ["name"]}},
+    {"name": "contexts.read", "description": "Read a UTF-8 context file, or return metadata for binary files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
+    {"name": "contexts.write", "description": "Create or update a UTF-8 text file inside a context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["name", "path", "content"]}},
+    {"name": "contexts.delete", "description": "Delete a brain pack context and all its files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
+    {"name": "contexts.delete_file", "description": "Delete a specific file from a brain pack context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
+    {"name": "contexts.versions", "description": "List saved versions of a brain pack context, newest first.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["name"]}},
+    {"name": "contexts.rollback", "description": "Restore a brain pack context to a previous version.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "version_id": {"type": "string"}}, "required": ["name", "version_id"]}},
+    # --- triggers ---
+    {"name": "triggers.list", "description": "List integration triggers, globally or filtered by worker/app.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "app": {"type": "string"}}}},
+    # --- approvals ---
+    {"name": "approvals.list", "description": "List pending approval requests.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}},
+    {"name": "approvals.approve", "description": "Approve a pending run so it continues executing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
+    {"name": "approvals.reject", "description": "Reject a pending run, stopping it from continuing.", "inputSchema": {"type": "object", "properties": {"run_id": {"type": "string"}, "comment": {"type": "string"}}, "required": ["run_id"]}},
+    # --- workspace ---
+    {"name": "workspace.chat", "description": "Send a message to the Workeros workspace agent and receive a reply.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}, "conversation_id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["message"]}},
+    {"name": "workspace.instructions.get", "description": "Read the current workspace agent instructions.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "workspace.instructions.set", "description": "Update the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
+    {"name": "workspace.versions", "description": "List saved versions of the workspace agent instructions.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}}},
+    {"name": "workspace.rollback", "description": "Restore workspace agent instructions to a previous version.", "inputSchema": {"type": "object", "properties": {"version_id": {"type": "string"}}, "required": ["version_id"]}},
+    # --- system ---
+    {"name": "system.overview", "description": "Full workspace dashboard — worker health, recent run counts, pending approvals, system alerts, and scheduler status.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "system.stats", "description": "Aggregate run statistics across the workspace for the last 7 days.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "system.info", "description": "Get platform version, deployment mode, and configuration flags.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "system.alerts", "description": "Get system-wide active alerts — worker failures, scheduler issues, connection errors.", "inputSchema": {"type": "object", "properties": {}}},
+    # --- integrations ---
+    {"name": "integrations.catalog", "description": "Browse available integrations (apps, triggers, actions) supported by Workeros.", "inputSchema": {"type": "object", "properties": {}}},
+    # --- conversations ---
+    {"name": "conversations.list", "description": "List past workspace agent conversations.", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 20}}}},
+    {"name": "conversations.get", "description": "Retrieve a full conversation history by ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    # --- custom tools management ---
+    {"name": "tools_list", "description": "List custom MCP tools registered for this workspace.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "tools_register", "description": "Register a custom MCP tool backed by a worker. Once registered the tool appears in tools/list and can be called directly by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Tool name agents will use."}, "description": {"type": "string"}, "worker_id": {"type": "string", "description": "Worker ID or name."}, "input_schema": {"type": "object", "description": "JSON Schema for inputs (optional — defaults to worker schema)."}}, "required": ["name", "description", "worker_id"]}},
+    {"name": "tools_delete", "description": "Delete a custom MCP tool by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "tools_update", "description": "Update an existing custom MCP tool. Only the fields you provide are changed.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Name of the tool to update."}, "description": {"type": "string", "description": "New description."}, "worker_id": {"type": "string", "description": "New worker ID or name to back this tool."}, "input_schema": {"type": "object", "description": "New JSON Schema for inputs."}}, "required": ["name"]}},
+]
+
+
+def _mcp_ok(rpc_id: Any, result: Any) -> dict:
+    return {"jsonrpc": "2.0", "id": rpc_id, "result": result}
+
+
+def _mcp_err(rpc_id: Any, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": code, "message": message}}
+
+
+def _mcp_content(text: str, is_error: bool = False) -> dict:
+    return {"content": [{"type": "text", "text": text}], "isError": is_error}
+
+
+async def _mcp_dispatch(
+    name: str,
+    arguments: dict,
+    auth: AuthContext,
+    repos: "Repositories",
+    request: Request,
+) -> dict:
+    import asyncio
+    import time as _time
+
+    a = arguments  # shorthand
+
+    # --- workers ---
+    if name == "workers.list":
+        data, s = await _api_call("GET", "/workers", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.get":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.create":
+        body = {k: a[k] for k in ("worker_yml", "run_py") if k in a}
+        if "skill_md" in a: body["skill_md"] = a["skill_md"]
+        data, s = await _api_call("POST", "/workers", request, body=body)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.update":
+        body = {k: a[k] for k in a if k != "id"}
+        data, s = await _api_call("PATCH", f"/workers/{_enc(a['id'])}", request, body=body)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.delete":
+        data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.run":
+        body = {"inputs": a.get("inputs") or {}, "trigger_source": a.get("trigger_source", "manual")}
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/runs", request, body=body)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.write_file":
+        data, s = await _api_call("PUT", f"/workers/{_enc(a['id'])}/files", request, body={"files": a["files"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.logs":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/logs", request, params={"level": a.get("level"), "since": a.get("since"), "limit": a.get("limit", 200)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.stats":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/stats", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.timeseries":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/runs/timeseries", request, params={"days": a.get("days", 30)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.versions":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/versions", request, params={"limit": a.get("limit", 50)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.rollback":
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/rollback/{_enc(a['version_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.archive":
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/archive", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.restore":
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/restore", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.reload":
+        data, s = await _api_call("POST", "/workers/reload", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.sample_input":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/sample-input", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.alerts.list":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/alerts", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.alerts.create":
+        body = {k: a[k] for k in a if k != "id"}
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/alerts", request, body=body)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.alerts.delete":
+        data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}/alerts/{_enc(a['alert_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- runs ---
+    if name == "runs.list":
+        data, s = await _api_call("GET", "/runs", request, params={"worker_id": a.get("worker_id"), "status": a.get("status"), "limit": a.get("limit", 50), "offset": a.get("offset", 0)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "runs.get":
+        data, s = await _api_call("GET", f"/runs/{_enc(a['id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "runs.cancel":
+        data, s = await _api_call("POST", f"/runs/{_enc(a['id'])}/cancel", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "runs.replay":
+        data, s = await _api_call("POST", f"/workers/{_enc(a['worker_id'])}/runs/{_enc(a['run_id'])}/replay", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "runs.watch":
+        run_id = a["id"]
+        timeout = min(int(a.get("timeout_ms", 120000)), 600000) / 1000
+        deadline = _time.monotonic() + timeout
+        run = None
+        while _time.monotonic() < deadline:
+            await asyncio.sleep(1.5)
+            run_data, s = await _api_call("GET", f"/runs/{_enc(run_id)}", request)
+            if s >= 400:
+                return _mcp_content(json.dumps(run_data, indent=2, default=str), True)
+            if run_data.get("status") in ("completed", "failed", "cancelled"):
+                return _mcp_content(json.dumps(run_data, indent=2, default=str), run_data.get("status") == "failed")
+        return _mcp_content(f"Run {run_id!r} did not complete within {timeout:.0f}s", is_error=True)
+
+    # --- secrets ---
+    if name == "secrets.list":
+        data, s = await _api_call("GET", "/secrets", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "secrets.set":
+        data, s = await _api_call("POST", f"/secrets/{_enc(a['key'])}", request, body={"value": a["value"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "secrets.delete":
+        data, s = await _api_call("DELETE", f"/secrets/{_enc(a['key'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "secrets.test":
+        data, s = await _api_call("POST", f"/secrets/{_enc(a['key'])}/test", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- connections ---
+    if name == "connections.list":
+        data, s = await _api_call("GET", "/connections", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "connections.add_mcp":
+        data, s = await _api_call("POST", "/connections/mcp", request, body=a)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "connections.delete":
+        data, s = await _api_call("DELETE", f"/connections/{_enc(a['connection_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "connections.status":
+        data, s = await _api_call("GET", f"/connections/{_enc(a['connection_id'])}/status", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "connections.test":
+        data, s = await _api_call("POST", f"/connections/{_enc(a['connection_id'])}/test", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- contexts ---
+    if name == "contexts.list":
+        data, s = await _api_call("GET", "/contexts", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.create":
+        data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}", request, body={"writeable": a.get("writeable", False)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.read":
+        encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
+        data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.write":
+        encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
+        data, s = await _api_call("PUT", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request, body={"content": a["content"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.delete":
+        qs = "?force=true" if a.get("force") else ""
+        data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}{qs}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.delete_file":
+        encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
+        data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.versions":
+        data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/versions", request, params={"limit": a.get("limit", 50)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "contexts.rollback":
+        data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}/rollback/{_enc(a['version_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- triggers ---
+    if name == "triggers.list":
+        data, s = await _api_call("GET", "/triggers", request, params={"worker_id": a.get("worker_id"), "app": a.get("app")})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- approvals ---
+    if name == "approvals.list":
+        data, s = await _api_call("GET", "/approvals", request, params={"limit": a.get("limit", 50)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "approvals.approve":
+        data, s = await _api_call("POST", f"/runs/{_enc(a['run_id'])}/approve", request, body={"comment": a.get("comment")})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "approvals.reject":
+        data, s = await _api_call("POST", f"/runs/{_enc(a['run_id'])}/reject", request, body={"comment": a.get("comment")})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- workspace ---
+    if name == "workspace.chat":
+        data, s = await _api_call("POST", "/chat", request, body={"message": a["message"], "conversation_id": a.get("conversation_id")})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workspace.instructions.get":
+        data, s = await _api_call("GET", "/workspace", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workspace.instructions.set":
+        data, s = await _api_call("PUT", "/workspace", request, body={"content": a["content"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workspace.versions":
+        data, s = await _api_call("GET", "/workspace/versions", request, params={"limit": a.get("limit", 20)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workspace.rollback":
+        data, s = await _api_call("POST", f"/workspace/rollback/{_enc(a['version_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- system ---
+    if name == "system.overview":
+        data, s = await _api_call("GET", "/system/overview", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "system.stats":
+        data, s = await _api_call("GET", "/stats", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "system.info":
+        data, s = await _api_call("GET", "/system/info", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "system.alerts":
+        data, s = await _api_call("GET", "/system/alerts", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- integrations ---
+    if name == "integrations.catalog":
+        data, s = await _api_call("GET", "/integrations/catalog", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- conversations ---
+    if name == "conversations.list":
+        data, s = await _api_call("GET", "/conversations", request, params={"limit": a.get("limit", 20)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "conversations.get":
+        data, s = await _api_call("GET", f"/conversations/{_enc(a['id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+
+    # --- custom tools management ---
+    if name == "tools_list":
+        tools = repos.mcp_tools.list(user_id=auth.user_id)
+        return _mcp_content(json.dumps(tools, indent=2, default=str))
+
+    if name == "tools_register":
+        tool_name = a.get("name", "")
+        description = a.get("description", "")
+        worker_ref = a.get("worker_id", "")
+        input_schema = a.get("input_schema") or {}
+        if not all([tool_name, description, worker_ref]):
+            return _mcp_content("name, description, and worker_id are required", is_error=True)
+        worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_ref)
+        if not worker:
+            workers = repos.workers.list(user_id=auth.user_id)
+            worker = next((w for w in workers if w["name"] == worker_ref), None)
+        if not worker:
+            return _mcp_content(f"Worker {worker_ref!r} not found", is_error=True)
+        if repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name):
+            return _mcp_content(f"Tool {tool_name!r} already exists — use tools_delete first to replace it", is_error=True)
+        if not input_schema:
+            input_schema = _mcp_input_schema_from_worker_record(worker)
+        tool = repos.mcp_tools.create(
+            user_id=auth.user_id,
+            name=tool_name,
+            description=description,
+            input_schema=input_schema,
+            worker_id=worker["id"],
+        )
+        return _mcp_content(json.dumps(tool, indent=2, default=str))
+
+    if name == "tools_delete":
+        tool_name = a.get("name", "")
+        tool = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name)
+        if not tool:
+            return _mcp_content(f"Tool {tool_name!r} not found", is_error=True)
+        repos.mcp_tools.delete(user_id=auth.user_id, tool_id=tool["id"])
+        return _mcp_content(f"Tool {tool_name!r} deleted")
+
+    if name == "tools_update":
+        tool_name = a.get("name", "")
+        tool = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=tool_name)
+        if not tool:
+            return _mcp_content(f"Tool {tool_name!r} not found", is_error=True)
+        updates: dict = {}
+        if a.get("description"):
+            updates["description"] = a["description"]
+        if a.get("input_schema"):
+            updates["input_schema"] = a["input_schema"]
+        if a.get("worker_id"):
+            worker_ref = a["worker_id"]
+            worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_ref)
+            if not worker:
+                workers = repos.workers.list(user_id=auth.user_id)
+                worker = next((w for w in workers if w["name"] == worker_ref), None)
+            if not worker:
+                return _mcp_content(f"Worker {worker_ref!r} not found", is_error=True)
+            updates["worker_id"] = worker["id"]
+        updated = repos.mcp_tools.update(user_id=auth.user_id, tool_id=tool["id"], **updates)
+        return _mcp_content(json.dumps(updated, indent=2, default=str))
+
+    # --- custom workspace tools — trigger backing worker, wait, return output ---
+    custom = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=name)
+    if custom:
+        worker_id = custom["worker_id"]
+        run_id = create_run(worker_id, a, "mcp", user_id=auth.user_id, repos=repos)
+        start_run(run_id, worker_id, a, user_id=auth.user_id, repos=repos)
+        deadline = _time.monotonic() + 120
+        run = None
+        while _time.monotonic() < deadline:
+            await asyncio.sleep(1.0)
+            run = repos.runs.get(user_id=auth.user_id, run_id=run_id)
+            if run and run["status"] in ("completed", "failed"):
+                break
+        if not run or run["status"] not in ("completed", "failed"):
+            return _mcp_content(f"Tool timed out after 120s (run_id={run_id})", is_error=True)
+        if run["status"] == "failed":
+            return _mcp_content(run.get("error") or "Worker run failed", is_error=True)
+        output = run.get("output_json") or run.get("output") or {}
+        return _mcp_content(json.dumps(output, indent=2, default=str))
+
+    return _mcp_content(f"Unknown tool: {name!r}", is_error=True)
+
+
+async def _mcp_handle_request(
+    body: dict,
+    auth: AuthContext,
+    repos: "Repositories",
+    request: Request | None = None,
+) -> dict:
+    """Core MCP JSON-RPC 2.0 dispatcher. Called by /mcp-tools/serve and by the cloud /mcp/{workspace_id}."""
+    rpc_id = body.get("id")
+    method = body.get("method", "")
+    params = body.get("params") or {}
+
+    if method == "initialize":
+        return _mcp_ok(rpc_id, {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "workeros", "version": "1.0.0"},
+        })
+
+    if method == "tools/list":
+        custom = repos.mcp_tools.list(user_id=auth.user_id)
+        tools = list(_MCP_DEFAULT_TOOLS) + [
+            {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
+            for t in custom
+        ]
+        return _mcp_ok(rpc_id, {"tools": tools})
+
+    if method == "tools/call":
+        if request is None:
+            return _mcp_err(rpc_id, -32603, "Internal error: request context unavailable")
+        result = await _mcp_dispatch(
+            params.get("name", ""),
+            params.get("arguments") or {},
+            auth,
+            repos,
+            request,
+        )
+        return _mcp_ok(rpc_id, result)
+
+    return _mcp_err(rpc_id, -32601, f"Method not found: {method!r}")
+
+
+@app.post("/mcp-tools/serve")
+async def mcp_http_endpoint(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(_mcp_err(None, -32700, "Parse error"), status_code=400)
+    return JSONResponse(await _mcp_handle_request(body, auth, repos, request))
+
+
+# ---------------------------------------------------------------------------
+# Multi-member: auth, users, personal access tokens (migration 59)
+# ---------------------------------------------------------------------------
+
+import secrets as _secrets_mod
+from auth.multi_member import SESSION_COOKIE, _hash_token as _hash_pat
+
+_SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+
+
+class _AuthSetupRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class _LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class _UserOut(BaseModel):
+    id: str
+    username: str
+    display_name: Optional[str] = None
+    role: str
+    disabled: bool
+    created_at: str
+
+
+class _UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+    role: str = "member"
+
+
+class _UserUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    disabled: Optional[bool] = None
+    password: Optional[str] = None
+
+
+class _PATOut(BaseModel):
+    id: str
+    name: str
+    last_used_at: Optional[str] = None
+    created_at: str
+    expires_at: Optional[str] = None
+
+
+class _PATCreateRequest(BaseModel):
+    name: str
+    expires_at: Optional[str] = None
+
+
+class _PATCreateResponse(BaseModel):
+    token: str  # raw value — shown once, never stored
+    pat: _PATOut
+
+
+def _bcrypt_hash(password: str) -> str:
+    try:
+        import bcrypt
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    except ImportError:
+        raise HTTPException(status_code=500, detail="bcrypt not installed")
+
+
+def _bcrypt_verify(password: str, hashed: str) -> bool:
+    try:
+        import bcrypt
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    except ImportError:
+        return False
+
+
+def _require_multi_member_repos(repos: Repositories):
+    if repos.users is None or repos.sessions is None or repos.tokens is None:
+        raise HTTPException(status_code=503, detail="multi-member not available")
+    return repos.users, repos.sessions, repos.tokens
+
+
+def _require_admin(auth: AuthContext) -> None:
+    if not auth.is_admin:
+        raise HTTPException(status_code=403, detail="admin required")
+
+
+@app.post("/auth/setup", response_model=_UserOut, status_code=201)
+def auth_setup(
+    payload: _AuthSetupRequest,
+    response: Response,
+    repos: Repositories = Depends(get_repos),
+) -> _UserOut:
+    """Create the first admin account. Returns 409 if any user already exists."""
+    user_repo, session_repo, _ = _require_multi_member_repos(repos)
+    if user_repo.count() > 0:
+        raise HTTPException(status_code=409, detail="workspace already set up")
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="username required")
+    password = payload.password
+    if not password or len(password) < 6:
+        raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+    user_id = str(_uuid_mod.uuid4())
+    pw_hash = _bcrypt_hash(password)
+    row = user_repo.create(
+        user_id=user_id,
+        username=username,
+        display_name=payload.display_name,
+        password_hash=pw_hash,
+        role="admin",
+    )
+    # Auto-login: issue a session cookie so the browser is immediately logged in
+    session_id = _secrets_mod.token_urlsafe(32)
+    from datetime import datetime, timedelta, timezone as _tz
+    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
+    session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    user_out = _UserOut(
+        id=row["id"],
+        username=row["username"],
+        display_name=row.get("display_name"),
+        role=row["role"],
+        disabled=bool(row["disabled"]),
+        created_at=row["created_at"],
+    )
+    return {**user_out.model_dump(), "redirect_to": "/overview"}
+
+
+@app.post("/auth/login")
+def auth_login(
+    payload: _LoginRequest,
+    response: Response,
+    repos: Repositories = Depends(get_repos),
+) -> dict:
+    """Authenticate with username+password; sets a session cookie."""
+    user_repo, session_repo, _ = _require_multi_member_repos(repos)
+    user = user_repo.get_by_username(username=payload.username)
+    if user is None or not _bcrypt_verify(payload.password, user.get("password_hash") or ""):
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    if user.get("disabled"):
+        raise HTTPException(status_code=403, detail="account disabled")
+    session_id = _secrets_mod.token_urlsafe(32)
+    from datetime import datetime, timedelta, timezone as _tz
+    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
+    session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "display_name": user.get("display_name"),
+        "role": user["role"],
+        "redirect_to": "/overview",
+    }
+
+
+@app.post("/auth/logout")
+def auth_logout(
+    request: Request,
+    response: Response,
+    repos: Repositories = Depends(get_repos),
+) -> dict:
+    """Invalidate the current session cookie."""
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if session_id and repos.sessions is not None:
+        try:
+            repos.sessions.delete(session_id=session_id)
+        except Exception:
+            pass
+    response.delete_cookie(SESSION_COOKIE)
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def auth_me(auth: AuthContext = Depends(get_auth_context)) -> dict:
+    """Return the current authenticated user's profile."""
+    return {
+        "user_id": auth.user_id,
+        "username": auth.username,
+        "role": auth.role,
+        "auth_method": auth.auth_method,
+        "is_admin": auth.is_admin,
+    }
+
+
+@app.get("/auth/setup-required")
+def auth_setup_required(repos: Repositories = Depends(get_repos)) -> dict:
+    """Public endpoint — returns whether the workspace needs initial setup.
+
+    Used by the login page to decide whether to show the setup form.
+    """
+    if repos.users is None:
+        return {"required": False}
+    return {"required": repos.users.count() == 0}
+
+
+# --- User management (admin only) ---
+
+
+@app.get("/users", response_model=List[_UserOut])
+def list_users(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[_UserOut]:
+    _require_admin(auth)
+    user_repo, _, _ = _require_multi_member_repos(repos)
+    rows = user_repo.list()
+    return [_UserOut(id=r["id"], username=r["username"], display_name=r.get("display_name"),
+                     role=r["role"], disabled=bool(r["disabled"]), created_at=r["created_at"]) for r in rows]
+
+
+@app.post("/users", response_model=_UserOut, status_code=201)
+def create_user(
+    payload: _UserCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _UserOut:
+    _require_admin(auth)
+    user_repo, _, _ = _require_multi_member_repos(repos)
+    username = payload.username.strip()
+    if not username:
+        raise HTTPException(status_code=422, detail="username required")
+    if payload.role not in ("admin", "member"):
+        raise HTTPException(status_code=422, detail="role must be admin or member")
+    if not payload.password or len(payload.password) < 6:
+        raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+    if user_repo.get_by_username(username=username) is not None:
+        raise HTTPException(status_code=409, detail="username already taken")
+    user_id = str(_uuid_mod.uuid4())
+    pw_hash = _bcrypt_hash(payload.password)
+    row = user_repo.create(
+        user_id=user_id,
+        username=username,
+        display_name=payload.display_name,
+        password_hash=pw_hash,
+        role=payload.role,
+    )
+    return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
+                    role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
+
+
+@app.patch("/users/{uid}", response_model=_UserOut)
+def update_user(
+    uid: str = PathParam(...),
+    payload: _UserUpdateRequest = Body(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _UserOut:
+    _require_admin(auth)
+    user_repo, _, _ = _require_multi_member_repos(repos)
+    updates: dict = {}
+    if payload.display_name is not None:
+        updates["display_name"] = payload.display_name
+    if payload.role is not None:
+        if payload.role not in ("admin", "member"):
+            raise HTTPException(status_code=422, detail="role must be admin or member")
+        updates["role"] = payload.role
+    if payload.disabled is not None:
+        updates["disabled"] = 1 if payload.disabled else 0
+    if payload.password is not None:
+        if len(payload.password) < 6:
+            raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+        updates["password_hash"] = _bcrypt_hash(payload.password)
+    row = user_repo.update(user_id=uid, **updates)
+    if row is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
+                    role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
+
+
+@app.delete("/users/{uid}", status_code=204)
+def delete_user(
+    uid: str = PathParam(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    _require_admin(auth)
+    user_repo, _, _ = _require_multi_member_repos(repos)
+    if uid == auth.user_id:
+        raise HTTPException(status_code=400, detail="cannot delete your own account")
+    if not user_repo.delete(user_id=uid):
+        raise HTTPException(status_code=404, detail="user not found")
+
+
+# --- Personal access tokens (current user) ---
+
+
+@app.get("/auth/tokens", response_model=List[_PATOut])
+def list_tokens(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[_PATOut]:
+    _, _, token_repo = _require_multi_member_repos(repos)
+    rows = token_repo.list(user_id=auth.user_id)
+    return [_PATOut(**{k: r[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")}) for r in rows]
+
+
+@app.post("/auth/tokens", response_model=_PATCreateResponse, status_code=201)
+def create_token(
+    payload: _PATCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _PATCreateResponse:
+    _, _, token_repo = _require_multi_member_repos(repos)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="token name required")
+    raw = "wos_" + _secrets_mod.token_urlsafe(32)
+    token_hash = _hash_pat(raw)
+    token_id = str(_uuid_mod.uuid4())
+    row = token_repo.create(
+        token_id=token_id,
+        user_id=auth.user_id,
+        name=name,
+        token_hash=token_hash,
+        expires_at=payload.expires_at,
+    )
+    pat = _PATOut(**{k: row[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")})
+    return _PATCreateResponse(token=raw, pat=pat)
+
+
+@app.delete("/auth/tokens/{token_id}", status_code=204)
+def delete_token(
+    token_id: str = PathParam(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    _, _, token_repo = _require_multi_member_repos(repos)
+    if not token_repo.delete(token_id=token_id, user_id=auth.user_id):
+        raise HTTPException(status_code=404, detail="token not found")
 
 
 if __name__ == "__main__":

@@ -11,15 +11,123 @@ import json
 import mimetypes
 import os
 import re
+import hashlib
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONTEXTS_DIR = Path(os.environ.get("FLOOM_CONTEXTS_DIR", str(PROJECT_ROOT / "contexts"))).resolve()
 CONTEXT_METADATA_PATH = CONTEXTS_DIR / ".workeros-contexts.json"
 MAX_CONTEXT_BYTES = 50 * 1024 * 1024
+
+
+# --- Multi-tenant scoping (cloud mode) ---------------------------------------
+#
+# In single-tenant local/OSS mode every context lives directly under
+# CONTEXTS_DIR (e.g. /var/contexts/<name>). In multi-tenant cloud mode the
+# same FS root is shared across workspaces; without scoping every authed
+# user sees every other tenant's contexts (P0 cross-tenant leak).
+#
+# The cloud wrapper registers a resolver callable via
+# ``set_context_scope_resolver()`` that returns the active workspace_id for
+# the current request. When set + returning a non-empty safe string, every
+# context path becomes ``CONTEXTS_DIR/<workspace_id>/<name>/...`` and the
+# per-scope metadata file lives at
+# ``CONTEXTS_DIR/<workspace_id>/.workeros-contexts.json``.
+#
+# When the resolver is unset or returns None (OSS local mode, scheduler /
+# background tasks, tests), paths fall back to the legacy unscoped layout
+# so existing single-tenant installs see no behavior change.
+
+_CONTEXT_SCOPE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_scope_resolver: Optional[Callable[[], Optional[str]]] = None
+_SCOPE_OVERRIDE_UNSET = object()
+_scope_override: ContextVar[object | str | None] = ContextVar(
+    "workeros_context_scope_override",
+    default=_SCOPE_OVERRIDE_UNSET,
+)
+
+
+def set_context_scope_resolver(resolver: Optional[Callable[[], Optional[str]]]) -> None:
+    """Register a callable returning the active scope id (workspace_id) for
+    the current request. Pass ``None`` to clear the resolver (OSS mode).
+
+    The resolver MUST return either a safe scope id matching
+    ``_CONTEXT_SCOPE_NAME_RE`` or ``None``. Invalid scope ids cause the
+    request to fall back to the unscoped root (defensive: no traversal
+    risk).
+    """
+    global _scope_resolver
+    _scope_resolver = resolver
+
+
+def context_scope_for_user(user_id: str | None) -> str | None:
+    deploy_mode = (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower()
+    scoped_local = os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1"
+    raw = str(user_id or "").strip()
+    is_local_workspace = bool(re.search(r"__ws_[a-f0-9]{14}$", raw))
+    if deploy_mode != "cloud" and not scoped_local and not is_local_workspace:
+        return None
+    if not raw:
+        return None
+    if _CONTEXT_SCOPE_NAME_RE.fullmatch(raw):
+        return raw
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+    return f"user-{digest}"
+
+
+@contextmanager
+def use_context_scope(scope: str | None):
+    safe_scope = None
+    if scope is not None:
+        raw = str(scope).strip()
+        if raw and _CONTEXT_SCOPE_NAME_RE.fullmatch(raw):
+            safe_scope = raw
+    token = _scope_override.set(safe_scope)
+    try:
+        yield safe_scope
+    finally:
+        _scope_override.reset(token)
+
+
+def _current_scope() -> Optional[str]:
+    override = _scope_override.get()
+    if override is not _SCOPE_OVERRIDE_UNSET:
+        return override if isinstance(override, str) and override else None
+    if _scope_resolver is None:
+        return None
+    try:
+        raw = _scope_resolver()
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text or not _CONTEXT_SCOPE_NAME_RE.fullmatch(text):
+        return None
+    return text
+
+
+def current_contexts_root() -> Path:
+    """Return the active CONTEXTS_DIR root for the current request.
+
+    Scoped to a per-workspace subdir in cloud mode; equal to CONTEXTS_DIR
+    otherwise. The returned path may not exist yet (callers should
+    ``mkdir(parents=True, exist_ok=True)`` before iterating).
+    """
+    scope = _current_scope()
+    if scope is None:
+        return CONTEXTS_DIR
+    return (CONTEXTS_DIR / scope).resolve()
+
+
+def current_metadata_path() -> Path:
+    """Return the active metadata file path for the current request."""
+    return current_contexts_root() / ".workeros-contexts.json"
 
 CONTEXT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 TEXT_FILE_EXTENSIONS = {
@@ -86,9 +194,10 @@ def validate_context_name(name: str) -> str:
 
 def context_dir(name: str) -> Path:
     safe_name = validate_context_name(name)
-    target = (CONTEXTS_DIR / safe_name).resolve()
+    root = current_contexts_root()
+    target = (root / safe_name).resolve()
     try:
-        target.relative_to(CONTEXTS_DIR)
+        target.relative_to(root)
     except ValueError as exc:
         raise ValueError(f"Path traversal attempt: {target}") from exc
     return target
@@ -115,14 +224,15 @@ def normalize_context_file_path(raw_path: str) -> str:
 
 
 def ensure_contexts_dir() -> None:
-    CONTEXTS_DIR.mkdir(parents=True, exist_ok=True)
+    current_contexts_root().mkdir(parents=True, exist_ok=True)
 
 
 def load_context_metadata() -> dict[str, dict[str, Any]]:
-    if not CONTEXT_METADATA_PATH.is_file():
+    metadata_path = current_metadata_path()
+    if not metadata_path.is_file():
         return {}
     try:
-        parsed = json.loads(CONTEXT_METADATA_PATH.read_text())
+        parsed = json.loads(metadata_path.read_text())
     except Exception:
         return {}
     if not isinstance(parsed, dict):
@@ -136,19 +246,129 @@ def load_context_metadata() -> dict[str, dict[str, Any]]:
 
 def save_context_metadata(metadata: dict[str, dict[str, Any]]) -> None:
     ensure_contexts_dir()
-    tmp_path = CONTEXT_METADATA_PATH.with_suffix(".tmp")
+    metadata_path = current_metadata_path()
+    tmp_path = metadata_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
-    os.replace(tmp_path, CONTEXT_METADATA_PATH)
+    os.replace(tmp_path, metadata_path)
 
 
-def set_context_metadata(name: str, *, writeable: bool | None = None) -> None:
+def context_owner_id(name: str, metadata: dict[str, dict[str, Any]] | None = None) -> str | None:
+    safe_name = validate_context_name(name)
+    meta = metadata if metadata is not None else load_context_metadata()
+    entry = meta.get(safe_name) or {}
+    owner_id = str(entry.get("owner_id") or "").strip()
+    return owner_id or None
+
+
+def set_context_metadata(
+    name: str,
+    *,
+    writeable: bool | None = None,
+    owner_id: str | None = None,
+) -> None:
     safe_name = validate_context_name(name)
     metadata = load_context_metadata()
     existing = metadata.get(safe_name, {})
     if writeable is not None:
         existing["writeable"] = bool(writeable)
+    if owner_id is not None:
+        owner_value = str(owner_id).strip()
+        if owner_value:
+            existing["owner_id"] = owner_value
     existing["updated_at"] = now_iso()
     metadata[safe_name] = existing
+    save_context_metadata(metadata)
+
+
+def set_context_file_metadata(
+    name: str,
+    file_path: str,
+    *,
+    tags: list[str] | None = None,
+    file_metadata: dict[str, Any] | None = None,
+    owner_id: str | None = None,
+) -> dict[str, Any]:
+    safe_name = validate_context_name(name)
+    rel = normalize_context_file_path(file_path)
+    metadata = load_context_metadata()
+    pack = metadata.get(safe_name, {})
+    if owner_id is not None:
+        owner_value = str(owner_id).strip()
+        if owner_value:
+            pack["owner_id"] = owner_value
+    files = pack.get("files")
+    if not isinstance(files, dict):
+        files = {}
+    file_entry = files.get(rel)
+    if not isinstance(file_entry, dict):
+        file_entry = {}
+    if tags is not None:
+        clean_tags = []
+        for tag in tags:
+            clean = str(tag).strip()
+            if clean and clean not in clean_tags:
+                clean_tags.append(clean[:64])
+            if len(clean_tags) >= 20:
+                break
+        if clean_tags:
+            file_entry["tags"] = clean_tags
+        else:
+            file_entry.pop("tags", None)
+    if file_metadata is not None:
+        clean_metadata: dict[str, Any] = {}
+        for raw_key, raw_value in file_metadata.items():
+            key = str(raw_key).strip()
+            if not key:
+                continue
+            if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+                clean_metadata[key[:64]] = raw_value
+        if clean_metadata:
+            file_entry["metadata"] = clean_metadata
+        else:
+            file_entry.pop("metadata", None)
+    if file_entry:
+        files[rel] = file_entry
+    else:
+        files.pop(rel, None)
+    if files:
+        pack["files"] = files
+    else:
+        pack.pop("files", None)
+    pack["updated_at"] = now_iso()
+    metadata[safe_name] = pack
+    save_context_metadata(metadata)
+    return pack
+
+
+def set_context_file_secret_flag(name: str, file_path: str, has_secret_warning: bool) -> None:
+    """Persist (or clear) the ``has_secret_warning`` flag on a context file's
+    metadata entry, without disturbing its tags/metadata. Used by the
+    write-boundary secret scanner so the UI can badge flagged files.
+    """
+    safe_name = validate_context_name(name)
+    rel = normalize_context_file_path(file_path)
+    metadata = load_context_metadata()
+    pack = metadata.get(safe_name, {})
+    files = pack.get("files")
+    if not isinstance(files, dict):
+        files = {}
+    file_entry = files.get(rel)
+    if not isinstance(file_entry, dict):
+        file_entry = {}
+    if has_secret_warning:
+        file_entry["has_secret_warning"] = True
+    else:
+        file_entry.pop("has_secret_warning", None)
+    if file_entry:
+        files[rel] = file_entry
+    else:
+        files.pop(rel, None)
+    if files:
+        pack["files"] = files
+    else:
+        pack.pop("files", None)
+    pack["updated_at"] = now_iso()
+    metadata[safe_name] = pack
     save_context_metadata(metadata)
 
 
@@ -185,6 +405,40 @@ def is_binary_file(path: str, mime_type: str) -> bool:
     return is_binary_mime(mime_type)
 
 
+# Extensions/MIME types that a browser will execute (script, markup) if served
+# inline. These are "text" (so not binary) but must NOT be rendered in the
+# browser's origin — otherwise an uploaded .html context file is stored XSS.
+# Served as attachment (force download) so the script never runs in-origin.
+_ACTIVE_MARKUP_EXTENSIONS = {
+    ".html",
+    ".htm",
+    ".xhtml",
+    ".svg",
+    ".xml",
+    ".xsl",
+    ".xslt",
+    ".mathml",
+}
+_ACTIVE_MARKUP_MIME_TYPES = {
+    "text/html",
+    "application/xhtml+xml",
+    "image/svg+xml",
+    "application/xml",
+    "text/xml",
+}
+
+
+def is_active_markup(path: str, mime_type: str) -> bool:
+    """Return True for non-binary content a browser would execute inline.
+
+    Such files (html, svg, xhtml, xml) must be force-downloaded, never
+    rendered inline, to avoid stored-XSS from uploaded context files.
+    """
+    if PurePosixPath(path).suffix.lower() in _ACTIVE_MARKUP_EXTENSIONS:
+        return True
+    return (mime_type or "").split(";", 1)[0].strip().lower() in _ACTIVE_MARKUP_MIME_TYPES
+
+
 def iter_context_files(root: Path) -> Iterable[Path]:
     if not root.is_dir():
         return []
@@ -195,17 +449,72 @@ def iter_context_files(root: Path) -> Iterable[Path]:
     )
 
 
-def context_file_metadata(root: Path, path: Path) -> dict[str, Any]:
+_EXT_DISPLAY_TYPE: dict[str, str] = {
+    ".md": "Markdown",
+    ".mdx": "Markdown",
+    ".yaml": "YAML",
+    ".yml": "YAML",
+    ".py": "Python",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".json": "JSON",
+    ".sh": "Shell",
+    ".bash": "Shell",
+    ".zsh": "Shell",
+    ".sql": "SQL",
+    ".csv": "CSV",
+    ".txt": "Text",
+    ".toml": "TOML",
+    ".xml": "XML",
+    ".html": "HTML",
+    ".htm": "HTML",
+    ".css": "CSS",
+    ".scss": "CSS",
+}
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp"}
+
+
+def context_file_display_type(path_str: str, mime_type: str) -> str:
+    ext = PurePosixPath(path_str).suffix.lower()
+    if ext in _IMAGE_EXTS or mime_type.startswith("image/"):
+        return "Image"
+    if ext in _EXT_DISPLAY_TYPE:
+        return _EXT_DISPLAY_TYPE[ext]
+    if mime_type.startswith("text/"):
+        return "Text"
+    return "File"
+
+
+def context_file_metadata(root: Path, path: Path, pack_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     rel = path.relative_to(root).as_posix()
     stat = path.stat()
     mime_type = guess_mime_type(rel)
-    return {
+    result = {
         "path": rel,
         "size": stat.st_size,
         "mime_type": mime_type,
         "updated_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
         "is_binary": is_binary_file(rel, mime_type),
+        "display_type": context_file_display_type(rel, mime_type),
     }
+    files = (pack_metadata or {}).get("files")
+    file_entry = files.get(rel) if isinstance(files, dict) else None
+    if isinstance(file_entry, dict):
+        if file_entry.get("has_secret_warning"):
+            result["has_secret_warning"] = True
+        tags = file_entry.get("tags")
+        if isinstance(tags, list):
+            result["tags"] = [str(tag) for tag in tags if str(tag).strip()]
+        extra_metadata = file_entry.get("metadata")
+        if isinstance(extra_metadata, dict):
+            result["metadata"] = {
+                str(key): value
+                for key, value in extra_metadata.items()
+                if isinstance(value, (str, int, float, bool)) or value is None
+            }
+    return result
 
 
 def context_total_size(root: Path) -> int:

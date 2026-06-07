@@ -14,6 +14,7 @@ Create a factual, structured, actionable markdown research brief for the provide
 
 You have the following tools available:
 
+- `web_search`: search the live web for fresh, external, or cutoff-sensitive facts. Use it whenever the brief needs current data.
 - `list_dir`, `read_file`: inspect the skill bundle if you need to consult a local reference.
 - `finish_with_outputs`: emit the final brief and complete the run.
 - `write_output`: emit an intermediate declared output if needed.
@@ -21,10 +22,10 @@ You have the following tools available:
 ## Method
 
 1. Decompose the topic into 3 to 6 specific subquestions.
-2. Use only provided inputs, local bundle files, and model knowledge. Live web search is not currently available in this runtime.
-3. Do not present time-sensitive facts as current. Qualify uncertain or cutoff-sensitive claims.
-4. Synthesize findings into a markdown brief. Use concrete names and numbers only when you can support them from available context.
-5. If current data is required but unavailable, say so explicitly. Do not fabricate sources, links, or recent facts.
+2. Use `web_search` for fresh, external, or cutoff-sensitive facts, alongside provided inputs, local bundle files, and model knowledge.
+3. Qualify any claim you cannot verify. Prefer searched facts over recalled ones for anything time-sensitive.
+4. Synthesize findings into a markdown brief. Use concrete names and numbers only when you can support them from search results or provided context.
+5. Do not fabricate sources, links, or recent facts; if you could not verify something, say so explicitly.
 
 ## Depth rules
 

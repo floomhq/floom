@@ -52,6 +52,12 @@ exec:
   - name: cv_file
     kind: file
     media_type: application/octet-stream
+    accepts:
+    - application/octet-stream
+    - application/pdf
+    - text/plain
+    - application/msword
+    - application/vnd.openxmlformats-officedocument.wordprocessingml.document
     path: inputs/cv_file
     required: true
     label: CV file (PDF, DOCX, or TXT)

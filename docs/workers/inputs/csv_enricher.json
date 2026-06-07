@@ -1,0 +1,4 @@
+{
+  "instruction": "For each company row, infer ICP fit (High/Medium/Low), add a one-line outreach angle, and classify the buyer persona.",
+  "note": "csv_file is a file upload — provide a CSV with name,company,title,location columns."
+}

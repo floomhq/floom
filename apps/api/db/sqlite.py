@@ -1,10 +1,22 @@
 from __future__ import annotations
 
-import fcntl
+try:
+    import fcntl as _fcntl_mod
+    _LOCK_EX = _fcntl_mod.LOCK_EX
+    _LOCK_UN = _fcntl_mod.LOCK_UN
+except ImportError:
+    class _fcntl_mod:  # type: ignore[no-redef]
+        LOCK_EX = 1; LOCK_UN = 8
+        @staticmethod
+        def flock(fd, op): pass
+    _LOCK_EX = 1
+    _LOCK_UN = 8
 import json
 import os
 import re
 import sqlite3
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -24,15 +36,125 @@ from ._legacy_sqlite import _row_dict, get_db, now_iso
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
 _FLOOM_USER_ID = "federico"
 
+# Per-asset visibility default. Private-by-default matches the Codex design
+# (Notion/Drive convention) — automation assets that hold secrets must not be
+# discoverable until the owner explicitly shares them.
+_DEFAULT_VISIBILITY = "private"
 
-def _env_path() -> Path:
+
+def _derive_workspace_id_local(owner_id: str | None) -> str:
+    """Workspace id for an owner_id (``<base>__ws_<14hex>`` suffix, else default).
+
+    Defined early so the worker INSERT paths can stamp workspace_id on create.
+    Mirrors ``derive_workspace_id`` (defined later for external callers).
+    """
+    text = (owner_id or "").strip()
+    match = re.search(r"__(ws_[a-f0-9]{14})$", text)
+    return match.group(1) if match else "local-default"
+
+
+def _normalize_visibility(value: Any) -> str:
+    """Coerce a visibility input to a valid enum value, defaulting to private."""
+    text = (str(value).strip().lower() if value is not None else "")
+    return text if text in {"private", "workspace", "specific_people"} else _DEFAULT_VISIBILITY
+
+
+def _legacy_source_relative_env_path() -> Path:
+    """The historical, source-tree-relative secret env file (``apps/api/.env``).
+
+    THIS PATH IS THE N4-1 BUG. Because it is resolved relative to this source
+    file, two processes serving the SAME shared DB but running from different
+    checkouts/deploy directories (e.g. ``/root/workeros`` vs
+    ``/opt/workeros-live`` vs a ``/tmp`` worktree) resolve it to DIFFERENT
+    files. A secret set by one process writes its value into that process's
+    tree, while the DB row (anchored to the ABSOLUTE ``WORKEROS_DB``/``FLOOM_DB``
+    path) is shared — so the secret reads back as "set" in the DB but its value
+    is invisible (orphaned in the other tree's ``.env``), and every scheduled
+    run fails ``missing_secret``.
+
+    It is retained ONLY as a read-time fallback so secrets written before this
+    fix are not lost. New writes go to ``secret_store_env_path()``.
+    """
+    return Path(__file__).resolve().parents[1] / ".env"
+
+
+def _db_anchored_env_path() -> Path | None:
+    """Stable secret env file co-located with the DB, deploy-dir-independent.
+
+    The DB path (``WORKEROS_DB`` / ``FLOOM_DB``) is the one piece of state that
+    is already shared across deploy directories. Anchoring the secret-value
+    store to the SAME directory (``<db_dir>/secrets.env``) guarantees the write
+    path and every run-time read path resolve to the same file regardless of
+    which checkout the serving process runs from. Returns ``None`` when the DB
+    path is not configured to an absolute location (pure local dev), so we fall
+    back to the legacy source-relative file.
+    """
+    db_path = (
+        os.environ.get("WORKEROS_DB")
+        or os.environ.get("FLOOM_DB")
+    )
+    if not db_path:
+        return None
+    db_path_obj = Path(db_path)
+    if not db_path_obj.is_absolute():
+        return None
+    return db_path_obj.resolve().parent / "secrets.env"
+
+
+def secret_store_env_path() -> Path:
+    """Canonical path to the env file that backs user-managed secret VALUES.
+
+    Single source of truth for WHERE a secret value is written. Both the write
+    path (``SqliteSecretRepository.set`` -> ``_upsert_env_var``) and the
+    run-time read paths (manual / scheduled / webhook / composio, via
+    ``get_secrets_for_worker``) resolve through here, so a secret set under the
+    worker's owner is always found at run time.
+
+    Resolution order:
+      1. ``WORKEROS_API_ENV_FILE`` / ``FLOOM_API_ENV_FILE`` (explicit config /
+         tests).
+      2. ``<db_dir>/secrets.env`` — stable, co-located with the DB, immune to
+         deploy-directory swaps (the N4-1 fix).
+      3. ``apps/api/.env`` relative to this source file (local-dev default,
+         only when no absolute DB path is configured).
+    """
     configured = (
         os.environ.get("WORKEROS_API_ENV_FILE")
         or os.environ.get("FLOOM_API_ENV_FILE")
     )
     if configured:
         return Path(configured)
-    return Path(__file__).resolve().parents[1] / ".env"
+    anchored = _db_anchored_env_path()
+    if anchored is not None:
+        return anchored
+    return _legacy_source_relative_env_path()
+
+
+def secret_store_read_paths() -> list[Path]:
+    """All env files consulted when READING a secret value, in priority order.
+
+    The canonical write target comes first, then legacy locations so that
+    values written before the N4-1 fix (orphaned in a prior deploy tree's
+    ``apps/api/.env``) still resolve. De-duplicated, existing-files only.
+    """
+    candidates = [secret_store_env_path(), _legacy_source_relative_env_path()]
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+    for path in candidates:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        ordered.append(path)
+    return ordered
+
+
+# Back-compat alias (kept so existing private callers don't break).
+def _env_path() -> Path:
+    return secret_store_env_path()
 
 
 def _json_dump(value: Any) -> str:
@@ -56,8 +178,9 @@ def _user_secret_key(user_id: str, name: str) -> str:
     return f"{_SECRET_PREFIX}_{safe_user}_{name}"
 
 
-def _read_env_lines() -> list[str]:
-    env_path = _env_path()
+def _read_env_lines(path: Path | None = None) -> list[str]:
+    """Read lines from a secret env file (defaults to the canonical write path)."""
+    env_path = path if path is not None else _env_path()
     if not env_path.exists():
         return []
     return env_path.read_text().splitlines(keepends=True)
@@ -67,14 +190,16 @@ def _write_env_lines(lines: list[str]) -> None:
     env_path = _env_path()
     env_path.parent.mkdir(parents=True, exist_ok=True)
     with env_path.open("a+") as lock_fd:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        _fcntl_mod.flock(lock_fd, _LOCK_EX)
         try:
             env_path.write_text("".join(lines))
         finally:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            _fcntl_mod.flock(lock_fd, _LOCK_UN)
 
 
 def _upsert_env_var(name: str, value: str) -> None:
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ValueError("Secret value must not contain newline or control characters")
     lines = _read_env_lines()
     new_line = f"{name}={value}\n"
     replaced = False
@@ -112,10 +237,14 @@ def _read_env_var(name: str) -> str | None:
     value = os.environ.get(name)
     if value is not None:
         return value
-    for line in _read_env_lines():
-        stripped = line.rstrip("\n")
-        if stripped.startswith(f"{name}="):
-            return stripped.split("=", 1)[1]
+    # Scan the canonical store first, then legacy locations, so secrets written
+    # before the N4-1 fix (orphaned in a prior deploy tree's apps/api/.env)
+    # still resolve. First match wins.
+    for env_path in secret_store_read_paths():
+        for line in _read_env_lines(env_path):
+            stripped = line.rstrip("\n")
+            if stripped.startswith(f"{name}="):
+                return stripped.split("=", 1)[1]
     return None
 
 
@@ -176,6 +305,8 @@ def _worker_record_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "example_output": manifest_dict.get("example_output"),
         "how_it_works": manifest_dict.get("how_it_works"),
         "is_example": manifest_dict.get("is_example"),
+        "archived": bool(manifest_dict.get("archived", False)),
+        "archive_reason": manifest_dict.get("archive_reason"),
         "tags": manifest_dict.get("tags") or [],
         "folder": manifest_dict.get("folder"),
         "status": "healthy",
@@ -199,6 +330,8 @@ def _worker_record_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "enabled": bool(data.get("enabled") or 0),
         "created_at": data.get("created_at"),
         "owner_id": data.get("owner_id") or _FLOOM_USER_ID,
+        "workspace_id": data.get("workspace_id") or "local-default",
+        "visibility": data.get("visibility") or "private",
         "composio_trigger_id": data.get("composio_trigger_id"),
         "composio_event": data.get("composio_event"),
     }
@@ -224,6 +357,8 @@ def _worker_select_sql(where_clause: str = "", limit_clause: str = "") -> str:
             w.enabled,
             w.created_at,
             w.owner_id,
+            w.workspace_id,
+            w.visibility,
             w.composio_trigger_id,
             w.composio_event,
             w.triggers_json,
@@ -239,20 +374,54 @@ def _worker_select_sql(where_clause: str = "", limit_clause: str = "") -> str:
 
 
 class SqliteWorkerRepository:
-    def list(self, *, user_id: str) -> list[dict[str, Any]]:
+    def list(self, *, user_id: str, role: str | None = None) -> list[dict[str, Any]]:
+        """List workers visible to the requesting user.
+
+        role="admin"  — admin sees all workers regardless of owner.
+        role="member" — member sees own workers + workspace-visibility workers.
+        role=None     — legacy default: only workers owned by user_id (backwards compat).
+        """
         with get_db() as conn:
-            rows = conn.execute(
-                _worker_select_sql("WHERE w.owner_id = ?"),
-                (user_id,),
-            ).fetchall()
+            if role == "admin":
+                rows = conn.execute(_worker_select_sql()).fetchall()
+            elif role == "member":
+                rows = conn.execute(
+                    _worker_select_sql("WHERE w.owner_id = ? OR w.visibility = 'workspace'"),
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    _worker_select_sql("WHERE w.owner_id = ?"),
+                    (user_id,),
+                ).fetchall()
         return [_worker_record_from_row(row) for row in rows]
 
-    def get(self, *, user_id: str, worker_id: str) -> dict[str, Any] | None:
+    def get(self, *, user_id: str, worker_id: str, role: str | None = None) -> dict[str, Any] | None:
+        """Get a single worker, respecting visibility rules.
+
+        role="admin"  — admin can fetch any worker by id.
+        role="member" — member can fetch own or workspace-visible workers.
+        role=None     — legacy default: only owner-scoped fetch (backwards compat).
+        """
         with get_db() as conn:
-            row = conn.execute(
-                _worker_select_sql("WHERE w.owner_id = ? AND w.id = ?", "LIMIT 1"),
-                (user_id, worker_id),
-            ).fetchone()
+            if role == "admin":
+                row = conn.execute(
+                    _worker_select_sql("WHERE w.id = ?", "LIMIT 1"),
+                    (worker_id,),
+                ).fetchone()
+            elif role == "member":
+                row = conn.execute(
+                    _worker_select_sql(
+                        "WHERE w.id = ? AND (w.owner_id = ? OR w.visibility = 'workspace')",
+                        "LIMIT 1",
+                    ),
+                    (worker_id, user_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    _worker_select_sql("WHERE w.owner_id = ? AND w.id = ?", "LIMIT 1"),
+                    (user_id, worker_id),
+                ).fetchone()
         return _worker_record_from_row(row) if row else None
 
     def get_any(self, *, worker_id: str) -> dict[str, Any] | None:
@@ -309,8 +478,9 @@ class SqliteWorkerRepository:
                     (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
                      next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
                      notify_webhook_url, grants_json, input_values_json, enabled, created_at,
-                     owner_id, composio_trigger_id, composio_event, triggers_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     owner_id, workspace_id, visibility, composio_trigger_id, composio_event,
+                     triggers_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     worker_id,
@@ -329,6 +499,8 @@ class SqliteWorkerRepository:
                     enabled,
                     created_at,
                     user_id,
+                    fields.get("workspace_id") or _derive_workspace_id_local(user_id),
+                    _normalize_visibility(fields.get("visibility")),
                     composio_trigger_id,
                     composio_event,
                     _json_dump(triggers_json) if triggers_json is not None else None,
@@ -392,8 +564,9 @@ class SqliteWorkerRepository:
                     (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
                      next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
                      notify_webhook_url, grants_json, input_values_json, enabled, created_at,
-                     owner_id, composio_trigger_id, composio_event, triggers_json)
-                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, ?, ?, ?, ?)
+                     owner_id, workspace_id, visibility, composio_trigger_id, composio_event,
+                     triggers_json)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     skill_version_id=excluded.skill_version_id,
                     name=excluded.name,
@@ -416,6 +589,8 @@ class SqliteWorkerRepository:
                     _json_dump(fields.get("input_values_json") or {}),
                     created_at,
                     user_id,
+                    fields.get("workspace_id") or _derive_workspace_id_local(user_id),
+                    _normalize_visibility(fields.get("visibility")),
                     fields.get("composio_trigger_id"),
                     fields.get("composio_event"),
                     _json_dump(triggers_json) if triggers_json is not None else None,
@@ -632,7 +807,7 @@ class SqliteWorkerRepository:
                 """
                 SELECT id, owner_id, cron_expr, next_run_at
                 FROM workers
-                WHERE enabled = 1 AND trigger_type = 'schedule'
+                WHERE enabled = 1 AND trigger_type IN ('schedule', 'cron', 'scheduled')
                 ORDER BY created_at, id
                 """
             ).fetchall()
@@ -782,6 +957,223 @@ class SqliteWorkerRepository:
             )
             return cursor.rowcount > 0
 
+    # -- worker_triggers (normalized multi-trigger rows) ---------------------
+
+    @staticmethod
+    def _trigger_config_for(trigger: dict[str, Any]) -> dict[str, Any]:
+        """Strip the redundant ``type`` key; keep the per-trigger config payload."""
+        return {k: v for k, v in trigger.items() if k != "type" and v is not None}
+
+    @staticmethod
+    def reconcile_triggers_conn(
+        conn: sqlite3.Connection,
+        *,
+        worker_id: str,
+        triggers: list[dict[str, Any]],
+        external_trigger_id: str | None = None,
+        enabled: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Connection-bound reconcile used when a write transaction is already
+        open (e.g. startup registration writes everything through one ``conn``
+        to avoid a second-connection ``database is locked``)."""
+        now = now_iso()
+        kept_ids: list[str] = []
+        existing = {
+            row["id"]: _row_dict(row)
+            for row in conn.execute(
+                "SELECT * FROM worker_triggers WHERE worker_id = ?",
+                (worker_id,),
+            ).fetchall()
+        }
+        for position, trigger in enumerate(triggers):
+            if not isinstance(trigger, dict):
+                continue
+            t_type = str(trigger.get("type") or "manual").strip().lower()
+            if t_type in {"cron", "scheduled"}:
+                t_type = "schedule"
+            if t_type == "composio":
+                t_type = "composio_event"
+            trigger_id = f"trg_{worker_id}_{position}"
+            kept_ids.append(trigger_id)
+            config_json = json.dumps(SqliteWorkerRepository._trigger_config_for(trigger))
+            ext_id = external_trigger_id if t_type == "composio_event" else None
+            webhook_path = worker_id if t_type == "webhook" else None
+            enabled_int = 1 if enabled else 0
+            prior = existing.get(trigger_id)
+            # Preserve next_run_at/last_fired_at across reconciles when the
+            # schedule config is unchanged, so the scheduler slot is stable.
+            next_run_at = None
+            last_fired_at = None
+            if prior:
+                prior_config = prior.get("config_json")
+                if t_type == "schedule" and prior_config == config_json:
+                    next_run_at = prior.get("next_run_at")
+                last_fired_at = prior.get("last_fired_at")
+            conn.execute(
+                """
+                INSERT INTO worker_triggers
+                    (id, worker_id, type, config_json, enabled, next_run_at,
+                     external_trigger_id, webhook_path, last_fired_at, position,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    type=excluded.type,
+                    config_json=excluded.config_json,
+                    enabled=excluded.enabled,
+                    next_run_at=excluded.next_run_at,
+                    external_trigger_id=excluded.external_trigger_id,
+                    webhook_path=excluded.webhook_path,
+                    position=excluded.position,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    trigger_id,
+                    worker_id,
+                    t_type,
+                    config_json,
+                    enabled_int,
+                    next_run_at,
+                    ext_id,
+                    webhook_path,
+                    last_fired_at,
+                    position,
+                    (prior or {}).get("created_at") or now,
+                    now,
+                ),
+            )
+        # Delete rows for triggers that no longer exist.
+        if kept_ids:
+            placeholders = ",".join("?" for _ in kept_ids)
+            conn.execute(
+                f"DELETE FROM worker_triggers WHERE worker_id = ? AND id NOT IN ({placeholders})",
+                (worker_id, *kept_ids),
+            )
+        else:
+            conn.execute(
+                "DELETE FROM worker_triggers WHERE worker_id = ?",
+                (worker_id,),
+            )
+        return [
+            _row_dict(row)
+            for row in conn.execute(
+                "SELECT * FROM worker_triggers WHERE worker_id = ? ORDER BY position, id",
+                (worker_id,),
+            ).fetchall()
+        ]
+
+    def reconcile_triggers(
+        self,
+        *,
+        worker_id: str,
+        triggers: list[dict[str, Any]],
+        external_trigger_id: str | None = None,
+        enabled: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Sync worker_triggers rows to exactly match the declared triggers.
+
+        One row per declared trigger. Row identity is stable across
+        re-reconciliations (id = ``trg_<worker_id>_<position>``) so updating a
+        worker's triggers in place updates the same rows instead of churning
+        them, and a removed trigger deletes its row.
+
+        ``external_trigger_id`` is the Composio registration id (a worker has at
+        most one composio trigger today); it is stamped onto the composio row so
+        an incoming event resolves back to the specific trigger.
+        """
+        with get_db() as conn:
+            return self.reconcile_triggers_conn(
+                conn,
+                worker_id=worker_id,
+                triggers=triggers,
+                external_trigger_id=external_trigger_id,
+                enabled=enabled,
+            )
+
+    def list_trigger_rows(self, *, worker_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM worker_triggers WHERE worker_id = ? ORDER BY position, id",
+                (worker_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def list_due_schedule_triggers(self, *, now_iso: str) -> list[dict[str, Any]]:
+        """Return enabled schedule trigger rows (joined to an enabled worker).
+
+        next_run_at filtering / due-comparison is done by the caller, since the
+        scheduler also handles NULL next_run_at (uninitialized) rows.
+        """
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.id, t.worker_id, t.config_json, t.next_run_at,
+                       t.last_fired_at, w.owner_id
+                FROM worker_triggers t
+                JOIN workers w ON w.id = t.worker_id
+                WHERE t.type = 'schedule'
+                  AND t.enabled = 1
+                  AND w.enabled = 1
+                ORDER BY t.worker_id, t.position, t.id
+                """
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def set_trigger_next_run_at(self, *, trigger_id: str, next_run_at: str | None) -> None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE worker_triggers SET next_run_at = ?, updated_at = ? WHERE id = ?",
+                (next_run_at, now_iso(), trigger_id),
+            )
+
+    def mark_trigger_fired(
+        self,
+        *,
+        trigger_id: str,
+        last_fired_at: str,
+        next_run_at: str | None,
+    ) -> None:
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE worker_triggers
+                SET last_fired_at = ?, next_run_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (last_fired_at, next_run_at, now_iso(), trigger_id),
+            )
+
+    def find_trigger_by_external_id(self, *, external_trigger_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM worker_triggers
+                WHERE external_trigger_id = ? AND enabled = 1
+                LIMIT 1
+                """,
+                (external_trigger_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def find_trigger_for_webhook(self, *, worker_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM worker_triggers
+                WHERE worker_id = ? AND type = 'webhook' AND enabled = 1
+                ORDER BY position, id
+                LIMIT 1
+                """,
+                (worker_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def count_schedule_trigger_rows(self) -> int:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM worker_triggers WHERE type = 'schedule'"
+            ).fetchone()
+        return int(row["cnt"] or 0) if row else 0
+
 
 class SqliteRunRepository:
     def list_for_worker(
@@ -864,7 +1256,7 @@ class SqliteRunRepository:
                        r.status, r.trigger_source, r.runner, r.input_json, r.output_json,
                        r.error, r.error_code, r.started_at, r.completed_at, r.duration_ms, r.created_at,
                        r.cancel_requested, r.cancelled_at, r.bundle_snapshot_path,
-                       r.quality_warning
+                       r.quality_warning, r.trigger_ref
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
@@ -876,6 +1268,11 @@ class SqliteRunRepository:
         return _row_dict(row) if row else None
 
     def get_any(self, *, run_id: str) -> dict[str, Any] | None:
+        # UNSCOPED run lookup (no owner filter). Reserved for internal/capability
+        # paths only: the sandbox→API composio-execute callback (run_id is the
+        # capability) and background run-execution in run_service.py. NEVER use on
+        # an operator-facing authed read path — those use get(user_id=...), which
+        # enforces WHERE w.owner_id = ? via the workers JOIN.
         with get_db() as conn:
             row = conn.execute(
                 "SELECT * FROM runs WHERE id = ? LIMIT 1",
@@ -888,18 +1285,28 @@ class SqliteRunRepository:
         run_id = fields["run_id"]
         with get_db() as conn:
             worker = conn.execute(
-                "SELECT 1 FROM workers WHERE id = ? AND owner_id = ?",
-                (worker_id, user_id),
+                "SELECT owner_id, visibility FROM workers WHERE id = ?",
+                (worker_id,),
             ).fetchone()
             if worker is None:
+                raise ValueError(f"worker {worker_id} not found")
+            # Allow workspace-visible workers to be run by any authenticated user.
+            # Non-workspace private workers can only be run by their owner.
+            # When a non-owner runs a workspace worker, attribute the run to the
+            # worker's owner so existing owner-scoped run queries keep working.
+            if worker["owner_id"] == user_id:
+                effective_user_id = user_id
+            elif worker["visibility"] == "workspace":
+                effective_user_id = worker["owner_id"]
+            else:
                 raise ValueError(f"worker {worker_id} does not belong to {user_id}")
             conn.execute(
                 """
                 INSERT INTO runs
                     (id, worker_id, status, trigger_source, runner, input_json, output_json,
                      approval_status, error, started_at, completed_at, duration_ms,
-                     created_at, bundle_snapshot_path, quality_warning)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, bundle_snapshot_path, quality_warning, trigger_ref)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -917,9 +1324,10 @@ class SqliteRunRepository:
                     fields.get("created_at") or now_iso(),
                     fields.get("bundle_snapshot_path"),
                     fields.get("quality_warning"),
+                    fields.get("trigger_ref"),
                 ),
             )
-        created = self.get(user_id=user_id, run_id=run_id)
+        created = self.get(user_id=effective_user_id, run_id=run_id)
         if created is None:
             raise RuntimeError(f"failed to create run {run_id}")
         return created
@@ -941,6 +1349,7 @@ class SqliteRunRepository:
             "cancelled_at",
             "bundle_snapshot_path",
             "quality_warning",
+            "trigger_ref",
         }
         updates: list[str] = []
         params: list[Any] = []
@@ -1011,11 +1420,31 @@ class SqliteRunRepository:
             updates["error_code"] = error_code
         if status == RunStatus.RUNNING.value:
             updates["started_at"] = now_iso()
+        # PENDING_APPROVAL marks the END of execution: the worker ran, emitted a
+        # decision_required, and halted to wait for the operator. Capture the real
+        # execution duration NOW. Without this, the later approve/reject COMPLETED
+        # transition would measure completed_at - started_at = execution time PLUS
+        # the entire approval-wait (a HITL run-1 showed "28m" duration that was
+        # mostly the operator thinking time). G5 rescore4 P2 (2026-05-29).
+        if status == RunStatus.PENDING_APPROVAL.value and run.get("duration_ms") is None:
+            started_at = run.get("started_at")
+            if started_at:
+                try:
+                    import datetime as _dt
+
+                    started = _dt.datetime.fromisoformat(started_at)
+                    ended = _dt.datetime.fromisoformat(now_iso())
+                    updates["duration_ms"] = int((ended - started).total_seconds() * 1000)
+                except Exception:
+                    pass
         if status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
             completed_at = now_iso()
             updates["completed_at"] = completed_at
             started_at = run.get("started_at")
-            if started_at:
+            # Preserve a duration_ms already captured at PENDING_APPROVAL park time
+            # — recomputing here would re-add the approval-wait. Only compute when
+            # the run never parked for approval (the normal path).
+            if started_at and run.get("duration_ms") is None:
                 try:
                     import datetime as _dt
 
@@ -1054,6 +1483,42 @@ class SqliteRunRepository:
             rows = conn.execute(
                 "SELECT level, message, timestamp, trace_id FROM logs WHERE run_id = ? ORDER BY timestamp",
                 (run_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def list_logs_for_worker(
+        self,
+        *,
+        user_id: str,
+        worker_id: str,
+        level: str | None = None,
+        since: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Cross-run logs for a worker, scoped to user_id, optionally filtered by level/since."""
+        params: list[Any] = [user_id, worker_id]
+        level_clause = ""
+        since_clause = ""
+        if level:
+            level_clause = "AND l.level = ?"
+            params.append(level)
+        if since:
+            since_clause = "AND l.timestamp >= ?"
+            params.append(since)
+        params.append(limit)
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT l.level, l.message, l.timestamp, l.trace_id, l.run_id
+                FROM logs l
+                JOIN runs r ON r.id = l.run_id
+                JOIN workers w ON w.id = r.worker_id
+                WHERE w.owner_id = ? AND r.worker_id = ?
+                  {level_clause} {since_clause}
+                ORDER BY l.timestamp DESC
+                LIMIT ?
+                """,
+                params,
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -1165,6 +1630,83 @@ class SqliteRunRepository:
                 )
         return [row["id"] for row in rows]
 
+    def fail_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail abandoned running runs older than *cutoff_iso*.
+
+        The status predicate is repeated in the UPDATE so a concurrently
+        finishing run is not overwritten by the reaper after it leaves
+        `running`.
+        """
+        completed_at = now_iso()
+        excluded = [str(run_id) for run_id in exclude_run_ids if str(run_id)]
+        exclude_clause = ""
+        params: list[Any] = [cutoff_iso]
+        if excluded:
+            placeholders = ",".join("?" for _ in excluded)
+            exclude_clause = f"AND r.id NOT IN ({placeholders})"
+            params.extend(excluded)
+
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.id, r.started_at, r.created_at, w.owner_id AS user_id
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE r.status = 'running'
+                  AND COALESCE(r.started_at, r.created_at) < ?
+                  {exclude_clause}
+                ORDER BY COALESCE(r.started_at, r.created_at) ASC
+                """,
+                tuple(params),
+            ).fetchall()
+            failed: list[dict[str, Any]] = []
+            for row in rows:
+                started_at = row["started_at"] or row["created_at"]
+                duration_ms = None
+                if started_at:
+                    try:
+                        import datetime as _dt
+
+                        started = _dt.datetime.fromisoformat(started_at)
+                        completed = _dt.datetime.fromisoformat(completed_at)
+                        duration_ms = int((completed - started).total_seconds() * 1000)
+                    except Exception:
+                        duration_ms = None
+                cursor = conn.execute(
+                    """
+                    UPDATE runs
+                    SET status = ?, error = ?, error_code = ?, completed_at = ?, duration_ms = ?
+                    WHERE id = ? AND status = 'running'
+                    """,
+                    (
+                        RunStatus.FAILED.value,
+                        error,
+                        error_code,
+                        completed_at,
+                        duration_ms,
+                        row["id"],
+                    ),
+                )
+                if cursor.rowcount:
+                    failed.append(
+                        {
+                            "id": row["id"],
+                            "run_id": row["id"],
+                            "user_id": row["user_id"],
+                            "started_at": row["started_at"],
+                            "created_at": row["created_at"],
+                            "completed_at": completed_at,
+                        }
+                    )
+        return failed
+
     def count_running_for_worker(self, *, user_id: str, worker_id: str) -> int:
         with get_db() as conn:
             row = conn.execute(
@@ -1223,7 +1765,8 @@ class SqliteConnectionRepository:
     _columns = """
         id, app_name, composio_connection_id, status, created_at, updated_at,
         scopes_json, account_label, display_name, last_checked_at, last_check_status, last_check_error, user_id,
-        kind, mcp_label, mcp_url, mcp_auth_secret, mcp_allowed_tools_json
+        kind, mcp_label, mcp_url, mcp_transport, mcp_command, mcp_args_json, mcp_env_json, mcp_cwd,
+        mcp_auth_secret, mcp_allowed_tools_json
     """
 
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
@@ -1265,6 +1808,46 @@ class SqliteConnectionRepository:
             ).fetchone()
         return _row_dict(row) if row else None
 
+    def find_by_app_account(
+        self,
+        *,
+        user_id: str,
+        app_name: str,
+        account_label: str,
+        exclude_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the canonical composio connection for an (app, account) pair.
+
+        Dedupe key for N5-1: reconnecting the SAME app + SAME account (by
+        normalized account_label, e.g. the Gmail address) must reuse the
+        existing row rather than spawning a duplicate. Returns the OLDEST
+        matching row (the canonical one) so repeated reconnects always merge
+        into a single, stable connection id. ``exclude_id`` skips the freshly
+        created reconnect row so it is never matched against itself.
+        """
+        label = (account_label or "").strip().lower()
+        if not label:
+            return None
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {self._columns}
+                FROM composio_connections
+                WHERE user_id = ?
+                  AND LOWER(app_name) = LOWER(?)
+                  AND (kind IS NULL OR kind = 'composio')
+                  AND LOWER(TRIM(COALESCE(account_label, ''))) = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (user_id, app_name, label),
+            ).fetchall()
+        for row in rows:
+            record = _row_dict(row)
+            if exclude_id is not None and record.get("id") == exclude_id:
+                continue
+            return record
+        return None
+
     def upsert(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         connection_id = fields["id"]
         app_name = fields["app_name"]
@@ -1281,8 +1864,17 @@ class SqliteConnectionRepository:
         kind = fields.get("kind") or "composio"
         mcp_label = fields.get("mcp_label")
         mcp_url = fields.get("mcp_url")
+        mcp_transport = fields.get("mcp_transport") or "streamable_http"
+        mcp_command = fields.get("mcp_command")
+        mcp_args_json = fields.get("mcp_args_json")
+        mcp_env_json = fields.get("mcp_env_json")
+        mcp_cwd = fields.get("mcp_cwd")
         mcp_auth_secret = fields.get("mcp_auth_secret")
         mcp_allowed_tools_json = fields.get("mcp_allowed_tools_json")
+        if mcp_args_json is not None and not isinstance(mcp_args_json, str):
+            mcp_args_json = _json_dump(mcp_args_json)
+        if mcp_env_json is not None and not isinstance(mcp_env_json, str):
+            mcp_env_json = _json_dump(mcp_env_json)
         if mcp_allowed_tools_json is not None and not isinstance(mcp_allowed_tools_json, str):
             mcp_allowed_tools_json = _json_dump(mcp_allowed_tools_json)
         with get_db() as conn:
@@ -1291,8 +1883,9 @@ class SqliteConnectionRepository:
                 INSERT INTO composio_connections
                     (id, app_name, composio_connection_id, status, created_at, updated_at,
                      scopes_json, account_label, display_name, last_checked_at, last_check_status, last_check_error, user_id,
-                     kind, mcp_label, mcp_url, mcp_auth_secret, mcp_allowed_tools_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     kind, mcp_label, mcp_url, mcp_transport, mcp_command, mcp_args_json, mcp_env_json, mcp_cwd,
+                     mcp_auth_secret, mcp_allowed_tools_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     app_name = excluded.app_name,
                     composio_connection_id = excluded.composio_connection_id,
@@ -1308,6 +1901,11 @@ class SqliteConnectionRepository:
                     kind = excluded.kind,
                     mcp_label = excluded.mcp_label,
                     mcp_url = excluded.mcp_url,
+                    mcp_transport = excluded.mcp_transport,
+                    mcp_command = excluded.mcp_command,
+                    mcp_args_json = excluded.mcp_args_json,
+                    mcp_env_json = excluded.mcp_env_json,
+                    mcp_cwd = excluded.mcp_cwd,
                     mcp_auth_secret = excluded.mcp_auth_secret,
                     mcp_allowed_tools_json = excluded.mcp_allowed_tools_json
                 """,
@@ -1328,6 +1926,11 @@ class SqliteConnectionRepository:
                     kind,
                     mcp_label,
                     mcp_url,
+                    mcp_transport,
+                    mcp_command,
+                    mcp_args_json,
+                    mcp_env_json,
+                    mcp_cwd,
                     mcp_auth_secret,
                     mcp_allowed_tools_json,
                 ),
@@ -1352,6 +1955,11 @@ class SqliteConnectionRepository:
             "kind",
             "mcp_label",
             "mcp_url",
+            "mcp_transport",
+            "mcp_command",
+            "mcp_args_json",
+            "mcp_env_json",
+            "mcp_cwd",
             "mcp_auth_secret",
             "mcp_allowed_tools_json",
         }
@@ -1361,7 +1969,7 @@ class SqliteConnectionRepository:
             if key not in allowed:
                 continue
             updates.append(f"{key} = ?")
-            if key == "scopes_json" and value is not None and not isinstance(value, str):
+            if key in {"scopes_json", "mcp_args_json", "mcp_env_json", "mcp_allowed_tools_json"} and value is not None and not isinstance(value, str):
                 params.append(_json_dump(value))
             else:
                 params.append(value)
@@ -1633,3 +2241,997 @@ class SqliteCliAuthRepository:
                     tuple(expired),
                 )
         return expired
+
+
+class SqliteApprovalRepository:
+    """SQLite-backed approval repository for S47 HITL."""
+
+    def create(self, *, owner_id: str, **fields: Any) -> dict[str, Any]:
+        allowed = {
+            "id", "run_id", "worker_id", "status", "label", "preview",
+            "created_at", "decided_at", "reason",
+            "decision_input_json", "edited_output_json", "follow_up_run_id",
+            "annotations_json",
+        }
+        cols = list(allowed & fields.keys())
+        cols_str = ", ".join(cols + ["owner_id"])
+        placeholders = ", ".join("?" for _ in cols) + ", ?"
+        values = [fields[c] for c in cols] + [owner_id]
+        with get_db() as conn:
+            conn.execute(
+                f"INSERT INTO approvals ({cols_str}) VALUES ({placeholders})",
+                tuple(values),
+            )
+        return self.get(owner_id=owner_id, approval_id=fields["id"])  # type: ignore[return-value]
+
+    def get(self, *, owner_id: str, approval_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM approvals WHERE id = ? AND owner_id = ?",
+                (approval_id, owner_id),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def get_public(self, *, approval_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT a.*, w.name AS worker_name
+                FROM approvals a
+                LEFT JOIN workers w ON w.id = a.worker_id
+                WHERE a.id = ?
+                LIMIT 1
+                """,
+                (approval_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def get_by_run_id(self, *, run_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM approvals WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def list_pending(self, *, owner_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.*, w.name AS worker_name
+                FROM approvals a
+                LEFT JOIN workers w ON w.id = a.worker_id
+                WHERE a.owner_id = ? AND a.status = 'pending'
+                ORDER BY a.created_at ASC
+                """,
+                (owner_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def count_pending(self, *, owner_id: str) -> int:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM approvals WHERE owner_id = ? AND status = 'pending'",
+                (owner_id,),
+            ).fetchone()
+        return int(row["cnt"] or 0) if row else 0
+
+    def approve(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        edited_output_json: str | None = None,
+        follow_up_run_id: str | None = None,
+        annotations_json: str | None = None,
+    ) -> dict[str, Any] | None:
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE approvals
+                SET status = 'approved',
+                    decided_at = ?,
+                    edited_output_json = ?,
+                    follow_up_run_id = ?,
+                    annotations_json = COALESCE(?, annotations_json)
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                """,
+                (decided_at, edited_output_json, follow_up_run_id, annotations_json, run_id, owner_id),
+            )
+        return self.get_by_run_id(run_id=run_id)
+
+    def reject(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        decided_at: str,
+        reason: str | None = None,
+        annotations_json: str | None = None,
+    ) -> dict[str, Any] | None:
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE approvals
+                SET status = 'rejected',
+                    decided_at = ?,
+                    reason = ?,
+                    annotations_json = COALESCE(?, annotations_json)
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                """,
+                (decided_at, reason, annotations_json, run_id, owner_id),
+            )
+        return self.get_by_run_id(run_id=run_id)
+
+
+class SqliteVersionRepository:
+    """SQLite implementation of VersionRepository."""
+
+    # Per-asset version cap. brain_pack snapshots embed the FULL content of every
+    # file in the pack, so a single large vault-pack snapshot can be 50-60MB. Keeping
+    # 50 of those filled an 11GB SQLite DB and the disk (2026-06-02 P1). 20 is generous
+    # for brain/worker history while bounding worst-case table growth. Pruning runs in
+    # the same transaction as the insert so the table self-limits forever, even if a
+    # future caller forgets the explicit prune() call.
+    DEFAULT_KEEP = 20
+
+    def create(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        user_id: str,
+        snapshot_json: str,
+        change_source: str,
+        keep: int | None = DEFAULT_KEEP,
+    ) -> dict[str, Any]:
+        version_id = f"ver_{uuid.uuid4().hex[:12]}"
+        created_at = datetime.now(timezone.utc).isoformat()
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(MAX(version_number), 0) FROM asset_versions WHERE asset_type = ? AND asset_id = ?",
+                (asset_type, asset_id),
+            ).fetchone()
+            next_version = (row[0] if row else 0) + 1
+            conn.execute(
+                """
+                INSERT INTO asset_versions (id, asset_type, asset_id, user_id, version_number, snapshot_json, change_source, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (version_id, asset_type, asset_id, user_id, next_version, snapshot_json, change_source, created_at),
+            )
+            # Self-limit within the same transaction so the table can never grow
+            # unbounded, even if a caller omits the explicit prune() below.
+            if keep is not None and keep > 0:
+                keep_ids = [
+                    r[0]
+                    for r in conn.execute(
+                        """
+                        SELECT id FROM asset_versions
+                        WHERE asset_type = ? AND asset_id = ?
+                        ORDER BY version_number DESC LIMIT ?
+                        """,
+                        (asset_type, asset_id, keep),
+                    ).fetchall()
+                ]
+                if keep_ids:
+                    placeholders = ",".join("?" * len(keep_ids))
+                    conn.execute(
+                        f"DELETE FROM asset_versions WHERE asset_type = ? AND asset_id = ? AND id NOT IN ({placeholders})",
+                        [asset_type, asset_id] + keep_ids,
+                    )
+        return self.get(version_id=version_id) or {}
+
+    def list(
+        self,
+        *,
+        asset_type: str,
+        asset_id: str,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, asset_type, asset_id, user_id, version_number, change_source, created_at
+                FROM asset_versions
+                WHERE asset_type = ? AND asset_id = ?
+                ORDER BY version_number DESC
+                LIMIT ?
+                """,
+                (asset_type, asset_id, limit),
+            ).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def get(self, *, version_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, asset_type, asset_id, user_id, version_number, snapshot_json, change_source, created_at FROM asset_versions WHERE id = ?",
+                (version_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def prune(self, *, asset_type: str, asset_id: str, keep: int = 20) -> int:
+        with get_db() as conn:
+            ids_to_keep = conn.execute(
+                """
+                SELECT id FROM asset_versions
+                WHERE asset_type = ? AND asset_id = ?
+                ORDER BY version_number DESC LIMIT ?
+                """,
+                (asset_type, asset_id, keep),
+            ).fetchall()
+            if not ids_to_keep:
+                return 0
+            placeholders = ",".join("?" * len(ids_to_keep))
+            keep_ids = [r[0] for r in ids_to_keep]
+            cursor = conn.execute(
+                f"DELETE FROM asset_versions WHERE asset_type = ? AND asset_id = ? AND id NOT IN ({placeholders})",
+                [asset_type, asset_id] + keep_ids,
+            )
+        return cursor.rowcount
+
+    def delete_for_asset(self, *, asset_type: str, asset_id: str) -> int:
+        """Delete ALL versions for a single (asset_type, asset_id) pair.
+
+        Called when the parent asset (worker, brain pack, brain file) is deleted,
+        so its snapshot history does not linger as an orphan forever (2026-06-02 P2).
+        """
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM asset_versions WHERE asset_type = ? AND asset_id = ?",
+                (asset_type, asset_id),
+            )
+        return cursor.rowcount
+
+    def delete_for_context(self, *, name: str) -> int:
+        """Delete every version row belonging to a context (brain pack).
+
+        A context owns one brain_pack asset (asset_id == name) plus one brain_file
+        asset per file (asset_id == f"{name}:{rel}"). Deleting the context must remove
+        all of them. The name portion is escaped because '_' and '%' are LIKE wildcards
+        and context names may legitimately contain underscores.
+        """
+        # Escape LIKE metacharacters in the name so a context like "my_pack" does not
+        # also match "myXpack:...". Backslash is the ESCAPE char.
+        escaped = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM asset_versions
+                WHERE (asset_type = 'brain_pack' AND asset_id = ?)
+                   OR (asset_type = 'brain_file' AND asset_id LIKE ? ESCAPE '\\')
+                """,
+                (name, f"{escaped}:%"),
+            )
+        return cursor.rowcount
+
+
+class SqliteAlertRepository:
+    """SQLite implementation of AlertRepository for webhook alert registrations."""
+
+    def add(
+        self,
+        *,
+        alert_id: str,
+        worker_id: str,
+        url: str | None,
+        email_to: str | None,
+        events: str,
+        description: str | None,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO worker_alerts (id, worker_id, url, email_to, events, description, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (alert_id, worker_id, url, email_to, events, description, created_at),
+            )
+        return self.get(alert_id=alert_id) or {}
+
+    def list(self, *, worker_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, worker_id, url, email_to, events, description, created_at FROM worker_alerts WHERE worker_id = ? ORDER BY created_at",
+                (worker_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def get(self, *, alert_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, worker_id, url, email_to, events, description, created_at FROM worker_alerts WHERE id = ?",
+                (alert_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def delete(self, *, alert_id: str, worker_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM worker_alerts WHERE id = ? AND worker_id = ?",
+                (alert_id, worker_id),
+            )
+        return cursor.rowcount > 0
+
+
+class SqliteMcpToolRepository:
+    _cols = "id, user_id, name, description, input_schema, worker_id, created_at, updated_at"
+
+    def _deserialize(self, row: dict[str, Any]) -> dict[str, Any]:
+        row["input_schema"] = json.loads(row.get("input_schema") or "{}")
+        return row
+
+    def list(self, *, user_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"SELECT {self._cols} FROM mcp_tools WHERE user_id = ? ORDER BY created_at",
+                (user_id,),
+            ).fetchall()
+        return [self._deserialize(_row_dict(r)) for r in rows]
+
+    def get(self, *, user_id: str, tool_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT {self._cols} FROM mcp_tools WHERE user_id = ? AND id = ? LIMIT 1",
+                (user_id, tool_id),
+            ).fetchone()
+        return self._deserialize(_row_dict(row)) if row else None
+
+    def get_by_name(self, *, user_id: str, name: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT {self._cols} FROM mcp_tools WHERE user_id = ? AND name = ? LIMIT 1",
+                (user_id, name),
+            ).fetchone()
+        return self._deserialize(_row_dict(row)) if row else None
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        worker_id: str,
+    ) -> dict[str, Any]:
+        tool_id = str(uuid.uuid4())
+        now = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO mcp_tools
+                    (id, user_id, name, description, input_schema, worker_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (tool_id, user_id, name, description, json.dumps(input_schema), worker_id, now, now),
+            )
+        item = self.get(user_id=user_id, tool_id=tool_id)
+        if item is None:
+            raise RuntimeError(f"failed to create mcp_tool {name!r}")
+        return item
+
+    def update(self, *, user_id: str, tool_id: str, **fields: Any) -> dict[str, Any] | None:
+        existing = self.get(user_id=user_id, tool_id=tool_id)
+        if existing is None:
+            return None
+        updates: dict[str, Any] = {}
+        for key in ("name", "description", "worker_id"):
+            if key in fields and fields[key] is not None:
+                updates[key] = fields[key]
+        if "input_schema" in fields and fields["input_schema"] is not None:
+            updates["input_schema"] = json.dumps(fields["input_schema"])
+        if not updates:
+            return existing
+        updates["updated_at"] = now_iso()
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        with get_db() as conn:
+            conn.execute(
+                f"UPDATE mcp_tools SET {set_clause} WHERE user_id = ? AND id = ?",
+                [*updates.values(), user_id, tool_id],
+            )
+        return self.get(user_id=user_id, tool_id=tool_id)
+
+    def delete(self, *, user_id: str, tool_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM mcp_tools WHERE user_id = ? AND id = ?",
+                (user_id, tool_id),
+            )
+        return cursor.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Members + per-asset visibility (Members STEP 1)
+# ---------------------------------------------------------------------------
+
+# Allowed enum values. ``specific_people`` is reserved (hidden in UI) until the
+# asset_grants table ships in a later step.
+VISIBILITY_VALUES: frozenset[str] = frozenset({"private", "workspace", "specific_people"})
+MEMBER_ROLES: frozenset[str] = frozenset({"owner", "admin", "member"})
+_ASSET_TABLES: dict[str, str] = {
+    "worker": "workers",
+    "brain_pack": "brain_packs",
+    "assistant": "assistants",
+}
+
+
+def derive_workspace_id(owner_id: str | None) -> str:
+    """Workspace id for an engine owner_id (mirrors the migration helper).
+
+    owner_id is the per-workspace scoped user_id: the base user under the default
+    workspace, or ``<base>__ws_<14hex>`` under a non-default local workspace. The
+    workspace is the suffix when present, else ``local-default``.
+    """
+    text = (owner_id or "").strip()
+    match = re.search(r"__(ws_[a-f0-9]{14})$", text)
+    return match.group(1) if match else "local-default"
+
+
+def assistant_row_id(workspace_id: str) -> str:
+    """Stable per-workspace assistant row id (one assistant per workspace).
+
+    Mirrors ``_legacy_sqlite._assistant_row_id`` so the lazily-upserted row and
+    the migration backfill row collide on the same id (idempotent).
+    """
+    ws = (workspace_id or "local-default").strip() or "local-default"
+    return f"workspace-agent:{ws}"
+
+
+class SqliteWorkspaceMemberRepository:
+    """Single-owner-degenerate WorkspaceMemberRepository for the OSS engine.
+
+    On the OSS engine each workspace has exactly one active owner (the local
+    user). ``list`` returns that one owner row; mutations that don't apply to a
+    single-owner workspace (invite/set_role/remove others) are no-ops or raise so
+    the same API surface renders identically to Cloud without forking the UI.
+    """
+
+    _cols = (
+        "workspace_id, user_id, email, display_name, role, status, "
+        "invited_by, created_at, updated_at"
+    )
+
+    def list(self, *, workspace_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {self._cols} FROM workspace_members
+                WHERE workspace_id = ? AND status != 'removed'
+                ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
+                         created_at
+                """,
+                (workspace_id,),
+            ).fetchall()
+        return [_row_dict(r) for r in rows]
+
+    def get(self, *, workspace_id: str, user_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT {self._cols} FROM workspace_members "
+                "WHERE workspace_id = ? AND user_id = ? LIMIT 1",
+                (workspace_id, user_id),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def _owner(self, conn: sqlite3.Connection, workspace_id: str) -> sqlite3.Row | None:
+        return conn.execute(
+            "SELECT user_id FROM workspace_members "
+            "WHERE workspace_id = ? AND role = 'owner' AND status = 'active' LIMIT 1",
+            (workspace_id,),
+        ).fetchone()
+
+    def _assert_owner_or_admin(self, conn: sqlite3.Connection, workspace_id: str, actor_id: str) -> str:
+        row = conn.execute(
+            "SELECT role FROM workspace_members "
+            "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+            (workspace_id, actor_id),
+        ).fetchone()
+        role = row["role"] if row else None
+        if role not in {"owner", "admin"}:
+            raise PermissionError("actor is not an owner or admin of this workspace")
+        return role
+
+    def invite(self, *, workspace_id: str, email: str, role: str, invited_by: str) -> dict[str, Any]:
+        if role not in MEMBER_ROLES:
+            raise ValueError(f"invalid role {role!r}")
+        if role == "owner":
+            raise ValueError("cannot invite a second owner; use transfer_owner")
+        now = now_iso()
+        # user_id is unknown until the invitee accepts; on the OSS engine we key
+        # the invited row by the email so the row is unique and acceptable later.
+        user_id = f"invite:{email.strip().lower()}"
+        with get_db() as conn:
+            self._assert_owner_or_admin(conn, workspace_id, invited_by)
+            conn.execute(
+                """
+                INSERT INTO workspace_members
+                    (workspace_id, user_id, email, display_name, role, status,
+                     invited_by, created_at, updated_at)
+                VALUES (?, ?, ?, NULL, ?, 'invited', ?, ?, ?)
+                ON CONFLICT(workspace_id, user_id) DO UPDATE SET
+                    role = excluded.role, status = 'invited',
+                    invited_by = excluded.invited_by, updated_at = excluded.updated_at
+                """,
+                (workspace_id, user_id, email.strip(), role, invited_by, now, now),
+            )
+        member = self.get(workspace_id=workspace_id, user_id=user_id)
+        if member is None:
+            raise RuntimeError("failed to invite member")
+        return member
+
+    def set_role(self, *, workspace_id: str, actor_id: str, user_id: str, role: str) -> dict[str, Any] | None:
+        if role not in MEMBER_ROLES or role == "owner":
+            raise ValueError("set_role only supports 'admin' or 'member'; use transfer_owner for owner")
+        with get_db() as conn:
+            owner = self._owner(conn, workspace_id)
+            if owner is None or owner["user_id"] != actor_id:
+                raise PermissionError("only the workspace owner can change roles")
+            if user_id == actor_id:
+                raise ValueError("owner cannot change their own role; use transfer_owner")
+            cursor = conn.execute(
+                "UPDATE workspace_members SET role = ?, updated_at = ? "
+                "WHERE workspace_id = ? AND user_id = ? AND role != 'owner'",
+                (role, now_iso(), workspace_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get(workspace_id=workspace_id, user_id=user_id)
+
+    def remove(self, *, workspace_id: str, actor_id: str, user_id: str) -> bool:
+        with get_db() as conn:
+            actor_role = self._assert_owner_or_admin(conn, workspace_id, actor_id)
+            target = conn.execute(
+                "SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ? LIMIT 1",
+                (workspace_id, user_id),
+            ).fetchone()
+            if target is None:
+                return False
+            if target["role"] == "owner":
+                raise PermissionError("cannot remove the workspace owner; transfer ownership first")
+            if actor_role == "admin" and target["role"] == "admin":
+                raise PermissionError("admins can only remove members, not other admins")
+            cursor = conn.execute(
+                "UPDATE workspace_members SET status = 'removed', updated_at = ? "
+                "WHERE workspace_id = ? AND user_id = ?",
+                (now_iso(), workspace_id, user_id),
+            )
+        return cursor.rowcount > 0
+
+    def transfer_owner(self, *, workspace_id: str, actor_id: str, new_owner_id: str) -> dict[str, Any]:
+        with get_db() as conn:
+            owner = self._owner(conn, workspace_id)
+            if owner is None or owner["user_id"] != actor_id:
+                raise PermissionError("only the current owner can transfer ownership")
+            target = conn.execute(
+                "SELECT user_id FROM workspace_members "
+                "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+                (workspace_id, new_owner_id),
+            ).fetchone()
+            if target is None:
+                raise ValueError("new owner must be an active member of the workspace")
+            now = now_iso()
+            # Demote current owner to admin, then promote the target. The partial
+            # unique index forbids two active owners, so demote first.
+            conn.execute(
+                "UPDATE workspace_members SET role = 'admin', updated_at = ? "
+                "WHERE workspace_id = ? AND user_id = ?",
+                (now, workspace_id, actor_id),
+            )
+            conn.execute(
+                "UPDATE workspace_members SET role = 'owner', updated_at = ? "
+                "WHERE workspace_id = ? AND user_id = ?",
+                (now, workspace_id, new_owner_id),
+            )
+        member = self.get(workspace_id=workspace_id, user_id=new_owner_id)
+        if member is None:
+            raise RuntimeError("failed to transfer ownership")
+        return member
+
+
+class SqliteAssetAccessRepository:
+    """Per-asset visibility + computed permission resolution for the OSS engine.
+
+    ``get_permissions`` combines the asset's owner_id + visibility with the
+    requesting user's workspace role. The OSS single-owner case: the local user
+    is the owner of their own assets, so every permission is granted; a private
+    asset they do not own is invisible (no permissions). The same logic is the
+    multi-member-correct rule, so Cloud's RLS mirrors it without a fork.
+    """
+
+    def _asset_row(self, conn: sqlite3.Connection, asset_type: str, asset_id: str) -> sqlite3.Row | None:
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        return conn.execute(
+            f"SELECT id, owner_id, workspace_id, visibility FROM {table} WHERE id = ? LIMIT 1",
+            (asset_id,),
+        ).fetchone()
+
+    def ensure_brain_pack(
+        self,
+        *,
+        pack_id: str,
+        workspace_id: str,
+        owner_id: str,
+        name: str | None = None,
+        default_visibility: str = "private",
+    ) -> dict[str, Any]:
+        """Lazily upsert the access-control mirror row for a brain pack.
+
+        Brain packs are filesystem dirs; their owner lives in the per-workspace
+        ``.workeros-contexts.json``. The first time the API needs visibility for a
+        pack it calls this so a row exists for ``get_permissions``/``set_visibility``.
+        Idempotent: never downgrades an existing visibility, only refreshes
+        owner/name/workspace. Returns the current row.
+        """
+        if default_visibility not in VISIBILITY_VALUES:
+            default_visibility = "private"
+        now = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO brain_packs
+                    (id, workspace_id, owner_id, visibility, name,
+                     metadata_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, '{}', ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    workspace_id = excluded.workspace_id,
+                    owner_id = excluded.owner_id,
+                    name = excluded.name,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    pack_id,
+                    workspace_id,
+                    owner_id,
+                    default_visibility,
+                    name or pack_id,
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id, owner_id, workspace_id, visibility FROM brain_packs WHERE id = ?",
+                (pack_id,),
+            ).fetchone()
+        return _row_dict(row) if row else {}
+
+    def ensure_assistant(
+        self,
+        *,
+        assistant_id: str,
+        workspace_id: str,
+        owner_id: str,
+        name: str = "Workspace assistant",
+        default_visibility: str = "workspace",
+    ) -> dict[str, Any]:
+        """Lazily upsert the access-control mirror row for the workspace assistant.
+
+        The assistant is a single shared workspace tool (``workspace`` default).
+        Idempotent: never downgrades visibility; refreshes owner/workspace/name.
+        """
+        if default_visibility not in VISIBILITY_VALUES:
+            default_visibility = "workspace"
+        now = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO assistants
+                    (id, workspace_id, owner_id, visibility, name,
+                     config_json, instructions_md, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, '{}', NULL, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    workspace_id = excluded.workspace_id,
+                    owner_id = excluded.owner_id,
+                    name = excluded.name,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    assistant_id,
+                    workspace_id,
+                    owner_id,
+                    default_visibility,
+                    name,
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id, owner_id, workspace_id, visibility FROM assistants WHERE id = ?",
+                (assistant_id,),
+            ).fetchone()
+        return _row_dict(row) if row else {}
+
+    def _role(self, conn: sqlite3.Connection, workspace_id: str, user_id: str) -> str | None:
+        row = conn.execute(
+            "SELECT role FROM workspace_members "
+            "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+            (workspace_id, user_id),
+        ).fetchone()
+        return row["role"] if row else None
+
+    @staticmethod
+    def _compute(
+        *, owner_id: str | None, visibility: str, role: str | None, user_id: str
+    ) -> dict[str, Any]:
+        is_owner = bool(owner_id) and owner_id == user_id
+        is_admin = role in {"owner", "admin"}
+        is_member = role in {"owner", "admin", "member"}
+        shared = visibility == "workspace"
+        # Discoverability gate: a private asset is visible only to its owner.
+        can_view = is_owner or (shared and is_member)
+        return {
+            "owner_id": owner_id,
+            "visibility": visibility,
+            "is_owner": is_owner,
+            "role": role,
+            "can_view": can_view,
+            # Owner edits/deletes/shares their own asset; an owner/admin may also
+            # edit/delete a workspace-shared asset owned by someone else.
+            "can_edit": is_owner or (shared and is_admin),
+            "can_delete": is_owner or (shared and is_admin),
+            "can_run": can_view,
+            "can_share": is_owner or is_admin,
+        }
+
+    def get_permissions(
+        self, *, workspace_id: str, user_id: str, asset_type: str, asset_id: str
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            asset = self._asset_row(conn, asset_type, asset_id)
+            if asset is None:
+                return self._compute(owner_id=None, visibility="private", role=None, user_id=user_id)
+            role = self._role(conn, asset["workspace_id"] or workspace_id, user_id)
+        visibility = asset["visibility"] or "private"
+        return self._compute(
+            owner_id=asset["owner_id"], visibility=visibility, role=role, user_id=user_id
+        )
+
+    def set_visibility(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, visibility: str
+    ) -> dict[str, Any] | None:
+        if visibility not in VISIBILITY_VALUES:
+            raise ValueError(f"invalid visibility {visibility!r}")
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        with get_db() as conn:
+            asset = self._asset_row(conn, asset_type, asset_id)
+            if asset is None:
+                return None
+            role = self._role(conn, asset["workspace_id"] or workspace_id, actor_id)
+            perms = self._compute(
+                owner_id=asset["owner_id"],
+                visibility=asset["visibility"] or "private",
+                role=role,
+                user_id=actor_id,
+            )
+            if not perms["can_share"]:
+                raise PermissionError("only the asset owner or a workspace admin can change visibility")
+            conn.execute(
+                f"UPDATE {table} SET visibility = ? WHERE id = ?",
+                (visibility, asset_id),
+            )
+        return self.get_permissions(
+            workspace_id=workspace_id, user_id=actor_id, asset_type=asset_type, asset_id=asset_id
+        )
+
+    def transfer_asset_owner(
+        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, new_owner_id: str
+    ) -> dict[str, Any] | None:
+        table = _ASSET_TABLES.get(asset_type)
+        if table is None:
+            raise ValueError(f"unsupported asset_type {asset_type!r}")
+        with get_db() as conn:
+            asset = self._asset_row(conn, asset_type, asset_id)
+            if asset is None:
+                return None
+            role = self._role(conn, asset["workspace_id"] or workspace_id, actor_id)
+            is_owner = asset["owner_id"] == actor_id
+            if not (is_owner or role in {"owner", "admin"}):
+                raise PermissionError("only the asset owner or a workspace admin can transfer the asset")
+            conn.execute(
+                f"UPDATE {table} SET owner_id = ? WHERE id = ?",
+                (new_owner_id, asset_id),
+            )
+        return self.get_permissions(
+            workspace_id=workspace_id, user_id=actor_id, asset_type=asset_type, asset_id=asset_id
+        )
+
+
+# ---------------------------------------------------------------------------
+# Multi-member: users, sessions, personal access tokens (migration 59)
+# ---------------------------------------------------------------------------
+
+
+class SqliteUserRepository:
+    """Local user accounts — created via POST /auth/setup or POST /users (admin)."""
+
+    def count(self) -> int:
+        with get_db() as conn:
+            row = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()
+        return int(row["cnt"] or 0) if row else 0
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        username: str,
+        display_name: str | None,
+        password_hash: str,
+        role: str,
+    ) -> dict[str, Any]:
+        created_at = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO users (id, username, display_name, password_hash, role, disabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (user_id, username, display_name, password_hash, role, created_at, created_at),
+            )
+        result = self.get(user_id=user_id)
+        if result is None:
+            raise RuntimeError(f"failed to create user {user_id}")
+        return result
+
+    def get(self, *, user_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, username, display_name, role, disabled, created_at, updated_at FROM users WHERE id = ? LIMIT 1",
+                (user_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def get_by_username(self, *, username: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, username, display_name, password_hash, role, disabled, created_at, updated_at FROM users WHERE username = ? LIMIT 1",
+                (username,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def list(self) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, username, display_name, role, disabled, created_at, updated_at FROM users ORDER BY created_at, id"
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def update(self, *, user_id: str, **fields: Any) -> dict[str, Any] | None:
+        allowed = {"display_name", "password_hash", "role", "disabled"}
+        updates: list[str] = []
+        params: list[Any] = []
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            updates.append(f"{key} = ?")
+            params.append(value)
+        if updates:
+            updates.append("updated_at = ?")
+            params.append(now_iso())
+            params.append(user_id)
+            with get_db() as conn:
+                conn.execute(
+                    f"UPDATE users SET {', '.join(updates)} WHERE id = ?",
+                    tuple(params),
+                )
+        return self.get(user_id=user_id)
+
+    def delete(self, *, user_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return cursor.rowcount > 0
+
+
+class SqlitePersonalAccessTokenRepository:
+    """Per-user PATs for API/MCP access — token values are never stored, only their SHA-256 hash."""
+
+    def create(
+        self,
+        *,
+        token_id: str,
+        user_id: str,
+        name: str,
+        token_hash: str,
+        expires_at: str | None,
+    ) -> dict[str, Any]:
+        created_at = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO personal_access_tokens (id, user_id, name, token_hash, last_used_at, created_at, expires_at)
+                VALUES (?, ?, ?, ?, NULL, ?, ?)
+                """,
+                (token_id, user_id, name, token_hash, created_at, expires_at),
+            )
+        return self._get(token_id=token_id)
+
+    def _get(self, *, token_id: str) -> dict[str, Any]:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, user_id, name, last_used_at, created_at, expires_at FROM personal_access_tokens WHERE id = ? LIMIT 1",
+                (token_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError(f"PAT {token_id} not found after insert")
+        return _row_dict(row)
+
+    def get_by_hash(self, *, token_hash: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT p.id, p.user_id, p.name, p.last_used_at, p.created_at, p.expires_at,
+                       u.username, u.role, u.disabled
+                FROM personal_access_tokens p
+                JOIN users u ON u.id = p.user_id
+                WHERE p.token_hash = ? LIMIT 1
+                """,
+                (token_hash,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def list(self, *, user_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, user_id, name, last_used_at, created_at, expires_at FROM personal_access_tokens WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def delete(self, *, token_id: str, user_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM personal_access_tokens WHERE id = ? AND user_id = ?",
+                (token_id, user_id),
+            )
+        return cursor.rowcount > 0
+
+    def touch_last_used(self, *, token_id: str, last_used_at: str) -> None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE personal_access_tokens SET last_used_at = ? WHERE id = ?",
+                (last_used_at, token_id),
+            )
+
+
+class SqliteUserSessionRepository:
+    """Server-side sessions for cookie-based auth — each session is a random UUID."""
+
+    def create(self, *, session_id: str, user_id: str, expires_at: str) -> dict[str, Any]:
+        created_at = now_iso()
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO user_sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+                (session_id, user_id, expires_at, created_at),
+            )
+        return {"id": session_id, "user_id": user_id, "expires_at": expires_at, "created_at": created_at}
+
+    def get(self, *, session_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT s.id, s.user_id, s.expires_at, s.created_at,
+                       u.username, u.role, u.disabled
+                FROM user_sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.id = ? LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def delete(self, *, session_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute("DELETE FROM user_sessions WHERE id = ?", (session_id,))
+        return cursor.rowcount > 0
+
+    def prune_expired(self, *, now_iso: str) -> int:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM user_sessions WHERE expires_at < ?",
+                (now_iso,),
+            )
+        return cursor.rowcount

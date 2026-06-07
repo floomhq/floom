@@ -5,7 +5,7 @@ title: Research Brief
 description: Generates a markdown research brief on any topic.
 long_description: |
   Produces a structured markdown research brief from a topic, audience, and depth setting. It is useful for quick market scans, product diligence, and internal prep where the output needs to be readable as a memo.
-  Live web search is not currently available in the agent runtime. The worker relies on provided inputs, local bundle files, and model knowledge, and it must qualify cutoff-sensitive claims.
+  The worker can search the live web for fresh facts in addition to provided inputs, local bundle files, and model knowledge, and it qualifies any claim it cannot verify.
 use_cases:
 - Prepare an executive summary before a client or investor call.
 - Draft a technical landscape overview for a DevX topic.

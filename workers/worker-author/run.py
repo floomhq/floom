@@ -1,20 +1,104 @@
 """Worker Author — generates Workeros worker bundles from natural-language prompts.
 
-This worker runs in an E2B sandbox. The worker-author-style context is mounted
-at context/worker-author-style/ inside the sandbox working directory.
+This worker runs in an E2B sandbox as a pure-script worker. The E2B driver
+executes ``python run.py`` and reads back ``result.json`` (schema
+``{"status", "outputs", "error"}``). The worker-author-style context is mounted
+at ``context/worker-author-style/`` inside the sandbox working directory.
 
-The worker calls the Workeros API (via the platform's OPENAI_API_KEY) to generate
-a valid worker.yml + SKILL.md or run.py bundle, validates the YAML, and writes
-the result as a JSON bundle to out/bundle.json.
+Protocol (matches the E2B pure-script contract, e.g. gmail_intake_brief):
+  1. Read inputs from ``inputs.json``.
+  2. Load secrets from ``.env.local`` (python-dotenv) — OPENAI_API_KEY ships here
+     because worker.yml declares ``exec.secrets: [OPENAI_API_KEY]``.
+  3. Call OpenAI to draft worker.yml + SKILL.md / run.py, validate the YAML.
+  4. Write the bundle to ``out/bundle.json``.
+  5. Write ``result.json`` with ``{"status", "outputs": {"bundle": "out/bundle.json"},
+     "artifacts": [...]}`` so the driver surfaces the result to the UI.
+
+Earlier this file defined a ``run(inputs, context)`` function that was never
+invoked under ``python run.py`` (no ``__main__`` block) and wrote out/bundle.json
+but never result.json — so every run failed with error_code=missing_result.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(".env.local")
+except ImportError:
+    pass  # dotenv optional; OPENAI_API_KEY may already be in os.environ
+
+
+# ---------------------------------------------------------------------------
+# Code-generation model (kept in sync with apps/api/codegen_model.py).
+# This worker runs in an E2B sandbox and cannot import the API module, so the
+# strong default + the gpt-5.x param handling are duplicated here intentionally.
+# Override with the WORKEROS_CODEGEN_MODEL env var (passed into the sandbox).
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CODEGEN_MODEL = "gpt-5.1"
+
+
+def _codegen_model() -> str:
+    return (os.environ.get("WORKEROS_CODEGEN_MODEL") or "").strip() or _DEFAULT_CODEGEN_MODEL
+
+
+def _codegen_chat(
+    client: Any,
+    *,
+    messages: list,
+    max_output_tokens: int,
+    temperature: float = 0.2,
+    response_format: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """chat.completions.create with the codegen model, param-compatible across
+    gpt-4 (max_tokens) and gpt-5.x/o-series (max_completion_tokens) families."""
+    model = _codegen_model()
+    ml = model.lower()
+    token_kwarg = (
+        "max_completion_tokens"
+        if ml.startswith(("gpt-5", "o1", "o3", "o4"))
+        else "max_tokens"
+    )
+
+    def _create(token_param: str, *, include_temperature: bool = True) -> Any:
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            token_param: max_output_tokens,
+        }
+        if include_temperature:
+            kwargs["temperature"] = temperature
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        return client.chat.completions.create(**kwargs)
+
+    try:
+        return _create(token_kwarg)
+    except Exception as exc:  # noqa: BLE001 - retry once on the param-name 400
+        msg = str(exc).lower()
+        if "max_completion_tokens" in msg and token_kwarg == "max_tokens":
+            return _create("max_completion_tokens")
+        if "max_tokens" in msg and token_kwarg == "max_completion_tokens":
+            return _create("max_tokens")
+        if (
+            "temperature" in msg
+            and (
+                "unsupported" in msg
+                or "does not support" in msg
+                or "only the default" in msg
+                or "only temperature=1" in msg
+            )
+        ):
+            return _create(token_kwarg, include_temperature=False)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +175,131 @@ def _validate_worker_yml(yml_string: str) -> Optional[str]:
         return f"YAML parse error: {exc}"
 
 
+def _load_manifest(yml_string: str) -> Optional[Dict[str, Any]]:
+    try:
+        import yaml as pyyaml
+
+        parsed = pyyaml.safe_load(yml_string)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _exec_block(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    block = manifest.get("exec")
+    return block if isinstance(block, dict) else {}
+
+
+def _entry(manifest: Dict[str, Any]) -> str:
+    exec_block = _exec_block(manifest)
+    return str(exec_block.get("entry") or exec_block.get("entrypoint") or manifest.get("entrypoint") or "").strip()
+
+
+def _trigger_types(manifest: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    triggers = manifest.get("triggers")
+    if isinstance(triggers, list):
+        for item in triggers:
+            if isinstance(item, dict):
+                out.append(str(item.get("type") or "manual").strip().lower())
+    trigger = manifest.get("trigger")
+    if isinstance(trigger, dict):
+        out.append(str(trigger.get("type") or "manual").strip().lower())
+    return [("schedule" if t in {"cron", "scheduled"} else t) for t in out if t]
+
+
+_SCHEDULE_INTENT_RE = re.compile(
+    r"\b("
+    r"cron|schedule|scheduled|every|daily|weekly|monthly|hourly|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"morning|afternoon|evening|night|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _prompt_requests_schedule(prompt: str) -> bool:
+    return bool(_SCHEDULE_INTENT_RE.search(prompt or ""))
+
+
+_PLACEHOLDER_CODE_MARKERS = (
+    "replace with the real output",
+    "TODO",
+    "pass  #",
+    "NotImplementedError",
+    "_write_result(\"success\", outputs={\"result\": result_value})",
+    "_write_result('success', outputs={'result': result_value})",
+)
+
+
+def _declared_output_names(manifest: Dict[str, Any]) -> List[str]:
+    exec_block = _exec_block(manifest)
+    raw_outputs = exec_block.get("outputs")
+    if not isinstance(raw_outputs, list):
+        raw_outputs = manifest.get("outputs")
+    if not isinstance(raw_outputs, list):
+        return []
+    names: List[str] = []
+    for item in raw_outputs:
+        if isinstance(item, dict) and item.get("name"):
+            names.append(str(item["name"]))
+    return names
+
+
+def _validate_generated_bundle(parsed: Dict[str, Any], prompt: str) -> Optional[str]:
+    """Reject valid-looking bundles that cannot become useful workers.
+
+    The YAML validator only checks shape. This gate checks generation intent:
+    no accidental schedule trigger, script-mode workers must include real
+    executable code, and agent-mode workers must include a real SKILL.md.
+    """
+    worker_yml = parsed.get("worker_yml")
+    if not isinstance(worker_yml, str) or not worker_yml.strip():
+        return "worker_yml is empty"
+
+    yaml_error = _validate_worker_yml(worker_yml)
+    if yaml_error:
+        return yaml_error
+
+    manifest = _load_manifest(worker_yml)
+    if not manifest:
+        return "worker_yml must be a YAML mapping"
+
+    trigger_types = _trigger_types(manifest)
+    if any(t == "schedule" for t in trigger_types) and not _prompt_requests_schedule(prompt):
+        return (
+            "trigger.type is schedule, but the prompt did not request a schedule. "
+            "Use trigger.type: manual unless the operator explicitly asks for recurring execution."
+        )
+
+    entry = _entry(manifest).lower()
+    if entry.endswith(".py"):
+        run_code = parsed.get("run_code")
+        if not isinstance(run_code, str) or not run_code.strip():
+            return "exec.entry is run.py, but run_code is empty"
+        try:
+            ast.parse(run_code)
+        except SyntaxError as exc:
+            return f"run_code is invalid Python: {exc}"
+        lower_code = run_code.lower()
+        for marker in _PLACEHOLDER_CODE_MARKERS:
+            if marker.lower() in lower_code:
+                return f"run_code still contains placeholder logic marker: {marker}"
+        output_names = _declared_output_names(manifest)
+        missing = [name for name in output_names if name not in run_code]
+        if missing:
+            return (
+                "run_code does not produce every declared output: "
+                + ", ".join(missing)
+            )
+    elif entry.endswith(".md"):
+        skill_md = parsed.get("skill_md")
+        if not isinstance(skill_md, str) or len(skill_md.strip()) < 40:
+            return "exec.entry is SKILL.md, but skill_md is empty or too thin"
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Prompt assembly
 # ---------------------------------------------------------------------------
@@ -111,11 +320,68 @@ Rules:
 - worker_yml must be schema_version 0.3, valid YAML (all strings double-quoted), exec.runner: "e2b"
 - Agent mode (entry: SKILL.md): set skill_md, leave run_code null
 - Script mode (entry: run.py): set run_code, leave skill_md null; always add exec.command
+
+Script-mode run.py rules (these EXACT mistakes crash generated workers — never make them):
+- Use ONLY the Python standard library unless you ALSO list the package in
+  requirements_txt. NEVER `import dotenv` / `from dotenv import ...` (it is NOT
+  preinstalled -> ModuleNotFoundError). Read secrets from os.environ with a
+  secrets.json fallback (see the template's _load_secrets helper).
+- import EVERY module you reference (os, json, csv, io, re, statistics, ...).
+- Write result.json to the WORKING DIRECTORY ("result.json"), NEVER "out/result.json".
+- Write output files under out/; map each declared output to its out/ path.
+- Read scalar inputs as literal values. A FILE input's value IS already the
+  relative path (e.g. "inputs/csv_file"); open(inputs["x"]) directly — NEVER
+  os.path.join("inputs", inputs["x"]) (double-prepending inputs/ is a top crash).
+- End with `if __name__ == "__main__": main()`.
+- If you `import requests`/`openai`/any third-party lib, requirements_txt MUST list it.
+- IMPLEMENT EVERY DECLARED OUTPUT FULLY: if the prompt asks for several things
+  (e.g. word count AND sentence count AND average word length), declare an output
+  for each and compute ALL of them in run.py. A worker that returns only the first
+  is an under-implemented no-op. Don't under-deliver vs the prompt.
 - name must be lowercase hyphens/digits, 3-64 chars, unique (avoid the IDs listed below)
 - is_example must be false
 - system_worker must be false or absent
 - trigger.type: "manual" unless the prompt explicitly describes a schedule or webhook
+- if you include "use_cases", it MUST contain EXACTLY 3 to 5 short items; otherwise omit the field entirely
+- if you include "tags", it MUST contain 8 or fewer flat (no "/") non-empty strings; otherwise omit it
 - KISS and YAGNI: the smallest bundle that does exactly what was described
+
+Output media_type rule for worker.yml (CRITICAL — wrong media_type makes a correct worker look broken):
+- For a structured/JSON result (e.g. stats like {"min":1,"max":9,"mean":5}, parsed
+  records, key-value summaries, any object/array the worker writes via json.dumps),
+  the output MUST declare media_type: "application/json" and a path under out/
+  (e.g. path: "out/<name>.json"). The validator gates JSON outputs on
+  parseability, not size, so a small valid JSON document passes; declaring it as
+  text/* would wrongly fail it against a byte floor.
+- For prose/markdown/CSV results, use the matching text media_type
+  (text/markdown, text/plain, text/csv) and a path under out/.
+
+Input-path rule for worker.yml (CRITICAL — gets workers wrong constantly):
+- SCALAR inputs (type: string | textarea | number | boolean | select | url):
+  use kind: "scalar" and NO `path:` field. The value is passed inline.
+- FILE inputs (an uploaded file): use kind: "file" and path: "inputs/<name>"
+  where <name> is the input's own name. The value the worker reads is that
+  relative path; open() it to get the bytes.
+
+example_input rule for worker.yml (so the worker is ONE-CLICK runnable from the
+"Fill with sample input" button — non-technical users never hand-craft a file):
+- ALWAYS include an `example_input:` block covering EVERY input the worker
+  declares, scalar AND file.
+- For a FILE input, the example_input value MUST be the file's INLINE TEXT
+  CONTENT as a string (e.g. a small CSV like "name\nalice\nbob\n"), NOT a path
+  and NOT a placeholder. The UI synthesizes a real uploaded file from this
+  string so the operator can run the worker immediately with no manual upload.
+- sample_input_json MUST mirror the same realistic values (file inputs as their
+  inline text content), so the smoke run and the UI sample agree.
+
+run.py rule (CRITICAL — most generated script workers crash on first run):
+- The run_code you emit MUST follow the canonical contract shown below EXACTLY:
+  read inputs.json, distinguish scalar (literal) vs file (relative path under
+  inputs/) inputs, import EVERY module you reference (os, json, csv, io, re,
+  statistics, ...), write output files under out/, and write result.json with
+  {"status","outputs","artifacts","error?"} on BOTH the success and error
+  paths, ending with `if __name__ == "__main__": main()`. A missing `import`
+  or a missing result.json is the #1 cause of a worker failing its first run.
 """
 
 
@@ -128,6 +394,7 @@ def _build_messages(
     context_style: Optional[str],
     context_anti_patterns: Optional[str],
     example_files: List[tuple[str, str]],
+    run_py_template: Optional[str] = None,
 ) -> list[dict]:
     system_parts = [SYSTEM_PROMPT_HEADER]
 
@@ -139,6 +406,20 @@ def _build_messages(
 
     if context_schema:
         system_parts.append(f"\n## Schema reference\n{context_schema[:3000]}")
+
+    if run_py_template:
+        # The canonical, copy-pasteable run.py contract. For SCRIPT-mode workers
+        # the emitted run_code MUST follow this verbatim. This is the single
+        # source of truth (contexts/worker-author-style/RUN_PY_TEMPLATE.py).
+        system_parts.append(
+            "\n## Canonical run.py contract (script mode — follow EXACTLY)\n"
+            "When entry is run.py, your run_code MUST match the contract in this "
+            "template: read inputs.json, treat scalar inputs as literal values and "
+            "file inputs as relative paths under inputs/, import every module you "
+            "use, write outputs under out/, and write result.json on success AND "
+            "error. Do not deviate.\n"
+            f"```python\n{run_py_template[:9000]}\n```"
+        )
 
     if context_style:
         system_parts.append(f"\n## Style conventions\n{context_style[:2000]}")
@@ -166,10 +447,26 @@ def _build_messages(
 
 
 # ---------------------------------------------------------------------------
-# Main entry
+# Generation logic
 # ---------------------------------------------------------------------------
 
-def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _stdout_log(msg: str, **kwargs: Any) -> None:
+    """Default logger: print to stdout so the E2B driver streams it to the
+    run's SSE log (the GeneratingPanel reads these lines)."""
+    level = kwargs.get("level", "info")
+    print(f"[{level}] {msg}", flush=True)
+
+
+def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
+    """Draft a worker bundle from the prompt. Returns the bundle dict.
+
+    Raises ValueError for a missing prompt and RuntimeError if OPENAI_API_KEY
+    is not available. A bundle whose YAML failed validation after all retries
+    is still returned (with a ``bundle["error"]`` key) so the operator can fix
+    it in the editor rather than seeing a hard failure.
+    """
+    log = log or _stdout_log
+    started_at = time.perf_counter()
     prompt = str(inputs.get("prompt") or "").strip()
     mode = str(inputs.get("mode") or "draft").strip()
     parent_worker_id = str(inputs.get("parent_worker_id") or "").strip() or None
@@ -177,12 +474,12 @@ def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if not prompt:
         raise ValueError("prompt is required")
 
-    log = getattr(context, "log", None) or (lambda msg, **_: None)
-
+    stage_at = time.perf_counter()
     log("worker-author: reading style context")
     schema_md = _read_context_file("worker-author-style", "SCHEMA.md")
     style_md = _read_context_file("worker-author-style", "STYLE.md")
     anti_patterns_md = _read_context_file("worker-author-style", "ANTI-PATTERNS.md")
+    run_py_template = _read_context_file("worker-author-style", "RUN_PY_TEMPLATE.py")
     example_filenames = _list_context_dir("worker-author-style", "EXAMPLES")
 
     example_files: list[tuple[str, str]] = []
@@ -190,10 +487,14 @@ def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
         content = _read_context_file("worker-author-style", f"EXAMPLES/{fname}")
         if content:
             example_files.append((fname, content))
+    log(f"worker-author: style context read in {time.perf_counter() - stage_at:.2f}s")
 
+    stage_at = time.perf_counter()
     log("worker-author: listing existing workers")
     existing_ids = _read_existing_workers()
+    log(f"worker-author: existing worker scan took {time.perf_counter() - stage_at:.2f}s")
 
+    stage_at = time.perf_counter()
     log(f"worker-author: building prompt (mode={mode})")
     messages = _build_messages(
         prompt=prompt,
@@ -204,7 +505,9 @@ def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
         context_style=style_md,
         context_anti_patterns=anti_patterns_md,
         example_files=example_files,
+        run_py_template=run_py_template,
     )
+    log(f"worker-author: prompt assembled in {time.perf_counter() - stage_at:.2f}s")
 
     # Call OpenAI
     openai_key = os.environ.get("OPENAI_API_KEY", "")
@@ -214,8 +517,8 @@ def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
     from openai import OpenAI  # type: ignore
     client = OpenAI(api_key=openai_key)
 
-    log("worker-author: calling LLM")
-    max_attempts = 3
+    log(f"worker-author: calling LLM (model={_codegen_model()})")
+    max_attempts = 2
     parsed: Dict[str, Any] = {}
     last_error: Optional[str] = None
 
@@ -231,12 +534,17 @@ def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 ),
             })
 
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=call_messages,  # type: ignore
+        attempt_started_at = time.perf_counter()
+        resp = _codegen_chat(
+            client,
+            messages=call_messages,
             temperature=0.2,
-            max_tokens=4000,
+            max_output_tokens=8000,
             response_format={"type": "json_object"},
+        )
+        log(
+            f"worker-author: LLM attempt {attempt}/{max_attempts} took "
+            f"{time.perf_counter() - attempt_started_at:.2f}s"
         )
         raw = resp.choices[0].message.content or ""
 
@@ -253,7 +561,7 @@ def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
             log(f"worker-author: attempt {attempt} empty worker_yml", level="warning")
             continue
 
-        validation_error = _validate_worker_yml(worker_yml)
+        validation_error = _validate_generated_bundle(parsed, prompt)
         if validation_error:
             last_error = validation_error
             log(f"worker-author: attempt {attempt} validation failed: {validation_error}", level="warning")
@@ -280,10 +588,64 @@ def run(inputs: Dict[str, Any], context: Any) -> Dict[str, Any]:
     else:
         log(f"worker-author: bundle valid, suggested_id={bundle['suggested_id']!r}")
 
-    # Write output
+    log(f"worker-author: total generation time {time.perf_counter() - started_at:.2f}s")
+    return bundle
+
+
+# ---------------------------------------------------------------------------
+# E2B pure-script entry: read inputs.json, write result.json
+# ---------------------------------------------------------------------------
+
+def _write_error(error: str) -> None:
+    Path("result.json").write_text(
+        json.dumps({"status": "error", "error": error}), encoding="utf-8"
+    )
+
+
+def main() -> None:
+    try:
+        inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+        if not isinstance(inputs, dict):
+            inputs = {}
+    except FileNotFoundError:
+        _write_error("inputs.json not found in sandbox working directory")
+        return
+    except json.JSONDecodeError as exc:
+        _write_error(f"inputs.json is not valid JSON: {exc}")
+        return
+
+    try:
+        bundle = generate_bundle(inputs, log=_stdout_log)
+    except ValueError as exc:
+        _write_error(str(exc))
+        return
+    except RuntimeError as exc:
+        # OPENAI_API_KEY missing or other hard runtime failure.
+        _write_error(str(exc))
+        return
+    except Exception as exc:  # pragma: no cover - defensive
+        _write_error(f"worker-author failed: {exc}")
+        return
+
+    # Write the bundle artifact + result.json with the declared output.
     os.makedirs("out", exist_ok=True)
     bundle_json = json.dumps(bundle, ensure_ascii=False, indent=2)
     Path("out/bundle.json").write_text(bundle_json, encoding="utf-8")
 
-    log("worker-author: done")
-    return {"bundle": bundle_json}
+    result = {
+        "status": "success",
+        "outputs": {"bundle": "out/bundle.json"},
+        "artifacts": [
+            {
+                "name": "bundle.json",
+                "relative_path": "out/bundle.json",
+                "type": "application/json",
+            }
+        ],
+    }
+    Path("result.json").write_text(json.dumps(result), encoding="utf-8")
+    _stdout_log("worker-author: done")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,66 @@
+schema_version: "0.3"
+is_example: true
+name: "slack-listener"
+title: "Slack Listener (@floom mentions)"
+description: "Polls for @floom mentions in a configured Slack channel, forwards each message to the workspace agent via /chat, and posts the reply in thread."
+long_description: |
+  Cron-driven v0 adapter that connects Slack to the Workeros workspace agent.
+
+  When triggered, it:
+  1. Fetches recent @floom mentions from the configured Slack channel.
+  2. For each unprocessed mention, calls POST /chat with the message text
+     and an optional conversation_id (keyed by Slack thread_ts).
+  3. Streams the workspace agent reply and posts it back to the Slack thread.
+
+  Upgrade path: replace cron trigger with a Slack webhook/Composio event trigger
+  once the workspace exposes a webhook receiver.
+use_cases:
+  - Embed the workspace agent in Slack so team members can query workers via DM or channel.
+  - Route Slack @floom mentions to the workspace agent for ops triage.
+  - Keep Slack thread follow-ups attached to the matching workspace conversation.
+example_input:
+  channel: "C01234567"
+  lookback_minutes: 10
+folder: "Examples"
+tags:
+  - "example"
+  - "slack"
+  - "chat-adapter"
+version: "0.1.0"
+entrypoint: "run.py"
+limits:
+  max_tool_iterations: 10
+  max_output_tokens: 2048
+  max_total_tokens: 50000
+  timeout_seconds: 120
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runtime: "python311"
+  runner: "local"
+  inputs:
+    - name: "channel"
+      kind: "scalar"
+      type: "string"
+      required: false
+      label: "Slack channel ID"
+      placeholder: "Defaults to SLACK_LISTENER_CHANNEL_ID"
+    - name: "lookback_minutes"
+      kind: "scalar"
+      type: "number"
+      required: false
+      label: "How far back to look (minutes)"
+      default: 10
+  outputs:
+    - name: "summary"
+      type: "markdown"
+      required: true
+      label: "Processing summary"
+trigger:
+  type: "cron"
+  cron: "*/10 * * * *"
+secrets:
+  - SLACK_BOT_TOKEN
+  - WORKEROS_API_SECRET
+  - WORKEROS_API_BASE
+connections: []

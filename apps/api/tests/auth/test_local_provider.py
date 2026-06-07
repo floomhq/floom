@@ -80,6 +80,18 @@ def test_wrong_secret_returns_401(monkeypatch):
     assert exc_info.value.detail == "unauthorized"
 
 
+def test_trailing_space_secret_returns_401(monkeypatch):
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret")
+
+    provider = SharedSecretAuthProvider()
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(provider.verify(_request({"x-floom-secret": "test-secret "})))
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "unauthorized"
+
+
 def test_compare_digest_is_used(monkeypatch):
     monkeypatch.setenv("FLOOM_SECRET", "test-secret")
     compare_digest = Mock(return_value=True)
@@ -88,5 +100,5 @@ def test_compare_digest_is_used(monkeypatch):
     provider = SharedSecretAuthProvider()
     ctx = asyncio.run(provider.verify(_request({"x-floom-secret": "test-secret"})))
 
-    compare_digest.assert_called_once_with("test-secret", "test-secret")
+    compare_digest.assert_called_once_with(b"test-secret", b"test-secret")
     assert ctx.user_id == "federico"

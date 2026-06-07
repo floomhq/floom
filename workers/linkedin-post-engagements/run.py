@@ -103,7 +103,10 @@ def build_snapshot(profile_url: str, new_posts: list[dict], new_engagers: list[d
     now = datetime.now(timezone.utc).isoformat()
     engagers_by_post: dict[str, list[dict]] = {}
     for e in new_engagers:
-        engagers_by_post.setdefault(e["post_Link"], []).append(e)
+        post_link = e.get("post_Link") or e.get("postLink") or e.get("post_url") or e.get("url")
+        if not post_link:
+            continue
+        engagers_by_post.setdefault(post_link, []).append(e)
 
     posts = []
     for post in new_posts:

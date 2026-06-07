@@ -1,4 +1,8 @@
 schema_version: "0.3"
+# Internal runtime-proof artifact, not an operator-facing business worker.
+# Marked system_worker so it is hidden from /workers and the overview catalog
+# (same treatment as workspace-agent / worker-author).
+system_worker: true
 is_example: true
 name: node-smoke-test
 title: Node Smoke Test
@@ -10,6 +14,7 @@ long_description: |
 use_cases:
 - Smoke-test the Node runtime + npm install path on Workeros.
 - Verify after backend changes that pure-script Node workers still work.
+- Run as a quick sanity check that the E2B sandbox is reachable and healthy.
 folder: Operations
 tags:
 - node

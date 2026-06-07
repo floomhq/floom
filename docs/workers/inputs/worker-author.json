@@ -1,0 +1,4 @@
+{
+  "prompt": "Every Monday morning, pull last week's GitHub PRs and send me a Slack summary",
+  "mode": "draft"
+}

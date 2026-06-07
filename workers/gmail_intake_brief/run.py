@@ -1,11 +1,12 @@
 """Gmail Intake Brief — E2B-native worker.
 
-Fetches recent emails via Composio Gmail integration and returns a markdown summary.
-Reads inputs.json and secrets from .env.local (python-dotenv), connections.json. Writes result.json.
-Falls back to secrets.json for backward-compat during transition period.
+Fetches recent emails via the Workeros Composio proxy and returns a markdown summary.
+Reads inputs.json and secrets from .env.local (python-dotenv), connections.json.
+Writes result.json.
 
 connections.json contains: {"gmail": "<composio_connection_id>"}
-.env.local contains: OPENAI_API_KEY=... COMPOSIO_API_KEY=...
+Calls POST https://workers-api.floom.dev/runs/{FLOOM_RUN_ID}/composio-execute/GMAIL_FETCH_EMAILS
+so COMPOSIO_API_KEY never needs to be in the sandbox.
 """
 
 from __future__ import annotations
@@ -17,7 +18,12 @@ try:
     from dotenv import load_dotenv
     load_dotenv(".env.local")
 except ImportError:
-    pass  # dotenv optional; secrets.json fallback covers transition
+    pass  # dotenv optional
+
+
+_WORKEROS_API = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev")
+_RUN_ID = os.environ.get("FLOOM_RUN_ID", "")
+_RUN_TOKEN = os.environ.get("WORKEROS_RUN_TOKEN", "")
 
 
 def _write_error(error: str) -> None:
@@ -25,20 +31,9 @@ def _write_error(error: str) -> None:
         json.dump({"status": "error", "error": error}, f)
 
 
-def _secrets_fallback() -> dict:
-    """Load secrets.json for backward-compat when dotenv import failed."""
-    try:
-        with open("secrets.json") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-
-
 def main():
     with open("inputs.json") as f:
         inputs = json.load(f)
-
-    _secrets_fb = _secrets_fallback()
 
     try:
         with open("connections.json") as f:
@@ -49,45 +44,52 @@ def main():
     query = str(inputs.get("query") or "is:unread").strip()
     max_results = int(inputs.get("max_results") or 5)
 
-    composio_api_key = os.environ.get("COMPOSIO_API_KEY") or _secrets_fb.get("COMPOSIO_API_KEY", "")
-    openai_api_key = os.environ.get("OPENAI_API_KEY") or _secrets_fb.get("OPENAI_API_KEY", "")
-
-    if not composio_api_key:
-        _write_error("COMPOSIO_API_KEY not set")
-        return
+    openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
 
     # Get the Gmail connection ID from connections.json
     gmail_conn_id = connections.get("gmail", "")
     if not gmail_conn_id:
-        _write_error("Gmail connection not found — ensure 'gmail' is in connections.json")
+        _write_error("Gmail connection not found — ensure 'gmail' is connected at /connections")
         return
 
-    emails = _fetch_emails(gmail_conn_id, composio_api_key, query, max_results)
+    if not _RUN_ID:
+        _write_error("FLOOM_RUN_ID not set — cannot call Composio proxy")
+        return
+
+    emails = _fetch_emails_via_proxy(gmail_conn_id, query, max_results)
 
     if not emails:
-        summary = f"No emails found for query `{query}`."
+        summary = f"## Gmail Brief — `{query}`\n\nNo emails matched the query. Your inbox is clear or no messages match the filter.\n\n---\n*Run completed at {__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}*"
     elif openai_api_key:
         summary = _summarize_with_openai(emails, openai_api_key, query)
     else:
         summary = _plain_summary(emails, query)
 
+    import os as _os
+    _os.makedirs("out", exist_ok=True)
+    with open("out/summary.md", "w") as f:
+        f.write(summary)
+
     result = {
         "status": "success",
-        "outputs": {"summary": summary},
-        "artifacts": [],
+        "outputs": {"summary": "out/summary.md"},
+        "artifacts": [{"name": "out/summary.md", "relative_path": "out/summary.md", "type": "text/markdown"}],
     }
     with open("result.json", "w") as f:
         json.dump(result, f)
 
 
-def _fetch_emails(conn_id: str, api_key: str, query: str, max_results: int) -> list:
-    """Fetch emails via Composio v3 tool execute endpoint (no SDK dependency)."""
+def _fetch_emails_via_proxy(conn_id: str, query: str, max_results: int) -> list:
+    """Fetch emails via the Workeros Composio proxy endpoint.
+
+    The proxy lives at POST /runs/{run_id}/composio-execute/GMAIL_FETCH_EMAILS
+    and uses the server-side COMPOSIO_API_KEY. The sandbox doesn't need it.
+    """
     import requests
 
-    url = "https://backend.composio.dev/api/v3/tools/execute/GMAIL_FETCH_EMAILS"
-    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    url = f"{_WORKEROS_API}/runs/{_RUN_ID}/composio-execute/GMAIL_FETCH_EMAILS"
     body = {
-        "user_id": "federico",
+        "connected_account_id": conn_id,
         "arguments": {
             "max_results": min(max_results, 50),
             "query": query,
@@ -95,9 +97,11 @@ def _fetch_emails(conn_id: str, api_key: str, query: str, max_results: int) -> l
         },
     }
     try:
-        r = requests.post(url, headers=headers, json=body, timeout=30)
+        run_headers = {"X-Workeros-Run-Token": _RUN_TOKEN} if _RUN_TOKEN else {}
+        r = requests.post(url, json=body, headers=run_headers, timeout=30)
         r.raise_for_status()
-        messages = (r.json().get("data") or {}).get("messages") or []
+        payload = r.json()
+        messages = (payload.get("data") or {}).get("messages") or []
         normalized = []
         for m in messages:
             hdrs = (m.get("payload") or {}).get("headers") or []

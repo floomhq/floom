@@ -28,6 +28,14 @@ _CATALOG_TTL_SECONDS = 60 * 60
 _catalog_cache: Dict[tuple, tuple[float, Dict[str, Any]]] = {}
 _catalog_cache_lock = threading.Lock()
 
+_TOOLKIT_TOOLS_TTL_SECONDS = 60 * 60
+_toolkit_tools_cache: Dict[tuple, tuple[float, List[Dict[str, Any]]]] = {}
+_toolkit_tools_cache_lock = threading.Lock()
+
+_AUTH_CONFIG_TTL_SECONDS = 10 * 60
+_auth_config_cache: Dict[str, tuple[float, str]] = {}
+_auth_config_cache_lock = threading.Lock()
+
 load_dotenv("/root/.config/workeros/api.env", override=False)
 
 SUPPORTED_APPS: Dict[str, str] = {
@@ -41,10 +49,16 @@ SUPPORTED_APPS: Dict[str, str] = {
 }
 
 
+class ComposioConfigurationError(RuntimeError):
+    """Raised when the server is missing required Composio configuration."""
+
+
 def _api_key() -> str:
     key = os.environ.get("COMPOSIO_API_KEY", "")
     if not key:
-        raise RuntimeError("COMPOSIO_API_KEY is not set")
+        raise ComposioConfigurationError(
+            "Composio is not configured on this server. Set COMPOSIO_API_KEY to enable connections."
+        )
     return key
 
 
@@ -150,6 +164,7 @@ def list_catalog_apps(
     multiple categories, the caller (main.py endpoint) is responsible for
     calling this function once per slug and merging the results.
     """
+    _api_key()
     page = max(1, page)
     limit = max(1, min(100, limit))
     normalized_search = search.strip()
@@ -162,14 +177,48 @@ def list_catalog_apps(
         if cached and now - cached[0] < _CATALOG_TTL_SECONDS:
             return cached[1]
 
-    data = _get_with_retry(
-        "/toolkits",
-        limit=limit,
-        cursor=_catalog_cursor(page, limit),
-        search=normalized_search or None,
-        category=normalized_category or None,
-    )
+    # Composio /toolkits rejects a `search` shorter than 3 chars with a 400
+    # ("Search query must be at least 3 characters long"), which previously
+    # surfaced to the Browse grid as a dead-end 502. For 1-2 char queries we do
+    # NOT forward the term; we fetch the page unfiltered and substring-filter it
+    # locally so short queries still narrow without ever 400/502-ing upstream.
+    upstream_search = normalized_search if len(normalized_search) >= 3 else None
+    local_filter = normalized_search.lower() if normalized_search and upstream_search is None else None
+
+    try:
+        data = _get_with_retry(
+            "/toolkits",
+            limit=limit,
+            cursor=_catalog_cursor(page, limit),
+            search=upstream_search,
+            category=normalized_category or None,
+        )
+    except requests.exceptions.HTTPError as exc:
+        # Never dead-end the Browse grid on an upstream catalog error: degrade to
+        # an unfiltered fetch (+ local filter). If even that fails, return an
+        # empty page rather than bubbling a 502 — and don't cache the failure.
+        logger.warning("Composio catalog query failed (%s); degrading to unfiltered", exc)
+        try:
+            data = _get_with_retry(
+                "/toolkits",
+                limit=limit,
+                cursor=_catalog_cursor(page, limit),
+                search=None,
+                category=normalized_category or None,
+            )
+            local_filter = normalized_search.lower() or local_filter
+        except requests.exceptions.HTTPError:
+            return {
+                "items": [], "page": page, "limit": limit,
+                "total_items": 0, "total_pages": 1, "next_page": None, "categories": [],
+            }
+
     items = [_normalize_catalog_item(item) for item in data.get("items") or []]
+    if local_filter:
+        items = [
+            it for it in items
+            if local_filter in it["name"].lower() or local_filter in it["slug"].lower()
+        ]
     categories = sorted({cat for item in items for cat in item["categories"]})
     total_items = int(data.get("total_items") or len(items))
     total_pages = int(data.get("total_pages") or 1)
@@ -186,6 +235,45 @@ def list_catalog_apps(
 
     with _catalog_cache_lock:
         _catalog_cache[cache_key] = (now, result)
+    return result
+
+
+def list_toolkit_tools(slug: str, *, limit: int = 100) -> List[Dict[str, Any]]:
+    """Return the top N tools for a Composio toolkit slug, cached for 1 hour.
+
+    Default limit raised to 100 to support the full tool list in the Browse
+    modal (e.g. Gmail has 85+ tools). Cache key includes limit so that
+    different callers with different caps get correct independent entries.
+
+    Returns a list of dicts with keys: name, description.
+    Falls back to [] on any error so the UI degrades gracefully.
+    """
+    _api_key()
+    normalized = slug.strip().lower()
+    cache_key = (normalized, limit)
+    now = time.monotonic()
+    with _toolkit_tools_cache_lock:
+        cached = _toolkit_tools_cache.get(cache_key)
+        if cached and now - cached[0] < _TOOLKIT_TOOLS_TTL_SECONDS:
+            return cached[1]
+
+    try:
+        data = _get_with_retry("/tools", toolkit_slug=normalized, limit=limit)
+        items = data.get("items") or []
+        result: List[Dict[str, Any]] = [
+            {
+                "name": item.get("name") or item.get("slug") or "",
+                "description": (item.get("description") or "")[:200],
+            }
+            for item in items
+            if item.get("name") or item.get("slug")
+        ]
+    except Exception as exc:
+        logger.warning("Failed to fetch tools for toolkit %s: %s", slug, exc)
+        result = []
+
+    with _toolkit_tools_cache_lock:
+        _toolkit_tools_cache[cache_key] = (now, result)
     return result
 
 
@@ -206,6 +294,8 @@ def list_connections(*, user_id: str) -> List[Dict[str, Any]]:
 
 def list_triggers() -> List[Dict[str, Any]]:
     """Return the Composio v3 trigger catalog (all pages)."""
+    _api_key()
+
     def fetch_page(cursor: Optional[str]) -> Dict[str, Any]:
         params: Dict[str, Any] = {"limit": 100}
         if cursor:
@@ -327,19 +417,29 @@ def _resolve_auth_config_id(app_name: str) -> str:
     Raises NoManagedAuthError if Composio does not support managed OAuth for
     this toolkit (e.g. the app is API-key-only or DCR_OAUTH-only).
     """
-    data = _get("/auth_configs", toolkit_slugs=app_name, limit=20)
+    normalized_app = app_name.lower().strip()
+    now = time.monotonic()
+    with _auth_config_cache_lock:
+        cached = _auth_config_cache.get(normalized_app)
+        if cached and now - cached[0] < _AUTH_CONFIG_TTL_SECONDS:
+            return cached[1]
+
+    data = _get("/auth_configs", toolkit_slugs=normalized_app, limit=20)
     for ac in data.get("items") or []:
         toolkit = ac.get("toolkit") or {}
-        if (toolkit.get("slug") or "").lower() == app_name.lower():
+        if (toolkit.get("slug") or "").lower() == normalized_app:
             if ac.get("status") in (None, "ENABLED"):
-                return ac["id"]
+                auth_config_id = ac["id"]
+                with _auth_config_cache_lock:
+                    _auth_config_cache[normalized_app] = (now, auth_config_id)
+                return auth_config_id
     # Create one if none exists.
     try:
         created = _post("/auth_configs", {
-            "toolkit": {"slug": app_name},
+            "toolkit": {"slug": normalized_app},
             "auth_config": {
                 "type": "use_composio_managed_auth",
-                "name": f"workeros_{app_name}",
+                "name": f"workeros_{normalized_app}",
             },
         })
     except requests.HTTPError as exc:
@@ -352,13 +452,16 @@ def _resolve_auth_config_id(app_name: str) -> str:
                 code = err.get("slug") or err.get("code") or ""
                 if "DefaultAuthConfig" in str(code) or "no managed" in str(err.get("message", "")).lower():
                     raise NoManagedAuthError(
-                        f"{app_name} does not support Composio-managed OAuth. "
+                        f"{normalized_app} does not support Composio-managed OAuth. "
                         "Add an API key in Secrets instead."
                     ) from exc
             except (ValueError, AttributeError):
                 pass
         raise
-    return created["auth_config"]["id"]
+    auth_config_id = created["auth_config"]["id"]
+    with _auth_config_cache_lock:
+        _auth_config_cache[normalized_app] = (now, auth_config_id)
+    return auth_config_id
 
 
 def initiate_connection(app_name: str, redirect_url: str, *, user_id: str) -> Dict[str, str]:

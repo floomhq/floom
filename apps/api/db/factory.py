@@ -4,19 +4,39 @@ import os
 from functools import lru_cache
 from typing import Callable, NamedTuple
 
+from typing import Optional
+
 from .interface import (
+    AlertRepository,
+    ApprovalRepository,
+    AssetAccessRepository,
     CliAuthRepository,
     ConnectionRepository,
+    McpToolRepository,
+    PersonalAccessTokenRepository,
     RunRepository,
     SecretRepository,
+    UserRepository,
+    UserSessionRepository,
+    VersionRepository,
     WorkerRepository,
+    WorkspaceMemberRepository,
 )
 from .sqlite import (
+    SqliteAlertRepository,
+    SqliteApprovalRepository,
+    SqliteAssetAccessRepository,
     SqliteCliAuthRepository,
     SqliteConnectionRepository,
+    SqliteMcpToolRepository,
+    SqlitePersonalAccessTokenRepository,
     SqliteRunRepository,
     SqliteSecretRepository,
+    SqliteUserRepository,
+    SqliteUserSessionRepository,
+    SqliteVersionRepository,
     SqliteWorkerRepository,
+    SqliteWorkspaceMemberRepository,
 )
 
 
@@ -26,6 +46,20 @@ class Repositories(NamedTuple):
     connections: ConnectionRepository
     secrets: SecretRepository
     cli_auth: CliAuthRepository
+    approvals: ApprovalRepository
+    alerts: AlertRepository
+    versions: VersionRepository
+    mcp_tools: McpToolRepository
+    # Members + per-asset visibility (Members STEP 1). Optional with defaults so a
+    # downstream factory (e.g. workeros-cloud) that predates these fields keeps
+    # constructing Repositories(...) without them; it can register its own impls
+    # when it ships member/visibility support.
+    members: Optional[WorkspaceMemberRepository] = None
+    asset_access: Optional[AssetAccessRepository] = None
+    # Multi-member auth (migration 59). Optional with defaults for backwards compat.
+    users: Optional[UserRepository] = None
+    tokens: Optional[PersonalAccessTokenRepository] = None
+    sessions: Optional[UserSessionRepository] = None
 
 
 def _local_repositories() -> Repositories:
@@ -35,6 +69,15 @@ def _local_repositories() -> Repositories:
         connections=SqliteConnectionRepository(),
         secrets=SqliteSecretRepository(),
         cli_auth=SqliteCliAuthRepository(),
+        approvals=SqliteApprovalRepository(),
+        alerts=SqliteAlertRepository(),
+        versions=SqliteVersionRepository(),
+        mcp_tools=SqliteMcpToolRepository(),
+        members=SqliteWorkspaceMemberRepository(),
+        asset_access=SqliteAssetAccessRepository(),
+        users=SqliteUserRepository(),
+        tokens=SqlitePersonalAccessTokenRepository(),
+        sessions=SqliteUserSessionRepository(),
     )
 
 

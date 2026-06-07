@@ -16,6 +16,7 @@ from auth.factory import (
     register_auth_provider,
 )
 from auth.local import SharedSecretAuthProvider
+from auth.multi_member import MultiMemberAuthProvider
 
 
 class _FakeCloudProvider:
@@ -65,13 +66,14 @@ def _clear_auth_provider_cache():
     get_auth_provider.cache_clear()
 
 
-def test_local_deploy_returns_shared_secret_provider(monkeypatch):
+def test_local_deploy_returns_multi_member_provider(monkeypatch):
+    """Local deploy now uses MultiMemberAuthProvider (supports PAT/session/secret/dev-mode)."""
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("FLOOM_SECRET", "test-secret")
 
     provider = get_auth_provider()
 
-    assert isinstance(provider, SharedSecretAuthProvider)
+    assert isinstance(provider, MultiMemberAuthProvider)
 
 
 def test_cloud_without_registered_provider_raises(monkeypatch):
@@ -103,7 +105,7 @@ def test_register_auth_provider_clears_cache(monkeypatch):
     monkeypatch.setenv("FLOOM_SECRET", "test-secret")
 
     first = get_auth_provider()
-    assert isinstance(first, SharedSecretAuthProvider)
+    assert isinstance(first, MultiMemberAuthProvider)
 
     register_auth_provider("local", lambda: _FakeCloudProvider())
 

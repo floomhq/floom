@@ -191,12 +191,23 @@ def main():
         writer.writerows(enriched_rows)
         enriched = out.getvalue().strip()
 
+    import os as _os
+    _os.makedirs("out", exist_ok=True)
+    with open("out/enriched_csv.csv", "w", encoding="utf-8") as fh:
+        fh.write(enriched)
+
     result = {
         "status": "success",
         "outputs": {
-            "enriched_csv": enriched,
+            "enriched_csv": "out/enriched_csv.csv",
         },
-        "artifacts": [],
+        "artifacts": [
+            {
+                "name": "out/enriched_csv.csv",
+                "relative_path": "out/enriched_csv.csv",
+                "type": "text/csv",
+            }
+        ],
     }
     with open("result.json", "w") as f:
         json.dump(result, f)

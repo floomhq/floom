@@ -25,6 +25,7 @@ class SandboxDriver(ABC):
         timeout_seconds: int = 300,
         config: Optional[WorkerConfig] = None,
         connection_ids: Optional[Dict[str, str]] = None,
+        user_id: str | None = None,
     ) -> WorkerResult:
         """Execute the worker and return a WorkerResult.
 

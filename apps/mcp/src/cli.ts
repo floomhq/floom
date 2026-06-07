@@ -1,13 +1,24 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { runLoginCommand } from "./commands/login.js";
 import { runLogoutCommand } from "./commands/logout.js";
 import { runWhoamiCommand } from "./commands/whoami.js";
 import { runWorkerCommand } from "./commands/run.js";
-import { workersListCommand, workersShowCommand, workersInfoCommand } from "./commands/workers.js";
+import {
+  workersListCommand,
+  workersShowCommand,
+  workersInfoCommand,
+  workersPushCommand,
+  workersValidateCommand,
+} from "./commands/workers.js";
+import {
+  workspacesListCommand,
+  workspacesShowCommand,
+  workspacesUseCommand,
+} from "./commands/workspaces.js";
 import {
   runsDownloadCommand,
   runsListCommand,
@@ -19,12 +30,21 @@ import {
   secretsListCommand,
   secretsSetCommand,
 } from "./commands/secrets.js";
+import {
+  connectionsImportMcpConfigCommand,
+  connectionsListCommand,
+} from "./commands/connections.js";
 import { mcpInstallCommand, mcpUninstallCommand } from "./commands/mcp.js";
 import { completionCommand } from "./commands/completion.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { main as runServer } from "./server.js";
 
 type RunResult = Promise<number> | number;
+
+function inferCommandName(argv = process.argv): "workeros" | "floom" {
+  const invoked = argv[1] ? basename(argv[1]) : "";
+  return invoked === "floom" ? "floom" : "workeros";
+}
 
 export function getPackageVersion(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -40,17 +60,18 @@ async function runAction(result: RunResult): Promise<void> {
   }
 }
 
-export function buildCliProgram(): Command {
+export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"): Command {
   const program = new Command();
   program
-    .name("floom")
+    .name(commandName)
     .description("Workeros CLI")
     .version(getPackageVersion())
     .showHelpAfterError();
 
   program.command("login")
     .description("Login via browser device authorization")
-    .action(async () => runAction(runLoginCommand()));
+    .option("--cloud", "Authenticate against Workeros Cloud (workeros.floom.dev)")
+    .action(async (options: { cloud?: boolean }) => runAction(runLoginCommand(options)));
 
   program.command("logout")
     .description("Remove saved CLI credentials")
@@ -88,6 +109,39 @@ export function buildCliProgram(): Command {
     .argument("<id>", "Worker id")
     .option("--json", "Print raw JSON")
     .action(async (id: string, options: { json?: boolean }) => runAction(workersInfoCommand(id, options)));
+  workers.command("validate")
+    .description("Validate a local worker directory")
+    .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")
+    .action(async (dir: string) => runAction(workersValidateCommand(dir)));
+  workers.command("push")
+    .description("Create or update a worker from a local worker directory")
+    .argument("<dir>", "Directory containing worker.yml plus run.py or SKILL.md")
+    .action(async (dir: string) => runAction(workersPushCommand(dir)));
+  workers.command("run")
+    .description("Trigger a worker run (alias for `floom run`)")
+    .argument("<id>", "Worker id")
+    .option("--input <key=value>", "Input key/value (repeatable)", (value: string, acc: string[]) => [...acc, value], [])
+    .option("-f, --inputs-file <path>", "Path to JSON inputs object")
+    .option("--output-dir <path>", "Save artifacts to this directory")
+    .option("--json", "Print final run JSON")
+    .action(async (
+      id: string,
+      options: { input?: string[]; inputsFile?: string; outputDir?: string; json?: boolean },
+    ) => runAction(runWorkerCommand(id, options)));
+
+  const workspaces = program.command("workspaces").description("Manage Workeros Cloud workspaces");
+  workspaces.command("list")
+    .description("List workspaces you can access")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(workspacesListCommand(options)));
+  workspaces.command("show")
+    .description("Show the currently active workspace")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(workspacesShowCommand(options)));
+  workspaces.command("use")
+    .description("Set the active workspace (matches by name or id)")
+    .argument("<name-or-id>", "Workspace name or id")
+    .action(async (target: string) => runAction(workspacesUseCommand(target)));
 
   const runs = program.command("runs").description("Inspect worker runs");
   runs.command("list")
@@ -128,16 +182,33 @@ export function buildCliProgram(): Command {
     .option("-y, --yes", "Skip confirmation")
     .action(async (key: string, options: { yes?: boolean }) => runAction(secretsDeleteCommand(key, options)));
 
+  const connections = program.command("connections").description("Manage app and MCP connections");
+  connections.command("list")
+    .description("List saved connections")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(connectionsListCommand(options)));
+  connections.command("import-mcp-config")
+    .description("Import MCP servers from a Claude/Cursor/VS Code mcpServers JSON file")
+    .argument("<path>", "Path to MCP client config JSON")
+    .option("--json", "Print raw JSON")
+    .action(async (path: string, options: { json?: boolean }) =>
+      runAction(connectionsImportMcpConfigCommand(path, options)));
+
   const mcp = program.command("mcp").description("Manage MCP client config");
+  mcp.command("add")
+    .description("Add Workeros to an MCP client config")
+    .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
+    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
+      runAction(mcpInstallCommand(options)));
   mcp.command("install")
     .description("Install MCP config for a client")
-    .option("--target <target>", "claude | cursor | continue")
-    .action(async (options: { target?: "claude" | "cursor" | "continue" }) =>
+    .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
+    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
       runAction(mcpInstallCommand(options)));
   mcp.command("uninstall")
     .description("Remove MCP config for a client")
-    .option("--target <target>", "claude | cursor | continue")
-    .action(async (options: { target?: "claude" | "cursor" | "continue" }) =>
+    .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
+    .action(async (options: { target?: "claude" | "cursor" | "vscode" | "windsurf" | "continue" | "generic" }) =>
       runAction(mcpUninstallCommand(options)));
 
   program.command("completion")
@@ -163,7 +234,8 @@ export function buildCliProgram(): Command {
 }
 
 export async function main(argv = process.argv): Promise<void> {
-  const program = buildCliProgram();
+  const commandName = inferCommandName(argv);
+  const program = buildCliProgram(commandName);
   const args = argv.slice(2);
   if (args.length === 0) {
     await runServer();
@@ -172,11 +244,23 @@ export async function main(argv = process.argv): Promise<void> {
   await program.parseAsync(argv);
 }
 
-const executedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+function resolveExecutedPath(argv1?: string): string {
+  if (!argv1) return "";
+  const absolute = resolve(argv1);
+  // npm installs bins as symlinks (node_modules/.bin/workeros -> ../@floomhq/workeros/dist/cli.js).
+  // import.meta.url is always the real module path, so compare against the resolved symlink target.
+  try {
+    return realpathSync(absolute);
+  } catch {
+    return absolute;
+  }
+}
+
+const executedPath = resolveExecutedPath(process.argv[1]);
 if (executedPath && fileURLToPath(import.meta.url) === executedPath) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`floom failed: ${message}`);
+    console.error(`${inferCommandName()} failed: ${message}`);
     process.exit(1);
   });
 }

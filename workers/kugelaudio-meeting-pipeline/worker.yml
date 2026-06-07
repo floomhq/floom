@@ -1,5 +1,7 @@
 schema_version: "0.3"
 is_example: true
+archived: true
+archive_reason: "Paused — needs the customer's Notion, Linear, and Slack accounts connected before it can run."
 name: kugelaudio-meeting-pipeline
 title: Kugelaudio Meeting Pipeline
 description: Notion Meeting Tracker -> Claude extraction -> Linear issues (dedupe + create) -> Slack digest -> Notion state writeback.

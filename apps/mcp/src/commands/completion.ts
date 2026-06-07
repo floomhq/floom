@@ -5,11 +5,12 @@ _floom_completion() {
   COMPREPLY=()
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  local commands="login logout whoami run workers runs secrets mcp completion --help --version"
+  local commands="login logout whoami run workers runs secrets connections mcp completion --help --version"
   local workers_sub="list show"
   local runs_sub="list show logs download"
   local secrets_sub="list set delete"
-  local mcp_sub="install uninstall"
+  local connections_sub="list import-mcp-config"
+  local mcp_sub="add install uninstall"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "\${commands}" -- "\${cur}") )
@@ -20,6 +21,7 @@ _floom_completion() {
     workers) COMPREPLY=( $(compgen -W "\${workers_sub}" -- "\${cur}") ) ;;
     runs) COMPREPLY=( $(compgen -W "\${runs_sub}" -- "\${cur}") ) ;;
     secrets) COMPREPLY=( $(compgen -W "\${secrets_sub}" -- "\${cur}") ) ;;
+    connections) COMPREPLY=( $(compgen -W "\${connections_sub}" -- "\${cur}") ) ;;
     mcp) COMPREPLY=( $(compgen -W "\${mcp_sub}" -- "\${cur}") ) ;;
   esac
 }
@@ -39,6 +41,7 @@ _floom() {
     'workers:List or show workers'
     'runs:List or inspect runs'
     'secrets:Manage secrets'
+    'connections:Manage app and MCP connections'
     'mcp:Manage MCP client config'
     'completion:Print completion scripts'
   )
@@ -49,11 +52,12 @@ compdef _floom floom
 }
 
 function fishCompletion(): string {
-  return `complete -c floom -f -a "login logout whoami run workers runs secrets mcp completion"
+  return `complete -c floom -f -a "login logout whoami run workers runs secrets connections mcp completion"
 complete -c floom -n "__fish_seen_subcommand_from workers" -a "list show"
 complete -c floom -n "__fish_seen_subcommand_from runs" -a "list show logs download"
 complete -c floom -n "__fish_seen_subcommand_from secrets" -a "list set delete"
-complete -c floom -n "__fish_seen_subcommand_from mcp" -a "install uninstall"
+complete -c floom -n "__fish_seen_subcommand_from connections" -a "list import-mcp-config"
+complete -c floom -n "__fish_seen_subcommand_from mcp" -a "add install uninstall"
 `;
 }
 
