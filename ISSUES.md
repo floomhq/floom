@@ -2059,3 +2059,22 @@ NOT deleted server-side (still retrievable via `GET /conversations/{id}`).
 feature modules is clean; two pre-existing `tsc` errors in
 `tests/useChatStream.test.ts` (`.title` on the `ToolCard` union, present on
 origin/main, not exercised by CI's vitest+lint gate) are untouched.
+
+---
+
+## [2026-06-07] Federico live-test round 2 — FL17-FL28 appended from durable punchlist
+
+Source: `/tmp/fede-livetest-issues-2026-06-07.md`. Status for each item below is **OPEN** until a committed fix PR plus live verification closes it.
+
+- **FL17 (P2 UI) Shadow artifacts below boxes on Overview.** Status: OPEN. Fix the box-shadow rendering artifacts shown in the live-test screenshot.
+- **FL18 (P1 UI systemic) Pages and boxes do not fill full-page height by default.** Status: OPEN. Applies to Overview, Brain bottom whitespace, and Runs skeleton/content.
+- **FL19 (P2 UI) Logout belongs on hover of the De Ponte avatar.** Status: OPEN. The separate sidebar logout icon is confusing.
+- **FL20 (P1 UX) Workspace-action labels are confusing.** Status: OPEN. Example called out: "Copy setup link" needs simpler meaning.
+- **FL21 (P1 UI) Brain file viewer needs far more reading space by default.** Status: OPEN. Opening a file needs a large viewer-first layout.
+- **FL22 (P2 design rule) No emojis anywhere.** Status: OPEN. Replace emojis with icons and sweep UI copy/assets.
+- **FL23 (DECISION) Rename WorkerOS to Agent Space and workers to agents.** Status: OPEN, awaiting Federico. This reverses prior "workers=employees / Hire AI workers" positioning, so the full switch needs explicit confirmation.
+- **FL24 (DECISION) Agent creation moves into Emily chat.** Status: OPEN, awaiting Federico. Direction: Emily builds conversationally, right pane shows Emily status, middle pane shows agent config/test/run, not a custom `/workers/new` page.
+- **FL25 (P1 recurring bug) `/workers/new` main prompt lacks inline Granola/HubSpot highlighting.** Status: OPEN. Recurring/claimed-done-but-partial: example cards have highlighting, but the main box does not.
+- **FL26 (P1 Cloud gap) Cloud has no Emily chat option.** Status: OPEN.
+- **FL27 (P0 Cloud durability gap) Cloud git-tracking is not included.** Status: OPEN. Related design doc: workeros PR #489, but implementation is not live.
+- **FL28 (TEST) Full worker setup flow plus Emily across UI/MCP/WhatsApp/Slack is incomplete.** Status: OPEN. Current matrix from source brief: UI pass, WhatsApp pass, MCP untested, Slack untested.
