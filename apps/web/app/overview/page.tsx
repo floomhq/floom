@@ -20,7 +20,7 @@ export default function OverviewPage() {
   }, []);
 
   return (
-    <div className="relative">
+    <div className="relative flex flex-1 flex-col">
       {/* Bell anchored top-right of the content pane */}
       <div className="absolute right-0 top-1 z-10">
         <AlertsBell items={attentionItems} onRefresh={handleRefresh} />

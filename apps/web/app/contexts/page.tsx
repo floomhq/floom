@@ -766,7 +766,9 @@ function ContextsPage() {
   const midStyle = isDesktop ? { width: paneWidths.mid } : undefined;
 
   return (
-    <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 120px)" }}>
+    // FL18: fill the full content height via flex-1 instead of a brittle
+    // viewport-minus-magic-number calc that left bottom whitespace.
+    <div className="flex flex-1 flex-col gap-5 min-h-0">
       {/* Page header */}
       <div className="flex items-start justify-between gap-4 shrink-0">
         <div>
@@ -1051,7 +1053,9 @@ function ContextsPage() {
 
 function BrainSkeleton() {
   return (
-    <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 120px)" }}>
+    // FL18: fill the full content height via flex-1 instead of a brittle
+    // viewport-minus-magic-number calc that left bottom whitespace.
+    <div className="flex flex-1 flex-col gap-5 min-h-0">
       {/* Page header */}
       <div className="flex items-start justify-between gap-4 shrink-0">
         <div className="space-y-2">

@@ -32,8 +32,10 @@ async function RunsFetcher() {
 // FL8: full-page Runs skeleton — header + Export action, the worker-filter +
 // status-tab row, then the runs table — so it matches the loaded layout.
 function RunsLoadingSkeleton() {
+  // FL18: skeleton fills the full content height (flex-1) so the loading state
+  // matches the loaded layout instead of leaving bottom whitespace.
   return (
-    <div className="space-y-6">
+    <div className="flex flex-1 flex-col space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <Skeleton className="h-8 w-48" />
@@ -49,8 +51,8 @@ function RunsLoadingSkeleton() {
           ))}
         </div>
       </div>
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
-        {Array.from({ length: 8 }).map((_, i) => (
+      <div className="flex-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+        {Array.from({ length: 12 }).map((_, i) => (
           <Skeleton key={i} className="h-11 w-full rounded-none border-b border-[var(--border-default)] last:border-b-0" />
         ))}
       </div>

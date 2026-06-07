@@ -56,9 +56,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <IconSprite />
       <Ambient />
       <Sidebar />
-      {/* Main content between sidebar and Emily dock — scrolls in its own container */}
+      {/* Main content between sidebar and Emily dock — scrolls in its own
+          container. FL18: the inner wrapper is a full-height flex column
+          (min-h-full) so pages and their loading skeletons fill the viewport
+          by default instead of leaving dead whitespace at the bottom. */}
       <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
+        <div className="flex min-h-full flex-col max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
       </main>
       {/* Emily dock: fixed-height right rail — scrolls internally, never bleeds to body */}
       <EmilyDock className="hidden md:flex" />

@@ -173,7 +173,9 @@ export default function RunsClient({
   }
 
   return (
-    <div className="space-y-6">
+    // FL18: grow to fill the full content height so the page doesn't leave
+    // bottom whitespace on tall viewports.
+    <div className="flex flex-1 flex-col space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Run history</h1>
