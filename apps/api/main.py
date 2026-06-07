@@ -2688,8 +2688,8 @@ class ContextSummary(BaseModel):
     system: bool = False
     read_only: bool = False
     # Sensitive packs are never committed to git or pushed to GitHub.
-    # They are stored only in Supabase Storage (encrypted at rest).
-    sensitive: bool = False
+    # Sensitive is the DEFAULT — set sensitive=False to opt in to git tracking.
+    sensitive: bool = True
     # Members STEP 4: ownership + per-asset visibility + computed permissions.
     # Mirrors the worker surface so the same Share control renders on brain packs.
     owner_id: Optional[str] = None
@@ -5148,7 +5148,7 @@ def _context_summary(
         total_size_bytes=total_size,
         updated_at=context_updated_at(root),
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
-        sensitive=bool(metadata.get(name, {}).get("sensitive", False)),
+        sensitive=bool(metadata.get(name, {}).get("sensitive", True)),
         worker_count=worker_count,
         description=description,
         system=is_system,
