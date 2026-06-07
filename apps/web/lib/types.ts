@@ -254,6 +254,8 @@ export interface ContextSummary {
   total_size_bytes: number;
   updated_at?: string | null;
   writeable: boolean;
+  system?: boolean;
+  read_only?: boolean;
   worker_count: number;
   description?: string | null;
 }

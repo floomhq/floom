@@ -34,6 +34,24 @@ function displayTypeIcon(displayType: string) {
   return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
 }
 
+function packNameFromFiles(files: FileList | File[], existing: ContextSummary[]): string {
+  const first = Array.from(files)[0];
+  const baseName = (first?.name || "My brain")
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || "my-brain";
+  const existingNames = new Set(existing.map((item) => item.name));
+  let candidate = baseName;
+  let suffix = 2;
+  while (existingNames.has(candidate)) {
+    candidate = `${baseName}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
 export default function ContextsPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -120,11 +138,13 @@ export default function ContextsPage() {
   }
 
   async function uploadFiles(files: FileList | File[]) {
-    if (!selectedName || files.length === 0) return;
+    if (files.length === 0) return;
+    const shouldCreateFolder = !selectedName || !detail || detail.system || detail.read_only;
+    const targetName = shouldCreateFolder ? packNameFromFiles(files, contexts) : selectedName;
     try {
-      await api.contexts.upload(selectedName, files);
-      await loadContexts(selectedName);
-      toast.success("File added");
+      await api.contexts.upload(targetName, files, { createIfMissing: shouldCreateFolder });
+      await loadContexts(targetName);
+      toast.success(shouldCreateFolder ? "Folder created" : "File added");
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to add file");
     }

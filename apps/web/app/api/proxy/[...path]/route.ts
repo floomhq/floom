@@ -30,8 +30,16 @@ async function handler(
   if (lastEventId) forwardHeaders["last-event-id"] = lastEventId;
   const accept = req.headers.get("accept");
   if (accept) forwardHeaders["accept"] = accept;
+  const authorization = req.headers.get("authorization");
+  if (authorization) forwardHeaders["authorization"] = authorization;
+  const cookie = req.headers.get("cookie");
+  if (cookie) forwardHeaders["cookie"] = cookie;
+  const workspace = req.headers.get("x-workeros-workspace");
+  if (workspace) forwardHeaders["x-workeros-workspace"] = workspace;
 
-  const isUpload = upstreamPath === "/uploads";
+  const isUpload =
+    upstreamPath === "/uploads" ||
+    (upstreamPath.startsWith("/contexts/") && upstreamPath.endsWith("/upload"));
   let body: BodyInit | null | undefined;
   if (req.method !== "GET" && req.method !== "HEAD") {
     body = isUpload ? req.body : await req.arrayBuffer();
@@ -58,6 +66,8 @@ async function handler(
   if (cl) responseHeaders.set("content-length", cl);
   const cacheControl = upstream.headers.get("cache-control");
   if (cacheControl) responseHeaders.set("cache-control", cacheControl);
+  const setCookie = upstream.headers.get("set-cookie");
+  if (setCookie) responseHeaders.set("set-cookie", setCookie);
 
   return new NextResponse(upstream.body, {
     status: upstream.status,
@@ -65,8 +75,24 @@ async function handler(
   });
 }
 
-export const GET = handler;
-export const POST = handler;
-export const PUT = handler;
-export const PATCH = handler;
-export const DELETE = handler;
+type RouteContext = { params: Promise<{ path: string[] }> };
+
+export async function GET(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}
+
+export async function POST(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}
+
+export async function PUT(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}
+
+export async function PATCH(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}
+
+export async function DELETE(req: NextRequest, context: RouteContext) {
+  return handler(req, context);
+}

@@ -184,9 +184,10 @@ export const api = {
       );
       return res.text();
     },
-    upload: async (name: string, files: FileList | File[]) => {
+    upload: async (name: string, files: FileList | File[], options?: { createIfMissing?: boolean }) => {
       const form = new FormData();
       Array.from(files).forEach((file) => form.append("files", file, file.name));
+      if (options?.createIfMissing) form.append("create_if_missing", "true");
       const res = await fetch(`${API_BASE}/contexts/${encodeURIComponent(name)}/upload`, {
         method: "POST",
         body: form,
@@ -198,6 +199,9 @@ export const api = {
           err = body.detail || JSON.stringify(body);
         } catch {
           err = res.statusText || `HTTP ${res.status}`;
+        }
+        if (/request body too large/i.test(err)) {
+          err = "Brain upload is too large. Upload files up to 25 MB.";
         }
         throw new Error(err);
       }
