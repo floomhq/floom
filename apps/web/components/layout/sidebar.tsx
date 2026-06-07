@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -280,6 +280,23 @@ export function UserProfileFooter({
   const router = useRouter();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const [user, setUser] = useState<CurrentUser | null>(null);
+  // FL19: the profile menu (Settings + Sign out) opens on HOVER of the avatar
+  // chip, not a separate sidebar icon. Controlled open state lets us trigger on
+  // pointer enter and keep it open while the pointer is over the trigger or the
+  // menu; a short close delay avoids flicker when crossing the gap between them.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openMenu = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setMenuOpen(true);
+  };
+  const scheduleClose = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setMenuOpen(false), 120);
+  };
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -315,9 +332,12 @@ export function UserProfileFooter({
 
   return (
     <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
-      {/* Profile chip — clicking opens a dropdown with Settings + Sign out (M37). */}
-      <DropdownMenu>
+      {/* Profile chip — hovering the avatar opens a menu with Settings + Sign
+          out (FL19). Click still works as a fallback for touch/keyboard. */}
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
         <DropdownMenuTrigger
+          onMouseEnter={openMenu}
+          onMouseLeave={scheduleClose}
           className={cn(
             "flex items-center gap-2 min-w-0 flex-1 rounded-[var(--radius-button)] px-1 py-0.5 -mx-1 transition-[background,color] duration-150 ease-[var(--ease)]",
             "hover:bg-[var(--active-nav-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
@@ -342,7 +362,14 @@ export function UserProfileFooter({
             <p className="text-[10px] text-muted-foreground truncate">{secondary}</p>
           </div>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48 p-1">
+        <DropdownMenuContent
+          side="top"
+          align="start"
+          sideOffset={8}
+          className="w-48 p-1"
+          onMouseEnter={openMenu}
+          onMouseLeave={scheduleClose}
+        >
           <DropdownMenuItem
             render={<Link href="/settings" onClick={onNavigate} />}
             className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
