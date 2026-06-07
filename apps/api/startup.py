@@ -349,6 +349,27 @@ def _override_git_cfg_for_cloud() -> None:
                 svc.table("git_workspace_config").update(fields).eq("workspace_id", workspace_id).execute()
             else:
                 svc.table("git_workspace_config").insert({"workspace_id": workspace_id, **fields}).execute()
+
+            # After write, re-read the full row to derive remote_url and configure git remote.
+            # Handles partial upserts (e.g. link operation only sets repo_full_name, not PAT).
+            row = (
+                svc.table("git_workspace_config")
+                .select("github_pat,repo_full_name,remote_url")
+                .eq("workspace_id", workspace_id)
+                .limit(1)
+                .execute()
+            )
+            if row.data:
+                r = row.data[0]
+                remote_url = r.get("remote_url") or ""
+                if not remote_url and r.get("github_pat") and r.get("repo_full_name"):
+                    remote_url = f"https://{r['github_pat']}@github.com/{r['repo_full_name']}.git"
+                    svc.table("git_workspace_config").update({"remote_url": remote_url}).eq(
+                        "workspace_id", workspace_id
+                    ).execute()
+                if remote_url:
+                    from apps.api.cloud_git_local import configure_remote
+                    configure_remote(workspace_id, remote_url)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("cloud_git_cfg_upsert failed: %s", exc)
@@ -358,6 +379,8 @@ def _override_git_cfg_for_cloud() -> None:
         try:
             svc = get_supabase_service_client()
             svc.table("git_workspace_config").delete().eq("workspace_id", workspace_id).execute()
+            from apps.api.cloud_git_local import remove_remote
+            remove_remote(workspace_id)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("cloud_git_cfg_delete failed: %s", exc)
@@ -607,17 +630,14 @@ def _suppress_secrets_enc_in_cloud() -> None:
 
 
 def _override_git_ops_for_cloud() -> None:
-    """Replace local git operations with GitHub Contents API calls in cloud.
+    """Replace local git operations with cloud-aware equivalents.
 
-    In cloud, there is no persistent disk or local git repo. This patch:
-    - Replaces git_ops.commit_paths with a GitHub API push (via cloud_git.schedule_push)
-    - Makes push_background, push, pull, configure_remote, ensure_repo no-ops
-      (commit_paths handles the GitHub push; no local repo to manage)
-    - Fixes _workers_git_prefix to return "workers" so cloud git repos have the
-      same layout as OSS repos (workers/{id}/ at root level)
+    Commit path: write files to per-workspace local git repo, commit, upload
+    bundle to Supabase Storage, then git push to configured remote (any provider)
+    in a background thread. No-op push if no remote is configured.
 
-    Workers are serialized from skill_versions.manifest_json._files in Supabase,
-    so no disk reads are needed for the push.
+    All git read ops (get_log, get_file_at_sha, checkout_path) use the local
+    repo first and fall back to the GitHub API only if the SHA is absent locally.
     """
     try:
         import git_ops as engine_git_ops  # noqa: PLC0415
@@ -628,7 +648,6 @@ def _override_git_ops_for_cloud() -> None:
         return
 
     from apps.api.auth.workspace_context import get_active_workspace_id
-    from apps.api.cloud_git import schedule_push, push_all, get_git_cfg
 
     def _cloud_commit_paths(
         workspace_dir,
@@ -639,9 +658,9 @@ def _override_git_ops_for_cloud() -> None:
     ):
         workspace_id = get_active_workspace_id()
         if workspace_id and rel_paths:
-            from apps.api.cloud_git_local import commit_workspace
+            from apps.api.cloud_git_local import commit_workspace, push_background
             commit_workspace(workspace_id, list(rel_paths), message)
-            schedule_push(workspace_id, list(rel_paths), message)
+            push_background(workspace_id)  # no-op if no remote configured
         return None
 
     _cloud_commit_paths._workeros_cloud_patched = True
@@ -650,20 +669,14 @@ def _override_git_ops_for_cloud() -> None:
     # push_background: no-op (schedule_push in commit_paths handles async push)
     engine_git_ops.push_background = lambda workspace_dir: None
 
-    # push: used by link_git_repo to do initial push — do a full workspace push
+    # push: called by link_git_repo after the user connects a remote.
+    # Commit everything not yet in local git, then push to the configured remote.
     def _cloud_push(workspace_dir):
         workspace_id = get_active_workspace_id()
         if not workspace_id:
             return
-        cfg = get_git_cfg(workspace_id)
-        if cfg and cfg.get("github_pat") and cfg.get("repo_full_name"):
-            import threading
-            threading.Thread(
-                target=push_all,
-                args=(workspace_id, cfg["github_pat"], cfg["repo_full_name"]),
-                daemon=True,
-                name="workeros-github-push-all",
-            ).start()
+        from apps.api.cloud_git_local import commit_and_push_all
+        commit_and_push_all(workspace_id)
 
     engine_git_ops.push = _cloud_push
 

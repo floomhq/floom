@@ -268,6 +268,105 @@ def _backfill_worker_files_from_git(workspace_id: str, git_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Remote git operations (provider-agnostic)
+# ---------------------------------------------------------------------------
+
+def configure_remote(workspace_id: str, remote_url: str) -> None:
+    """Set or replace the origin remote in the workspace git repo.
+
+    remote_url must embed credentials:
+      GitHub:    https://{pat}@github.com/{owner}/{repo}.git
+      GitLab:    https://oauth2:{token}@gitlab.com/{owner}/{repo}.git
+      Bitbucket: https://{user}:{app_password}@bitbucket.org/{owner}/{repo}.git
+      Generic:   https://{token}@{host}/{path}.git
+    """
+    git_dir = ensure_workspace_repo(workspace_id)
+    with _get_lock(workspace_id):
+        _git(["remote", "remove", "origin"], git_dir, check=False)
+        _git(["remote", "add", "origin", remote_url], git_dir)
+    logger.info("Configured git remote for workspace %s", workspace_id)
+
+
+def remove_remote(workspace_id: str) -> None:
+    """Remove the origin remote (called on disconnect)."""
+    git_dir = get_workspace_git_dir(workspace_id)
+    if (git_dir / ".git").exists():
+        _git(["remote", "remove", "origin"], git_dir, check=False)
+
+
+def push_background(workspace_id: str) -> None:
+    """Push HEAD to origin in a daemon thread. Silent no-op if no remote configured."""
+    git_dir = get_workspace_git_dir(workspace_id)
+    if not (git_dir / ".git").exists():
+        return
+
+    def _run() -> None:
+        try:
+            has_remote = _git(["remote", "get-url", "origin"], git_dir, check=False)
+            if has_remote.returncode != 0:
+                return
+            result = _git(["push", "-u", "origin", "HEAD"], git_dir, check=False, timeout=60)
+            if result.returncode == 0:
+                _stamp_last_pushed(workspace_id)
+            else:
+                logger.debug("git push failed for %s: %s", workspace_id, result.stderr.strip())
+        except Exception as exc:
+            logger.debug("push_background failed for %s: %s", workspace_id, exc)
+
+    threading.Thread(
+        target=_run, daemon=True, name=f"workeros-git-push-{workspace_id[:8]}"
+    ).start()
+
+
+def _stamp_last_pushed(workspace_id: str) -> None:
+    from datetime import datetime, timezone
+    try:
+        svc = get_supabase_service_client()
+        svc.table("git_workspace_config").update(
+            {"last_pushed_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("workspace_id", workspace_id).execute()
+    except Exception as exc:
+        logger.debug("_stamp_last_pushed failed: %s", exc)
+
+
+def commit_and_push_all(workspace_id: str) -> None:
+    """Commit all workspace content to local git then push to the configured remote.
+
+    Used on initial remote link to snapshot everything. Runs in a background thread.
+    Workers that have already been committed individually are idempotent (git detects
+    no change and skips those commits).
+    """
+    def _run() -> None:
+        try:
+            svc = get_supabase_service_client()
+            msg = "chore: initial workspace snapshot"
+
+            rows = svc.table("workers").select("id").eq("workspace_id", workspace_id).execute()
+            for row in (rows.data or []):
+                try:
+                    commit_workspace(workspace_id, [f"workers/{row['id']}"], msg)
+                except Exception as exc:
+                    logger.debug("commit_and_push_all: worker %s: %s", row["id"], exc)
+
+            try:
+                commit_workspace(
+                    workspace_id,
+                    ["workspace-tools.yml", "workspace.md", "workspace.base.md"],
+                    msg,
+                )
+            except Exception as exc:
+                logger.debug("commit_and_push_all: workspace files: %s", exc)
+
+            push_background(workspace_id)
+        except Exception as exc:
+            logger.warning("commit_and_push_all failed for %s: %s", workspace_id, exc)
+
+    threading.Thread(
+        target=_run, daemon=True, name=f"workeros-git-push-all-{workspace_id[:8]}"
+    ).start()
+
+
+# ---------------------------------------------------------------------------
 # Bundle upload
 # ---------------------------------------------------------------------------
 

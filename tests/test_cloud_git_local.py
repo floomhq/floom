@@ -352,6 +352,79 @@ def test_ensure_bucket_creates_bucket(tmp_path):
     )
 
 
+# ---------------------------------------------------------------------------
+# configure_remote / remove_remote / push_background
+# ---------------------------------------------------------------------------
+
+def test_configure_remote_sets_origin(tmp_path):
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client"):
+            from apps.api.cloud_git_local import configure_remote
+            configure_remote(WORKSPACE_ID, "https://token@github.com/owner/repo.git")
+
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"], cwd=str(git_dir),
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0
+    assert "github.com/owner/repo.git" in result.stdout
+
+
+def test_configure_remote_replaces_existing(tmp_path):
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+    subprocess.run(["git", "remote", "add", "origin", "https://old@github.com/old/repo.git"],
+                   cwd=str(git_dir), check=True, capture_output=True)
+
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client"):
+            from apps.api.cloud_git_local import configure_remote
+            configure_remote(WORKSPACE_ID, "https://new@gitlab.com/owner/repo.git")
+
+    result = subprocess.run(["git", "remote", "get-url", "origin"], cwd=str(git_dir),
+                            capture_output=True, text=True)
+    assert "gitlab.com" in result.stdout
+
+
+def test_remove_remote_removes_origin(tmp_path):
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+    subprocess.run(["git", "remote", "add", "origin", "https://token@github.com/owner/repo.git"],
+                   cwd=str(git_dir), check=True, capture_output=True)
+
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        from apps.api.cloud_git_local import remove_remote
+        remove_remote(WORKSPACE_ID)
+
+    result = subprocess.run(["git", "remote"], cwd=str(git_dir), capture_output=True, text=True)
+    assert "origin" not in result.stdout
+
+
+def test_push_background_noop_when_no_remote(tmp_path):
+    """push_background exits silently when no remote is configured."""
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+    _commit_file(git_dir, "test.txt", "hello")
+
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        from apps.api.cloud_git_local import push_background
+        push_background(WORKSPACE_ID)  # should not raise
+
+
+def test_push_background_noop_when_no_git_dir(tmp_path):
+    ws_root = tmp_path / "workspaces"
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        from apps.api.cloud_git_local import push_background
+        push_background(WORKSPACE_ID)  # no .git dir — should not raise
+
+
 def test_ensure_bucket_ignores_already_exists(tmp_path):
     mock_svc = MagicMock()
     mock_svc.storage.create_bucket.side_effect = Exception("already exists")
