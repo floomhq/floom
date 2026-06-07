@@ -267,21 +267,23 @@ async def lifespan(app: FastAPI):
                     logger.warning("Git pull from remote failed (non-fatal): %s", _pull_exc)
     except Exception as _git_exc:
         logger.warning("Git workspace init failed (non-fatal): %s", _git_exc)
-    # Load encrypted secrets from .secrets.enc if the workspace is connected.
-    # This restores secrets on restart without any user action.
+    # Restore workspace config from git on startup (secrets + MCP tools).
     try:
         _bootstrap_uid = _bootstrap_user_id()
+        _startup_repos = get_repositories()
         _startup_cfg = _git_cfg_get(_bootstrap_uid)
         if _startup_cfg and _startup_cfg.get("github_pat") and _startup_cfg.get("repo_full_name"):
-            _startup_repos = get_repositories()
             _n = _load_secrets_from_enc(
                 _bootstrap_uid, _startup_repos,
                 _startup_cfg["github_pat"], _startup_cfg["repo_full_name"],
             )
             if _n:
                 logger.info("Restored %d secrets from %s on startup", _n, _SECRETS_ENC_FILENAME)
+        _t = _load_workspace_tools_yml(_bootstrap_uid, _startup_repos)
+        if _t:
+            logger.info("Restored %d MCP tools from %s on startup", _t, _WORKSPACE_TOOLS_FILENAME)
     except Exception as _sec_exc:
-        logger.warning("Startup secrets load from %s failed (non-fatal): %s", _SECRETS_ENC_FILENAME, _sec_exc)
+        logger.warning("Startup workspace config restore failed (non-fatal): %s", _sec_exc)
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy == "local":
         bootstrap_user_id = _bootstrap_user_id()
@@ -6569,7 +6571,35 @@ def set_worker_visibility(
     if result is None:
         raise HTTPException(status_code=404, detail="Worker not found")
 
+    # Write visibility back to worker.yml so it travels with the repo
+    _patch_worker_yml_field(worker_id, "visibility", str(payload.visibility))
+    author_name, author_email = _git_author(auth)
+    _git_commit_worker(
+        worker_id,
+        message=f"worker {worker_id}: set visibility to {payload.visibility}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+def _patch_worker_yml_field(worker_id: str, field: str, value: Any) -> None:
+    """Write a single field into worker.yml on disk without disturbing other fields."""
+    import yaml as pyyaml
+    worker_dir = WORKERS_DIR / worker_id
+    yml_path = worker_dir / "worker.yml"
+    if not yml_path.is_file():
+        return
+    try:
+        raw = pyyaml.safe_load(yml_path.read_text(encoding="utf-8")) or {}
+        raw[field] = value
+        yml_path.write_text(
+            pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning("Failed to patch %s in worker.yml for %s: %s", field, worker_id, exc)
 
 
 def _set_db_manifest_archived(
@@ -8125,6 +8155,9 @@ def _worker_record_from_worker_yml(worker_id: str, worker_yml: str) -> Dict[str,
         "status": "healthy",
         "trigger_type": config.trigger.type,
         "runner": config.runtime.runner,
+        # Visibility from worker.yml — if set, used as the initial value on create/reload.
+        # "private" is the safe default if not specified in the manifest.
+        "visibility": contract.visibility or "private",
     }
 
 
@@ -18871,13 +18904,15 @@ def create_mcp_tool(
     if not input_schema:
         input_schema = _mcp_input_schema_from_worker_record(worker)
 
-    return repos.mcp_tools.create(
+    result = repos.mcp_tools.create(
         user_id=auth.user_id,
         name=payload.name,
         description=payload.description,
         input_schema=input_schema,
         worker_id=worker["id"],
     )
+    _sync_workspace_tools_yml(auth.user_id, repos)
+    return result
 
 
 @app.put("/mcp-tools/{tool_id}", response_model=McpToolItem)
@@ -18892,6 +18927,7 @@ def update_mcp_tool(
         raise HTTPException(status_code=404, detail="MCP tool not found")
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     updated = repos.mcp_tools.update(user_id=auth.user_id, tool_id=tool_id, **updates)
+    _sync_workspace_tools_yml(auth.user_id, repos)
     return updated
 
 
@@ -18905,7 +18941,86 @@ def delete_mcp_tool(
     if not repos.mcp_tools.get(user_id=auth.user_id, tool_id=tool_id):
         raise HTTPException(status_code=404, detail="MCP tool not found")
     repos.mcp_tools.delete(user_id=auth.user_id, tool_id=tool_id)
+    _sync_workspace_tools_yml(auth.user_id, repos)
     return ActionResponse(status="deleted")
+
+
+_WORKSPACE_TOOLS_FILENAME = "workspace-tools.yml"
+
+
+def _sync_workspace_tools_yml(user_id: str, repos: Repositories) -> None:
+    """Write all MCP tools to workspace-tools.yml and commit to git.
+
+    Called after every create/update/delete so the file is always the
+    authoritative source of truth for the workspace's tool registrations.
+    """
+    import yaml as pyyaml
+    try:
+        tools = repos.mcp_tools.list(user_id=user_id)
+        doc = {
+            "version": 1,
+            "tools": [
+                {
+                    "id": t["id"],
+                    "name": t["name"],
+                    "worker_id": t["worker_id"],
+                    "description": t.get("description", ""),
+                }
+                for t in tools
+            ],
+        }
+        yml_path = _git_workspace() / _WORKSPACE_TOOLS_FILENAME
+        yml_path.write_text(
+            pyyaml.safe_dump(doc, sort_keys=False, default_flow_style=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        _git_ops.commit_paths(
+            _git_workspace(), [_WORKSPACE_TOOLS_FILENAME],
+            f"tools: update workspace-tools.yml ({len(tools)} tool{'s' if len(tools) != 1 else ''})",
+        )
+        _git_ops.push_background(_git_workspace())
+    except Exception as exc:
+        logger.warning("Failed to sync %s: %s", _WORKSPACE_TOOLS_FILENAME, exc)
+
+
+def _load_workspace_tools_yml(user_id: str, repos: Repositories) -> int:
+    """Parse workspace-tools.yml and sync missing tools into the DB.
+
+    Called on startup after a fresh clone so MCP tool registrations
+    are restored automatically. Returns count of tools loaded.
+    """
+    import yaml as pyyaml
+    yml_path = _git_workspace() / _WORKSPACE_TOOLS_FILENAME
+    if not yml_path.is_file():
+        return 0
+    try:
+        doc = pyyaml.safe_load(yml_path.read_text(encoding="utf-8")) or {}
+        tools_in_file = doc.get("tools") or []
+        existing_names = {t["name"] for t in repos.mcp_tools.list(user_id=user_id)}
+        loaded = 0
+        for t in tools_in_file:
+            name = t.get("name", "").strip()
+            worker_id = t.get("worker_id", "").strip()
+            if not name or not worker_id or name in existing_names:
+                continue
+            worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
+            if not worker:
+                continue
+            input_schema = _mcp_input_schema_from_worker_record(worker)
+            repos.mcp_tools.create(
+                user_id=user_id,
+                name=name,
+                description=t.get("description", ""),
+                input_schema=input_schema,
+                worker_id=worker_id,
+            )
+            loaded += 1
+        if loaded:
+            logger.info("Loaded %d MCP tools from %s", loaded, _WORKSPACE_TOOLS_FILENAME)
+        return loaded
+    except Exception as exc:
+        logger.warning("Failed to load %s: %s", _WORKSPACE_TOOLS_FILENAME, exc)
+        return 0
 
 
 # ---------------------------------------------------------------------------
