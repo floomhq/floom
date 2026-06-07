@@ -504,13 +504,23 @@ function RenderedFilePreview({
     );
   }
 
-  // "code" kind (run.py, .sh, .json, etc.): Preview = plain readable text,
-  // Raw tab (in ReadOnlyFileContent) = syntax-highlighted. Two distinct views.
+  // "code" kind (run.py, .sh, .json, etc.): Preview = comfortable plain-text
+  // reading view matching Brain's PlainTextPreview (max-w-3xl column, no
+  // syntax colour). Raw tab = syntax-highlighted source.
   if (sourceFileKind(path, detected) === "code") {
+    if (!content.trim()) {
+      return (
+        <div className="p-6">
+          <p className="text-sm text-muted-foreground italic">This file is empty.</p>
+        </div>
+      );
+    }
     return (
-      <pre className="max-h-[640px] overflow-auto whitespace-pre-wrap p-4 text-sm leading-relaxed font-mono text-foreground bg-muted/20">
-        {content}
-      </pre>
+      <div className="mx-auto max-w-3xl px-6 py-6">
+        <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-foreground">
+          {content}
+        </pre>
+      </div>
     );
   }
 
