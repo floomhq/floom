@@ -37,9 +37,17 @@ import type { ContextDetail, ContextFileItem, ContextSummary, SecretWarning, Ver
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl, AssetVisibilityIndicator } from "@/components/AssetVisibilityControl";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { CodeBlock } from "@/components/file-viewer/code-block";
 
@@ -237,10 +245,12 @@ function buildEntries(files: ContextFileItem[], currentFolder: string): Entry[] 
 const PANE_WIDTHS_KEY = "floom:brain:pane-widths";
 const PACKS_MIN = 160;
 const PACKS_MAX = 420;
-const MID_MIN = 180;
-const MID_MAX = 560;
-const PACKS_DEFAULT = 300;
-const MID_DEFAULT = 280;
+const MID_MIN = 160;
+const MID_MAX = 400;
+// FL21: give the file content pane much more reading space by default.
+// Reduce the packs and folder columns rails so the viewer flexes wide.
+const PACKS_DEFAULT = 220;
+const MID_DEFAULT = 200;
 
 type PaneWidths = { packs: number; mid: number };
 
@@ -380,6 +390,19 @@ function ContextsPage() {
   const [newContextName, setNewContextName] = useState("");
   const [showNewContext, setShowNewContext] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+
+  // ---- Confirm dialog (M468-contexts: replace window.confirm) ---------------
+  type ConfirmDialogState =
+    | { open: false }
+    | { open: true; title: string; description: string; destructive?: boolean; onConfirm: () => void };
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({ open: false });
+
+  function openConfirm(opts: { title: string; description: string; destructive?: boolean; onConfirm: () => void }) {
+    setConfirmDialog({ open: true, ...opts });
+  }
+  function closeConfirm() {
+    setConfirmDialog({ open: false });
+  }
 
   // ---- Resizable panes (desktop only) -------------------------------------
   const isDesktop = useIsDesktop();
@@ -602,33 +625,46 @@ function ContextsPage() {
     }
   }
 
-  async function deleteContext(context: ContextSummary) {
+  function deleteContext(context: ContextSummary) {
     if (context.read_only) return;
-    if (!confirm(`Delete folder "${context.name}"? This cannot be undone.`)) return;
-    try {
-      await api.contexts.delete(context.name, true);
-      const remaining = contexts.filter((item) => item.name !== context.name);
-      setContexts(remaining);
-      setFolderPath([]);
-      setSelectedFile(null);
-      await loadContexts(remaining[0]?.name || "");
-      toast.success("Folder deleted");
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete folder");
-    }
+    openConfirm({
+      title: `Delete "${context.name}"?`,
+      description: "This will permanently delete the folder and all its files. This cannot be undone.",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await api.contexts.delete(context.name, true);
+          const remaining = contexts.filter((item) => item.name !== context.name);
+          setContexts(remaining);
+          setFolderPath([]);
+          setSelectedFile(null);
+          await loadContexts(remaining[0]?.name || "");
+          toast.success("Folder deleted");
+        } catch (error: unknown) {
+          toast.error(error instanceof Error ? error.message : "Failed to delete folder");
+        }
+      },
+    });
   }
 
-  async function deleteFile(path: string) {
-    if (!selectedName || !confirm(`Delete "${path}"?`)) return;
-    try {
-      const next = await api.contexts.deleteFile(selectedName, path);
-      setDetail(next);
-      if (selectedFile === path) setSelectedFile(null);
-      await loadContexts(selectedName);
-      toast.success("File deleted");
-    } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete file");
-    }
+  function deleteFile(path: string) {
+    if (!selectedName) return;
+    openConfirm({
+      title: `Delete "${path}"?`,
+      description: "This will permanently remove the file from this folder.",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const next = await api.contexts.deleteFile(selectedName, path);
+          setDetail(next);
+          if (selectedFile === path) setSelectedFile(null);
+          await loadContexts(selectedName);
+          toast.success("File deleted");
+        } catch (error: unknown) {
+          toast.error(error instanceof Error ? error.message : "Failed to delete file");
+        }
+      },
+    });
   }
 
   async function uploadFiles(files: FileList | File[]) {
@@ -1016,6 +1052,7 @@ function ContextsPage() {
                   void api.contexts.get(selectedName).then(setDetail).catch(() => {});
                   void loadContexts(selectedName);
                 }}
+                onRequestConfirm={openConfirm}
               />
               {dragActive && !readOnly && (
                 <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-[var(--primary)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
@@ -1037,6 +1074,35 @@ function ContextsPage() {
           }}
         />
       </div>
+
+      {/* M468-contexts: app Dialog replaces browser window.confirm() */}
+      <Dialog open={confirmDialog.open} onOpenChange={(open) => { if (!open) closeConfirm(); }}>
+        <DialogContent showCloseButton={false}>
+          {confirmDialog.open && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{confirmDialog.title}</DialogTitle>
+                <DialogDescription>{confirmDialog.description}</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeConfirm}>
+                  Cancel
+                </Button>
+                <Button
+                  variant={confirmDialog.destructive ? "destructive" : "default"}
+                  onClick={() => {
+                    const cb = confirmDialog.onConfirm;
+                    closeConfirm();
+                    void cb();
+                  }}
+                >
+                  {confirmDialog.destructive ? "Delete" : "Confirm"}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1682,6 +1748,11 @@ function FolderColumn({
 // File content pane (the 70% right pane). Opens in place, no navigation.
 // ===========================================================================
 
+// M07: kinds that show a Preview/Raw tab strip. The strip is lifted to the
+// top of FilePane (consistent with the workers-detail tab strip placement)
+// so it sits in the same header band as the file name and actions.
+const TABBED_KINDS: FileKind[] = ["markdown", "code", "html", "table"];
+
 function FilePane({
   file,
   kind,
@@ -1700,6 +1771,7 @@ function FilePane({
   onClose,
   onBackMobile,
   onRestored,
+  onRequestConfirm,
 }: {
   file: ContextFileItem | null;
   kind: FileKind | null;
@@ -1718,8 +1790,18 @@ function FilePane({
   onClose: () => void;
   onBackMobile: () => void;
   onRestored: (restoredContent: string) => void;
+  onRequestConfirm: (opts: { title: string; description: string; onConfirm: () => void }) => void;
 }) {
   const [fileLinkCopied, setFileLinkCopied] = useState(false);
+  // M07: top-level tab state for files that have Preview/Raw views. Resets
+  // to "preview" whenever a different file is opened.
+  const [previewTab, setPreviewTab] = useState<"preview" | "raw">("preview");
+  const prevFilePath = useRef<string | null>(null);
+  if (file && file.path !== prevFilePath.current) {
+    prevFilePath.current = file.path;
+    setPreviewTab("preview");
+  }
+
   if (!file) return null;
 
   async function copyFileLink() {
@@ -1737,11 +1819,12 @@ function FilePane({
 
   const canEdit = isKnownTextFile(file) && !readOnly;
   const displayType = fileDisplayType(file);
+  const showTabs = !editing && !loadingText && kind !== null && TABBED_KINDS.includes(kind);
 
   return (
     <>
-      {/* Breadcrumb + actions */}
-      <div className="flex h-[82px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-2.5">
+      {/* Header row 1: file name + actions */}
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-2.5" style={{ minHeight: showTabs ? undefined : 82 }}>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
             <button
@@ -1794,6 +1877,7 @@ function FilePane({
               readOnly={readOnly}
               refreshKey={versionsKey}
               onRestored={onRestored}
+              onRequestConfirm={onRequestConfirm}
             />
           )}
           <button
@@ -1817,6 +1901,18 @@ function FilePane({
         </div>
       </div>
 
+      {/* M07: Preview/Raw tab strip lifted to the top of the pane, consistent
+          with the workers-detail horizontal tabs placement. Only shown when a
+          tabbed file kind is open and we are not in edit mode. */}
+      {showTabs && (
+        <Tabs value={previewTab} onValueChange={(v) => setPreviewTab(v as "preview" | "raw")} className="shrink-0 border-b border-[var(--border-default)] px-4 !flex-row items-center gap-0">
+          <TabsList variant="line" className="h-9">
+            <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
+            <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+
       {/* Content */}
       <div className="flex-1 overflow-auto min-h-0">
         {loadingText ? (
@@ -1830,7 +1926,7 @@ function FilePane({
             className="w-full h-full min-h-[400px] resize-none border-0 rounded-none font-mono text-xs leading-6 outline-none focus-visible:ring-0 focus-visible:ring-offset-0 p-4"
           />
         ) : (
-          <FileContent file={file} packName={packName} kind={kind} text={text} fileUrl={fileUrl} />
+          <FileContent file={file} packName={packName} kind={kind} text={text} fileUrl={fileUrl} activeTab={previewTab} />
         )}
       </div>
     </>
@@ -1843,12 +1939,14 @@ function FileContent({
   kind,
   text,
   fileUrl,
+  activeTab = "preview",
 }: {
   file: ContextFileItem;
   packName: string;
   kind: FileKind | null;
   text: string;
   fileUrl: string;
+  activeTab?: "preview" | "raw";
 }) {
   if (!kind) return null;
 
@@ -1867,66 +1965,48 @@ function FileContent({
   }
 
   if (kind === "markdown") {
-    // Markdown is the one genuine rendered-vs-source case: Preview shows the
-    // formatted document, Raw shows the highlighted source.
+    // M07: Tab strip is lifted to FilePane header; we just render the active view.
+    if (activeTab === "raw") return <CodeBlock text={text} filePath={file.path} />;
     return (
-      <PreviewRawTabs
-        preview={
-          <div className="mx-auto max-w-3xl px-6 py-6">
-            <MarkdownRenderer content={text} />
-          </div>
-        }
-        raw={<CodeBlock text={text} filePath={file.path} />}
-      />
+      <div className="mx-auto max-w-3xl px-6 py-6">
+        <MarkdownRenderer content={text} />
+      </div>
     );
   }
 
   if (kind === "code") {
-    // FL6: every text file type gets Preview + Raw, consistent with markdown,
-    // html, and tables. Preview is a comfortable, wrapped reading view (the way
-    // you'd read a .txt / .log / .env or skim a config); Raw is the canonical
-    // syntax-highlighted source block (with a copy affordance) shared with the
-    // worker-detail Source view.
-    return (
-      <PreviewRawTabs
-        preview={<PlainTextPreview text={text} />}
-        raw={
-          <div className="flex h-full flex-col">
-            <CodeViewToolbar text={text} />
-            <div className="flex-1 overflow-auto">
-              <CodeBlock text={text} filePath={file.path} />
-            </div>
+    // M07: Tab strip is lifted to FilePane header; render the active view only.
+    if (activeTab === "raw") {
+      return (
+        <div className="flex h-full flex-col">
+          <CodeViewToolbar text={text} />
+          <div className="flex-1 overflow-auto">
+            <CodeBlock text={text} filePath={file.path} />
           </div>
-        }
-      />
-    );
+        </div>
+      );
+    }
+    return <PlainTextPreview text={text} />;
   }
 
   if (kind === "html") {
+    // M07: Tab strip is lifted to FilePane header.
+    if (activeTab === "raw") return <CodeBlock text={text} filePath={file.path} />;
     return (
-      <PreviewRawTabs
-        previewClassName="bg-white"
-        preview={
-          <iframe
-            title={file.path}
-            srcDoc={text}
-            sandbox=""
-            referrerPolicy="no-referrer"
-            className="h-full min-h-[600px] w-full border-0 bg-white"
-          />
-        }
-        raw={<CodeBlock text={text} filePath={file.path} />}
+      <iframe
+        title={file.path}
+        srcDoc={text}
+        sandbox=""
+        referrerPolicy="no-referrer"
+        className="h-full min-h-[600px] w-full border-0 bg-white"
       />
     );
   }
 
   if (kind === "table") {
-    return (
-      <PreviewRawTabs
-        preview={<DelimitedTablePreview text={text} path={file.path} />}
-        raw={<CodeBlock text={text} filePath={file.path} />}
-      />
-    );
+    // M07: Tab strip is lifted to FilePane header.
+    if (activeTab === "raw") return <CodeBlock text={text} filePath={file.path} />;
+    return <DelimitedTablePreview text={text} path={file.path} />;
   }
 
   if (kind === "spreadsheet") {
@@ -1975,35 +2055,6 @@ function FileContent({
   );
 }
 
-// Shared Preview/Raw shell for the text-like file kinds (markdown, code, html,
-// table). Keeps the tab strip, spacing, and surface identical across kinds
-// instead of each viewer re-declaring its own slightly different version.
-function PreviewRawTabs({
-  preview,
-  raw,
-  previewClassName = "",
-}: {
-  preview: ReactNode;
-  raw: ReactNode;
-  previewClassName?: string;
-}) {
-  return (
-    <Tabs defaultValue="preview" className="flex h-full flex-col">
-      <div className="shrink-0 border-b border-[var(--border-default)] px-4 pt-2">
-        <TabsList variant="line" className="h-8">
-          <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
-          <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
-        </TabsList>
-      </div>
-      <TabsContent value="preview" className={`mt-0 flex-1 overflow-auto p-0 ${previewClassName}`}>
-        {preview}
-      </TabsContent>
-      <TabsContent value="raw" className="mt-0 flex-1 overflow-auto p-0">
-        {raw}
-      </TabsContent>
-    </Tabs>
-  );
-}
 
 // A single "Copy" affordance for the code view replaces the old redundant
 // Raw tab. One canonical highlighted block + a copy button, instead of a second
@@ -2348,12 +2399,14 @@ function FileHistoryMenu({
   readOnly,
   refreshKey,
   onRestored,
+  onRequestConfirm,
 }: {
   packName: string;
   file: ContextFileItem;
   readOnly: boolean;
   refreshKey: number;
   onRestored: (restoredContent: string) => void;
+  onRequestConfirm: (opts: { title: string; description: string; onConfirm: () => void }) => void;
 }) {
   const filePath = file.path;
   const fileName = filePath.split("/").pop() ?? filePath;
@@ -2388,35 +2441,35 @@ function FileHistoryMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  async function handleRestore(v: VersionSummary) {
-    if (
-      !confirm(
-        `Restore "${fileName}" to commit ${v.sha}?\n\nThis replaces the current contents. A new commit is created automatically.`
-      )
-    ) {
-      return;
-    }
-    setRestoring(v.id);
-    try {
-      const result = await api.contexts.restoreFileVersion(packName, filePath, v.id);
-      if (result.deleted) {
-        toast.error("This commit recorded the file as deleted — it has been removed.");
-      } else {
-        // Fetch the restored content so the editor refreshes correctly
+  function handleRestore(v: VersionSummary) {
+    // M468-contexts: use app Dialog instead of window.confirm().
+    onRequestConfirm({
+      title: `Restore "${fileName}" to commit ${v.sha}?`,
+      description: "This replaces the current file contents. A new commit is created automatically.",
+      onConfirm: async () => {
+        setRestoring(v.id);
         try {
-          const text = await api.contexts.readTextFile(packName, filePath);
-          onRestored(text);
-        } catch {
-          onRestored("");
+          const result = await api.contexts.restoreFileVersion(packName, filePath, v.id);
+          if (result.deleted) {
+            toast.error("This commit recorded the file as deleted — it has been removed.");
+          } else {
+            // Fetch the restored content so the editor refreshes correctly
+            try {
+              const text = await api.contexts.readTextFile(packName, filePath);
+              onRestored(text);
+            } catch {
+              onRestored("");
+            }
+            toast.success(`Restored ${fileName} to commit ${v.sha}`);
+          }
+          await loadVersions();
+        } catch (err: unknown) {
+          toast.error(err instanceof Error ? err.message : "Restore failed");
+        } finally {
+          setRestoring(null);
         }
-        toast.success(`Restored ${fileName} to commit ${v.sha}`);
-      }
-      await loadVersions();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Restore failed");
-    } finally {
-      setRestoring(null);
-    }
+      },
+    });
   }
 
   return (
@@ -2429,7 +2482,7 @@ function FileHistoryMenu({
       onOpen={() => {
         if (!loadedOnce) void loadVersions();
       }}
-      onRestore={(v) => void handleRestore(v)}
+      onRestore={(v) => handleRestore(v)}
     />
   );
 }
