@@ -8,9 +8,9 @@ import { toast } from "sonner";
 import { Paperclip, Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import { PromptText } from "@/components/PromptText";
 import { PromptChips } from "@/components/PromptChips";
+import { PromptHighlightInput } from "@/components/PromptHighlightInput";
 
 // ---------------------------------------------------------------------------
 // Example workflows shown below the hero card. The tool/capability chips on
@@ -505,16 +505,20 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
             <p className="text-sm font-medium text-foreground">Drop a .md / .py / .zip or a worker folder to import</p>
           </div>
         )}
-        <Textarea
+        {/* Inline highlight overlay + real textarea via PromptHighlightInput.
+            The mirror layer renders the typed text through the shared tokeniser
+            (lib/prompt-detect) — same engine as PromptText on the example cards
+            and PromptChips below, so highlight, chips, and backend wiring
+            always agree. */}
+        <PromptHighlightInput
           ref={textareaRef}
           placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={setPrompt}
           onInput={(e) => {
             const val = (e.target as HTMLTextAreaElement).value;
             if (val !== prompt) setPrompt(val);
           }}
-          className="min-h-[160px] resize-none border-0 px-0 shadow-none text-base focus-visible:ring-0 focus-visible:border-0 placeholder:text-muted-foreground/50"
           disabled={isBusy}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -524,10 +528,10 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
           }}
         />
 
-        {/* Detected tools + capabilities — a textarea can't carry rich inline
-            highlights, so we surface what the prompt touches as a removable,
-            pre-selected chip row directly under the box. Same shared detector
-            as the inline PromptText highlight (lib/prompt-detect). */}
+        {/* Chip row — keeps the removable "Will use: Granola HubSpot …" row
+            which gives an additional signal of detected connections. Both the
+            inline highlight above AND this chip row derive from the shared
+            detector so they always agree. */}
         <PromptChips
           prompt={prompt}
           dismissed={dismissedChips}
