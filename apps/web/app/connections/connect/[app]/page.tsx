@@ -144,12 +144,12 @@ export default function ConnectAppPage() {
               </div>
             )}
 
-            <div className="mt-6 rounded-lg border bg-muted/40 p-4">
-              <p className="text-sm font-medium">What this allows</p>
-              <ul className="mt-2 space-y-1 text-sm text-muted-foreground list-disc list-inside">
-                <li>Read your {providerName} data on your behalf</li>
-                <li>Perform actions in {providerName} that your workers ask for</li>
-                <li>You can revoke this at any time from the Connections page</li>
+            <div className="mt-6">
+              <p className="text-sm font-medium text-muted-foreground">What this allows</p>
+              <ul className="mt-2 space-y-1 text-sm text-muted-foreground list-none">
+                <li>· Read your {providerName} data on your behalf</li>
+                <li>· Perform actions in {providerName} that your workers ask for</li>
+                <li>· Revoke access at any time from the Connections page</li>
               </ul>
             </div>
 

@@ -574,6 +574,11 @@ export const api = {
       fetchJson<import("./types").VersionFileDetail>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/versions/${versionId}`
       ),
+    restoreFileVersion: (name: string, path: string, sha: string) =>
+      fetchJson<import("./types").ContextFileItem>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/restore/${sha}`,
+        { method: "POST" }
+      ),
   },
   system: {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
@@ -620,6 +625,29 @@ export const api = {
       fetchJson<import("./types").VersionSummary[]>(`/workspace/base/versions?limit=${limit}`),
     rollbackWorkspaceBasePersona: (versionId: string) =>
       fetchText(`/workspace/base/rollback/${versionId}`, { method: "POST" }),
+    gitStatus: () =>
+      fetchJson<import("./types").GitWorkspaceStatus>("/system/git"),
+    gitConnect: (pat: string) =>
+      fetchJson<{ username: string }>("/system/git/connect", {
+        method: "POST",
+        body: JSON.stringify({ pat }),
+      }),
+    gitListRepos: () =>
+      fetchJson<import("./types").GitRepoItem[]>("/system/git/repos"),
+    gitCreateRepo: (name: string) =>
+      fetchJson<import("./types").GitRepoItem>("/system/git/repos", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    gitLink: (repo_full_name: string) =>
+      fetchJson<import("./types").GitWorkspaceStatus>("/system/git/link", {
+        method: "POST",
+        body: JSON.stringify({ repo_full_name }),
+      }),
+    gitPush: () =>
+      fetchJson<import("./types").GitWorkspaceStatus>("/system/git/push", { method: "POST" }),
+    gitDisconnect: () =>
+      fetchRaw("/system/git", { method: "DELETE" }).then(() => undefined),
   },
   connections: {
     list: () => fetchJson<import("./types").ConnectionItem[]>("/connections"),
