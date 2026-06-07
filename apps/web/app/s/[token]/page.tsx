@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { fetchStandaloneShare } from "@/lib/server-api";
+import { isAuthenticated } from "@/lib/server-auth";
 import { StandaloneShareCard } from "./StandaloneShareCard";
 
 export const dynamic = "force-dynamic";
@@ -43,5 +44,8 @@ export default async function StandaloneSharePage({ params }: Props) {
 
   // v6: the share card is self-contained (it carries its own Workeros nav +
   // sticky CTA), so the page no longer renders a separate header.
-  return <StandaloneShareCard share={share} token={token} />;
+  // FL4: pass auth state so a signed-in visitor sees "Dashboard" instead of a
+  // login-bound "Add to workspace".
+  const authed = await isAuthenticated();
+  return <StandaloneShareCard share={share} token={token} authed={authed} />;
 }
