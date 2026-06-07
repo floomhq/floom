@@ -5836,7 +5836,7 @@ def list_workers(
                 connections=_conn_slugs,
                 inputs=_inputs,
                 runtime=_runtime_type,
-                public_link=_worker_public_link(w),
+                public_link=_worker_public_link(w) if str(w.get("visibility") or "private") == "public" else None,
                 owner_id=w.get("owner_id"),
                 visibility=str(w.get("visibility") or "private"),
                 permissions=_worker_permissions(w, user_id=worker_user_id, repos=repos),
