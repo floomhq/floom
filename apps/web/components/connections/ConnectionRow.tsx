@@ -9,6 +9,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "./BrandLogo";
 import { formatTimestamp, type ConnectionView } from "./connection-data";
@@ -146,16 +152,25 @@ export function ConnectionRow({
         </p>
       </div>
 
-      {/* Scopes count (desktop only).
-          E3 fix: scopes are now captured from Composio (data.scope string).
-          Show the real granted-scope count. When not yet loaded (no sweep has
-          run for this row), show an honest "—" placeholder with an inline
-          refresh that triggers a re-check — NOT a fake "default scopes" label. */}
+      {/* Scopes count (desktop only). #507: show scopes in a proper Tooltip
+          instead of the native browser title attribute which truncates and has
+          no styling. */}
       <span className="hidden md:inline-flex items-center gap-1 text-xs text-muted-foreground truncate">
         {connection.scopes.length > 0 ? (
-          <span title={connection.scopes.join(", ")}>
-            {`${connection.scopes.length} scope${connection.scopes.length === 1 ? "" : "s"}`}
-          </span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger className="underline-offset-2 hover:underline cursor-default">
+                {`${connection.scopes.length} scope${connection.scopes.length === 1 ? "" : "s"}`}
+              </TooltipTrigger>
+              <TooltipContent side="bottom" align="start" className="max-w-xs">
+                <ul className="space-y-0.5 text-left">
+                  {connection.scopes.map((scope) => (
+                    <li key={scope} className="font-mono text-[11px]">{scope}</li>
+                  ))}
+                </ul>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         ) : connection.status === "expired" ||
           connection.status === "failed" ||
           connection.lastCheckStatus === "expired" ||
@@ -231,13 +246,9 @@ export function ConnectionRow({
             <MoreHorizontal className="size-3.5" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onTest(connection)} disabled={testing}>
-              <Zap className="size-3.5" />
-              {testing ? "Testing..." : "Test connection"}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onRefresh(connection)} disabled={refreshing}>
-              <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-              {refreshing ? "Refreshing..." : "Refresh status"}
+            <DropdownMenuItem onClick={() => onTest(connection)} disabled={testing || refreshing}>
+              <Zap className={cn("size-3.5", testing && "animate-pulse")} />
+              {testing ? "Checking..." : "Check connection"}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => onDelete(connection)}
