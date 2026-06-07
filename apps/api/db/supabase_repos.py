@@ -3364,3 +3364,74 @@ class SupabaseMcpToolRepository(_BaseSupabaseRepository):
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.execute()
         return bool(_response_rows(response))
+
+
+class SupabaseAlertRepository(_BaseSupabaseRepository):
+    """Supabase implementation of AlertRepository — workspace-scoped.
+
+    Replaces SqliteAlertRepository in cloud. The engine's AlertRepository
+    Protocol uses worker_id as the only scope key; in cloud we additionally
+    filter by workspace_id from the active request context so tenants are
+    fully isolated.
+    """
+
+    def _workspace_id(self) -> str | None:
+        return get_active_workspace_id()
+
+    def add(
+        self,
+        *,
+        alert_id: str,
+        worker_id: str,
+        url: str | None,
+        email_to: str | None,
+        events: str,
+        description: str | None,
+        created_at: str,
+    ) -> dict[str, Any]:
+        workspace_id = self._workspace_id()
+        if not workspace_id:
+            raise RuntimeError("No active workspace_id — cannot create alert")
+        row = {
+            "id": alert_id,
+            "workspace_id": workspace_id,
+            "worker_id": worker_id,
+            "url": url,
+            "email_to": email_to,
+            "events": events,
+            "description": description,
+            "created_at": created_at,
+        }
+        self._client.table("worker_alerts").insert(row).execute()
+        return row
+
+    def list(self, *, worker_id: str) -> list[dict[str, Any]]:
+        builder = (
+            self._client.table("worker_alerts")
+            .select("id,workspace_id,worker_id,url,email_to,events,description,created_at")
+            .eq("worker_id", worker_id)
+        )
+        workspace_id = self._workspace_id()
+        if workspace_id:
+            builder = builder.eq("workspace_id", workspace_id)
+        return _response_rows(builder.order("created_at").execute())
+
+    def get(self, *, alert_id: str) -> dict[str, Any] | None:
+        builder = self._client.table("worker_alerts").select("*").eq("id", alert_id)
+        workspace_id = self._workspace_id()
+        if workspace_id:
+            builder = builder.eq("workspace_id", workspace_id)
+        return _first_row(builder.limit(1).execute())
+
+    def delete(self, *, alert_id: str, worker_id: str) -> bool:
+        builder = (
+            self._client.table("worker_alerts")
+            .delete()
+            .eq("id", alert_id)
+            .eq("worker_id", worker_id)
+        )
+        workspace_id = self._workspace_id()
+        if workspace_id:
+            builder = builder.eq("workspace_id", workspace_id)
+        response = builder.execute()
+        return bool(_response_rows(response))
