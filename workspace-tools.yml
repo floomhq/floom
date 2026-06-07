@@ -1,0 +1,6 @@
+version: 1
+tools:
+- id: 4b6015ff-abbb-4065-9aa9-32df0078b4d7
+  name: my-test-tool
+  worker_id: topic-explainer
+  description: Test MCP tool for git versioning
