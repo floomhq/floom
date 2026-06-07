@@ -751,19 +751,11 @@ function ContextsPage() {
   }
 
   // ---- Render -------------------------------------------------------------
+  // FL8: full-page skeleton that mirrors the real Brain layout (header +
+  // New-folder button, then the unified two-pane container with a folders rail
+  // and a folder-detail pane) so the page doesn't shift when data arrives.
   if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="space-y-1">
-          <Skeleton className="h-7 w-48 rounded-[var(--radius-button)]" />
-          <Skeleton className="h-4 w-72 rounded-[var(--radius-button)]" />
-        </div>
-        <div className="flex flex-col lg:flex-row gap-4" style={{ minHeight: 520 }}>
-          <Skeleton className="w-full lg:w-[30%] rounded-[var(--radius-card)]" style={{ minHeight: 180 }} />
-          <Skeleton className="flex-1 rounded-[var(--radius-card)]" style={{ minHeight: 320 }} />
-        </div>
-      </div>
-    );
+    return <BrainSkeleton />;
   }
 
   // Desktop pane width comes from the resizable state; on mobile each pane is
@@ -1043,6 +1035,83 @@ function ContextsPage() {
             e.target.value = "";
           }}
         />
+      </div>
+    </div>
+  );
+}
+
+// ===========================================================================
+// FL8: full-page Brain loading skeleton. Mirrors the real loaded layout — page
+// header + New-folder button, then the single bordered two-pane container with
+// a folders rail (search + rows) and the folder-detail pane (metadata header +
+// files toolbar + a file list) — so the page fills the viewport while loading
+// instead of showing two small partial blocks.
+// ===========================================================================
+
+function BrainSkeleton() {
+  return (
+    <div className="flex flex-col gap-5" style={{ height: "calc(100vh - 120px)" }}>
+      {/* Page header */}
+      <div className="flex items-start justify-between gap-4 shrink-0">
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-28 rounded-[var(--radius-button)]" />
+          <Skeleton className="h-4 w-80 rounded-[var(--radius-button)]" />
+        </div>
+        <Skeleton className="h-8 w-28 rounded-[var(--radius-button)]" />
+      </div>
+
+      {/* Two-pane container */}
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+        {/* Folders rail */}
+        <section className="flex flex-col w-full lg:w-[300px] shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-default)]">
+          <div className="flex min-h-[82px] shrink-0 flex-col justify-center gap-2 border-b border-[var(--border-default)] p-3">
+            <Skeleton className="h-3 w-20 rounded-[var(--radius-button)]" />
+            <Skeleton className="h-7 w-full rounded-[var(--radius-button)]" />
+          </div>
+          <div className="flex-1 divide-y divide-[var(--border-default)]">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex items-start gap-2.5 px-3 py-3">
+                <Skeleton className="mt-0.5 size-3 shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <Skeleton className="h-4 w-32 rounded-[var(--radius-button)]" />
+                  <Skeleton className="h-3 w-40 rounded-[var(--radius-button)]" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Folder detail pane */}
+        <section className="flex-1 flex flex-col min-w-0">
+          {/* Metadata header */}
+          <div className="min-h-[82px] shrink-0 border-b border-[var(--border-default)] px-5 py-4 space-y-3">
+            <Skeleton className="h-5 w-44 rounded-[var(--radius-button)]" />
+            <Skeleton className="h-4 w-72 rounded-[var(--radius-button)]" />
+            <div className="flex flex-wrap items-center gap-3">
+              <Skeleton className="h-8 w-20 rounded-[var(--radius-button)]" />
+              <Skeleton className="h-8 w-28 rounded-[var(--radius-button)]" />
+              <Skeleton className="h-8 w-20 rounded-[var(--radius-button)]" />
+            </div>
+          </div>
+          {/* Files toolbar */}
+          <div className="flex items-center justify-between px-5 py-2.5 border-b border-[var(--border-default)] shrink-0">
+            <Skeleton className="h-3 w-12 rounded-[var(--radius-button)]" />
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-7 w-28 rounded-[var(--radius-button)]" />
+              <Skeleton className="h-7 w-20 rounded-[var(--radius-button)]" />
+            </div>
+          </div>
+          {/* File list */}
+          <div className="flex-1 p-3 space-y-1.5">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-2 py-2.5">
+                <Skeleton className="size-4 shrink-0 rounded-[var(--radius-button)]" />
+                <Skeleton className="h-4 w-48 rounded-[var(--radius-button)]" />
+                <Skeleton className="ml-auto h-3 w-14 rounded-[var(--radius-button)]" />
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     </div>
   );
