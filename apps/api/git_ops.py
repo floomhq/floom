@@ -18,9 +18,42 @@ import logging
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Workspace ID resolver — cloud hook
+#
+# In OSS single-tenant mode this is never set; everything lives in one repo.
+# In cloud multi-tenant mode, managed-deployment registers a callable that returns
+# the active workspace_id for the current request (same pattern as
+# contexts.set_context_scope_resolver). The engine uses it to scope the git
+# root to the right per-workspace directory.
+# ---------------------------------------------------------------------------
+
+_workspace_id_resolver: Optional[Callable[[], Optional[str]]] = None
+
+
+def set_workspace_id_resolver(fn: Optional[Callable[[], Optional[str]]]) -> None:
+    """Register a callable that returns the active workspace_id per request.
+
+    Called by managed-deployment at startup. Pass ``None`` to clear (OSS mode).
+    The callable MUST return either a safe workspace_id string or None.
+    """
+    global _workspace_id_resolver
+    _workspace_id_resolver = fn
+
+
+def get_active_workspace_id() -> Optional[str]:
+    """Return the workspace_id for the current request, or None in OSS mode."""
+    if _workspace_id_resolver is None:
+        return None
+    try:
+        return _workspace_id_resolver()
+    except Exception:
+        return None
 
 
 class GitOpsError(Exception):

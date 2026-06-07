@@ -168,9 +168,21 @@ import git_ops as _git_ops
 
 
 def _git_workspace() -> Path:
-    """Return the git workspace root (dir that contains workers/, contexts/, workspace.md)."""
+    """Return the git workspace root for the current request.
+
+    OSS (single-tenant): WORKEROS_WORKSPACE_DIR env var, or WORKERS_DIR.parent.
+    Cloud (multi-tenant): WORKERS_DIR / {workspace_id} — one git repo per workspace,
+    resolved via the workspace_id resolver registered by managed-deployment at startup.
+    """
     custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
-    return Path(custom).resolve() if custom else WORKERS_DIR.parent.resolve()
+    if custom:
+        return Path(custom).resolve()
+    workspace_id = _git_ops.get_active_workspace_id()
+    if workspace_id:
+        # Cloud: each workspace has its own git repo under WORKERS_DIR
+        return (WORKERS_DIR / workspace_id).resolve()
+    # OSS: single workspace at WORKERS_DIR.parent
+    return WORKERS_DIR.parent.resolve()
 
 
 def _git_author(auth: "AuthContext") -> tuple[str, str]:
@@ -2453,7 +2465,13 @@ def _workspace_base_persona_asset_id(request: Request | None = None) -> str:
 
 
 def _workers_git_prefix() -> str:
-    """Relative dir name of the workers dir within the workspace git root."""
+    """Relative path of the workers dir within the workspace git root.
+
+    OSS: git root is WORKERS_DIR.parent, so workers are at 'workers/'.
+    Cloud: git root IS WORKERS_DIR/workspace_id, so workers sit at root — prefix is ''.
+    """
+    if _git_ops.get_active_workspace_id():
+        return ""  # Cloud: worker_id/ is directly under the git root
     try:
         return WORKERS_DIR.relative_to(_git_workspace()).as_posix()
     except ValueError:
@@ -2461,11 +2479,30 @@ def _workers_git_prefix() -> str:
 
 
 def _contexts_git_prefix() -> str:
-    """Relative dir name of the contexts dir within the workspace git root."""
+    """Relative path of the contexts dir within the workspace git root.
+
+    OSS: git root is WORKERS_DIR.parent, contexts at 'contexts/'.
+    Cloud: contexts live under CONTEXTS_DIR/workspace_id which may be outside the
+    workers-scoped git root. If so, fall back to 'contexts' and note that contexts
+    versioning in cloud requires a unified workspace dir (v2 cloud work).
+    """
+    if _git_ops.get_active_workspace_id():
+        # In cloud, CONTEXTS_DIR may be a separate FS root from WORKERS_DIR.
+        # Try to compute relative path; if outside git root, use 'contexts' as
+        # a best-effort path (commits will no-op if the path doesn't exist).
+        try:
+            return CONTEXTS_DIR.relative_to(_git_workspace()).as_posix()
+        except ValueError:
+            return "contexts"
     try:
         return CONTEXTS_DIR.relative_to(_git_workspace()).as_posix()
     except ValueError:
         return "contexts"
+
+
+def _git_join(*parts: str) -> str:
+    """Join path parts, skipping empty segments (handles empty prefix in cloud mode)."""
+    return "/".join(p for p in parts if p)
 
 
 def _git_commit_worker(
@@ -2477,8 +2514,8 @@ def _git_commit_worker(
 ) -> None:
     try:
         workspace = _git_workspace()
-        prefix = _workers_git_prefix()
-        _git_ops.commit_paths(workspace, [f"{prefix}/{worker_id}"], message, author_name, author_email)
+        rel = _git_join(_workers_git_prefix(), worker_id)
+        _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
         _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for worker %s: %s", worker_id, exc)
@@ -2494,9 +2531,8 @@ def _git_commit_context(
 ) -> None:
     try:
         workspace = _git_workspace()
-        prefix = _contexts_git_prefix()
-        path = f"{prefix}/{name}/{rel_path}" if rel_path else f"{prefix}/{name}"
-        _git_ops.commit_paths(workspace, [path], message, author_name, author_email)
+        rel = _git_join(_contexts_git_prefix(), name, rel_path or "")
+        _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
         _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for context %s: %s", name, exc)
@@ -17517,30 +17553,41 @@ class _GitRepoItem(BaseModel):
     pushed_at: Optional[str] = None
 
 
+def _git_workspace_key(user_id: str) -> str:
+    """Return the key for git_workspace_config rows.
+
+    Cloud: workspace_id — all members of a workspace share one GitHub repo.
+    OSS:   user_id — single-user or first-admin owns the config.
+    """
+    return _git_ops.get_active_workspace_id() or user_id
+
+
 def _git_cfg_get(user_id: str) -> dict | None:
+    key = _git_workspace_key(user_id)
     with get_db() as conn:
         row = conn.execute(
             """SELECT github_pat, github_username, repo_full_name, repo_url,
                       remote_url, connected_at, last_pushed_at
                FROM git_workspace_config WHERE user_id = ?""",
-            (user_id,),
+            (key,),
         ).fetchone()
     return dict(row) if row else None
 
 
 def _git_cfg_upsert(user_id: str, **fields: str) -> None:
+    key = _git_workspace_key(user_id)
     with get_db() as conn:
         existing = conn.execute(
-            "SELECT 1 FROM git_workspace_config WHERE user_id = ?", (user_id,)
+            "SELECT 1 FROM git_workspace_config WHERE user_id = ?", (key,)
         ).fetchone()
         if existing:
             set_clause = ", ".join(f"{k} = ?" for k in fields)
             conn.execute(
                 f"UPDATE git_workspace_config SET {set_clause} WHERE user_id = ?",
-                [*fields.values(), user_id],
+                [*fields.values(), key],
             )
         else:
-            fields["user_id"] = user_id
+            fields["user_id"] = key
             keys = ", ".join(fields)
             placeholders = ", ".join("?" * len(fields))
             conn.execute(
