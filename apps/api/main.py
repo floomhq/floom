@@ -17633,6 +17633,12 @@ def _git_cfg_upsert(user_id: str, **fields: str) -> None:
             )
 
 
+def _git_cfg_delete(user_id: str) -> None:
+    key = _git_workspace_key(user_id)
+    with get_db() as conn:
+        conn.execute("DELETE FROM git_workspace_config WHERE user_id = ?", (key,))
+
+
 _SECRETS_ENC_FILENAME = ".secrets.enc"
 
 # Cloud hook — registered by managed-deployment startup.py to return the
@@ -17922,13 +17928,133 @@ def push_git_workspace(auth: AuthContext = Depends(get_auth_context)) -> _GitSta
 def disconnect_git(auth: AuthContext = Depends(get_auth_context)) -> Response:
     """Remove stored GitHub credentials and detach the remote. Admin only."""
     _require_admin(auth)
-    with get_db() as conn:
-        conn.execute("DELETE FROM git_workspace_config WHERE user_id = ?", (auth.user_id,))
+    _git_cfg_delete(auth.user_id)
     try:
         _git_ops._git(["remote", "remove", "origin"], _git_workspace(), check=False)
     except Exception:
         pass
     return Response(status_code=204)
+
+
+@app.post("/system/git/import", status_code=200)
+def import_git_workspace(
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Import workers and contexts from the linked GitHub repo into WorkerOS.
+
+    Clones the repo into a temp directory, parses each worker bundle, upserts
+    into the repository, then cleans up. Safe to call on an existing install —
+    workers already in the DB are updated, not duplicated. Admin only.
+
+    In cloud, repos.workers is SupabaseWorkerRepository so upsert goes to
+    Supabase. Secrets are skipped in cloud (.secrets.enc is OSS-only).
+    In OSS, worker files are written to WORKERS_DIR and committed to git.
+    """
+    import tempfile, shutil as _shutil
+    import github_api as _gh
+    import yaml as pyyaml
+
+    _require_admin(auth)
+    cfg = _git_cfg_get(auth.user_id)
+    if not cfg or not cfg.get("repo_full_name"):
+        raise HTTPException(status_code=400, detail="No GitHub repo linked")
+
+    pat = cfg["github_pat"]
+    repo_full_name = cfg["repo_full_name"]
+    imported = {"workers": 0, "contexts": 0, "secrets": 0, "tools": 0}
+
+    tmp = Path(tempfile.mkdtemp(prefix="workeros-import-"))
+    try:
+        # Clone into temp directory
+        remote_url = f"https://x-access-token:{pat}@github.com/{repo_full_name}.git"
+        try:
+            _git_ops.clone_or_init(tmp, remote_url)
+        except _git_ops.GitOpsError as exc:
+            raise HTTPException(status_code=500, detail=f"Clone failed: {exc}") from exc
+
+        # Import workers
+        workers_dir_in_repo = tmp / "workers"
+        if workers_dir_in_repo.is_dir():
+            for worker_bundle in sorted(workers_dir_in_repo.iterdir()):
+                if not worker_bundle.is_dir():
+                    continue
+                worker_id = worker_bundle.name
+                yml_path = worker_bundle / "worker.yml"
+                if not yml_path.is_file():
+                    continue
+                try:
+                    manifest = pyyaml.safe_load(yml_path.read_text(encoding="utf-8")) or {}
+                    # Embed all other files as _files
+                    files: Dict[str, str] = {}
+                    for fpath in worker_bundle.iterdir():
+                        if fpath.name == "worker.yml" or not fpath.is_file():
+                            continue
+                        try:
+                            files[fpath.name] = fpath.read_text(encoding="utf-8")
+                        except Exception:
+                            pass
+                    if files:
+                        manifest["_files"] = files
+                    repos.workers.upsert(
+                        user_id=auth.user_id,
+                        worker_id=worker_id,
+                        name=manifest.get("title") or manifest.get("name") or worker_id,
+                        manifest_json=manifest,
+                        trigger_type=manifest.get("trigger", {}).get("type") or "manual",
+                        bundle_path=f"workers/{worker_id}",
+                    )
+                    imported["workers"] += 1
+                except Exception as exc:
+                    logger.warning("Import: skipped worker %s: %s", worker_id, exc)
+
+        # Import contexts (write to disk — contexts are filesystem-based in both OSS and cloud)
+        contexts_dir_in_repo = tmp / "contexts"
+        if contexts_dir_in_repo.is_dir():
+            dest_contexts = current_contexts_root()
+            for ctx_bundle in sorted(contexts_dir_in_repo.iterdir()):
+                if not ctx_bundle.is_dir():
+                    continue
+                dest = dest_contexts / ctx_bundle.name
+                dest.mkdir(parents=True, exist_ok=True)
+                for fpath in ctx_bundle.iterdir():
+                    if fpath.is_file():
+                        try:
+                            (dest / fpath.name).write_bytes(fpath.read_bytes())
+                        except Exception:
+                            pass
+                imported["contexts"] += 1
+
+        # Import workspace instructions
+        for fname in ("workspace.md", "workspace.base.md"):
+            src = tmp / fname
+            if src.is_file():
+                try:
+                    (_git_workspace() / fname).write_bytes(src.read_bytes())
+                except Exception:
+                    pass
+
+        # Import workspace-tools.yml
+        tools_yml = tmp / "workspace-tools.yml"
+        if tools_yml.is_file():
+            try:
+                loaded = _load_workspace_tools_yml(auth.user_id, repos)
+                imported["tools"] = loaded
+            except Exception:
+                pass
+
+        # Import secrets from .secrets.enc (OSS only — cloud uses Supabase)
+        if _secrets_key_resolver is None:
+            loaded_secrets = _load_secrets_from_enc(auth.user_id, repos, pat, repo_full_name)
+            imported["secrets"] = loaded_secrets
+
+    finally:
+        try:
+            _shutil.rmtree(tmp, ignore_errors=True)
+        except Exception:
+            pass
+
+    return {"imported": imported}
 
 
 @app.get("/system/alerts")
