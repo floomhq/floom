@@ -5,7 +5,7 @@ Source report: `docs/launch-readiness/ux-walk-2026-06-07.md`
 ## PRs
 
 - P0 Cloud magic-link email: https://github.com/floomhq/workeros-cloud/pull/113
-- P1 OSS assistant base editor: TBD after PR creation
+- P1 OSS assistant base editor: https://github.com/floomhq/workeros/pull/532
 
 ## P0 - Cloud Magic-Link Email Corruption
 
