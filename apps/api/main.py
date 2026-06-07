@@ -17852,6 +17852,7 @@ def create_git_repo(
 def link_git_repo(
     payload: _GitLinkRequest,
     auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
 ) -> _GitStatus:
     """Link a GitHub repo as this workspace's remote and push. Admin only."""
     _require_admin(auth)
