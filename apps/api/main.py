@@ -12379,15 +12379,6 @@ def upsert_secret(
         status=SecretStatus.SET.value,
     )
     logger.info("Secret %s upserted", name)
-    # Mirror to GitHub repo secrets if workspace is connected
-    try:
-        import github_api as _gh
-        _cfg = _git_cfg_get(auth.user_id)
-        if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):
-            _gh.set_secret(_cfg["github_pat"], _cfg["repo_full_name"], str(name), payload.value)
-            logger.debug("Secret %s mirrored to GitHub", name)
-    except Exception as _gh_exc:
-        logger.warning("Failed to mirror secret %s to GitHub (non-fatal): %s", name, _gh_exc)
     return SecretTestResult(status="valid", reason=f"Secret {name!r} saved.")
 
 
@@ -12414,14 +12405,6 @@ def delete_secret(
         raise HTTPException(status_code=404, detail=f"Secret {name!r} not found in .env")
     repos.secrets.delete(user_id=auth.user_id, name=name)
     logger.info("Secret %s deleted", name)
-    # Mirror deletion to GitHub repo secrets if workspace is connected
-    try:
-        import github_api as _gh
-        _cfg = _git_cfg_get(auth.user_id)
-        if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):
-            _gh.delete_secret(_cfg["github_pat"], _cfg["repo_full_name"], str(name))
-    except Exception as _gh_exc:
-        logger.warning("Failed to delete secret %s from GitHub (non-fatal): %s", name, _gh_exc)
     return SecretTestResult(status="valid", reason=f"Secret {name!r} removed.")
 
 
@@ -17526,10 +17509,8 @@ class _GitStatus(BaseModel):
     repo_url: Optional[str] = None
     connected_at: Optional[str] = None
     last_pushed_at: Optional[str] = None
-    # Secret name sync: names in GitHub but not yet set locally (for fresh-install guide)
-    missing_secrets: List[str] = Field(default_factory=list)
-    # Names of secrets currently mirrored to GitHub
-    github_secret_names: List[str] = Field(default_factory=list)
+    # Set after a fresh-install link when secrets were decrypted from .secrets.enc
+    secrets_loaded: int = 0
 
 
 class _GitConnectRequest(BaseModel):
@@ -17597,31 +17578,11 @@ def _git_cfg_upsert(user_id: str, **fields: str) -> None:
 
 
 @app.get("/system/git", response_model=_GitStatus)
-def get_git_status(
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> _GitStatus:
-    """Return current GitHub connection + linked repo status.
-
-    Also fetches GitHub secret names (not values) and compares them against
-    locally configured secrets so fresh installs know what to configure.
-    """
-    import github_api as _gh
-
+def get_git_status(auth: AuthContext = Depends(get_auth_context)) -> _GitStatus:
+    """Return current GitHub connection + linked repo status."""
     cfg = _git_cfg_get(auth.user_id)
     if not cfg or not cfg.get("repo_full_name"):
         return _GitStatus(connected=False)
-
-    github_secret_names: list[str] = []
-    missing_secrets: list[str] = []
-    try:
-        github_secret_names = _gh.list_secret_names(cfg["github_pat"], cfg["repo_full_name"])
-        if github_secret_names:
-            local_secrets = {s["name"] for s in repos.secrets.list(user_id=auth.user_id)}
-            missing_secrets = [n for n in github_secret_names if n not in local_secrets]
-    except Exception as _exc:
-        logger.debug("Could not fetch GitHub secret names (non-fatal): %s", _exc)
-
     return _GitStatus(
         connected=True,
         github_username=cfg.get("github_username"),
@@ -17629,8 +17590,6 @@ def get_git_status(
         repo_url=cfg.get("repo_url"),
         connected_at=cfg.get("connected_at"),
         last_pushed_at=cfg.get("last_pushed_at"),
-        github_secret_names=github_secret_names,
-        missing_secrets=missing_secrets,
     )
 
 
