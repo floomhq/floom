@@ -137,16 +137,16 @@ def test_floom_secret_auth(monkeypatch, tmp_path):
         assert resp.json()["role"] == "admin"
 
 
-def test_wrong_secret_returns_403(monkeypatch, tmp_path):
-    """Wrong x-floom-secret on a non-exempt path is rejected by the pre-auth middleware with 403."""
+def test_wrong_secret_returns_401(monkeypatch, tmp_path):
+    """Wrong x-floom-secret on a non-exempt path is rejected like missing auth."""
     from fastapi.testclient import TestClient
     monkeypatch.setenv("FLOOM_SECRET", "mysecret")
     main = load_main(monkeypatch, tmp_path)
     monkeypatch.setenv("FLOOM_SECRET", "mysecret")
     with TestClient(main.app) as c:
-        # /me is not an exempt path â€” wrong secret is caught by the middleware as 403
+        # /me is not an exempt path; wrong secret is caught by the middleware.
         resp = c.get("/me", headers={"x-floom-secret": "wrongsecret"})
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
