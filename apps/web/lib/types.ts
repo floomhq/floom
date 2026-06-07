@@ -943,8 +943,7 @@ export interface GitWorkspaceStatus {
   repo_url?: string | null;
   connected_at?: string | null;
   last_pushed_at?: string | null;
-  github_secret_names?: string[];
-  missing_secrets?: string[];
+  secrets_loaded?: number;
 }
 
 export interface GitRepoItem {
