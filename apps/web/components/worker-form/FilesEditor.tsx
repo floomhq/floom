@@ -47,18 +47,18 @@ function sourceFileKind(path: string, language?: string) {
 }
 
 // A file has a *genuine* rendered-vs-source distinction worth a second tab.
-// Generic .yaml/.yml/.json/.py/etc. do NOT: their "rendered" form is just the
-// same syntax-highlighted source, so showing both a Preview and a Raw tab is
-// redundant (the confusing dual-tab Federico flagged). Only these kinds render
-// to something materially different from their source:
-//   - markdown -> formatted document
-//   - html     -> iframe
+// Preview semantics per kind:
+//   - markdown -> formatted prose document
+//   - html     -> sandboxed iframe
 //   - table    -> parsed grid
+//   - code     -> plain wrapped text (Preview) vs syntax-highlighted (Raw)
+// Generic .yaml/.yml get a single view — their "Preview" would be identical
+// to the syntax-highlighted source (the confusing dual-tab Federico flagged).
 // worker.yml is special-cased separately (structured summary), handled by
 // `hasWorkerYamlSummary`.
 function supportsRenderedPreview(path: string, binary?: boolean): boolean {
   if (binary) return false;
-  return ["markdown", "html", "table"].includes(sourceFileKind(path));
+  return ["markdown", "html", "table", "code"].includes(sourceFileKind(path));
 }
 
 // worker.yml gets a structured "Summary" rendering distinct from its raw YAML
@@ -386,8 +386,7 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
     );
   }
 
-  // Everything else (.py / .ts / .json / .yaml / .yml / .txt / ...): a single
-  // canonical syntax-highlighted view — no redundant Preview-vs-Raw tabs.
+  // Remaining cases: .yaml/.yml (not worker.yml) — single syntax-highlighted view.
   return (
     <div>
       <SourcePreviewToolbar path={file.path} content={content} label="Source" />
@@ -502,6 +501,16 @@ function RenderedFilePreview({
         detail="This worker source payload only includes text content for source files. This renderer needs file bytes or a backend download URL, which is not present in WorkerFile."
         path={path}
       />
+    );
+  }
+
+  // "code" kind (run.py, .sh, .json, etc.): Preview = plain readable text,
+  // Raw tab (in ReadOnlyFileContent) = syntax-highlighted. Two distinct views.
+  if (sourceFileKind(path, detected) === "code") {
+    return (
+      <pre className="max-h-[640px] overflow-auto whitespace-pre-wrap p-4 text-sm leading-relaxed font-mono text-foreground bg-muted/20">
+        {content}
+      </pre>
     );
   }
 
