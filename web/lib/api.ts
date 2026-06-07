@@ -725,6 +725,12 @@ export const api = {
         { method: "POST", body: JSON.stringify({ new_owner_id: newOwnerId }) }
       ),
   },
+  conversations: {
+    list: (limit = 50) =>
+      fetchJson<import("./types").ConversationSummary[]>(`/conversations?limit=${limit}`),
+    get: (id: string) =>
+      fetchJson<import("./types").ConversationDetail>(`/conversations/${encodeURIComponent(id)}`),
+  },
   integrations: {
     triggers: () =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),

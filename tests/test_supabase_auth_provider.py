@@ -18,6 +18,7 @@ def _request(authorization: str | None) -> Request:
             "type": "http",
             "method": "GET",
             "path": "/api/workers",
+            "query_string": b"",
             "headers": headers,
         }
     )

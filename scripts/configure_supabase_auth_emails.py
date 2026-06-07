@@ -54,7 +54,17 @@ def _template(
     cta_label: str,
     otp_type: str,
 ) -> str:
-    action_url = "{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=" + otp_type
+    # Keep the token/type query separators out of quoted-printable's `=XX`
+    # grammar. SES/Supabase Auth emails have corrupted links when a token starts
+    # with hex bytes such as e9 or cb and the body contains `token_hash=e9...`.
+    #
+    # If the email provider preserves the wrapper, deployed callbacks can read
+    # token_hash/type from the nested URL. If it normalizes to direct encoded
+    # separators, apps/api/routes/auth.py reads that shape too.
+    action_url = (
+        "{{ .RedirectTo }}&confirmation_url={{ .RedirectTo }}"
+        "%26token_hash%3D{{ .TokenHash }}%26type%3D" + otp_type
+    )
     return _workeros_email_html(
         preheader=preheader,
         eyebrow=eyebrow,

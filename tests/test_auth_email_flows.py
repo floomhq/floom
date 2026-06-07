@@ -20,6 +20,7 @@ class _AuthClient:
     def __init__(self, *, signup_response: SimpleNamespace | None = None, user: SimpleNamespace | None = None) -> None:
         self.signup_payloads: list[dict] = []
         self.otp_payloads: list[dict] = []
+        self.verify_payloads: list[dict] = []
         self.signup_response = signup_response
         self.user = user
 
@@ -30,6 +31,18 @@ class _AuthClient:
     def sign_up(self, payload: dict):
         self.signup_payloads.append(payload)
         return self.signup_response or SimpleNamespace(user=self.user, session=None)
+
+    def verify_otp(self, payload: dict):
+        self.verify_payloads.append(payload)
+        user = self.user or SimpleNamespace(id="user-1", email="new@example.com")
+        session = SimpleNamespace(
+            access_token="access-token-123",
+            refresh_token="refresh-token-123",
+            expires_at=1_900_000_000,
+            expires_in=3600,
+            user=user,
+        )
+        return SimpleNamespace(user=user, session=session)
 
     def get_user(self, access_token: str):
         assert access_token == "access-token-123"
@@ -123,6 +136,69 @@ def test_password_signup_confirmation_required_is_not_signin_failure(monkeypatch
     assert auth_client.signup_payloads[0]["options"]["email_redirect_to"].startswith(
         "https://workeros-api.floom.dev/auth/callback?"
     )
+
+
+def test_auth_email_templates_use_qp_safe_token_query_separators():
+    from scripts.configure_supabase_auth_emails import _payload
+
+    payload = _payload()
+    for key in [
+        "mailer_templates_confirmation_content",
+        "mailer_templates_magic_link_content",
+        "mailer_templates_recovery_content",
+        "mailer_templates_email_change_content",
+        "mailer_templates_invite_content",
+        "mailer_templates_reauthentication_content",
+    ]:
+        template = payload[key]
+        assert "confirmation_url={{ .RedirectTo }}%26token_hash%3D{{ .TokenHash }}%26type%3D" in template
+        assert "token_hash%3D{{ .TokenHash }}" in template
+        assert "token_hash={{ .TokenHash }}" not in template
+        assert "%26type%3D" in template
+        assert "&amp;type=" not in template
+
+
+def test_callback_accepts_qp_safe_encoded_token_query_separator(monkeypatch):
+    user = SimpleNamespace(id="user-1", email="new@example.com")
+    auth_client = _AuthClient(user=user)
+    client = _app(monkeypatch, auth_client)
+
+    response = client.get(
+        "/auth/callback?next=/app&token_hash%3De978abc123&type%3Dsignup",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "https://workeros.floom.dev/app"
+    assert auth_client.verify_payloads == [
+        {
+            "token_hash": "e978abc123",
+            "type": "signup",
+            "options": {
+                "redirect_to": "https://workeros-api.floom.dev/auth/callback?next=%2Fapp"
+            },
+        }
+    ]
+    assert "workeros_cloud_session=" in response.headers["set-cookie"]
+
+
+def test_callback_accepts_qp_safe_confirmation_url_wrapper(monkeypatch):
+    user = SimpleNamespace(id="user-1", email="new@example.com")
+    auth_client = _AuthClient(user=user)
+    client = _app(monkeypatch, auth_client)
+
+    response = client.get(
+        "/auth/callback?"
+        "next=/app&"
+        "confirmation_url=https://workeros-api.floom.dev/auth/callback?next=%2Fapp"
+        "%26token_hash%3Dcb37abc123%26type%3Dsignup",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert auth_client.verify_payloads[0]["token_hash"] == "cb37abc123"
+    assert auth_client.verify_payloads[0]["type"] == "signup"
+    assert "workeros_cloud_session=" in response.headers["set-cookie"]
 
 
 def test_password_signup_with_session_sets_cookie(monkeypatch):

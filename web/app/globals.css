@@ -681,3 +681,10 @@ html.dark .grain {
   width: 20px;
   height: 20px;
 }
+
+/* Indeterminate progress animation for "Connecting" OAuth rows */
+@keyframes conn-progress {
+  0%   { left: -33%; }
+  60%  { left: 100%; }
+  100% { left: 100%; }
+}

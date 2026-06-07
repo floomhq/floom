@@ -33,6 +33,7 @@ def _request(*, cookie: str | None = None, header: str | None = None) -> Request
             "type": "http",
             "method": "GET",
             "path": "/api/workers",
+            "query_string": b"",
             "headers": raw_headers,
         }
     )
@@ -141,6 +142,7 @@ def test_missing_bearer_raises_401(monkeypatch):
             "type": "http",
             "method": "GET",
             "path": "/api/workers",
+            "query_string": b"",
             "headers": [],
         }
     )

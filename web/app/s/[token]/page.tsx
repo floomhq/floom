@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchStandaloneShare } from "@/lib/server-api";
 import { StandaloneShareCard } from "./StandaloneShareCard";
@@ -42,23 +41,7 @@ export default async function StandaloneSharePage({ params }: Props) {
     notFound();
   }
 
-  return (
-    <>
-      <header className="flex h-14 items-center justify-between border-b border-[var(--border-soft)] px-5">
-        <Link href="/" className="inline-flex items-center gap-2 text-[15px] font-semibold text-[var(--ink)]">
-          <span className="grid size-[22px] place-items-center rounded-[5px] bg-[var(--primary)] text-xs font-bold text-[var(--primary-text)]">
-            W
-          </span>
-          Workeros
-        </Link>
-        <Link
-          href="/login"
-          className="inline-flex h-8 items-center rounded-[7px] px-3 text-xs font-medium text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-[var(--ink)]"
-        >
-          Sign in
-        </Link>
-      </header>
-      <StandaloneShareCard share={share} token={token} />
-    </>
-  );
+  // v6: the share card is self-contained (it carries its own Workeros nav +
+  // sticky CTA), so the page no longer renders a separate header.
+  return <StandaloneShareCard share={share} token={token} />;
 }

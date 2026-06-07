@@ -37,6 +37,7 @@ import {
   type LucideProps,
 } from "lucide-react";
 import { HeroPromptComposer } from "../landing-ref/HeroPromptComposer";
+import { ChannelInstall } from "../landing-ref/ChannelInstall";
 import { ToolLogo, hasLogo } from "../landing-ref/logos";
 
 const EASE_OUT: Transition["ease"] = [0.22, 1, 0.36, 1];
@@ -452,10 +453,12 @@ export function HeroV3Collage() {
           <HeroPromptComposer onFocusedChange={setFocused} />
         </motion.div>
 
+        <ChannelInstall />
+
         <motion.div
           initial={reduce ? false : { opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, delay: 0.42, ease: EASE_OUT }}
+          transition={{ duration: 0.55, delay: 0.56, ease: EASE_OUT }}
           className="mt-6 text-center text-[13px] text-muted-foreground"
         >
           Or{" "}
