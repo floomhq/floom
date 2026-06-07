@@ -246,9 +246,9 @@ const PANE_WIDTHS_KEY = "floom:brain:pane-widths";
 const PACKS_MIN = 160;
 const PACKS_MAX = 420;
 const MID_MIN = 180;
-const MID_MAX = 560;
+const MID_MAX = 900;
 const PACKS_DEFAULT = 300;
-const MID_DEFAULT = 280;
+const MID_DEFAULT = 360;
 
 type PaneWidths = { packs: number; mid: number };
 
