@@ -281,7 +281,26 @@ def _dispatch_rel(workspace_id: str, rel: str, pat: str, repo: str, message: str
     # Context: "contexts/{name}" or "contexts/{name}/file"
     if rel.startswith("contexts/"):
         context_name = rel.split("/", 2)[1]
-        push_context(workspace_id, context_name, pat, repo, message)
+        is_delete = "delete" in message.lower()
+        if is_delete:
+            # Clean up Storage — disk is already gone
+            try:
+                from apps.api.cloud_contexts import delete_context_from_storage  # noqa: PLC0415
+                delete_context_from_storage(workspace_id, context_name)
+            except Exception as exc:
+                logger.debug("delete_context_from_storage failed: %s", exc)
+        else:
+            push_context(workspace_id, context_name, pat, repo, message)
+            # Also sync to Supabase Storage for container-restart persistence
+            try:
+                from apps.api.cloud_contexts import upload_context_background  # noqa: PLC0415
+                from apps.api._engine import ensure_engine_api_path  # noqa: PLC0415
+                ensure_engine_api_path()
+                from contexts import current_contexts_root  # noqa: PLC0415
+                ctx_dir = current_contexts_root() / context_name
+                upload_context_background(workspace_id, context_name, ctx_dir)
+            except Exception as exc:
+                logger.debug("context Storage upload failed: %s", exc)
         return
 
     # Worker: "workers/{id}" or just "{id}" (cloud empty prefix)

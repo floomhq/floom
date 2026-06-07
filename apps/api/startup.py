@@ -241,6 +241,53 @@ def _override_worker_author_platform_secret() -> None:
     run_service.get_secrets_for_worker = _cloud_get_secrets_for_worker
 
 
+def _bootstrap_contexts_storage() -> None:
+    """Ensure the Supabase Storage 'contexts' bucket exists and patch the engine's
+    context_dir() to lazy-hydrate from Storage when a context is missing on disk.
+
+    Without this, context files live only on the container's ephemeral FS and are
+    lost on every restart. With it:
+      - Write: upload to Storage after every context file save (via cloud_git)
+      - Read:  if CONTEXTS_DIR/{workspace_id}/{name}/ is absent, download from
+               Storage before returning the path — transparent to the engine
+    """
+    from apps.api.cloud_contexts import ensure_bucket, hydrate_if_missing
+
+    # Create bucket once (idempotent)
+    try:
+        ensure_bucket()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("contexts bucket bootstrap failed: %s", exc)
+
+    # Patch engine_contexts.context_dir for lazy hydration
+    if not hasattr(engine_contexts, "context_dir"):
+        return
+
+    _original_context_dir = engine_contexts.context_dir
+    if getattr(_original_context_dir, "_workeros_cloud_patched", False):
+        return
+
+    from apps.api.auth.workspace_context import get_active_workspace_id
+
+    def _cloud_context_dir(name: str) -> "Path":
+        d = _original_context_dir(name)
+        if not d.exists() or not any(d.iterdir() if d.exists() else []):
+            workspace_id = get_active_workspace_id()
+            if workspace_id:
+                try:
+                    hydrate_if_missing(workspace_id, name, d)
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).debug(
+                        "context hydration failed for %s/%s: %s", workspace_id, name, exc
+                    )
+        return d
+
+    _cloud_context_dir._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    engine_contexts.context_dir = _cloud_context_dir
+
+
 def _override_git_cfg_for_cloud() -> None:
     """Replace SQLite-backed git_workspace_config reads/writes with Supabase.
 
@@ -435,6 +482,7 @@ def register_cloud_components() -> None:
     _register_secrets_key_resolver()
     _override_git_cfg_for_cloud()
     _override_git_ops_for_cloud()
+    _bootstrap_contexts_storage()
     _override_create_run_for_members()
     _override_worker_author_platform_secret()
     # Run the real init_db() once so the engine's local SQLite DB has the
