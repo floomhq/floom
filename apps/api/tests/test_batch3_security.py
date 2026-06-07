@@ -60,48 +60,61 @@ def test_clean_url_still_passes(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# #529 — Private workers must not expose public_link in list response
+# #529 — Private workers must not expose public_link in list or detail response
 # ---------------------------------------------------------------------------
 
-def _make_link(worker_id: str) -> str:
-    """Minimal replica of _worker_public_link for testing the guard logic.
-
-    Replicates the HMAC URL construction from main.py without importing the
-    full FastAPI app (which pulls in dotenv, sqlite, e2b, etc.).
-    """
-    import hashlib
-    import hmac as _hmac
-
-    secret = os.environ.get("FLOOM_SECRET", "dev-secret-not-set")
-    payload = f"worker.{worker_id}.owner1"
-    token = _hmac.new(
-        secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-    return f"http://localhost:3000/w/{worker_id}?token={token}"
+MAIN_PY = API_DIR / "main.py"
+_GUARD = "== \"public\" else None"
 
 
-def _guarded_link(worker: dict) -> str | None:
-    """Exact conditional from main.py line ~5839."""
-    if str(worker.get("visibility") or "private") != "public":
-        return None
-    return _make_link(str(worker.get("id") or ""))
+def test_list_endpoint_guards_public_link():
+    """list_workers must gate _worker_public_link on visibility == 'public'."""
+    src = MAIN_PY.read_text()
+    # Find the list_workers assignment — must be a conditional, not a bare call.
+    # We look for the guard expression occurring on the same line as the list call.
+    list_lines = [
+        line for line in src.splitlines()
+        if "_worker_public_link" in line and "public_link=" in line and _GUARD in line
+    ]
+    assert len(list_lines) >= 1, (
+        "list_workers: public_link= must use the visibility guard "
+        f"('... == \"public\" else None'), found 0 guarded assignments"
+    )
 
 
-def test_private_worker_share_link_suppressed():
-    """Private workers must not receive a public_link in the list response."""
-    private_worker = {"id": "wk-priv", "owner_id": "owner1", "visibility": "private"}
-    assert _guarded_link(private_worker) is None, "Private worker must not have a public_link"
+def test_detail_endpoint_guards_public_link():
+    """WorkerDetail constructor must gate _worker_public_link on visibility == 'public'."""
+    src = MAIN_PY.read_text()
+    guarded = [
+        line for line in src.splitlines()
+        if "_worker_public_link" in line and "public_link=" in line and _GUARD in line
+    ]
+    # Both list and detail must be guarded — require at least 2 occurrences.
+    assert len(guarded) >= 2, (
+        f"Both list_workers and WorkerDetail must guard public_link with the visibility "
+        f"check, but only {len(guarded)} guarded assignment(s) found in main.py"
+    )
 
 
-def test_public_worker_share_link_present():
-    """Public workers must receive a public_link in the list response."""
-    public_worker = {"id": "wk-pub", "owner_id": "owner1", "visibility": "public"}
-    link = _guarded_link(public_worker)
-    assert link is not None, "Public worker must have a public_link"
-    assert "/w/wk-pub" in link
+def test_no_unguarded_worker_public_link_assignments():
+    """No public_link= line may call _worker_public_link without the visibility guard."""
+    src = MAIN_PY.read_text()
+    unguarded = [
+        line.strip() for line in src.splitlines()
+        if "_worker_public_link" in line and "public_link=" in line and _GUARD not in line
+    ]
+    assert unguarded == [], (
+        f"Found unguarded _worker_public_link assignment(s) in main.py:\n"
+        + "\n".join(unguarded)
+    )
 
 
-def test_default_visibility_suppresses_link():
-    """Workers with no visibility field default to private and get no link."""
-    no_vis_worker = {"id": "wk-none", "owner_id": "owner1"}
-    assert _guarded_link(no_vis_worker) is None
+def test_private_worker_guard_logic():
+    """The guard expression itself: private and no-visibility workers return None."""
+    def _apply_guard(worker: dict) -> bool:
+        return str(worker.get("visibility") or "private") == "public"
+
+    assert not _apply_guard({"visibility": "private"}), "private → guarded out"
+    assert not _apply_guard({}), "no visibility field → guarded out"
+    assert not _apply_guard({"visibility": None}), "None visibility → guarded out"
+    assert _apply_guard({"visibility": "public"}), "public → allowed through"
