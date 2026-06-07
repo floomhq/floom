@@ -35,14 +35,22 @@ function test536CodeInSupportsRenderedPreview(): void {
 
 function test536CodePreviewIsPlainText(): void {
   const src = readFileSync(FILES_EDITOR, "utf8");
-  // RenderedFilePreview must have a "code" branch that renders a <pre> block (plain text).
+  // RenderedFilePreview must have a "code" branch matching Brain's PlainTextPreview.
   assert(
     src.includes('sourceFileKind(path, detected) === "code"'),
     'RenderedFilePreview must have a branch for kind === "code"'
   );
   assert(
-    src.includes("whitespace-pre-wrap"),
-    "Code Preview must use whitespace-pre-wrap for readable plain-text display"
+    src.includes("whitespace-pre-wrap") && src.includes("break-words"),
+    "Code Preview must use whitespace-pre-wrap + break-words (matches Brain PlainTextPreview)"
+  );
+  assert(
+    src.includes("max-w-3xl") && src.includes("px-6"),
+    "Code Preview must use Brain's max-w-3xl reading column layout"
+  );
+  assert(
+    src.includes('text-[13px]') && src.includes("leading-6"),
+    "Code Preview must use Brain's exact font size (text-[13px] leading-6)"
   );
 }
 
