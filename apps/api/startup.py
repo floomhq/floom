@@ -368,12 +368,12 @@ def _override_git_cfg_for_cloud() -> None:
 
 
 def _override_git_rollback_for_cloud() -> None:
-    """Override git_ops functions used by rollback to fetch from GitHub API.
+    """Override git_ops read functions to use local git first, GitHub API as fallback.
 
-    In cloud there is no local git repo, so git_ops.get_file_at_sha() and
-    list_files_at_sha() (used by context and workspace.md rollback) silently
-    return nothing. This patch replaces them with GitHub Contents API calls so
-    rollback works correctly in cloud.
+    Local git workspace lives at {WORKEROS_GIT_WORKSPACES_DIR}/{workspace_id}/ and is
+    always initialised (see _override_git_ops_for_cloud / ensure_repo). GitHub API is
+    the fallback for workspaces that were connected to GitHub before local git was added
+    or when the local repo doesn't have the requested SHA.
     """
     try:
         import git_ops as engine_git_ops  # noqa: PLC0415
@@ -387,34 +387,58 @@ def _override_git_rollback_for_cloud() -> None:
     from apps.api.auth.workspace_context import get_active_workspace_id
     from apps.api.cloud_git import get_git_cfg
 
+    # Capture originals so local-git paths can call the real implementations
+    _orig_get_file_at_sha = engine_git_ops.get_file_at_sha
+    _orig_list_files_at_sha = engine_git_ops.list_files_at_sha
+    _orig_get_log = engine_git_ops.get_log
+
     def _cloud_get_file_at_sha(workspace_dir, sha: str, rel_path: str):
         workspace_id = get_active_workspace_id()
-        if not workspace_id:
-            return None
-        cfg = get_git_cfg(workspace_id)
+        if workspace_id:
+            from apps.api.cloud_git_local import ensure_workspace_repo
+            try:
+                git_dir = ensure_workspace_repo(workspace_id)
+                result = _orig_get_file_at_sha(git_dir, sha, rel_path)
+                if result is not None:
+                    return result
+            except Exception:
+                pass
+        cfg = get_git_cfg(workspace_id) if workspace_id else None
         if not cfg or not cfg.get("github_pat") or not cfg.get("repo_full_name"):
             return None
-        return github_api.get_file_content(
-            cfg["github_pat"], cfg["repo_full_name"], rel_path, ref=sha
-        )
+        return github_api.get_file_content(cfg["github_pat"], cfg["repo_full_name"], rel_path, ref=sha)
 
     def _cloud_list_files_at_sha(workspace_dir, sha: str, prefix: str) -> list:
         workspace_id = get_active_workspace_id()
-        if not workspace_id:
-            return []
-        cfg = get_git_cfg(workspace_id)
+        if workspace_id:
+            from apps.api.cloud_git_local import ensure_workspace_repo
+            try:
+                git_dir = ensure_workspace_repo(workspace_id)
+                result = _orig_list_files_at_sha(git_dir, sha, prefix)
+                if result:
+                    return result
+            except Exception:
+                pass
+        cfg = get_git_cfg(workspace_id) if workspace_id else None
         if not cfg or not cfg.get("github_pat") or not cfg.get("repo_full_name"):
             return []
-        return github_api.list_files_at_ref(
-            cfg["github_pat"], cfg["repo_full_name"], prefix, sha
-        )
+        return github_api.list_files_at_ref(cfg["github_pat"], cfg["repo_full_name"], prefix, sha)
 
     def _cloud_get_log(workspace_dir, rel_path=None, limit=50, asset_type="", asset_id=""):
-        """Fetch git log from GitHub commits API instead of local git."""
         workspace_id = get_active_workspace_id()
-        if not workspace_id:
-            return []
-        cfg = get_git_cfg(workspace_id)
+        if workspace_id:
+            from apps.api.cloud_git_local import ensure_workspace_repo
+            try:
+                git_dir = ensure_workspace_repo(workspace_id)
+                result = _orig_get_log(
+                    git_dir, rel_path=rel_path, limit=limit,
+                    asset_type=asset_type, asset_id=asset_id,
+                )
+                if result:
+                    return result
+            except Exception:
+                pass
+        cfg = get_git_cfg(workspace_id) if workspace_id else None
         if not cfg or not cfg.get("github_pat") or not cfg.get("repo_full_name"):
             return []
         try:
@@ -442,35 +466,53 @@ def _override_git_rollback_for_cloud() -> None:
             return []
 
     def _cloud_checkout_path(workspace_dir, sha: str, rel_path: str) -> None:
-        """In cloud: fetch files at SHA from GitHub, write to WORKERS_DIR/{id}/ so
-        discover_workers() can find them after rollback. Works for workers and contexts."""
         import logging as _log
+        import subprocess as _sp
+        import os as _os
+        from pathlib import Path as _Path
         _logger = _log.getLogger(__name__)
         _logger.debug("cloud_checkout_path: sha=%s rel=%s", sha, rel_path)
         workspace_id = get_active_workspace_id()
         if not workspace_id:
             raise engine_git_ops.GitOpsError("No workspace context for cloud rollback")
+
+        # Try local git workspace first
+        from apps.api.cloud_git_local import ensure_workspace_repo, sync_checkout_to_workers
+        git_dir = ensure_workspace_repo(workspace_id)
+        try:
+            result = _sp.run(
+                ["git", "checkout", sha, "--", rel_path],
+                cwd=str(git_dir),
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**_os.environ},
+            )
+            if result.returncode == 0:
+                sync_checkout_to_workers(workspace_id, git_dir, rel_path)
+                _logger.info("cloud_checkout_path: restored %s@%s from local git", rel_path, sha)
+                return
+            _logger.debug("Local git checkout failed: %s", result.stderr)
+        except Exception as exc:
+            _logger.debug("Local git checkout exception: %s", exc)
+
+        # Fall back to GitHub API
         cfg = get_git_cfg(workspace_id)
         if not cfg or not cfg.get("github_pat") or not cfg.get("repo_full_name"):
-            raise engine_git_ops.GitOpsError("No GitHub connection configured")
+            raise engine_git_ops.GitOpsError(
+                f"No local git history for {rel_path!r} at {sha!r} and no GitHub connection configured"
+            )
 
         pat, repo = cfg["github_pat"], cfg["repo_full_name"]
-        import os as _os
-        from pathlib import Path as _Path
-
-        # Determine where to write files so discovery finds them
         workers_dir_env = (_os.environ.get("FLOOM_WORKERS_DIR") or "").strip()
         workers_dir = _Path(workers_dir_env) if workers_dir_env else _Path("/opt/workeros-cloud/var/workers")
-
-        # rel_path = "workers/{worker_id}" → write to workers_dir/{worker_id}/
         parts = rel_path.split("/")
         entity_id = parts[-1]
         dest_dir = workers_dir / entity_id
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        # Fetch all files at this SHA from GitHub
         all_files = github_api.list_files_at_ref(pat, repo, rel_path, sha)
-        _logger.debug("cloud_checkout_path: dest=%s files=%s", dest_dir, all_files)
+        _logger.debug("cloud_checkout_path(github): files=%s", all_files)
         if not all_files:
             raise engine_git_ops.GitOpsError(f"No files found for {rel_path!r} at {sha!r}")
 
@@ -484,9 +526,6 @@ def _override_git_rollback_for_cloud() -> None:
                 fpath.write_text(content, encoding="utf-8")
                 file_contents[rel_file] = content
 
-        # Also update Supabase so the worker detail API returns the rolled-back version.
-        # The engine's _persist_discovered_workers only writes to SQLite (sidecar);
-        # in cloud workers live in Supabase, so we upsert here after writing disk.
         if rel_path.startswith("workers/") and "worker.yml" in file_contents:
             try:
                 import yaml as _yaml  # noqa: PLC0415
@@ -494,7 +533,6 @@ def _override_git_rollback_for_cloud() -> None:
                 manifest = _yaml.safe_load(file_contents["worker.yml"]) or {}
                 manifest["_files"] = {k: v for k, v in file_contents.items() if k != "worker.yml"}
                 svc = get_supabase_service_client()
-                # Update skill_versions.manifest_json for this worker's current version
                 rows = (
                     svc.table("workers")
                     .select("skill_version_id")
@@ -505,7 +543,6 @@ def _override_git_rollback_for_cloud() -> None:
                 )
                 if rows.data and rows.data[0].get("skill_version_id"):
                     sv_id = rows.data[0]["skill_version_id"]
-                    # skill_versions has no workspace_id column — filter by id only
                     svc.table("skill_versions").update(
                         {"manifest_json": manifest}
                     ).eq("id", sv_id).execute()
@@ -602,6 +639,8 @@ def _override_git_ops_for_cloud() -> None:
     ):
         workspace_id = get_active_workspace_id()
         if workspace_id and rel_paths:
+            from apps.api.cloud_git_local import commit_workspace
+            commit_workspace(workspace_id, list(rel_paths), message)
             schedule_push(workspace_id, list(rel_paths), message)
         return None
 
@@ -636,7 +675,19 @@ def _override_git_ops_for_cloud() -> None:
     engine_git_ops.pull = lambda workspace_dir: None
     engine_git_ops.push_background = lambda workspace_dir: None
     engine_git_ops.configure_remote = lambda workspace_dir, remote_url: None
-    engine_git_ops.ensure_repo = lambda workspace_dir: False
+
+    def _cloud_ensure_repo(workspace_dir):
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            from apps.api.cloud_git_local import ensure_workspace_repo
+            try:
+                ensure_workspace_repo(workspace_id)
+            except Exception as exc:
+                import logging as _log
+                _log.getLogger(__name__).debug("ensure_workspace_repo failed: %s", exc)
+        return True
+
+    engine_git_ops.ensure_repo = _cloud_ensure_repo
 
     # Use "workers/" prefix so cloud and OSS github repos have identical layout
     try:
@@ -693,6 +744,16 @@ def _register_secrets_key_resolver() -> None:
     # Until that is wired up, leave the resolver unset — OSS fallback (GitHub Variable).
 
 
+def _bootstrap_git_bundles_storage() -> None:
+    """Create the workeros-git-bundles Supabase Storage bucket (idempotent)."""
+    from apps.api.cloud_git_local import ensure_bucket
+    try:
+        ensure_bucket()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("git bundles bucket bootstrap failed: %s", exc)
+
+
 def register_cloud_components() -> None:
     _activate_cloud_deploy()
     get_cloud_settings()
@@ -710,6 +771,7 @@ def register_cloud_components() -> None:
     _override_git_rollback_for_cloud()
     _suppress_secrets_enc_in_cloud()
     _bootstrap_contexts_storage()
+    _bootstrap_git_bundles_storage()
     _override_create_run_for_members()
     _override_worker_author_platform_secret()
     # Run the real init_db() once so the engine's local SQLite DB has the
