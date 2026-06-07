@@ -11,7 +11,7 @@ import time
 from functools import lru_cache
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, unquote_plus, urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -124,6 +124,21 @@ def _safe_next(value: str | None) -> str:
     if candidate.startswith(("//", "/\\", "\\")):
         return "/"
     return candidate
+
+
+def _query_value_from_encoded_separator(raw_query: str, name: str) -> str | None:
+    """Read `name%3Dvalue` query parts used in Supabase Auth email links.
+
+    The auth email template intentionally percent-encodes the `=` after
+    `token_hash` and `type` so quoted-printable email transfer encoding cannot
+    treat `=e9`, `=cb`, etc. inside token hashes as byte escapes.
+    """
+    prefix = f"{name}%3d"
+    for part in (raw_query or "").split("&"):
+        if part.lower().startswith(prefix):
+            value = part[len(prefix):]
+            return unquote_plus(value) if value else None
+    return None
 
 
 def _normalize_email(value: str | None) -> str:
@@ -715,11 +730,20 @@ def callback(
     )
     client = new_supabase_anon_client()
     if confirmation_url and not code and not token_hash:
-        confirmation_query = parse_qs(urlparse(confirmation_url).query)
+        confirmation_raw_query = urlparse(confirmation_url).query
+        confirmation_query = parse_qs(confirmation_raw_query)
         token_hash = (
             (confirmation_query.get("token_hash") or confirmation_query.get("token") or [None])[0]
+            or _query_value_from_encoded_separator(confirmation_raw_query, "token_hash")
+            or _query_value_from_encoded_separator(confirmation_raw_query, "token")
         )
-        type = (confirmation_query.get("type") or [type])[0]
+        type = (confirmation_query.get("type") or [type])[0] or _query_value_from_encoded_separator(
+            confirmation_raw_query, "type"
+        )
+    if not token_hash:
+        token_hash = _query_value_from_encoded_separator(request.url.query, "token_hash")
+    if not type:
+        type = _query_value_from_encoded_separator(request.url.query, "type")
 
     try:
         if code:
