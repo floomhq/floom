@@ -241,6 +241,140 @@ def _override_worker_author_platform_secret() -> None:
     run_service.get_secrets_for_worker = _cloud_get_secrets_for_worker
 
 
+def _override_git_cfg_for_cloud() -> None:
+    """Replace SQLite-backed git_workspace_config reads/writes with Supabase.
+
+    The engine stores GitHub PAT + repo config in a local SQLite table.
+    In cloud, containers are ephemeral — SQLite is lost on restart. This patch
+    redirects _git_cfg_get, _git_cfg_upsert, and _git_cfg_delete in the engine
+    to the Supabase git_workspace_config table (migration 0030).
+
+    Module-level monkey-patching works here because Python resolves global
+    names via the module's __dict__ at call time, not at function definition
+    time — so internal callers in main.py pick up the patched versions.
+    """
+    from apps.api._engine import import_engine_module
+    from apps.api.auth.workspace_context import get_active_workspace_id
+    from apps.api.config import get_supabase_service_client
+    from datetime import datetime, timezone
+
+    engine_main = import_engine_module("main")
+
+    def _cloud_git_cfg_get(user_id: str):
+        workspace_id = get_active_workspace_id() or user_id
+        try:
+            svc = get_supabase_service_client()
+            rows = (
+                svc.table("git_workspace_config")
+                .select("*")
+                .eq("workspace_id", workspace_id)
+                .limit(1)
+                .execute()
+            )
+            return dict(rows.data[0]) if rows.data else None
+        except Exception:
+            return None
+
+    def _cloud_git_cfg_upsert(user_id: str, **fields):
+        workspace_id = get_active_workspace_id() or user_id
+        try:
+            svc = get_supabase_service_client()
+            svc.table("git_workspace_config").upsert(
+                {"workspace_id": workspace_id, **fields},
+                on_conflict="workspace_id",
+            ).execute()
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("cloud_git_cfg_upsert failed: %s", exc)
+
+    def _cloud_git_cfg_delete(user_id: str):
+        workspace_id = get_active_workspace_id() or user_id
+        try:
+            svc = get_supabase_service_client()
+            svc.table("git_workspace_config").delete().eq("workspace_id", workspace_id).execute()
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("cloud_git_cfg_delete failed: %s", exc)
+
+    engine_main._git_cfg_get = _cloud_git_cfg_get
+    engine_main._git_cfg_upsert = _cloud_git_cfg_upsert
+    engine_main._git_cfg_delete = _cloud_git_cfg_delete
+
+
+def _override_git_ops_for_cloud() -> None:
+    """Replace local git operations with GitHub Contents API calls in cloud.
+
+    In cloud, there is no persistent disk or local git repo. This patch:
+    - Replaces git_ops.commit_paths with a GitHub API push (via cloud_git.schedule_push)
+    - Makes push_background, push, pull, configure_remote, ensure_repo no-ops
+      (commit_paths handles the GitHub push; no local repo to manage)
+    - Fixes _workers_git_prefix to return "workers" so cloud git repos have the
+      same layout as OSS repos (workers/{id}/ at root level)
+
+    Workers are serialized from skill_versions.manifest_json._files in Supabase,
+    so no disk reads are needed for the push.
+    """
+    try:
+        import git_ops as engine_git_ops  # noqa: PLC0415
+    except ImportError:
+        return
+
+    if getattr(engine_git_ops.commit_paths, "_workeros_cloud_patched", False):
+        return
+
+    from apps.api.auth.workspace_context import get_active_workspace_id
+    from apps.api.cloud_git import schedule_push, push_all, get_git_cfg
+
+    def _cloud_commit_paths(
+        workspace_dir,
+        rel_paths,
+        message,
+        author_name="WorkerOS",
+        author_email="workeros@local",
+    ):
+        workspace_id = get_active_workspace_id()
+        if workspace_id and rel_paths:
+            schedule_push(workspace_id, list(rel_paths), message)
+        return None
+
+    _cloud_commit_paths._workeros_cloud_patched = True
+    engine_git_ops.commit_paths = _cloud_commit_paths
+
+    # push_background: no-op (schedule_push in commit_paths handles async push)
+    engine_git_ops.push_background = lambda workspace_dir: None
+
+    # push: used by link_git_repo to do initial push — do a full workspace push
+    def _cloud_push(workspace_dir):
+        workspace_id = get_active_workspace_id()
+        if not workspace_id:
+            return
+        cfg = get_git_cfg(workspace_id)
+        if cfg and cfg.get("github_pat") and cfg.get("repo_full_name"):
+            import threading
+            threading.Thread(
+                target=push_all,
+                args=(workspace_id, cfg["github_pat"], cfg["repo_full_name"]),
+                daemon=True,
+                name="workeros-github-push-all",
+            ).start()
+
+    engine_git_ops.push = _cloud_push
+
+    # No local git repo — make disk-based git ops no-ops
+    engine_git_ops.pull = lambda workspace_dir: None
+    engine_git_ops.configure_remote = lambda workspace_dir, remote_url: None
+    engine_git_ops.ensure_repo = lambda workspace_dir: False
+    engine_git_ops.clone_or_init = lambda workspace_dir, remote_url: False
+
+    # Use "workers/" prefix so cloud and OSS github repos have identical layout
+    try:
+        from apps.api._engine import import_engine_module
+        engine_main = import_engine_module("main")
+        engine_main._workers_git_prefix = lambda: "workers"
+    except Exception:
+        pass
+
+
 def _register_git_workspace_resolver() -> None:
     """Tell the engine's git_ops to scope the workspace git root per-request.
 
@@ -299,6 +433,8 @@ def register_cloud_components() -> None:
     _register_contexts_scope_resolver()
     _register_git_workspace_resolver()
     _register_secrets_key_resolver()
+    _override_git_cfg_for_cloud()
+    _override_git_ops_for_cloud()
     _override_create_run_for_members()
     _override_worker_author_platform_secret()
     # Run the real init_db() once so the engine's local SQLite DB has the
