@@ -1,0 +1,5714 @@
+{
+  "body": [
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Turns raw notes into a polished weekly company update using AI.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Operations/Reporting",
+      "how_it_works": null,
+      "id": "weekly_update",
+      "inputs": [
+        {
+          "name": "notes",
+          "type": "text"
+        },
+        {
+          "name": "audience",
+          "type": "select"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-06-02T20:49:48.955144+00:00",
+        "created_at": "2026-06-02T20:49:29.852168+00:00",
+        "duration_ms": 19041,
+        "error": null,
+        "error_code": null,
+        "id": "run_449eed9711a6",
+        "started_at": "2026-06-02T20:49:29.913266+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "weekly_update",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Weekly Update",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-02T20:49:29.852168+00:00",
+        "runs_7d": 10,
+        "success_rate_7d": 0.9,
+        "success_rate_change_7d": 0.10833333333333339
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "updates",
+        "reporting",
+        "markdown",
+        "operations"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Parse a candidate CV (PDF/DOCX/TXT), extract structured profile, and generate a branded NovaSearch submission writeup.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Recruiting/NovaSearch",
+      "how_it_works": null,
+      "id": "cv_writeup",
+      "inputs": [
+        {
+          "name": "cv_file",
+          "type": "file"
+        },
+        {
+          "name": "client_brief",
+          "type": "text"
+        },
+        {
+          "name": "target_format",
+          "type": "select"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-05-29T09:40:04.618009+00:00",
+        "created_at": "2026-05-29T09:39:42.790009+00:00",
+        "duration_ms": 21805,
+        "error": null,
+        "error_code": null,
+        "id": "run_b3fd473d3fef",
+        "started_at": "2026-05-29T09:39:42.812455+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "cv_writeup",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "CV Reformat + Writeup",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "recruiting",
+        "cv",
+        "novasearch",
+        "writeup",
+        "candidate"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "A\u00dcG risk assessment, Scheinselbst\u00e4ndigkeit check, and DACH market rate benchmark for contractor engagements.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Recruiting/Compliance",
+      "how_it_works": null,
+      "id": "dach_compliance",
+      "inputs": [
+        {
+          "name": "engagement_type",
+          "type": "select"
+        },
+        {
+          "name": "role_summary",
+          "type": "text"
+        },
+        {
+          "name": "proposed_daily_rate_eur",
+          "type": "number"
+        },
+        {
+          "name": "location",
+          "type": "text"
+        },
+        {
+          "name": "experience_years",
+          "type": "number"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-05-29T09:32:10.722340+00:00",
+        "created_at": "2026-05-29T09:31:51.508372+00:00",
+        "duration_ms": 19188,
+        "error": null,
+        "error_code": null,
+        "id": "run_09cd796988a7",
+        "started_at": "2026-05-29T09:31:51.533739+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "dach_compliance",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "DACH Compliance + Rate Benchmark",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "dach",
+        "compliance",
+        "rates",
+        "recruiting",
+        "contractors"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Score your CRM contacts against a job brief and surface the top fits with DACH-specific signals.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Recruiting/NovaSearch",
+      "how_it_works": null,
+      "id": "reverse_match_crm",
+      "inputs": [
+        {
+          "name": "crm_csv",
+          "type": "file"
+        },
+        {
+          "name": "job_brief",
+          "type": "text"
+        },
+        {
+          "name": "required_modules",
+          "type": "text"
+        },
+        {
+          "name": "min_score",
+          "type": "number"
+        },
+        {
+          "name": "top_n",
+          "type": "number"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-05-29T09:40:37.476963+00:00",
+        "created_at": "2026-05-29T09:40:18.983409+00:00",
+        "duration_ms": 18452,
+        "error": null,
+        "error_code": null,
+        "id": "run_608251122b6e",
+        "started_at": "2026-05-29T09:40:19.024828+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "reverse_match_crm",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Reverse Match CRM",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "recruiting",
+        "crm",
+        "matching",
+        "novasearch",
+        "dach"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [
+        "gmail"
+      ],
+      "description": "Fetches recent Gmail messages matching a query and returns a markdown summary.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Operations/Inbox",
+      "how_it_works": null,
+      "id": "gmail_intake_brief",
+      "inputs": [
+        {
+          "name": "query",
+          "type": "text"
+        },
+        {
+          "name": "max_results",
+          "type": "number"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-06-05T00:59:48.293878+00:00",
+        "created_at": "2026-06-05T00:59:24.552087+00:00",
+        "duration_ms": 23715,
+        "error": null,
+        "error_code": null,
+        "id": "run_dd49a96ab7ca",
+        "started_at": "2026-06-05T00:59:24.578428+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "gmail_intake_brief",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Gmail Intake Brief",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-05T00:59:24.552087+00:00",
+        "runs_7d": 7,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": 0.5
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "gmail",
+        "intake",
+        "summary",
+        "operations"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [
+        "github"
+      ],
+      "description": "Every morning at 9am, send a digest of unread GitHub PRs and open issues.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "github-digest",
+      "inputs": [],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-06-06T09:00:55.397091+00:00",
+        "created_at": "2026-06-06T09:00:01.738795+00:00",
+        "duration_ms": 53640,
+        "error": null,
+        "error_code": null,
+        "id": "run_313beec1b775",
+        "started_at": "2026-06-06T09:00:01.757077+00:00",
+        "status": "completed",
+        "trigger_source": "schedule",
+        "worker_id": "github-digest",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "GitHub Digest Sender",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-06T09:00:01.738795+00:00",
+        "runs_7d": 7,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": 0.17142857142857137
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 0 9 * * *"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "0 9 * * *",
+          "timezone": "UTC",
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Runs the upstream OpenBlog 5-stage pipeline to generate grounded SEO articles, images, verified URLs, internal links, and export artifacts.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Content/Blog",
+      "how_it_works": null,
+      "id": "openblog",
+      "inputs": [
+        {
+          "name": "url",
+          "type": "text"
+        },
+        {
+          "name": "keywords",
+          "type": "textarea"
+        },
+        {
+          "name": "language",
+          "type": "select"
+        },
+        {
+          "name": "market",
+          "type": "select"
+        },
+        {
+          "name": "default_word_count",
+          "type": "select"
+        },
+        {
+          "name": "batch_instructions",
+          "type": "textarea"
+        },
+        {
+          "name": "max_parallel",
+          "type": "select"
+        },
+        {
+          "name": "model_name",
+          "type": "text"
+        },
+        {
+          "name": "skip_images",
+          "type": "boolean"
+        },
+        {
+          "name": "export_formats",
+          "type": "text"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-05-29T09:35:58.857963+00:00",
+        "created_at": "2026-05-29T09:32:21.295844+00:00",
+        "duration_ms": 217537,
+        "error": null,
+        "error_code": null,
+        "id": "run_11045729d76c",
+        "started_at": "2026-05-29T09:32:21.320685+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "openblog",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "OpenBlog SEO Pipeline",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "blog",
+        "article",
+        "seo",
+        "openblog",
+        "content",
+        "marketing"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Runs the upstream OpenDraft engine end to end to generate a long-form academic draft with verified citation discovery and export artifacts.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Research/Drafting",
+      "how_it_works": null,
+      "id": "opendraft",
+      "inputs": [
+        {
+          "name": "topic",
+          "type": "textarea"
+        },
+        {
+          "name": "citation_style",
+          "type": "select"
+        },
+        {
+          "name": "language",
+          "type": "select"
+        },
+        {
+          "name": "model_name",
+          "type": "text"
+        },
+        {
+          "name": "enable_citation_verification",
+          "type": "boolean"
+        },
+        {
+          "name": "export_pdf",
+          "type": "boolean"
+        },
+        {
+          "name": "export_docx",
+          "type": "boolean"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-05-29T10:17:31.842972+00:00",
+        "created_at": "2026-05-29T09:32:28.746521+00:00",
+        "duration_ms": 2703063,
+        "error": "This worker took too long and was stopped. Try again, or simplify the input.",
+        "error_code": "e2b_sandbox_error",
+        "id": "run_1aa07f09ddc1",
+        "started_at": "2026-05-29T09:32:28.779051+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "opendraft",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "OpenDraft Research Paper",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [
+        "research",
+        "thesis",
+        "opendraft",
+        "academic",
+        "citations"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Enriches CSV rows using a custom instruction.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Operations/Data",
+      "how_it_works": null,
+      "id": "csv_enricher",
+      "inputs": [
+        {
+          "name": "csv_file",
+          "type": "file"
+        },
+        {
+          "name": "instruction",
+          "type": "text"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-05-29T09:40:04.431707+00:00",
+        "created_at": "2026-05-29T09:39:50.114725+00:00",
+        "duration_ms": 14257,
+        "error": null,
+        "error_code": null,
+        "id": "run_cdd8babe38f9",
+        "started_at": "2026-05-29T09:39:50.173792+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "csv_enricher",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "CSV Enricher",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "csv",
+        "enrichment",
+        "operations",
+        "spreadsheet"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Generates a markdown research brief on any topic.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Research",
+      "how_it_works": null,
+      "id": "research_brief",
+      "inputs": [
+        {
+          "name": "topic",
+          "type": "text"
+        },
+        {
+          "name": "audience",
+          "type": "select"
+        },
+        {
+          "name": "depth",
+          "type": "select"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-06-02T20:35:56.399384+00:00",
+        "created_at": "2026-06-02T20:35:01.238962+00:00",
+        "duration_ms": 55124,
+        "error": null,
+        "error_code": null,
+        "id": "run_72470feec9ca",
+        "started_at": "2026-06-02T20:35:01.274963+00:00",
+        "status": "completed",
+        "trigger_source": "audit",
+        "worker_id": "research_brief",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Research Brief",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-02T20:35:01.238962+00:00",
+        "runs_7d": 4,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": 0.08333333333333337
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "research",
+        "brief",
+        "strategy",
+        "markdown"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [
+        "deepwiki"
+      ],
+      "description": "Verifies typed MCP worker connections on production.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "smoke-mcp-deepwiki-045652",
+      "inputs": [],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-28T02:57:07.127568+00:00",
+        "created_at": "2026-05-28T02:56:57.119210+00:00",
+        "duration_ms": 9997,
+        "error": null,
+        "error_code": null,
+        "id": "run_16294bfc7b54",
+        "started_at": "2026-05-28T02:56:57.130490+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "smoke-mcp-deepwiki-045652",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "MCP DeepWiki Smoke",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Verifies production output quality gates reject tiny declared files.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "smoke-quality-tiny-050123",
+      "inputs": [],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-28T03:01:32.951895+00:00",
+        "created_at": "2026-05-28T03:01:28.957080+00:00",
+        "duration_ms": 3981,
+        "error": "output_validation_failed: update file is too small (4 bytes, minimum 100)",
+        "error_code": null,
+        "id": "run_69c8aed7c41d",
+        "started_at": "2026-05-28T03:01:28.970349+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "smoke-quality-tiny-050123",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Quality Gate Tiny File Smoke",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Temporary S35 runtime smoke worker that exits with OOM code 137.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "s35-oom-smoke",
+      "inputs": [],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "S35 OOM Smoke",
+      "owner_id": "s35-smoke-archived",
+      "permissions": {
+        "can_delete": false,
+        "can_edit": false,
+        "can_run": false,
+        "can_share": true,
+        "can_view": false,
+        "is_owner": false
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "audit",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "audit-local-rate-5a647a61-0",
+      "inputs": [],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-28T23:48:40.724229+00:00",
+        "created_at": "2026-05-28T23:48:35.764185+00:00",
+        "duration_ms": 4922,
+        "error": "This worker finished but didn't produce a result. Check the run logs, then re-run.",
+        "error_code": "missing_result",
+        "id": "run_7346f17f87cf",
+        "started_at": "2026-05-28T23:48:35.801440+00:00",
+        "status": "failed",
+        "trigger_source": "audit",
+        "worker_id": "audit-local-rate-5a647a61-0",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "audit-local-rate-5a647a61-0",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "audit",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "audit-local-rate-b2d8d24f-1",
+      "inputs": [],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-28T23:48:41.359398+00:00",
+        "created_at": "2026-05-28T23:48:35.813379+00:00",
+        "duration_ms": 5508,
+        "error": "This worker finished but didn't produce a result. Check the run logs, then re-run.",
+        "error_code": "missing_result",
+        "id": "run_23c379e62d8f",
+        "started_at": "2026-05-28T23:48:35.851340+00:00",
+        "status": "failed",
+        "trigger_source": "audit",
+        "worker_id": "audit-local-rate-b2d8d24f-1",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "audit-local-rate-b2d8d24f-1",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "audit",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "audit-local-rate-eabe640a-2",
+      "inputs": [],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-28T23:48:39.202725+00:00",
+        "created_at": "2026-05-28T23:48:35.729128+00:00",
+        "duration_ms": 3443,
+        "error": "This worker finished but didn't produce a result. Check the run logs, then re-run.",
+        "error_code": "missing_result",
+        "id": "run_ddb3ce4b3caf",
+        "started_at": "2026-05-28T23:48:35.759415+00:00",
+        "status": "failed",
+        "trigger_source": "audit",
+        "worker_id": "audit-local-rate-eabe640a-2",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "audit-local-rate-eabe640a-2",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "audit",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "audit-local-replay-db242b6a",
+      "inputs": [],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "audit-local-replay",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Demonstrates the two-run HITL approval pattern. Run 1 drafts an outbound message and proposes it for approval. Run 2 (spawned after approval) executes the approved message by writing it to a context file.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Demo",
+      "how_it_works": null,
+      "id": "outbound-approval-demo",
+      "inputs": [
+        {
+          "name": "prospect_name",
+          "type": "text"
+        },
+        {
+          "name": "role",
+          "type": "text"
+        },
+        {
+          "name": "decision",
+          "type": "text"
+        },
+        {
+          "name": "approved_output",
+          "type": "text"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-06-05T21:12:32.676078+00:00",
+        "created_at": "2026-06-05T21:09:44.982255+00:00",
+        "duration_ms": 4769,
+        "error": null,
+        "error_code": null,
+        "id": "run_b9681a8a96f4",
+        "started_at": "2026-06-05T21:09:45.000893+00:00",
+        "status": "completed",
+        "trigger_source": "workspace-agent",
+        "worker_id": "outbound-approval-demo",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Outbound approval demo",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-05T21:09:44.982255+00:00",
+        "runs_7d": 19,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": 0.0
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "demo",
+        "hitl",
+        "approvals"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Polls for @floom mentions in a configured Slack channel, forwards each message to the workspace agent via /chat, and posts the reply in thread.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Examples",
+      "how_it_works": null,
+      "id": "slack-listener",
+      "inputs": [
+        {
+          "name": "channel",
+          "type": "text"
+        },
+        {
+          "name": "lookback_minutes",
+          "type": "number"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-06-06T22:00:47.983459+00:00",
+        "created_at": "2026-06-06T22:00:47.852785+00:00",
+        "duration_ms": 109,
+        "error": "This worker is missing a required credential. Add it in settings, then re-run.",
+        "error_code": "missing_secret",
+        "id": "run_93d762b443b2",
+        "started_at": "2026-06-06T22:00:47.873982+00:00",
+        "status": "failed",
+        "trigger_source": "schedule",
+        "worker_id": "slack-listener",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Slack Listener (@floom mentions)",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-06T22:00:47.852785+00:00",
+        "runs_7d": 853,
+        "success_rate_7d": 0.0,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "missing_secret",
+      "system": false,
+      "tags": [
+        "example",
+        "slack",
+        "chat-adapter"
+      ],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 */10 * * * *"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "*/10 * * * *",
+          "timezone": null,
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [
+        "whatsapp"
+      ],
+      "description": "Polls for incoming WhatsApp messages via Composio, forwards them to the workspace agent via /chat, and sends the reply back.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Examples",
+      "how_it_works": null,
+      "id": "whatsapp-listener",
+      "inputs": [
+        {
+          "name": "lookback_minutes",
+          "type": "number"
+        }
+      ],
+      "is_example": true,
+      "last_run": {
+        "completed_at": "2026-06-06T21:38:56.271531+00:00",
+        "created_at": "2026-06-06T21:38:56.173353+00:00",
+        "duration_ms": 86,
+        "error": "This worker is missing a required credential. Add it in settings, then re-run.",
+        "error_code": "missing_secret",
+        "id": "run_6994d8bbd7b2",
+        "started_at": "2026-06-06T21:38:56.184757+00:00",
+        "status": "failed",
+        "trigger_source": "schedule",
+        "worker_id": "whatsapp-listener",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "WhatsApp Listener (workspace agent)",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-06T21:38:56.173353+00:00",
+        "runs_7d": 705,
+        "success_rate_7d": 0.0,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "missing_secret",
+      "system": false,
+      "tags": [
+        "example",
+        "whatsapp",
+        "chat-adapter"
+      ],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 */10 * * * *"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "*/10 * * * *",
+          "timezone": null,
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "List open GitHub pull requests and generate a one-line summary for each.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "github-pull-request-summary",
+      "inputs": [],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "GitHub Pull Request Summary",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "missing_secret",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Removes duplicate email addresses from a provided list.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "email-deduplicator",
+      "inputs": [
+        {
+          "name": "email_list",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Email Deduplicator",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Generates a friendly daily motivational quote and returns it as text.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "daily-motivational-quote",
+      "inputs": [
+        {
+          "name": "topic",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-06-03T05:27:56.328493+00:00",
+        "created_at": "2026-06-03T05:27:45.435419+00:00",
+        "duration_ms": 10864,
+        "error": null,
+        "error_code": null,
+        "id": "run_294e526042fc",
+        "started_at": "2026-06-03T05:27:45.464463+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "daily-motivational-quote",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Daily Motivational Quote",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-03T05:27:45.435419+00:00",
+        "runs_7d": 1,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": 0.0
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Counts the words and characters in a block of text.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "text-word-character-counter",
+      "inputs": [
+        {
+          "name": "text_block",
+          "type": "textarea"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-06-02T08:26:35.050059+00:00",
+        "created_at": "2026-06-02T08:26:34.325358+00:00",
+        "duration_ms": 691,
+        "error": "This worker hit an internal error and stopped. Check the run logs, then edit or re-run the worker.",
+        "error_code": "agent_runtime_error",
+        "id": "run_9276b2ece5ca",
+        "started_at": "2026-06-02T08:26:34.358400+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "text-word-character-counter",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Text Word and Character Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-02T08:26:34.325358+00:00",
+        "runs_7d": 1,
+        "success_rate_7d": 0.0,
+        "success_rate_change_7d": -1.0
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Generates 3 random science facts each run.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "random-science-facts",
+      "inputs": [
+        {
+          "name": "count",
+          "type": "number"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T11:40:40.352516+00:00",
+        "created_at": "2026-05-29T11:40:37.166677+00:00",
+        "duration_ms": 3159,
+        "error": "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it.",
+        "error_code": "e2b_sandbox_error",
+        "id": "run_f98efc1ea659",
+        "started_at": "2026-05-29T11:40:37.193385+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "random-science-facts",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Random Science Facts",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Takes a CSV and adds a column with the length of the name field.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "csv-name-length-adder",
+      "inputs": [
+        {
+          "name": "input_csv",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T11:41:47.933379+00:00",
+        "created_at": "2026-05-29T11:41:43.871663+00:00",
+        "duration_ms": 4018,
+        "error": "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it.",
+        "error_code": "e2b_sandbox_error",
+        "id": "run_d853133e3fae",
+        "started_at": "2026-05-29T11:41:43.915117+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "csv-name-length-adder",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "CSV Name Length Adder",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Converts a block of markdown into plain text.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "markdown-to-plain-text",
+      "inputs": [
+        {
+          "name": "markdown_input",
+          "type": "textarea"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T11:42:57.346061+00:00",
+        "created_at": "2026-05-29T11:42:53.643099+00:00",
+        "duration_ms": 3679,
+        "error": "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it.",
+        "error_code": "e2b_sandbox_error",
+        "id": "run_59faf2993fd6",
+        "started_at": "2026-05-29T11:42:53.666737+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "markdown-to-plain-text",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Markdown to Plain Text Converter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Takes a list of numbers and returns min, max, mean, and median.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "statistics-calculator",
+      "inputs": [
+        {
+          "name": "numbers",
+          "type": "textarea"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T11:43:52.404107+00:00",
+        "created_at": "2026-05-29T11:43:48.124685+00:00",
+        "duration_ms": 4252,
+        "error": "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it.",
+        "error_code": "e2b_sandbox_error",
+        "id": "run_762191e94729",
+        "started_at": "2026-05-29T11:43:48.151941+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "statistics-calculator",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Statistics Calculator",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Calculates the min, max, mean, and median from a list of numbers.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "number-stats",
+      "inputs": [
+        {
+          "name": "numbers",
+          "type": "textarea"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T15:40:57.562244+00:00",
+        "created_at": "2026-05-29T15:40:54.362212+00:00",
+        "duration_ms": 3166,
+        "error": "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it.",
+        "error_code": "e2b_sandbox_error",
+        "id": "run_6d0708dbe52e",
+        "started_at": "2026-05-29T15:40:54.395974+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "number-stats",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Number Statistics",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Extracts all email addresses from the provided text.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "email-extractor",
+      "inputs": [
+        {
+          "name": "input_text",
+          "type": "textarea"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T12:25:33.940765+00:00",
+        "created_at": "2026-05-29T12:25:30.761690+00:00",
+        "duration_ms": 3158,
+        "error": null,
+        "error_code": null,
+        "id": "run_fdb02d032052",
+        "started_at": "2026-05-29T12:25:30.782736+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "email-extractor",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Email Address Extractor",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Converts a list of prices from USD to EUR using a fixed exchange rate.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "usd-to-euro-converter",
+      "inputs": [
+        {
+          "name": "prices",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T12:26:40.593212+00:00",
+        "created_at": "2026-05-29T12:26:36.502010+00:00",
+        "duration_ms": 4043,
+        "error": null,
+        "error_code": null,
+        "id": "run_f4028545fe90",
+        "started_at": "2026-05-29T12:26:36.549412+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "usd-to-euro-converter",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "USD to Euro Converter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Counts the frequency of each word in the provided text.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "word-count",
+      "inputs": [
+        {
+          "name": "input_text",
+          "type": "textarea"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-06-03T05:01:14.992160+00:00",
+        "created_at": "2026-06-03T05:01:11.257360+00:00",
+        "duration_ms": 3692,
+        "error": null,
+        "error_code": null,
+        "id": "run_775f73a45859",
+        "started_at": "2026-06-03T05:01:11.300143+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "word-count",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Word Count",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-03T05:01:11.257360+00:00",
+        "runs_7d": 1,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": 0.0
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Summarize a block of text into two concise sentences.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "text-summary",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T12:26:04.554285+00:00",
+        "created_at": "2026-05-29T12:25:58.549117+00:00",
+        "duration_ms": 5994,
+        "error": null,
+        "error_code": null,
+        "id": "run_8e325e454c86",
+        "started_at": "2026-05-29T12:25:58.559414+00:00",
+        "status": "completed",
+        "trigger_source": "audit",
+        "worker_id": "text-summary",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Text Summarizer",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Remove duplicate strings from a list while preserving the original order.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "deduplicate-string-list",
+      "inputs": [
+        {
+          "name": "string_list",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "String List Deduplicator",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Extract all email addresses from a block of text.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "extract-email-addresses",
+      "inputs": [
+        {
+          "name": "text_block",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T13:27:17.242968+00:00",
+        "created_at": "2026-05-29T13:27:11.633500+00:00",
+        "duration_ms": 5583,
+        "error": null,
+        "error_code": null,
+        "id": "run_0a33eae1824f",
+        "started_at": "2026-05-29T13:27:11.659858+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "extract-email-addresses",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Email Address Extractor",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Extract all phone numbers from a block of text and return them as a JSON list.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "extract-phone-numbers",
+      "inputs": [
+        {
+          "name": "text_data",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T13:24:37.338030+00:00",
+        "created_at": "2026-05-29T13:24:32.643252+00:00",
+        "duration_ms": 4659,
+        "error": null,
+        "error_code": null,
+        "id": "run_769152c78dac",
+        "started_at": "2026-05-29T13:24:32.678894+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "extract-phone-numbers",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Phone Number Extractor",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Divide the first input number by the second and return the quotient.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "divide-numbers",
+      "inputs": [
+        {
+          "name": "number1",
+          "type": "number"
+        },
+        {
+          "name": "number2",
+          "type": "number"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T13:25:05.874196+00:00",
+        "created_at": "2026-05-29T13:25:02.646672+00:00",
+        "duration_ms": 3207,
+        "error": "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it.",
+        "error_code": "e2b_sandbox_error",
+        "id": "run_516e6261f5c4",
+        "started_at": "2026-05-29T13:25:02.666908+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "divide-numbers",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Number Divider",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Remove duplicate strings from a list.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "string-deduplicator",
+      "inputs": [
+        {
+          "name": "string_list",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "String Deduplicator",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Calculates the standard deviation of a list of numbers.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "standard-deviation-calculator",
+      "inputs": [
+        {
+          "name": "numbers",
+          "type": "textarea"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T14:35:41.437394+00:00",
+        "created_at": "2026-05-29T14:35:37.727687+00:00",
+        "duration_ms": 3683,
+        "error": null,
+        "error_code": null,
+        "id": "run_1658da77bef7",
+        "started_at": "2026-05-29T14:35:37.754388+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "standard-deviation-calculator",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Standard Deviation Calculator",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Convert prices from various currencies to euros.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "price-converter",
+      "inputs": [
+        {
+          "name": "prices_data",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T15:37:09.884710+00:00",
+        "created_at": "2026-05-29T15:37:09.863293+00:00",
+        "duration_ms": null,
+        "error": "This worker needs a file uploaded for one of its inputs. Upload the file, then re-run.",
+        "error_code": null,
+        "id": "run_e7a17837703e",
+        "started_at": null,
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "price-converter",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Price Converter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Calculate the median of a list of numbers.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "calculate-median",
+      "inputs": [
+        {
+          "name": "numbers",
+          "type": "array"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Median Calculator",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Extract phone numbers from a given text input.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "phone-number-extractor",
+      "inputs": [
+        {
+          "name": "text_data",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Phone Number Extractor",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Remove duplicate entries from a list.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "list-deduplicator",
+      "inputs": [
+        {
+          "name": "list_data",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T15:37:14.571612+00:00",
+        "created_at": "2026-05-29T15:37:14.558167+00:00",
+        "duration_ms": null,
+        "error": "This worker needs a file uploaded for one of its inputs. Upload the file, then re-run.",
+        "error_code": null,
+        "id": "run_6ac366eec24a",
+        "started_at": null,
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "list-deduplicator",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "List Deduplicator",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Count the frequency of each word in a given text.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "word-frequency-counter",
+      "inputs": [
+        {
+          "name": "text_data",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Word Frequency Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Calculate the variance of a given set of numbers.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "calculate-variance",
+      "inputs": [
+        {
+          "name": "data",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Variance Calculator",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Reverses a given string.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "string-reverser",
+      "inputs": [
+        {
+          "name": "input_string",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-06-02T17:28:40.572609+00:00",
+        "created_at": "2026-06-02T17:28:40.479115+00:00",
+        "duration_ms": 64,
+        "error": "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it.",
+        "error_code": "invalid_worker",
+        "id": "run_97872e6fa7f8",
+        "started_at": "2026-06-02T17:28:40.508235+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "string-reverser",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "String Reverser",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-02T17:28:40.479115+00:00",
+        "runs_7d": 1,
+        "success_rate_7d": 0.0,
+        "success_rate_change_7d": -1.0
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Sorts a CSV file by the second column.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "csv-sorter",
+      "inputs": [
+        {
+          "name": "input_csv",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T16:45:14.736285+00:00",
+        "created_at": "2026-05-29T16:45:10.603495+00:00",
+        "duration_ms": 4092,
+        "error": null,
+        "error_code": null,
+        "id": "run_03fabf8983f9",
+        "started_at": "2026-05-29T16:45:10.643422+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "csv-sorter",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "CSV Sorter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Calculates the sum of a specified column from a CSV file.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "sum-column",
+      "inputs": [
+        {
+          "name": "input_csv",
+          "type": "file"
+        },
+        {
+          "name": "column_name",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T16:45:43.728357+00:00",
+        "created_at": "2026-05-29T16:45:38.585679+00:00",
+        "duration_ms": 5099,
+        "error": null,
+        "error_code": null,
+        "id": "run_8ec5fb4268e2",
+        "started_at": "2026-05-29T16:45:38.629328+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "sum-column",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Sum Column of Numbers",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Calculates the median of a list of numbers.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "median-of-list",
+      "inputs": [
+        {
+          "name": "numbers",
+          "type": "textarea"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T16:44:25.577366+00:00",
+        "created_at": "2026-05-29T16:44:20.746475+00:00",
+        "duration_ms": 4804,
+        "error": null,
+        "error_code": null,
+        "id": "run_ec06eba178f0",
+        "started_at": "2026-05-29T16:44:20.772378+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "median-of-list",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Median of a List",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Converts a given sentence into title case format.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "title-case-sentence",
+      "inputs": [
+        {
+          "name": "sentence",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T16:44:20.245969+00:00",
+        "created_at": "2026-05-29T16:44:16.603132+00:00",
+        "duration_ms": 3620,
+        "error": null,
+        "error_code": null,
+        "id": "run_20f793a03f19",
+        "started_at": "2026-05-29T16:44:16.625838+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "title-case-sentence",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Title Case Sentence",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Removes duplicate lines from a text file.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "remove-duplicate-lines",
+      "inputs": [
+        {
+          "name": "input_file",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T16:46:11.395102+00:00",
+        "created_at": "2026-05-29T16:46:05.745120+00:00",
+        "duration_ms": 5606,
+        "error": null,
+        "error_code": null,
+        "id": "run_5a0e271e6334",
+        "started_at": "2026-05-29T16:46:05.788606+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "remove-duplicate-lines",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Remove Duplicate Lines",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Count the number of words in a given text string and return the count.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "text-word-counter",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-05-29T17:24:00.130584+00:00",
+        "created_at": "2026-05-29T17:23:54.846218+00:00",
+        "duration_ms": 5253,
+        "error": null,
+        "error_code": null,
+        "id": "run_15529a307636",
+        "started_at": "2026-05-29T17:23:54.877200+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "text-word-counter",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Text Word Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": null,
+        "runs_7d": 0,
+        "success_rate_7d": null,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Convert a temperature from Celsius to Fahrenheit.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "celsius-to-fahrenheit",
+      "inputs": [
+        {
+          "name": "celsius",
+          "type": "float"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Celsius to Fahrenheit Converter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Extract all email addresses from a block of text.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "extract-email-addresses-2",
+      "inputs": [
+        {
+          "name": "text_block",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Email Address Extractor",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Reverse a list of numbers provided as a JSON array.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "reverse-number-list",
+      "inputs": [
+        {
+          "name": "number_list",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Reverse Number List",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Calculate the average of a list of numbers.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "calculate-average",
+      "inputs": [
+        {
+          "name": "numbers",
+          "type": "array"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-06-04T23:06:08.918314+00:00",
+        "created_at": "2026-06-04T23:06:05.606804+00:00",
+        "duration_ms": 3284,
+        "error": null,
+        "error_code": null,
+        "id": "run_bcdb66d44f01",
+        "started_at": "2026-06-04T23:06:05.633674+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "calculate-average",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Average Calculator",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-04T23:06:05.606804+00:00",
+        "runs_7d": 1,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": 1.0
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Extract all phone numbers from a given text and return them as a list.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "extract-phone-numbers-2",
+      "inputs": [
+        {
+          "name": "text_data",
+          "type": "file"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Phone Number Extractor",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Analyzes a block of text to return word count, sentence count, and average word length.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "text-summary-analyzer",
+      "inputs": [
+        {
+          "name": "text_block",
+          "type": "textarea"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Text Summary Analyzer",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Scrapes LinkedIn post likers for /in/fedeponte using Apify. Runs incrementally \u2014 rescrapes posts < 7 days old to catch new likers.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "linkedin_engagements",
+      "inputs": [],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-06-05T09:00:36.302373+00:00",
+        "created_at": "2026-06-05T09:00:36.106795+00:00",
+        "duration_ms": 180,
+        "error": "This worker is missing a required credential. Add it in settings, then re-run.",
+        "error_code": "missing_secret",
+        "id": "run_df9228eb6d39",
+        "started_at": "2026-06-05T09:00:36.121848+00:00",
+        "status": "failed",
+        "trigger_source": "schedule",
+        "worker_id": "linkedin_engagements",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "LinkedIn Post Engagements",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-05T09:00:36.106795+00:00",
+        "runs_7d": 2,
+        "success_rate_7d": 0.0,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 0 9 * * 2,5"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "0 9 * * 2,5",
+          "timezone": null,
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Fetches top AI news every 60 minutes, summarizes three stories, and posts a digest to Discord.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Operations/Reporting",
+      "how_it_works": null,
+      "id": "ai-news-discord-digest",
+      "inputs": [
+        {
+          "name": "discord_channel_id",
+          "type": "text"
+        },
+        {
+          "name": "search_query",
+          "type": "text"
+        },
+        {
+          "name": "max_stories",
+          "type": "number"
+        }
+      ],
+      "is_example": false,
+      "last_run": {
+        "completed_at": "2026-06-07T04:00:50.497719+00:00",
+        "created_at": "2026-06-07T04:00:50.086303+00:00",
+        "duration_ms": 384,
+        "error": "This worker took too long and was stopped. Try again, or simplify the input.",
+        "error_code": "e2b_sandbox_error",
+        "id": "run_4c403d630b2b",
+        "started_at": "2026-06-07T04:00:50.113026+00:00",
+        "status": "failed",
+        "trigger_source": "schedule",
+        "worker_id": "ai-news-discord-digest",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "AI News Discord Digester",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-07T04:00:50.086303+00:00",
+        "runs_7d": 205,
+        "success_rate_7d": 0.4634146341463415,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [
+        "json",
+        "digest",
+        "daily",
+        "on-demand",
+        "operations"
+      ],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 0 * * * *"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "0 * * * *",
+          "timezone": "UTC",
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [
+        "google_search_console"
+      ],
+      "description": "Weekly SEO audit via Google Search Console that compares 28-day performance windows and surfaces concrete ranking, CTR, and diagnostics opportunities.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Operations/SEO",
+      "how_it_works": null,
+      "id": "search_console_insights",
+      "inputs": [
+        {
+          "name": "site_url",
+          "type": "text"
+        },
+        {
+          "name": "run_diagnostics",
+          "type": "boolean"
+        }
+      ],
+      "is_example": false,
+      "last_run": {
+        "completed_at": "2026-06-02T20:34:28.585394+00:00",
+        "created_at": "2026-06-02T20:32:48.474320+00:00",
+        "duration_ms": 100078,
+        "error": null,
+        "error_code": null,
+        "id": "run_06541430ff9a",
+        "started_at": "2026-06-02T20:32:48.507087+00:00",
+        "status": "completed",
+        "trigger_source": "audit",
+        "worker_id": "search_console_insights",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Search Console Insights",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-02T20:32:48.474320+00:00",
+        "runs_7d": 5,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "seo",
+        "google-search-console",
+        "diagnostics",
+        "reporting"
+      ],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 0 9 * * 1"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "0 9 * * 1",
+          "timezone": null,
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [
+        "gmail"
+      ],
+      "description": "Daily Gmail cleaner that applies inbox rules, archives low-value messages, labels matching mail, and writes a markdown digest.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Operations/Inbox",
+      "how_it_works": null,
+      "id": "gmail_inbox_manager",
+      "inputs": [],
+      "is_example": false,
+      "last_run": {
+        "completed_at": "2026-06-06T07:00:17.423905+00:00",
+        "created_at": "2026-06-06T07:00:00.607834+00:00",
+        "duration_ms": 16792,
+        "error": null,
+        "error_code": null,
+        "id": "run_188070ade7eb",
+        "started_at": "2026-06-06T07:00:00.631392+00:00",
+        "status": "completed",
+        "trigger_source": "schedule",
+        "worker_id": "gmail_inbox_manager",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Gmail Inbox Manager",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-06T07:00:00.607834+00:00",
+        "runs_7d": 9,
+        "success_rate_7d": 0.8888888888888888,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [
+        "gmail",
+        "inbox",
+        "email",
+        "operations"
+      ],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 0 7 * * *"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "0 7 * * *",
+          "timezone": null,
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Counts the number of words in a block of text and returns the total count",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Data/Enrichment",
+      "how_it_works": null,
+      "id": "text-word-counter-2",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "textarea"
+        }
+      ],
+      "is_example": false,
+      "last_run": null,
+      "long_description": null,
+      "name": "Text Word Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [
+        "text",
+        "json",
+        "on-demand",
+        "utility"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Live verification worker for brain attach.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "b12-live-worker-051059",
+      "inputs": [],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-06-02T05:11:27.558230+00:00",
+        "created_at": "2026-06-02T05:11:23.253006+00:00",
+        "duration_ms": 4256,
+        "error": null,
+        "error_code": null,
+        "id": "run_4deef920efca",
+        "started_at": "2026-06-02T05:11:23.302094+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "b12-live-worker-051059",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "B12 Live Worker 051059",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-02T05:11:23.253006+00:00",
+        "runs_7d": 2,
+        "success_rate_7d": 0.5,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Counts the number of characters in a block of text and returns the count as a number",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Data/Enrichment",
+      "how_it_works": null,
+      "id": "text-character-counter",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "textarea"
+        }
+      ],
+      "is_example": false,
+      "last_run": null,
+      "long_description": null,
+      "name": "Text Character Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [
+        "text",
+        "json",
+        "on-demand"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Reverse the characters of an input string called text and return it as result.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "text-reverser",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-06-06T01:20:53.397621+00:00",
+        "created_at": "2026-06-06T01:20:46.226588+00:00",
+        "duration_ms": 7142,
+        "error": null,
+        "error_code": null,
+        "id": "run_8f7024d80689",
+        "started_at": "2026-06-06T01:20:46.254980+00:00",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "text-reverser",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Text Reverser",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-06T01:20:46.226588+00:00",
+        "runs_7d": 1,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Counts the number of vowels in a block of text and returns the total as a number",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Data/Enrichment",
+      "how_it_works": null,
+      "id": "vowel-counter",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "textarea"
+        }
+      ],
+      "is_example": false,
+      "last_run": null,
+      "long_description": null,
+      "name": "Vowel Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [
+        "text",
+        "on-demand",
+        "json",
+        "operations"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Bundle",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "bundle-test",
+      "inputs": [],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Bundle",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Test",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "test",
+      "inputs": [],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Test",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Count the number of words in a given text and return the total as a number.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "word-counter",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Word Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Count the number of sentences in a block of text and return the count as a number.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "sentence-counter",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Sentence Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Counts the number of sentences in a block of text and returns the count as a number",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Data/Enrichment",
+      "how_it_works": null,
+      "id": "sentence-counter-2",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "textarea"
+        }
+      ],
+      "is_example": false,
+      "last_run": null,
+      "long_description": null,
+      "name": "Sentence Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [
+        "json",
+        "on-demand",
+        "report"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "An open-ended agent that interprets a natural language request and performs reasoning, writing, or planning to respond appropriately.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "generic-task-agent",
+      "inputs": [
+        {
+          "name": "instruction",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Generic Task Agent",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "\ud83d\ude80 Rocket",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "emoji-test",
+      "inputs": [],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "\ud83d\ude80 Rocket",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Sends a weekly email digest of closed GitHub issues from selected repositories.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Engineering/GitHub",
+      "how_it_works": null,
+      "id": "github-weekly-issue-digest",
+      "inputs": [
+        {
+          "name": "repos",
+          "type": "textarea"
+        },
+        {
+          "name": "recipient_email",
+          "type": "text"
+        },
+        {
+          "name": "timezone",
+          "type": "text"
+        }
+      ],
+      "is_example": false,
+      "last_run": null,
+      "long_description": null,
+      "name": "GitHub Weekly Issue Digest",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "missing_secret",
+      "system": false,
+      "tags": [
+        "github",
+        "digest",
+        "weekly",
+        "engineering",
+        "email"
+      ],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 0 8 * * 1"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "0 8 * * 1",
+          "timezone": "UTC",
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Sends a daily Slack summary of your most important GitHub notifications.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Engineering/GitHub",
+      "how_it_works": null,
+      "id": "github-slack-notification-digest",
+      "inputs": [
+        {
+          "name": "lookback_hours",
+          "type": "number"
+        },
+        {
+          "name": "max_items",
+          "type": "number"
+        },
+        {
+          "name": "slack_channel",
+          "type": "text"
+        },
+        {
+          "name": "include_reasons",
+          "type": "text"
+        },
+        {
+          "name": "additional_instructions",
+          "type": "textarea"
+        }
+      ],
+      "is_example": false,
+      "last_run": {
+        "completed_at": "2026-06-06T09:00:01.907713+00:00",
+        "created_at": "2026-06-06T09:00:01.767040+00:00",
+        "duration_ms": 101,
+        "error": "This worker is missing a required input. Add it, then re-run.",
+        "error_code": "missing_required_input",
+        "id": "run_ecd79141bca7",
+        "started_at": "2026-06-06T09:00:01.806584+00:00",
+        "status": "failed",
+        "trigger_source": "schedule",
+        "worker_id": "github-slack-notification-digest",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "GitHub Slack Notification Digest",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-06T09:00:01.767040+00:00",
+        "runs_7d": 3,
+        "success_rate_7d": 0.0,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [
+        "github",
+        "slack",
+        "digest",
+        "daily",
+        "engineering"
+      ],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 0 9 * * *"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "0 9 * * *",
+          "timezone": "UTC",
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Counts vowels in a block of text and returns the total as a number",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Data/Enrichment",
+      "how_it_works": null,
+      "id": "vowel-counter-2",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "textarea"
+        }
+      ],
+      "is_example": false,
+      "last_run": null,
+      "long_description": null,
+      "name": "Vowel Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [
+        "text",
+        "utility",
+        "on-demand"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Takes a simple text input and echoes it back unchanged. Useful as a minimal test worker or template.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "text-x-echo",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Echo Single Text Input",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Counts vowels (a, e, i, o, u) in an input text and returns total and per-vowel counts.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "vowel-counter-3",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Vowel Counter",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [
+        "gmail"
+      ],
+      "description": "Fetches recent Gmail messages matching a query and returns a markdown summary.",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Operations/Inbox",
+      "how_it_works": null,
+      "id": "gmail-intake-brief-copy",
+      "inputs": [
+        {
+          "name": "query",
+          "type": "text"
+        },
+        {
+          "name": "max_results",
+          "type": "number"
+        }
+      ],
+      "is_example": false,
+      "last_run": null,
+      "long_description": null,
+      "name": "Gmail Intake Brief",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [
+        "gmail",
+        "intake",
+        "summary",
+        "operations"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Convert input text to uppercase and return the transformed result.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "text-uppercaser",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": {
+        "completed_at": "2026-06-07T03:25:14.735582+00:00",
+        "created_at": "2026-06-07T03:25:06.716944+00:00",
+        "duration_ms": 7988,
+        "error": null,
+        "error_code": null,
+        "id": "run_efb1f2f6f809",
+        "started_at": "2026-06-07T03:25:06.747038+00:00",
+        "status": "completed",
+        "trigger_source": "codex-audit",
+        "worker_id": "text-uppercaser",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Text Uppercaser",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-07T03:25:06.716944+00:00",
+        "runs_7d": 1,
+        "success_rate_7d": 1.0,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "healthy",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Analyze the single-character input 'x' and respond with a brief explanation or handling note.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "x-analyzer",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Single Character X Analyzer",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "A minimal worker that takes a short text input and returns the reversed text, useful as a tiny example worker.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "tiny-text-reverser",
+      "inputs": [
+        {
+          "name": "text",
+          "type": "text"
+        }
+      ],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Tiny Text Reverser",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Finds recent news about a person and returns a balanced brief with positive and negative points",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Operations/Reporting",
+      "how_it_works": null,
+      "id": "person-news-sentiment-brief",
+      "inputs": [
+        {
+          "name": "person_name",
+          "type": "text"
+        }
+      ],
+      "is_example": false,
+      "last_run": null,
+      "long_description": null,
+      "name": "Person News Sentiment Brief",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "ready",
+      "system": false,
+      "tags": [
+        "markdown",
+        "report",
+        "search",
+        "on-demand"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [],
+      "description": "Finds recent news about a person and returns a balanced brief with positive and negative points",
+      "example_input": null,
+      "example_output": null,
+      "folder": "Operations/Reporting",
+      "how_it_works": null,
+      "id": "person-news-sentiment-brief-2",
+      "inputs": [
+        {
+          "name": "person_name",
+          "type": "text"
+        }
+      ],
+      "is_example": false,
+      "last_run": {
+        "completed_at": "2026-06-06T01:43:46.740760+00:00",
+        "created_at": "2026-06-06T01:43:03.156671+00:00",
+        "duration_ms": 43554,
+        "error": "This worker hit an internal error and stopped. Check the run logs, then edit or re-run the worker.",
+        "error_code": "agent_runtime_error",
+        "id": "run_7f01a92cf98f",
+        "started_at": "2026-06-06T01:43:03.186403+00:00",
+        "status": "failed",
+        "trigger_source": "manual",
+        "worker_id": "person-news-sentiment-brief-2",
+        "worker_name": null
+      },
+      "long_description": null,
+      "name": "Person News Sentiment Brief",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": {
+        "last_run_at": "2026-06-06T01:43:03.156671+00:00",
+        "runs_7d": 1,
+        "success_rate_7d": 0.0,
+        "success_rate_change_7d": null
+      },
+      "runner": "e2b",
+      "runtime": "skill",
+      "status": "needs_attention",
+      "system": false,
+      "tags": [
+        "markdown",
+        "report",
+        "search",
+        "on-demand"
+      ],
+      "timeseries": null,
+      "trigger_type": "manual",
+      "triggers": [
+        "Manual"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": null,
+          "timezone": null,
+          "type": "manual",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    },
+    {
+      "archive_reason": null,
+      "archived": false,
+      "connections": [
+        "gmail"
+      ],
+      "description": "Sends a short weekday morning summary by email at 8am.",
+      "example_input": null,
+      "example_output": null,
+      "folder": null,
+      "how_it_works": null,
+      "id": "good-morning-summary-email",
+      "inputs": [],
+      "is_example": null,
+      "last_run": null,
+      "long_description": null,
+      "name": "Good Morning Summary Email",
+      "owner_id": "federico",
+      "permissions": {
+        "can_delete": true,
+        "can_edit": true,
+        "can_run": true,
+        "can_share": true,
+        "can_view": true,
+        "is_owner": true
+      },
+      "public_link": "[REDACTED]",
+      "recent_stats": null,
+      "runner": "e2b",
+      "runtime": "python311",
+      "status": "ready",
+      "system": false,
+      "tags": [],
+      "timeseries": null,
+      "trigger_type": "schedule",
+      "triggers": [
+        "Cron \u00b7 0 8 * * 1-5"
+      ],
+      "triggers_spec": [
+        {
+          "composio": null,
+          "cron": "0 8 * * 1-5",
+          "timezone": null,
+          "type": "schedule",
+          "webhook": null
+        }
+      ],
+      "use_cases": null,
+      "visibility": "private"
+    }
+  ],
+  "elapsed_ms": 425,
+  "headers": {
+    "CF-RAY": "a07d75bbaab7e866-FRA",
+    "Connection": "close",
+    "Content-Length": "108206",
+    "Content-Type": "application/json",
+    "Date": "Sun, 07 Jun 2026 06:04:32 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=F1EqV4rPmHyEzDkAnPLzI7QUpSOVEfrRLkcbzLYECrjv9uPdv1H6st1tAPw6ySDK45dsAYGYjGTXzgoix8WRumpiXmv%2BU%2FcWzC9y8Fjenl7dbZEQV6DeUixPXA85SzI0aSEnsBAT15HJ0HsbVMmSMu8tLAs%3D\"}]}",
+    "Server": "cloudflare",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "status": 200
+}

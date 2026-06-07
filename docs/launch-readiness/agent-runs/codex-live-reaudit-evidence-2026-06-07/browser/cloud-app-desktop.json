@@ -1,0 +1,33 @@
+{
+  "name": "cloud-app-desktop",
+  "url": "https://workeros.floom.dev/app",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+  "status": 404,
+  "title": "404: NOT_FOUND",
+  "textSnippet": "404: NOT_FOUND\nCode: NOT_FOUND\nID: arn1:arn1::845lz-1780812692920-eeafc569d213\n\nRead our documentation to learn more about this error.",
+  "textLength": 134,
+  "h1": [],
+  "buttons": [],
+  "links": [
+    {
+      "text": "Read our documentation to learn more about this error.",
+      "href": "https://vercel.com/docs/errors/NOT_FOUND"
+    }
+  ],
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 ()"
+    }
+  ],
+  "errorResponses": [
+    {
+      "url": "https://workeros.floom.dev/app",
+      "status": 404
+    }
+  ]
+}

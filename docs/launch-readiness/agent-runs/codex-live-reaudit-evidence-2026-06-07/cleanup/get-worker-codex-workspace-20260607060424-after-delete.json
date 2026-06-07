@@ -1,0 +1,25 @@
+{
+  "body": {
+    "detail": "Worker not found"
+  },
+  "elapsed_ms": 125,
+  "headers": {
+    "CF-RAY": "a07d7656b93ad3bc-FRA",
+    "Connection": "close",
+    "Content-Length": "29",
+    "Content-Type": "application/json",
+    "Date": "Sun, 07 Jun 2026 06:04:56 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=POVFp%2B4WnQYUqpX%2FBQHzOmohCBAThc%2B90mZZhTXJG4Ptk53ld%2F0koVlyvHT9vU4T4OIDNXzB8QDi3iH5WCTUtK%2Fgx8Hb%2Fax%2BOXIypQVg7k8k3VNFhw0mvPo0HMYiSMRy1feiejY8ZzJUKJG9B7o4ETnklaw%3D\"}]}",
+    "Server": "cloudflare",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "status": 404
+}

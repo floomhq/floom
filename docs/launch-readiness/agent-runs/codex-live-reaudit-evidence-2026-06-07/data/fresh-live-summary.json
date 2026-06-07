@@ -1,0 +1,40 @@
+{
+  "alerts_open": 13,
+  "alerts_total": 21,
+  "metrics": {
+    "active_triggers": 6,
+    "connections_count": 23,
+    "drafts_last_hour": 0,
+    "runs_7d": 1868,
+    "runs_failed_7d": 1684,
+    "runs_total": 2486,
+    "secrets_count": "[REDACTED]",
+    "uptime_seconds": 3132,
+    "workers_count": 99
+  },
+  "runs_after_2026_06_07T04_50_UTC_in_limit100": {
+    "completed": 1,
+    "count": 1,
+    "failed": 0,
+    "sample": [
+      {
+        "created_at": "2026-06-07T06:04:46.254597+00:00",
+        "error_code": null,
+        "id": "run_902010104355",
+        "status": "completed",
+        "trigger_source": "manual",
+        "worker_id": "text-uppercaser"
+      }
+    ]
+  },
+  "runs_limit_100": {
+    "completed": 88,
+    "count": 100,
+    "failed": 12
+  },
+  "workers_shape_list": {
+    "count": 86,
+    "has_fl1_workers": true,
+    "private_with_public_link": 86
+  }
+}

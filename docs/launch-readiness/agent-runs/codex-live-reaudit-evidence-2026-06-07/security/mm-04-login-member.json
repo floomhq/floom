@@ -1,0 +1,30 @@
+{
+  "body": {
+    "display_name": "Codex Reaudit Member",
+    "id": "fa5ffcb5-5c5b-4a96-9388-17d63537b17e",
+    "redirect_to": "/overview",
+    "role": "member",
+    "username": "codex_member_20260607060424"
+  },
+  "elapsed_ms": 368,
+  "headers": {
+    "CF-RAY": "a07d761b0c17368a-FRA",
+    "Connection": "close",
+    "Content-Length": "166",
+    "Content-Type": "application/json",
+    "Date": "Sun, 07 Jun 2026 06:04:47 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=%2BqRq6hsTGurcCWND1HzWbLscwBiPuIcEEfC%2Bc0a4r7UMOKgCikpKCzVpI7MGjJEujzTa0PJtPO%2FYwvYIMhYwncOEbnJC5TPMQya4%2FyCmbyFyfoYvvQ2JG5p6gRNRU%2Badt1Ou20mvBUgSbF3EHKxidB9afAc%3D\"}]}",
+    "Server": "cloudflare",
+    "Set-Cookie": "[REDACTED]",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "status": 200
+}

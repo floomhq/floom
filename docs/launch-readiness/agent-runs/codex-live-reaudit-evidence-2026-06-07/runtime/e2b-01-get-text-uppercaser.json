@@ -1,0 +1,184 @@
+{
+  "body": {
+    "archive_reason": null,
+    "archived": false,
+    "cloned_from": null,
+    "config": {
+      "approvals": {
+        "label": "Approve action",
+        "required": false
+      },
+      "connections": [],
+      "contexts": [],
+      "csv_required_columns": null,
+      "description": "Convert input text to uppercase and return the transformed result.",
+      "id": "text-uppercaser",
+      "inputs": [
+        {
+          "accept_csv": false,
+          "accepts": null,
+          "default": null,
+          "description": null,
+          "label": "Input text",
+          "max_size_mb": null,
+          "name": "text",
+          "options": null,
+          "placeholder": null,
+          "required": true,
+          "type": "text"
+        }
+      ],
+      "model": "gpt-5-mini",
+      "name": "Text Uppercaser",
+      "notify": null,
+      "outputs": [
+        {
+          "columns": null,
+          "json_required_keys": null,
+          "kind": "scalar",
+          "label": "Uppercased text",
+          "media_type": null,
+          "name": "uppercased",
+          "path": null,
+          "required": true,
+          "type": "text"
+        }
+      ],
+      "retry": null,
+      "runtime": {
+        "bundle_path": "text-uppercaser",
+        "command": "python run.py",
+        "disable_tools": [],
+        "entrypoint": "run.py",
+        "limits": {
+          "max_output_tokens": 16000,
+          "max_tool_iterations": 12,
+          "max_total_tokens": 50000,
+          "timeout_seconds": 300
+        },
+        "mode": "pure-script",
+        "model": "gpt-5-mini",
+        "runner": "e2b",
+        "system_prompt": null,
+        "type": "python311"
+      },
+      "secrets": "[REDACTED]",
+      "trigger": {
+        "at": null,
+        "composio": null,
+        "cron": null,
+        "every": null,
+        "timezone": null,
+        "type": "manual",
+        "webhook": null
+      }
+    },
+    "description": "Convert input text to uppercase and return the transformed result.",
+    "enabled": true,
+    "example_input": {
+      "text": "Hello, Workeros!"
+    },
+    "example_output": null,
+    "files": [
+      {
+        "binary": false,
+        "content": "schema_version: '0.3'\nname: text-uppercaser\ntitle: Text Uppercaser\ndescription: Convert input text to uppercase and return the transformed result.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: e2b\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Input text\n  outputs:\n  - name: uppercased\n    kind: scalar\n    type: string\n    required: true\n    label: Uppercased text\ntrigger:\n  type: manual\nexample_input:\n  text: Hello, Workeros!\n",
+        "language": "yaml",
+        "path": "worker.yml",
+        "size": 539
+      },
+      {
+        "binary": false,
+        "content": "import json\nfrom pathlib import Path\n\n\ndef main() -> None:\n    try:\n        inputs = json.loads(Path(\"inputs.json\").read_text())\n        text = str(inputs.get(\"text\", \"\"))\n        uppercased = text.upper()\n\n        result = {\n            \"status\": \"success\",\n            \"outputs\": {\n                \"uppercased\": uppercased,\n            },\n            \"artifacts\": [],\n            \"error\": None,\n        }\n    except Exception as e:\n        result = {\n            \"status\": \"error\",\n            \"outputs\": {},\n            \"artifacts\": [],\n            \"error\": str(e),\n        }\n\n    Path(\"result.json\").write_text(json.dumps(result))\n\n\nif __name__ == \"__main__\":\n    main()\n",
+        "language": "python",
+        "path": "run.py",
+        "size": 675
+      },
+      {
+        "binary": false,
+        "content": "# No third-party dependencies required\n",
+        "language": "text",
+        "path": "requirements.txt",
+        "size": 39
+      }
+    ],
+    "folder": null,
+    "how_it_works": null,
+    "id": "text-uppercaser",
+    "is_example": null,
+    "long_description": null,
+    "manifest_yaml": "schema_version: '0.3'\nname: text-uppercaser\ntitle: Text Uppercaser\ndescription: Convert input text to uppercase and return the transformed result.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: e2b\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Input text\n  outputs:\n  - name: uppercased\n    kind: scalar\n    type: string\n    required: true\n    label: Uppercased text\ntrigger:\n  type: manual\nexample_input:\n  text: Hello, Workeros!\n",
+    "name": "Text Uppercaser",
+    "new_webhook_secret": "[REDACTED]",
+    "owner_id": "federico",
+    "permissions": {
+      "can_delete": true,
+      "can_edit": true,
+      "can_run": true,
+      "can_share": true,
+      "can_view": true,
+      "is_owner": true
+    },
+    "public_link": "[REDACTED]",
+    "recent_runs": [
+      {
+        "completed_at": "2026-06-07T03:25:14.735582+00:00",
+        "created_at": "2026-06-07T03:25:06.716944+00:00",
+        "duration_ms": 7988,
+        "error": null,
+        "error_code": null,
+        "id": "run_efb1f2f6f809",
+        "started_at": "2026-06-07T03:25:06.747038+00:00",
+        "status": "completed",
+        "trigger_source": "codex-audit",
+        "worker_id": "text-uppercaser",
+        "worker_name": null
+      }
+    ],
+    "recent_stats": {
+      "last_run_at": "2026-06-07T03:25:06.716944+00:00",
+      "runs_7d": 1,
+      "success_rate_7d": 1.0,
+      "success_rate_change_7d": null
+    },
+    "run_py": "import json\nfrom pathlib import Path\n\n\ndef main() -> None:\n    try:\n        inputs = json.loads(Path(\"inputs.json\").read_text())\n        text = str(inputs.get(\"text\", \"\"))\n        uppercased = text.upper()\n\n        result = {\n            \"status\": \"success\",\n            \"outputs\": {\n                \"uppercased\": uppercased,\n            },\n            \"artifacts\": [],\n            \"error\": None,\n        }\n    except Exception as e:\n        result = {\n            \"status\": \"error\",\n            \"outputs\": {},\n            \"artifacts\": [],\n            \"error\": str(e),\n        }\n\n    Path(\"result.json\").write_text(json.dumps(result))\n\n\nif __name__ == \"__main__\":\n    main()\n",
+    "run_py_content": "import json\nfrom pathlib import Path\n\n\ndef main() -> None:\n    try:\n        inputs = json.loads(Path(\"inputs.json\").read_text())\n        text = str(inputs.get(\"text\", \"\"))\n        uppercased = text.upper()\n\n        result = {\n            \"status\": \"success\",\n            \"outputs\": {\n                \"uppercased\": uppercased,\n            },\n            \"artifacts\": [],\n            \"error\": None,\n        }\n    except Exception as e:\n        result = {\n            \"status\": \"error\",\n            \"outputs\": {},\n            \"artifacts\": [],\n            \"error\": str(e),\n        }\n\n    Path(\"result.json\").write_text(json.dumps(result))\n\n\nif __name__ == \"__main__\":\n    main()\n",
+    "runner": "e2b",
+    "skill_md_content": null,
+    "status": "healthy",
+    "tags": [],
+    "trigger_type": "manual",
+    "triggers_spec": [
+      {
+        "composio": null,
+        "cron": null,
+        "timezone": null,
+        "type": "manual",
+        "webhook": null
+      }
+    ],
+    "use_cases": null,
+    "visibility": "private",
+    "webhook_url": "[REDACTED]"
+  },
+  "elapsed_ms": 189,
+  "headers": {
+    "CF-RAY": "a07d76137fed340d-FRA",
+    "Connection": "close",
+    "Content-Length": "6165",
+    "Content-Type": "application/json",
+    "Date": "Sun, 07 Jun 2026 06:04:46 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=HwQt1ocpALVjoQmc2VRVmQOq8o8%2BIN77CqvO2iDobuBF%2BN6pwt10o9dx2%2Ftw17ipw4Csoh029TchmzJDep9xbHBN3HXflm8MfFvlct6xYbipQ%2FP46jaiNhjqON5%2B5KKy%2FYPmv3WBq51xN5dNViZWrSA3JDk%3D\"}]}",
+    "Server": "cloudflare",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "status": 200
+}

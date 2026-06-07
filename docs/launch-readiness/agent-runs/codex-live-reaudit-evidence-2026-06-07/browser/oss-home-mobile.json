@@ -1,0 +1,22 @@
+{
+  "name": "oss-home-mobile",
+  "url": "https://workers.floom.dev/",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+  "status": 200,
+  "title": "Workeros",
+  "textSnippet": "Workeros\nCreate your workspace\n\nSet up the first admin account for this Workeros instance.\n\nDisplay name\n(optional)\nUsername\nPassword\nCreate workspace",
+  "textLength": 150,
+  "h1": [
+    "Create your workspace"
+  ],
+  "buttons": [
+    "Create workspace"
+  ],
+  "links": [],
+  "consoleMessages": [],
+  "errorResponses": []
+}

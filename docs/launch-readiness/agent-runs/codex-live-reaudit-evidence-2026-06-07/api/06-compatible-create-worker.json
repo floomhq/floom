@@ -1,0 +1,170 @@
+{
+  "body": {
+    "archive_reason": null,
+    "archived": false,
+    "cloned_from": null,
+    "config": {
+      "approvals": {
+        "label": "Approve action",
+        "required": false
+      },
+      "connections": [],
+      "contexts": [],
+      "csv_required_columns": null,
+      "description": "Temporary live launch-readiness audit worker. Safe to delete.",
+      "id": "codex-reaudit-ok-20260607060620",
+      "inputs": [
+        {
+          "accept_csv": false,
+          "accepts": null,
+          "default": null,
+          "description": null,
+          "label": "Text",
+          "max_size_mb": null,
+          "name": "text",
+          "options": null,
+          "placeholder": null,
+          "required": true,
+          "type": "text"
+        }
+      ],
+      "model": "gpt-5-mini",
+      "name": "Codex Reaudit OK 20260607060620",
+      "notify": null,
+      "outputs": [
+        {
+          "columns": null,
+          "json_required_keys": null,
+          "kind": "scalar",
+          "label": "Result",
+          "media_type": null,
+          "name": "result",
+          "path": null,
+          "required": true,
+          "type": "text"
+        }
+      ],
+      "retry": null,
+      "runtime": {
+        "bundle_path": "codex-reaudit-ok-20260607060620",
+        "command": "python run.py",
+        "disable_tools": [],
+        "entrypoint": "run.py",
+        "limits": {
+          "max_output_tokens": 16000,
+          "max_tool_iterations": 12,
+          "max_total_tokens": 50000,
+          "timeout_seconds": 300
+        },
+        "mode": "pure-script",
+        "model": "gpt-5-mini",
+        "runner": "e2b",
+        "system_prompt": null,
+        "type": "python311"
+      },
+      "secrets": "[REDACTED]",
+      "trigger": {
+        "at": null,
+        "composio": null,
+        "cron": null,
+        "every": null,
+        "timezone": null,
+        "type": "manual",
+        "webhook": null
+      }
+    },
+    "description": "Temporary live launch-readiness audit worker. Safe to delete.",
+    "enabled": true,
+    "example_input": null,
+    "example_output": null,
+    "files": [
+      {
+        "binary": false,
+        "content": "schema_version: \"0.3\"\nname: codex-reaudit-ok-20260607060620\ntitle: \"Codex Reaudit OK 20260607060620\"\ndescription: \"Temporary live launch-readiness audit worker. Safe to delete.\"\nversion: \"0.1.0\"\ntargets: [generic]\nexec:\n  entry: \"run.py\"\n  runtime: \"python311\"\n  runner: \"e2b\"\n  command: \"python run.py\"\n  inputs:\n    - name: text\n      kind: scalar\n      type: string\n      required: true\n  outputs:\n    - name: result\n      kind: scalar\n      type: string\n      required: true\ntrigger:\n  type: manual\n",
+        "language": "yaml",
+        "path": "worker.yml",
+        "size": 503
+      },
+      {
+        "binary": false,
+        "content": "# Codex Reaudit OK 20260607060620\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+        "language": "markdown",
+        "path": "SKILL.md",
+        "size": 181
+      },
+      {
+        "binary": false,
+        "content": "import json\nfrom pathlib import Path\n\ndef main():\n    inputs=json.loads(Path(\"inputs.json\").read_text())\n    text=str(inputs.get(\"text\", \"\"))\n    result={\"status\":\"success\",\"outputs\":{\"result\":\"REAUDIT_OK:\" + text.upper()},\"artifacts\":[],\"error\":None}\n    Path(\"result.json\").write_text(json.dumps(result))\n\nif __name__ == \"__main__\":\n    main()\n",
+        "language": "python",
+        "path": "run.py",
+        "size": 346
+      },
+      {
+        "binary": false,
+        "content": "",
+        "language": "text",
+        "path": "requirements.txt",
+        "size": 0
+      }
+    ],
+    "folder": null,
+    "how_it_works": null,
+    "id": "codex-reaudit-ok-20260607060620",
+    "is_example": null,
+    "long_description": null,
+    "manifest_yaml": "schema_version: \"0.3\"\nname: codex-reaudit-ok-20260607060620\ntitle: \"Codex Reaudit OK 20260607060620\"\ndescription: \"Temporary live launch-readiness audit worker. Safe to delete.\"\nversion: \"0.1.0\"\ntargets: [generic]\nexec:\n  entry: \"run.py\"\n  runtime: \"python311\"\n  runner: \"e2b\"\n  command: \"python run.py\"\n  inputs:\n    - name: text\n      kind: scalar\n      type: string\n      required: true\n  outputs:\n    - name: result\n      kind: scalar\n      type: string\n      required: true\ntrigger:\n  type: manual\n",
+    "name": "Codex Reaudit OK 20260607060620",
+    "new_webhook_secret": "[REDACTED]",
+    "owner_id": "federico",
+    "permissions": {
+      "can_delete": true,
+      "can_edit": true,
+      "can_run": true,
+      "can_share": true,
+      "can_view": true,
+      "is_owner": true
+    },
+    "public_link": "[REDACTED]",
+    "recent_runs": [],
+    "recent_stats": null,
+    "run_py": "import json\nfrom pathlib import Path\n\ndef main():\n    inputs=json.loads(Path(\"inputs.json\").read_text())\n    text=str(inputs.get(\"text\", \"\"))\n    result={\"status\":\"success\",\"outputs\":{\"result\":\"REAUDIT_OK:\" + text.upper()},\"artifacts\":[],\"error\":None}\n    Path(\"result.json\").write_text(json.dumps(result))\n\nif __name__ == \"__main__\":\n    main()\n",
+    "run_py_content": "import json\nfrom pathlib import Path\n\ndef main():\n    inputs=json.loads(Path(\"inputs.json\").read_text())\n    text=str(inputs.get(\"text\", \"\"))\n    result={\"status\":\"success\",\"outputs\":{\"result\":\"REAUDIT_OK:\" + text.upper()},\"artifacts\":[],\"error\":None}\n    Path(\"result.json\").write_text(json.dumps(result))\n\nif __name__ == \"__main__\":\n    main()\n",
+    "runner": "e2b",
+    "skill_md_content": "# Codex Reaudit OK 20260607060620\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+    "status": "ready",
+    "tags": [],
+    "trigger_type": "manual",
+    "triggers_spec": [
+      {
+        "composio": null,
+        "cron": null,
+        "timezone": null,
+        "type": "manual",
+        "webhook": null
+      }
+    ],
+    "use_cases": null,
+    "visibility": "private",
+    "webhook_url": "[REDACTED]"
+  },
+  "elapsed_ms": 211,
+  "headers": {
+    "CF-RAY": "a07d785fecdcd349-FRA",
+    "Connection": "close",
+    "Content-Length": "5060",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+    "Content-Type": "application/json",
+    "Date": "Sun, 07 Jun 2026 06:06:20 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "Permissions-Policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=HwITrmfLB8SpeNTP7upd6uMQzRxU79UV6L31K%2BCoadSI5x%2BcLQnzGRFSCSvOxyiLyZ4Fnh83%2FScpYIBX%2Fj0yGXP13%2Br68urNEwgPGFckanSJiNbS5oRWi5cyglgI7apq%2BJ1XvTaFw8xqVcxSEYriqkwqb1A%3D\"}]}",
+    "Server": "cloudflare",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC"
+  },
+  "status": 200
+}

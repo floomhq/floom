@@ -1,0 +1,225 @@
+{
+  "alert_validation": {
+    "alert_encoded_crlf": {
+      "created": true,
+      "detail": null,
+      "status": 201
+    },
+    "alert_localhost": {
+      "created": false,
+      "detail": "Alert webhook URL is not allowed: points to an internal/loopback/link-local address",
+      "status": 400
+    },
+    "alert_metadata": {
+      "created": false,
+      "detail": "Alert webhook URL is not allowed: points to an internal/loopback/link-local address",
+      "status": 400
+    },
+    "alert_private_ip": {
+      "created": false,
+      "detail": "Alert webhook URL is not allowed: points to an internal/loopback/link-local address",
+      "status": 400
+    },
+    "alert_public_url": {
+      "created": true,
+      "detail": null,
+      "status": 201
+    }
+  },
+  "checks": {
+    "/runs?limit=100": {
+      "elapsed_ms": 3412,
+      "status": 200
+    },
+    "/secrets": "[REDACTED]",
+    "/stats": {
+      "elapsed_ms": 157,
+      "status": 200
+    },
+    "/system/alerts": {
+      "elapsed_ms": 241,
+      "status": 200
+    },
+    "/system/metrics": {
+      "elapsed_ms": 167,
+      "status": 200
+    },
+    "/workers": {
+      "elapsed_ms": 464,
+      "status": 200
+    },
+    "/workers?shape=list": {
+      "elapsed_ms": 425,
+      "status": 200
+    },
+    "chat_smoke": {
+      "body_contains_ok": true,
+      "status": 200
+    },
+    "e2b_worker_detail": {
+      "runner": "e2b",
+      "status": 200
+    },
+    "health_no_secret": "[REDACTED]",
+    "health_with_secret": "[REDACTED]",
+    "lifecycle_create_run": {
+      "run_id": "[present]",
+      "status": 200
+    },
+    "lifecycle_create_worker": {
+      "status": 200
+    },
+    "lifecycle_final_run": {
+      "outputs": null,
+      "run_status": "failed",
+      "status": 200
+    },
+    "workers_good_secret": "[REDACTED]",
+    "workers_no_secret": "[REDACTED]",
+    "workers_wrong_secret": "[REDACTED]"
+  },
+  "cleanup": [
+    {
+      "delete_user_status": 204,
+      "user_id_present": true
+    }
+  ],
+  "ended_at": "2026-06-07T06:04:57.213585+00:00",
+  "metrics": {
+    "runs_7d": 1867,
+    "runs_failed_7d": 1684,
+    "runs_total": 2485,
+    "uptime_seconds": 2080
+  },
+  "multi_member": {
+    "auth_me_secret": "[REDACTED]",
+    "create_member": 201,
+    "login_member": 200,
+    "logout_member": 200,
+    "member_get_private": 404,
+    "member_get_workspace": 200,
+    "member_me": {
+      "body": {
+        "auth_method": "session",
+        "is_admin": false,
+        "role": "member",
+        "user_id": "fa5ffcb5-5c5b-4a96-9388-17d63537b17e",
+        "username": "codex_member_20260607060424"
+      },
+      "status": 200
+    },
+    "member_pat_create": 201,
+    "member_run_private": 404,
+    "member_run_workspace": 404,
+    "member_users": 403,
+    "pat_me": {
+      "body": {
+        "auth_method": "pat",
+        "is_admin": false,
+        "role": "member",
+        "user_id": "fa5ffcb5-5c5b-4a96-9388-17d63537b17e",
+        "username": "codex_member_20260607060424"
+      },
+      "status": 200
+    },
+    "setup_required": 200
+  },
+  "routes": {
+    "https://workeros.floom.dev/": {
+      "body_snippet": "<!DOCTYPE html><html data-dpl-id=\"dpl_BBzLVAxANFRRCMN6TRJmAj18pZdQ\" lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a",
+      "elapsed_ms": 292,
+      "status": 200
+    },
+    "https://workeros.floom.dev/api/proxy/auth/me": {
+      "body_snippet": "<!DOCTYPE html><html data-dpl-id=\"dpl_BBzLVAxANFRRCMN6TRJmAj18pZdQ\" lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a",
+      "elapsed_ms": 197,
+      "status": 404
+    },
+    "https://workeros.floom.dev/api/proxy/auth/setup-required": {
+      "body_snippet": "<!DOCTYPE html><html data-dpl-id=\"dpl_BBzLVAxANFRRCMN6TRJmAj18pZdQ\" lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a",
+      "elapsed_ms": 122,
+      "status": 404
+    },
+    "https://workeros.floom.dev/api/proxy/users": {
+      "body_snippet": "<!DOCTYPE html><html data-dpl-id=\"dpl_BBzLVAxANFRRCMN6TRJmAj18pZdQ\" lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a",
+      "elapsed_ms": 40,
+      "status": 404
+    },
+    "https://workeros.floom.dev/app": {
+      "body_snippet": "The page could not be found\n\nNOT_FOUND\n\narn1:arn1::fn8gb-1780812293836-51e0469a0037\n",
+      "elapsed_ms": 456,
+      "status": 404
+    },
+    "https://workeros.floom.dev/auth/me": {
+      "body_snippet": "<!DOCTYPE html><html data-dpl-id=\"dpl_BBzLVAxANFRRCMN6TRJmAj18pZdQ\" lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a",
+      "elapsed_ms": 35,
+      "status": 404
+    },
+    "https://workeros.floom.dev/login": {
+      "body_snippet": "<!DOCTYPE html><html data-dpl-id=\"dpl_BBzLVAxANFRRCMN6TRJmAj18pZdQ\" lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a",
+      "elapsed_ms": 760,
+      "status": 200
+    },
+    "https://workeros.floom.dev/templates": {
+      "body_snippet": "<!DOCTYPE html><html data-dpl-id=\"dpl_BBzLVAxANFRRCMN6TRJmAj18pZdQ\" lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a",
+      "elapsed_ms": 455,
+      "status": 200
+    },
+    "https://workeros.floom.dev/users": {
+      "body_snippet": "<!DOCTYPE html><html data-dpl-id=\"dpl_BBzLVAxANFRRCMN6TRJmAj18pZdQ\" lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a",
+      "elapsed_ms": 226,
+      "status": 404
+    },
+    "https://workers.floom.dev/": {
+      "body_snippet": "<!DOCTYPE html><html data-dpl-id=\"dpl_84N6HGtYFdqhVujRprPipYxqvyoP\" lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a",
+      "elapsed_ms": 781,
+      "status": 200
+    },
+    "https://workers.floom.dev/api/auth/setup": {
+      "body_snippet": "{'required': False}",
+      "elapsed_ms": 1241,
+      "status": 200
+    },
+    "https://workers.floom.dev/api/proxy/auth/setup-required": {
+      "body_snippet": "{'detail': 'Authentication required.'}",
+      "elapsed_ms": 216,
+      "status": 401
+    }
+  },
+  "run_tag": "20260607060424",
+  "started_at": "2026-06-07T06:04:24.667561+00:00",
+  "targets": {
+    "api": "https://workers-api.floom.dev",
+    "cloud": "https://workeros.floom.dev",
+    "oss": "https://workers.floom.dev"
+  },
+  "workers_full": {
+    "count": 86,
+    "ids_sample": [
+      "weekly_update",
+      "cv_writeup",
+      "dach_compliance",
+      "reverse_match_crm",
+      "gmail_intake_brief",
+      "github-digest",
+      "openblog",
+      "opendraft"
+    ],
+    "private_with_public_link": 86
+  },
+  "workers_shape_list": {
+    "count": 86,
+    "has_fl1_workers": true,
+    "ids_sample": [
+      "weekly_update",
+      "cv_writeup",
+      "dach_compliance",
+      "reverse_match_crm",
+      "gmail_intake_brief",
+      "github-digest",
+      "openblog",
+      "opendraft"
+    ],
+    "private_with_public_link": 86
+  }
+}

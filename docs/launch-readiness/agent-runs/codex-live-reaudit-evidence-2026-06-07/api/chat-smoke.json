@@ -1,0 +1,24 @@
+{
+  "body": "data: {\"type\": \"chat.meta\", \"protocol\": \"emily.chat.v1\", \"version\": 2, \"conversation_id\": \"conv_12f41b4beb1d498f\", \"assistant_message_id\": \"msg_pending_f034512f2dd84f3d\", \"source\": \"web\"}\n\ndata: {\"type\": \"text\", \"text\": \"OK\", \"version\": 2, \"conversation_id\": \"conv_12f41b4beb1d498f\", \"message_id\": \"msg_pending_f034512f2dd84f3d\"}\n\ndata: {\"type\": \"finish\", \"version\": 2, \"conversation_id\": \"conv_12f41b4beb1d498f\", \"message_id\": \"msg_a1e6632e5bb64a23\", \"assistant_message_id\": \"msg_pending_f034512f2dd84f3d\", \"cards\": []}\n\n",
+  "elapsed_ms": 4725,
+  "headers": {
+    "CF-RAY": "a07d75f5bdd45f18-FRA",
+    "Cache-Control": "no-cache",
+    "Connection": "close",
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Date": "Sun, 07 Jun 2026 06:04:42 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=zVpnV7QaHVi%2FRnVTcdcjGHFDunHZgOSjxyioMUyV5BWsLB6so%2BlS51XpoNANnWhkNBy9FFxPLDpVR1jxR5%2F1AtEZTRF5mh%2FRoHSuQx%2FDcdc%2F2r0VjueyXy394PZ2Ne4YNxEWNmpQ%2FH0%2FQAFzBeE5jfpAybs%3D\"}]}",
+    "Server": "cloudflare",
+    "Transfer-Encoding": "chunked",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "status": 200
+}

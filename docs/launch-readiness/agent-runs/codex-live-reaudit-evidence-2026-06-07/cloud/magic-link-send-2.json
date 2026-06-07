@@ -1,0 +1,72 @@
+{
+  "email": "[TEST_EMAIL]",
+  "actual_email": "[TEST_EMAIL]",
+  "started_at": "2026-06-07T06:23:24.760Z",
+  "beforeSubmit": {
+    "inputs": [
+      {
+        "type": "email",
+        "name": "",
+        "placeholder": "you@company.com",
+        "value": "[TEST_EMAIL]",
+        "disabled": false
+      }
+    ],
+    "buttons": [
+      {
+        "text": "Magic link",
+        "type": "button",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "text": "Password",
+        "type": "button",
+        "disabled": false,
+        "ariaDisabled": null
+      },
+      {
+        "text": "Email me a magic link",
+        "type": "submit",
+        "disabled": false,
+        "ariaDisabled": null
+      }
+    ],
+    "forms": [
+      {
+        "action": "https://workeros.floom.dev/login",
+        "method": "get"
+      }
+    ]
+  },
+  "bodyText": "Floom\n/ workeros\nSign in to Floom\n\nAI workers that actually run\n\nContinue with Google\nContinue with GitHub\nOR\nMagic link\nPassword\nEmail\nEmail me a magic link\n\nSign-in failed\n\nBy signing in you agree to the Terms and Privacy Policy. We'll create your workspace automatically on first sign-in.\n\nNew here? See what Floom does",
+  "url": "https://workeros.floom.dev/login",
+  "requests": [
+    {
+      "method": "GET",
+      "url": "https://workeros.floom.dev/login",
+      "postData": ""
+    },
+    {
+      "method": "POST",
+      "url": "https://workeros.floom.dev/app/api/auth/email",
+      "postData": "{\"email\":\"[TEST_EMAIL]\",\"password\":\"\",\"next\":\"/app\"}"
+    }
+  ],
+  "responses": [
+    {
+      "url": "https://workeros.floom.dev/login",
+      "status": 200
+    },
+    {
+      "url": "https://workeros.floom.dev/app/api/auth/email",
+      "status": 404
+    }
+  ],
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 ()"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+29125 bytes written to file docs/launch-readiness/agent-runs/codex-live-reaudit-evidence-2026-06-07/browser/oss-home-vtime-desktop.png
+[1705317:1705341:0607/081912.036337:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+Created TensorFlow Lite XNNPACK delegate for CPU.
+[1705317:1705341:0607/081934.551972:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT
+FAILED:124

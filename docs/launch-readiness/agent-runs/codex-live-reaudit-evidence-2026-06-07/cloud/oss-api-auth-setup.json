@@ -1,0 +1,25 @@
+{
+  "body": {
+    "required": false
+  },
+  "elapsed_ms": 1241,
+  "headers": {
+    "Age": "0",
+    "Cache-Control": "public, max-age=0, must-revalidate",
+    "Connection": "close",
+    "Content-Security-Policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data: blob: https:; media-src 'self' blob:; frame-src 'self' blob:; font-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:; script-src 'self' 'unsafe-inline' https:; connect-src 'self' https:; worker-src 'self' blob:; upgrade-insecure-requests",
+    "Content-Type": "application/json",
+    "Date": "Sun, 07 Jun 2026 06:04:52 GMT",
+    "Permissions-Policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Server": "Vercel",
+    "Strict-Transport-Security": "max-age=63072000",
+    "Transfer-Encoding": "chunked",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-Matched-Path": "/api/auth/setup",
+    "X-Vercel-Cache": "MISS",
+    "X-Vercel-Id": "arn1::iad1::2cf25-1780812290982-c25383ae3c77"
+  },
+  "status": 200
+}

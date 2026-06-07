@@ -1,0 +1,8 @@
+Navigating to https://workers.floom.dev/
+Waiting for timeout 2500...
+Capturing screenshot into docs/launch-readiness/agent-runs/codex-live-reaudit-evidence-2026-06-07/browser/oss-home-cli-desktop.png
+Error: Target page, context or browser has been closed
+Call log:
+[2m  - taking page screenshot[22m
+[2m  - waiting for fonts to load...[22m
+[2m  - fonts loaded[22m

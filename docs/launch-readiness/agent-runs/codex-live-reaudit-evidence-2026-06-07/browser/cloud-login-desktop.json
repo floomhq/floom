@@ -1,0 +1,49 @@
+{
+  "name": "cloud-login-desktop",
+  "url": "https://workeros.floom.dev/login",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+  "status": 200,
+  "title": "Sign in · Floom",
+  "textSnippet": "Floom\n/ workeros\nSign in to Floom\n\nAI workers that actually run\n\nContinue with Google\nContinue with GitHub\nOR\nMagic link\nPassword\nEmail\nEmail me a magic link\n\nBy signing in you agree to the Terms and Privacy Policy. We'll create your workspace automatically on first sign-in.\n\nNew here? See what Floom does",
+  "textLength": 306,
+  "h1": [
+    "Sign in to Floom"
+  ],
+  "buttons": [
+    "Magic link",
+    "Password",
+    "Email me a magic link"
+  ],
+  "links": [
+    {
+      "text": "Floom / workeros",
+      "href": "https://workeros.floom.dev/"
+    },
+    {
+      "text": "Continue with Google",
+      "href": "https://workeros-api.floom.dev/auth/login?provider=google&next=%2Fapp"
+    },
+    {
+      "text": "Continue with GitHub",
+      "href": "https://workeros-api.floom.dev/auth/login?provider=github&next=%2Fapp"
+    },
+    {
+      "text": "Terms",
+      "href": "https://workeros.floom.dev/terms"
+    },
+    {
+      "text": "Privacy Policy",
+      "href": "https://workeros.floom.dev/privacy"
+    },
+    {
+      "text": "See what Floom does",
+      "href": "https://workeros.floom.dev/"
+    }
+  ],
+  "consoleMessages": [],
+  "errorResponses": []
+}

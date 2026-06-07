@@ -1,0 +1,559 @@
+[
+  {
+    "name": "oss-home-desktop",
+    "url": "https://workers.floom.dev/",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+    "status": 200,
+    "title": "Workeros",
+    "textSnippet": "Workeros\nCreate your workspace\n\nSet up the first admin account for this Workeros instance.\n\nDisplay name\n(optional)\nUsername\nPassword\nCreate workspace",
+    "textLength": 150,
+    "h1": [
+      "Create your workspace"
+    ],
+    "buttons": [
+      "Create workspace"
+    ],
+    "links": [],
+    "consoleMessages": [],
+    "errorResponses": []
+  },
+  {
+    "name": "oss-home-mobile",
+    "url": "https://workers.floom.dev/",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+    "status": 200,
+    "title": "Workeros",
+    "textSnippet": "Workeros\nCreate your workspace\n\nSet up the first admin account for this Workeros instance.\n\nDisplay name\n(optional)\nUsername\nPassword\nCreate workspace",
+    "textLength": 150,
+    "h1": [
+      "Create your workspace"
+    ],
+    "buttons": [
+      "Create workspace"
+    ],
+    "links": [],
+    "consoleMessages": [],
+    "errorResponses": []
+  },
+  {
+    "name": "cloud-home-desktop",
+    "url": "https://workeros.floom.dev/",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+    "status": 200,
+    "title": "Workeros: Hire AI workers for your company",
+    "textSnippet": "Workeros\nBY FLOOM\nTemplates\nHow it works\nIntegrations\nSign in\nMaya\nSALES\nLive\n#01\nAtlas\nOPS\nRunning…\n#02\nNova\nREPORTS\nApproved\n#03\nFelix\nRECRUITING\nLive\n#04\nBacked by\nFounders Inc\nHire AI workers\nfor your company.\n\nDescribe the job. Workeros hires the worker and runs it for your team, with your approval before anything ships.\n\n⌘ + Enter to hire\nHire this worker\nWeekly pipeline report\nPost-call follow-up\nMorning lead research\nSupport inbox triage\nOr install directly where your team works.\nInstall in Slack\nWorkspace install\nInstall in WhatsApp\nPersonal or shared number\nInstall in Discord\nServer bot\nInstall in CLI\nPair from your terminal\nSame flow if a teammate invited you: sign in and you're in the workspace.\nOr browse ready-made workers.\nSTART IN 60 SECONDS\nHire a worker in 60 seconds.\n\nTemplates already tuned for the recurring work teams ask Workeros to handle.\n\nBrowse all templates\nClient Follow-up Worker\nSALES\nASKS FIRST\n\nDrafts follow-up emails after calls.\n\nRETURNS Email draft + CR",
+    "textLength": 5034,
+    "h1": [
+      "Hire AI workers\nfor your company."
+    ],
+    "buttons": [
+      "",
+      "Hire this worker",
+      "Weekly pipeline report",
+      "Post-call follow-up",
+      "Morning lead research",
+      "Support inbox triage",
+      "Edit draft",
+      "Send email",
+      "Describe your worker"
+    ],
+    "links": [
+      {
+        "text": "Workerosby Floom",
+        "href": "https://workeros.floom.dev/"
+      },
+      {
+        "text": "Templates",
+        "href": "https://workeros.floom.dev/templates"
+      },
+      {
+        "text": "How it works",
+        "href": "https://workeros.floom.dev/#see-how-it-works"
+      },
+      {
+        "text": "Integrations",
+        "href": "https://workeros.floom.dev/#connections"
+      },
+      {
+        "text": "Sign in",
+        "href": "https://workeros.floom.dev/login"
+      },
+      {
+        "text": "Backed byFounders Inc",
+        "href": "https://f.inc/"
+      },
+      {
+        "text": "Install in SlackWorkspace install",
+        "href": "https://workeros.floom.dev/login?install=slack"
+      },
+      {
+        "text": "Install in WhatsAppPersonal or shared number",
+        "href": "https://workeros.floom.dev/login?install=whatsapp"
+      },
+      {
+        "text": "Install in DiscordServer bot",
+        "href": "https://workeros.floom.dev/login?install=discord"
+      },
+      {
+        "text": "Install in CLIPair from your terminal",
+        "href": "https://workeros.floom.dev/login?install=cli"
+      },
+      {
+        "text": "browse ready-made workers",
+        "href": "https://workeros.floom.dev/templates"
+      },
+      {
+        "text": "Browse all templates",
+        "href": "https://workeros.floom.dev/templates"
+      },
+      {
+        "text": "Client Follow-up WorkerSalesAsks firstDrafts follow-up emails after calls.Returns Email draft + CRM noteGoogle CalendarGmailHubSpotSlackAfter selected calendar callsHire this worker",
+        "href": "https://workeros.floom.dev/templates/client-follow-up-worker"
+      },
+      {
+        "text": "Monday Report WorkerOpsPulls metrics and writes a weekly update.SheetsLinearSlack+1View",
+        "href": "https://workeros.floom.dev/templates/monday-report-worker"
+      },
+      {
+        "text": "Lead Research WorkerSalesResearches prospects and drafts outreach angles.HubSpotGmailWeb+1View",
+        "href": "https://workeros.floom.dev/templates/lead-research-worker"
+      },
+      {
+        "text": "Competitor Watch WorkerResearchTracks competitor changes weekly.WebNotionSlackView",
+        "href": "https://workeros.floom.dev/templates/competitor-watch-worker"
+      },
+      {
+        "text": "Recruiting BD WorkerRecruitingFinds companies hiring and drafts outreach.WebSheetsGmail+1View",
+        "href": "https://workeros.floom.dev/templates/recruiting-bd-worker"
+      },
+      {
+        "text": "Or browse templates",
+        "href": "https://workeros.floom.dev/templates"
+      },
+      {
+        "text": "Templates",
+        "href": "https://workeros.floom.dev/templates"
+      },
+      {
+        "text": "Sign in",
+        "href": "https://workeros.floom.dev/login"
+      },
+      {
+        "text": "Marketing",
+        "href": "https://workeros.floom.dev/marketing"
+      },
+      {
+        "text": "Sales",
+        "href": "https://workeros.floom.dev/sales"
+      },
+      {
+        "text": "Recruiting",
+        "href": "https://workeros.floom.dev/recruiting"
+      },
+      {
+        "text": "Support",
+        "href": "https://workeros.floom.dev/support"
+      },
+      {
+        "text": "GitHub",
+        "href": "https://github.com/floomhq/workeros"
+      },
+      {
+        "text": "Floom Skills",
+        "href": "https://skills.floom.dev/"
+      },
+      {
+        "text": "Floom",
+        "href": "https://floom.dev/"
+      },
+      {
+        "text": "LinkedIn",
+        "href": "https://www.linkedin.com/company/floomhq/"
+      },
+      {
+        "text": "X",
+        "href": "https://x.com/floomhq"
+      },
+      {
+        "text": "Terms",
+        "href": "https://workeros.floom.dev/terms"
+      }
+    ],
+    "consoleMessages": [],
+    "errorResponses": []
+  },
+  {
+    "name": "cloud-login-desktop",
+    "url": "https://workeros.floom.dev/login",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+    "status": 200,
+    "title": "Sign in · Floom",
+    "textSnippet": "Floom\n/ workeros\nSign in to Floom\n\nAI workers that actually run\n\nContinue with Google\nContinue with GitHub\nOR\nMagic link\nPassword\nEmail\nEmail me a magic link\n\nBy signing in you agree to the Terms and Privacy Policy. We'll create your workspace automatically on first sign-in.\n\nNew here? See what Floom does",
+    "textLength": 306,
+    "h1": [
+      "Sign in to Floom"
+    ],
+    "buttons": [
+      "Magic link",
+      "Password",
+      "Email me a magic link"
+    ],
+    "links": [
+      {
+        "text": "Floom / workeros",
+        "href": "https://workeros.floom.dev/"
+      },
+      {
+        "text": "Continue with Google",
+        "href": "https://workeros-api.floom.dev/auth/login?provider=google&next=%2Fapp"
+      },
+      {
+        "text": "Continue with GitHub",
+        "href": "https://workeros-api.floom.dev/auth/login?provider=github&next=%2Fapp"
+      },
+      {
+        "text": "Terms",
+        "href": "https://workeros.floom.dev/terms"
+      },
+      {
+        "text": "Privacy Policy",
+        "href": "https://workeros.floom.dev/privacy"
+      },
+      {
+        "text": "See what Floom does",
+        "href": "https://workeros.floom.dev/"
+      }
+    ],
+    "consoleMessages": [],
+    "errorResponses": []
+  },
+  {
+    "name": "cloud-templates-desktop",
+    "url": "https://workeros.floom.dev/templates",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+    "status": 200,
+    "title": "Templates — Workeros",
+    "textSnippet": "Workeros\nBY FLOOM\nTemplates\nHow it works\nIntegrations\nSign in\nTEMPLATES\nPick a worker. Hire it. Done.\n\nReady-to-run workers for the recurring jobs your team already does. Each one connects to your tools and asks before anything ships.\n\n8 workers\nAll\nSales\nOps\nFounder\nRecruiting\nFinance\nResearch\nCustomer\nClient Follow-up Worker\nSALES\nASKS FIRST\n\nDrafts follow-up emails after calls.\n\nRETURNS Email draft + CRM note\nGoogle Calendar\nGmail\nHubSpot\nSlack\nAfter selected calendar calls\nHire this worker\nMonday Report Worker\nOPS\nASKS FIRST\n\nPulls metrics and writes a weekly update.\n\nRETURNS Slack post + 1-page report\nSheets\nLinear\nSlack\nNotion\nEvery Monday at 9am\nHire this worker\nLead Research Worker\nSALES\nASKS FIRST\n\nResearches prospects and drafts outreach angles.\n\nRETURNS Lead briefs + CRM notes\nHubSpot\nGmail\nWeb\nSlack\nSlack request or new lead\nHire this worker\nCompetitor Watch Worker\nRESEARCH\n\nTracks competitor changes weekly.\n\nRETURNS Digest + suggested response\nWeb\nNotion\nSlack\nWeekly sched",
+    "textLength": 2226,
+    "h1": [
+      "Pick a worker. Hire it. Done."
+    ],
+    "buttons": [
+      "",
+      "All",
+      "Sales",
+      "Ops",
+      "Founder",
+      "Recruiting",
+      "Finance",
+      "Research",
+      "Customer",
+      "Hire this worker",
+      "Weekly pipeline report",
+      "Post-call follow-up",
+      "Morning lead research",
+      "Support inbox triage"
+    ],
+    "links": [
+      {
+        "text": "Workerosby Floom",
+        "href": "https://workeros.floom.dev/"
+      },
+      {
+        "text": "Templates",
+        "href": "https://workeros.floom.dev/templates"
+      },
+      {
+        "text": "How it works",
+        "href": "https://workeros.floom.dev/#see-how-it-works"
+      },
+      {
+        "text": "Integrations",
+        "href": "https://workeros.floom.dev/#connections"
+      },
+      {
+        "text": "Sign in",
+        "href": "https://workeros.floom.dev/login"
+      },
+      {
+        "text": "Client Follow-up WorkerSalesAsks firstDrafts follow-up emails after calls.Returns Email draft + CRM noteGoogle CalendarGmailHubSpotSlackAfter selected calendar callsHire this worker",
+        "href": "https://workeros.floom.dev/templates/client-follow-up-worker"
+      },
+      {
+        "text": "Monday Report WorkerOpsAsks firstPulls metrics and writes a weekly update.Returns Slack post + 1-page reportSheetsLinearSlackNotionEvery Monday at 9amHire this worker",
+        "href": "https://workeros.floom.dev/templates/monday-report-worker"
+      },
+      {
+        "text": "Lead Research WorkerSalesAsks firstResearches prospects and drafts outreach angles.Returns Lead briefs + CRM notesHubSpotGmailWebSlackSlack request or new leadHire this worker",
+        "href": "https://workeros.floom.dev/templates/lead-research-worker"
+      },
+      {
+        "text": "Competitor Watch WorkerResearchTracks competitor changes weekly.Returns Digest + suggested responseWebNotionSlackWeekly scheduleHire this worker",
+        "href": "https://workeros.floom.dev/templates/competitor-watch-worker"
+      },
+      {
+        "text": "Founder Update WorkerFounderAsks firstTurns metrics and notes into an investor/company update.Returns Email draft + summarySheetsNotionLinearSlackWeekly or monthly scheduleHire this worker",
+        "href": "https://workeros.floom.dev/templates/founder-update-worker"
+      },
+      {
+        "text": "Recruiting BD WorkerRecruitingAsks firstFinds companies hiring and drafts outreach.Returns Company list + outreach draftsWebSheetsGmailSlackWeekly schedule or Slack requestHire this worker",
+        "href": "https://workeros.floom.dev/templates/recruiting-bd-worker"
+      },
+      {
+        "text": "CRM Cleanup WorkerOpsAsks firstFinds stale records and drafts updates.Returns CRM changes + exception listHubSpotSalesforceSheetsSlackSchedule or Slack requestHire this worker",
+        "href": "https://workeros.floom.dev/templates/crm-cleanup-worker"
+      },
+      {
+        "text": "Customer Reply WorkerCustomerAsks firstDrafts replies using docs and past conversations.Returns Reply draft + source notesGmailIntercomNotionSlackNew support email or Slack requestHire this worker",
+        "href": "https://workeros.floom.dev/templates/customer-reply-worker"
+      },
+      {
+        "text": "Templates",
+        "href": "https://workeros.floom.dev/templates"
+      },
+      {
+        "text": "Sign in",
+        "href": "https://workeros.floom.dev/login"
+      },
+      {
+        "text": "Marketing",
+        "href": "https://workeros.floom.dev/marketing"
+      },
+      {
+        "text": "Sales",
+        "href": "https://workeros.floom.dev/sales"
+      },
+      {
+        "text": "Recruiting",
+        "href": "https://workeros.floom.dev/recruiting"
+      },
+      {
+        "text": "Support",
+        "href": "https://workeros.floom.dev/support"
+      },
+      {
+        "text": "GitHub",
+        "href": "https://github.com/floomhq/workeros"
+      },
+      {
+        "text": "Floom Skills",
+        "href": "https://skills.floom.dev/"
+      },
+      {
+        "text": "Floom",
+        "href": "https://floom.dev/"
+      },
+      {
+        "text": "LinkedIn",
+        "href": "https://www.linkedin.com/company/floomhq/"
+      },
+      {
+        "text": "X",
+        "href": "https://x.com/floomhq"
+      },
+      {
+        "text": "Terms",
+        "href": "https://workeros.floom.dev/terms"
+      },
+      {
+        "text": "Privacy",
+        "href": "https://workeros.floom.dev/privacy"
+      }
+    ],
+    "consoleMessages": [],
+    "errorResponses": []
+  },
+  {
+    "name": "cloud-templates-mobile",
+    "url": "https://workeros.floom.dev/templates",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+    "status": 200,
+    "title": "Templates — Workeros",
+    "textSnippet": "Workeros\nBY FLOOM\nSign in\nTEMPLATES\nPick a worker. Hire it. Done.\n\nReady-to-run workers for the recurring jobs your team already does. Each one connects to your tools and asks before anything ships.\n\n8 workers\nAll\nSales\nOps\nFounder\nRecruiting\nFinance\nResearch\nCustomer\nClient Follow-up Worker\nSALES\nASKS FIRST\n\nDrafts follow-up emails after calls.\n\nRETURNS Email draft + CRM note\nGoogle Calendar\nGmail\nHubSpot\nSlack\nAfter selected calendar calls\nHire this worker\nMonday Report Worker\nOPS\nASKS FIRST\n\nPulls metrics and writes a weekly update.\n\nRETURNS Slack post + 1-page report\nSheets\nLinear\nSlack\nNotion\nEvery Monday at 9am\nHire this worker\nLead Research Worker\nSALES\nASKS FIRST\n\nResearches prospects and drafts outreach angles.\n\nRETURNS Lead briefs + CRM notes\nHubSpot\nGmail\nWeb\nSlack\nSlack request or new lead\nHire this worker\nCompetitor Watch Worker\nRESEARCH\n\nTracks competitor changes weekly.\n\nRETURNS Digest + suggested response\nWeb\nNotion\nSlack\nWeekly schedule\nHire this worker\nFounder Update ",
+    "textLength": 2172,
+    "h1": [
+      "Pick a worker. Hire it. Done."
+    ],
+    "buttons": [
+      "",
+      "All",
+      "Sales",
+      "Ops",
+      "Founder",
+      "Recruiting",
+      "Finance",
+      "Research",
+      "Customer",
+      "Hire this worker",
+      "Weekly pipeline report",
+      "Post-call follow-up",
+      "Morning lead research",
+      "Support inbox triage"
+    ],
+    "links": [
+      {
+        "text": "Workerosby Floom",
+        "href": "https://workeros.floom.dev/"
+      },
+      {
+        "text": "Templates",
+        "href": "https://workeros.floom.dev/templates"
+      },
+      {
+        "text": "How it works",
+        "href": "https://workeros.floom.dev/#see-how-it-works"
+      },
+      {
+        "text": "Integrations",
+        "href": "https://workeros.floom.dev/#connections"
+      },
+      {
+        "text": "Sign in",
+        "href": "https://workeros.floom.dev/login"
+      },
+      {
+        "text": "Client Follow-up WorkerSalesAsks firstDrafts follow-up emails after calls.Returns Email draft + CRM noteGoogle CalendarGmailHubSpotSlackAfter selected calendar callsHire this worker",
+        "href": "https://workeros.floom.dev/templates/client-follow-up-worker"
+      },
+      {
+        "text": "Monday Report WorkerOpsAsks firstPulls metrics and writes a weekly update.Returns Slack post + 1-page reportSheetsLinearSlackNotionEvery Monday at 9amHire this worker",
+        "href": "https://workeros.floom.dev/templates/monday-report-worker"
+      },
+      {
+        "text": "Lead Research WorkerSalesAsks firstResearches prospects and drafts outreach angles.Returns Lead briefs + CRM notesHubSpotGmailWebSlackSlack request or new leadHire this worker",
+        "href": "https://workeros.floom.dev/templates/lead-research-worker"
+      },
+      {
+        "text": "Competitor Watch WorkerResearchTracks competitor changes weekly.Returns Digest + suggested responseWebNotionSlackWeekly scheduleHire this worker",
+        "href": "https://workeros.floom.dev/templates/competitor-watch-worker"
+      },
+      {
+        "text": "Founder Update WorkerFounderAsks firstTurns metrics and notes into an investor/company update.Returns Email draft + summarySheetsNotionLinearSlackWeekly or monthly scheduleHire this worker",
+        "href": "https://workeros.floom.dev/templates/founder-update-worker"
+      },
+      {
+        "text": "Recruiting BD WorkerRecruitingAsks firstFinds companies hiring and drafts outreach.Returns Company list + outreach draftsWebSheetsGmailSlackWeekly schedule or Slack requestHire this worker",
+        "href": "https://workeros.floom.dev/templates/recruiting-bd-worker"
+      },
+      {
+        "text": "CRM Cleanup WorkerOpsAsks firstFinds stale records and drafts updates.Returns CRM changes + exception listHubSpotSalesforceSheetsSlackSchedule or Slack requestHire this worker",
+        "href": "https://workeros.floom.dev/templates/crm-cleanup-worker"
+      },
+      {
+        "text": "Customer Reply WorkerCustomerAsks firstDrafts replies using docs and past conversations.Returns Reply draft + source notesGmailIntercomNotionSlackNew support email or Slack requestHire this worker",
+        "href": "https://workeros.floom.dev/templates/customer-reply-worker"
+      },
+      {
+        "text": "Templates",
+        "href": "https://workeros.floom.dev/templates"
+      },
+      {
+        "text": "Sign in",
+        "href": "https://workeros.floom.dev/login"
+      },
+      {
+        "text": "Marketing",
+        "href": "https://workeros.floom.dev/marketing"
+      },
+      {
+        "text": "Sales",
+        "href": "https://workeros.floom.dev/sales"
+      },
+      {
+        "text": "Recruiting",
+        "href": "https://workeros.floom.dev/recruiting"
+      },
+      {
+        "text": "Support",
+        "href": "https://workeros.floom.dev/support"
+      },
+      {
+        "text": "GitHub",
+        "href": "https://github.com/floomhq/workeros"
+      },
+      {
+        "text": "Floom Skills",
+        "href": "https://skills.floom.dev/"
+      },
+      {
+        "text": "Floom",
+        "href": "https://floom.dev/"
+      },
+      {
+        "text": "LinkedIn",
+        "href": "https://www.linkedin.com/company/floomhq/"
+      },
+      {
+        "text": "X",
+        "href": "https://x.com/floomhq"
+      },
+      {
+        "text": "Terms",
+        "href": "https://workeros.floom.dev/terms"
+      },
+      {
+        "text": "Privacy",
+        "href": "https://workeros.floom.dev/privacy"
+      }
+    ],
+    "consoleMessages": [],
+    "errorResponses": []
+  },
+  {
+    "name": "cloud-app-desktop",
+    "url": "https://workeros.floom.dev/app",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+    "status": 404,
+    "title": "404: NOT_FOUND",
+    "textSnippet": "404: NOT_FOUND\nCode: NOT_FOUND\nID: arn1:arn1::845lz-1780812692920-eeafc569d213\n\nRead our documentation to learn more about this error.",
+    "textLength": 134,
+    "h1": [],
+    "buttons": [],
+    "links": [
+      {
+        "text": "Read our documentation to learn more about this error.",
+        "href": "https://vercel.com/docs/errors/NOT_FOUND"
+      }
+    ],
+    "consoleMessages": [
+      {
+        "type": "error",
+        "text": "Failed to load resource: the server responded with a status of 404 ()"
+      }
+    ],
+    "errorResponses": [
+      {
+        "url": "https://workeros.floom.dev/app",
+        "status": 404
+      }
+    ]
+  }
+]

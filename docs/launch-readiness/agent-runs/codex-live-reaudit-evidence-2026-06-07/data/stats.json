@@ -1,0 +1,31 @@
+{
+  "body": {
+    "active_workers": 23,
+    "avg_duration_ms": 2214.445,
+    "most_active_worker_id": "slack-listener",
+    "most_active_worker_name": "Slack Listener (@floom mentions)",
+    "success_rate_7d": 0.09908944831280128,
+    "total_runs_7d": 1867,
+    "total_workers": 89
+  },
+  "elapsed_ms": 157,
+  "headers": {
+    "CF-RAY": "a07d75a1debc36df-FRA",
+    "Connection": "close",
+    "Content-Length": "228",
+    "Content-Type": "application/json",
+    "Date": "Sun, 07 Jun 2026 06:04:27 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=MdJOvBUjPWNihOWOA17ClWkTU9EBRf4Vy0ZqlDwTTtEOfyL0rGOIxX7rri5xWSz1p0aO3lq6q4ZrP%2FdKvgzm6yoG3z5cFI0FiU%2BQqtv1Cb1kpCwwCHLIIHOMVfccgKxs%2FbHjdY5PEJPBgiMpMPe%2Bl6NdUvs%3D\"}]}",
+    "Server": "cloudflare",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "status": 200
+}

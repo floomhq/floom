@@ -1,0 +1,151 @@
+{
+  "name": "cloud-home-desktop",
+  "url": "https://workeros.floom.dev/",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "screenshotError": "page.screenshot: Timeout 8000ms exceeded.\nCall log:\n\u001b[2m  - taking page screenshot\u001b[22m\n\u001b[2m  - waiting for fonts to load...\u001b[22m\n\u001b[2m  - fonts loaded\u001b[22m\n",
+  "status": 200,
+  "title": "Workeros: Hire AI workers for your company",
+  "textSnippet": "Workeros\nBY FLOOM\nTemplates\nHow it works\nIntegrations\nSign in\nMaya\nSALES\nLive\n#01\nAtlas\nOPS\nRunning…\n#02\nNova\nREPORTS\nApproved\n#03\nFelix\nRECRUITING\nLive\n#04\nBacked by\nFounders Inc\nHire AI workers\nfor your company.\n\nDescribe the job. Workeros hires the worker and runs it for your team, with your approval before anything ships.\n\n⌘ + Enter to hire\nHire this worker\nWeekly pipeline report\nPost-call follow-up\nMorning lead research\nSupport inbox triage\nOr install directly where your team works.\nInstall in Slack\nWorkspace install\nInstall in WhatsApp\nPersonal or shared number\nInstall in Discord\nServer bot\nInstall in CLI\nPair from your terminal\nSame flow if a teammate invited you: sign in and you're in the workspace.\nOr browse ready-made workers.\nSTART IN 60 SECONDS\nHire a worker in 60 seconds.\n\nTemplates already tuned for the recurring work teams ask Workeros to handle.\n\nBrowse all templates\nClient Follow-up Worker\nSALES\nASKS FIRST\n\nDrafts follow-up emails after calls.\n\nRETURNS Email draft + CR",
+  "textLength": 5034,
+  "h1": [
+    "Hire AI workers\nfor your company."
+  ],
+  "buttons": [
+    "",
+    "Hire this worker",
+    "Weekly pipeline report",
+    "Post-call follow-up",
+    "Morning lead research",
+    "Support inbox triage",
+    "Edit draft",
+    "Send email",
+    "Describe your worker"
+  ],
+  "links": [
+    {
+      "text": "Workerosby Floom",
+      "href": "https://workeros.floom.dev/"
+    },
+    {
+      "text": "Templates",
+      "href": "https://workeros.floom.dev/templates"
+    },
+    {
+      "text": "How it works",
+      "href": "https://workeros.floom.dev/#see-how-it-works"
+    },
+    {
+      "text": "Integrations",
+      "href": "https://workeros.floom.dev/#connections"
+    },
+    {
+      "text": "Sign in",
+      "href": "https://workeros.floom.dev/login"
+    },
+    {
+      "text": "Backed byFounders Inc",
+      "href": "https://f.inc/"
+    },
+    {
+      "text": "Install in SlackWorkspace install",
+      "href": "https://workeros.floom.dev/login?install=slack"
+    },
+    {
+      "text": "Install in WhatsAppPersonal or shared number",
+      "href": "https://workeros.floom.dev/login?install=whatsapp"
+    },
+    {
+      "text": "Install in DiscordServer bot",
+      "href": "https://workeros.floom.dev/login?install=discord"
+    },
+    {
+      "text": "Install in CLIPair from your terminal",
+      "href": "https://workeros.floom.dev/login?install=cli"
+    },
+    {
+      "text": "browse ready-made workers",
+      "href": "https://workeros.floom.dev/templates"
+    },
+    {
+      "text": "Browse all templates",
+      "href": "https://workeros.floom.dev/templates"
+    },
+    {
+      "text": "Client Follow-up WorkerSalesAsks firstDrafts follow-up emails after calls.Returns Email draft + CRM noteGoogle CalendarGmailHubSpotSlackAfter selected calendar callsHire this worker",
+      "href": "https://workeros.floom.dev/templates/client-follow-up-worker"
+    },
+    {
+      "text": "Monday Report WorkerOpsPulls metrics and writes a weekly update.SheetsLinearSlack+1View",
+      "href": "https://workeros.floom.dev/templates/monday-report-worker"
+    },
+    {
+      "text": "Lead Research WorkerSalesResearches prospects and drafts outreach angles.HubSpotGmailWeb+1View",
+      "href": "https://workeros.floom.dev/templates/lead-research-worker"
+    },
+    {
+      "text": "Competitor Watch WorkerResearchTracks competitor changes weekly.WebNotionSlackView",
+      "href": "https://workeros.floom.dev/templates/competitor-watch-worker"
+    },
+    {
+      "text": "Recruiting BD WorkerRecruitingFinds companies hiring and drafts outreach.WebSheetsGmail+1View",
+      "href": "https://workeros.floom.dev/templates/recruiting-bd-worker"
+    },
+    {
+      "text": "Or browse templates",
+      "href": "https://workeros.floom.dev/templates"
+    },
+    {
+      "text": "Templates",
+      "href": "https://workeros.floom.dev/templates"
+    },
+    {
+      "text": "Sign in",
+      "href": "https://workeros.floom.dev/login"
+    },
+    {
+      "text": "Marketing",
+      "href": "https://workeros.floom.dev/marketing"
+    },
+    {
+      "text": "Sales",
+      "href": "https://workeros.floom.dev/sales"
+    },
+    {
+      "text": "Recruiting",
+      "href": "https://workeros.floom.dev/recruiting"
+    },
+    {
+      "text": "Support",
+      "href": "https://workeros.floom.dev/support"
+    },
+    {
+      "text": "GitHub",
+      "href": "https://github.com/floomhq/workeros"
+    },
+    {
+      "text": "Floom Skills",
+      "href": "https://skills.floom.dev/"
+    },
+    {
+      "text": "Floom",
+      "href": "https://floom.dev/"
+    },
+    {
+      "text": "LinkedIn",
+      "href": "https://www.linkedin.com/company/floomhq/"
+    },
+    {
+      "text": "X",
+      "href": "https://x.com/floomhq"
+    },
+    {
+      "text": "Terms",
+      "href": "https://workeros.floom.dev/terms"
+    }
+  ],
+  "consoleMessages": [],
+  "errorResponses": []
+}

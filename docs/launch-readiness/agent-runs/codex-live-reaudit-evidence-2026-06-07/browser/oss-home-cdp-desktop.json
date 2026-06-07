@@ -1,0 +1,17 @@
+{
+  "name": "oss-home-cdp-desktop",
+  "url": "https://workers.floom.dev/",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "status": 200,
+  "title": "Workeros",
+  "text": "Workeros\nCreate your workspace\n\nSet up the first admin account for this Workeros instance.\n\nDisplay name\n(optional)\nUsername\nPassword\nCreate workspace",
+  "h1": [
+    "Create your workspace"
+  ],
+  "error": "cdpSession.send: Target page, context or browser has been closed",
+  "errorResponses": [],
+  "consoleMessages": []
+}

@@ -1,0 +1,115 @@
+{
+  "body": {
+    "artifacts": [],
+    "completed_at": "2026-06-07T06:04:39.624122+00:00",
+    "created_at": "2026-06-07T06:04:35.561945+00:00",
+    "duration_ms": 4034,
+    "error": "This worker finished but didn't produce a result. Check the run logs, then re-run.",
+    "error_code": "missing_result",
+    "error_raw": "Worker did not write a result. Check run.py wrote result.json before exiting (the file is missing).",
+    "id": "run_21f7180ab9ae",
+    "input": {},
+    "logs": [
+      {
+        "level": "info",
+        "message": "Run started",
+        "timestamp": "2026-06-07T06:04:35.609777+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "Validating inputs",
+        "timestamp": "2026-06-07T06:04:35.625284+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "Loading secrets",
+        "timestamp": "2026-06-07T06:04:35.641011+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "Executing worker ([redacted-metadata], [redacted-metadata]",
+        "timestamp": "2026-06-07T06:04:35.671767+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Spawning sandbox for run [redacted-id]",
+        "timestamp": "2026-06-07T06:04:35.687053+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded worker.yml",
+        "timestamp": "2026-06-07T06:04:36.881768+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded run.py",
+        "timestamp": "2026-06-07T06:04:37.634765+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded SKILL.md",
+        "timestamp": "2026-06-07T06:04:37.850851+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded requirements.txt",
+        "timestamp": "2026-06-07T06:04:38.074504+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Executing worker command: python run.py",
+        "timestamp": "2026-06-07T06:04:38.859533+00:00"
+      },
+      {
+        "level": "error",
+        "message": "[e2b] No result.json at [worker file] path '[worker file]' does not exist",
+        "timestamp": "2026-06-07T06:04:39.373895+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Sandbox killed",
+        "timestamp": "2026-06-07T06:04:39.592547+00:00"
+      },
+      {
+        "level": "error",
+        "message": "Run failed: This worker finished but didn't produce a result. Check the run logs, then re-run.",
+        "timestamp": "2026-06-07T06:04:39.652868+00:00"
+      }
+    ],
+    "output": {},
+    "output_schema": [
+      {
+        "label": "Result",
+        "name": "result",
+        "type": "text"
+      }
+    ],
+    "runner": "e2b",
+    "started_at": "2026-06-07T06:04:35.589927+00:00",
+    "status": "failed",
+    "transcript": [],
+    "trigger_source": "manual",
+    "worker_id": "codex-reaudit-20260607060424",
+    "worker_name": "Codex Reaudit 20260607060424"
+  },
+  "elapsed_ms": 148,
+  "headers": {
+    "CF-RAY": "a07d75ee882c3a8c-FRA",
+    "Connection": "close",
+    "Content-Length": "2192",
+    "Content-Type": "application/json",
+    "Date": "Sun, 07 Jun 2026 06:04:40 GMT",
+    "Nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "Report-To": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=yEuCDgT8r9IDxX2%2Fq5JKegZkUzQlpO%2FWZx8IHfWhhPiCgahQwBXDovtT0qXn8vlank5vDZD5AGNe7%2BEiKeSEVl0jD89r0u1hyMwRMGcpSDE5MPMe37JwsH8nES%2FQqdWIMmsz742sR%2BnCLS9Qd1xC0XChkaw%3D\"}]}",
+    "Server": "cloudflare",
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "status": 200
+}

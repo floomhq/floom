@@ -1,0 +1,20 @@
+{
+  "email": "[TEST_EMAIL]",
+  "actual_email": "[TEST_EMAIL]",
+  "started_at": "2026-06-07T06:22:48.341Z",
+  "error": "locator.click: Timeout 10000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: /email me a magic link/i })\u001b[22m\n\u001b[2m    - locator resolved to <button type=\"submit\" class=\"auth-btn auth-btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-60\">Email me a magic link</button>\u001b[22m\n\u001b[2m  - attempting click action\u001b[22m\n\u001b[2m    - waiting for element to be visible, enabled and stable\u001b[22m\n",
+  "requests": [
+    {
+      "method": "GET",
+      "url": "https://workeros.floom.dev/login",
+      "postData": ""
+    }
+  ],
+  "responses": [
+    {
+      "url": "https://workeros.floom.dev/login",
+      "status": 200
+    }
+  ],
+  "consoleMessages": []
+}

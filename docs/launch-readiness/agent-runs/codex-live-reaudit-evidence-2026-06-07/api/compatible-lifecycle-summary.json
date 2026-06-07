@@ -1,0 +1,25 @@
+{
+  "cleanup": {
+    "delete_status": 204,
+    "get_after_delete": 404
+  },
+  "created": 200,
+  "e2b_poll": {
+    "error": null,
+    "error_code": null,
+    "id_present": true,
+    "outputs": null,
+    "run_status": "completed",
+    "status": 200
+  },
+  "run": {
+    "error": null,
+    "error_code": null,
+    "id_present": true,
+    "outputs": null,
+    "run_status": "completed",
+    "status": 200
+  },
+  "run_create": 200,
+  "tag": "20260607060620"
+}
