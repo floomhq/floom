@@ -6283,7 +6283,7 @@ def _build_worker_detail(
         files=worker_files,
         webhook_url=webhook_url,
         triggers_spec=triggers_spec,
-        public_link=_worker_public_link(worker),
+        public_link=_worker_public_link(worker) if str(worker.get("visibility") or "private") == "public" else None,
         owner_id=worker.get("owner_id"),
         visibility=str(worker.get("visibility") or "private"),
         permissions=_worker_permissions(worker, user_id=user_id, repos=repos),
