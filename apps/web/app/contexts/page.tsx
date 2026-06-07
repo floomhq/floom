@@ -1354,13 +1354,14 @@ function PackDetailPane({
             {!readOnly && (
               <button
                 type="button"
-                title={detail.sensitive ? "Sensitive — not tracked by git. Click to disable." : "Mark as sensitive (exclude from git)"}
+                title={(detail.sensitive ?? true) ? "Sensitive — not tracked by git. Click to enable git tracking." : "Git-tracked. Click to make sensitive (exclude from git)."}
                 onClick={async () => {
-                  await api.contexts.setSensitive(detail.name, !detail.sensitive);
-                  onVisibilityChange({ ...detail, sensitive: !detail.sensitive });
+                  const next = !(detail.sensitive ?? true);
+                  await api.contexts.setSensitive(detail.name, next);
+                  onVisibilityChange({ ...detail, sensitive: next });
                 }}
                 className={`p-1 rounded-[var(--radius-button)] transition-colors shrink-0 ${
-                  detail.sensitive
+                  (detail.sensitive ?? true)
                     ? "text-amber-500 hover:text-amber-600 bg-amber-50 hover:bg-amber-100"
                     : "text-muted-foreground hover:bg-muted"
                 }`}
