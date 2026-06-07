@@ -479,6 +479,7 @@ export interface ContextFileItem {
   metadata?: Record<string, string | number | boolean | null | undefined>;
   has_secret_warning?: boolean;
   secret_warnings?: SecretWarning[];
+  deleted?: boolean;
 }
 
 export interface ContextDetail extends ContextSummary {

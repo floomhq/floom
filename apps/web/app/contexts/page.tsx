@@ -37,6 +37,14 @@ import type { ContextDetail, ContextFileItem, ContextSummary, SecretWarning, Ver
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl, AssetVisibilityIndicator } from "@/components/AssetVisibilityControl";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -2361,6 +2369,7 @@ function FileHistoryMenu({
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
 
   const canRestore = isKnownTextFile(file) && !readOnly;
 
@@ -2388,21 +2397,16 @@ function FileHistoryMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  async function handleRestore(v: VersionSummary) {
-    if (
-      !confirm(
-        `Restore "${fileName}" to commit ${v.sha}?\n\nThis replaces the current contents. A new commit is created automatically.`
-      )
-    ) {
-      return;
-    }
+  async function confirmRestore() {
+    if (!pendingRestore) return;
+    const v = pendingRestore;
+    setPendingRestore(null);
     setRestoring(v.id);
     try {
-      const result = await api.contexts.restoreFileVersion(packName, filePath, v.id);
+      const result = await api.contexts.restoreFileVersion(packName, filePath, v.sha);
       if (result.deleted) {
         toast.error("This commit recorded the file as deleted — it has been removed.");
       } else {
-        // Fetch the restored content so the editor refreshes correctly
         try {
           const text = await api.contexts.readTextFile(packName, filePath);
           onRestored(text);
@@ -2420,17 +2424,41 @@ function FileHistoryMenu({
   }
 
   return (
-    <VersionHistoryMenu
-      versions={versions}
-      loading={loading && !loadedOnce}
-      canRestore={canRestore}
-      restoringId={restoring}
-      buttonClassName="h-7 text-xs"
-      onOpen={() => {
-        if (!loadedOnce) void loadVersions();
-      }}
-      onRestore={(v) => void handleRestore(v)}
-    />
+    <>
+      <VersionHistoryMenu
+        versions={versions}
+        loading={loading && !loadedOnce}
+        canRestore={canRestore}
+        restoringId={restoring}
+        buttonClassName="h-7 text-xs"
+        onOpen={() => {
+          if (!loadedOnce) void loadVersions();
+        }}
+        onRestore={(v) => setPendingRestore(v)}
+      />
+      <Dialog
+        open={!!pendingRestore}
+        onOpenChange={(open) => { if (!open) setPendingRestore(null); }}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Restore {fileName}?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            Restores to commit <code className="font-mono text-xs">{pendingRestore?.sha}</code>.
+            The current contents are replaced. A new commit is created automatically.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRestore(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void confirmRestore()}>
+              Restore
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
