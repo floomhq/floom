@@ -49,11 +49,12 @@ async function handler(
   if (accept) forwardHeaders["accept"] = accept;
 
   // Stream multipart uploads (no buffering in the Next function): the generic
-  // /uploads route plus the X4 approval-scoped screenshot upload endpoints
-  // (authed owner + signed-link public reviewer).
+  // /uploads route, X4 approval-scoped screenshot upload endpoints, and Brain
+  // file uploads.
   const isUpload =
     upstreamPath === "/uploads" ||
-    (/^\/approvals\/(public\/)?[^/]+\/uploads$/.test(upstreamPath.split("?")[0]));
+    (/^\/approvals\/(public\/)?[^/]+\/uploads$/.test(upstreamPath.split("?")[0])) ||
+    (upstreamPath.startsWith("/contexts/") && upstreamPath.endsWith("/upload"));
   let body: BodyInit | null | undefined;
   if (req.method !== "GET" && req.method !== "HEAD") {
     body = isUpload ? req.body : await req.arrayBuffer();
@@ -83,6 +84,8 @@ async function handler(
   if (cacheControl) responseHeaders.set("cache-control", cacheControl);
   const location = upstream.headers.get("location");
   if (location) responseHeaders.set("location", location);
+  const setCookie = upstream.headers.get("set-cookie");
+  if (setCookie) responseHeaders.set("set-cookie", setCookie);
 
   return new NextResponse(upstream.body, {
     status: upstream.status,
