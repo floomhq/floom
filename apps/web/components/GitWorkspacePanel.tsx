@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, ExternalLink, GitBranch, Github, Loader2, Plus, RefreshCw, Unlink } from "lucide-react";
+import { Check, ExternalLink, GitBranch, Loader2, Plus, RefreshCw, Unlink } from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
@@ -394,7 +394,7 @@ export function GitWorkspacePanel() {
     return (
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <Github className="size-4 text-muted-foreground" />
+          <GitBranch className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">GitHub workspace</h2>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
@@ -409,7 +409,7 @@ export function GitWorkspacePanel() {
     return (
       <section className="space-y-4">
         <div className="flex items-center gap-2">
-          <Github className="size-4 text-muted-foreground" />
+          <GitBranch className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">GitHub workspace</h2>
           {status?.connected && (
             <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
@@ -425,7 +425,7 @@ export function GitWorkspacePanel() {
   return (
     <section className="space-y-4">
       <div className="flex items-center gap-2">
-        <Github className="size-4 text-muted-foreground" />
+        <GitBranch className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-medium">GitHub workspace</h2>
         {step === "connected" && (
           <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
