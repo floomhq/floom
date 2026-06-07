@@ -491,7 +491,7 @@ function ContextsPage() {
             if (!cancelled) toast.error("Couldn't reach the server. Check your connection and retry.");
           }
         } else if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "Failed to load knowledge packs");
+          toast.error(error instanceof Error ? error.message : "Failed to load folders");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -558,7 +558,7 @@ function ContextsPage() {
     try {
       setDetail(await api.contexts.get(name));
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to load knowledge pack");
+      toast.error(error instanceof Error ? error.message : "Failed to load folder");
     }
   }
 
@@ -595,15 +595,15 @@ function ContextsPage() {
       await loadContexts(name);
       setFolderPath([]);
       setSelectedFile(null);
-      toast.success("Knowledge pack created");
+      toast.success("Folder created");
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to create knowledge pack");
+      toast.error(error instanceof Error ? error.message : "Failed to create folder");
     }
   }
 
   async function deleteContext(context: ContextSummary) {
     if (context.read_only) return;
-    if (!confirm(`Delete knowledge pack "${context.name}"? This cannot be undone.`)) return;
+    if (!confirm(`Delete folder "${context.name}"? This cannot be undone.`)) return;
     try {
       await api.contexts.delete(context.name, true);
       const remaining = contexts.filter((item) => item.name !== context.name);
@@ -611,9 +611,9 @@ function ContextsPage() {
       setFolderPath([]);
       setSelectedFile(null);
       await loadContexts(remaining[0]?.name || "");
-      toast.success("Knowledge pack deleted");
+      toast.success("Folder deleted");
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete knowledge pack");
+      toast.error(error instanceof Error ? error.message : "Failed to delete folder");
     }
   }
 
@@ -633,7 +633,7 @@ function ContextsPage() {
   async function uploadFiles(files: FileList | File[]) {
     if (files.length === 0) return;
     if (readOnly) {
-      toast.error("System packs are read-only.");
+      toast.error("System folders are read-only.");
       return;
     }
     const creatingPack = !selectedName;
@@ -655,7 +655,7 @@ function ContextsPage() {
         setSecretWarnings(warnings);
         toast.warning("File added - but it looks like it contains a secret");
       } else {
-        toast.success(creatingPack ? "Knowledge pack created" : "File added");
+        toast.success(creatingPack ? "Folder created" : "File added");
       }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to add file");
@@ -779,13 +779,13 @@ function ContextsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Brain</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Reusable knowledge packs your workers can read before they act.
+            Reusable folders of files your workers can read before they act.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" onClick={() => setShowNewContext(true)}>
             <Plus className="size-4" />
-            New pack
+            New folder
           </Button>
         </div>
       </div>
@@ -824,14 +824,14 @@ function ContextsPage() {
           }`}
         >
           <div className="flex min-h-[82px] shrink-0 flex-col justify-center border-b border-[var(--border-default)] p-3">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Knowledge packs</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Folders</p>
             {!fileOpen && (
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search packs..."
+                  placeholder="Search folders..."
                   className="h-7 pl-8 text-sm"
                 />
               </div>
@@ -868,7 +868,7 @@ function ContextsPage() {
                   >
                     <span className="flex items-center gap-2 text-sm font-medium">
                       <Plus className="size-4" />
-                      New knowledge pack
+                      New folder
                     </span>
                     <span className="mt-1 block text-xs text-muted-foreground">
                       Company facts, ICP, and brand voice your workers read before they act.
@@ -920,19 +920,19 @@ function ContextsPage() {
               <div className="space-y-1.5">
                 <h2 className="text-base font-semibold">Give your workers knowledge</h2>
                 <p className="text-sm text-muted-foreground">
-                  A knowledge pack is a small set of files your workers read before they act:
-                  company facts, your ICP, product details, and brand voice. Attach a pack to a
-                  worker and it uses that brain pack on every run.
+                  A folder is a small set of files your workers read before they act:
+                  company facts, your ICP, product details, and brand voice. Attach a folder to a
+                  worker and it uses those files on every run.
                 </p>
               </div>
               <Button onClick={() => setShowNewContext(true)}>
                 <Plus className="size-4" />
-                New knowledge pack
+                New folder
               </Button>
             </div>
             {dragActive && (
               <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-[var(--primary)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
-                Drop files to create a knowledge pack
+                Drop files to create a folder
               </div>
             )}
           </section>
@@ -1075,7 +1075,7 @@ function SecretWarningBanner({
           This file looks like it contains a live API key or secret.
         </p>
         <p className="text-muted-foreground">
-          Brain packs are readable by anyone with workspace access. Move secrets
+          Brain folders are readable by anyone with workspace access. Move secrets
           to{" "}
           <Link href="/connections/secrets" className="underline underline-offset-2">
             Secrets
@@ -1151,7 +1151,7 @@ function PackRow({
           {!compact && ctx.read_only && (
             <span
               className="inline-flex items-center gap-0.5 rounded-[var(--radius-pill)] border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
-              title="Read-only system pack"
+              title="Read-only system folder"
             >
               <Lock className="size-2.5" />
               Read-only
@@ -1168,14 +1168,14 @@ function PackRow({
             </span>
             {/* Shared-with-workspace indicator (operator packs only). STEP 4. */}
             {!ctx.read_only && ctx.visibility === "workspace" && (
-              <AssetVisibilityIndicator visibility={ctx.visibility} noun="brain pack" />
+              <AssetVisibilityIndicator visibility={ctx.visibility} noun="folder" />
             )}
           </span>
         )}
       </span>
       {!compact && (
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
-          <button type="button" onClick={copyLink} className="p-1 rounded-[var(--radius-button)] hover:bg-muted" title="Copy link to this pack">
+          <button type="button" onClick={copyLink} className="p-1 rounded-[var(--radius-button)] hover:bg-muted" title="Copy link to this folder">
             {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5 text-muted-foreground" />}
           </button>
           {!ctx.read_only && (
@@ -1263,7 +1263,7 @@ function PackDetailPane({
               type="button"
               onClick={onBackMobile}
               className="lg:hidden p-1 -ml-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground"
-              title="Back to packs"
+              title="Back to folders"
             >
               <ChevronLeft className="size-4" />
             </button>
@@ -1271,7 +1271,7 @@ function PackDetailPane({
             {readOnly && (
               <span
                 className="inline-flex items-center gap-0.5 rounded-[var(--radius-pill)] border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
-                title="Read-only system pack"
+                title="Read-only system folder"
               >
                 <Lock className="size-2.5" />
                 Read-only
@@ -1285,8 +1285,8 @@ function PackDetailPane({
               <AssetVisibilityControl
                 visibility={detail.visibility}
                 canShare={detail.permissions?.can_share ?? Boolean(detail.owner_id)}
-                noun="brain pack"
-                titleLabel="Brain pack visibility"
+                noun="folder"
+                titleLabel="Folder visibility"
                 onApply={async (next) => {
                   const updated = await api.contexts.setVisibility(detail.name, next);
                   onVisibilityChange(updated);
@@ -1298,7 +1298,7 @@ function PackDetailPane({
               type="button"
               onClick={copyPackLink}
               className="p-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground transition-colors shrink-0"
-              title="Share this pack"
+              title="Share this folder"
             >
               {packLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
             </button>
@@ -1306,13 +1306,13 @@ function PackDetailPane({
         </div>
         {readOnly && (
           <p className="mt-2 text-xs text-muted-foreground">
-            This is a Workeros engine pack. It shapes how workers are generated and is read-only.
+            This is a Workeros engine folder. It shapes how workers are generated and is read-only.
           </p>
         )}
         {detail.description ? (
           <p className="text-sm text-muted-foreground mt-0.5">{detail.description}</p>
         ) : (
-          <p className="text-xs text-muted-foreground mt-0.5 italic">No description. Add a README.md to this pack.</p>
+          <p className="text-xs text-muted-foreground mt-0.5 italic">No description. Add a README.md to this folder.</p>
         )}
 
         <div className="flex flex-wrap items-center gap-3 mt-3">
@@ -1371,10 +1371,10 @@ function PackDetailPane({
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="rounded-[var(--radius-button)] border border-dashed border-[var(--border-default)] p-6 text-center">
             {readOnly ? (
-              <p className="text-sm text-muted-foreground">This system pack has no files.</p>
+              <p className="text-sm text-muted-foreground">This system folder has no files.</p>
             ) : (
               <>
-                <p className="text-sm text-muted-foreground">This pack is empty. Add a file to get started.</p>
+                <p className="text-sm text-muted-foreground">This folder is empty. Add a file to get started.</p>
                 <Button size="sm" variant="outline" className="mt-3" onClick={onAddFile}>
                   <Plus className="size-4" />
                   Add file
@@ -1449,7 +1449,7 @@ function FolderColumns({
           type="button"
           onClick={onBackMobile}
           className="lg:hidden p-1 -ml-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground"
-          title="Back to packs"
+          title="Back to folders"
         >
           <ChevronLeft className="size-4" />
         </button>
@@ -1992,7 +1992,7 @@ function ContextFileObjectUrl({
     return (
       <PreviewUnavailable
         title={`${fileDisplayType(file)} preview unavailable`}
-        detail={`The file is listed in this Brain pack, but the file endpoint returned: ${error}. This usually means the file bytes are missing, the selected workspace changed, or the file was deleted after the list loaded.`}
+        detail={`The file is listed in this folder, but the file endpoint returned: ${error}. This usually means the file bytes are missing, the selected workspace changed, or the file was deleted after the list loaded.`}
         fileUrl={fileUrl}
         onRetry={() => setReloadKey((value) => value + 1)}
       />
@@ -2173,7 +2173,7 @@ function SpreadsheetPreview({ packName, file }: { packName: string; file: Contex
     return (
       <PreviewUnavailable
         title="Spreadsheet preview unavailable"
-        detail={`The workbook could not be fetched or parsed: ${error}. XLSX files still remain downloadable from this Brain pack.`}
+        detail={`The workbook could not be fetched or parsed: ${error}. XLSX files still remain downloadable from this folder.`}
         fileUrl={fileUrl}
         onRetry={() => setReloadKey((value) => value + 1)}
       />
