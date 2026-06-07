@@ -17602,20 +17602,44 @@ def _git_cfg_upsert(user_id: str, **fields: str) -> None:
 
 _SECRETS_ENC_FILENAME = ".secrets.enc"
 
+# Cloud hook — registered by workeros-cloud startup.py to return the
+# workspace's AES key from Supabase Vault (pgsodium DARE) instead of
+# reading from GitHub Variables.
+_secrets_key_resolver: Optional[Any] = None
 
-def _derive_secrets_key(pat: str, repo_full_name: str) -> bytes:
-    """Derive a 32-byte AES-256 key from the GitHub PAT + repo name.
 
-    HMAC-SHA256(key=PAT, msg="workeros-secrets-v1:{repo}") — anyone with
-    the PAT and the repo name can decrypt, which matches the access model:
-    if you can push to the repo you should be able to read its secrets.
+def set_secrets_key_resolver(fn: Optional[Any]) -> None:
+    """Register a callable returning the active workspace's AES-256 key bytes.
+
+    Cloud registers this at startup — keys come from Supabase Vault (pgsodium).
+    Pass None to clear (OSS fallback).
     """
-    import hashlib, hmac as _hmac
-    return _hmac.new(
-        pat.encode("utf-8"),
-        msg=f"workeros-secrets-v1:{repo_full_name}".encode("utf-8"),
-        digestmod=hashlib.sha256,
-    ).digest()
+    global _secrets_key_resolver
+    _secrets_key_resolver = fn
+
+
+def _get_or_create_secrets_key(pat: str, repo_full_name: str) -> bytes:
+    """Return the AES-256 key for .secrets.enc.
+
+    Cloud:  _secrets_key_resolver() — key from Supabase Vault, never touches GitHub.
+    OSS:    reads WORKEROS_SECRETS_KEY from GitHub repo Variables. If missing
+            (first connect), generates a random 32-byte key and stores it there.
+            Any PAT with repo access reads the same key — PAT rotation and
+            multiple installs pointing at the same repo all work correctly.
+    """
+    import github_api as _gh
+
+    if _secrets_key_resolver is not None:
+        return _secrets_key_resolver()
+
+    # OSS: key lives in the GitHub repo as an Actions Variable (readable via API)
+    key = _gh.get_secrets_key(pat, repo_full_name)
+    if key is None:
+        # First time connecting this repo — generate and store the key
+        key = os.urandom(32)
+        _gh.set_secrets_key(pat, repo_full_name, key)
+        logger.info("Generated new secrets key for %s", repo_full_name)
+    return key
 
 
 def _encrypt_secrets_blob(secrets: dict, key: bytes) -> bytes:
@@ -17649,7 +17673,7 @@ def _sync_secrets_to_enc(user_id: str, repos: Repositories, pat: str, repo_full_
                 secrets[row["name"]] = val
         if not secrets:
             return
-        key = _derive_secrets_key(pat, repo_full_name)
+        key = _get_or_create_secrets_key(pat, repo_full_name)
         blob = _encrypt_secrets_blob(secrets, key)
         enc_path = _git_workspace() / _SECRETS_ENC_FILENAME
         enc_path.write_bytes(blob)
@@ -17672,7 +17696,7 @@ def _load_secrets_from_enc(user_id: str, repos: Repositories, pat: str, repo_ful
         enc_path = _git_workspace() / _SECRETS_ENC_FILENAME
         if not enc_path.is_file():
             return 0
-        key = _derive_secrets_key(pat, repo_full_name)
+        key = _get_or_create_secrets_key(pat, repo_full_name)
         blob = enc_path.read_bytes()
         secrets = _decrypt_secrets_blob(blob, key)
         loaded = 0
