@@ -381,7 +381,7 @@ export function WorkspaceSwitcher() {
           <DialogHeader>
             <DialogTitle>New workspace</DialogTitle>
             <DialogDescription>
-              Workspaces keep workers, runs, connections, secrets, and brain packs
+              Workspaces keep workers, runs, connections, secrets, and brain folders
               isolated on this local Workeros instance.
             </DialogDescription>
           </DialogHeader>
