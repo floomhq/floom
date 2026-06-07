@@ -12,6 +12,7 @@ import { Terminal } from "@/components/ai-elements/terminal";
 import { StackTrace } from "@/components/ai-elements/stack-trace";
 import { Task } from "@/components/ai-elements/task";
 import { OutputRenderer } from "@/components/output-renderer";
+import { GenericOutput } from "@/components/generic-output";
 import { api } from "@/lib/api";
 import { formatAbsolute } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
@@ -161,28 +162,35 @@ export function RunDetailSplitPane({
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <Tabs defaultValue="transcript" className="flex h-full min-h-0 flex-col">
+          {/* v6: lead with the rendered OUTPUT (the generic viewer). The
+              transcript/logs/files/raw/metadata are secondary tabs, not a
+              vertical scroll-pile. Output is the default tab. */}
+          <Tabs defaultValue="output" className="flex h-full min-h-0 flex-col">
             <div className="shrink-0 border-b border-border px-3 py-2">
               <TabsList variant="line">
-                <TabsTrigger value="transcript">Result</TabsTrigger>
-                <TabsTrigger value="logs">Logs</TabsTrigger>
                 <TabsTrigger value="output">Output</TabsTrigger>
+                <TabsTrigger value="transcript">Steps</TabsTrigger>
+                <TabsTrigger value="files">Files</TabsTrigger>
+                <TabsTrigger value="logs">Logs</TabsTrigger>
                 <TabsTrigger value="raw">Raw</TabsTrigger>
                 <TabsTrigger value="metadata">Metadata</TabsTrigger>
               </TabsList>
             </div>
             {/* R5 (2026-05-30): add min-w-0 + overflow-x-auto so wide content
                 (markdown tables, long unbreakable strings, the Output table)
-                scrolls within the Result column instead of overflowing and
-                getting clipped by the pane's `overflow-hidden`. */}
+                scrolls within the column instead of overflowing and getting
+                clipped by the pane's `overflow-hidden`. */}
+            <TabsContent value="output" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
+              <OutputView run={run} />
+            </TabsContent>
             <TabsContent value="transcript" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <TranscriptView run={run} parts={transcriptParts} />
             </TabsContent>
+            <TabsContent value="files" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
+              <FilesView run={run} />
+            </TabsContent>
             <TabsContent value="logs" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <OperatorLogs run={run} />
-            </TabsContent>
-            <TabsContent value="output" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
-              <OutputView run={run} />
             </TabsContent>
             <TabsContent value="raw" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <RawView run={run} parts={transcriptParts} />
@@ -554,14 +562,15 @@ function RecentLogsPreview({ run }: { run: RunDetail }) {
   );
 }
 
+// v6 default tab: render the OUTPUT inline through the GENERIC renderer
+// (markdown/json/csv/text/file), with NO use-case chrome. Falls back to the
+// readable transcript when a completed run produced no structured output so the
+// output-first tab is never empty.
 function OutputView({ run }: { run: RunDetail }) {
   const hasSchema = run.output_schema && run.output_schema.length > 0;
   const hasRaw = Object.keys(run.output || {}).length > 0;
   if (run.status === "failed") {
     return <StackTrace error={run.error} />;
-  }
-  if (!hasSchema && !hasRaw) {
-    return <p className="text-sm text-muted-foreground">No output yet.</p>;
   }
   if (hasSchema) {
     return (
@@ -572,18 +581,45 @@ function OutputView({ run }: { run: RunDetail }) {
       </div>
     );
   }
-  return (
-    <div className="space-y-4">
-      {Object.entries(run.output).map(([key, value]) => (
-        <div key={key} className="space-y-1">
-          <p className="text-xs font-medium uppercase text-muted-foreground">{humanizeKey(key)}</p>
-          <pre className="overflow-auto rounded-[var(--radius-button)] bg-muted p-3 font-mono text-xs">
-            {stripCitationTokens(formatUnknown(value))}
-          </pre>
-        </div>
-      ))}
-    </div>
-  );
+  if (hasRaw) {
+    return (
+      <div className="space-y-4">
+        {Object.entries(run.output).map(([key, value]) => (
+          <div key={key} className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">{humanizeKey(key)}</p>
+            <GenericOutput type={inferOutputType(value)} value={value} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  // No structured output. For a completed run, show the readable transcript so
+  // the output-first tab carries the result; otherwise an empty-state.
+  if (run.status === "completed" || run.status === "running" || run.status === "queued") {
+    return <TranscriptView run={run} parts={partsFromRun(run)} />;
+  }
+  return <p className="text-sm text-muted-foreground">No output yet.</p>;
+}
+
+// Infer a GenericOutput type from a raw output value (no schema available).
+function inferOutputType(value: unknown): string {
+  if (typeof value === "object" && value !== null) return "json";
+  if (typeof value === "string") {
+    const t = value.trim();
+    if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) return "json";
+    if (/^#{1,3}\s|\n[-*]\s|\|.+\|/.test(t)) return "markdown";
+    return "text";
+  }
+  return "text";
+}
+
+// v6: dedicated Files tab so result artifacts are a secondary surface, not a
+// third vertical block stacked under the output.
+function FilesView({ run }: { run: RunDetail }) {
+  if (run.artifacts.length === 0) {
+    return <p className="text-sm text-muted-foreground">No result files.</p>;
+  }
+  return <ArtifactsList run={run} />;
 }
 
 function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
@@ -835,11 +871,6 @@ function parseMaybeJson(value: unknown): unknown {
   }
 }
 
-function formatUnknown(value: unknown): string {
-  if (typeof value === "string") return value;
-  return JSON.stringify(value, null, 2);
-}
-
 function isScalarOutput(value: unknown): value is string | number | boolean {
   return typeof value === "number" || typeof value === "boolean" || (typeof value === "string" && !value.includes("/") && value.length <= 120);
 }
@@ -859,8 +890,14 @@ function formatScalarValue(key: string, value: unknown): string {
   return String(value);
 }
 
+// v6: statuses render in Title Case across the run page (header glyph, metrics
+// strip, overview). "pending_approval" -> "Awaiting approval"; everything else
+// is humanized then title-cased ("completed" -> "Completed").
 function statusLabel(value: string): string {
-  return value.replace(/_/g, " ");
+  const s = (value || "").toLowerCase();
+  if (s === "pending_approval") return "Awaiting approval";
+  const words = s.replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function formatBytes(bytes: number): string {

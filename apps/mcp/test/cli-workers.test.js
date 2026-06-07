@@ -37,14 +37,14 @@ const skillMd = `# CLI Test Worker
 Return a compact JSON result.
 `;
 
-async function makeTempHome(apiBase) {
+async function makeTempHome(apiBase, apiSecret = "test-secret") {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-workers-home-"));
   const configDir = join(home, ".config", "workeros");
   await mkdir(configDir, { recursive: true });
   await writeFile(join(configDir, "credentials.json"), JSON.stringify({
     api_base: apiBase,
     mode: "oss",
-    api_secret: "test-secret",
+    api_secret: apiSecret,
     authed_at: new Date().toISOString(),
   }, null, 2));
   return home;
@@ -68,7 +68,15 @@ async function makeWorkerDir(options = {}) {
 async function runCli(args, env = {}) {
   const child = spawn(process.execPath, ["dist/cli.js", ...args], {
     cwd: process.cwd(),
-    env: { ...process.env, ...env },
+    env: {
+      ...process.env,
+      WORKEROS_API_BASE: "",
+      WORKEROS_API_SECRET: "",
+      WORKEROS_API_TOKEN: "",
+      FLOOM_API_BASE: "",
+      FLOOM_API_SECRET: "",
+      ...env,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const stdout = [];
@@ -97,7 +105,7 @@ function json(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
-async function startMockApi({ existing = false, putStatus = 200 } = {}) {
+async function startMockApi({ existing = false, putStatus = 200, putDetail = "Unsupported" } = {}) {
   const seen = [];
   const bodies = [];
   const server = createServer(async (request, response) => {
@@ -129,7 +137,7 @@ async function startMockApi({ existing = false, putStatus = 200 } = {}) {
       const body = await readBody(request);
       bodies.push(body);
       if (putStatus !== 200) {
-        json(response, putStatus, { detail: "Unsupported" });
+        json(response, putStatus, { detail: putDetail });
         return;
       }
       json(response, 200, { id: "cli-test-worker", name: "CLI Test Worker" });
@@ -295,4 +303,67 @@ test("workers push reports unsupported in-place source updates", async (t) => {
     "GET /workers/cli-test-worker",
     "PUT /workers/cli-test-worker",
   ]);
+});
+
+test("workers push accepts FLOOM_API_BASE and FLOOM_API_SECRET env aliases", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await mkdtemp(join(tmpdir(), "workeros-cli-workers-empty-home-"));
+  const dir = await makeWorkerDir();
+
+  const result = await runCli(["workers", "push", dir], {
+    HOME: home,
+    FLOOM_API_BASE: mock.baseUrl,
+    FLOOM_API_SECRET: "test-secret",
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Created cli-test-worker/);
+  assert.deepEqual(mock.seen, [
+    "GET /workers/cli-test-worker",
+    "POST /workers",
+  ]);
+});
+
+test("workers push reports unreachable API separately from expired auth", async () => {
+  const home = await makeTempHome("http://127.0.0.1:9");
+  const dir = await makeWorkerDir();
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Workeros API is unreachable/);
+  assert.match(result.stdout, /WORKEROS_API_BASE\/FLOOM_API_BASE/);
+  assert.doesNotMatch(result.stderr, /session expired/i);
+});
+
+test("workers push reports 401 as expired auth", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl, "stale-secret");
+  const dir = await makeWorkerDir();
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Your session expired/);
+  assert.match(result.stdout, /floom login/);
+});
+
+test("workers push does not call non-auth 403 an expired session", async (t) => {
+  const mock = await startMockApi({
+    existing: true,
+    putStatus: 403,
+    putDetail: "Stock workers cannot be modified",
+  });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+  const dir = await makeWorkerDir();
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Request was forbidden/);
+  assert.match(result.stdout, /Stock workers cannot be modified/);
+  assert.doesNotMatch(result.stderr, /session expired/i);
 });

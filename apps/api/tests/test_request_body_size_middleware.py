@@ -103,3 +103,20 @@ def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         )
         assert list_response.status_code == 200, list_response.text
         assert any(item["id"] == "phase2-smoke" for item in list_response.json())
+
+
+def test_default_json_oversize_returns_friendly_message(monkeypatch, tmp_path):
+    main = load_main(monkeypatch, tmp_path)
+    payload = {"prompt": "x" * (main.DEFAULT_JSON_BODY_LIMIT_BYTES + 1)}
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/workers/draft-from-prompt",
+            headers={"x-floom-secret": "test-secret"},
+            json=payload,
+        )
+
+    assert response.status_code == 413
+    detail = response.json()["detail"]
+    assert "Request body is too large" in detail
+    assert detail != "Request body too large"

@@ -29,6 +29,26 @@ import { formatTimestamp, type ConnectionView } from "./connection-data";
 //   - Test: outline button
 //   - Disconnect: ghost destructive button
 //   - Refresh status: icon-only
+
+// Thin indeterminate progress bar shown at the bottom of a "Connecting" row.
+function ConnectingProgressBar() {
+  return (
+    <div
+      aria-hidden="true"
+      className="absolute bottom-0 left-0 right-0 h-[2px] overflow-hidden rounded-b-none"
+      style={{ background: "color-mix(in srgb,#9a6a16 12%,transparent)" }}
+    >
+      <div
+        className="absolute inset-y-0 w-1/3 rounded-full"
+        style={{
+          background: "#b07a1a",
+          animation: "conn-progress 1.6s cubic-bezier(0.4,0,0.2,1) infinite",
+        }}
+      />
+    </div>
+  );
+}
+
 function StatusPill({ status }: { status: string }) {
   // P1-7 (audit 2026-05-29): the Status column previously rendered nothing for
   // active connections, so a healthy connection looked state-less while only
@@ -43,13 +63,25 @@ function StatusPill({ status }: { status: string }) {
       </span>
     );
   }
-  const map: Record<string, string> = {
-    initiated: "border-[color-mix(in_srgb,#9a6a16_24%,var(--line))] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] text-[#8a5d12]",
-  };
+  if (status === "initiated") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,#9a6a16_24%,var(--line))] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] px-2 py-0.5 text-[11px] font-medium text-[#8a5d12]">
+        <svg
+          aria-hidden="true"
+          className="size-2.5 shrink-0 animate-spin"
+          viewBox="0 0 16 16"
+          fill="none"
+        >
+          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.25" />
+          <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+        </svg>
+        Connecting
+      </span>
+    );
+  }
+  const map: Record<string, string> = {};
   const label =
-    status === "initiated"
-      ? "Connecting"
-      : status === "expired"
+    status === "expired"
       ? "Expired"
       : status === "failed"
       ? "Failed"
@@ -90,11 +122,13 @@ export function ConnectionRow({
   onRefresh: (connection: ConnectionView) => void;
   onTest: (connection: ConnectionView) => void;
 }) {
+  const isConnecting = connection.status === "initiated";
+
   return (
     <div
       id={`connection-${connection.id}`}
       className={cn(
-        "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-3 md:gap-4 items-center px-3 py-2.5 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors",
+        "relative grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-3 md:gap-4 items-center px-3 py-2.5 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors",
         highlighted &&
           "bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] ring-1 ring-inset ring-[color-mix(in_srgb,var(--positive)_40%,transparent)]"
       )}
@@ -221,6 +255,9 @@ export function ConnectionRow({
       <span className="col-span-3 md:hidden inline-flex">
         <StatusPill status={connection.status} />
       </span>
+
+      {/* Indeterminate progress bar along the bottom edge while OAuth resolves */}
+      {isConnecting && <ConnectingProgressBar />}
     </div>
   );
 }

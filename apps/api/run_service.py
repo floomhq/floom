@@ -443,6 +443,53 @@ def _fire_alert_webhooks(
             )
 
 
+def _dispatch_terminal_run_alerts(
+    *,
+    run_id: str,
+    worker_id: str,
+    status: str,
+    error: str | None,
+    user_id: str | None,
+    repos: "Repositories",
+) -> None:
+    """Run all terminal status notifications without blocking run finalization."""
+    if status not in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
+        return
+
+    def _deliver() -> None:
+        _fire_alert_webhooks(
+            run_id=run_id,
+            worker_id=worker_id,
+            status=status,
+            error=error,
+            repos=repos,
+        )
+        if status != RunStatus.FAILED.value:
+            return
+        try:
+            from alerting import alert_worker_failure_if_needed
+
+            alert_worker_failure_if_needed(worker_id)
+        except Exception as exc:
+            logger.warning(
+                "Worker failure incident check failed for %s after run %s: %s",
+                worker_id,
+                run_id,
+                exc,
+            )
+        _maybe_pause_worker_after_consecutive_failures(
+            worker_id=worker_id,
+            user_id=user_id,
+            repos=repos,
+        )
+
+    threading.Thread(
+        target=_deliver,
+        daemon=True,
+        name=f"alert-{run_id}",
+    ).start()
+
+
 def _schedule_retry(
     *,
     original_run_id: str,
@@ -611,7 +658,27 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
             if not isinstance(field, dict):
                 continue
             kind = str(field.get("kind") or "").strip().lower()
+            ftype = str(field.get("type") or "").strip().lower()
             has_file_markers = bool(field.get("path") or field.get("media_type"))
+            # (0) missing kind + file markers (or legacy type:file) -> file.
+            # WorkerContractField defaults missing kind to scalar; a generated
+            # output like `{media_type, path}` without `kind:file` then rejects
+            # as "scalar cannot declare media_type/path". Preserve the functional
+            # declaration by making the intended file kind explicit.
+            if not kind and (has_file_markers or ftype == "file"):
+                field["kind"] = "file"
+                kind = "file"
+                touched = True
+            if kind == "file" and field.get("type") and ftype != "file":
+                field.pop("type", None)
+                touched = True
+            if kind == "file":
+                if field.get("media_type") and not field.get("path"):
+                    safe_name = str(field.get("name") or "result").strip() or "result"
+                    ext = ".json" if str(field.get("media_type")).lower() == "application/json" else ".txt"
+                    field["path"] = f"out/{safe_name}{ext}"
+                    touched = True
+                continue
             # (1) type-in-kind-slot (e.g. kind: textarea) -> kind:scalar + type.
             if kind in _SCALAR_TYPES:
                 if not field.get("type"):
@@ -630,6 +697,9 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
             # (3) scalar missing the required type -> default string.
             is_scalar = kind == "scalar" or (not kind and not has_file_markers)
             if is_scalar and not field.get("type") and not has_file_markers:
+                field["type"] = "string"
+                touched = True
+            if field.get("type") == "select" and not (field.get("options") or field.get("enum")):
                 field["type"] = "string"
                 touched = True
         return touched
@@ -773,15 +843,19 @@ def _register_authored_worker(
     Idempotency: if the run output already carries a ``created_worker_id``
     (e.g. a resumed/re-executed run), no second worker is created.
     """
+    started_at = time.perf_counter()
     if isinstance(outputs, dict) and outputs.get("created_worker_id"):
         return str(outputs["created_worker_id"])  # already registered
 
+    stage_at = time.perf_counter()
     bundle_path = _find_bundle_artifact(run_id, artifacts)
     if bundle_path is None:
         log_fn("worker-author produced no bundle.json — nothing to register", level="warning")
         return None
+    log_fn(f"worker-author registration: found bundle artifact in {time.perf_counter() - stage_at:.2f}s")
 
     try:
+        stage_at = time.perf_counter()
         bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         log_fn(f"worker-author bundle.json unreadable: {exc}", level="warning")
@@ -789,6 +863,7 @@ def _register_authored_worker(
     if not isinstance(bundle, dict):
         log_fn("worker-author bundle.json is not an object", level="warning")
         return None
+    log_fn(f"worker-author registration: parsed bundle in {time.perf_counter() - stage_at:.2f}s")
 
     # If the author could not produce valid YAML after its retries it embeds an
     # `error`. Don't register a broken worker; leave the run viewable so the
@@ -812,9 +887,11 @@ def _register_authored_worker(
     # 3-5 items, tags <= 8 flat strings). Strip violating optional metadata so a
     # functionally-valid worker still registers instead of dead-ending. This is
     # lossless to behaviour (these fields are display metadata only).
+    stage_at = time.perf_counter()
     worker_yml = _normalize_authored_worker_yml(worker_yml, log_fn)
     # G5 FIX 4: guarantee a runnable sample even when the LLM omits example_input.
     worker_yml = _backfill_example_input(worker_yml, bundle.get("sample_input_json"), log_fn)
+    log_fn(f"worker-author registration: normalized manifest in {time.perf_counter() - stage_at:.2f}s")
 
     skill_md = bundle.get("skill_md")
     run_code = bundle.get("run_code")
@@ -848,13 +925,18 @@ def _register_authored_worker(
     if isinstance(requirements_txt, str) and requirements_txt.strip():
         files.append(_main.DraftFile(path="requirements.txt", content=requirements_txt))
 
+    stage_at = time.perf_counter()
     worker_id = _main._register_worker_from_files(
         files,
         user_id=user_id,
         repos=repos,
         dedupe_id=True,
     )
-    log_fn(f"Registered worker {worker_id!r} from drafted bundle")
+    log_fn(
+        f"Registered worker {worker_id!r} from drafted bundle "
+        f"in {time.perf_counter() - stage_at:.2f}s "
+        f"(registration total {time.perf_counter() - started_at:.2f}s)"
+    )
     return worker_id
 
 
@@ -864,13 +946,13 @@ def _register_authored_worker(
 # A generated SCRIPT-mode worker must be PROVEN to run before the operator is
 # told it is ready. After registration we run ONE real E2B smoke execution with
 # the bundle's sample input. If it fails with a code-class error, we make a
-# bounded repair pass (max 2): feed the run.py + the failure to a focused model
+# bounded repair pass (max 1): feed the run.py + the failure to a focused model
 # call, rewrite run.py on disk, re-smoke. We never loop unbounded, never spawn
 # more than one sandbox at a time (the smoke runs inline on the author run's
 # already-acquired execution slot), and never silently ship a broken worker —
 # the outcome is recorded on the author run output as ``smoke``.
 
-_MAX_SMOKE_REPAIRS = 3
+_MAX_SMOKE_REPAIRS = 1
 
 # Distinctive prefix of main._DEFAULT_RUN_PY_STUB's comment. A generated script
 # worker whose run.py is the placeholder stub does nothing (it writes a success
@@ -1104,6 +1186,7 @@ def _smoke_and_repair_generated_worker(
     calm reason) so the operator edits their own code. Silently mutating
     user-provided code would change its semantics without consent.
     """
+    started_at = time.perf_counter()
     repos_obj = _repos(repos)
     loaded = _load_worker_recipe(worker_id, repos_obj)
     if not loaded:
@@ -1187,9 +1270,10 @@ def _smoke_and_repair_generated_worker(
             if runtime and runtime.limits
             else 120
         )
-        # Cap the smoke generously below a normal run; a runnable worker proves
-        # itself fast, and we don't want the smoke to dominate the author run.
-        timeout_seconds = min(int(timeout_seconds), 180)
+        # Cap the smoke below a normal run; a generated worker's first proof run
+        # must not dominate worker creation latency.
+        timeout_seconds = min(int(timeout_seconds), 90)
+        log_fn(f"Smoke budget for generated worker is {timeout_seconds}s", level="info")
 
         while True:
             smoke_inputs = _build_smoke_inputs(config, bundle, tmp_root)
@@ -1200,6 +1284,7 @@ def _smoke_and_repair_generated_worker(
 
             try:
                 driver = get_sandbox_driver(runner, config=config)
+                attempt_started_at = time.perf_counter()
                 with use_context_scope(context_scope_for_user(user_id)):
                     result = driver.run(
                         worker_id=worker_id,
@@ -1213,6 +1298,11 @@ def _smoke_and_repair_generated_worker(
                         connection_ids=connection_ids,
                         user_id=user_id,
                     )
+                log_fn(
+                    f"Smoke attempt {repairs + 1} completed in "
+                    f"{time.perf_counter() - attempt_started_at:.2f}s",
+                    level="info",
+                )
             except Exception as exc:  # pragma: no cover - driver/infra variance
                 last_failure = str(exc)
                 log_fn(f"Smoke run raised: {exc}", level="warning")
@@ -1270,7 +1360,7 @@ def _smoke_and_repair_generated_worker(
                     "Smoke passed — generated worker ran successfully"
                     + (f" after {repairs} repair(s)" if repairs else "")
                 )
-                log_fn(msg)
+                log_fn(f"{msg} (smoke total {time.perf_counter() - started_at:.2f}s)")
                 return {"status": "passed", "reason": "", "repairs": repairs}
 
             # Failure: decide whether it's a code bug worth repairing.
@@ -1326,12 +1416,17 @@ def _smoke_and_repair_generated_worker(
                     "repairs": repairs,
                 }
 
+            repair_started_at = time.perf_counter()
             fixed = _repair_run_py(
                 run_code=current_code,
                 failure=last_failure,
                 secrets=secrets,
                 log_fn=log_fn,
                 intent=(getattr(config, "description", None) or "").strip(),
+            )
+            log_fn(
+                f"Smoke repair model step took {time.perf_counter() - repair_started_at:.2f}s",
+                level="info",
             )
             if not fixed:
                 return {
@@ -1798,6 +1893,9 @@ def update_run_status(
         if scope is None:
             return
         owner_id, _worker_id = scope
+    run_row = repos_obj.runs.get(user_id=owner_id, run_id=run_id)
+    worker_id = str((run_row or {}).get("worker_id") or "")
+    previous_error = (run_row or {}).get("error")
     repos_obj.runs.update_status(
         user_id=owner_id,
         run_id=run_id,
@@ -1806,6 +1904,16 @@ def update_run_status(
         error=error,
         error_code=error_code,
     )
+
+    if worker_id and status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
+        _dispatch_terminal_run_alerts(
+            run_id=run_id,
+            worker_id=worker_id,
+            status=status,
+            error=error if error is not None else previous_error,
+            user_id=owner_id,
+            repos=repos_obj,
+        )
 
     # Publish SSE event for the status change
     _publish_sse(run_id, {
@@ -2357,7 +2465,13 @@ def _schedule_missing_secret_pause_threshold() -> int:
         return _SCHEDULE_MISSING_SECRET_PAUSE_AFTER
 
 
-def _persist_worker_paused_flag(worker_id: str, *, repos: Repositories, user_id: str | None) -> None:
+def _persist_worker_paused_flag(
+    worker_id: str,
+    *,
+    repos: Repositories,
+    user_id: str | None,
+    archive_reason: str | None = None,
+) -> None:
     if not user_id:
         return
     worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
@@ -2367,6 +2481,7 @@ def _persist_worker_paused_flag(worker_id: str, *, repos: Repositories, user_id:
         manifest["enabled"] = False
         manifest["archive_reason"] = (
             manifest.get("archive_reason")
+            or archive_reason
             or "Paused automatically after repeated scheduled setup failures."
         )
         repos.workers.update(
@@ -2432,6 +2547,55 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
     _persist_worker_paused_flag(worker_id, repos=repos, user_id=user_id)
     logger.warning(
         "Auto-paused scheduled worker %s after %d consecutive missing-secret failures",
+        worker_id,
+        threshold,
+    )
+    return True
+
+
+def _auto_pause_on_consecutive_failures_enabled() -> bool:
+    raw = os.environ.get("WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES", "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _alert_consecutive_failure_threshold() -> int:
+    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "3")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 3
+
+
+def _maybe_pause_worker_after_consecutive_failures(
+    *,
+    worker_id: str,
+    user_id: str | None,
+    repos: Repositories,
+) -> bool:
+    """Optionally pause automatic workers that keep failing consecutively."""
+    if not user_id or not _auto_pause_on_consecutive_failures_enabled():
+        return False
+    threshold = _alert_consecutive_failure_threshold()
+    rows, _ = repos.runs.list(user_id=user_id, worker_id=worker_id, limit=threshold, offset=0)
+    if len(rows) < threshold:
+        return False
+    automatic_sources = {"schedule", "scheduled", "webhook", "composio", "trigger"}
+    for row in rows:
+        if row.get("status") != RunStatus.FAILED.value:
+            return False
+        if str(row.get("trigger_source") or "").lower() not in automatic_sources:
+            return False
+
+    _persist_worker_paused_flag(
+        worker_id,
+        repos=repos,
+        user_id=user_id,
+        archive_reason=(
+            f"Paused automatically after {threshold} consecutive automatic run failures."
+        ),
+    )
+    logger.warning(
+        "Auto-paused worker %s after %d consecutive automatic failures",
         worker_id,
         threshold,
     )
@@ -3064,20 +3228,6 @@ def execute_run(
                 _log_failure_line = "Run failed."
             log_fn(_log_failure_line, level="error")
 
-            # Fire webhook alerts for failed runs
-            threading.Thread(
-                target=_fire_alert_webhooks,
-                kwargs={
-                    "run_id": run_id,
-                    "worker_id": worker_id,
-                    "status": "failed",
-                    "error": result_error,
-                    "repos": repos_obj,
-                },
-                daemon=True,
-                name=f"alert-{run_id}",
-            ).start()
-
             # Auto-retry if configured on the worker manifest
             retry_cfg = getattr(config, "retry", None) if config else None
             if retry_cfg and owner_id:
@@ -3274,19 +3424,6 @@ def execute_run(
         log_fn("Output generated")
         log_fn("Run completed")
 
-        # Fire webhook alerts for completed runs
-        threading.Thread(
-            target=_fire_alert_webhooks,
-            kwargs={
-                "run_id": run_id,
-                "worker_id": worker_id,
-                "status": "completed",
-                "error": None,
-                "repos": repos_obj,
-            },
-            daemon=True,
-            name=f"alert-{run_id}",
-        ).start()
     except Exception as exc:
         logger.exception("Run %s crashed for worker %s", run_id, worker_id)
         error_message = str(exc) or exc.__class__.__name__
@@ -3312,21 +3449,6 @@ def execute_run(
             log_fn(f"Run crashed: {error_message}", level="error")
         except Exception:
             logger.exception("Failed to persist crash log for run %s", run_id)
-        try:
-            threading.Thread(
-                target=_fire_alert_webhooks,
-                kwargs={
-                    "run_id": run_id,
-                    "worker_id": worker_id,
-                    "status": "failed",
-                    "error": error_message,
-                    "repos": repos_obj,
-                },
-                daemon=True,
-                name=f"alert-{run_id}",
-            ).start()
-        except Exception:
-            pass
         return
 
 

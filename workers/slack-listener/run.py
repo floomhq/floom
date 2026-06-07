@@ -165,11 +165,31 @@ def main() -> None:
     with open(inputs_path) as f:
         inputs = json.load(f)
 
-    channel = str(inputs.get("channel") or "")
+    channel = str(
+        inputs.get("channel")
+        or os.environ.get("SLACK_LISTENER_CHANNEL_ID")
+        or os.environ.get("SLACK_CHANNEL_ID")
+        or os.environ.get("SLACK_DEFAULT_CHANNEL")
+        or ""
+    ).strip()
     lookback_minutes = int(inputs.get("lookback_minutes") or 10)
     if not channel:
-        print("ERROR: channel input is required", file=sys.stderr)
-        sys.exit(1)
+        output_dir = os.environ.get("FLOOM_OUTPUT_DIR", ".")
+        os.makedirs(output_dir, exist_ok=True)
+        summary_md = (
+            "# Slack Listener Run\n\n"
+            "- Status: skipped\n"
+            "- Reason: no Slack channel configured\n\n"
+            "Set `SLACK_LISTENER_CHANNEL_ID` or save a `channel` input value to enable scheduled polling.\n"
+        )
+        with open(os.path.join(output_dir, "summary.md"), "w") as f:
+            f.write(summary_md)
+        print(json.dumps({
+            "summary": "Skipped Slack Listener run: no Slack channel configured.",
+            "processed": [],
+            "skipped": "no_channel_configured",
+        }))
+        return
 
     oldest = time.time() - lookback_minutes * 60
     data = slack_get("conversations.history", {"channel": channel, "oldest": str(oldest), "limit": 50})
