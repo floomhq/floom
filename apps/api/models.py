@@ -1074,6 +1074,11 @@ class WorkerContract(BaseModel):
     system_worker: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    # Visibility: controls who can see and run this worker.
+    # "private"   — owner only (default)
+    # "workspace" — all workspace members
+    # Stored in worker.yml so it travels with the repo and is version-controlled.
+    visibility: Optional[str] = None
     # Runtime gate: a smoke-disabled worker (its first test run failed) sets
     # paused=true in its manifest so the disable survives re-discovery
     # (`_persist_discovered_workers` reads `manifest.get("paused")` to compute
