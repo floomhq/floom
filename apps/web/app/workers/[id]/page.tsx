@@ -179,6 +179,8 @@ const NAV_ITEMS: NavItem[] = [
   // back-compat (see HASH_TO_SECTION).
   { id: "connections", label: "Tools", icon: <Plug2 className="w-4 h-4" />, group: "setup" },
 ];
+const PRIMARY_NAV = NAV_ITEMS.filter((item) => item.group === "view");
+const SETUP_NAV = NAV_ITEMS.filter((item) => item.group === "setup");
 // Note: "Versions" is intentionally NOT a tab. Worker config-version history is
 // surfaced via a header "Versions" dropdown → dialog (VersionsSection), to match
 // the inline Versions dropdown on Agent (/assistant) and Brain (/contexts) and
@@ -1922,41 +1924,53 @@ export default function WorkerDetailPage() {
           flex-column <Tabs> root (not the `w-fit` list) — the overflow chain
           didn't reliably reach the list and the last tab (History) clipped with
           no scroll. Wrapping the `w-fit` list directly restores the swipe. */}
-      <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
-        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
-          {/* E2: the shared TabsList is h-8 (32px) — below the 44px touch
-              minimum. Bump the bar (and via h-full each trigger) to ≥44px on
-              mobile only; desktop keeps the tight 32px height. */}
+      {/* #539: 4 primary view tabs + "..." overflow for setup tabs (Settings,
+          Brain, Tools). Reduces 7 competing top-level choices to 4 + overflow. */}
+      <div className="-mx-4 flex items-center gap-1 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
+        <Tabs value={SETUP_NAV.some((n) => n.id === activeSection) ? "" : activeSection} onValueChange={(v) => setSection(v as Section)}>
           <TabsList className="h-11 min-h-11 sm:h-8 sm:min-h-0">
-            {NAV_ITEMS.map((item, i) => {
-              // Divider at the view→setup group boundary: extra gap + a hairline
-              // rule so the 7 tabs read as two short clusters in one row. Every
-              // tab stays one click away; this is purely visual rhythm.
-              const startsNewGroup = i > 0 && NAV_ITEMS[i - 1].group !== item.group;
-              return (
-                <Fragment key={item.id}>
-                  {startsNewGroup && (
-                    <span
-                      aria-hidden
-                      className="mx-1 h-4 w-px shrink-0 self-center bg-border"
-                    />
-                  )}
-                  <TabsTrigger value={item.id}>
-                    {item.icon}
-                    <span>{item.label}</span>
-                    {item.id === "settings" && triggersCount > 1 && (
-                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
-                    )}
-                    {item.id === "runs" && runsCount > 0 && (
-                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
-                    )}
-                  </TabsTrigger>
-                </Fragment>
-              );
-            })}
+            {PRIMARY_NAV.map((item) => (
+              <TabsTrigger key={item.id} value={item.id}>
+                {item.icon}
+                <span>{item.label}</span>
+                {item.id === "runs" && runsCount > 0 && (
+                  <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
+                )}
+              </TabsTrigger>
+            ))}
           </TabsList>
-        </div>
-      </Tabs>
+        </Tabs>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[var(--radius-button)] border px-2.5 text-xs transition-colors ${
+                SETUP_NAV.some((n) => n.id === activeSection)
+                  ? "border-border bg-muted font-medium text-foreground"
+                  : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              <MoreVertical className="w-3.5 h-3.5" />
+              {SETUP_NAV.find((n) => n.id === activeSection)?.label ?? "More"}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {SETUP_NAV.map((item) => (
+              <DropdownMenuItem
+                key={item.id}
+                onClick={() => setSection(item.id as Section)}
+                className={activeSection === item.id ? "bg-muted" : ""}
+              >
+                {item.icon}
+                <span className="ml-2">{item.label}</span>
+                {item.id === "settings" && triggersCount > 1 && (
+                  <span className="ml-auto text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {/* Section content */}
       <div>
