@@ -20,6 +20,20 @@ if sys.platform == "win32":
     _fcntl.flock = lambda fd, operation: None  # type: ignore[attr-defined]
     sys.modules.setdefault("fcntl", _fcntl)
 
+from pathlib import Path as _Path
+
+# Set FLOOM_WORKERS_DIR before ANY engine module imports.
+# run_service.py does `from worker_registry import WORKERS_DIR` at module level;
+# WORKERS_DIR is a module-level constant that is evaluated at import time from
+# FLOOM_WORKERS_DIR. If FLOOM_WORKERS_DIR isn't set correctly before run_service
+# is imported, every subsequent disk-based worker lookup uses the wrong directory.
+os.environ["WORKEROS_DEPLOY"] = "cloud"
+_custom_wd = (os.environ.get("WORKEROS_WORKERS_DIR") or "").strip()
+os.environ.setdefault(
+    "FLOOM_WORKERS_DIR",
+    _custom_wd or str(_Path(__file__).resolve().parents[2] / "engine" / "workers"),
+)
+
 from fastapi import FastAPI, HTTPException, Query, Request
 
 from apps.api.cloud_scheduler import start_cloud_scheduler, stop_cloud_scheduler

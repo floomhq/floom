@@ -91,6 +91,7 @@ def push_worker(workspace_id: str, worker_id: str, pat: str, repo: str, message:
         .execute()
     )
     if not rows.data:
+        print(f"[push_worker] {worker_id}: no worker row in Supabase", flush=True)
         return
     sv_id = rows.data[0]["skill_version_id"]
     sv_rows = (
@@ -105,6 +106,22 @@ def push_worker(workspace_id: str, worker_id: str, pat: str, repo: str, message:
 
     manifest: dict = dict(sv_rows.data[0]["manifest_json"] or {})
     files: dict = manifest.pop("_files", {}) or {}
+
+    # If _files is empty, fall back to reading from disk (e.g. after rollback
+    # wrote historical files to the workers dir but manifest lacks _files).
+    if not files:
+        import os as _os
+        workers_dir_env = (_os.environ.get("FLOOM_WORKERS_DIR") or "").strip()
+        if workers_dir_env:
+            from pathlib import Path as _Path
+            worker_dir = _Path(workers_dir_env) / worker_id
+            if worker_dir.is_dir():
+                for fpath in worker_dir.iterdir():
+                    if fpath.is_file() and fpath.name != "worker.yml":
+                        try:
+                            files[fpath.name] = fpath.read_text(encoding="utf-8")
+                        except Exception:
+                            pass
 
     prefix = f"{_WORKERS_GIT_PREFIX}/{worker_id}"
 

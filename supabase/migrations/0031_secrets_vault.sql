@@ -13,6 +13,8 @@
 -- lazily on next write (re-encrypt via Vault at that point).
 
 ALTER TABLE secrets ADD COLUMN IF NOT EXISTS vault_secret_id UUID;
+-- Allow value to be NULL when secret is stored in Vault instead of Fernet
+ALTER TABLE secrets ALTER COLUMN value DROP NOT NULL;
 
 -- Public-schema wrappers so supabase-py .rpc() can reach vault.* functions
 -- (supabase-py PostgREST client cannot call functions in non-public schemas
@@ -53,7 +55,10 @@ LANGUAGE sql
 SECURITY DEFINER
 SET search_path = vault, public
 AS $$
-    SELECT vault.delete_secret(p_id);
+    -- vault.delete_secret() is not available in all Supabase versions.
+    -- Delete directly from vault.secrets instead (same effect).
+    DELETE FROM vault.secrets WHERE id = p_id;
+    SELECT true;
 $$;
 
 CREATE OR REPLACE FUNCTION workeros_vault_read_secret(p_id uuid)

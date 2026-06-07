@@ -508,7 +508,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             result[str(row["id"])] = str(manifest.get("title") or row.get("name") or row["id"])
         return result
 
-    def list(self, *, user_id: str) -> list[dict[str, Any]]:
+    def list(self, *, user_id: str, role: str | None = None) -> list[dict[str, Any]]:
         rows = self._worker_rows(user_id=user_id)
         skill_map = self._skill_versions_by_id(
             row.get("skill_version_id") for row in rows if row.get("skill_version_id")
@@ -526,7 +526,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             for row in rows
         ]
 
-    def get(self, *, user_id: str, worker_id: str) -> dict[str, Any] | None:
+    def get(self, *, user_id: str, worker_id: str, role: str | None = None) -> dict[str, Any] | None:
         # Fast path: reuse the raw rows already fetched by list() in this request.
         recipe_cache = _recipe_cache.get()
         if recipe_cache is not None:

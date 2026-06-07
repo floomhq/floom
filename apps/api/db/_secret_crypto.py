@@ -66,16 +66,34 @@ def vault_store_secret(
     name: str,
     description: str = "",
 ) -> UUID:
-    """Create or update a secret in Supabase Vault.
+    """Create or update a secret in Supabase Vault by name.
 
-    Returns the vault UUID. Caller stores this in secrets.vault_secret_id.
-    If a secret with this name already exists in Vault, update it in place.
+    Returns the vault UUID. If a secret with this name already exists
+    (e.g. from a previous partial write), updates it in place.
     """
-    result = client.rpc(
-        "workeros_vault_create_secret",
-        {"p_secret": plaintext, "p_name": name, "p_description": description},
-    ).execute()
-    return UUID(str(result.data))
+    try:
+        result = client.rpc(
+            "workeros_vault_create_secret",
+            {"p_secret": plaintext, "p_name": name, "p_description": description},
+        ).execute()
+        return UUID(str(result.data))
+    except Exception as exc:
+        if "duplicate" not in str(exc).lower() and "unique" not in str(exc).lower():
+            raise
+        # Name already exists in vault — find existing ID and update
+        existing = (
+            client.schema("vault")
+            .table("secrets")
+            .select("id")
+            .eq("name", name)
+            .limit(1)
+            .execute()
+        )
+        if not existing.data:
+            raise
+        existing_id = UUID(str(existing.data[0]["id"]))
+        vault_update_secret(client, existing_id, plaintext, name)
+        return existing_id
 
 
 def vault_update_secret(client, vault_id: UUID, plaintext: str, name: str) -> None:

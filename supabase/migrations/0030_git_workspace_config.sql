@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS git_workspace_config (
     github_username TEXT,
     repo_full_name  TEXT,
     repo_url        TEXT,
+    remote_url      TEXT,
     connected_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_pushed_at  TIMESTAMPTZ
 );
