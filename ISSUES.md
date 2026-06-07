@@ -1,3 +1,9 @@
+Issues are tracked in GitHub Issues: https://github.com/floomhq/workeros/issues
+
+---
+
+# Historical ISSUES.md Content
+
 # ISSUES (Federico's 2026-05-26 morning walkthrough)
 
 Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from a real browser walkthrough of workers.floom.dev after PRs #29-#33 landed.
