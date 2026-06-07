@@ -661,6 +661,25 @@ def _override_git_ops_for_cloud() -> None:
             from apps.api.cloud_git_local import commit_workspace, push_background
             commit_workspace(workspace_id, list(rel_paths), message)
             push_background(workspace_id)  # no-op if no remote configured
+            # Upload contexts to Supabase Storage regardless of sensitive flag.
+            # Non-sensitive contexts also go to git (above); sensitive contexts
+            # skip git but still need Storage as their only durable backup.
+            for rel in rel_paths:
+                if rel.startswith("contexts/"):
+                    parts = rel.split("/", 2)
+                    if len(parts) >= 2:
+                        context_name = parts[1]
+                        try:
+                            from apps.api.cloud_contexts import upload_context_background
+                            from apps.api._engine import ensure_engine_api_path
+                            ensure_engine_api_path()
+                            from contexts import current_contexts_root
+                            ctx_dir = current_contexts_root() / context_name
+                            if ctx_dir.is_dir():
+                                upload_context_background(workspace_id, context_name, ctx_dir)
+                        except Exception as _exc:
+                            import logging as _log
+                            _log.getLogger(__name__).debug("context storage upload failed: %s", _exc)
         return None
 
     _cloud_commit_paths._workeros_cloud_patched = True
