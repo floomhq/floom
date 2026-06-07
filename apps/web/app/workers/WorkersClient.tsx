@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Box, ChevronDown, ChevronRight, Folder, Globe, Lock, Plus, Search, Star, Archive, LayoutGrid, Clock, Users,
+  FileText, Mail, BarChart2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -545,9 +546,9 @@ function flattenFolders(workers: WorkerSummary[]): FlatFolder[] {
 
 function EmptyWorkersState() {
   const templates = [
-    { id: "research_brief", title: "Research brief", description: "Markdown brief from a topic, audience, and depth.", icon: "📄" },
-    { id: "gmail_intake_brief", title: "Gmail triage", description: "Unread Gmail summary with next actions.", icon: "✉️" },
-    { id: "csv_enricher", title: "CSV enricher", description: "Spreadsheet enrichment with structured output.", icon: "📊" },
+    { id: "research_brief", title: "Research brief", description: "Markdown brief from a topic, audience, and depth.", Icon: FileText },
+    { id: "gmail_intake_brief", title: "Gmail triage", description: "Unread Gmail summary with next actions.", Icon: Mail },
+    { id: "csv_enricher", title: "CSV enricher", description: "Spreadsheet enrichment with structured output.", Icon: BarChart2 },
   ];
 
   const examples = [
@@ -593,8 +594,8 @@ function EmptyWorkersState() {
                 href={`/workers/new?template=${t.id}`}
                 className="group block rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] hover:bg-[var(--active-nav-bg)] transition-colors p-4"
               >
-                <div className="text-2xl mb-2" aria-hidden>
-                  {t.icon}
+                <div className="mb-2" aria-hidden>
+                  <t.Icon className="size-6 text-[var(--ink-soft)]" />
                 </div>
                 <p className="text-sm font-medium">{t.title}</p>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
