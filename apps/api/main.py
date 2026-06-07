@@ -1388,7 +1388,7 @@ async def auth_middleware(request: Request, call_next):
         if raw_secret is None:
             return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
         if not hmac.compare_digest(raw_secret, expected):
-            return _JSONResponse(status_code=403, content={"detail": "Forbidden"})
+            return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
     return await call_next(request)
 
 logger = logging.getLogger("floom.api")
