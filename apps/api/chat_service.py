@@ -40,8 +40,14 @@ CHAT_EVENT_VERSION = 2
 ARGS_PREVIEW_MAX_STRING = 240
 ARGS_PREVIEW_MAX_ITEMS = 12
 ARGS_PREVIEW_MAX_DEPTH = 4
-WORKSPACE_MD_PATH = Path(__file__).resolve().parents[3] / "workspace.md"
-WORKSPACE_BASE_PERSONA_PATH = Path(__file__).resolve().parents[3] / "workspace.base.md"
+def _workspace_root() -> Path:
+    custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
+    if custom:
+        return Path(custom).resolve()
+    return Path(__file__).resolve().parents[3]
+
+WORKSPACE_MD_PATH = _workspace_root() / "workspace.md"
+WORKSPACE_BASE_PERSONA_PATH = _workspace_root() / "workspace.base.md"
 WORKSPACE_MD_TEMPLATE = Path(__file__).resolve().parents[3] / "workspace.md.template"
 
 EMILY_BASE_PERSONA = """# Emily
