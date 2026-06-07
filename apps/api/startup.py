@@ -241,6 +241,25 @@ def _override_worker_author_platform_secret() -> None:
     run_service.get_secrets_for_worker = _cloud_get_secrets_for_worker
 
 
+def _register_git_workspace_resolver() -> None:
+    """Tell the engine's git_ops to scope the workspace git root per-request.
+
+    Each cloud workspace gets its own git repo under WORKERS_DIR/{workspace_id}.
+    The resolver returns the active workspace_id from the request contextvar —
+    same mechanism as _register_contexts_scope_resolver.
+
+    If the engine submodule predates the hook the call is skipped; git workspace
+    simply won't be cloud-aware on that deploy (OSS fallback behaviour).
+    """
+    try:
+        import git_ops as engine_git_ops  # noqa: PLC0415
+    except ImportError:
+        return  # engine submodule too old — skip silently
+    if not hasattr(engine_git_ops, "set_workspace_id_resolver"):
+        return  # hook not yet in engine — skip silently
+    engine_git_ops.set_workspace_id_resolver(get_active_workspace_id)
+
+
 def register_cloud_components() -> None:
     _activate_cloud_deploy()
     get_cloud_settings()
@@ -251,6 +270,7 @@ def register_cloud_components() -> None:
     apply_engine_overrides()
     apply_cloud_workspace_agent_overrides()
     _register_contexts_scope_resolver()
+    _register_git_workspace_resolver()
     _override_create_run_for_members()
     _override_worker_author_platform_secret()
     # Run the real init_db() once so the engine's local SQLite DB has the
