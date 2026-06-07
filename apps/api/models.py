@@ -6,7 +6,7 @@ import re
 import socket
 import warnings
 from typing import Any, Dict, List, Literal, Optional, Union
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
 
@@ -135,6 +135,16 @@ def assert_safe_outbound_url(url: str, *, label: str = "URL") -> str:
     Bypassed entirely when WORKEROS_ALLOW_PRIVATE_MCP_URLS=1 (self-hoster opt-in).
     """
     stripped = (url or "").strip()
+
+    # Reject CRLF injection — check raw, percent-decoded, and double-decoded to
+    # catch %0d%0a, %250d%250a, and mixed variants before any HTTP client sees them.
+    _once = unquote(stripped)
+    _twice = unquote(_once)
+    if any("\r" in s or "\n" in s for s in (stripped, _once, _twice)):
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: contains control characters (CRLF injection)"
+        )
+
     if _allow_private_mcp_urls():
         return stripped
 
