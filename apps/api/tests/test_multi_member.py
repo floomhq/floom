@@ -194,6 +194,7 @@ def test_login_correct_creds(admin_client):
     resp = admin_client.post("/auth/login", json={"username": "admin", "password": "adminpass123"})
     assert resp.status_code == 200
     assert "wos_session" in resp.cookies
+    assert resp.json()["redirect_to"] == "/overview"
 
 
 def test_login_wrong_password(admin_client):
@@ -485,4 +486,3 @@ def test_duplicate_username_rejected(admin_client):
     admin_client.post("/users", json={"username": "henry", "password": "henrypass123", "role": "member"})
     resp = admin_client.post("/users", json={"username": "henry", "password": "henrypass123", "role": "member"})
     assert resp.status_code == 409
-
