@@ -15,29 +15,117 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
+import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
 import type { AttachedFile, ChatMessage, ToolCard } from "./emily-chat-types";
+import {
+  CONVERSATION_STORAGE_KEY,
+  readStoredConversationId,
+  writeStoredConversationId,
+  clearStoredConversationId,
+} from "./emily-chat-storage";
+import { rehydrateConversation } from "./emily-chat-rehydrate";
 
 export interface ChatStreamState {
   messages: ChatMessage[];
   conversationId: string | null;
   isStreaming: boolean;
+  /** True while the stored conversation is being fetched + rehydrated on mount. */
+  isHydrating: boolean;
   error: string | null;
   sendMessage: (text: string, files?: AttachedFile[]) => void;
+  /** Reset to a fresh conversation. The previous one stays retrievable server-side. */
+  newSession: () => void;
 }
 
 export function useChatStream(): ChatStreamState {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isHydrating, setIsHydrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Keep localStorage in sync whenever the active conversation id changes so the
+  // id survives modal close/open, fullscreen toggle, navigation, and reload.
+  useEffect(() => {
+    if (conversationId) {
+      writeStoredConversationId(conversationId);
+    }
+  }, [conversationId]);
+
+  // On mount: if a conversation id was persisted, fetch it from the server and
+  // rehydrate messages + tool cards into the live stream shape. This is what
+  // makes the dock/full-page survive unmount and a browser reload.
+  useEffect(() => {
+    const storedId = readStoredConversationId();
+    if (!storedId) return;
+
+    let cancelled = false;
+    setIsHydrating(true);
+    (async () => {
+      try {
+        const detail = await api.conversations.get(storedId);
+        if (cancelled) return;
+        const hydrated = rehydrateConversation(detail);
+        setMessages(hydrated);
+        setConversationId(storedId);
+      } catch {
+        // Stored id no longer resolves (deleted, wrong workspace, 404). Drop it
+        // so we start clean instead of looping on a dead id.
+        if (!cancelled) clearStoredConversationId();
+      } finally {
+        if (!cancelled) setIsHydrating(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Cross-tab / cross-instance sync: if another mounted instance (e.g. the dock
+  // while the full page is open, or a second tab) starts a new session or
+  // switches conversation, mirror it here.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key !== CONVERSATION_STORAGE_KEY) return;
+      const next = e.newValue;
+      if (!next) {
+        // Cleared elsewhere → reset to fresh.
+        setMessages([]);
+        setConversationId(null);
+        return;
+      }
+      if (next === conversationId) return;
+      (async () => {
+        try {
+          const detail = await api.conversations.get(next);
+          const hydrated = rehydrateConversation(detail);
+          setMessages(hydrated);
+          setConversationId(next);
+        } catch {
+          /* ignore */
+        }
+      })();
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [conversationId]);
 
   // Abort any in-flight stream on unmount
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
     };
+  }, []);
+
+  const newSession = useCallback(() => {
+    abortRef.current?.abort();
+    clearStoredConversationId();
+    setMessages([]);
+    setConversationId(null);
+    setError(null);
+    setIsStreaming(false);
   }, []);
 
   const sendMessage = useCallback(
@@ -186,7 +274,15 @@ export function useChatStream(): ChatStreamState {
     [conversationId]
   );
 
-  return { messages, conversationId, isStreaming, error, sendMessage };
+  return {
+    messages,
+    conversationId,
+    isStreaming,
+    isHydrating,
+    error,
+    sendMessage,
+    newSession,
+  };
 }
 
 // ── Event reducer ─────────────────────────────────────────────────────────────

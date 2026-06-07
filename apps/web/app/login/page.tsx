@@ -22,8 +22,8 @@ function LoginContent() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const rawNext = searchParams.get("next") || "/";
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+  const rawNext = searchParams.get("next") || "/overview";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/overview";
 
   useEffect(() => {
     void (async () => {
@@ -103,7 +103,7 @@ function LoginContent() {
       <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-10">
         <div className="mb-6 flex items-center gap-2">
           <FloomMark size={22} />
-          <span className="text-base font-semibold tracking-tight">WorkerOS</span>
+          <span className="text-base font-semibold tracking-tight">Workeros</span>
         </div>
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
@@ -114,14 +114,14 @@ function LoginContent() {
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-10">
       <div className="mb-6 flex items-center gap-2">
         <FloomMark size={22} />
-        <span className="text-base font-semibold tracking-tight">WorkerOS</span>
+        <span className="text-base font-semibold tracking-tight">Workeros</span>
       </div>
 
       {mode === "setup" ? (
         <>
           <h1 className="text-xl font-semibold tracking-tight">Create your workspace</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Set up the first admin account for this WorkerOS instance.
+            Set up the first admin account for this Workeros instance.
           </p>
         </>
       ) : mode === "username" ? (

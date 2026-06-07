@@ -44,7 +44,7 @@ import smtplib
 import socket
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger("floom.alerting")
 
@@ -63,6 +63,8 @@ _SMTP_FROM: Optional[str] = os.environ.get("WORKEROS_SMTP_FROM") or _SMTP_USER o
 _ALERT_CONSECUTIVE_FAILURES: int = int(os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "3"))
 _ALERT_SUCCESS_RATE_THRESHOLD: float = float(os.environ.get("WORKEROS_ALERT_SUCCESS_RATE_THRESHOLD", "0.5"))
 _ALERT_HEALTHY_THRESHOLD: float = 0.80   # must have been >= this to trigger rate-drop alert
+_FAILURE_STATUSES = {"failed", "error", "cancelled", "rejected", "timeout"}
+_SUCCESS_STATUSES = {"completed", "approved", "success", "succeeded"}
 
 # How many scheduler ticks to skip between alerting checks (0 = every tick)
 _ALERT_POLL_EVERY_N_TICKS: int = int(os.environ.get("WORKEROS_ALERT_POLL_TICKS", "5"))
@@ -128,6 +130,19 @@ def _notify(worker_id: str, worker_name: str, reason: str, details: str) -> None
             f"\nView worker: {worker_url}\n"
         )
         _send_email(subject, body)
+
+
+def _count_consecutive_failures(statuses: list[str]) -> int:
+    count = 0
+    for status in statuses:
+        normalized = (status or "").strip().lower()
+        if normalized in _FAILURE_STATUSES:
+            count += 1
+            continue
+        if normalized in _SUCCESS_STATUSES:
+            break
+        break
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +235,98 @@ def alerting_tick() -> None:
     except Exception as exc:
         # Never crash the scheduler
         logger.exception("Alerting check failed: %s", exc)
+
+
+def alert_worker_failure_if_needed(worker_id: str) -> dict[str, Any] | None:
+    """Open and notify a consecutive-failure incident for one worker.
+
+    This is called immediately after a run is marked failed. It reuses the same
+    incident table and notification path as the scheduler tick, so a threshold
+    crossing fires once and stays quiet until recovery resolves the incident.
+    """
+    if not _ALERT_ENABLED:
+        return None
+
+    from db import get_db
+
+    with get_db() as conn:
+        _ensure_alert_incidents_table(conn)
+        worker = conn.execute(
+            """
+            SELECT
+                w.id,
+                w.name,
+                w.enabled,
+                w.trigger_type,
+                w.triggers_json,
+                sv.manifest_json
+            FROM workers w
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+            WHERE w.id = ? AND w.enabled = 1
+            """,
+            (worker_id,),
+        ).fetchone()
+        if not worker:
+            return None
+        worker_name = worker["name"] or worker_id
+        if _is_system_worker(worker_name):
+            return None
+        if _is_manual_only_worker(
+            worker["trigger_type"],
+            worker["manifest_json"],
+            worker["triggers_json"],
+        ):
+            return None
+
+        rows = conn.execute(
+            """
+            SELECT status, error, error_code, created_at, started_at, completed_at
+            FROM runs
+            WHERE worker_id = ?
+            ORDER BY COALESCE(completed_at, started_at, created_at) DESC, created_at DESC
+            LIMIT 20
+            """,
+            (worker_id,),
+        ).fetchall()
+        statuses = [str(row["status"] or "") for row in rows]
+        consecutive = _count_consecutive_failures(statuses)
+        if consecutive < _ALERT_CONSECUTIVE_FAILURES:
+            return {
+                "opened": False,
+                "worker_id": worker_id,
+                "consecutive_failures": consecutive,
+                "threshold": _ALERT_CONSECUTIVE_FAILURES,
+            }
+        if _is_incident_open(conn, worker_id, "consecutive_failures"):
+            return {
+                "opened": False,
+                "worker_id": worker_id,
+                "consecutive_failures": consecutive,
+                "threshold": _ALERT_CONSECUTIVE_FAILURES,
+                "already_open": True,
+            }
+
+        latest = rows[0] if rows else None
+        reason = f"{consecutive} consecutive failures"
+        detail_bits = [
+            f"threshold={_ALERT_CONSECUTIVE_FAILURES}",
+        ]
+        if latest and latest["error_code"]:
+            detail_bits.append(f"latest_error_code={latest['error_code']}")
+        if latest and latest["error"]:
+            detail_bits.append(f"latest_error={str(latest['error']).splitlines()[0][:160]}")
+        details = "; ".join(detail_bits)
+        _open_incident(conn, worker_id, "consecutive_failures", reason, details)
+        conn.commit()
+        _notify(worker_id, worker_name, reason, details)
+        return {
+            "opened": True,
+            "worker_id": worker_id,
+            "consecutive_failures": consecutive,
+            "threshold": _ALERT_CONSECUTIVE_FAILURES,
+            "reason": reason,
+            "details": details,
+        }
 
 
 def _run_alerting_check() -> None:
