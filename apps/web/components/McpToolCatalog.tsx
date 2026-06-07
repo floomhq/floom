@@ -14,7 +14,7 @@ const TOOL_GROUPS: { group: string; tools: { name: string; description: string }
   {
     group: "Workers",
     tools: [
-      { name: "workers.list", description: "List available Floom Workers." },
+      { name: "workers.list", description: "List available Workeros workers." },
       { name: "workers.get", description: "Read one worker, including config and recent run metadata." },
       { name: "workers.create", description: "Create a script-mode worker from worker_yml and run_py." },
       { name: "workers.update", description: "Patch trigger, cron, default inputs, capabilities, or rotate webhook secret." },
@@ -160,7 +160,7 @@ export function McpToolCatalog() {
         {/* W4: /connections/mcp is a real route (apps/web/app/connections/mcp).
             Link verified, not dead. */}
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Every tool the Floom Workers MCP server exposes to connected agents. Custom MCP
+          Every tool the Workeros MCP server exposes to connected agents. Custom MCP
           tools you add live under{" "}
           <a href="/connections/mcp" className="font-medium text-foreground underline underline-offset-2">
             Connections &rarr; MCP

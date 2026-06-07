@@ -4,11 +4,10 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Edit3, Save, X } from "lucide-react";
+import { AlertTriangle, Edit3, RotateCcw, Save, X } from "lucide-react";
 
 import { api } from "@/lib/api";
 import type { VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
-import { formatRelative } from "@/lib/formatters";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,22 +25,28 @@ import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 
-type TabKey = "instructions" | "prompt";
+type TabKey = "base" | "instructions" | "prompt";
 
-const TABS: TabKey[] = ["instructions", "prompt"];
+const TABS: TabKey[] = ["base", "instructions", "prompt"];
 
 function validTab(value: string): value is TabKey {
   return TABS.includes(value as TabKey);
 }
 
-// Inline "Versions ▾" dropdown for workspace instructions. Lazily loads the
-// version list when opened and rolls back in place — no separate tab/page.
-function InstructionsHistoryMenu({
+// Inline "Versions" dropdown reused by both editable layers (base + workspace).
+// Lazily loads the version list when opened and rolls back in place.
+function HistoryMenu({
+  loadVersions,
+  rollback,
   onRollback,
   refreshKey,
+  confirmLabel,
 }: {
+  loadVersions: () => Promise<VersionSummary[]>;
+  rollback: (versionId: string) => Promise<string>;
   onRollback: (content: string) => void;
   refreshKey: number;
+  confirmLabel: string;
 }) {
   const [versions, setVersions] = useState<VersionSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,28 +54,24 @@ function InstructionsHistoryMenu({
   const [rollingBack, setRollingBack] = useState<string | null>(null);
   const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
 
-  const loadVersions = useCallback(async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setVersions(await api.system.listWorkspaceVersions());
+      setVersions(await loadVersions());
     } catch {
       setVersions([]);
     } finally {
       setLoading(false);
       setLoadedOnce(true);
     }
-  }, []);
+  }, [loadVersions]);
 
   // Re-fetch when a save/rollback bumps the key, but only if already opened
   // once (avoids fetching for users who never open the dropdown).
   useEffect(() => {
-    if (loadedOnce) void loadVersions();
+    if (loadedOnce) void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
-
-  function handleRollback(v: VersionSummary) {
-    setPendingRestore(v);
-  }
 
   async function doRollback() {
     if (!pendingRestore) return;
@@ -78,10 +79,10 @@ function InstructionsHistoryMenu({
     setPendingRestore(null);
     setRollingBack(v.id);
     try {
-      const content = await api.system.rollbackWorkspaceInstructions(v.id);
+      const content = await rollback(v.id);
       onRollback(content);
-      await loadVersions();
-      toast.success(`Rolled back to commit ${v.sha}`);
+      await refresh();
+      toast.success(`Rolled back to version ${v.version_number}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
     } finally {
@@ -96,9 +97,9 @@ function InstructionsHistoryMenu({
         loading={loading && !loadedOnce}
         restoringId={rollingBack}
         onOpen={() => {
-          if (!loadedOnce) void loadVersions();
+          if (!loadedOnce) void refresh();
         }}
-        onRestore={(v) => handleRollback(v)}
+        onRestore={(v) => setPendingRestore(v)}
       />
 
       <Dialog
@@ -107,10 +108,10 @@ function InstructionsHistoryMenu({
       >
         <DialogContent showCloseButton={false} className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Restore commit {pendingRestore?.sha}?</DialogTitle>
+            <DialogTitle>Restore version {pendingRestore?.version_number}?</DialogTitle>
           </DialogHeader>
           <DialogDescription>
-            This will overwrite your current workspace instructions. The current version is saved automatically before restoring.
+            {confirmLabel} The current version is saved automatically before restoring.
           </DialogDescription>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPendingRestore(null)}>
@@ -130,28 +131,46 @@ export default function AssistantPage() {
   const initial =
     typeof window !== "undefined" && validTab(window.location.hash.replace(/^#/, ""))
       ? (window.location.hash.replace(/^#/, "") as TabKey)
-      : "instructions";
+      : "base";
   const [tab, setTab] = useState<TabKey>(initial);
   const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
+
+  // Layer 1: base instructions (built-in Emily persona, applies to ALL conversations).
+  const [base, setBase] = useState("");
+  const [originalBase, setOriginalBase] = useState("");
+  const [baseIsCustom, setBaseIsCustom] = useState(false);
+  const [editingBase, setEditingBase] = useState(false);
+  const [savingBase, setSavingBase] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
+
+  // Layer 2: workspace instructions (per-workspace, layered after base).
   const [instructions, setInstructions] = useState("");
   const [originalInstructions, setOriginalInstructions] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [editingInstructions, setEditingInstructions] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [versionsKey, setVersionsKey] = useState(0);
+  const [baseVersionsKey, setBaseVersionsKey] = useState(0);
 
   const dirty = instructions !== originalInstructions;
+  const baseDirty = base !== originalBase;
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [agentRes, instructionsRes] = await Promise.all([
+      const [agentRes, baseRes, instructionsRes] = await Promise.all([
         api.system.workspaceAgent(),
+        api.system.workspaceBasePersona(),
         api.system.workspaceInstructions(),
       ]);
       setAgent(agentRes);
+      setBase(baseRes.content);
+      setOriginalBase(baseRes.content);
+      setBaseIsCustom(baseRes.is_custom);
       setInstructions(instructionsRes);
       setOriginalInstructions(instructionsRes);
     } catch (err) {
@@ -178,6 +197,51 @@ export default function AssistantPage() {
     if (!validTab(value)) return;
     setTab(value);
     window.history.replaceState(null, "", `/assistant#${value}`);
+  }
+
+  async function saveBase() {
+    if (!base.trim()) {
+      toast.error("Base instructions cannot be empty");
+      return;
+    }
+    setSavingBase(true);
+    try {
+      await api.system.updateWorkspaceBasePersona(base);
+      setOriginalBase(base);
+      setBaseIsCustom(true);
+      setEditingBase(false);
+      toast.success("Base instructions saved");
+      setBaseVersionsKey((k) => k + 1);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save base instructions");
+    } finally {
+      setSavingBase(false);
+    }
+  }
+
+  async function resetBase() {
+    setResetting(true);
+    try {
+      await api.system.resetWorkspaceBasePersona();
+      setResetConfirm(false);
+      setEditingBase(false);
+      toast.success("Base instructions reset to the built-in default");
+      setBaseVersionsKey((k) => k + 1);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reset base instructions");
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  function handleBaseRollback(content: string) {
+    setBase(content);
+    setOriginalBase(content);
+    setBaseIsCustom(true);
+    setEditingBase(false);
+    setBaseVersionsKey((k) => k + 1);
   }
 
   async function saveInstructions() {
@@ -237,9 +301,8 @@ export default function AssistantPage() {
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           Your interactive workspace assistant — chat with it to get help and orchestrate your
-          workers. It reads the same Brain your workers use and can use your Connections read-only;
-          actions that would change a live connection need your approval. Workers run autonomously
-          on triggers; the assistant is interactive.
+          workers. Two layers shape how it behaves: Base instructions apply to every conversation,
+          and Workspace instructions add your tenant-specific rules on top.
         </p>
       </div>
 
@@ -254,10 +317,91 @@ export default function AssistantPage() {
       <Tabs value={tab} onValueChange={changeTab}>
         <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <TabsList>
-            <TabsTrigger value="instructions">Instructions</TabsTrigger>
+            <TabsTrigger value="base">Base instructions</TabsTrigger>
+            <TabsTrigger value="instructions">Workspace instructions</TabsTrigger>
             <TabsTrigger value="prompt">Final prompt</TabsTrigger>
           </TabsList>
         </div>
+
+        <TabsContent value="base" className="space-y-3">
+          {loading ? (
+            <>
+              <Skeleton className="h-4 w-44" />
+              <Skeleton className="h-80 w-full" />
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-medium">Base instructions</h2>
+                    <Badge variant="outline" className="text-xs">
+                      {baseIsCustom ? "Custom" : "Built-in default"}
+                    </Badge>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    The assistant&apos;s core identity and behavior. Applies to every conversation
+                    and is layered before your workspace instructions.
+                  </p>
+                </div>
+                {editingBase ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setBase(originalBase);
+                        setEditingBase(false);
+                      }}
+                      disabled={savingBase}
+                    >
+                      <X className="size-3.5" />
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={saveBase} disabled={!baseDirty || savingBase}>
+                      <Save className="size-3.5" />
+                      {savingBase ? "Saving" : "Save"}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <HistoryMenu
+                      refreshKey={baseVersionsKey}
+                      loadVersions={() => api.system.listWorkspaceBaseVersions()}
+                      rollback={(id) => api.system.rollbackWorkspaceBasePersona(id)}
+                      onRollback={handleBaseRollback}
+                      confirmLabel="This will overwrite your current base instructions."
+                    />
+                    {baseIsCustom ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setResetConfirm(true)}
+                        disabled={resetting}
+                      >
+                        <RotateCcw className="size-3.5" />
+                        Reset to default
+                      </Button>
+                    ) : null}
+                    <Button size="sm" variant="outline" onClick={() => setEditingBase(true)}>
+                      <Edit3 className="size-3.5" />
+                      Edit
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <Textarea
+                value={base}
+                onChange={(event) => {
+                  if (editingBase) setBase(event.target.value);
+                }}
+                readOnly={!editingBase}
+                className="min-h-[28rem] font-mono text-xs leading-relaxed read-only:bg-muted/40"
+                spellCheck={false}
+              />
+            </>
+          )}
+        </TabsContent>
 
         <TabsContent value="instructions" className="space-y-3">
           {loading ? (
@@ -271,7 +415,8 @@ export default function AssistantPage() {
                 <div>
                   <h2 className="text-sm font-medium">Workspace instructions</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Saved in workspace.md and prepended to the agent prompt.
+                    Tenant-specific rules and context. Saved in workspace.md and layered after the
+                    base instructions.
                   </p>
                 </div>
                 {editingInstructions ? (
@@ -295,9 +440,12 @@ export default function AssistantPage() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <InstructionsHistoryMenu
+                    <HistoryMenu
                       refreshKey={versionsKey}
+                      loadVersions={() => api.system.listWorkspaceVersions()}
+                      rollback={(id) => api.system.rollbackWorkspaceInstructions(id)}
                       onRollback={handleInstructionsRollback}
+                      confirmLabel="This will overwrite your current workspace instructions."
                     />
                     <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
                       <Edit3 className="size-3.5" />
@@ -328,7 +476,7 @@ export default function AssistantPage() {
                 <div>
                   <h2 className="text-sm font-medium">Final system prompt</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Read-only preview of the base agent prompt plus your saved workspace instructions.
+                    Read-only preview of the base instructions plus your saved workspace instructions.
                   </p>
                 </div>
                 <Badge variant="outline" className="text-xs">Read-only</Badge>
@@ -341,6 +489,29 @@ export default function AssistantPage() {
         </TabsContent>
 
       </Tabs>
+
+      <Dialog
+        open={resetConfirm}
+        onOpenChange={(open) => { if (!open) setResetConfirm(false); }}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reset base instructions?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            This removes your custom base instructions and restores the built-in default. Your
+            current version is saved to history first, so you can roll back.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetConfirm(false)} disabled={resetting}>
+              Cancel
+            </Button>
+            <Button onClick={() => void resetBase()} disabled={resetting}>
+              {resetting ? "Resetting" : "Reset to default"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <p className="text-xs text-muted-foreground">
         To use this assistant from Slack, go to{" "}

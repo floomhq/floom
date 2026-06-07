@@ -221,6 +221,19 @@ def set_workspace_base_persona(content: str) -> None:
     WORKSPACE_BASE_PERSONA_PATH.write_text(content, encoding='utf-8')
 
 
+def base_persona_is_custom() -> bool:
+    """True when a saved override exists (vs the built-in engine default)."""
+    return WORKSPACE_BASE_PERSONA_PATH.is_file()
+
+
+def clear_workspace_base_persona() -> None:
+    """Remove the override so the built-in engine default applies again."""
+    try:
+        WORKSPACE_BASE_PERSONA_PATH.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def get_workspace_md() -> str:
     """Return editable workspace custom instructions, or a custom-only default."""
     if WORKSPACE_MD_PATH.is_file():
@@ -1587,6 +1600,8 @@ def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     worker_id = str(args.get("id") or "")
     if not worker_id:
         return {"ok": False, "error": "id is required"}
+    from main import _canonical_worker_id
+    worker_id = _canonical_worker_id(worker_id)
     with _get_db() as conn:
         row = conn.execute(
             """
@@ -2460,6 +2475,8 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     yaml_text = str(args.get("yaml_text") or "")
     if not worker_id or not yaml_text:
         return {"ok": False, "error": "id and yaml_text are required"}
+    from main import _canonical_worker_id
+    worker_id = _canonical_worker_id(worker_id)
 
     from db import get_db as _get_db
     with _get_db() as conn:
@@ -2564,6 +2581,8 @@ def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     worker_id = str(args.get("id") or "")
     if not worker_id:
         return {"ok": False, "error": "id is required"}
+    from main import _canonical_worker_id
+    worker_id = _canonical_worker_id(worker_id)
     inputs_json = args.get("inputs_json") or "{}"
     try:
         inputs = json.loads(inputs_json) if isinstance(inputs_json, str) else dict(inputs_json or {})

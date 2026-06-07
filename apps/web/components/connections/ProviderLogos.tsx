@@ -6,7 +6,7 @@ function FloomMark({ className }: { className?: string }) {
       className={className}
       viewBox="0 0 100 100"
       role="img"
-      aria-label="Floom"
+      aria-label="Workeros"
     >
       <rect width="100" height="100" rx="22" fill="#1a1a1a" />
       <path

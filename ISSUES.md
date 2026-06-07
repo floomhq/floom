@@ -4,6 +4,32 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 ---
 
+## Walk defects from launch-readiness UX pass (2026-06-07)
+
+**Scope:** live UX walk documented in `docs/launch-readiness/ux-walk-2026-06-07.md`.
+
+**Status:** FIXING
+
+### P0 — Cloud magic-link email URL corrupted
+
+**Root cause:** the Cloud Supabase Auth email template constructed confirmation links with a raw `token_hash={{ .TokenHash }}` query separator. When SES/Supabase sent the email as quoted-printable, token hashes beginning with hex-looking bytes such as `e9` or `cb` could turn `=e9` / `=cb` into decoded bytes, removing the `=` separator or injecting a control character. The callback then received no valid `token_hash` and failed authentication.
+
+**Fix:** Cloud PR #113 makes the auth email template QP-safe and teaches the callback to parse emitted `token_hash%3D...` / `type%3D...` query parts. The live Supabase Auth template was patched on 2026-06-07, but final live cookie verification still requires deploying the Cloud API parser fallback.
+
+**Evidence:** Cloud tests passed: `python3 -m pytest tests/test_auth_email_flows.py tests/test_auth_error_logging.py -q` (`17 passed`, one existing pytest config warning). A fresh live email to a Gmail plus alias arrived with `token_hash%3D` and `type%3Dsignup` separators. Click-through on the currently deployed API still reached the fragment bridge without a session cookie because the parser fallback is not deployed yet.
+
+### P1 — OSS `/assistant` base-instructions editor loads empty after `/workspace/base/state` 404
+
+**Root cause:** the deployed OSS API exposes `GET /workspace/base` but not the newer `GET /workspace/base/state` endpoint that the `/assistant` page calls during `Promise.all`. That single 404 rejected the whole load, producing "Couldn't load the assistant — Not Found" and leaving the base-instructions editor empty.
+
+**Fix:** add a frontend compatibility fallback: if `/workspace/base/state` returns `Not Found`, fetch `/workspace/base` and use that resolved content as the current/default base persona until the state endpoint is deployed.
+
+**Evidence:** live `GET https://workers-api.floom.dev/workspace/base/state` with the real access secret returned HTTP 404; live `GET /workspace/base` returned HTTP 200 and the Emily base persona. Local targeted tests passed: `python3 -m pytest apps/api/tests/test_workspace_agent_endpoint.py -q` (`10 passed`), `npm test -- --run tests/api-workspace-base.test.ts` (`1 passed`), and `npm run build` completed successfully.
+
+**Audit:** `docs/WALK_DEFECTS_FIX_2026-06-07.md`
+
+---
+
 ## P0 bug pass M73/M74/M75 (2026-06-05)
 
 **Scope:** live Workeros product paths on `workeros.floom.dev` (Downstream host) and `workers.floom.dev` (open-source surface), both backed by the Workeros engine.
@@ -1976,3 +2002,188 @@ Raw/YAML Save + Discard buttons only render when `filesDirty === true`.
 **Status:** FIXED (PR #433)
 
 Button relabelled "Edit worker" to clarify destination.
+
+## [2026-06-05] Federico live-walk batch (workeros.floom.dev) — DOCUMENTED before changes
+- **Emily v5 — CONFIRMED CORRECT (not a bug):** design-doc v5 (emily-persona-research-2026-06-04 §3) IS canonical (no richer version hidden in past sessions — verified via transcript grep). PR #443 (merged) wired it faithfully: `EMILY_BASE_PERSONA` = v5 generic (tenant-safe, first-person "I'm Emily"), `workspace.md` = Federico context incl "Workers are your swarm", `SKILL.md` double-identity line trimmed. Live OS API serves v5 behavior (bare greeting leads with workspace state, no "Let me check"). Reaches live Cloud via the convergence engine bump.
+- **M73 (P0) Worker creation times out — FIXED/DEPLOYED (engine PR #447, squash `e4df683`):** root cause was the `/workers/new` prompt UI falling back from async `POST /workers/new/from-prompt` into legacy sync `POST /workers/draft-and-create`, where `gpt-5.5` codegen plus smoke/gate work can exceed the 60s Next/Vercel proxy `maxDuration`. The page also hardcoded `/api/proxy` for SSE instead of the configured proxy base. Fix: prompt creation is async-only after `newFromPrompt`; SSE paths use the configured API proxy and preserve workspace query state. OS API deployed via `/opt/workeros-api-deploy/ops/deploy-api.sh`, then `systemctl restart workeros-api`; active process cwd `/opt/workeros-api-deploy/apps/api`, repo SHA `e4df683`, health ok. Live verification: `POST https://workers-api.floom.dev/workers/new/from-prompt` returned run ids in `0.253s` and `0.285s`; the background codegen runs took `92.555s` and `177.564s`, proving the timeout-prone work is no longer on the HTTP request path. Both generated workers were deleted after verification. Separate follow-up: worker-author smoke quality still produced disabled workers in those probes, unrelated to the HTTP timeout root cause.
+- **M74 (P0) Worker detail infinite loop — FIXED/DEPLOYED (Cloud PR #87 `403cfd5`, PR #88 `9df73dd`; engine submodule `e4df683`):** two root causes. First, exact Cloud worker lookups were scoped to the active workspace cookie; with stale/default workspace `ws_aac663b43cb542`, the owned worker in `ws_b79e570aad8349` missed and surfaced as a not-found/bad-state detail. Second, Cloud middleware hardcoded `/app/login` while the dashboard runs under Next `basePath=/app`, producing Vercel `508 INFINITE_LOOP` in the authenticated browser path. Fix: `SupabaseWorkerRepository.get()` now retries exact id + owner on an active-workspace miss, and Cloud middleware strips/adds `/app` once while redirecting to internal `/login`. Cloud dashboard prod deploy `dpl_DRXeHuz6PQbqSaHzqdk2VFbZCXsz`; Cloud API restarted on `/opt/managed-deployment-deploy` at `9df73dd`. Live route check now redirects once to `/app/login?next=...` and returns HTTP 200, no `x-vercel-error: INFINITE_LOOP`. Deployed repo probe with stale workspace found `granola-hubspot-meeting-actions`; public Cloud API detail request with a temporary token returned the worker detail, and the token was deleted.
+- **M75 (P0) "Run not found" — FIXED/DEPLOYED (Cloud PR #87 `403cfd5`, PR #88 `9df73dd`; engine submodule `e4df683`):** root cause was the same exact-detail workspace scoping bug for runs. The real run exists in Cloud Supabase as `run_8290101e249b`, worker `granola-hubspot-meeting-sync`, status `failed`, duration `4436ms`, workspace `ws_b79e570aad8349`; stale/default workspace context made `runs.get()` return not found. Fix: `SupabaseRunRepository.get()` now retries exact run id + owner after an active-workspace miss. Cloud API deployed and restarted; deployed repo probe with stale workspace found `run_8290101e249b` with status `failed`. Public Cloud API detail request with a temporary token returned the run detail (`failed`, `4436ms`) and the token was deleted. Public deep link now redirects once to login and returns HTTP 200 instead of looping. Authenticated browser screenshot is pending Federico completing the broker login handoff.
+- **M76 (P1, UI) Tool/app logos missing — FIXED (PR #446, merged 947bb0f):** worker cards + popular-workflow cards + overview activity/coming-up lists showed generic trigger glyphs not app logos. Now: real brand logos derived from `WorkerSummary.connections` (data-driven), real Granola SVG added (granola.ai official marque, not fabricated). Reaches live Cloud via convergence bump.
+- **Inline prompt-text tool highlight — DONE (PR #442, merged d700d1f):** known tool names in prompt text get an inline brand icon + faint badge; Granola now shows its real logo (via #446).
+- **M77 (cleanup) Duplicate junk workers** — 3 near-identical "Granola to HubSpot Daily Meeting" workers (Emily created dupes). M49-class cleanup; fold into a dedupe pass after the P0s.
+
+## [2026-06-05] Federico live-walk batch 2 (connections/channels) — DOCUMENTED before changes
+- **Emily v5 — CONFIRMED LIVE on Cloud (not just merged):** Cloud API restarted 22:39 CEST, after engine bumped to e4df683 (v5) at 21:36; deployed chat_service.py has the v5 "I'm Emily" persona. The assistant#prompt tab serves v5 live. (Definitive yes.)
+- **M78 (P1, FEATURE — main complaint) No proper Slack/WhatsApp onboarding.** assistant#channels has only a barebones Slack form (paste Channel ID manually); WhatsApp absent entirely from the codebase. Wants guided Slack + WhatsApp onboarding, reachable from the landing directly. Build: Slack OAuth -> live channel-picker (no manual ID); WhatsApp mechanism TBD (Composio? Twilio? OpenClaw gateway — scope first, flag if it needs a Federico decision). Lane dispatched.
+- **M79 (bug) apex /connections/* 404.** workeros.floom.dev/connections/browse = 404, /connections = 404 (apex, no /app); /app/connections/browse = 307 works. Bare links don't resolve into the dashboard. Fix: apex redirect /connections,/connections/* -> /app/<same>. Lane dispatched.
+- **M80 (perf) "Redirecting to Composio" slow.** Root cause CONFIRMED: apps/web/app/connections/redirect/page.tsx hardcodes setTimeout(redirect, 3000) — a 3-second artificial delay. Fix: redirect as soon as the auth URL is ready. Lane dispatched.
+
+## [2026-06-05] Federico live-walk batch 3 (account / mcp / brain / sharing) — DOCUMENTED before changes
+NOTE: 4 screenshots referenced (Mac Desktop paths) could NOT be retrieved (ssh mac down). M82/M84 are screenshot-only — working from descriptions; M82 needs Federico to name the control.
+- **M81 (bug) Account does not show my email.** The account section/footer does not display the signed-in user's email. (Screenshot 13.38.03)
+- **M82 (P1 bug) "these dont do anything" — VIEWED:** the connections-table row "⋯" Actions menu items **Test connection / Refresh status / Disconnect** are all dead on click. Lane dispatched (connections-detail).
+- **VIEWED-PRECISION (2026-06-05, screenshots now readable via sshfs):** M81 = the connection ROW shows "account …ea71f1" (internal id) not the email + stuck "Connecting" (separate from the now-fixed sidebar footer email). M84 = the worker "Add tool" app picker is a plain TEXT dropdown, no brand logos (separate from the now-fixed MCP-server-add JSON). M86 = worker Share is a cramped modal with a raw hash token, not a Floom-style standalone page (standalone-share lane covers it).
+- **M83 (UX, REPEATED feedback) MCP connections should default to JSON, not a form** — https://workeros.floom.dev/app/connections/mcp — MCP servers are configured via JSON; the add UI must default to a JSON config input. Federico gave this before; not delivered. OWN IT.
+- **M84 (UX) "add a tool" UI sucks** (Screenshot 13.39.23) — likely the MCP/tool add form; make it JSON-based + clean. (Could not view screenshot.)
+- **M85 BRAIN / CONTEXT cluster:**
+  - M85a (P0 bug) **brain attach throws HTTP 500 on Cloud.**
+  - M85b (bug) download a brain file -> {"detail":"Context not found"} (confusing/broken). Source: apps/api/main.py + managed-deployment/apps/api/routes/context_previews.py.
+  - M85c (UX) drag-drop a file into the brain should JUST WORK and auto-create a pack if none exists (auto-name it). Currently can't just drop a file.
+  - M85d (feature) **standalone noindex share links for individual FILES** (like the approvals shareable links / M12) — currently can only share a pack, not a file standalone; and even pack sharing "links to the platform" rather than being a true standalone page. Wants standalone noindex pages. (Expands M70.)
+  - M85e (feature) brain/context is **read-only — wants WRITE** (add/edit files).
+- **M86 (UX, REPEATED feedback) Worker-card share page is weird; must match the Floom share reference** — target design: https://floom.dev/s/fls_A7lOwwSGOct63FCNC_-4CWlryYf8VddxfTCRxsmVk10 . Federico gave this reference BEFORE; I did not pick it up. The worker share + all standalone share pages (worker/brain-file/pack) should look like that Floom standalone share page. OWN IT — build against the reference this time.
+
+---
+
+## Emily chat persistence pass (2026-06-06)
+
+**Scope:** Emily chat in `apps/web` (engine) — the dock (`EmilyDock`) and the
+full-page chat (`EmilyChatPage` at `/chat`). Federico hit these live on
+`workers.floom.dev`. Propagates to Cloud via engine sync (no Cloud-repo edits).
+
+### EC1 — Conversation does not survive dock close→open, fullscreen toggle, or reload
+
+**Status:** FIXED
+
+**Root cause:** `useChatStream` held `messages` + `conversationId` in in-memory
+`useState` only. Closing/reopening the dock, switching between the dock and
+`/chat`, or reloading the browser dropped the in-memory state, so the chat
+appeared to reset even though the server already persisted the conversation.
+
+**Fix:** the active `conversationId` is persisted to `localStorage`
+(`workeros.emily.conversationId`). On mount the hook fetches
+`GET /conversations/{id}` (new `api.conversations.get`) and rehydrates server
+messages + tool cards into the live `ChatMessage`/`MsgPart` shape via
+`emily-chat-rehydrate.ts`. A `storage` event listener mirrors session changes
+across the dock/full-page/other tabs.
+
+### EC2 — No way to start a new conversation
+
+**Status:** FIXED
+
+**Fix:** a "New chat" control resets messages + conversationId and clears the
+localStorage key, starting a fresh conversation. The previous conversation is
+NOT deleted server-side (still retrievable via `GET /conversations/{id}`).
+
+### EC3 — No way to export a conversation
+
+**Status:** FIXED
+
+**Fix:** an "Export" control downloads the current conversation as Markdown
+(readable You/Emily turns, tool actions noted briefly) via
+`emily-chat-export.ts`. A JSON export helper is included as a bonus.
+
+### EC4 — Controls must be reachable in both dock and full-page chat
+
+**Status:** FIXED
+
+**Fix:** New chat + Export live in a controls bar inside the shared
+`EmilyChatCore`, so both `EmilyDock` and `EmilyChatPage` get them.
+
+**Evidence:** `apps/web` `npm run lint` (0 errors), `npm test` (33 passed),
+`npm run build` (Compiled successfully). Targeted `tsc` of the new/changed
+feature modules is clean; two pre-existing `tsc` errors in
+`tests/useChatStream.test.ts` (`.title` on the `ToolCard` union, present on
+origin/main, not exercised by CI's vitest+lint gate) are untouched.
+
+---
+
+## Federico live-test pass FL1–FL16 (2026-06-07)
+
+**Scope:** live walkthrough of the Workeros OS surface (apps/web). Items FL4, FL6, FL7, FL8, FL9, FL10 are addressed in branch `fix/livetest-ui-polish` (this PR); the rest are tracked here. Backend/worker-visibility (FL1/FL2), Cloud login (FL3), and upload limits (FL5) are owned by separate Codex lanes.
+
+### FL1 — Worker visibility: owner's private workers "gone" in UI
+
+**Status:** OPEN
+
+Not data loss. DB verified: 100 workers, 99 owner=`federico`, all `visibility=private`. The role-aware worker visibility (legacy `role=None` default) hides private workers from a session that doesn't map to owner/workspace. Owner/admin session must see their own private workers again; map legacy owner `federico` + `local-default` correctly. Do NOT migrate destructively. (Codex backend lane.)
+
+### FL2 — Durability fear ("lost after some time")
+
+**Status:** OPEN
+
+Move to the git-backed durable store (Vivek #488). Until then, OSS persistent disk keeps workers; Cloud must not rely on ephemeral FS. (Backend lane.)
+
+### FL3 — Cloud login returns to home page, no dashboard
+
+**Status:** OPEN
+
+Login redirect broken/confusing on the Downstream host. (Codex Cloud-login lane.)
+
+### FL4 — Homepage CTA must read "Dashboard" when signed in
+
+**Status:** OPEN
+
+When a session/token is present, the header CTA must say "Dashboard" (linking to the app), not "Sign in". Detect auth state. (Addressed for OS public share surfaces in this PR; Cloud landing owned by Cloud lane.)
+
+### FL5 — Upload without a folder → "Request body too large"
+
+**Status:** OPEN
+
+Inserting a 1.4MB image when no folder exists returns a bad/confusing "Request body too large" error and the upload is flaky without a folder (failed then worked). Raise/clarify the body limit and the error copy. (Upload lane.)
+
+### FL6 — `.txt` files have no Preview/Raw tabs
+
+**Status:** OPEN
+
+Every text file type should get Preview + Raw, consistent with markdown/other types. (Addressed in this PR.)
+
+### FL7 — Brain de-jargon: "knowledge pack" → "folder"
+
+**Status:** OPEN
+
+Rename user-visible "knowledge pack" → "folder" and items → plain "file" across the Brain/contexts UI. Text/label only; data model and routes unchanged (structural folder tree owned by Vivek). (Addressed in this PR.)
+
+### FL8 — Loading skeletons should be full-page
+
+**Status:** OPEN
+
+Skeletons for Brain, Workers, Runs, and Approvals should be full-page (match the real layout), not small partial blocks. (Brain + Runs addressed in this PR; Workers/Approvals already full-page.)
+
+### FL9 — Sidebar order: Assistant above Workers
+
+**Status:** OPEN
+
+Reorder the sidebar so Assistant sits above Workers. (Addressed in this PR.)
+
+### FL10 — "Clear all runs" too prominent / dangerous
+
+**Status:** OPEN
+
+The destructive clear-all-runs action must not be one-click-prominent beside the search bar. Guard it (app Dialog / type-to-confirm, not window.confirm) and de-emphasize/move it into an overflow menu. Global rule: dangerous destructive actions must never be one-click-prominent. (Addressed in this PR: command-palette entry de-emphasized + routes to the type-to-confirm danger zone.)
+
+### FL11 — Connections: scopes not visible ("Gmail … 12 scopes")
+
+**Status:** OPEN
+
+Add a hover/tooltip listing what the scopes actually are. (Connections redesign lane.)
+
+### FL12 — Connections trust: optional peek at last emails on hover
+
+**Status:** OPEN
+
+Optionally show last emails / a peek on hover to build trust. (Connections redesign lane.)
+
+### FL13 — Connections: "Test connection" vs "status" vs "refresh status" confusing
+
+**Status:** OPEN
+
+Clarify/merge the overlapping connection-status controls. (Connections redesign lane.)
+
+### FL14 — Connections: "use OAuth" info in a scrolling card
+
+**Status:** OPEN
+
+The OAuth info card scrolls (violates one-card/no-scroll rule); move it elsewhere. (Connections redesign lane.)
+
+### FL15 — MCP page redesign
+
+**Status:** OPEN
+
+MCP page "doesn't feel nice" — make it intuitive: JSON config / form / import-from-JSON. (MCP redesign lane.)
+
+### FL16 — Naming discussion (workers → agents? assistant → Chief of Staff?)
+
+**Status:** OPEN
+
+Federico's call — not building yet. Needs a decision before any rename.

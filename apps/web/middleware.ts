@@ -53,7 +53,15 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   const withNoindex = (response: NextResponse) => {
-    if (pathname === "/s" || pathname.startsWith("/s/")) {
+    // Public, token-gated share surfaces must never be indexed: the standalone
+    // share pages (/s/*) and the standalone approval review page
+    // (/approvals/review). /w/* sets noindex via its page metadata.
+    const isNoindexPath =
+      pathname === "/s" ||
+      pathname.startsWith("/s/") ||
+      pathname === "/approvals/review" ||
+      pathname.startsWith("/approvals/review");
+    if (isNoindexPath) {
       response.headers.set("X-Robots-Tag", "noindex, nofollow");
       response.headers.set("Cache-Control", "no-store");
     }
