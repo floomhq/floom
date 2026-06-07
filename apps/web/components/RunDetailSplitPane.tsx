@@ -169,6 +169,7 @@ export function RunDetailSplitPane({
             <div className="shrink-0 border-b border-border px-3 py-2">
               <TabsList variant="line">
                 <TabsTrigger value="output">Output</TabsTrigger>
+                <TabsTrigger value="inputs">Inputs</TabsTrigger>
                 <TabsTrigger value="transcript">Steps</TabsTrigger>
                 <TabsTrigger value="files">Files</TabsTrigger>
                 <TabsTrigger value="logs">Logs</TabsTrigger>
@@ -182,6 +183,9 @@ export function RunDetailSplitPane({
                 clipped by the pane's `overflow-hidden`. */}
             <TabsContent value="output" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <OutputView run={run} />
+            </TabsContent>
+            <TabsContent value="inputs" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
+              <InputsView run={run} />
             </TabsContent>
             <TabsContent value="transcript" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <TranscriptView run={run} parts={transcriptParts} />
@@ -700,6 +704,31 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
           </pre>
         )}
       </section>
+    </div>
+  );
+}
+
+function InputsView({ run }: { run: RunDetail }) {
+  const entries = Object.entries(run.input || {});
+  if (entries.length === 0) {
+    return <p className="text-sm text-muted-foreground">No inputs were provided for this run.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {entries.map(([key, value]) => (
+        <div key={key} className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{key}</p>
+          {typeof value === "string" ? (
+            <p className="text-sm text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-border bg-muted/30 px-3 py-2">
+              {value || <span className="italic text-muted-foreground">empty</span>}
+            </p>
+          ) : (
+            <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-border bg-muted/30 px-3 py-2">
+              {JSON.stringify(value, null, 2)}
+            </pre>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
