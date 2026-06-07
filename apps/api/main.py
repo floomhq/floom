@@ -18038,8 +18038,10 @@ def import_git_workspace(
         tools_yml = tmp / "workspace-tools.yml"
         if tools_yml.is_file():
             try:
-                loaded = _load_workspace_tools_yml(auth.user_id, repos)
-                imported["tools"] = loaded
+                dest_tools = _git_workspace() / _WORKSPACE_TOOLS_FILENAME
+                dest_tools.parent.mkdir(parents=True, exist_ok=True)
+                dest_tools.write_bytes(tools_yml.read_bytes())
+                imported["tools"] = _load_workspace_tools_yml(auth.user_id, repos)
             except Exception:
                 pass
 
