@@ -74,13 +74,16 @@ const CHANNELS: Channel[] = [
 export function ChannelInstall() {
   const reduce = useReducedMotion() ?? false;
 
+  // Mount-animated, not viewport-triggered. This sits in the hero, so the
+  // initial IntersectionObserver may not fire before the user scrolls or
+  // focuses the composer (the audit caught this exact pattern). Match the
+  // composer's always-on entrance.
   const Wrapper = reduce ? "div" : motion.div;
   const wrapperProps = reduce
     ? {}
     : {
         initial: "hidden",
-        whileInView: "show",
-        viewport: { once: true, amount: 0.3 } as const,
+        animate: "show",
         variants: stagger,
       };
 
