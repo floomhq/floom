@@ -163,6 +163,8 @@ def ensure_workspace_repo(workspace_id: str) -> Path:
 
     On first call for a fresh workspace:
     1. Try to download and restore a bundle from Supabase Storage.
+       If restored, backfill any worker _files missing from Supabase so
+       workers can execute on the new server without a GitHub connection.
     2. Otherwise initialise a new empty repo.
     Subsequent calls are a fast-path (just checks for .git/).
     """
@@ -173,11 +175,96 @@ def ensure_workspace_repo(workspace_id: str) -> Path:
     with _get_lock(workspace_id):
         if (git_dir / ".git").exists():
             return git_dir
-        if not _restore_from_bundle(workspace_id, git_dir):
+        restored = _restore_from_bundle(workspace_id, git_dir)
+        if restored:
+            # Backfill worker execution files into Supabase so workers can run
+            # on this new server without needing GitHub or the old disk.
+            _backfill_worker_files_from_git(workspace_id, git_dir)
+        else:
             _init_repo(git_dir)
             logger.info("Initialised fresh git workspace for %s", workspace_id)
 
     return git_dir
+
+
+def _backfill_worker_files_from_git(workspace_id: str, git_dir: Path) -> None:
+    """After restoring from a bundle on a fresh server, update Supabase
+    skill_versions.manifest_json._files for any workers whose _files are
+    missing. This ensures workers can execute (E2B reads _files from Supabase)
+    even when GitHub is not connected.
+
+    Only updates workers that belong to this workspace and have empty _files.
+    Safe to call multiple times — skips workers that already have _files.
+    """
+    workers_git_dir = git_dir / "workers"
+    if not workers_git_dir.is_dir():
+        return
+
+    import yaml
+
+    svc = get_supabase_service_client()
+
+    for worker_dir in workers_git_dir.iterdir():
+        if not worker_dir.is_dir():
+            continue
+        worker_id = worker_dir.name
+        worker_yml = worker_dir / "worker.yml"
+        if not worker_yml.exists():
+            continue
+
+        try:
+            # Check if this worker has _files in Supabase already
+            rows = (
+                svc.table("workers")
+                .select("skill_version_id")
+                .eq("id", worker_id)
+                .eq("workspace_id", workspace_id)
+                .limit(1)
+                .execute()
+            )
+            if not rows.data or not rows.data[0].get("skill_version_id"):
+                continue
+            sv_id = rows.data[0]["skill_version_id"]
+
+            sv_rows = (
+                svc.table("skill_versions")
+                .select("manifest_json")
+                .eq("id", sv_id)
+                .limit(1)
+                .execute()
+            )
+            if not sv_rows.data:
+                continue
+
+            manifest = dict(sv_rows.data[0]["manifest_json"] or {})
+            existing_files = manifest.get("_files") or {}
+            if existing_files:
+                continue  # Already has files — nothing to backfill
+
+            # Read all non-yml files from the git workspace
+            files: dict[str, str] = {}
+            for fpath in worker_dir.iterdir():
+                if fpath.is_file() and fpath.name != "worker.yml":
+                    try:
+                        files[fpath.name] = fpath.read_text(encoding="utf-8")
+                    except Exception:
+                        pass
+
+            if not files:
+                continue  # Nothing to backfill
+
+            manifest["_files"] = files
+            svc.table("skill_versions").update(
+                {"manifest_json": manifest}
+            ).eq("id", sv_id).execute()
+            logger.info(
+                "backfill: restored _files for worker %s/%s (%d files)",
+                workspace_id, worker_id, len(files),
+            )
+        except Exception as exc:
+            logger.warning(
+                "backfill: failed for worker %s/%s: %s", workspace_id, worker_id, exc
+            )
 
 
 # ---------------------------------------------------------------------------

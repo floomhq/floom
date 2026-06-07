@@ -348,7 +348,7 @@ def test_ensure_bucket_creates_bucket(tmp_path):
         ensure_bucket()
     mock_svc.storage.create_bucket.assert_called_once_with(
         "workeros-git-bundles",
-        options={"public": False, "file_size_limit": "500mb"},
+        options={"public": False},
     )
 
 
@@ -358,3 +358,121 @@ def test_ensure_bucket_ignores_already_exists(tmp_path):
     with patch("apps.api.cloud_git_local.get_supabase_service_client", return_value=mock_svc):
         from apps.api.cloud_git_local import ensure_bucket
         ensure_bucket()  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# _backfill_worker_files_from_git
+# ---------------------------------------------------------------------------
+
+def test_backfill_updates_supabase_when_files_missing(tmp_path):
+    """Workers with empty _files in Supabase get them backfilled from the git dir."""
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+
+    # Set up git workspace with a worker
+    worker_dir = git_dir / "workers" / "w1"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "worker.yml").write_text("name: w1\ndescription: test\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text("print('hello')\n", encoding="utf-8")
+
+    # Supabase returns worker with empty _files
+    mock_svc = MagicMock()
+    mock_svc.table().select().eq().eq().limit().execute.return_value.data = [
+        {"skill_version_id": "sv-111"}
+    ]
+    mock_svc.table().select().eq().limit().execute.return_value.data = [
+        {"manifest_json": {"name": "w1", "_files": {}}}
+    ]
+
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client", return_value=mock_svc):
+            from apps.api.cloud_git_local import _backfill_worker_files_from_git
+            _backfill_worker_files_from_git(WORKSPACE_ID, git_dir)
+
+    # Should have called update with _files populated
+    # Access via return_value chain to avoid triggering a new mock call
+    update_mock = mock_svc.table.return_value.update
+    update_mock.assert_called()
+    manifest_arg = update_mock.call_args.args[0]["manifest_json"]
+    assert "run.py" in manifest_arg["_files"]
+    assert manifest_arg["_files"]["run.py"] == "print('hello')\n"
+
+
+def test_backfill_skips_workers_that_already_have_files(tmp_path):
+    """Workers that already have _files in Supabase are not touched."""
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    worker_dir = git_dir / "workers" / "w1"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "worker.yml").write_text("name: w1\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text("print('existing')\n", encoding="utf-8")
+
+    mock_svc = MagicMock()
+    mock_svc.table().select().eq().eq().limit().execute.return_value.data = [
+        {"skill_version_id": "sv-222"}
+    ]
+    mock_svc.table().select().eq().limit().execute.return_value.data = [
+        {"manifest_json": {"name": "w1", "_files": {"run.py": "print('existing')"}}}
+    ]
+
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client", return_value=mock_svc):
+            from apps.api.cloud_git_local import _backfill_worker_files_from_git
+            _backfill_worker_files_from_git(WORKSPACE_ID, git_dir)
+
+    mock_svc.table().update.assert_not_called()
+
+
+def test_backfill_skips_dirs_without_worker_yml(tmp_path):
+    """Directories without worker.yml are skipped silently."""
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    (git_dir / "workers" / "w1").mkdir(parents=True)
+    # No worker.yml
+
+    mock_svc = MagicMock()
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client", return_value=mock_svc):
+            from apps.api.cloud_git_local import _backfill_worker_files_from_git
+            _backfill_worker_files_from_git(WORKSPACE_ID, git_dir)
+
+    mock_svc.table().update.assert_not_called()
+
+
+def test_ensure_workspace_repo_triggers_backfill_on_restore(tmp_path):
+    """After restoring from a bundle, backfill is called automatically."""
+    ws_root = tmp_path / "workspaces"
+
+    # Create a real bundle with a worker
+    src_dir = tmp_path / "src"
+    _make_git_dir(src_dir)
+    (src_dir / "workers" / "w1").mkdir(parents=True)
+    (src_dir / "workers" / "w1" / "worker.yml").write_text("name: w1\n", encoding="utf-8")
+    (src_dir / "workers" / "w1" / "run.py").write_text("print('v1')\n", encoding="utf-8")
+    _commit_file(src_dir, "workers/w1/worker.yml", "name: w1\n")
+    import tempfile as _tf
+    bundle_tmp = tmp_path / "repo.bundle"
+    subprocess.run(["git", "bundle", "create", str(bundle_tmp), "--all"],
+                   cwd=str(src_dir), check=True, capture_output=True)
+    bundle_bytes = bundle_tmp.read_bytes()
+
+    mock_storage = MagicMock()
+    mock_storage.from_().download.return_value = bundle_bytes
+    mock_svc = MagicMock()
+    mock_svc.storage = mock_storage
+    # Worker has no _files in Supabase
+    mock_svc.table().select().eq().eq().limit().execute.return_value.data = [
+        {"skill_version_id": "sv-333"}
+    ]
+    mock_svc.table().select().eq().limit().execute.return_value.data = [
+        {"manifest_json": {"name": "w1", "_files": {}}}
+    ]
+
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client", return_value=mock_svc):
+            from apps.api.cloud_git_local import ensure_workspace_repo
+            git_dir = ensure_workspace_repo(WORKSPACE_ID)
+
+    assert (git_dir / ".git").exists()
+    # update should have been called to backfill _files
+    mock_svc.table().update.assert_called()
