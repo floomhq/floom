@@ -342,6 +342,46 @@ function ConnectedView({
 }
 
 // ---------------------------------------------------------------------------
+// Member read-only view
+// ---------------------------------------------------------------------------
+
+function MemberView({ status }: { status: GitWorkspaceStatus | null }) {
+  if (!status?.connected) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        GitHub is not configured for this workspace. Ask a workspace admin to connect a GitHub repo in Settings → GitHub.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 rounded-[var(--radius-card)] border border-border bg-muted/30 px-4 py-3">
+        <span className="size-2 rounded-full bg-green-500 shrink-0" />
+        <div className="min-w-0">
+          <a
+            href={status.repo_url ?? "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium hover:underline flex items-center gap-1 truncate"
+          >
+            {status.repo_full_name}
+            <ExternalLink className="size-3 shrink-0" />
+          </a>
+          <p className="text-xs text-muted-foreground">
+            {status.last_pushed_at
+              ? <>Last pushed {formatRelative(status.last_pushed_at)}</>
+              : "Never pushed"}
+          </p>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Every save you make is automatically committed and pushed to this repo. Contact a workspace admin to change the configuration.
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main panel
 // ---------------------------------------------------------------------------
 
@@ -351,19 +391,57 @@ export function GitWorkspacePanel() {
   const [step, setStep] = useState<Step>("loading");
   const [status, setStatus] = useState<GitWorkspaceStatus | null>(null);
   const [username, setUsername] = useState<string>("");
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
 
   useEffect(() => {
-    api.system.gitStatus()
-      .then((s) => {
-        if (s.connected) {
-          setStatus(s);
-          setStep("connected");
-        } else {
-          setStep("pat");
-        }
-      })
-      .catch(() => setStep("pat"));
+    Promise.all([
+      api.system.gitStatus().catch(() => null),
+      api.me().catch(() => null),
+    ]).then(([s, me]) => {
+      // role === "admin" or unset (dev mode / OSS single-user) = admin access
+      const admin = !me || !me.role || me.role === "admin";
+      setIsAdmin(admin);
+      if (s?.connected) {
+        setStatus(s);
+        setStep("connected");
+      } else {
+        setStep("pat");
+      }
+    });
   }, []);
+
+  // Still loading
+  if (isAdmin === null) {
+    return (
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Github className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">GitHub workspace</h2>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+          <Loader2 className="size-4 animate-spin" /> Loading…
+        </div>
+      </section>
+    );
+  }
+
+  // Members get a read-only view — no config controls
+  if (!isAdmin) {
+    return (
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Github className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium">GitHub workspace</h2>
+          {status?.connected && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
+              <Check className="size-2.5" /> Connected
+            </span>
+          )}
+        </div>
+        <MemberView status={status} />
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-4">
