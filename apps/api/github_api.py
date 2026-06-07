@@ -210,16 +210,33 @@ def list_repo_tree(pat: str, repo_full_name: str, ref: str = "HEAD") -> list[dic
         raise
 
 
-def get_file_content(pat: str, repo_full_name: str, path: str) -> Optional[str]:
-    """Return the decoded text content of a file, or None if not found."""
+def get_file_content(pat: str, repo_full_name: str, path: str, ref: Optional[str] = None) -> Optional[str]:
+    """Return the decoded text content of a file at ref (default: HEAD), or None if not found."""
     from base64 import b64decode
+    url = f"/repos/{repo_full_name}/contents/{path}"
+    if ref:
+        url += f"?ref={ref}"
     try:
-        result = _call("GET", f"/repos/{repo_full_name}/contents/{path}", pat)
+        result = _call("GET", url, pat)
         encoded = result.get("content", "")
         return b64decode(encoded.replace("\n", "")).decode("utf-8")
     except GitHubAPIError as exc:
         if exc.status == 404:
             return None
         raise
+
+
+def list_files_at_ref(pat: str, repo_full_name: str, prefix: str, ref: str) -> list[str]:
+    """Return all file paths under prefix at the given ref (commit SHA or branch).
+
+    Used by cloud rollback to enumerate context files at a historical commit.
+    """
+    tree = list_repo_tree(pat, repo_full_name, ref)
+    prefix = prefix.rstrip("/") + "/"
+    return [
+        e["path"]
+        for e in tree
+        if e.get("type") == "blob" and e.get("path", "").startswith(prefix)
+    ]
 
 
