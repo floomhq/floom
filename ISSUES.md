@@ -2059,3 +2059,105 @@ NOT deleted server-side (still retrievable via `GET /conversations/{id}`).
 feature modules is clean; two pre-existing `tsc` errors in
 `tests/useChatStream.test.ts` (`.title` on the `ToolCard` union, present on
 origin/main, not exercised by CI's vitest+lint gate) are untouched.
+
+---
+
+## Federico live-test pass FL1–FL16 (2026-06-07)
+
+**Scope:** live walkthrough of the Workeros OS surface (apps/web). Items FL4, FL6, FL7, FL8, FL9, FL10 are addressed in branch `fix/livetest-ui-polish` (this PR); the rest are tracked here. Backend/worker-visibility (FL1/FL2), Cloud login (FL3), and upload limits (FL5) are owned by separate Codex lanes.
+
+### FL1 — Worker visibility: owner's private workers "gone" in UI
+
+**Status:** OPEN
+
+Not data loss. DB verified: 100 workers, 99 owner=`federico`, all `visibility=private`. The role-aware worker visibility (legacy `role=None` default) hides private workers from a session that doesn't map to owner/workspace. Owner/admin session must see their own private workers again; map legacy owner `federico` + `local-default` correctly. Do NOT migrate destructively. (Codex backend lane.)
+
+### FL2 — Durability fear ("lost after some time")
+
+**Status:** OPEN
+
+Move to the git-backed durable store (Vivek #488). Until then, OSS persistent disk keeps workers; Cloud must not rely on ephemeral FS. (Backend lane.)
+
+### FL3 — Cloud login returns to home page, no dashboard
+
+**Status:** OPEN
+
+Login redirect broken/confusing on the Cloud wrapper. (Codex Cloud-login lane.)
+
+### FL4 — Homepage CTA must read "Dashboard" when signed in
+
+**Status:** OPEN
+
+When a session/token is present, the header CTA must say "Dashboard" (linking to the app), not "Sign in". Detect auth state. (Addressed for OS public share surfaces in this PR; Cloud landing owned by Cloud lane.)
+
+### FL5 — Upload without a folder → "Request body too large"
+
+**Status:** OPEN
+
+Inserting a 1.4MB image when no folder exists returns a bad/confusing "Request body too large" error and the upload is flaky without a folder (failed then worked). Raise/clarify the body limit and the error copy. (Upload lane.)
+
+### FL6 — `.txt` files have no Preview/Raw tabs
+
+**Status:** OPEN
+
+Every text file type should get Preview + Raw, consistent with markdown/other types. (Addressed in this PR.)
+
+### FL7 — Brain de-jargon: "knowledge pack" → "folder"
+
+**Status:** OPEN
+
+Rename user-visible "knowledge pack" → "folder" and items → plain "file" across the Brain/contexts UI. Text/label only; data model and routes unchanged (structural folder tree owned by Vivek). (Addressed in this PR.)
+
+### FL8 — Loading skeletons should be full-page
+
+**Status:** OPEN
+
+Skeletons for Brain, Workers, Runs, and Approvals should be full-page (match the real layout), not small partial blocks. (Brain + Runs addressed in this PR; Workers/Approvals already full-page.)
+
+### FL9 — Sidebar order: Assistant above Workers
+
+**Status:** OPEN
+
+Reorder the sidebar so Assistant sits above Workers. (Addressed in this PR.)
+
+### FL10 — "Clear all runs" too prominent / dangerous
+
+**Status:** OPEN
+
+The destructive clear-all-runs action must not be one-click-prominent beside the search bar. Guard it (app Dialog / type-to-confirm, not window.confirm) and de-emphasize/move it into an overflow menu. Global rule: dangerous destructive actions must never be one-click-prominent. (Addressed in this PR: command-palette entry de-emphasized + routes to the type-to-confirm danger zone.)
+
+### FL11 — Connections: scopes not visible ("Gmail … 12 scopes")
+
+**Status:** OPEN
+
+Add a hover/tooltip listing what the scopes actually are. (Connections redesign lane.)
+
+### FL12 — Connections trust: optional peek at last emails on hover
+
+**Status:** OPEN
+
+Optionally show last emails / a peek on hover to build trust. (Connections redesign lane.)
+
+### FL13 — Connections: "Test connection" vs "status" vs "refresh status" confusing
+
+**Status:** OPEN
+
+Clarify/merge the overlapping connection-status controls. (Connections redesign lane.)
+
+### FL14 — Connections: "use OAuth" info in a scrolling card
+
+**Status:** OPEN
+
+The OAuth info card scrolls (violates one-card/no-scroll rule); move it elsewhere. (Connections redesign lane.)
+
+### FL15 — MCP page redesign
+
+**Status:** OPEN
+
+MCP page "doesn't feel nice" — make it intuitive: JSON config / form / import-from-JSON. (MCP redesign lane.)
+
+### FL16 — Naming discussion (workers → agents? assistant → Chief of Staff?)
+
+**Status:** OPEN
+
+Federico's call — not building yet. Needs a decision before any rename.
