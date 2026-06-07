@@ -894,7 +894,7 @@ function ContextsPage() {
 
         {/* Divider between the packs pane and the detail/middle pane. */}
         <ResizableDivider
-          ariaLabel="Resize knowledge packs pane"
+          ariaLabel="Resize folders pane"
           onResizeStart={beginResize}
           onResize={resizePacks}
           onResizeEnd={noop}
