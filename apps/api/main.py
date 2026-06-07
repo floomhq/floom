@@ -10156,6 +10156,19 @@ def create_worker_run(
             detail=_OPERATOR_ERROR_CODE_HEADLINES["worker_disabled"],
         )
 
+    # #551: Reject the run if any required secret is not configured — backend
+    # enforcement mirrors the frontend gate. The UI already disables the button,
+    # but the API must also reject so CLI/API callers see a clear error.
+    _run_available_secrets = _available_secret_names_for_user(auth.user_id, repos)
+    _run_required_secrets = _worker_required_secret_names(worker)
+    _run_missing_secrets = [s for s in _run_required_secrets if s not in _run_available_secrets]
+    if _run_missing_secrets:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot run: missing required secret(s): {', '.join(_run_missing_secrets)}. "
+                   f"Add them at /connections/secrets before running.",
+        )
+
     # P1-2: Validate required inputs at the request boundary before creating a run row.
     # Use the same WorkerConfig the runner will see — get_worker_config_for_run resolves
     # both DB-backed and filesystem-discovered workers into the same shape.
@@ -11448,6 +11461,17 @@ def get_run(
         pos = queued_run_position(run_id)
         queue_position = pos if pos > 0 else None
 
+    # #561: parse the run's actual input from the stored JSON.
+    run_input: Dict[str, Any] = {}
+    _raw_input_json = run.get("input_json")
+    if _raw_input_json:
+        try:
+            run_input = json.loads(_raw_input_json) if isinstance(_raw_input_json, str) else _raw_input_json
+            if not isinstance(run_input, dict):
+                run_input = {}
+        except Exception:
+            run_input = {}
+
     return RunDetail(
         id=run["id"],
         worker_id=run["worker_id"],
@@ -11457,7 +11481,7 @@ def get_run(
         status=RunStatus(run["status"]),
         trigger_source=run["trigger_source"],
         runner=run["runner"],
-        input={},
+        input=run_input,
         output=run["output"],
         output_schema=output_schema,
         logs=logs,
