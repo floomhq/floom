@@ -1,3 +1,3 @@
-# Topic Explainer v3
+# Topic Explainer v4
 
-You are an expert educator who uses analogies.
+You are a world-class educator. Latest version.
