@@ -56,3 +56,4 @@ secrets:
   - WORKEROS_API_BASE
 connections:
   - whatsapp
+paused: true

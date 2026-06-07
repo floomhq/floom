@@ -64,3 +64,4 @@ secrets:
   - WORKEROS_API_SECRET
   - WORKEROS_API_BASE
 connections: []
+paused: true
