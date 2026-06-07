@@ -4,6 +4,32 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 ---
 
+## Walk defects from launch-readiness UX pass (2026-06-07)
+
+**Scope:** live UX walk documented in `docs/launch-readiness/ux-walk-2026-06-07.md`.
+
+**Status:** FIXING
+
+### P0 — Cloud magic-link email URL corrupted
+
+**Root cause:** the Cloud Supabase Auth email template constructed confirmation links with a raw `token_hash={{ .TokenHash }}` query separator. When SES/Supabase sent the email as quoted-printable, token hashes beginning with hex-looking bytes such as `e9` or `cb` could turn `=e9` / `=cb` into decoded bytes, removing the `=` separator or injecting a control character. The callback then received no valid `token_hash` and failed authentication.
+
+**Fix:** Cloud PR #113 makes the auth email template QP-safe and teaches the callback to parse emitted `token_hash%3D...` / `type%3D...` query parts. The live Supabase Auth template was patched on 2026-06-07, but final live cookie verification still requires deploying the Cloud API parser fallback.
+
+**Evidence:** Cloud tests passed: `python3 -m pytest tests/test_auth_email_flows.py tests/test_auth_error_logging.py -q` (`17 passed`, one existing pytest config warning). A fresh live email to a Gmail plus alias arrived with `token_hash%3D` and `type%3Dsignup` separators. Click-through on the currently deployed API still reached the fragment bridge without a session cookie because the parser fallback is not deployed yet.
+
+### P1 — OSS `/assistant` base-instructions editor loads empty after `/workspace/base/state` 404
+
+**Root cause:** the deployed OSS API exposes `GET /workspace/base` but not the newer `GET /workspace/base/state` endpoint that the `/assistant` page calls during `Promise.all`. That single 404 rejected the whole load, producing "Couldn't load the assistant — Not Found" and leaving the base-instructions editor empty.
+
+**Fix:** add a frontend compatibility fallback: if `/workspace/base/state` returns `Not Found`, fetch `/workspace/base` and use that resolved content as the current/default base persona until the state endpoint is deployed.
+
+**Evidence:** live `GET https://workers-api.floom.dev/workspace/base/state` with the real access secret returned HTTP 404; live `GET /workspace/base` returned HTTP 200 and the Emily base persona. Local targeted tests passed: `python3 -m pytest apps/api/tests/test_workspace_agent_endpoint.py -q` (`10 passed`), `npm test -- --run tests/api-workspace-base.test.ts` (`1 passed`), and `npm run build` completed successfully.
+
+**Audit:** `docs/WALK_DEFECTS_FIX_2026-06-07.md`
+
+---
+
 ## P0 bug pass M73/M74/M75 (2026-06-05)
 
 **Scope:** live Workeros product paths on `workeros.floom.dev` (Cloud wrapper) and `workers.floom.dev` (open-source surface), both backed by the Workeros engine.
