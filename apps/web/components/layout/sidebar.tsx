@@ -77,8 +77,10 @@ type NavItem = {
 
 const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
-  { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
+  // FL9: Assistant above Workers — the thing you talk to comes before the
+  // things that run on triggers.
   { href: "/assistant", label: "Assistant", icon: null, emilyDot: true, hint: "Chat, ask, delegate" },
+  { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
