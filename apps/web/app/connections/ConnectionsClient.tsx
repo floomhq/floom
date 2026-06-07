@@ -54,6 +54,8 @@ export default function ConnectionsClient({
   const [scopesByConnectionId, setScopesByConnectionId] = useState<Record<string, string[]>>({});
   // #565: map app slug -> worker count that uses that connection
   const [usedByCountBySlug, setUsedByCountBySlug] = useState<Record<string, number>>({});
+  // #556: map connection slug -> worker names that require it but it's not connected yet
+  const [missingBySlug, setMissingBySlug] = useState<Record<string, string[]>>({});
   const [connectionSearch, setConnectionSearch] = useState("");
   // #565: track which row is expanded for the in-place peek
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -103,6 +105,7 @@ export default function ConnectionsClient({
         .then((workers) => {
           void getLastUsedByConnection(workers).then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); });
           setUsedByCountBySlug(computeUsedByCount(workers));
+          setMissingBySlug(computeMissingBySlug(workers));
         })
         .catch(() => {
           setLastUsedBySlug({});
@@ -125,6 +128,7 @@ export default function ConnectionsClient({
         .then((workers) => {
           void getLastUsedByConnection(workers).then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); });
           setUsedByCountBySlug(computeUsedByCount(workers));
+          setMissingBySlug(computeMissingBySlug(workers));
         })
         .catch(() => { setLastUsedBySlug({}); setLastUsedLoaded(true); });
     } else {
@@ -340,6 +344,29 @@ export default function ConnectionsClient({
         </header>
         <ConnectionsTabs />
 
+        {/* #556: setup-required callout — connections needed by workers but not yet connected */}
+        {Object.keys(missingBySlug).length > 0 && (
+          <div className="rounded-[var(--radius-card)] border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-4 space-y-2">
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-300">Setup required</p>
+            {Object.entries(missingBySlug).map(([slug, workerNames]) => (
+              <div key={slug} className="flex items-center justify-between gap-3">
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  <span className="font-medium capitalize">{slug}</span>
+                  {" — required by "}
+                  {workerNames.slice(0, 2).join(", ")}
+                  {workerNames.length > 2 ? ` +${workerNames.length - 2} more` : ""}
+                </p>
+                <a
+                  href={`/connections/browse?search=${encodeURIComponent(slug)}`}
+                  className="shrink-0 text-xs font-medium text-amber-800 dark:text-amber-300 underline underline-offset-2 hover:opacity-80"
+                >
+                  Connect
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
+
         <section aria-label="Connected tools">
           {loading ? (
             <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
@@ -487,4 +514,16 @@ function computeUsedByCount(workers: WorkerDetail[]): Record<string, number> {
     }
   }
   return counts;
+}
+
+// #556: slug -> worker names that require it but haven't connected it yet.
+function computeMissingBySlug(workers: WorkerDetail[]): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const worker of workers) {
+    for (const slug of worker.missing_connections ?? []) {
+      const key = slug.toLowerCase();
+      result[key] = [...(result[key] ?? []), worker.name];
+    }
+  }
+  return result;
 }

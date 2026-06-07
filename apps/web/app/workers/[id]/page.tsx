@@ -2812,13 +2812,26 @@ function RunSection({
               <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <div>
                 <p className="font-medium">Secret required</p>
-                <p>
-                  This worker requires a secret that is not configured. Add it in{" "}
-                  <Link href="/secrets" className="underline hover:text-amber-900">
-                    Secrets
-                  </Link>{" "}
-                  before running.
-                </p>
+                {worker.missing_secrets && worker.missing_secrets.length > 0 ? (
+                  <p>
+                    Add{" "}
+                    {worker.missing_secrets.map((s, i) => (
+                      <span key={s}>
+                        <Link href={`/connections/secrets?prefill=${encodeURIComponent(s)}`} className="font-mono underline hover:text-amber-900">{s}</Link>
+                        {i < (worker.missing_secrets?.length ?? 0) - 1 ? ", " : ""}
+                      </span>
+                    ))}{" "}
+                    in{" "}
+                    <Link href="/connections/secrets" className="underline hover:text-amber-900">Secrets</Link>{" "}
+                    before running.
+                  </p>
+                ) : (
+                  <p>
+                    This worker requires a secret that is not configured. Add it in{" "}
+                    <Link href="/connections/secrets" className="underline hover:text-amber-900">Secrets</Link>{" "}
+                    before running.
+                  </p>
+                )}
               </div>
             </div>
           )}

@@ -269,6 +269,8 @@ export interface WorkerSummary {
   recent_stats?: RecentStats | null;
   timeseries?: TimeseriesDay[] | null;
   connections: string[];  // Composio app slugs declared in worker.yml
+  missing_secrets?: string[];      // #556: required secrets not yet configured
+  missing_connections?: string[];  // #556: required connections not yet configured
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
   public_link?: string;   // owner-only signed share link to /w/<id>?token=
@@ -328,6 +330,8 @@ export interface WorkerDetail {
   webhook_url?: string;
   files: WorkerFile[];
   triggers_spec: TriggerSpec[];
+  missing_secrets?: string[];      // #556: required secrets not yet configured
+  missing_connections?: string[];  // #556: required connections not yet configured
   // Owner-only signed share link to the standalone public worker page
   // (/w/<id>?token=<hmac>). Only present on the owner's authenticated fetch.
   public_link?: string;
