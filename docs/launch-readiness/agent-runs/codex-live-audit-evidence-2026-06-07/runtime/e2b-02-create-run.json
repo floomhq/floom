@@ -1,0 +1,10 @@
+{
+  "label": "e2b-02-create-run",
+  "method": "POST",
+  "path": "/workers/text-uppercaser/runs",
+  "status": 200,
+  "body": {
+    "status": "running",
+    "run_id": "run_efb1f2f6f809"
+  }
+}

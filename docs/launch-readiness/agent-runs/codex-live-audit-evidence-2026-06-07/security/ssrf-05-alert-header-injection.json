@@ -1,0 +1,17 @@
+{
+  "label": "ssrf-05-alert-header-injection",
+  "method": "POST",
+  "path": "/workers/codex-alert-20260607032355/alerts",
+  "status": 201,
+  "body": {
+    "id": "alrt_495ce9cb6ab6",
+    "worker_id": "codex-alert-20260607032355",
+    "url": "https://example.com/%0d%0aX-Evil:%20yes",
+    "email_to": null,
+    "on": [
+      "failed"
+    ],
+    "description": "codex ssrf probe",
+    "created_at": "2026-06-07T03:23:56.043339+00:00"
+  }
+}

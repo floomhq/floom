@@ -1,0 +1,41 @@
+{
+  "workerId": "codex-alert-20260607032355",
+  "steps": [
+    {
+      "label": "ssrf-01-create-worker",
+      "status": 200
+    },
+    {
+      "label": "ssrf-02-alert-localhost",
+      "status": 400,
+      "detail": "Alert webhook URL is not allowed: points to an internal/loopback/link-local address"
+    },
+    {
+      "label": "ssrf-03-alert-metadata",
+      "status": 400,
+      "detail": "Alert webhook URL is not allowed: points to an internal/loopback/link-local address"
+    },
+    {
+      "label": "ssrf-04-alert-private-ip",
+      "status": 400,
+      "detail": "Alert webhook URL is not allowed: points to an internal/loopback/link-local address"
+    },
+    {
+      "label": "ssrf-05-alert-header-injection",
+      "status": 201
+    },
+    {
+      "label": "ssrf-06-alert-public-url",
+      "status": 201,
+      "alertId": "alrt_8bd0cd0ccfcd"
+    },
+    {
+      "label": "ssrf-07-delete-public-alert",
+      "status": 204
+    },
+    {
+      "label": "ssrf-cleanup-delete-worker",
+      "status": 204
+    }
+  ]
+}

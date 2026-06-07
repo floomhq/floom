@@ -1,0 +1,5 @@
+data: {"type": "chat.meta", "protocol": "emily.chat.v1", "version": 2, "conversation_id": "conv_client_c42918a62203583d2a542f982642ccb1", "assistant_message_id": "msg_pending_65e7d4a5eaaa4241", "source": "web"}
+
+data: {"type": "text", "text": "OK", "version": 2, "conversation_id": "conv_client_c42918a62203583d2a542f982642ccb1", "message_id": "msg_pending_65e7d4a5eaaa4241"}
+
+data: {"type": "finish", "version": 2, "conversation_id": "conv_client_c42918a62203583d2a542f982642ccb1", "message_id": "msg_e442a06e41f64f2a", "assistant_message_id": "msg_pending_65e7d4a5eaaa4241", "cards": []}

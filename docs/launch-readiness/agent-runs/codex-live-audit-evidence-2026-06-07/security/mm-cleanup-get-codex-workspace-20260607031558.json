@@ -1,0 +1,26 @@
+{
+  "label": "mm-cleanup-get-codex-workspace-20260607031558",
+  "method": "GET",
+  "path": "/workers/codex-workspace-20260607031558",
+  "status": 404,
+  "ok": false,
+  "headers": {
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "connection": "keep-alive",
+    "content-length": "29",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "content-type": "application/json",
+    "date": "Sun, 07 Jun 2026 03:16:00 GMT",
+    "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=nM7kN1knBB5JOXLsGRE136nIzeYcqcBrZSmCZHKyu1k6W3i6aGtINH%2BJFSINnKyNlI3oyBWw8liigxG77UnX5O4AmnvZ%2Bjgud0CBPEzDlH1KfoIWhcfNbMzAtUIwFdTLiVhYXO1i8rbCGQ4DotQb319MRHo%3D\"}]}",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "body": {
+    "detail": "Worker not found"
+  }
+}

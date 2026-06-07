@@ -1,0 +1,9 @@
+{
+  "label": "ssrf-02-alert-localhost",
+  "method": "POST",
+  "path": "/workers/codex-alert-20260607032355/alerts",
+  "status": 400,
+  "body": {
+    "detail": "Alert webhook URL is not allowed: points to an internal/loopback/link-local address"
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "label": "ssrf-01-create-worker",
+  "method": "POST",
+  "path": "/workers",
+  "status": 200,
+  "body": {
+    "id": "codex-alert-20260607032355",
+    "name": "Codex Alert SSRF Probe",
+    "description": "Throwaway alert validation worker.",
+    "long_description": null,
+    "use_cases": null,
+    "example_input": null,
+    "example_output": null,
+    "how_it_works": null,
+    "is_example": null,
+    "archived": false,
+    "enabled": true,
+    "archive_reason": null,
+    "tags": [],
+    "folder": null,
+    "status": "ready",
+    "trigger_type": "manual",
+    "runner": "e2b",
+    "config": {
+      "id": "codex-alert-20260607032355",
+      "name": "Codex Alert SSRF Probe",
+      "description": "Throwaway alert validation worker.",
+      "model": "gpt-5-mini",
+      "trigger": {
+        "type": "manual",
+        "cron": null,
+        "timezone": null,
+        "every": null,
+        "at": null,
+        "webhook": null,
+        "composio": null
+      },
+      "runtime": {
+        "type": "python311",
+        "entrypoint": "run.py",
+        "runner": "e2b",
+        "command": "python run.py",
+        "bundle_path": "codex-alert-20260607032355",
+        "mode": "pure-script",
+        "model": "gpt-5-mini",
+        "system_prompt": null,
+        "disable_tools": [],
+        "limits": {
+          "max_tool_iterations": 12,
+          "max_output_tokens": 16000,
+          "max_total_tokens": 50000,
+          "timeout_seconds": 300
+        }
+      },
+      "inputs": [],
+      "secrets": [],
+      "connections": [],
+      "contexts": [],
+      "outputs": [
+        {
+          "name": "ok",
+          "label": "OK",
+          "type": "text",
+          "required": true,
+          "kind": "scalar",
+          "media_type": null,
+          "path": null,
+          "columns": null,
+          "json_required_keys": null
+        }
+      ],
+      "csv_required_columns": null,
+      "approvals": {
+        "required": false,
+        "label": "Approve action"
+      },
+      "retry": null,
+      "notify": null
+    },
+    "recent_stats": null,
+    "recent_runs": [],
+    "manifest_yaml": "schema_version: \"0.3\"\nname: codex-alert-20260607032355\ntitle: Codex Alert SSRF Probe\ndescription: Throwaway alert validation worker.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: local\n  command: python run.py\n  inputs: []\n  outputs:\n  - name: ok\n    kind: scalar\n    type: string\n    required: true\n    label: OK\ntrigger:\n  type: manual\n",
+    "run_py": "import json\nfrom pathlib import Path\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'ok':'ok'},'artifacts':[],'error':None}))\n",
+    "skill_md_content": "# Codex Alert SSRF Probe\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+    "run_py_content": "import json\nfrom pathlib import Path\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'ok':'ok'},'artifacts':[],'error':None}))\n",
+    "new_webhook_secret": null,
+    "webhook_url": null,
+    "files": [
+      {
+        "path": "worker.yml",
+        "language": "yaml",
+        "content": "schema_version: \"0.3\"\nname: codex-alert-20260607032355\ntitle: Codex Alert SSRF Probe\ndescription: Throwaway alert validation worker.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: local\n  command: python run.py\n  inputs: []\n  outputs:\n  - name: ok\n    kind: scalar\n    type: string\n    required: true\n    label: OK\ntrigger:\n  type: manual\n",
+        "binary": false,
+        "size": 379
+      },
+      {
+        "path": "SKILL.md",
+        "language": "markdown",
+        "content": "# Codex Alert SSRF Probe\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+        "binary": false,
+        "size": 172
+      },
+      {
+        "path": "run.py",
+        "language": "python",
+        "content": "import json\nfrom pathlib import Path\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'ok':'ok'},'artifacts':[],'error':None}))\n",
+        "binary": false,
+        "size": 152
+      },
+      {
+        "path": "requirements.txt",
+        "language": "text",
+        "content": "",
+        "binary": false,
+        "size": 0
+      }
+    ],
+    "triggers_spec": [
+      {
+        "type": "manual",
+        "cron": null,
+        "timezone": null,
+        "webhook": null,
+        "composio": null
+      }
+    ],
+    "public_link": "https://workers.floom.dev/w/codex-alert-20260607032355?token=[REDACTED_PUBLIC_SHARE_TOKEN]",
+    "cloned_from": null,
+    "owner_id": "federico",
+    "visibility": "private",
+    "permissions": {
+      "is_owner": true,
+      "can_view": true,
+      "can_edit": true,
+      "can_run": true,
+      "can_delete": true,
+      "can_share": true
+    }
+  }
+}

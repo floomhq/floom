@@ -1,0 +1,20 @@
+{
+  "status": 200,
+  "title": "Workeros",
+  "bodyStart": "Workeros\nSign in\n\nEnter your access secret to continue.\n\nAccess secret\nSign in",
+  "bodyLength": 78,
+  "logs": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 ()"
+    }
+  ],
+  "responses": [
+    {
+      "status": 404,
+      "url": "https://workers.floom.dev/api/auth/setup"
+    }
+  ],
+  "err": null,
+  "htmlStart": "<!DOCTYPE html><html lang=\"en\" class=\"h-full antialiased geist_a71539c9-module__T19VSG__variable geist_mono_8d43a2aa-module__8Li5zG__variable\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"preload\" href=\"/_next/static/media/797e433ab948586e-s.p.09zddjkbdep5a.woff2?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" as=\"font\" crossorigin=\"\" type=\"font/woff2\"><link rel=\"preload\" href=\"/_next/static/media/caa3a2e1cccd8315-s.p.09~u27dqhyhd6.woff2?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" as=\"font\" crossorigin=\"\" type=\"font/woff2\"><link rel=\"stylesheet\" href=\"/_next/static/chunks/0_t9bfr2tk34x.css?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" data-precedence=\"next\"><link rel=\"stylesheet\" href=\"/_next/static/chunks/0g7-64bnyx.oh.css?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" data-precedence=\"next\"><link rel=\"preload\" as=\"script\" fetchpriority=\"low\" href=\"/_next/static/chunks/0of8e1cu3i5.~.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\"><script src=\"/_next/static/chunks/0irk7qdnvu0cf.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" async=\"\"></script><script src=\"/_next/static/chunks/0g.ceqh-xm15a.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" async=\"\"></script><script src=\"/_next/static/chunks/0zyrp5jh~ap7i.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" async=\"\"></script><script src=\"/_next/static/chunks/0aqed3otfcph-.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" async=\"\"></script><script src=\"/_next/static/chunks/turbopack-07htjxe-.a09o.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" async=\"\"></script><script src=\"/_next/static/chunks/0ik_hkk0aiaib.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" async=\"\"></script><script src=\"/_next/static/chunks/0gw1pwh~ps90a.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" async=\"\"></script><script src=\"/_next/static/chunks/0tc24nz.6oste.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" async=\"\"></script><script src=\"/_next/static/chunks/0osaee0r7d61m.js?dpl=dpl_EYZqCCB67WWrZ1q1firQ99gEUPuz\" async=\"\"></script><script src=\"/_next/static/chunks/0ajwobr1~.zti.js?dpl=dpl_E"
+}

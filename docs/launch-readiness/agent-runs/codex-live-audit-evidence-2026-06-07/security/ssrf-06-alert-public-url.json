@@ -1,0 +1,17 @@
+{
+  "label": "ssrf-06-alert-public-url",
+  "method": "POST",
+  "path": "/workers/codex-alert-20260607032355/alerts",
+  "status": 201,
+  "body": {
+    "id": "alrt_8bd0cd0ccfcd",
+    "worker_id": "codex-alert-20260607032355",
+    "url": "https://example.com/workeros-codex-audit",
+    "email_to": null,
+    "on": [
+      "failed"
+    ],
+    "description": "codex public url probe",
+    "created_at": "2026-06-07T03:23:56.142494+00:00"
+  }
+}

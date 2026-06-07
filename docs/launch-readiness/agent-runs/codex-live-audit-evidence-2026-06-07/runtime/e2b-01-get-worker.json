@@ -1,0 +1,149 @@
+{
+  "label": "e2b-01-get-worker",
+  "method": "GET",
+  "path": "/workers/text-uppercaser",
+  "status": 200,
+  "body": {
+    "id": "text-uppercaser",
+    "name": "Text Uppercaser",
+    "description": "Convert input text to uppercase and return the transformed result.",
+    "long_description": null,
+    "use_cases": null,
+    "example_input": {
+      "text": "Hello, Workeros!"
+    },
+    "example_output": null,
+    "how_it_works": null,
+    "is_example": null,
+    "archived": false,
+    "enabled": true,
+    "archive_reason": null,
+    "tags": [],
+    "folder": null,
+    "status": "ready",
+    "trigger_type": "manual",
+    "runner": "e2b",
+    "config": {
+      "id": "text-uppercaser",
+      "name": "Text Uppercaser",
+      "description": "Convert input text to uppercase and return the transformed result.",
+      "model": "gpt-5-mini",
+      "trigger": {
+        "type": "manual",
+        "cron": null,
+        "timezone": null,
+        "every": null,
+        "at": null,
+        "webhook": null,
+        "composio": null
+      },
+      "runtime": {
+        "type": "python311",
+        "entrypoint": "run.py",
+        "runner": "e2b",
+        "command": "python run.py",
+        "bundle_path": "text-uppercaser",
+        "mode": "pure-script",
+        "model": "gpt-5-mini",
+        "system_prompt": null,
+        "disable_tools": [],
+        "limits": {
+          "max_tool_iterations": 12,
+          "max_output_tokens": 16000,
+          "max_total_tokens": 50000,
+          "timeout_seconds": 300
+        }
+      },
+      "inputs": [
+        {
+          "name": "text",
+          "label": "Input text",
+          "type": "text",
+          "required": true,
+          "placeholder": null,
+          "description": null,
+          "options": null,
+          "default": null,
+          "accept_csv": false,
+          "accepts": null,
+          "max_size_mb": null
+        }
+      ],
+      "secrets": [],
+      "connections": [],
+      "contexts": [],
+      "outputs": [
+        {
+          "name": "uppercased",
+          "label": "Uppercased text",
+          "type": "text",
+          "required": true,
+          "kind": "scalar",
+          "media_type": null,
+          "path": null,
+          "columns": null,
+          "json_required_keys": null
+        }
+      ],
+      "csv_required_columns": null,
+      "approvals": {
+        "required": false,
+        "label": "Approve action"
+      },
+      "retry": null,
+      "notify": null
+    },
+    "recent_stats": null,
+    "recent_runs": [],
+    "manifest_yaml": "schema_version: '0.3'\nname: text-uppercaser\ntitle: Text Uppercaser\ndescription: Convert input text to uppercase and return the transformed result.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: e2b\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Input text\n  outputs:\n  - name: uppercased\n    kind: scalar\n    type: string\n    required: true\n    label: Uppercased text\ntrigger:\n  type: manual\nexample_input:\n  text: Hello, Workeros!\n",
+    "run_py": "import json\nfrom pathlib import Path\n\n\ndef main() -> None:\n    try:\n        inputs = json.loads(Path(\"inputs.json\").read_text())\n        text = str(inputs.get(\"text\", \"\"))\n        uppercased = text.upper()\n\n        result = {\n            \"status\": \"success\",\n            \"outputs\": {\n                \"uppercased\": uppercased,\n            },\n            \"artifacts\": [],\n            \"error\": None,\n        }\n    except Exception as e:\n        result = {\n            \"status\": \"error\",\n            \"outputs\": {},\n            \"artifacts\": [],\n            \"error\": str(e),\n        }\n\n    Path(\"result.json\").write_text(json.dumps(result))\n\n\nif __name__ == \"__main__\":\n    main()\n",
+    "skill_md_content": null,
+    "run_py_content": "import json\nfrom pathlib import Path\n\n\ndef main() -> None:\n    try:\n        inputs = json.loads(Path(\"inputs.json\").read_text())\n        text = str(inputs.get(\"text\", \"\"))\n        uppercased = text.upper()\n\n        result = {\n            \"status\": \"success\",\n            \"outputs\": {\n                \"uppercased\": uppercased,\n            },\n            \"artifacts\": [],\n            \"error\": None,\n        }\n    except Exception as e:\n        result = {\n            \"status\": \"error\",\n            \"outputs\": {},\n            \"artifacts\": [],\n            \"error\": str(e),\n        }\n\n    Path(\"result.json\").write_text(json.dumps(result))\n\n\nif __name__ == \"__main__\":\n    main()\n",
+    "new_webhook_secret": null,
+    "webhook_url": null,
+    "files": [
+      {
+        "path": "worker.yml",
+        "language": "yaml",
+        "content": "schema_version: '0.3'\nname: text-uppercaser\ntitle: Text Uppercaser\ndescription: Convert input text to uppercase and return the transformed result.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: e2b\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Input text\n  outputs:\n  - name: uppercased\n    kind: scalar\n    type: string\n    required: true\n    label: Uppercased text\ntrigger:\n  type: manual\nexample_input:\n  text: Hello, Workeros!\n",
+        "binary": false,
+        "size": 539
+      },
+      {
+        "path": "run.py",
+        "language": "python",
+        "content": "import json\nfrom pathlib import Path\n\n\ndef main() -> None:\n    try:\n        inputs = json.loads(Path(\"inputs.json\").read_text())\n        text = str(inputs.get(\"text\", \"\"))\n        uppercased = text.upper()\n\n        result = {\n            \"status\": \"success\",\n            \"outputs\": {\n                \"uppercased\": uppercased,\n            },\n            \"artifacts\": [],\n            \"error\": None,\n        }\n    except Exception as e:\n        result = {\n            \"status\": \"error\",\n            \"outputs\": {},\n            \"artifacts\": [],\n            \"error\": str(e),\n        }\n\n    Path(\"result.json\").write_text(json.dumps(result))\n\n\nif __name__ == \"__main__\":\n    main()\n",
+        "binary": false,
+        "size": 675
+      },
+      {
+        "path": "requirements.txt",
+        "language": "text",
+        "content": "# No third-party dependencies required\n",
+        "binary": false,
+        "size": 39
+      }
+    ],
+    "triggers_spec": [
+      {
+        "type": "manual",
+        "cron": null,
+        "timezone": null,
+        "webhook": null,
+        "composio": null
+      }
+    ],
+    "public_link": "https://workers.floom.dev/w/text-uppercaser?token=[REDACTED_PUBLIC_SHARE_TOKEN]",
+    "cloned_from": null,
+    "owner_id": "federico",
+    "visibility": "private",
+    "permissions": {
+      "is_owner": true,
+      "can_view": true,
+      "can_edit": true,
+      "can_run": true,
+      "can_delete": true,
+      "can_share": true
+    }
+  }
+}

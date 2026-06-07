@@ -1,0 +1,122 @@
+{
+  "label": "04-poll-run-02",
+  "method": "GET",
+  "path": "/runs/run_1842259e06cf",
+  "status": 200,
+  "ok": true,
+  "headers": {
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "connection": "keep-alive",
+    "content-encoding": "br",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "content-type": "application/json",
+    "date": "Sun, 07 Jun 2026 03:14:52 GMT",
+    "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=cERoSz74oISK%2F91epKCsis2IUpI0GnE6lCH1%2FVnlyJdiK2vaDcBmJqa1otBHv27JmHeIpykyhP5PbSO3GPA5tCZRShpm1i0BnF2RTcDUkDLLqeMqPIbWx3WIX611QGFqTnRwhmrIPqK%2BTPaMePw%2Bla%2FKypo%3D\"}]}",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "transfer-encoding": "chunked",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "body": {
+    "id": "run_1842259e06cf",
+    "worker_id": "codex-audit-20260607031446",
+    "worker_name": "Codex Audit Throwaway",
+    "status": "completed",
+    "trigger_source": "codex-audit",
+    "runner": "e2b",
+    "input": {},
+    "output": {
+      "echo": "codex-audit:hello <script>alert('codex')</script> ' OR 1=1 -- codex-audit-20260607031446"
+    },
+    "output_schema": [
+      {
+        "name": "echo",
+        "type": "text",
+        "label": "Echo",
+        "value": "codex-audit:hello <script>alert('codex')</script> ' OR 1=1 -- codex-audit-20260607031446"
+      }
+    ],
+    "logs": [
+      {
+        "level": "info",
+        "message": "Run started",
+        "timestamp": "2026-06-07T03:14:47.230412+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "Validating inputs",
+        "timestamp": "2026-06-07T03:14:47.246834+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "Loading secrets",
+        "timestamp": "2026-06-07T03:14:47.266050+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "Executing worker ([redacted-metadata], [redacted-metadata]",
+        "timestamp": "2026-06-07T03:14:47.304054+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Spawning sandbox for run [redacted-id]",
+        "timestamp": "2026-06-07T03:14:47.324561+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded worker.yml",
+        "timestamp": "2026-06-07T03:14:49.095805+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded run.py",
+        "timestamp": "2026-06-07T03:14:49.320671+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded SKILL.md",
+        "timestamp": "2026-06-07T03:14:49.553419+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded requirements.txt",
+        "timestamp": "2026-06-07T03:14:49.768649+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Executing worker command: python run.py",
+        "timestamp": "2026-06-07T03:14:50.532132+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Run completed successfully",
+        "timestamp": "2026-06-07T03:14:51.442312+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Sandbox killed",
+        "timestamp": "2026-06-07T03:14:52.237356+00:00"
+      },
+      {
+        "level": "info",
+        "message": "Output generated",
+        "timestamp": "2026-06-07T03:14:52.291494+00:00"
+      },
+      {
+        "level": "info",
+        "message": "Run completed",
+        "timestamp": "2026-06-07T03:14:52.315435+00:00"
+      }
+    ],
+    "artifacts": [],
+    "transcript": [],
+    "started_at": "2026-06-07T03:14:47.210014+00:00",
+    "completed_at": "2026-06-07T03:14:52.266098+00:00",
+    "duration_ms": 5056,
+    "created_at": "2026-06-07T03:14:47.183443+00:00"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "label": "ssrf-cleanup-delete-worker",
+  "method": "DELETE",
+  "path": "/workers/codex-alert-20260607032355",
+  "status": 204,
+  "body": ""
+}

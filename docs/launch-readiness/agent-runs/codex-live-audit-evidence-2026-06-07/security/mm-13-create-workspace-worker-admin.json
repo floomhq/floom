@@ -1,0 +1,174 @@
+{
+  "label": "mm-13-create-workspace-worker-admin",
+  "method": "POST",
+  "path": "/workers",
+  "status": 200,
+  "ok": true,
+  "headers": {
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "connection": "keep-alive",
+    "content-encoding": "br",
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+    "content-type": "application/json",
+    "date": "Sun, 07 Jun 2026 03:15:59 GMT",
+    "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=v0yiei4pdiZhr1PQa9%2B4ft6ajwrJhSbgpQtcq5Sibh6paJoBq8KxIpsjCdUsKG4K%2BQLIkhvkkBiolBaaHy9akNLcn3ymMDUV5t2pYOXUSSX2uEFgXoQq9dXUn3U5u1cypW4AwxW16jDtQHgYNqxQ6rMCdNQ%3D\"}]}",
+    "strict-transport-security": "max-age=31536000; includeSubDomains",
+    "transfer-encoding": "chunked",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY"
+  },
+  "body": {
+    "id": "codex-workspace-20260607031558",
+    "name": "Codex workspace ACL Probe",
+    "description": "Throwaway worker for member visibility audit.",
+    "long_description": null,
+    "use_cases": null,
+    "example_input": {
+      "text": "hello"
+    },
+    "example_output": null,
+    "how_it_works": null,
+    "is_example": null,
+    "archived": false,
+    "enabled": true,
+    "archive_reason": null,
+    "tags": [],
+    "folder": null,
+    "status": "ready",
+    "trigger_type": "manual",
+    "runner": "e2b",
+    "config": {
+      "id": "codex-workspace-20260607031558",
+      "name": "Codex workspace ACL Probe",
+      "description": "Throwaway worker for member visibility audit.",
+      "model": "gpt-5-mini",
+      "trigger": {
+        "type": "manual",
+        "cron": null,
+        "timezone": null,
+        "every": null,
+        "at": null,
+        "webhook": null,
+        "composio": null
+      },
+      "runtime": {
+        "type": "python311",
+        "entrypoint": "run.py",
+        "runner": "e2b",
+        "command": "python run.py",
+        "bundle_path": "codex-workspace-20260607031558",
+        "mode": "pure-script",
+        "model": "gpt-5-mini",
+        "system_prompt": null,
+        "disable_tools": [],
+        "limits": {
+          "max_tool_iterations": 12,
+          "max_output_tokens": 16000,
+          "max_total_tokens": 50000,
+          "timeout_seconds": 300
+        }
+      },
+      "inputs": [
+        {
+          "name": "text",
+          "label": "Text",
+          "type": "text",
+          "required": true,
+          "placeholder": null,
+          "description": null,
+          "options": null,
+          "default": null,
+          "accept_csv": false,
+          "accepts": null,
+          "max_size_mb": null
+        }
+      ],
+      "secrets": [],
+      "connections": [],
+      "contexts": [],
+      "outputs": [
+        {
+          "name": "echo",
+          "label": "Echo",
+          "type": "text",
+          "required": true,
+          "kind": "scalar",
+          "media_type": null,
+          "path": null,
+          "columns": null,
+          "json_required_keys": null
+        }
+      ],
+      "csv_required_columns": null,
+      "approvals": {
+        "required": false,
+        "label": "Approve action"
+      },
+      "retry": null,
+      "notify": null
+    },
+    "recent_stats": null,
+    "recent_runs": [],
+    "manifest_yaml": "schema_version: \"0.3\"\nname: codex-workspace-20260607031558\ntitle: Codex workspace ACL Probe\ndescription: Throwaway worker for member visibility audit.\nvisibility: workspace\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: local\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Text\n  outputs:\n  - name: echo\n    kind: scalar\n    type: string\n    required: true\n    label: Echo\ntrigger:\n  type: manual\nexample_input:\n  text: hello\n",
+    "run_py": "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'echo':str(inputs.get('text',''))},'artifacts':[],'error':None}))\n",
+    "skill_md_content": "# Codex workspace ACL Probe\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+    "run_py_content": "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'echo':str(inputs.get('text',''))},'artifacts':[],'error':None}))\n",
+    "new_webhook_secret": null,
+    "webhook_url": null,
+    "files": [
+      {
+        "path": "worker.yml",
+        "language": "yaml",
+        "content": "schema_version: \"0.3\"\nname: codex-workspace-20260607031558\ntitle: Codex workspace ACL Probe\ndescription: Throwaway worker for member visibility audit.\nvisibility: workspace\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: local\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Text\n  outputs:\n  - name: echo\n    kind: scalar\n    type: string\n    required: true\n    label: Echo\ntrigger:\n  type: manual\nexample_input:\n  text: hello\n",
+        "binary": false,
+        "size": 533
+      },
+      {
+        "path": "SKILL.md",
+        "language": "markdown",
+        "content": "# Codex workspace ACL Probe\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+        "binary": false,
+        "size": 175
+      },
+      {
+        "path": "run.py",
+        "language": "python",
+        "content": "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'echo':str(inputs.get('text',''))},'artifacts':[],'error':None}))\n",
+        "binary": false,
+        "size": 227
+      },
+      {
+        "path": "requirements.txt",
+        "language": "text",
+        "content": "",
+        "binary": false,
+        "size": 0
+      }
+    ],
+    "triggers_spec": [
+      {
+        "type": "manual",
+        "cron": null,
+        "timezone": null,
+        "webhook": null,
+        "composio": null
+      }
+    ],
+    "public_link": "https://workers.floom.dev/w/codex-workspace-20260607031558?token=[REDACTED_PUBLIC_SHARE_TOKEN]",
+    "cloned_from": null,
+    "owner_id": "federico",
+    "visibility": "private",
+    "permissions": {
+      "is_owner": true,
+      "can_view": true,
+      "can_edit": true,
+      "can_run": true,
+      "can_delete": true,
+      "can_share": true
+    }
+  }
+}

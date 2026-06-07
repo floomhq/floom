@@ -1,0 +1,7 @@
+{
+  "label": "ssrf-07-delete-public-alert",
+  "method": "DELETE",
+  "path": "/workers/codex-alert-20260607032355/alerts/alrt_8bd0cd0ccfcd",
+  "status": 204,
+  "body": ""
+}

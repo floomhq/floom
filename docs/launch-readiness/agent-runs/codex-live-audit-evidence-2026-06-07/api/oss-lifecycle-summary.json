@@ -1,0 +1,592 @@
+{
+  "workerId": "codex-audit-20260607031446",
+  "startedAt": "2026-06-07T03:14:46.700Z",
+  "steps": [
+    {
+      "label": "01-create-worker",
+      "method": "POST",
+      "path": "/workers",
+      "status": 200,
+      "ok": true,
+      "headers": {
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-cache-status": "DYNAMIC",
+        "connection": "keep-alive",
+        "content-encoding": "br",
+        "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+        "content-type": "application/json",
+        "date": "Sun, 07 Jun 2026 03:14:47 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=THD%2FLwyBeu%2FC2o2JPmK4EDZZ%2BDwxCdLbLJZ5FGHuv2zo0UEXi7HHBSmJLnajydbhYZA5T%2BjObMYcmn9z34YYG3wHNoowuvfPf%2F9IxQ4TY%2FMtQqSSGLdCFPb6WCq3AzOXpbUgDoRJmtL0cpEe49VKLf4pT8M%3D\"}]}",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY"
+      },
+      "body": {
+        "id": "codex-audit-20260607031446",
+        "name": "Codex Audit Throwaway",
+        "description": "Throwaway worker for 2026-06-07 launch-readiness audit. Delete after run.",
+        "long_description": null,
+        "use_cases": null,
+        "example_input": {
+          "text": "hello"
+        },
+        "example_output": null,
+        "how_it_works": null,
+        "is_example": null,
+        "archived": false,
+        "enabled": true,
+        "archive_reason": null,
+        "tags": [],
+        "folder": null,
+        "status": "ready",
+        "trigger_type": "manual",
+        "runner": "e2b",
+        "config": {
+          "id": "codex-audit-20260607031446",
+          "name": "Codex Audit Throwaway",
+          "description": "Throwaway worker for 2026-06-07 launch-readiness audit. Delete after run.",
+          "model": "gpt-5-mini",
+          "trigger": {
+            "type": "manual",
+            "cron": null,
+            "timezone": null,
+            "every": null,
+            "at": null,
+            "webhook": null,
+            "composio": null
+          },
+          "runtime": {
+            "type": "python311",
+            "entrypoint": "run.py",
+            "runner": "e2b",
+            "command": "python run.py",
+            "bundle_path": "codex-audit-20260607031446",
+            "mode": "pure-script",
+            "model": "gpt-5-mini",
+            "system_prompt": null,
+            "disable_tools": [],
+            "limits": {
+              "max_tool_iterations": 12,
+              "max_output_tokens": 16000,
+              "max_total_tokens": 50000,
+              "timeout_seconds": 300
+            }
+          },
+          "inputs": [
+            {
+              "name": "text",
+              "label": "Text",
+              "type": "text",
+              "required": true,
+              "placeholder": null,
+              "description": null,
+              "options": null,
+              "default": null,
+              "accept_csv": false,
+              "accepts": null,
+              "max_size_mb": null
+            }
+          ],
+          "secrets": [],
+          "connections": [],
+          "contexts": [],
+          "outputs": [
+            {
+              "name": "echo",
+              "label": "Echo",
+              "type": "text",
+              "required": true,
+              "kind": "scalar",
+              "media_type": null,
+              "path": null,
+              "columns": null,
+              "json_required_keys": null
+            }
+          ],
+          "csv_required_columns": null,
+          "approvals": {
+            "required": false,
+            "label": "Approve action"
+          },
+          "retry": null,
+          "notify": null
+        },
+        "recent_stats": null,
+        "recent_runs": [],
+        "manifest_yaml": "schema_version: \"0.3\"\nname: codex-audit-20260607031446\ntitle: Codex Audit Throwaway\ndescription: Throwaway worker for 2026-06-07 launch-readiness audit. Delete after run.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: local\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Text\n  outputs:\n  - name: echo\n    kind: scalar\n    type: string\n    required: true\n    label: Echo\ntrigger:\n  type: manual\nexample_input:\n  text: hello\n",
+        "run_py": "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\ntext=str(inputs.get('text',''))\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'echo':'codex-audit:' + text[:120]},'artifacts':[],'error':None}))\n",
+        "skill_md_content": "# Codex Audit Throwaway\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+        "run_py_content": "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\ntext=str(inputs.get('text',''))\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'echo':'codex-audit:' + text[:120]},'artifacts':[],'error':None}))\n",
+        "new_webhook_secret": null,
+        "webhook_url": null,
+        "files": [
+          {
+            "path": "worker.yml",
+            "language": "yaml",
+            "content": "schema_version: \"0.3\"\nname: codex-audit-20260607031446\ntitle: Codex Audit Throwaway\ndescription: Throwaway worker for 2026-06-07 launch-readiness audit. Delete after run.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: local\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Text\n  outputs:\n  - name: echo\n    kind: scalar\n    type: string\n    required: true\n    label: Echo\ntrigger:\n  type: manual\nexample_input:\n  text: hello\n",
+            "binary": false,
+            "size": 531
+          },
+          {
+            "path": "SKILL.md",
+            "language": "markdown",
+            "content": "# Codex Audit Throwaway\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+            "binary": false,
+            "size": 171
+          },
+          {
+            "path": "run.py",
+            "language": "python",
+            "content": "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\ntext=str(inputs.get('text',''))\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'echo':'codex-audit:' + text[:120]},'artifacts':[],'error':None}))\n",
+            "binary": false,
+            "size": 260
+          },
+          {
+            "path": "requirements.txt",
+            "language": "text",
+            "content": "",
+            "binary": false,
+            "size": 0
+          }
+        ],
+        "triggers_spec": [
+          {
+            "type": "manual",
+            "cron": null,
+            "timezone": null,
+            "webhook": null,
+            "composio": null
+          }
+        ],
+        "public_link": "https://workers.floom.dev/w/codex-audit-20260607031446?token=[REDACTED_PUBLIC_SHARE_TOKEN]",
+        "cloned_from": null,
+        "owner_id": "federico",
+        "visibility": "private",
+        "permissions": {
+          "is_owner": true,
+          "can_view": true,
+          "can_edit": true,
+          "can_run": true,
+          "can_delete": true,
+          "can_share": true
+        }
+      }
+    },
+    {
+      "label": "02-get-worker",
+      "method": "GET",
+      "path": "/workers/codex-audit-20260607031446",
+      "status": 200,
+      "ok": true,
+      "headers": {
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-cache-status": "DYNAMIC",
+        "connection": "keep-alive",
+        "content-encoding": "br",
+        "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+        "content-type": "application/json",
+        "date": "Sun, 07 Jun 2026 03:14:47 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=W3S0YpAp5CNHdOPW3Fujbz%2BIPQDeuz3B3%2FsRlsn9gxjp8X3POnPEf5%2B%2BIJUWIYC501DFnxG7OTDWPmYbq9lAnvfm9he5GEFMfCaooFqGQ1vfS4suN3zMvH%2BDnzk6g4mKslBWLk30ig%2FZQQx3pgmZczKxhHE%3D\"}]}",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY"
+      },
+      "body": {
+        "id": "codex-audit-20260607031446",
+        "name": "Codex Audit Throwaway",
+        "description": "Throwaway worker for 2026-06-07 launch-readiness audit. Delete after run.",
+        "long_description": null,
+        "use_cases": null,
+        "example_input": {
+          "text": "hello"
+        },
+        "example_output": null,
+        "how_it_works": null,
+        "is_example": null,
+        "archived": false,
+        "enabled": true,
+        "archive_reason": null,
+        "tags": [],
+        "folder": null,
+        "status": "ready",
+        "trigger_type": "manual",
+        "runner": "e2b",
+        "config": {
+          "id": "codex-audit-20260607031446",
+          "name": "Codex Audit Throwaway",
+          "description": "Throwaway worker for 2026-06-07 launch-readiness audit. Delete after run.",
+          "model": "gpt-5-mini",
+          "trigger": {
+            "type": "manual",
+            "cron": null,
+            "timezone": null,
+            "every": null,
+            "at": null,
+            "webhook": null,
+            "composio": null
+          },
+          "runtime": {
+            "type": "python311",
+            "entrypoint": "run.py",
+            "runner": "e2b",
+            "command": "python run.py",
+            "bundle_path": "codex-audit-20260607031446",
+            "mode": "pure-script",
+            "model": "gpt-5-mini",
+            "system_prompt": null,
+            "disable_tools": [],
+            "limits": {
+              "max_tool_iterations": 12,
+              "max_output_tokens": 16000,
+              "max_total_tokens": 50000,
+              "timeout_seconds": 300
+            }
+          },
+          "inputs": [
+            {
+              "name": "text",
+              "label": "Text",
+              "type": "text",
+              "required": true,
+              "placeholder": null,
+              "description": null,
+              "options": null,
+              "default": null,
+              "accept_csv": false,
+              "accepts": null,
+              "max_size_mb": null
+            }
+          ],
+          "secrets": [],
+          "connections": [],
+          "contexts": [],
+          "outputs": [
+            {
+              "name": "echo",
+              "label": "Echo",
+              "type": "text",
+              "required": true,
+              "kind": "scalar",
+              "media_type": null,
+              "path": null,
+              "columns": null,
+              "json_required_keys": null
+            }
+          ],
+          "csv_required_columns": null,
+          "approvals": {
+            "required": false,
+            "label": "Approve action"
+          },
+          "retry": null,
+          "notify": null
+        },
+        "recent_stats": null,
+        "recent_runs": [],
+        "manifest_yaml": "schema_version: \"0.3\"\nname: codex-audit-20260607031446\ntitle: Codex Audit Throwaway\ndescription: Throwaway worker for 2026-06-07 launch-readiness audit. Delete after run.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: local\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Text\n  outputs:\n  - name: echo\n    kind: scalar\n    type: string\n    required: true\n    label: Echo\ntrigger:\n  type: manual\nexample_input:\n  text: hello\n",
+        "run_py": "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\ntext=str(inputs.get('text',''))\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'echo':'codex-audit:' + text[:120]},'artifacts':[],'error':None}))\n",
+        "skill_md_content": "# Codex Audit Throwaway\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+        "run_py_content": "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\ntext=str(inputs.get('text',''))\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'echo':'codex-audit:' + text[:120]},'artifacts':[],'error':None}))\n",
+        "new_webhook_secret": null,
+        "webhook_url": null,
+        "files": [
+          {
+            "path": "worker.yml",
+            "language": "yaml",
+            "content": "schema_version: \"0.3\"\nname: codex-audit-20260607031446\ntitle: Codex Audit Throwaway\ndescription: Throwaway worker for 2026-06-07 launch-readiness audit. Delete after run.\nversion: 0.1.0\ntargets:\n- generic\nexec:\n  entry: run.py\n  runtime: python311\n  runner: local\n  command: python run.py\n  inputs:\n  - name: text\n    kind: scalar\n    type: string\n    required: true\n    label: Text\n  outputs:\n  - name: echo\n    kind: scalar\n    type: string\n    required: true\n    label: Echo\ntrigger:\n  type: manual\nexample_input:\n  text: hello\n",
+            "binary": false,
+            "size": 531
+          },
+          {
+            "path": "SKILL.md",
+            "language": "markdown",
+            "content": "# Codex Audit Throwaway\n\nThis WorkerContract entrypoint is a placeholder for the markdown skill runtime. Current Workeros execution uses `exec.command` from `worker.yml`.\n",
+            "binary": false,
+            "size": 171
+          },
+          {
+            "path": "run.py",
+            "language": "python",
+            "content": "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\ntext=str(inputs.get('text',''))\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{'echo':'codex-audit:' + text[:120]},'artifacts':[],'error':None}))\n",
+            "binary": false,
+            "size": 260
+          },
+          {
+            "path": "requirements.txt",
+            "language": "text",
+            "content": "",
+            "binary": false,
+            "size": 0
+          }
+        ],
+        "triggers_spec": [
+          {
+            "type": "manual",
+            "cron": null,
+            "timezone": null,
+            "webhook": null,
+            "composio": null
+          }
+        ],
+        "public_link": "https://workers.floom.dev/w/codex-audit-20260607031446?token=[REDACTED_PUBLIC_SHARE_TOKEN]",
+        "cloned_from": null,
+        "owner_id": "federico",
+        "visibility": "private",
+        "permissions": {
+          "is_owner": true,
+          "can_view": true,
+          "can_edit": true,
+          "can_run": true,
+          "can_delete": true,
+          "can_share": true
+        }
+      }
+    },
+    {
+      "label": "03-create-run",
+      "method": "POST",
+      "path": "/workers/codex-audit-20260607031446/runs",
+      "status": 200,
+      "ok": true,
+      "headers": {
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-cache-status": "DYNAMIC",
+        "connection": "keep-alive",
+        "content-length": "48",
+        "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+        "content-type": "application/json",
+        "date": "Sun, 07 Jun 2026 03:14:47 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=B0gRH0bMDaYOAjcXIKim6t6DX035dwVGL7X%2Br4CqkEkCO9VyE93OztupGGXcnRX3Giy%2Fr5Mp0rJDZV8a9QoR1D5aWD7Y%2FCRihyJ577964RMv%2BP%2BEd2cvE2q4BKQEB3BwJ8mCOj9YPFGEcN9CQlhrZA887O4%3D\"}]}",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY"
+      },
+      "body": {
+        "status": "running",
+        "run_id": "run_1842259e06cf"
+      }
+    },
+    {
+      "label": "04-poll-run-01",
+      "status": 200,
+      "runStatus": "running",
+      "hasOutput": true
+    },
+    {
+      "label": "04-poll-run-02",
+      "status": 200,
+      "runStatus": "completed",
+      "hasOutput": true
+    },
+    {
+      "label": "05-get-run-final",
+      "method": "GET",
+      "path": "/runs/run_1842259e06cf",
+      "status": 200,
+      "ok": true,
+      "headers": {
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-cache-status": "DYNAMIC",
+        "connection": "keep-alive",
+        "content-encoding": "br",
+        "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+        "content-type": "application/json",
+        "date": "Sun, 07 Jun 2026 03:14:52 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=%2BisilzqofJKIkgCKp6mi17Hn%2FyYZlm9RRMqXQNfZ%2FC%2B843JRh8TcFDxlJull%2BDyv46TKrAyLrvdpmzQus2FMV8y7Y8DUxlHHksEkVLy8CR8T9M5dvJol5PBHF0Ptgjj%2FASozuQvCY8Dweh1PpNMelQ1smIs%3D\"}]}",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "transfer-encoding": "chunked",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY"
+      },
+      "body": {
+        "id": "run_1842259e06cf",
+        "worker_id": "codex-audit-20260607031446",
+        "worker_name": "Codex Audit Throwaway",
+        "status": "completed",
+        "trigger_source": "codex-audit",
+        "runner": "e2b",
+        "input": {},
+        "output": {
+          "echo": "codex-audit:hello <script>alert('codex')</script> ' OR 1=1 -- codex-audit-20260607031446"
+        },
+        "output_schema": [
+          {
+            "name": "echo",
+            "type": "text",
+            "label": "Echo",
+            "value": "codex-audit:hello <script>alert('codex')</script> ' OR 1=1 -- codex-audit-20260607031446"
+          }
+        ],
+        "logs": [
+          {
+            "level": "info",
+            "message": "Run started",
+            "timestamp": "2026-06-07T03:14:47.230412+00:00"
+          },
+          {
+            "level": "debug",
+            "message": "Validating inputs",
+            "timestamp": "2026-06-07T03:14:47.246834+00:00"
+          },
+          {
+            "level": "debug",
+            "message": "Loading secrets",
+            "timestamp": "2026-06-07T03:14:47.266050+00:00"
+          },
+          {
+            "level": "debug",
+            "message": "Executing worker ([redacted-metadata], [redacted-metadata]",
+            "timestamp": "2026-06-07T03:14:47.304054+00:00"
+          },
+          {
+            "level": "info",
+            "message": "[e2b] Spawning sandbox for run [redacted-id]",
+            "timestamp": "2026-06-07T03:14:47.324561+00:00"
+          },
+          {
+            "level": "debug",
+            "message": "[e2b] Uploaded worker.yml",
+            "timestamp": "2026-06-07T03:14:49.095805+00:00"
+          },
+          {
+            "level": "debug",
+            "message": "[e2b] Uploaded run.py",
+            "timestamp": "2026-06-07T03:14:49.320671+00:00"
+          },
+          {
+            "level": "debug",
+            "message": "[e2b] Uploaded SKILL.md",
+            "timestamp": "2026-06-07T03:14:49.553419+00:00"
+          },
+          {
+            "level": "debug",
+            "message": "[e2b] Uploaded requirements.txt",
+            "timestamp": "2026-06-07T03:14:49.768649+00:00"
+          },
+          {
+            "level": "info",
+            "message": "[e2b] Executing worker command: python run.py",
+            "timestamp": "2026-06-07T03:14:50.532132+00:00"
+          },
+          {
+            "level": "info",
+            "message": "[e2b] Run completed successfully",
+            "timestamp": "2026-06-07T03:14:51.442312+00:00"
+          },
+          {
+            "level": "debug",
+            "message": "[e2b] Sandbox killed",
+            "timestamp": "2026-06-07T03:14:52.237356+00:00"
+          },
+          {
+            "level": "info",
+            "message": "Output generated",
+            "timestamp": "2026-06-07T03:14:52.291494+00:00"
+          },
+          {
+            "level": "info",
+            "message": "Run completed",
+            "timestamp": "2026-06-07T03:14:52.315435+00:00"
+          }
+        ],
+        "artifacts": [],
+        "transcript": [],
+        "started_at": "2026-06-07T03:14:47.210014+00:00",
+        "completed_at": "2026-06-07T03:14:52.266098+00:00",
+        "duration_ms": 5056,
+        "created_at": "2026-06-07T03:14:47.183443+00:00"
+      }
+    },
+    {
+      "label": "06-delete-worker",
+      "method": "DELETE",
+      "path": "/workers/codex-audit-20260607031446",
+      "status": 204,
+      "ok": true,
+      "headers": {
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-cache-status": "DYNAMIC",
+        "connection": "keep-alive",
+        "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+        "content-type": "application/json",
+        "date": "Sun, 07 Jun 2026 03:14:52 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=M78RO6nyrdwEf3dNhNpnyrL5lDYvTFsRN%2Bqra5vRy9onQes3fqS33e7SZ0wVJUYJrL%2FApEQFUiPpf4SYwvFaMRX2WRk9K6WQ1Ckh8uEc%2FOPguLSGbTNrxkZoC8cQo0fe3nnmO3tppEPWpnq5yEAeUXSE81A%3D\"}]}",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY"
+      },
+      "body": ""
+    },
+    {
+      "label": "07-get-worker-after-delete",
+      "method": "GET",
+      "path": "/workers/codex-audit-20260607031446",
+      "status": 404,
+      "ok": false,
+      "headers": {
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-cache-status": "DYNAMIC",
+        "connection": "keep-alive",
+        "content-length": "29",
+        "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+        "content-type": "application/json",
+        "date": "Sun, 07 Jun 2026 03:14:53 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=p%2BXHLkzn9%2BHfCqS15FvwqKtChsGAWKCgQ1IsuoDf8rOl6aegIUdgI4RauVjrxyieGYnWvAZa%2FBr1Tjf%2BvbSg0z2DP5Tpy0ZC8nVr%2FkWy0ZwSRSg9ZrxSN%2FpQrmdrdYFrG8rLz3n4q%2FRqdnb6gA2e3muiv%2B8%3D\"}]}",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY"
+      },
+      "body": {
+        "detail": "Worker not found"
+      }
+    },
+    {
+      "label": "08-get-run-after-worker-delete",
+      "method": "GET",
+      "path": "/runs/run_1842259e06cf",
+      "status": 404,
+      "ok": false,
+      "headers": {
+        "alt-svc": "h3=\":443\"; ma=86400",
+        "cf-cache-status": "DYNAMIC",
+        "connection": "keep-alive",
+        "content-length": "26",
+        "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+        "content-type": "application/json",
+        "date": "Sun, 07 Jun 2026 03:14:53 GMT",
+        "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+        "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=PrHOYxkMALgHmWxwgMANpdq%2BcDknUOOaeCnUwJY7GItzAkhNyfwjnj35kM%2FHjv6ZL5swY%2F4EJIJPNkwkdg4958TFQ2XU2TiRbv9qqsx0fzkCqkszDPURJFtCRF43sMaDv4P7Mzj3CrqJf00NIic%2FVnMAVI8%3D\"}]}",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY"
+      },
+      "body": {
+        "detail": "Run not found"
+      }
+    }
+  ],
+  "runId": "run_1842259e06cf",
+  "finishedAt": "2026-06-07T03:14:53.248Z"
+}

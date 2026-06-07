@@ -1,0 +1,109 @@
+{
+  "label": "e2b-03-poll-02",
+  "method": "GET",
+  "path": "/runs/run_efb1f2f6f809",
+  "status": 200,
+  "body": {
+    "id": "run_efb1f2f6f809",
+    "worker_id": "text-uppercaser",
+    "worker_name": "Text Uppercaser",
+    "status": "completed",
+    "trigger_source": "codex-audit",
+    "runner": "e2b",
+    "input": {},
+    "output": {
+      "uppercased": "CODEX E2B SMOKE"
+    },
+    "output_schema": [
+      {
+        "name": "uppercased",
+        "type": "text",
+        "label": "Uppercased text",
+        "value": "CODEX E2B SMOKE"
+      }
+    ],
+    "logs": [
+      {
+        "level": "info",
+        "message": "Run started",
+        "timestamp": "2026-06-07T03:25:06.766429+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "Validating inputs",
+        "timestamp": "2026-06-07T03:25:06.781699+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "Loading secrets",
+        "timestamp": "2026-06-07T03:25:06.800280+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "Executing worker ([redacted-metadata], [redacted-metadata]",
+        "timestamp": "2026-06-07T03:25:06.838912+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Spawning sandbox for run [redacted-id]",
+        "timestamp": "2026-06-07T03:25:06.855680+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded worker.yml",
+        "timestamp": "2026-06-07T03:25:08.563914+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded run.py",
+        "timestamp": "2026-06-07T03:25:08.777159+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Uploaded requirements.txt",
+        "timestamp": "2026-06-07T03:25:08.988699+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Installing requirements.txt...",
+        "timestamp": "2026-06-07T03:25:11.443453+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Requirements installed",
+        "timestamp": "2026-06-07T03:25:13.496774+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Executing worker command: python run.py",
+        "timestamp": "2026-06-07T03:25:13.534284+00:00"
+      },
+      {
+        "level": "info",
+        "message": "[e2b] Run completed successfully",
+        "timestamp": "2026-06-07T03:25:13.976251+00:00"
+      },
+      {
+        "level": "debug",
+        "message": "[e2b] Sandbox killed",
+        "timestamp": "2026-06-07T03:25:14.707308+00:00"
+      },
+      {
+        "level": "info",
+        "message": "Output generated",
+        "timestamp": "2026-06-07T03:25:14.760968+00:00"
+      },
+      {
+        "level": "info",
+        "message": "Run completed",
+        "timestamp": "2026-06-07T03:25:14.784588+00:00"
+      }
+    ],
+    "artifacts": [],
+    "transcript": [],
+    "started_at": "2026-06-07T03:25:06.747038+00:00",
+    "completed_at": "2026-06-07T03:25:14.735582+00:00",
+    "duration_ms": 7988,
+    "created_at": "2026-06-07T03:25:06.716944+00:00"
+  }
+}

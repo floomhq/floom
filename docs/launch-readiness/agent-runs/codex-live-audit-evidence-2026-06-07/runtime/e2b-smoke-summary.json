@@ -1,0 +1,32 @@
+{
+  "workerId": "text-uppercaser",
+  "steps": [
+    {
+      "label": "e2b-01-get-worker",
+      "status": 200,
+      "runner": "e2b"
+    },
+    {
+      "label": "e2b-02-create-run",
+      "status": 200,
+      "runId": "run_efb1f2f6f809"
+    },
+    {
+      "label": "e2b-03-poll-01",
+      "status": 200,
+      "runStatus": "running",
+      "error": null,
+      "output": {}
+    },
+    {
+      "label": "e2b-03-poll-02",
+      "status": 200,
+      "runStatus": "completed",
+      "error": null,
+      "output": {
+        "uppercased": "CODEX E2B SMOKE"
+      }
+    }
+  ],
+  "runId": "run_efb1f2f6f809"
+}

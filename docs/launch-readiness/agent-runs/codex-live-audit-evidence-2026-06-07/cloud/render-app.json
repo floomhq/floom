@@ -1,0 +1,9 @@
+{
+  "route": "/app",
+  "status": 200,
+  "title": "Sign in · Floom",
+  "bodyStart": "Floom\n/ workeros\nSign in to Floom\n\nAI workers that actually run\n\nContinue with Google\nContinue with GitHub\nOR\nMagic link\nSign in\nSign up\nEmail\nEmail me a magic link\n\nBy signing in you agree to the Terms and Privacy Policy. We'll create your workspace automatically on first sign-in.\n\nNew here? Create an account",
+  "bodyLength": 311,
+  "errors": [],
+  "api": []
+}
