@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
+from typing import Optional
+from uuid import UUID
 
 from cryptography.fernet import Fernet
 
@@ -9,6 +12,12 @@ from apps.api._cloud_env import load_cloud_env_file
 
 load_cloud_env_file()
 
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Fernet — legacy fallback for secrets written before Vault migration
+# ---------------------------------------------------------------------------
 
 def _secret_encryption_key() -> str:
     value = (os.environ.get("WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY") or "").strip()
@@ -34,3 +43,69 @@ def encrypt_secret(plaintext: str) -> bytes:
 
 def decrypt_secret(ciphertext: bytes) -> str:
     return _fernet().decrypt(bytes(ciphertext)).decode()
+
+
+# ---------------------------------------------------------------------------
+# Supabase Vault (pgsodium) — primary store for new secrets
+#
+# Vault stores one pgsodium-encrypted row per secret. The plaintext is only
+# readable via vault.decrypted_secrets (service role only) — it never appears
+# in application logs or network traffic beyond the Supabase RPC response.
+#
+# Public-schema wrapper functions (workeros_vault_*) in migration 0031 bridge
+# the supabase-py PostgREST client to vault.* which lives in its own schema.
+#
+# Migration strategy: new secrets go to Vault (vault_secret_id set, value=NULL).
+# Old Fernet-encrypted secrets retain their value blob. On the next write the
+# secret is re-encrypted via Vault and the Fernet blob is cleared.
+# ---------------------------------------------------------------------------
+
+def vault_store_secret(
+    client,
+    plaintext: str,
+    name: str,
+    description: str = "",
+) -> UUID:
+    """Create or update a secret in Supabase Vault.
+
+    Returns the vault UUID. Caller stores this in secrets.vault_secret_id.
+    If a secret with this name already exists in Vault, update it in place.
+    """
+    result = client.rpc(
+        "workeros_vault_create_secret",
+        {"p_secret": plaintext, "p_name": name, "p_description": description},
+    ).execute()
+    return UUID(str(result.data))
+
+
+def vault_update_secret(client, vault_id: UUID, plaintext: str, name: str) -> None:
+    """Overwrite the plaintext of an existing Vault secret."""
+    client.rpc(
+        "workeros_vault_update_secret",
+        {"p_id": str(vault_id), "p_secret": plaintext, "p_name": name},
+    ).execute()
+
+
+def vault_read_secret(client, vault_id: UUID) -> Optional[str]:
+    """Decrypt and return the plaintext of a Vault secret, or None if missing."""
+    result = client.rpc(
+        "workeros_vault_read_secret",
+        {"p_id": str(vault_id)},
+    ).execute()
+    return result.data or None
+
+
+def vault_delete_secret(client, vault_id: UUID) -> None:
+    """Delete a secret from the Vault."""
+    try:
+        client.rpc(
+            "workeros_vault_delete_secret",
+            {"p_id": str(vault_id)},
+        ).execute()
+    except Exception as exc:
+        logger.warning("vault_delete_secret %s failed (non-fatal): %s", vault_id, exc)
+
+
+def vault_secret_name(workspace_id: str, secret_name: str) -> str:
+    """Canonical name for a secret in Vault — scoped to workspace."""
+    return f"workeros/{workspace_id}/{secret_name}"

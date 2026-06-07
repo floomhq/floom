@@ -69,7 +69,15 @@ from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.workspace_context import get_active_member_role, get_active_workspace_id
 from apps.api.config import get_supabase_service_client
 from apps.api.db import workspaces as workspace_repo
-from apps.api.db._secret_crypto import decrypt_secret, encrypt_secret
+from apps.api.db._secret_crypto import (
+    decrypt_secret,
+    encrypt_secret,
+    vault_store_secret,
+    vault_update_secret,
+    vault_read_secret,
+    vault_delete_secret,
+    vault_secret_name,
+)
 
 ensure_engine_api_path()
 
@@ -2328,87 +2336,144 @@ class SupabaseConnectionRepository(_BaseSupabaseRepository):
 
 
 class SupabaseSecretRepository(_BaseSupabaseRepository):
+    """Secrets stored in Supabase Vault (pgsodium) for new writes.
+
+    Migration strategy:
+    - New secrets: stored via Vault (vault_secret_id set, value=NULL)
+    - Legacy secrets: value blob (Fernet-encrypted), vault_secret_id=NULL
+    - On next write of a legacy secret: migrated to Vault, Fernet blob cleared
+    - On read: Vault takes priority; Fernet used as fallback for legacy rows
+    """
+
+    _SELECT = (
+        "user_id,name,value,vault_secret_id,status,"
+        "last_used_at,created_at,updated_at,last_checked_at,last_check_status,last_check_error"
+    )
+
+    def _decrypt_row(self, row: dict) -> dict:
+        """Resolve plaintext from Vault or legacy Fernet blob. Strips raw fields."""
+        vault_id = row.pop("vault_secret_id", None)
+        ciphertext = _bytea_bytes(row.pop("value", None))
+        if vault_id:
+            try:
+                from uuid import UUID
+                row["value"] = vault_read_secret(self._client, UUID(str(vault_id)))
+            except Exception as exc:
+                _repo_logger.warning("vault_read_secret failed for %s: %s", row.get("name"), exc)
+                row["value"] = None
+        elif ciphertext is not None:
+            try:
+                row["value"] = decrypt_secret(ciphertext)
+            except Exception:
+                row["value"] = None
+        else:
+            row["value"] = None
+        return row
+
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
-        builder = self._client.table("secrets").select(
-            "user_id,name,value,status,last_used_at,created_at,updated_at,last_checked_at,last_check_status,last_check_error"
-        )
+        builder = self._client.table("secrets").select(self._SELECT)
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.order("name").execute()
-        items = _response_rows(response)
-        for item in items:
-            ciphertext = _bytea_bytes(item.get("value"))
-            item["value"] = decrypt_secret(ciphertext) if ciphertext is not None else None
-        return items
+        return [self._decrypt_row(dict(item)) for item in _response_rows(response)]
 
     def get(self, *, user_id: str, name: str) -> dict[str, Any] | None:
-        builder = self._client.table("secrets").select(
-            "user_id,name,value,status,last_used_at,created_at,updated_at,last_checked_at,last_check_status,last_check_error"
-        )
+        builder = self._client.table("secrets").select(self._SELECT)
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.eq("name", name).limit(1).execute()
         row = _first_row(response)
-        if row is None:
-            return None
-        ciphertext = _bytea_bytes(row.get("value"))
-        row["value"] = decrypt_secret(ciphertext) if ciphertext is not None else None
-        return row
+        return self._decrypt_row(dict(row)) if row is not None else None
 
     def set(self, *, user_id: str, name: str, value: str, status: str = "set") -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
-        ciphertext = _bytea_literal(encrypt_secret(value))
         workspace_id = _resolve_workspace_id_for_write(user_id=user_id)
-        existing_builder = self._client.table("secrets").select("created_at")
+
+        # Read existing row to find legacy vault_id or Fernet blob
+        existing_builder = self._client.table("secrets").select("vault_secret_id,value")
         existing_builder = _scope_by_workspace(existing_builder, user_id=user_id)
-        existing = existing_builder.eq("name", name).limit(1).execute()
-        if _first_row(existing) is None:
+        existing = _first_row(existing_builder.eq("name", name).limit(1).execute())
+
+        vault_name = vault_secret_name(workspace_id, name)
+        if existing is None:
+            # New secret — store in Vault
+            from uuid import UUID
+            vault_id = vault_store_secret(self._client, value, vault_name)
             self._client.table("secrets").insert(
                 {
                     "user_id": user_id,
                     "workspace_id": workspace_id,
                     "name": name,
-                    "value": ciphertext,
+                    "value": None,
+                    "vault_secret_id": str(vault_id),
                     "status": status,
                     "created_at": now,
                     "updated_at": now,
                 }
             ).execute()
         else:
-            update_builder = self._client.table("secrets").update(
-                {
-                    "value": ciphertext,
-                    "status": status,
-                    "updated_at": now,
-                }
-            ).eq("name", name)
+            existing_vault_id = existing.get("vault_secret_id")
+            if existing_vault_id:
+                # Update existing Vault secret in place
+                from uuid import UUID
+                vault_update_secret(self._client, UUID(str(existing_vault_id)), value, vault_name)
+                update_builder = self._client.table("secrets").update(
+                    {"status": status, "updated_at": now}
+                ).eq("name", name)
+            else:
+                # Migrate legacy Fernet secret → Vault on next write
+                from uuid import UUID
+                vault_id = vault_store_secret(self._client, value, vault_name)
+                update_builder = self._client.table("secrets").update(
+                    {
+                        "value": None,
+                        "vault_secret_id": str(vault_id),
+                        "status": status,
+                        "updated_at": now,
+                    }
+                ).eq("name", name)
             update_builder = _scope_by_workspace(update_builder, user_id=user_id)
             update_builder.execute()
+
         item = self.get(user_id=user_id, name=name)
         if item is None:
             raise RuntimeError(f"failed to set secret {name}")
         return item
 
     def delete(self, *, user_id: str, name: str) -> bool:
+        # Fetch vault_secret_id before deleting the row
+        fetch = self._client.table("secrets").select("vault_secret_id")
+        fetch = _scope_by_workspace(fetch, user_id=user_id)
+        row = _first_row(fetch.eq("name", name).limit(1).execute())
+        if row and row.get("vault_secret_id"):
+            from uuid import UUID
+            vault_delete_secret(self._client, UUID(str(row["vault_secret_id"])))
+
         builder = self._client.table("secrets").delete().eq("name", name)
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.execute()
         return bool(_response_rows(response))
 
     def read_value(self, *, user_id: str, name: str) -> str | None:
-        builder = self._client.table("secrets").select("value")
+        builder = self._client.table("secrets").select("value,vault_secret_id")
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.eq("name", name).limit(1).execute()
         row = _first_row(response)
         if row is None:
             return None
-        ciphertext = _bytea_bytes(row.get("value"))
-        if ciphertext is None:
-            return None
-        plaintext = decrypt_secret(ciphertext)
-        used_builder = self._client.table("secrets").update(
-            {"last_used_at": datetime.now(timezone.utc).isoformat()}
-        ).eq("name", name)
-        used_builder = _scope_by_workspace(used_builder, user_id=user_id)
-        used_builder.execute()
+
+        vault_id = row.get("vault_secret_id")
+        if vault_id:
+            from uuid import UUID
+            plaintext = vault_read_secret(self._client, UUID(str(vault_id)))
+        else:
+            ciphertext = _bytea_bytes(row.get("value"))
+            plaintext = decrypt_secret(ciphertext) if ciphertext is not None else None
+
+        if plaintext is not None:
+            used_builder = self._client.table("secrets").update(
+                {"last_used_at": datetime.now(timezone.utc).isoformat()}
+            ).eq("name", name)
+            used_builder = _scope_by_workspace(used_builder, user_id=user_id)
+            used_builder.execute()
         return plaintext
 
     def list_names(self, *, user_id: str) -> set[str]:
