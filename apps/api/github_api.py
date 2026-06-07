@@ -147,3 +147,79 @@ def set_secrets_key(pat: str, repo_full_name: str, key: bytes) -> None:
             raise
 
 
+# ---------------------------------------------------------------------------
+# GitHub Contents API
+#
+# Allows creating/updating individual files in a repo without a local git
+# clone. Used by the cloud GitOps path where there is no persistent disk.
+# ---------------------------------------------------------------------------
+
+def get_file_sha(pat: str, repo_full_name: str, path: str) -> Optional[str]:
+    """Return the blob SHA of an existing file, or None if not found.
+
+    Required for PUT (update) calls — GitHub rejects updates without the
+    current SHA to prevent unintentional overwrites.
+    """
+    try:
+        result = _call("GET", f"/repos/{repo_full_name}/contents/{path}", pat)
+        return result.get("sha")
+    except GitHubAPIError as exc:
+        if exc.status == 404:
+            return None
+        raise
+
+
+def put_file(
+    pat: str,
+    repo_full_name: str,
+    path: str,
+    content: bytes,
+    message: str,
+    sha: Optional[str] = None,
+) -> None:
+    """Create or update a single file in the repo via the Contents API.
+
+    If sha is None the file will be fetched first to get the current SHA
+    (needed for updates). Pass sha explicitly to avoid an extra round-trip
+    when you already have it.
+    """
+    from base64 import b64encode
+    if sha is None:
+        sha = get_file_sha(pat, repo_full_name, path)
+    body: dict = {
+        "message": message,
+        "content": b64encode(content).decode("ascii"),
+    }
+    if sha:
+        body["sha"] = sha
+    _call("PUT", f"/repos/{repo_full_name}/contents/{path}", pat, body)
+
+
+def list_repo_tree(pat: str, repo_full_name: str, ref: str = "HEAD") -> list[dict]:
+    """Return the full recursive tree of the repo at ref.
+
+    Each entry: {path, type, sha} where type is 'blob' or 'tree'.
+    Used by the import flow to discover all worker/context files.
+    """
+    try:
+        result = _call("GET", f"/repos/{repo_full_name}/git/trees/{ref}?recursive=1", pat)
+        return result.get("tree", [])
+    except GitHubAPIError as exc:
+        if exc.status == 404:
+            return []
+        raise
+
+
+def get_file_content(pat: str, repo_full_name: str, path: str) -> Optional[str]:
+    """Return the decoded text content of a file, or None if not found."""
+    from base64 import b64decode
+    try:
+        result = _call("GET", f"/repos/{repo_full_name}/contents/{path}", pat)
+        encoded = result.get("content", "")
+        return b64decode(encoded.replace("\n", "")).decode("utf-8")
+    except GitHubAPIError as exc:
+        if exc.status == 404:
+            return None
+        raise
+
+
