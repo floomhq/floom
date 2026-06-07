@@ -6,12 +6,15 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Copy,
+  ExternalLink,
   Loader2,
   Plus,
   Server,
   Terminal,
   Trash2,
+  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -257,6 +260,8 @@ export default function McpConnectionsPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
+  // #566: track which MCP row is expanded for the in-place peek
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Concept A: install Floom Workers into an AI client (secondary, collapsed)
   const [installOpen, setInstallOpen] = useState(false);
@@ -922,8 +927,10 @@ export default function McpConnectionsPage() {
               conn={conn}
               deleting={deleting === conn.id}
               testing={testing === conn.id}
+              expanded={expandedId === conn.id}
               onDelete={() => void handleDelete(conn)}
               onTest={() => void handleTest(conn)}
+              onToggle={() => setExpandedId((prev) => prev === conn.id ? null : conn.id)}
             />
           ))
         )}
@@ -976,14 +983,18 @@ function McpRow({
   conn,
   deleting,
   testing,
+  expanded,
   onDelete,
   onTest,
+  onToggle,
 }: {
   conn: McpConnection;
   deleting: boolean;
   testing: boolean;
+  expanded?: boolean;
   onDelete: () => void;
   onTest: () => void;
+  onToggle?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -996,74 +1007,134 @@ function McpRow({
     });
   }
 
+  const toolCount = (conn.mcp_allowed_tools ?? []).length;
+  const toolLabel = toolCount > 0 ? `${toolCount} tool${toolCount === 1 ? "" : "s"}` : "All tools";
+  const statusLabel = conn.status === "active" ? "Active" : conn.status === "failed" ? "Failed" : conn.status === "expired" ? "Expired" : "Inactive";
+  const isActive = conn.status === "active";
+
   return (
-    <div className="group grid grid-cols-[32px_1fr_auto] items-center gap-3 border-b border-[var(--border-default)] px-3 py-2.5 transition-colors last:border-b-0 hover:bg-[var(--active-nav-bg)] md:grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] md:gap-4">
-      {/* Icon */}
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)]">
-        <Server className="size-3.5 text-muted-foreground" />
-      </div>
+    <div className="border-b border-[var(--border-default)] last:border-b-0 transition-colors">
+      {/* Clickable row */}
+      <div
+        role={onToggle ? "button" : undefined}
+        tabIndex={onToggle ? 0 : undefined}
+        onClick={onToggle}
+        onKeyDown={onToggle ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } } : undefined}
+        className={`group grid grid-cols-[32px_1fr_auto] items-center gap-3 px-3 py-2.5 md:grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] md:gap-4 ${onToggle ? "cursor-pointer select-none hover:bg-[var(--active-nav-bg)]" : "hover:bg-[var(--active-nav-bg)]"} transition-colors`}
+      >
+        {/* Icon */}
+        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)]">
+          <Server className="size-3.5 text-muted-foreground" />
+        </div>
 
-      {/* Label */}
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{conn.mcp_label}</p>
-        <p className="truncate text-xs text-muted-foreground md:hidden">{connectionSummary(conn)}</p>
-      </div>
+        {/* Label */}
+        <div className="min-w-0 flex items-center gap-1.5">
+          {onToggle && (
+            <ChevronRight
+              className={`size-3.5 shrink-0 text-muted-foreground/50 transition-transform ${expanded ? "rotate-90" : ""}`}
+            />
+          )}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{conn.mcp_label}</p>
+            <p className="truncate text-xs text-muted-foreground md:hidden">{connectionSummary(conn)}</p>
+          </div>
+        </div>
 
-      {/* URL */}
-      <div className="hidden min-w-0 items-center gap-1.5 md:flex">
-        <span className="flex-1 truncate text-xs text-muted-foreground">
-          {(conn.mcp_transport ?? "streamable_http") === "stdio"
-            ? connectionSummary(conn)
-            : truncateUrl(conn.mcp_url ?? "", 52)}
+        {/* URL */}
+        <div
+          className="hidden min-w-0 items-center gap-1.5 md:flex"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="flex-1 truncate text-xs text-muted-foreground">
+            {(conn.mcp_transport ?? "streamable_http") === "stdio"
+              ? connectionSummary(conn)
+              : truncateUrl(conn.mcp_url ?? "", 52)}
+          </span>
+          <button
+            type="button"
+            onClick={copyUrl}
+            className="rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+            title="Copy URL"
+          >
+            {copied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5 text-muted-foreground" />}
+          </button>
+        </div>
+
+        {/* Auth */}
+        <span className="hidden truncate text-xs text-muted-foreground md:inline">
+          {conn.mcp_auth_secret ? (
+            <code className="rounded bg-muted px-1 py-0.5 font-mono">{conn.mcp_auth_secret}</code>
+          ) : "None"}
         </span>
-        <button
-          type="button"
-          onClick={copyUrl}
-          className="rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
-          title="Copy URL"
-        >
-          {copied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5 text-muted-foreground" />}
-        </button>
+
+        {/* Tools */}
+        <span className="hidden truncate text-xs text-muted-foreground md:inline">
+          {toolLabel}
+        </span>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onTest}
+            disabled={testing}
+            className="hidden h-7 px-2 text-xs md:flex"
+            title="Test connection"
+          >
+            {testing ? <Loader2 className="size-3.5 animate-spin" /> : "Test"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onDelete}
+            disabled={deleting}
+            title="Remove MCP server"
+          >
+            {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+          </Button>
+        </div>
       </div>
 
-      {/* Auth */}
-      <span className="hidden truncate text-xs text-muted-foreground md:inline">
-        {conn.mcp_auth_secret ? (
-          <code className="rounded bg-muted px-1 py-0.5 font-mono">{conn.mcp_auth_secret}</code>
-        ) : "None"}
-      </span>
-
-      {/* Tools */}
-      <span className="hidden truncate text-xs text-muted-foreground md:inline">
-        {(conn.mcp_allowed_tools ?? []).length > 0
-          ? `${(conn.mcp_allowed_tools ?? []).length} tool${(conn.mcp_allowed_tools ?? []).length === 1 ? "" : "s"}`
-          : "All tools"}
-      </span>
-
-      {/* Actions */}
-      <div className="flex items-center gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onTest}
-          disabled={testing}
-          className="hidden h-7 px-2 text-xs md:flex"
-          title="Test connection"
-        >
-          {testing ? <Loader2 className="size-3.5 animate-spin" /> : "Test"}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={onDelete}
-          disabled={deleting}
-          title="Remove MCP server"
-        >
-          {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-        </Button>
-      </div>
+      {/* Expanded peek */}
+      {expanded && (
+        <div className="border-t border-[var(--border-default)] bg-[color-mix(in_srgb,var(--active-nav-bg)_60%,transparent)] px-3 py-3 md:pl-[52px]">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border ${isActive ? "border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]" : "border-[color-mix(in_srgb,var(--negative)_24%,var(--line))] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]"}`}>
+              {statusLabel}
+            </span>
+            <span className="text-[var(--ink-soft)]">{toolLabel}</span>
+            <span className="text-[var(--ink-soft)] font-mono text-xs">
+              {conn.mcp_transport ?? "streamable_http"}
+            </span>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={onTest}
+              disabled={testing}
+            >
+              <Zap className={`size-3 ${testing ? "animate-pulse" : ""}`} />
+              {testing ? "Testing..." : "Test"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={() => { window.location.href = `/connections/mcp/${conn.id}`; }}
+            >
+              <ExternalLink className="size-3" />
+              Open
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
