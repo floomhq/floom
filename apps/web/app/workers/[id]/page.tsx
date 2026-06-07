@@ -22,7 +22,7 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   Copy, Code2, Clock, Plug2, ListChecks, History,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, Plus, RotateCcw, Search, Check,
+  Brain as BrainIcon, Settings2, Plus, RotateCcw, Search, Check, KeyRound,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
@@ -1524,7 +1524,8 @@ export default function WorkerDetailPage() {
   // it would only 409. Treat it like a connection block: disabled + a clear
   // "paused" label so the click is never a dead end.
   const isPaused = worker.enabled === false && !worker.archived;
-  const canRun = !running && missingConnections.length === 0 && !isPaused;
+  const isMissingSecretForRun = worker.status === "missing_secret";
+  const canRun = !running && missingConnections.length === 0 && !isPaused && !isMissingSecretForRun;
   // canApplySample: allowed when the worker declares any input. File-only
   // workers are now fillable too — applyExampleInput synthesizes a real upload
   // from the inline example_input content (G5 FIX 4), so a non-technical user
@@ -2792,6 +2793,22 @@ function RunSection({
             </div>
           )}
 
+          {worker.status === "missing_secret" && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
+              <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">Secret required</p>
+                <p>
+                  This worker requires a secret that is not configured. Add it in{" "}
+                  <Link href="/secrets" className="underline hover:text-amber-900">
+                    Secrets
+                  </Link>{" "}
+                  before running.
+                </p>
+              </div>
+            </div>
+          )}
+
           <Button onClick={onRun} disabled={!canRun} className="w-full">
             <Play className="w-4 h-4 mr-1.5" />
             {running
@@ -2800,6 +2817,8 @@ function RunSection({
               ? "Paused — turn on to run"
               : missingConnections.length > 0
               ? `Connect ${missingConnections[0]} first`
+              : worker.status === "missing_secret"
+              ? "Add missing secret first"
               : "Run worker"}
           </Button>
       </div>
