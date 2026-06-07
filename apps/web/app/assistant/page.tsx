@@ -82,7 +82,7 @@ function HistoryMenu({
       const content = await rollback(v.id);
       onRollback(content);
       await refresh();
-      toast.success(`Rolled back to version ${v.version_number}`);
+      toast.success(`Rolled back to version ${v.sha}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
     } finally {
@@ -108,7 +108,7 @@ function HistoryMenu({
       >
         <DialogContent showCloseButton={false} className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Restore version {pendingRestore?.version_number}?</DialogTitle>
+            <DialogTitle>Restore version {pendingRestore?.sha}?</DialogTitle>
           </DialogHeader>
           <DialogDescription>
             {confirmLabel} The current version is saved automatically before restoring.
