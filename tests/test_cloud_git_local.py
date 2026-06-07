@@ -549,3 +549,167 @@ def test_ensure_workspace_repo_triggers_backfill_on_restore(tmp_path):
     assert (git_dir / ".git").exists()
     # update should have been called to backfill _files
     mock_svc.table().update.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Sensitive context tests
+# ---------------------------------------------------------------------------
+
+def _reset_contexts_module():
+    """Clear cached contexts module so env var changes take effect."""
+    import sys
+    for mod in [k for k in list(sys.modules) if k == "contexts" or k.startswith("contexts.")]:
+        sys.modules.pop(mod)
+
+
+def _make_context_dir(contexts_root: Path, name: str, sensitive: bool | None = None) -> Path:
+    """Create a context directory with an optional sensitive flag in metadata."""
+    ctx_dir = contexts_root / name
+    ctx_dir.mkdir(parents=True, exist_ok=True)
+    (ctx_dir / "notes.txt").write_text("secret data\n", encoding="utf-8")
+    if sensitive is not None:
+        meta = contexts_root / ".workeros-contexts.json"
+        existing = {}
+        if meta.exists():
+            import json as _json
+            existing = _json.loads(meta.read_text())
+        existing[name] = {"sensitive": sensitive}
+        import json as _json
+        meta.write_text(_json.dumps(existing))
+    return ctx_dir
+
+
+def test_write_context_skips_sensitive_context(tmp_path):
+    """_write_context returns False and writes nothing to git for sensitive contexts."""
+    _reset_contexts_module()
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+    contexts_root = tmp_path / "contexts"
+    contexts_root.mkdir()
+    _make_context_dir(contexts_root, "private-docs", sensitive=True)
+
+    with patch.dict(os.environ, {
+        "WORKEROS_GIT_WORKSPACES_DIR": str(ws_root),
+        "FLOOM_CONTEXTS_DIR": str(contexts_root),
+    }):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client"):
+            from apps.api.cloud_git_local import _write_context
+            result = _write_context(git_dir, WORKSPACE_ID, "private-docs")
+
+    assert result is False
+    # Nothing written to git workspace
+    assert not (git_dir / "contexts" / "private-docs").exists()
+
+
+def test_write_context_skips_when_no_metadata(tmp_path):
+    """_write_context returns False when context has no metadata (default=sensitive)."""
+    _reset_contexts_module()
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+    contexts_root = tmp_path / "contexts"
+    contexts_root.mkdir()
+    # Create context dir with no metadata entry — defaults to sensitive
+    _make_context_dir(contexts_root, "new-pack", sensitive=None)
+
+    with patch.dict(os.environ, {
+        "WORKEROS_GIT_WORKSPACES_DIR": str(ws_root),
+        "FLOOM_CONTEXTS_DIR": str(contexts_root),
+    }):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client"):
+            from apps.api.cloud_git_local import _write_context
+            result = _write_context(git_dir, WORKSPACE_ID, "new-pack")
+
+    assert result is False
+    assert not (git_dir / "contexts" / "new-pack").exists()
+
+
+def test_write_context_writes_when_non_sensitive(tmp_path):
+    """_write_context writes to git workspace when sensitive=False."""
+    _reset_contexts_module()
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+    contexts_root = tmp_path / "contexts"
+    contexts_root.mkdir()
+    _make_context_dir(contexts_root, "shared-docs", sensitive=False)
+
+    with patch.dict(os.environ, {
+        "WORKEROS_GIT_WORKSPACES_DIR": str(ws_root),
+        "FLOOM_CONTEXTS_DIR": str(contexts_root),
+    }):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client"):
+            from apps.api.cloud_git_local import _write_context
+            result = _write_context(git_dir, WORKSPACE_ID, "shared-docs")
+
+    assert result is True
+    assert (git_dir / "contexts" / "shared-docs" / "notes.txt").exists()
+
+
+def test_commit_workspace_skips_sensitive_context(tmp_path):
+    """commit_workspace makes no git commit when context path is sensitive."""
+    _reset_contexts_module()
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+    contexts_root = tmp_path / "contexts"
+    contexts_root.mkdir()
+    _make_context_dir(contexts_root, "classified", sensitive=True)
+
+    # Seed one commit so HEAD exists
+    _commit_file(git_dir, "workers/dummy/worker.yml", "name: dummy\n")
+    head_before = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(git_dir),
+        capture_output=True, text=True
+    ).stdout.strip()
+
+    with patch.dict(os.environ, {
+        "WORKEROS_GIT_WORKSPACES_DIR": str(ws_root),
+        "FLOOM_CONTEXTS_DIR": str(contexts_root),
+    }):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client"):
+            from apps.api.cloud_git_local import commit_workspace
+            sha = commit_workspace(WORKSPACE_ID, ["contexts/classified"], "test: sensitive ctx")
+
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(git_dir),
+        capture_output=True, text=True
+    ).stdout.strip()
+
+    assert sha is None
+    assert head_before == head_after  # no new commit
+
+
+def test_commit_workspace_commits_non_sensitive_context(tmp_path):
+    """commit_workspace creates a git commit when context is explicitly non-sensitive."""
+    _reset_contexts_module()
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+    contexts_root = tmp_path / "contexts"
+    contexts_root.mkdir()
+    _make_context_dir(contexts_root, "public-docs", sensitive=False)
+
+    _commit_file(git_dir, "workers/dummy/worker.yml", "name: dummy\n")
+    head_before = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(git_dir),
+        capture_output=True, text=True
+    ).stdout.strip()
+
+    with patch.dict(os.environ, {
+        "WORKEROS_GIT_WORKSPACES_DIR": str(ws_root),
+        "FLOOM_CONTEXTS_DIR": str(contexts_root),
+    }):
+        with patch("apps.api.cloud_git_local.get_supabase_service_client"):
+            from apps.api.cloud_git_local import commit_workspace
+            sha = commit_workspace(WORKSPACE_ID, ["contexts/public-docs"], "test: non-sensitive ctx")
+
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(git_dir),
+        capture_output=True, text=True
+    ).stdout.strip()
+
+    assert sha is not None
+    assert head_after != head_before  # new commit created
+    assert (git_dir / "contexts" / "public-docs" / "notes.txt").exists()
