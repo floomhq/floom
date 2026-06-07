@@ -22,7 +22,15 @@ function LoginContent() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const rawNext = searchParams.get("next") || "/overview";
+  const installChannel = searchParams.get("install");
+  const INSTALL_ROUTES: Record<string, string> = {
+    slack: "/settings?from_install=slack#slack",
+    whatsapp: "/overview?from_install=whatsapp",
+    discord: "/overview?from_install=discord",
+    cli: "/settings?from_install=cli",
+  };
+  const rawNext = searchParams.get("next") ||
+    (installChannel ? (INSTALL_ROUTES[installChannel] ?? "/overview") : "/overview");
   const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/overview";
 
   useEffect(() => {

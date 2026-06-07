@@ -30,6 +30,8 @@ export function SlackConnect() {
   // M17: track the team that was just connected so we can surface a prominent
   // "Open in Slack" CTA right after the OAuth round-trip lands the user back.
   const [justConnectedTeamId, setJustConnectedTeamId] = useState<string | null>(null);
+  // #540: countdown to auto-redirect into Slack after a successful connect.
+  const [slackRedirectCountdown, setSlackRedirectCountdown] = useState<number | null>(null);
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -59,6 +61,7 @@ export function SlackConnect() {
     if (connected) {
       toast.success("Slack workspace connected");
       setJustConnectedTeamId(teamId || null);
+      if (teamId) setSlackRedirectCountdown(3);
     } else if (slackError) {
       toast.error(`Slack connection failed: ${slackError}`);
     }
@@ -70,6 +73,18 @@ export function SlackConnect() {
       window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
     }
   }, []);
+
+  // #540: auto-redirect countdown — opens Slack when it hits zero.
+  useEffect(() => {
+    if (slackRedirectCountdown === null || !justConnectedTeamId) return;
+    if (slackRedirectCountdown <= 0) {
+      window.open(`https://app.slack.com/client/${justConnectedTeamId}`, "_blank", "noopener,noreferrer");
+      setSlackRedirectCountdown(null);
+      return;
+    }
+    const timer = setTimeout(() => setSlackRedirectCountdown((c) => (c !== null ? c - 1 : null)), 1000);
+    return () => clearTimeout(timer);
+  }, [slackRedirectCountdown, justConnectedTeamId]);
 
   const installedTeams = useMemo(() => status?.installed_teams ?? [], [status]);
   const connected = installedTeams.length > 0;
@@ -130,17 +145,31 @@ export function SlackConnect() {
             <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 px-4 py-3">
               <div className="flex items-center gap-2 min-w-0">
                 <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                <span className="text-sm font-medium text-emerald-800 dark:text-emerald-200 truncate">
-                  {justConnectedTeam?.team_name
-                    ? `${justConnectedTeam.team_name} connected`
-                    : "Workspace connected"}
-                </span>
+                <div className="min-w-0">
+                  <span className="block text-sm font-medium text-emerald-800 dark:text-emerald-200 truncate">
+                    {justConnectedTeam?.team_name
+                      ? `${justConnectedTeam.team_name} connected`
+                      : "Workspace connected"}
+                  </span>
+                  {slackRedirectCountdown !== null && (
+                    <span className="text-xs text-emerald-700 dark:text-emerald-400">
+                      Opening Slack in {slackRedirectCountdown}s…{" "}
+                      <button
+                        type="button"
+                        className="underline underline-offset-2 hover:opacity-80"
+                        onClick={() => setSlackRedirectCountdown(null)}
+                      >
+                        Stay here
+                      </button>
+                    </span>
+                  )}
+                </div>
               </div>
               <a
                 href={`https://app.slack.com/client/${justConnectedTeamId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                onClick={() => setJustConnectedTeamId(null)}
+                onClick={() => { setJustConnectedTeamId(null); setSlackRedirectCountdown(null); }}
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#4A154B] bg-[#4A154B] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#3d1140]"
               >
                 <SlackMark className="size-3.5" />
