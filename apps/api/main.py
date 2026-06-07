@@ -267,6 +267,21 @@ async def lifespan(app: FastAPI):
                     logger.warning("Git pull from remote failed (non-fatal): %s", _pull_exc)
     except Exception as _git_exc:
         logger.warning("Git workspace init failed (non-fatal): %s", _git_exc)
+    # Load encrypted secrets from .secrets.enc if the workspace is connected.
+    # This restores secrets on restart without any user action.
+    try:
+        _bootstrap_uid = _bootstrap_user_id()
+        _startup_cfg = _git_cfg_get(_bootstrap_uid)
+        if _startup_cfg and _startup_cfg.get("github_pat") and _startup_cfg.get("repo_full_name"):
+            _startup_repos = get_repositories()
+            _n = _load_secrets_from_enc(
+                _bootstrap_uid, _startup_repos,
+                _startup_cfg["github_pat"], _startup_cfg["repo_full_name"],
+            )
+            if _n:
+                logger.info("Restored %d secrets from %s on startup", _n, _SECRETS_ENC_FILENAME)
+    except Exception as _sec_exc:
+        logger.warning("Startup secrets load from %s failed (non-fatal): %s", _SECRETS_ENC_FILENAME, _sec_exc)
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy == "local":
         bootstrap_user_id = _bootstrap_user_id()
@@ -12379,6 +12394,10 @@ def upsert_secret(
         status=SecretStatus.SET.value,
     )
     logger.info("Secret %s upserted", name)
+    # Re-encrypt .secrets.enc if workspace is connected to GitHub
+    _cfg = _git_cfg_get(auth.user_id)
+    if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):
+        _sync_secrets_to_enc(auth.user_id, repos, _cfg["github_pat"], _cfg["repo_full_name"])
     return SecretTestResult(status="valid", reason=f"Secret {name!r} saved.")
 
 
@@ -12405,6 +12424,10 @@ def delete_secret(
         raise HTTPException(status_code=404, detail=f"Secret {name!r} not found in .env")
     repos.secrets.delete(user_id=auth.user_id, name=name)
     logger.info("Secret %s deleted", name)
+    # Re-encrypt .secrets.enc if workspace is connected to GitHub
+    _cfg = _git_cfg_get(auth.user_id)
+    if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):
+        _sync_secrets_to_enc(auth.user_id, repos, _cfg["github_pat"], _cfg["repo_full_name"])
     return SecretTestResult(status="valid", reason=f"Secret {name!r} removed.")
 
 
@@ -17577,6 +17600,96 @@ def _git_cfg_upsert(user_id: str, **fields: str) -> None:
             )
 
 
+_SECRETS_ENC_FILENAME = ".secrets.enc"
+
+
+def _derive_secrets_key(pat: str, repo_full_name: str) -> bytes:
+    """Derive a 32-byte AES-256 key from the GitHub PAT + repo name.
+
+    HMAC-SHA256(key=PAT, msg="workeros-secrets-v1:{repo}") — anyone with
+    the PAT and the repo name can decrypt, which matches the access model:
+    if you can push to the repo you should be able to read its secrets.
+    """
+    import hashlib, hmac as _hmac
+    return _hmac.new(
+        pat.encode("utf-8"),
+        msg=f"workeros-secrets-v1:{repo_full_name}".encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).digest()
+
+
+def _encrypt_secrets_blob(secrets: dict, key: bytes) -> bytes:
+    """Encrypt a secrets dict to bytes using AES-256-GCM."""
+    import json as _json
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce = os.urandom(12)
+    ct = AESGCM(key).encrypt(nonce, _json.dumps(secrets).encode("utf-8"), None)
+    return nonce + ct  # 12-byte nonce prepended for decryption
+
+
+def _decrypt_secrets_blob(blob: bytes, key: bytes) -> dict:
+    """Decrypt bytes produced by _encrypt_secrets_blob."""
+    import json as _json
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce, ct = blob[:12], blob[12:]
+    plaintext = AESGCM(key).decrypt(nonce, ct, None)
+    return _json.loads(plaintext.decode("utf-8"))
+
+
+def _sync_secrets_to_enc(user_id: str, repos: Repositories, pat: str, repo_full_name: str) -> None:
+    """Encrypt all workspace secrets and commit .secrets.enc to git.
+
+    Called on every secret save/delete when GitHub is connected.
+    """
+    try:
+        secrets: dict[str, str] = {}
+        for row in repos.secrets.list(user_id=user_id):
+            val = repos.secrets.read_value(user_id=user_id, name=row["name"])
+            if val is not None:
+                secrets[row["name"]] = val
+        if not secrets:
+            return
+        key = _derive_secrets_key(pat, repo_full_name)
+        blob = _encrypt_secrets_blob(secrets, key)
+        enc_path = _git_workspace() / _SECRETS_ENC_FILENAME
+        enc_path.write_bytes(blob)
+        _git_ops.commit_paths(
+            _git_workspace(), [_SECRETS_ENC_FILENAME],
+            "secrets: update encrypted vault",
+        )
+        _git_ops.push_background(_git_workspace())
+        logger.debug("Encrypted %d secrets to %s", len(secrets), _SECRETS_ENC_FILENAME)
+    except Exception as exc:
+        logger.warning("Failed to sync secrets to %s: %s", _SECRETS_ENC_FILENAME, exc)
+
+
+def _load_secrets_from_enc(user_id: str, repos: Repositories, pat: str, repo_full_name: str) -> int:
+    """Decrypt .secrets.enc and load secrets into WorkerOS. Returns count loaded.
+
+    Called on startup (if already connected) and after linking a repo (fresh install).
+    """
+    try:
+        enc_path = _git_workspace() / _SECRETS_ENC_FILENAME
+        if not enc_path.is_file():
+            return 0
+        key = _derive_secrets_key(pat, repo_full_name)
+        blob = enc_path.read_bytes()
+        secrets = _decrypt_secrets_blob(blob, key)
+        loaded = 0
+        for name, value in secrets.items():
+            try:
+                repos.secrets.set(user_id=user_id, name=name, value=str(value))
+                loaded += 1
+            except Exception:
+                pass
+        if loaded:
+            logger.info("Loaded %d secrets from %s", loaded, _SECRETS_ENC_FILENAME)
+        return loaded
+    except Exception as exc:
+        logger.warning("Failed to load secrets from %s: %s", _SECRETS_ENC_FILENAME, exc)
+        return 0
+
+
 @app.get("/system/git", response_model=_GitStatus)
 def get_git_status(auth: AuthContext = Depends(get_auth_context)) -> _GitStatus:
     """Return current GitHub connection + linked repo status."""
@@ -17708,6 +17821,11 @@ def link_git_repo(
         remote_url=remote_url,
         last_pushed_at=pushed_at,
     )
+
+    # Fresh-install: if .secrets.enc is in the cloned repo, decrypt and load now.
+    # On an existing install this is a no-op (secrets already loaded).
+    secrets_loaded = _load_secrets_from_enc(auth.user_id, repos, pat, full_name)
+
     return _GitStatus(
         connected=True,
         github_username=cfg.get("github_username"),
@@ -17715,6 +17833,7 @@ def link_git_repo(
         repo_url=repo_url,
         connected_at=cfg.get("connected_at"),
         last_pushed_at=pushed_at,
+        secrets_loaded=secrets_loaded,
     )
 
 

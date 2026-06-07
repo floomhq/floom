@@ -110,7 +110,11 @@ function RepoSelector({
     setLinking(fullName);
     try {
       const status = await api.system.gitLink(fullName);
-      toast.success(`Linked ${fullName} — workspace pushed to GitHub`);
+      if (status.secrets_loaded && status.secrets_loaded > 0) {
+        toast.success(`Linked ${fullName} — ${status.secrets_loaded} secret${status.secrets_loaded !== 1 ? "s" : ""} restored from encrypted vault`);
+      } else {
+        toast.success(`Linked ${fullName} — workspace pushed to GitHub`);
+      }
       onLinked(status);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to link repo");
@@ -125,9 +129,12 @@ function RepoSelector({
     try {
       const repo = await api.system.gitCreateRepo(newName.trim());
       toast.success(`Created ${repo.full_name}`);
-      // Immediately link it
       const status = await api.system.gitLink(repo.full_name);
-      toast.success("Workspace pushed to GitHub");
+      if (status.secrets_loaded && status.secrets_loaded > 0) {
+        toast.success(`Linked — ${status.secrets_loaded} secret${status.secrets_loaded !== 1 ? "s" : ""} restored from encrypted vault`);
+      } else {
+        toast.success("Workspace pushed to GitHub");
+      }
       onLinked(status);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to create repo");
