@@ -111,11 +111,6 @@ function testPromptHighlights() {
   const allPlain = plainSegments.every((s) => s.kind === "plain");
   assert(allPlain, "tokenisePrompt must return only plain segments when no tools detected");
 
-  // Verify the overlay logic condition: if any segment is non-plain, show overlay
-  const promptWithTools = "Check my Gmail inbox and summarise";
-  const segs = tokenisePrompt(promptWithTools);
-  const overlayActive = segs.some((s) => s.kind !== "plain");
-  assert(overlayActive || true, "overlay condition checked (Gmail may or may not be detected — acceptable)");
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +124,19 @@ function testAppShellLayout() {
   assert(
     src.includes("flex flex-col min-h-full"),
     "AppShell main content wrapper must have 'flex flex-col min-h-full' for pages to fill height"
+  );
+
+  // The other half of the fix: OverviewDashboard must not use the fragile calc
+  // workaround that hard-coded the sidebar height offset.
+  const overviewPath = path.resolve(__dirname, "../components/overview/OverviewDashboard.tsx");
+  const overview = fs.readFileSync(overviewPath, "utf8");
+  assert(
+    !overview.includes("calc(100dvh"),
+    "OverviewDashboard must not use calc(100dvh) height hack — use flex-1 instead"
+  );
+  assert(
+    overview.includes("flex-1"),
+    "OverviewDashboard must use flex-1 to inherit height from AppShell"
   );
 }
 
