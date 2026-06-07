@@ -64,6 +64,6 @@ Post-verification worker row counts remained unchanged:
 
 ## PR
 
-PR: pending
+PR: #492 - https://github.com/floomhq/workeros/pull/492
 
 Note for Vivek / `itachi-hue`: this touches the role-aware worker visibility path from the multi-member work. The patch keeps the new role-aware model intact while restoring legacy OSS owner mapping for Federico's local-default private workers.
