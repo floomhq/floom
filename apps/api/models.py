@@ -1694,6 +1694,9 @@ class WorkerSummary(BaseModel):
     recent_stats: Optional[RecentStats] = None
     timeseries: Optional[List[TimeseriesDay]] = None  # 14-day sparkline data; None when not loaded
     connections: List[str] = Field(default_factory=list)  # Composio app slugs declared in worker.yml
+    # #556: specific secrets/connections required by the worker that are not yet configured.
+    missing_secrets: List[str] = Field(default_factory=list)
+    missing_connections: List[str] = Field(default_factory=list)
     inputs: List[Union[WorkerInput, WorkerSummaryInput]] = Field(default_factory=list)  # input descriptors for worker-card icon composition
     runtime: Optional[str] = None  # exec.runtime ("skill", "python311", "node22", …)
     # Owner-only signed share link to the standalone public worker page
@@ -1746,6 +1749,9 @@ class WorkerDetail(BaseModel):
     webhook_url: Optional[str] = None  # Full webhook URL (only when trigger includes webhook)
     files: List[WorkerFile] = Field(default_factory=list)  # All files in the worker dir
     triggers_spec: List[TriggerSpec] = Field(default_factory=list)  # structured trigger objects (all triggers)
+    # #556: specific secrets/connections required by the worker that are not yet configured.
+    missing_secrets: List[str] = Field(default_factory=list)
+    missing_connections: List[str] = Field(default_factory=list)
     # Owner-only signed share link to the standalone public worker page
     # (/w/<id>?token=<hmac>). Mirrors the approval `public_link` pattern: the
     # token is a deterministic HMAC the /workers/public/* route verifies, so the
