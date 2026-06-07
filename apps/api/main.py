@@ -2204,6 +2204,20 @@ def _available_secret_names_for_user(user_id: str, repos: Repositories) -> set[s
     return names
 
 
+def _available_connection_slugs_for_user(user_id: str, repos: Repositories) -> set[str]:
+    """Return lower-cased app_name slugs for all active connections owned by user_id."""
+    _live = {"active", "valid", "connected"}
+    try:
+        rows = repos.connections.list(user_id=user_id)
+        return {
+            row_to_dict(r).get("app_name", "").lower()
+            for r in rows
+            if str((row_to_dict(r).get("status") or "")).lower() in _live
+        }
+    except Exception:
+        return set()
+
+
 def _get_stats_batch(
     worker_ids: List[str],
     *,
@@ -5754,6 +5768,7 @@ def list_workers(
         else _get_timeseries_batch(worker_ids, user_id=worker_user_id, repos=repos, days=14)
     )
     available_secret_names = _available_secret_names_for_user(worker_user_id, repos)
+    available_conn_slugs = _available_connection_slugs_for_user(worker_user_id, repos)
     result: List[WorkerSummary] = []
     for w in workers:
         last_run_row = _get_last_run_for_worker(w["id"], user_id=worker_user_id, repos=repos)
@@ -5776,6 +5791,13 @@ def list_workers(
         triggers_spec = _build_triggers_spec(w)
         recent_stats = stats_by_id.get(w["id"])
         timeseries = timeseries_by_id.get(w["id"])
+
+        # #556: compute which required secrets/connections are not yet configured.
+        _secret_set = set(available_secret_names)
+        _req_secrets = _worker_required_secret_names(w) if config else []
+        _missing_secrets = [s for s in _req_secrets if s not in _secret_set]
+        _req_conn_slugs = _worker_connection_slugs(w)
+        _missing_connections = [c for c in _req_conn_slugs if c.lower() not in available_conn_slugs]
 
         # Extract connection slugs and runtime from worker config dict.
         # These are lightweight and needed for the worker card tool-logo strip.
@@ -5834,6 +5856,8 @@ def list_workers(
                 timeseries=None if list_shape else timeseries,
                 # B7: always include connection slugs and runtime for worker card tool strip.
                 connections=_conn_slugs,
+                missing_secrets=_missing_secrets,
+                missing_connections=_missing_connections,
                 inputs=_inputs,
                 runtime=_runtime_type,
                 public_link=_worker_public_link(w) if str(w.get("visibility") or "private") == "public" else None,
@@ -6193,6 +6217,7 @@ def _build_worker_detail(
     # carries `enabled` (same w.enabled column get_recipe reads), so no separate
     # recipe fetch is needed.
     available_secret_names = _available_secret_names_for_user(user_id, repos)
+    available_conn_slugs_detail = _available_connection_slugs_for_user(user_id, repos)
     status = _resolve_worker_status(
         worker,
         config=config,
@@ -6200,6 +6225,11 @@ def _build_worker_detail(
         last_run_status=recent_runs[0].status if recent_runs else None,
         has_run=bool(recent_runs),
     )
+    # #556: compute specific missing items.
+    _det_req_secrets = _worker_required_secret_names(worker) if config else []
+    _det_missing_secrets = [s for s in _det_req_secrets if s not in available_secret_names]
+    _det_req_conns = _worker_connection_slugs(worker)
+    _det_missing_connections = [c for c in _det_req_conns if c.lower() not in available_conn_slugs_detail]
     # `enabled` mirrors the same w.enabled column the resolver reads; stock /
     # filesystem workers carry no enabled flag and are treated as enabled.
     worker_enabled = bool(worker.get("enabled", True))
@@ -6283,6 +6313,8 @@ def _build_worker_detail(
         files=worker_files,
         webhook_url=webhook_url,
         triggers_spec=triggers_spec,
+        missing_secrets=_det_missing_secrets,
+        missing_connections=_det_missing_connections,
         public_link=_worker_public_link(worker) if str(worker.get("visibility") or "private") == "public" else None,
         owner_id=worker.get("owner_id"),
         visibility=str(worker.get("visibility") or "private"),
