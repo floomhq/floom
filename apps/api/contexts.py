@@ -284,12 +284,19 @@ def set_context_metadata(
 
 
 def is_context_sensitive(name: str) -> bool:
-    """Return True if this context is flagged sensitive — must not be committed to git."""
+    """Return True if this context should be excluded from git.
+
+    Sensitive is the DEFAULT — contexts are only git-tracked when explicitly
+    marked non-sensitive (sensitive=False) by the user.
+    """
     try:
         safe_name = validate_context_name(name)
-        return bool(load_context_metadata().get(safe_name, {}).get("sensitive", False))
+        entry = load_context_metadata().get(safe_name, {})
+        # If the key is absent the context has never been explicitly opted in,
+        # so treat it as sensitive (never committed to git).
+        return bool(entry.get("sensitive", True))
     except Exception:
-        return False
+        return True
 
 
 def set_context_file_metadata(
