@@ -502,7 +502,9 @@ def _write_context(git_dir: Path, workspace_id: str, context_name: str) -> bool:
     try:
         from apps.api._engine import ensure_engine_api_path
         ensure_engine_api_path()
-        from contexts import current_contexts_root  # noqa: PLC0415
+        from contexts import current_contexts_root, is_context_sensitive  # noqa: PLC0415
+        if is_context_sensitive(context_name):
+            return False  # sensitive contexts never enter git
         src = current_contexts_root() / context_name
     except Exception:
         return False
