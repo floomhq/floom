@@ -198,6 +198,57 @@ def test_stock_name_post_forks_to_user_owned_copy(monkeypatch, tmp_path):
     assert (Path(main.WORKERS_DIR) / "gmail_inbox_manager" / "worker.yml").read_text(encoding="utf-8") == stock_yml_before
 
 
+def test_stock_name_put_forks_to_user_owned_copy(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("gmail_inbox_manager",))
+    client = TestClient(main.app)
+    stock_dir = Path(main.WORKERS_DIR) / "gmail_inbox_manager"
+    stock_yml_before = (stock_dir / "worker.yml").read_text(encoding="utf-8")
+    stock_run_before = (stock_dir / "run.py").read_text(encoding="utf-8")
+
+    updated = client.put(
+        "/workers/gmail_inbox_manager",
+        headers=_headers(),
+        json=_worker_payload("gmail_inbox_manager", title="Customized Gmail Cleaner", is_example=True),
+    )
+
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["id"] == "gmail-inbox-manager-copy"
+    assert body["cloned_from"] == "gmail_inbox_manager"
+    assert body["id"] != "gmail_inbox_manager"
+    copied_yml = (Path(main.WORKERS_DIR) / body["id"] / "worker.yml").read_text(encoding="utf-8")
+    copied_run = (Path(main.WORKERS_DIR) / body["id"] / "run.py").read_text(encoding="utf-8")
+    assert "name: gmail-inbox-manager-copy" in copied_yml
+    assert "title: Customized Gmail Cleaner" in copied_yml
+    assert "is_example: false" in copied_yml
+    assert "worker push p0 regression" in copied_yml
+    assert "outputs': {'ok': True}" in copied_run
+    assert (stock_dir / "worker.yml").read_text(encoding="utf-8") == stock_yml_before
+    assert (stock_dir / "run.py").read_text(encoding="utf-8") == stock_run_before
+
+
+def test_stock_name_put_fork_collision_appends_suffix(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("gmail_inbox_manager",))
+    client = TestClient(main.app)
+
+    first = client.put(
+        "/workers/gmail_inbox_manager",
+        headers=_headers(),
+        json=_worker_payload("gmail_inbox_manager", title="First Gmail Cleaner"),
+    )
+    second = client.put(
+        "/workers/gmail_inbox_manager",
+        headers=_headers(),
+        json=_worker_payload("gmail_inbox_manager", title="Second Gmail Cleaner"),
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["id"] == "gmail-inbox-manager-copy"
+    assert second.json()["id"] == "gmail-inbox-manager-copy-2"
+    assert second.json()["cloned_from"] == "gmail_inbox_manager"
+
+
 def test_missing_or_invalid_workspace_context_returns_400_for_worker_write(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path, require_workspace=True)
     client = TestClient(main.app)

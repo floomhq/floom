@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, ChevronLeft, Maximize2 } from "lucide-react";
+import { ChevronRight, ChevronLeft, Maximize2, PenSquare, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -14,7 +14,48 @@ import { PromptInput } from "./PromptInput";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
 import { useChatStream } from "@/lib/useChatStream";
+import { exportConversationMarkdown } from "@/lib/emily-chat-export";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
+
+// ── Chat controls (New chat + Export) ─────────────────────────────────────────
+
+function ChatControls({
+  onNew,
+  onExport,
+  canExport,
+}: {
+  onNew: () => void;
+  onExport: () => void;
+  canExport: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+        onClick={onNew}
+        title="Start a new conversation"
+        aria-label="New chat"
+      >
+        <PenSquare className="size-3.5" />
+        <span className="hidden sm:inline">New chat</span>
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+        onClick={onExport}
+        disabled={!canExport}
+        title="Export this conversation as Markdown"
+        aria-label="Export conversation"
+      >
+        <Download className="size-3.5" />
+        <span className="hidden sm:inline">Export</span>
+      </Button>
+    </div>
+  );
+}
 
 // ── Suggestion pills ──────────────────────────────────────────────────────────
 
@@ -121,7 +162,8 @@ interface EmilyChatCoreProps {
 }
 
 function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
-  const { messages, isStreaming, sendMessage } = useChatStream();
+  const { messages, conversationId, isStreaming, isHydrating, sendMessage, newSession } =
+    useChatStream();
   const [input, setInput] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -139,12 +181,34 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
     setAttachedFiles([]);
   }, [input, attachedFiles, sendMessage]);
 
+  const handleExport = useCallback(() => {
+    exportConversationMarkdown(messages, conversationId);
+  }, [messages, conversationId]);
+
+  const hasMessages = messages.length > 0;
+
   return (
     <div className={cn("flex flex-col h-full", fullPage && "max-w-2xl mx-auto w-full")}>
+      {/* Controls: New chat + Export — reachable in both dock and full-page */}
+      <div
+        className={cn(
+          "flex shrink-0 items-center justify-end gap-1 border-b border-border/60",
+          fullPage ? "px-6 py-2" : "px-3 py-1.5"
+        )}
+      >
+        <ChatControls onNew={newSession} onExport={handleExport} canExport={hasMessages} />
+      </div>
+
       {/* Message list */}
       <div className="flex-1 overflow-y-auto">
-        {messages.length === 0 ? (
-          <EmptyState onSuggest={(text) => { setInput(text); }} />
+        {!hasMessages ? (
+          isHydrating ? (
+            <div className="flex h-full items-center justify-center px-6 text-center">
+              <p className="text-xs text-muted-foreground">Loading conversation...</p>
+            </div>
+          ) : (
+            <EmptyState onSuggest={(text) => { setInput(text); }} />
+          )
         ) : (
           <div className={cn("py-5 space-y-5", fullPage ? "px-6" : "px-4")}>
             {messages.map((msg) => (
