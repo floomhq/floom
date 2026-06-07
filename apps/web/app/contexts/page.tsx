@@ -1861,17 +1861,23 @@ function FileContent({
   }
 
   if (kind === "code") {
-    // Single syntax-highlighted view, no redundant Preview-vs-Raw tabs.
-    // A .py/.ts/.json/.yaml/.txt file has one canonical rendering: the
-    // highlighted code block (with a copy affordance), shared with the
+    // FL6: every text file type gets Preview + Raw, consistent with markdown,
+    // html, and tables. Preview is a comfortable, wrapped reading view (the way
+    // you'd read a .txt / .log / .env or skim a config); Raw is the canonical
+    // syntax-highlighted source block (with a copy affordance) shared with the
     // worker-detail Source view.
     return (
-      <div className="flex h-full flex-col">
-        <CodeViewToolbar text={text} />
-        <div className="flex-1 overflow-auto">
-          <CodeBlock text={text} filePath={file.path} />
-        </div>
-      </div>
+      <PreviewRawTabs
+        preview={<PlainTextPreview text={text} />}
+        raw={
+          <div className="flex h-full flex-col">
+            <CodeViewToolbar text={text} />
+            <div className="flex-1 overflow-auto">
+              <CodeBlock text={text} filePath={file.path} />
+            </div>
+          </div>
+        }
+      />
     );
   }
 
@@ -1999,6 +2005,27 @@ function CodeViewToolbar({ text }: { text: string }) {
         {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <Copy className="size-3.5" />}
         {copied ? "Copied" : "Copy"}
       </button>
+    </div>
+  );
+}
+
+// FL6: comfortable reading view for plain-text / code files. Preserves the
+// file's whitespace and line breaks but wraps long lines and uses a relaxed
+// reading column, so the Preview tab reads like a document while Raw keeps the
+// exact, horizontally-scrolling, syntax-highlighted source.
+function PlainTextPreview({ text }: { text: string }) {
+  if (!text.trim()) {
+    return (
+      <div className="p-6">
+        <p className="text-sm text-muted-foreground italic">This file is empty.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="mx-auto max-w-3xl px-6 py-6">
+      <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-foreground">
+        {text}
+      </pre>
     </div>
   );
 }
