@@ -303,6 +303,7 @@ async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDi
 
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
+DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024
 # A workspace template bundles every operator worker + knowledge pack, so it is
 # larger than a single worker bundle. Cap it generously but bounded.
 WORKSPACE_IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024
@@ -318,6 +319,36 @@ RATE_LIMIT_RULES = [
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
     (re.compile(r"^/connections$"), (20, 60.0)),
 ]
+
+
+def _context_upload_limit_bytes() -> int:
+    try:
+        configured = int(os.environ.get("WORKEROS_CONTEXT_UPLOAD_MAX_BYTES", ""))
+    except ValueError:
+        configured = 0
+    return configured if configured > 0 else DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES
+
+
+def _context_upload_body_limit_bytes() -> int:
+    # Multipart framing adds overhead beyond the uploaded file bytes.
+    return _context_upload_limit_bytes() + (1024 * 1024)
+
+
+def _format_limit_mb(size_bytes: int) -> str:
+    mb = size_bytes / (1024 * 1024)
+    return f"{mb:.0f} MB" if mb.is_integer() else f"{mb:.1f} MB"
+
+
+def _context_upload_too_large_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=413,
+        content={
+            "detail": (
+                "Brain upload is too large. Upload files up to "
+                f"{_format_limit_mb(_context_upload_limit_bytes())}."
+            )
+        },
+    )
 
 PROTECTED_STOCK_WORKER_IDS = frozenset(
     {
@@ -987,6 +1018,15 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
     return DEFAULT_JSON_BODY_LIMIT_BYTES
 
 
+def _is_context_upload_request(request: Request) -> bool:
+    path = request.url.path
+    return (
+        request.method.upper() == "POST"
+        and path.startswith("/contexts/")
+        and path.endswith("/upload")
+    )
+
+
 @app.middleware("http")
 async def request_body_size_middleware(request: Request, call_next):
     if request.method.upper() in BODYLESS_METHODS:
@@ -1002,6 +1042,15 @@ async def request_body_size_middleware(request: Request, call_next):
         return await call_next(request)
 
     max_bytes = _body_limit_for_request(request)
+    if _is_context_upload_request(request):
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > _context_upload_body_limit_bytes():
+                    return _context_upload_too_large_response()
+            except ValueError:
+                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+
     if max_bytes is None:
         return await call_next(request)
 
@@ -1009,13 +1058,29 @@ async def request_body_size_middleware(request: Request, call_next):
     if content_length:
         try:
             if int(content_length) > max_bytes:
-                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": (
+                            "Request body is too large. Reduce the payload size "
+                            "and try again."
+                        )
+                    },
+                )
         except ValueError:
             return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
 
     body = await request.body()
     if len(body) > max_bytes:
-        return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        return JSONResponse(
+            status_code=413,
+            content={
+                "detail": (
+                    "Request body is too large. Reduce the payload size "
+                    "and try again."
+                )
+            },
+        )
     return await call_next(request)
 
 
@@ -3634,6 +3699,44 @@ def _list_db_workers(
         return []
 
 
+def _worker_access_user_id(auth: AuthContext) -> str:
+    """Resolve the engine owner id for worker visibility checks."""
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    username = (auth.username or "").strip()
+    if deploy != "local" or not username or username == auth.user_id:
+        return auth.user_id
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_members
+                WHERE workspace_id = ?
+                  AND user_id = ?
+                  AND role IN ('owner', 'admin')
+                  AND status = 'active'
+                LIMIT 1
+                """,
+                (DEFAULT_WORKSPACE_ID, username),
+            ).fetchone()
+            if row is not None:
+                return username
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM local_workspaces
+                WHERE id = ? AND owner_user_id = ?
+                LIMIT 1
+                """,
+                (DEFAULT_WORKSPACE_ID, username),
+            ).fetchone()
+            if row is not None:
+                return username
+    except Exception:
+        logger.debug("worker access user-id compatibility lookup failed", exc_info=True)
+    return auth.user_id
+
+
 def _user_scoped_local_mode() -> bool:
     return os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1"
 
@@ -3709,7 +3812,7 @@ def _list_visible_workers(
     visible = {
         worker["id"]: worker
         for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
-        if not _worker_hidden_from_api(worker["id"])
+        if not str(worker.get("id") or "").startswith(".")
     }
     for worker in _stock_workers_from_filesystem(use_cache=use_cache):
         visible.setdefault(worker["id"], worker)
@@ -5326,6 +5429,24 @@ def _write_context_file(
     return item
 
 
+async def _read_context_upload_bytes(upload: UploadFile, remaining_bytes: int) -> bytes:
+    data = bytearray()
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > remaining_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    "Brain upload is too large. Upload files up to "
+                    f"{_format_limit_mb(_context_upload_limit_bytes())}."
+                ),
+            )
+    return bytes(data)
+
+
 def _workers_referencing_context(name: str, *, user_id: str, repos: Repositories) -> List[str]:
     referenced_by: List[str] = []
     for worker in repos.workers.list(user_id=user_id):
@@ -5634,7 +5755,7 @@ async def upload_context_files(
     path_prefix: str = Form(""),
     tags_json: str = Form(""),
     metadata_json: str = Form(""),
-    create_if_missing: bool = Form(False),
+    create_if_missing: bool = Form(True),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextUploadResponse:
@@ -5674,10 +5795,13 @@ async def upload_context_files(
         upload_metadata = dict(parsed_metadata)
     written: List[ContextFileItem] = []
     written_paths: List[str] = []
+    total_upload_bytes = 0
+    upload_limit = _context_upload_limit_bytes()
     for upload in files:
         filename = _context_file_path_or_400(upload.filename or "upload.bin")
         rel = f"{prefix}/{filename}" if prefix else filename
-        data = await upload.read()
+        data = await _read_context_upload_bytes(upload, upload_limit - total_upload_bytes)
+        total_upload_bytes += len(data)
         written.append(
             _write_context_file(
                 safe_name,
@@ -5758,7 +5882,8 @@ def list_workers(
     ?include_archived=true — include archived workers (archived:true in worker.yml).
                              Default: excluded from All/Starred/Recent; shown only in Archived view.
     """
-    workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True, role=auth.role)
+    worker_user_id = _worker_access_user_id(auth)
+    workers = _list_visible_workers(user_id=worker_user_id, repos=repos, use_cache=True, role=auth.role)
     # Filter out system_worker: true workers unless explicitly requested.
     if not include_system:
         workers = [
@@ -5771,17 +5896,17 @@ def list_workers(
     if not include_archived:
         workers = [w for w in workers if not w.get("archived", False)]
     worker_ids = [w["id"] for w in workers]
-    stats_by_id = _get_stats_batch(worker_ids, user_id=auth.user_id, repos=repos)
+    stats_by_id = _get_stats_batch(worker_ids, user_id=worker_user_id, repos=repos)
     # S44 Win 3: skip expensive timeseries fetch when list shape requested.
     list_shape = shape == "list"
     timeseries_by_id = (
         {} if list_shape
-        else _get_timeseries_batch(worker_ids, user_id=auth.user_id, repos=repos, days=14)
+        else _get_timeseries_batch(worker_ids, user_id=worker_user_id, repos=repos, days=14)
     )
-    available_secret_names = _available_secret_names_for_user(auth.user_id, repos)
+    available_secret_names = _available_secret_names_for_user(worker_user_id, repos)
     result: List[WorkerSummary] = []
     for w in workers:
-        last_run_row = _get_last_run_for_worker(w["id"], user_id=auth.user_id, repos=repos)
+        last_run_row = _get_last_run_for_worker(w["id"], user_id=worker_user_id, repos=repos)
         last_run = _make_run_summary(last_run_row) if last_run_row else None
 
         # Resolve status via the SHARED resolver so LIST and DETAIL agree
@@ -5864,7 +5989,7 @@ def list_workers(
                 public_link=_worker_public_link(w),
                 owner_id=w.get("owner_id"),
                 visibility=str(w.get("visibility") or "private"),
-                permissions=_worker_permissions(w, user_id=auth.user_id, repos=repos),
+                permissions=_worker_permissions(w, user_id=worker_user_id, repos=repos),
             )
         )
     return result
@@ -6693,7 +6818,12 @@ def get_worker_detail(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     canonical_id = _canonical_worker_id(worker_id)
-    return _build_worker_detail(canonical_id, user_id=auth.user_id, repos=repos, role=auth.role)
+    return _build_worker_detail(
+        canonical_id,
+        user_id=_worker_access_user_id(auth),
+        repos=repos,
+        role=auth.role,
+    )
 
 
 @app.put("/workers/{worker_id}/visibility", response_model=WorkerDetail)
@@ -19601,6 +19731,7 @@ def auth_login(
         "username": user["username"],
         "display_name": user.get("display_name"),
         "role": user["role"],
+        "redirect_to": "/overview",
     }
 
 
