@@ -99,6 +99,7 @@ from contexts import (
     set_context_scope_resolver,
     set_context_file_metadata,
     set_context_file_secret_flag,
+    is_context_sensitive,
     set_context_metadata,
     use_context_scope,
     validate_context_name,
@@ -2610,6 +2611,8 @@ def _git_commit_context(
     author_name: str = "WorkerOS",
     author_email: str = "workeros@local",
 ) -> None:
+    if is_context_sensitive(name):
+        return  # sensitive contexts never enter git
     try:
         workspace = _git_workspace()
         rel = _git_join(_contexts_git_prefix(), name, rel_path or "")
@@ -2684,6 +2687,9 @@ class ContextSummary(BaseModel):
     # edit or delete them. Operator-created packs have system=False.
     system: bool = False
     read_only: bool = False
+    # Sensitive packs are never committed to git or pushed to GitHub.
+    # They are stored only in Supabase Storage (encrypted at rest).
+    sensitive: bool = False
     # Members STEP 4: ownership + per-asset visibility + computed permissions.
     # Mirrors the worker surface so the same Share control renders on brain packs.
     owner_id: Optional[str] = None
@@ -5142,6 +5148,7 @@ def _context_summary(
         total_size_bytes=total_size,
         updated_at=context_updated_at(root),
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
+        sensitive=bool(metadata.get(name, {}).get("sensitive", False)),
         worker_count=worker_count,
         description=description,
         system=is_system,
@@ -5453,6 +5460,27 @@ def set_context_visibility(
     return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
+class ContextSensitiveRequest(BaseModel):
+    sensitive: bool
+
+
+@app.patch("/contexts/{name}/sensitive")
+def set_context_sensitive(
+    name: str,
+    body: ContextSensitiveRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict:
+    """Mark a brain pack as sensitive (skips git + GitHub, Supabase Storage only).
+
+    Sensitive contexts are encrypted at rest in Supabase Storage but never
+    committed to git, never appear in git history, and never pushed to any
+    connected GitHub repo. Toggle off to resume git tracking from the next write.
+    """
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    set_context_metadata(safe_name, sensitive=body.sensitive)
+    return {"name": safe_name, "sensitive": body.sensitive}
+
+
 @app.delete("/contexts/{name}", response_model=ContextDeleteResponse)
 def delete_context(
     name: str,
@@ -5471,12 +5499,7 @@ def delete_context(
     shutil.rmtree(root)
     delete_context_metadata(safe_name)
     # Record the deletion in git so the history is preserved but the directory is gone.
-    try:
-        workspace = _git_workspace()
-        prefix = _contexts_git_prefix()
-        _git_ops.commit_paths(workspace, [f"{prefix}/{safe_name}"], f"context {safe_name}: delete")
-    except Exception as exc:
-        logger.warning("git commit for context deletion failed (non-fatal): %s", exc)
+    _git_commit_context(safe_name, message=f"context {safe_name}: delete")
     return ContextDeleteResponse(status="deleted", referenced_by=referenced_by)
 
 
