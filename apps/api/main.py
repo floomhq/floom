@@ -19580,6 +19580,30 @@ def _frontend_public_base() -> str:
     return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
 
 
+def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories) -> str:
+    if repos.tokens is None:
+        raise HTTPException(status_code=503, detail="Personal access tokens are not configured")
+
+    raw = "wos_" + _secrets_mod.token_urlsafe(32)
+    token_id = str(_uuid_mod.uuid4())
+    token_name = f"CLI device: {(client_name or 'unknown').strip() or 'unknown'}"
+    try:
+        repos.tokens.create(
+            token_id=token_id,
+            user_id=user_id,
+            name=token_name,
+            token_hash=_hash_pat(raw),
+            expires_at=None,
+        )
+    except Exception as exc:
+        logger.exception("Could not issue CLI auth PAT for user %s", user_id)
+        raise HTTPException(
+            status_code=409,
+            detail="CLI authorization requires a real user account before issuing API tokens",
+        ) from exc
+    return raw
+
+
 @app.post("/cli-auth/devices")
 def create_cli_device(payload: CliAuthDeviceCreateRequest, request: Request) -> Dict[str, Any]:
     client_name = (payload.client_name or "").strip()
@@ -19673,10 +19697,6 @@ def approve_cli_device(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    floom_secret = os.environ.get("FLOOM_SECRET", "")
-    if not floom_secret:
-        raise HTTPException(status_code=503, detail="FLOOM_SECRET is not configured")
-
     now_ts = time.time()
     repos.cli_auth.prune_expired(now_ts=now_ts)
     record = repos.cli_auth.verify_device(payload.user_code)
@@ -19684,10 +19704,15 @@ def approve_cli_device(
         raise HTTPException(status_code=404, detail="User code not found")
     if str(record.get("status")) != "pending":
         raise HTTPException(status_code=409, detail="Device code is no longer pending")
+    api_token = _issue_cli_auth_pat(
+        user_id=auth.user_id,
+        client_name=str(record.get("client_name") or "unknown"),
+        repos=repos,
+    )
     repos.cli_auth.update(
         device_code=record["device_code"],
         status="approved",
-        secret=floom_secret,
+        secret=api_token,
         approved_at=now_ts,
     )
     return {"ok": True, "client_name": record.get("client_name") or "unknown"}
@@ -20787,6 +20812,21 @@ _SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 _MAGIC_LINK_FALLBACK_SECRET: str = pysecrets.token_hex(32)
 
 
+def _session_cookie_secure() -> bool:
+    return os.environ.get("WORKEROS_INSECURE_COOKIES") != "1"
+
+
+def _set_session_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        session_id,
+        httponly=True,
+        samesite="lax",
+        max_age=_SESSION_TTL_SECONDS,
+        secure=_session_cookie_secure(),
+    )
+
+
 class _AuthSetupRequest(BaseModel):
     username: str
     password: str
@@ -20896,7 +20936,7 @@ def auth_setup(
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    _set_session_cookie(response, session_id)
     return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
                     role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
 
@@ -20918,7 +20958,7 @@ def auth_login(
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    _set_session_cookie(response, session_id)
     return {
         "id": user["id"],
         "username": user["username"],
@@ -21023,7 +21063,7 @@ def auth_consume_magic_link(
     session_id = pysecrets.token_urlsafe(32)
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    _set_session_cookie(response, session_id)
     return {"ok": True, "redirect_to": "/overview"}
 
 
