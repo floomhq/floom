@@ -15,7 +15,6 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GenericToolCard } from "./emily-chat-types";
 import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
 import type { AttachedFile, ChatMessage, ToolCard } from "./emily-chat-types";
 import {
