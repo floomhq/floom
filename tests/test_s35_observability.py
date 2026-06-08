@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import sys
+import types
 
 from fastapi.testclient import TestClient
 
@@ -69,9 +71,31 @@ def test_health_runs_dependency_checks_and_uses_cache(monkeypatch, tmp_path):
 
     assert first.status_code == 200, first.text
     assert first.json()["status"] == "ok"
-    assert set(first.json()["checks"]) == {"db", "e2b", "openai", "composio"}
+    assert set(first.json()["checks"]) == {"db", "disk", "e2b", "openai", "composio"}
     assert second.status_code == 200, second.text
     assert calls == ["db", "e2b", "openai", "composio"]
+
+
+def test_health_check_e2b_bounds_sdk_call_without_unsupported_kwargs(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    captured: dict[str, object] = {}
+
+    class FakeListing:
+        def next_items(self):
+            return []
+
+    class FakeSandbox:
+        @staticmethod
+        def list(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return FakeListing()
+
+    monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeSandbox))
+    monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+
+    assert main._health_check_e2b() == {"ok": True}
+    assert captured["kwargs"] == {"limit": 1}
 
 
 def test_prometheus_metrics_expose_run_counters_duration_and_active_runs(monkeypatch, tmp_path):

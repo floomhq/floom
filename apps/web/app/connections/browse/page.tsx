@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -268,10 +269,12 @@ function ToolsModal({
 function CatalogCard({
   item,
   connecting,
+  isConnected,
   onConnect,
 }: {
   item: IntegrationCatalogItem;
   connecting: boolean;
+  isConnected: boolean;
   onConnect: (slug: string) => void;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
@@ -289,9 +292,7 @@ function CatalogCard({
               decoding="async"
             />
           </div>
-          <div className="min-w-0">
-            {/* P2-8 (audit 2026-05-29): dropped the dev-facing Composio toolkit
-                slug. The human name now gets two lines so it no longer truncates. */}
+          <div className="min-w-0 flex-1">
             <h2 className="line-clamp-2 text-sm font-semibold text-ink">{item.name}</h2>
           </div>
         </div>
@@ -315,18 +316,35 @@ function CatalogCard({
           ) : null}
         </div>
 
-        {/* S29p: outline variant keeps grid-of-peers visual weight balanced */}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="w-full"
-          disabled={connecting}
-          onClick={() => onConnect(item.slug)}
-        >
-          {connecting ? <Loader2 className="animate-spin" /> : <ExternalLink />}
-          {connecting ? "Opening..." : "Connect"}
-        </Button>
+        {isConnected ? (
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1 text-[11px] font-medium text-green-600">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Connected
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="ml-auto h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => onConnect(item.slug)}
+            >
+              + Add account
+            </Button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="w-full"
+            disabled={connecting}
+            onClick={() => onConnect(item.slug)}
+          >
+            {connecting ? <Loader2 className="animate-spin" /> : <ExternalLink />}
+            {connecting ? "Opening..." : "Connect"}
+          </Button>
+        )}
       </article>
 
       {/* Tools modal — rendered outside article to avoid grid stretching */}
@@ -353,6 +371,21 @@ export default function ConnectionsBrowsePage() {
   const [category, setCategory] = useState("");
   const [page, setPage] = useState(1);
   const [connecting, setConnecting] = useState<string | null>(null);
+  // Set of app slugs that already have an active connection for this user.
+  const [connectedSlugs, setConnectedSlugs] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    api.connections.list()
+      .then((list) => {
+        const active = new Set(
+          list
+            .filter((c) => c.status === "active")
+            .map((c) => (c.app_name ?? "").toLowerCase())
+        );
+        setConnectedSlugs(active);
+      })
+      .catch(() => { /* non-fatal — just don't show connected badges */ });
+  }, []);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -505,6 +538,7 @@ export default function ConnectionsBrowsePage() {
               key={item.slug}
               item={item}
               connecting={connecting === item.slug}
+              isConnected={connectedSlugs.has(item.slug.toLowerCase())}
               onConnect={handleConnect}
             />
           ))

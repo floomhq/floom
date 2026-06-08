@@ -1408,6 +1408,16 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
 
     path = request.url.path
+    authorization_header = request.headers.get("authorization", "")
+    bearer_token_header = ""
+    if authorization_header.startswith("Bearer "):
+        bearer_token_header = authorization_header[7:].strip()
+    if bearer_token_header.startswith("wrt_"):
+        if request.method != "POST" or not _RE_WORKER_RUN_CREATE.match(path):
+            return _JSONResponse(
+                status_code=403,
+                content={"detail": "Worker-call tokens are only valid for child run creation"},
+            )
 
     # Run-scoped token check — always evaluated, even in dev mode. A run token
     # is a narrow sandbox capability: it can only call its own Composio proxy
@@ -1487,6 +1497,10 @@ async def auth_middleware(request: Request, call_next):
         # Multi-member auth: Bearer PAT or session cookie bypass x-floom-secret
         if bearer_token or session_cookie:
             return await call_next(request)
+        if raw_secret is not None:
+            raw_secret_text = raw_secret.decode("latin-1", errors="replace").strip()
+            if raw_secret_text.startswith("wos_"):
+                return await call_next(request)
         expected = secret.encode("latin-1")
         if raw_secret is None:
             return _JSONResponse(status_code=401, content={"detail": "Unauthorized"})
@@ -1500,6 +1514,7 @@ logger = logging.getLogger("floom.api")
 # auth is by X-Workeros-Run-Token, scoped to the run_id in the path).
 import re as _re
 _RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
+_RE_WORKER_RUN_CREATE = _re.compile(r"^/workers/[^/]+/runs$")
 
 # Process start time for /system/metrics uptime reporting.
 _PROCESS_START_TIME = time.time()
@@ -1814,14 +1829,24 @@ def _health_check_disk() -> Dict[str, Any]:
 def _health_check_e2b() -> Dict[str, Any]:
     if not os.environ.get("E2B_API_KEY"):
         return {"ok": False, "error": "E2B_API_KEY missing"}
-    from e2b import Sandbox
     import concurrent.futures
 
+    from e2b import Sandbox
+
+    def _list_sandboxes() -> None:
+        Sandbox.list(limit=1).next_items()
+
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="workeros-e2b-health",
+    )
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            ex.submit(lambda: Sandbox.list(limit=1).next_items()).result(timeout=5)
+        future = executor.submit(_list_sandboxes)
+        future.result(timeout=3)
     except concurrent.futures.TimeoutError:
-        return {"ok": False, "error": "E2B API timeout (>5s)"}
+        return {"ok": False, "error": "E2B health check timed out after 3s"}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     return {"ok": True}
 
 
@@ -3597,14 +3622,22 @@ def _persist_discovered_workers(
                 now,
             ),
         )
+        # System workers must be workspace-visible so any authenticated user
+        # can run them regardless of which bootstrap user originally persisted
+        # the row. Without this, a multi-member setup where user A bootstrapped
+        # the DB and user B logs in gets "worker does not belong to B" when
+        # Emily tries to start a worker-author run (#698).
+        is_system_worker = bool(manifest.get("system_worker"))
+        worker_visibility = "workspace" if is_system_worker else "private"
+
         conn.execute(
             """
             INSERT INTO workers
                 (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
                  next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
                  notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id,
-                 composio_trigger_id, composio_event, triggers_json)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+                 composio_trigger_id, composio_event, triggers_json, visibility)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 skill_version_id=excluded.skill_version_id,
                 name=excluded.name,
@@ -3615,7 +3648,8 @@ def _persist_discovered_workers(
                 owner_id=workers.owner_id,
                 composio_trigger_id=excluded.composio_trigger_id,
                 composio_event=excluded.composio_event,
-                triggers_json=excluded.triggers_json
+                triggers_json=excluded.triggers_json,
+                visibility=excluded.visibility
             """,
             (
                 worker_id,
@@ -3632,6 +3666,7 @@ def _persist_discovered_workers(
                 composio_trigger_id,
                 composio_event,
                 triggers_json_str,
+                worker_visibility,
             ),
         )
 
@@ -8089,7 +8124,11 @@ def _call_draft_llm(
 
 
 @app.post("/workers/draft-from-prompt", response_model=DraftFromPromptResponse)
-async def draft_worker_from_prompt(payload: DraftFromPromptRequest, request: Request) -> DraftFromPromptResponse:
+async def draft_worker_from_prompt(
+    payload: DraftFromPromptRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> DraftFromPromptResponse:
     """Draft a WorkerContract YAML from a natural-language prompt using LLM."""
     prompt = (payload.prompt or "").strip()
     if not prompt:
@@ -19585,6 +19624,29 @@ def _frontend_public_base() -> str:
     return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
 
 
+def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories) -> str:
+    raw = "wos_" + _secrets_mod.token_urlsafe(32)
+    token_id = str(_uuid_mod.uuid4())
+    token_name = f"CLI device: {(client_name or 'unknown').strip() or 'unknown'}"
+    try:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO cli_api_tokens
+                    (id, token_hash, user_id, role, name, created_at, last_used_at, revoked_at)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
+                """,
+                (token_id, _hash_pat(raw), user_id, "admin", token_name, now_iso()),
+            )
+    except Exception as exc:
+        logger.exception("Could not issue CLI auth token for user %s", user_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Could not issue CLI API token",
+        ) from exc
+    return raw
+
+
 @app.post("/cli-auth/devices")
 def create_cli_device(payload: CliAuthDeviceCreateRequest, request: Request) -> Dict[str, Any]:
     client_name = (payload.client_name or "").strip()
@@ -19678,21 +19740,22 @@ def approve_cli_device(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    floom_secret = os.environ.get("FLOOM_SECRET", "")
-    if not floom_secret:
-        raise HTTPException(status_code=503, detail="FLOOM_SECRET is not configured")
-
     now_ts = time.time()
     repos.cli_auth.prune_expired(now_ts=now_ts)
     record = repos.cli_auth.verify_device(payload.user_code)
-    if not record or record["user_id"] != auth.user_id:
+    if not record:
         raise HTTPException(status_code=404, detail="User code not found")
     if str(record.get("status")) != "pending":
         raise HTTPException(status_code=409, detail="Device code is no longer pending")
+    api_token = _issue_cli_auth_pat(
+        user_id=auth.user_id,
+        client_name=str(record.get("client_name") or "unknown"),
+        repos=repos,
+    )
     repos.cli_auth.update(
         device_code=record["device_code"],
         status="approved",
-        secret=floom_secret,
+        secret=api_token,
         approved_at=now_ts,
     )
     return {"ok": True, "client_name": record.get("client_name") or "unknown"}
@@ -19707,7 +19770,7 @@ def deny_cli_device(
     now_ts = time.time()
     repos.cli_auth.prune_expired(now_ts=now_ts)
     record = repos.cli_auth.verify_device(payload.user_code)
-    if not record or record["user_id"] != auth.user_id:
+    if not record:
         raise HTTPException(status_code=404, detail="User code not found")
     if str(record.get("status")) != "pending":
         raise HTTPException(status_code=409, detail="Device code is no longer pending")
@@ -20792,6 +20855,21 @@ _SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 _MAGIC_LINK_FALLBACK_SECRET: str = pysecrets.token_hex(32)
 
 
+def _session_cookie_secure() -> bool:
+    return os.environ.get("WORKEROS_INSECURE_COOKIES") != "1"
+
+
+def _set_session_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        session_id,
+        httponly=True,
+        samesite="lax",
+        max_age=_SESSION_TTL_SECONDS,
+        secure=_session_cookie_secure(),
+    )
+
+
 class _AuthSetupRequest(BaseModel):
     username: str
     password: str
@@ -20901,7 +20979,7 @@ def auth_setup(
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    _set_session_cookie(response, session_id)
     return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
                     role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
 
@@ -20923,7 +21001,7 @@ def auth_login(
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    _set_session_cookie(response, session_id)
     return {
         "id": user["id"],
         "username": user["username"],
@@ -21028,7 +21106,7 @@ def auth_consume_magic_link(
     session_id = pysecrets.token_urlsafe(32)
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
-    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    _set_session_cookie(response, session_id)
     return {"ok": True, "redirect_to": "/overview"}
 
 

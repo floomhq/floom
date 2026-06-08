@@ -80,6 +80,10 @@ class MultiMemberAuthProvider:
             if key.lower() == b"x-floom-secret":
                 provided = value
                 break
+        if provided is not None:
+            provided_text = provided.decode("latin-1", errors="replace").strip()
+            if provided_text.startswith(_PAT_PREFIX):
+                return await self._verify_pat(provided_text)
         if self._secret:
             # A secret is configured: enforce it strictly and NEVER fall through
             # to dev mode. A missing or wrong secret must return 401 immediately.
@@ -145,7 +149,7 @@ class MultiMemberAuthProvider:
         token_hash = _hash_token(raw_token)
         row = repos.tokens.get_by_hash(token_hash=token_hash)
         if row is None:
-            raise HTTPException(status_code=401, detail="invalid token")
+            return await self._verify_cli_api_token(raw_token)
         if row.get("disabled"):
             raise HTTPException(status_code=401, detail="account disabled")
         if _is_expired(row.get("expires_at")):
@@ -163,6 +167,41 @@ class MultiMemberAuthProvider:
             auth_method="pat",
             username=row.get("username"),
             scopes=("admin",) if row.get("role") == "admin" else (),
+        )
+
+    async def _verify_cli_api_token(self, raw_token: str) -> AuthContext:
+        from db import get_db, now_iso
+
+        token_hash = _hash_token(raw_token)
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT id, user_id, role, name
+                FROM cli_api_tokens
+                WHERE token_hash = ? AND revoked_at IS NULL
+                LIMIT 1
+                """,
+                (token_hash,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="invalid token")
+
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE cli_api_tokens SET last_used_at = ? WHERE id = ?",
+                    (now_iso(), row["id"]),
+                )
+        except Exception:
+            pass
+
+        role = row["role"] or "admin"
+        return AuthContext(
+            user_id=row["user_id"],
+            role=role,
+            auth_method="pat",
+            username=row["name"],
+            scopes=("admin",) if role == "admin" else (),
         )
 
     # ------------------------------------------------------------------

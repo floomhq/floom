@@ -68,6 +68,20 @@ def _missing_connections_for_scheduled_worker(repos, worker_id: str, user_id: st
         return []
     return [s for s in required_slugs if s not in available_slugs]
 
+
+def _advance_next_run_after_failure(
+    repos,
+    *,
+    worker_id: str,
+    next_run_at: str | None,
+    trigger_id: str | None = None,
+) -> None:
+    """Advance the schedule slot even when firing the run fails."""
+    if trigger_id is not None:
+        repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=next_run_at)
+        return
+    repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=next_run_at)
+
 logger = logging.getLogger("floom.scheduler")
 
 POLL_INTERVAL_SECONDS = 60  # check every minute
@@ -291,6 +305,12 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 new_next,
             )
         except Exception as exc:
+            _advance_next_run_after_failure(
+                repos,
+                worker_id=worker_id,
+                trigger_id=trigger_id,
+                next_run_at=new_next,
+            )
             logger.exception(
                 "Failed to fire schedule trigger %s for worker %s: %s",
                 trigger_id,
@@ -446,6 +466,11 @@ def _tick() -> None:
                 new_next,
             )
         except Exception as exc:
+            _advance_next_run_after_failure(
+                repos,
+                worker_id=worker_id,
+                next_run_at=new_next,
+            )
             logger.exception(
                 "Failed to fire scheduled run for worker %s: %s", worker_id, exc
             )

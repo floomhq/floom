@@ -11,6 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from enum import Enum
 
 
+DEFAULT_WORKER_AGENT_MODEL = "gpt-5.1"
+
+
 def _model_data(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump()
@@ -225,6 +228,7 @@ class RunStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
     PENDING_APPROVAL = "pending_approval"
 
 
@@ -1118,7 +1122,7 @@ class WorkerContract(BaseModel):
     schema_version: Literal["0.3"]
     name: str
     title: str
-    description: str
+    description: str = ""
     long_description: Optional[str] = None
     use_cases: Optional[List[str]] = None
     example_input: Optional[Dict[str, Any]] = None
@@ -1143,7 +1147,7 @@ class WorkerContract(BaseModel):
     version: str
     entrypoint: Optional[str] = "SKILL.md"
     system_prompt: Optional[str] = None
-    model: Optional[str] = "gpt-5.1"
+    model: Optional[str] = DEFAULT_WORKER_AGENT_MODEL
     entrypoints: Optional[List[WorkerEntrypoint]] = None
     limits: WorkerLimits = Field(default_factory=WorkerLimits)
     targets: List[str] = Field(default_factory=lambda: ["generic"])
@@ -1163,6 +1167,14 @@ class WorkerContract(BaseModel):
     csv_required_columns: Optional[List[str]] = None
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
     calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_missing_description(cls, value: Any) -> Any:
+        if isinstance(value, dict) and not str(value.get("description") or "").strip():
+            fallback = str(value.get("title") or value.get("name") or "Workeros worker").strip()
+            value = {**value, "description": fallback[:500]}
+        return value
 
     @field_validator("name")
     @classmethod
@@ -1407,7 +1419,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         runner=runner,
         command=contract.exec.command,
         mode=contract.exec.mode or "agent",
-        model=contract.model or "gpt-5.1",
+        model=contract.model or DEFAULT_WORKER_AGENT_MODEL,
         system_prompt=contract.system_prompt,
         disable_tools=list(contract.exec.disable_tools or []),
         limits=_model_data(contract.limits),
@@ -1570,7 +1582,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
         ),
         system_prompt=config.runtime.system_prompt,
-        model=config.runtime.model or config.model or "gpt-5.1",
+        model=config.runtime.model or config.model or DEFAULT_WORKER_AGENT_MODEL,
         limits=config.runtime.limits,
         capabilities=WorkerContractCapabilities(
             secrets=list(config.secrets),
