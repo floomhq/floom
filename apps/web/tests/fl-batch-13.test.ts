@@ -168,6 +168,16 @@ function test538ApiTsMagicLinkMethods(): void {
   );
 }
 
+function test538MagicLinkMiddlewareExempt(): void {
+  const s = api("main.py");
+  // The consume endpoint is unauthenticated by definition — user has no session yet.
+  // It must be in the auth middleware exempt list or the link is dead on arrival.
+  assert(
+    s.includes('path.startswith("/auth/magic/")'),
+    "auth_middleware must exempt /auth/magic/* so unauthenticated users can consume the link",
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
@@ -185,6 +195,7 @@ const tests: [string, () => void][] = [
   ["#538 stream_chat accepts and applies system_suffix", test538StreamChatAcceptsSystemSuffix],
   ["#538 /auth/magic/[token] page consumes token and redirects", test538MagicLinkPage],
   ["#538 api.ts exposes issueMagicLink and consumeMagicLink", test538ApiTsMagicLinkMethods],
+  ["#538 auth_middleware exempts /auth/magic/* for unauthenticated consume", test538MagicLinkMiddlewareExempt],
 ];
 
 let passed = 0;

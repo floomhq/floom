@@ -24,7 +24,6 @@ def _fake_repos() -> Repositories:
         cli_auth=_FakeWorkerRepo(),  # type: ignore[arg-type]
         approvals=_FakeWorkerRepo(),  # type: ignore[arg-type]
         alerts=_FakeWorkerRepo(),  # type: ignore[arg-type]
-        versions=_FakeWorkerRepo(),  # type: ignore[arg-type]
         mcp_tools=_FakeWorkerRepo(),  # type: ignore[arg-type]
     )
 
