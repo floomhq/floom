@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
+import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { AlertTriangle, CheckCircle2, Copy, Trash2 } from "lucide-react";
 
 function PersonalAccessTokensPanel() {
@@ -159,15 +160,16 @@ function PersonalAccessTokensPanel() {
 // belongs in Settings, not Connections.
 // S-dev: renamed "API access" tab to "Developer" (value "api" → "developer").
 // The old ?tab=api / #api URLs are handled by the legacy fallback below.
-type TabKey = "developer" | "system" | "slack" | "assistant" | "notifications" | "appearance" | "danger";
+type TabKey = "developer" | "system" | "slack" | "github" | "assistant" | "notifications" | "appearance" | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["developer", "system", "slack", "appearance", "danger"];
-const TAB_KEYS: TabKey[] = ["developer", "system", "slack", "assistant", "notifications", "appearance", "danger"];
+const VISIBLE_TAB_KEYS: TabKey[] = ["developer", "system", "slack", "github", "appearance", "danger"];
+const TAB_KEYS: TabKey[] = ["developer", "system", "slack", "github", "assistant", "notifications", "appearance", "danger"];
 
 const NAV_ITEMS: { key: TabKey; label: string }[] = [
   { key: "developer", label: "Developer" },
   { key: "system", label: "System" },
   { key: "slack", label: "Slack" },
+  { key: "github", label: "GitHub" },
   { key: "appearance", label: "Appearance" },
   { key: "danger", label: "Danger zone" },
 ];
@@ -493,6 +495,14 @@ function SettingsContent() {
 
         <TabsContent value="slack" className="pt-6">
           <SlackConnect />
+        </TabsContent>
+
+        {/* #616: GitHub remote sync — GitWorkspacePanel existed but was never
+            wired into a route. Connected here under Settings → GitHub so
+            operators can link a PAT, list/create repos, and push workspace
+            state without leaving the settings flow. */}
+        <TabsContent value="github" className="pt-6">
+          <GitWorkspacePanel />
         </TabsContent>
 
         <TabsContent value="notifications" className="space-y-4 pt-6">
