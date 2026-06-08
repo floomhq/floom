@@ -11,7 +11,6 @@ export function ConnectionsTabs() {
   const pathname = usePathname();
   const tabs = [
     { href: "/connections", label: "Connected", match: (p: string) => p === "/connections" },
-    { href: "/connections/browse", label: "Browse", match: (p: string) => p.startsWith("/connections/browse") },
     { href: "/connections/mcp", label: "MCP", match: (p: string) => p.startsWith("/connections/mcp") },
     { href: "/connections/secrets", label: "Secrets", match: (p: string) => p.startsWith("/connections/secrets") || p.startsWith("/secrets") },
     // Slack is the HUMAN INTERFACE (DM assistant, @mention, approvals) —
