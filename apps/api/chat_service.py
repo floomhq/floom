@@ -2588,6 +2588,38 @@ def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         inputs = json.loads(inputs_json) if isinstance(inputs_json, str) else dict(inputs_json or {})
     except json.JSONDecodeError as exc:
         return {"ok": False, "error": f"Invalid inputs_json: {exc}"}
+
+    # #627: validate required inputs before firing the run. Previously this
+    # function called create_run/start_run immediately, launching a run that
+    # would fail at execution time if required inputs were absent. Emily had
+    # no way to surface the gap — it just reported a failure after the fact.
+    #
+    # Now we load the worker's declared input schema and return a structured
+    # error listing the missing fields + their descriptions, so Emily can ask
+    # the user for the missing values before retrying.
+    from run_service import get_worker_config_for_run
+    run_config = get_worker_config_for_run(worker_id)
+    if run_config is not None:
+        declared_inputs = getattr(run_config, "inputs", []) or []
+        missing = [
+            inp for inp in declared_inputs
+            if getattr(inp, "required", False)
+            and (inp.name not in inputs or inputs.get(inp.name) in (None, ""))
+        ]
+        if missing:
+            # Include the label/description so Emily can phrase the follow-up
+            # question intelligently rather than echoing a raw field name.
+            details = [
+                f"{inp.name!r} ({inp.label or inp.description or inp.name})"
+                for inp in missing
+            ]
+            return {
+                "ok": False,
+                "error": f"Missing required inputs: {', '.join(details)}. "
+                         "Ask the user to provide them, then retry.",
+                "missing_inputs": [inp.name for inp in missing],
+            }
+
     from run_service import create_run, start_run
     from db import get_repositories
     try:
