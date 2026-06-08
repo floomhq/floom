@@ -40,6 +40,20 @@ _FLOOM_USER_ID = "federico"
 # (Notion/Drive convention) — automation assets that hold secrets must not be
 # discoverable until the owner explicitly shares them.
 _DEFAULT_VISIBILITY = "private"
+_DEFAULT_RUN_LOG_LIMIT = 10_000
+_DEFAULT_RUN_ARTIFACT_LIMIT = 1_000
+
+
+def _bounded_positive_int(value: int | None, *, default: int, maximum: int) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed <= 0:
+        return default
+    return min(parsed, maximum)
 
 
 def _derive_workspace_id_local(owner_id: str | None) -> str:
@@ -1465,24 +1479,47 @@ class SqliteRunRepository:
         timestamp: str,
         trace_id: str | None = None,
     ) -> None:
-        if self.get(user_id=user_id, run_id=run_id) is None:
-            raise ValueError(f"run {run_id} not found for {user_id}")
         with get_db() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO logs (run_id, level, message, timestamp, trace_id)
-                VALUES (?, ?, ?, ?, ?)
+                SELECT ?, ?, ?, ?, ?
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM runs r
+                    JOIN workers w ON w.id = r.worker_id
+                    WHERE r.id = ? AND w.owner_id = ?
+                )
                 """,
-                (run_id, level, message, timestamp, trace_id),
+                (run_id, level, message, timestamp, trace_id, run_id, user_id),
             )
+            if cursor.rowcount == 0:
+                raise ValueError(f"run {run_id} not found for {user_id}")
 
-    def list_logs(self, *, user_id: str, run_id: str) -> list[dict[str, Any]]:
-        if self.get(user_id=user_id, run_id=run_id) is None:
-            return []
+    def list_logs(
+        self,
+        *,
+        user_id: str,
+        run_id: str,
+        limit: int | None = _DEFAULT_RUN_LOG_LIMIT,
+    ) -> list[dict[str, Any]]:
+        bounded_limit = _bounded_positive_int(
+            limit,
+            default=_DEFAULT_RUN_LOG_LIMIT,
+            maximum=_DEFAULT_RUN_LOG_LIMIT,
+        )
         with get_db() as conn:
             rows = conn.execute(
-                "SELECT level, message, timestamp, trace_id FROM logs WHERE run_id = ? ORDER BY timestamp",
-                (run_id,),
+                """
+                SELECT l.level, l.message, l.timestamp, l.trace_id
+                FROM logs l
+                JOIN runs r ON r.id = l.run_id
+                JOIN workers w ON w.id = r.worker_id
+                WHERE l.run_id = ? AND w.owner_id = ?
+                ORDER BY l.timestamp
+                LIMIT ?
+                """,
+                (run_id, user_id, bounded_limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -1534,24 +1571,47 @@ class SqliteRunRepository:
         size_bytes: int | None,
         created_at: str,
     ) -> None:
-        if self.get(user_id=user_id, run_id=run_id) is None:
-            raise ValueError(f"run {run_id} not found for {user_id}")
         with get_db() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO artifacts (id, run_id, name, type, path, size_bytes, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                SELECT ?, ?, ?, ?, ?, ?, ?
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM runs r
+                    JOIN workers w ON w.id = r.worker_id
+                    WHERE r.id = ? AND w.owner_id = ?
+                )
                 """,
-                (artifact_id, run_id, name, artifact_type, path, size_bytes, created_at),
+                (artifact_id, run_id, name, artifact_type, path, size_bytes, created_at, run_id, user_id),
             )
+            if cursor.rowcount == 0:
+                raise ValueError(f"run {run_id} not found for {user_id}")
 
-    def list_artifacts(self, *, user_id: str, run_id: str) -> list[dict[str, Any]]:
-        if self.get(user_id=user_id, run_id=run_id) is None:
-            return []
+    def list_artifacts(
+        self,
+        *,
+        user_id: str,
+        run_id: str,
+        limit: int | None = _DEFAULT_RUN_ARTIFACT_LIMIT,
+    ) -> list[dict[str, Any]]:
+        bounded_limit = _bounded_positive_int(
+            limit,
+            default=_DEFAULT_RUN_ARTIFACT_LIMIT,
+            maximum=_DEFAULT_RUN_ARTIFACT_LIMIT,
+        )
         with get_db() as conn:
             rows = conn.execute(
-                "SELECT * FROM artifacts WHERE run_id = ? ORDER BY created_at, name",
-                (run_id,),
+                """
+                SELECT a.*
+                FROM artifacts a
+                JOIN runs r ON r.id = a.run_id
+                JOIN workers w ON w.id = r.worker_id
+                WHERE a.run_id = ? AND w.owner_id = ?
+                ORDER BY a.created_at, a.name
+                LIMIT ?
+                """,
+                (run_id, user_id, bounded_limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
