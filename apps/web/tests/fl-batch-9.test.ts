@@ -115,6 +115,50 @@ function test561RunDetailReplayGated(): void {
   );
 }
 
+function test561CostTotalTokens(): void {
+  // Backend: agent_driver writes usage row to transcript
+  const agentDriver = readFileSync(
+    resolve(API_ROOT, "runner_sandbox/agent_driver.py"),
+    "utf8",
+  );
+  assert(
+    agentDriver.includes("\"type\": \"usage\"") || agentDriver.includes('"type": "usage"'),
+    "agent_driver must append a usage row to the transcript with total_tokens",
+  );
+  assert(
+    agentDriver.includes("total_tokens"),
+    "agent_driver usage row must include total_tokens",
+  );
+
+  // Backend: main.py extracts usage from transcript
+  const mainPy = api("main.py");
+  assert(
+    mainPy.includes("_extract_total_tokens_from_transcript"),
+    "main.py must define _extract_total_tokens_from_transcript",
+  );
+  assert(
+    mainPy.includes("total_tokens=_total_tokens"),
+    "RunDetail constructor must receive total_tokens",
+  );
+
+  // Backend model: RunDetail.total_tokens field
+  const models = api("models.py");
+  const runDetailIdx = models.indexOf("class RunDetail");
+  const section = models.slice(runDetailIdx, runDetailIdx + 2000);
+  assert(section.includes("total_tokens"), "RunDetail model must declare total_tokens field");
+
+  // Frontend types
+  const types = src("lib/types.ts");
+  const rdIdx = types.indexOf("interface RunDetail");
+  const rdSection = types.slice(rdIdx, rdIdx + 2000);
+  assert(rdSection.includes("total_tokens"), "RunDetail interface must include total_tokens");
+
+  // Frontend component: token count displayed
+  const pane = src("components/RunDetailSplitPane.tsx");
+  assert(pane.includes("total_tokens"), "RunDetailSplitPane must render total_tokens");
+  assert(pane.includes("tokens"), "RunDetailSplitPane must show 'tokens' label for the count");
+}
+
 // ---------------------------------------------------------------------------
 // #565 — Backend: connection activity endpoint
 // ---------------------------------------------------------------------------
@@ -177,6 +221,7 @@ const tests: [string, () => void][] = [
   ["#561 RunDetailSplitPane has Tool calls tab with ToolCallsView", test561RunDetailToolCallsTab],
   ["#561 RunDetailSplitPane has Approval tab with ApprovalView", test561RunDetailApprovalTab],
   ["#561 RunDetailSplitPane gates Re-run button on can_replay", test561RunDetailReplayGated],
+  ["#561 cost: agent_driver writes usage row; main.py extracts total_tokens; frontend displays it", test561CostTotalTokens],
   ["#565 main.py has GET /connections/{id}/activity endpoint", test565BackendActivityEndpoint],
   ["#565 api.ts connections has activity method", test565ApiActivityMethod],
   ["#565 Connection detail page renders activity log with RunStatusBadge", test565ConnectionDetailActivitySection],
