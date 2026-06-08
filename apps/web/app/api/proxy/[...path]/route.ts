@@ -70,7 +70,20 @@ async function handler(
     fetchOptions.duplex = "half";
   }
 
-  const upstream = await fetch(upstreamUrl, fetchOptions);
+  // #586: wrap the upstream fetch so a refused connection (backend not running,
+  // wrong port, network error) returns a 502 JSON response instead of letting
+  // the unhandled fetch rejection bubble up as a Next.js 500 page. A 502 lets
+  // client-side error handlers show a meaningful message rather than a blank
+  // crash screen.
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl, fetchOptions);
+  } catch {
+    return new NextResponse(
+      JSON.stringify({ detail: "Could not reach the API server. Is the backend running?" }),
+      { status: 502, headers: { "content-type": "application/json" } },
+    );
+  }
 
   // Stream response back; preserves binary content (artifacts, etc.)
   const responseHeaders = new Headers();
