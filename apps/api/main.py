@@ -4371,6 +4371,31 @@ def _resolve_file_input_references(
     return resolved_inputs
 
 
+def _validate_file_input_references(
+    run_config: Optional[WorkerConfig],
+    inputs: Dict[str, Any],
+) -> None:
+    """Reject invalid file input references before a run row is created."""
+    if not run_config:
+        return
+    for inp in getattr(run_config, "inputs", []) or []:
+        if getattr(inp, "type", None) != "file":
+            continue
+        value = inputs.get(inp.name)
+        if value in (None, ""):
+            continue
+        if not is_sha256(value):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"File input '{inp.name}': value must be a SHA-256 reference "
+                    f"from /uploads, got non-SHA value"
+                ),
+            )
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
+            raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
+
+
 _DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 _DEFAULT_UPLOAD_HOURLY_CAP_BYTES = 1024 * 1024 * 1024
 _UPLOAD_HOURLY_WINDOW_SECONDS = 3600.0
@@ -10403,6 +10428,7 @@ def create_worker_run(
                 status_code=400,
                 detail=f"Missing required inputs: {', '.join(missing)}",
             )
+        _validate_file_input_references(run_config, payload.inputs)
 
     _enforce_run_create_quota(auth, worker_id)
 
@@ -19039,6 +19065,11 @@ def system_metrics(
         for worker in workers
         if worker.get("enabled") and worker.get("trigger_type") != "manual"
     )
+    try:
+        from runner_sandbox.agent_driver import cancel_flag_db_read_errors_total
+        cancel_flag_errors = cancel_flag_db_read_errors_total()
+    except Exception:
+        cancel_flag_errors = 0
     return {
         "workers_count": len(workers),
         "runs_total": int(runs_total or 0),
@@ -19048,6 +19079,7 @@ def system_metrics(
         "secrets_count": int(secrets_count or 0),
         "active_triggers": int(active_triggers or 0),
         "drafts_last_hour": _drafts_last_hour_total(),
+        "cancel_flag_db_read_errors": int(cancel_flag_errors or 0),
         "uptime_seconds": int(time.time() - _PROCESS_START_TIME),
     }
 
@@ -19070,6 +19102,11 @@ _METRICS_DB_CONNECTION_ERRORS_TOTAL = 0
 def prometheus_metrics(auth: AuthContext = Depends(get_auth_context)):
     """Prometheus text exposition for runtime health."""
     buckets = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600]
+    try:
+        from runner_sandbox.agent_driver import cancel_flag_db_read_errors_total
+        cancel_flag_errors = cancel_flag_db_read_errors_total()
+    except Exception:
+        cancel_flag_errors = 0
     try:
         with get_db() as conn:
             run_rows = conn.execute(
@@ -19157,6 +19194,9 @@ def prometheus_metrics(auth: AuthContext = Depends(get_auth_context)):
         "# HELP workeros_db_connection_errors_total Total DB connection/query errors observed by metrics.",
         "# TYPE workeros_db_connection_errors_total counter",
         f"workeros_db_connection_errors_total {_METRICS_DB_CONNECTION_ERRORS_TOTAL}",
+        "# HELP workeros_cancel_flag_db_read_errors_total Total cancel flag DB read failures treated as cancelled.",
+        "# TYPE workeros_cancel_flag_db_read_errors_total counter",
+        f"workeros_cancel_flag_db_read_errors_total {int(cancel_flag_errors or 0)}",
         "# HELP workeros_active_runs Active queued or running runs.",
         "# TYPE workeros_active_runs gauge",
         f"workeros_active_runs {int(active_runs or 0)}",

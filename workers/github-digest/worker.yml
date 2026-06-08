@@ -26,4 +26,7 @@ trigger:
   cron: "0 9 * * *"
   timezone: "UTC"
 connections:
-- github
+  - app: github
+    allowed_tools:
+      - GITHUB_FIND_PULL_REQUESTS
+      - GITHUB_LIST_ASSIGNED_ISSUES
