@@ -1767,8 +1767,8 @@ def _runner_key(config: Optional[WorkerConfig]) -> str:
         runtime_type = (config.runtime.type or "").strip().lower()
         if runtime_type.startswith("skill"):
             return runtime_type
-        return config.runtime.runner or "local"
-    return "local"
+        return config.runtime.runner or "e2b"
+    return "e2b"
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
@@ -3134,10 +3134,12 @@ def execute_run(
                 bundle_snapshot_path=bundle_snapshot_path,
             )
 
-        # Dispatch to the appropriate sandbox driver based on worker config
-        runner = "local"
+        # Dispatch to the appropriate sandbox driver based on worker config.
+        # #603: default to "e2b" — "local" (in-process) runner was removed in
+        # the security audit; all workers run inside E2B sandboxes.
+        runner = "e2b"
         if config and config.runtime:
-            runner = config.runtime.runner or "local"
+            runner = config.runtime.runner or "e2b"
         mode = config.runtime.mode if config and config.runtime else "pure-script"
         timeout_seconds = (
             config.runtime.limits.timeout_seconds
@@ -3181,24 +3183,38 @@ def execute_run(
         _materialize_declared_file_outputs(run_id, config, outputs, artifacts)
         _store_run_artifacts(run_id, artifacts, log_fn, user_id=owner_id, repos=repos_obj)
 
-        # DX diagnostic: a worker that declares approvals.required: true but
-        # whose run.py never emits a `decision_required` event can NEVER pause
-        # for approval (the gate below needs BOTH). Without this line the run
-        # just completes/fails with no hint that the approval wiring is broken.
-        # Surface a clear, actionable message in the run log so the author can
-        # fix the manifest/run.py. Does not change the gate behavior.
+        # #595: approvals.required auto-gate.
+        # Previously, `approvals.required: true` in the manifest only worked if
+        # run.py also explicitly emitted a `decision_required` event. Workers
+        # that declared the flag but omitted the event would silently complete,
+        # making the manifest flag a no-op.
+        #
+        # Fix: synthesise a decision_required payload from the run outputs when
+        # the manifest declares approvals.required but run.py didn't emit one.
+        # This makes the manifest flag sufficient for simple "always pause before
+        # completing" use cases without requiring boilerplate in every run.py.
+        worker_needs_approval = bool(
+            config and getattr(config, "approvals", None) and config.approvals.required
+        )
         if (
-            config
-            and getattr(config, "approvals", None)
-            and config.approvals.required
+            worker_needs_approval
             and not result.decision_required
+            and result.status not in ("error", "failed")
         ):
+            approval_label = (
+                config.approvals.label
+                if config and config.approvals and config.approvals.label
+                else "Approve to complete"
+            )
+            result.decision_required = {
+                "label": approval_label,
+                "preview": json.dumps(result.outputs, indent=2)[:2000] if result.outputs else "",
+            }
             log_fn(
-                "This worker declares approvals.required: true but its run.py "
-                "never emitted a decision_required event, so it cannot pause for "
-                "approval. Emit a decision_required event (e.g. write it to "
-                "result.json) before exiting. See docs/AUTHORING.md (Approvals).",
-                level="warning",
+                "approvals.required: synthesising approval gate from manifest "
+                "(run.py did not emit decision_required). Add an explicit "
+                "decision_required event to customise the label and preview.",
+                level="info",
             )
 
         # Both "error" and "failed" terminal statuses map to a failed run

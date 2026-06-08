@@ -9,20 +9,22 @@ avg, cheaper than Zapier Pro.
 
 agent-mode workers use AgentDriver (LLM tool loop, separate concern).
 pure-script workers always run inside E2B.
+
+#602: SkillRuntimeDriver removed — zero stock workers used runner:skill and
+the driver duplicated path-traversal + LLM-loop logic already in AgentDriver.
 """
 
 from .base import SandboxDriver
 from .agent_driver import AgentDriver
 from .e2b_driver import E2BSandboxDriver
-from .skill_driver import SkillRuntimeDriver
 from models import WorkerConfig
 
 
 def _resolve_mode_from_entry(entry: str | None) -> str | None:
-    """PR S11: derive execution mode from the entry-point file suffix.
+    """Derive execution mode from the entry-point file suffix (PR S11).
 
-    `.md` -> agent mode (SKILL.md loop with tools).
-    `.py`, `.sh`, `.js` -> script mode (just exec the file in E2B).
+    `.md`            -> agent mode (SKILL.md loop with tools via AgentDriver).
+    `.py`/`.sh`/`.js`-> pure-script mode (exec the file inside E2B sandbox).
     """
     if not entry:
         return None
@@ -35,26 +37,25 @@ def _resolve_mode_from_entry(entry: str | None) -> str | None:
 
 
 def get_driver(runner: str = "e2b", config: WorkerConfig | None = None) -> SandboxDriver:
-    """Return the sandbox driver. Routes on `entrypoint` suffix (PR S11).
+    """Return the correct sandbox driver for a worker.
 
-    `entrypoint` ending in `.md` -> AgentDriver. `.py/.sh/.js` -> E2BSandboxDriver.
-    Falls back to legacy `mode` field if entrypoint is unset (back-compat).
-    Legacy compat: the `runner` parameter is accepted but ignored for pure-script
-    (always E2B now). Skill-runtime workers go through SkillRuntimeDriver.
+    Routing priority (PR S11):
+      1. entrypoint suffix — `.md` -> AgentDriver, `.py/.sh/.js` -> E2BSandboxDriver.
+      2. runtime.mode field — `agent` / `pure-script` (backwards compat).
+      3. Default: AgentDriver (agent-mode workers are the common case).
+
+    The `runner` parameter is accepted for backwards compat but ignored for
+    pure-script dispatch (always E2B). `runner:skill` is no longer supported
+    (#602 — SkillRuntimeDriver removed).
     """
     if config and config.runtime:
-        # PR S11: prefer entry-based routing.
         inferred = _resolve_mode_from_entry(config.runtime.entrypoint)
         mode = inferred or config.runtime.mode or "agent"
         if mode == "agent":
             return AgentDriver()
-        if mode not in ("pure-script", "hybrid"):
+        if mode != "pure-script":
             raise ValueError(f"Unknown exec mode: {mode!r}. Must be 'agent' or 'pure-script'.")
 
-    # Pure-script: always E2B. The `runner` field is informational only.
-    runner = (runner or "e2b").strip().lower()
-    if runner.startswith("skill"):
-        return SkillRuntimeDriver()
     return E2BSandboxDriver()
 
 
@@ -62,6 +63,5 @@ __all__ = [
     "SandboxDriver",
     "AgentDriver",
     "E2BSandboxDriver",
-    "SkillRuntimeDriver",
     "get_driver",
 ]

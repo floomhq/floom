@@ -197,25 +197,10 @@ class AgentDriver(SandboxDriver):
             )
 
     def _run_coro_sync(self, coro: Any) -> WorkerResult:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(coro)
-
-        result_box: dict[str, WorkerResult | BaseException] = {}
-
-        def _runner() -> None:
-            try:
-                result_box["result"] = asyncio.run(coro)
-            except BaseException as exc:
-                result_box["error"] = exc
-
-        thread = threading.Thread(target=_runner, daemon=True)
-        thread.start()
-        thread.join()
-        if "error" in result_box:
-            raise result_box["error"]  # type: ignore[misc]
-        return result_box["result"]  # type: ignore[return-value]
+        # #605: delegate to the shared async_bridge utility so the
+        # sync-from-async-context pattern is maintained in one place.
+        from async_bridge import run_coro_sync
+        return run_coro_sync(coro)  # type: ignore[return-value]
 
     async def _run_agent_async(
         self,
