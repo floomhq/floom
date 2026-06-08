@@ -14,6 +14,8 @@
 // `npx ... add <token>` install artifact is intentionally dropped.
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { api } from "@/lib/api";
 import { Clock, FileText, MousePointerClick, Webhook, Zap } from "lucide-react";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
@@ -94,18 +96,32 @@ function buildWorkerYml(worker: PublicWorker): string {
 
 type FileTab = "skill" | "yaml" | "output";
 
-export function WorkerShareCard({ worker, authed = false }: { worker: PublicWorker; authed?: boolean }) {
+export function WorkerShareCard({ worker, authed = false, token }: { worker: PublicWorker; authed?: boolean; token?: string }) {
+  const router = useRouter();
   const [flipped, setFlipped] = useState(false);
   const [tab, setTab] = useState<FileTab>("skill");
+  const [importing, setImporting] = useState(false);
+  const [importedId, setImportedId] = useState<string | null>(null);
 
   const { label: triggerLabel, Icon: TriggerIcon } = triggerMeta(worker.trigger_type);
   const tools = (worker.connections ?? []).map(normalizeSlug);
   const hasExample = Boolean((worker.example_output ?? "").trim());
 
-  // FL4: signed-in visitors go straight to their dashboard; logged-out
-  // prospects keep the "Add to workspace" prompt that routes through login.
-  const ctaHref = authed ? "/" : "/login";
-  const ctaLabel = authed ? "Dashboard" : "Add to workspace";
+  async function handleImport() {
+    if (!token || importing) return;
+    setImporting(true);
+    try {
+      const result = await api.workers.importFromShare(token);
+      setImportedId(result.worker_id);
+      router.push(`/workers/${result.worker_id}`);
+    } catch {
+      setImporting(false);
+    }
+  }
+
+  // CTA element differs: authed users get an import button; guests go to login.
+  const ctaHref = authed ? undefined : "/login";
+  const ctaLabel = importedId ? "View worker" : importing ? "Importing..." : "Add to workspace";
 
   return (
     <div className="px-7 pb-4">
@@ -199,7 +215,7 @@ export function WorkerShareCard({ worker, authed = false }: { worker: PublicWork
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-soft)] bg-[var(--bg-2)] px-5 py-3">
               <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
                 {authed
-                  ? "Open your dashboard to add this worker and connect its tools."
+                  ? "Import this worker into your workspace and connect its tools."
                   : "Add this worker to your workspace and connect its tools."}
               </p>
               <div className="flex shrink-0 gap-2">
@@ -211,12 +227,23 @@ export function WorkerShareCard({ worker, authed = false }: { worker: PublicWork
                   <FileText className="size-3.5" />
                   See files
                 </button>
-                <Link
-                  href={ctaHref}
-                  className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
-                >
-                  {ctaLabel}
-                </Link>
+                {authed && token ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleImport()}
+                    disabled={importing || importedId != null}
+                    className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-60"
+                  >
+                    {ctaLabel}
+                  </button>
+                ) : (
+                  <Link
+                    href={ctaHref ?? "/login"}
+                    className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
+                  >
+                    {ctaLabel}
+                  </Link>
+                )}
               </div>
             </div>
           </div>
@@ -241,12 +268,23 @@ export function WorkerShareCard({ worker, authed = false }: { worker: PublicWork
                 </button>
                 <span className="text-[13px] font-semibold">Worker files</span>
               </div>
-              <Link
-                href={ctaHref}
-                className="inline-flex h-7 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
-              >
-                {ctaLabel}
-              </Link>
+              {authed && token ? (
+                <button
+                  type="button"
+                  onClick={() => void handleImport()}
+                  disabled={importing || importedId != null}
+                  className="inline-flex h-7 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-60"
+                >
+                  {ctaLabel}
+                </button>
+              ) : (
+                <Link
+                  href={ctaHref ?? "/login"}
+                  className="inline-flex h-7 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
+                >
+                  {ctaLabel}
+                </Link>
+              )}
             </div>
 
             {/* TOP TAB BAR */}

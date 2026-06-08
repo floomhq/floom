@@ -208,6 +208,11 @@ export const api = {
       fetchJson<import("./types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
         method: "POST",
       }),
+    importFromShare: (token: string) =>
+      fetchJson<{ worker_id: string; url: string }>("/workers/import-from-share", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
     run: (id: string, inputs: Record<string, unknown>) =>

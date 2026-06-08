@@ -6652,12 +6652,22 @@ def _public_worker_share_from_worker(worker: Dict[str, Any]) -> Dict[str, Any]:
             runtime={"type": "python", "entrypoint": "run.py"},
         )
     public = _public_worker_response(worker, config).model_dump()
+    # Read the actual source files so the share card can preview them and the
+    # import endpoint can clone them without a separate DB/FS lookup.
+    from worker_registry import WORKERS_DIR as _SHARE_WORKERS_DIR
+    worker_dir = _SHARE_WORKERS_DIR / str(worker.get("id") or "")
+    raw_files = _read_worker_files(worker_dir)
+    share_files = [
+        {"path": f.path, "content": f.content or "", "binary": f.binary}
+        for f in raw_files
+        if not f.binary
+    ]
     return {
         "entity_type": "worker",
         "title": public.get("name"),
         "description": public.get("description") or public.get("long_description"),
         "worker": public,
-        "files": [],
+        "files": share_files,
     }
 
 
@@ -6697,6 +6707,36 @@ def _standalone_share_payload(token: str, repos: Repositories) -> Dict[str, Any]
     # share table existed.
     worker = _load_short_link_public_worker(token, repos)
     return _public_worker_share_from_worker(worker)
+
+
+class _ImportFromShareRequest(BaseModel):
+    token: str
+
+
+@app.post("/workers/import-from-share")
+def import_worker_from_share(
+    body: _ImportFromShareRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Clone a shared worker into the authenticated user's workspace.
+
+    Resolves the share token, reads the source worker's files from the share
+    payload (populated by _public_worker_share_from_worker), and registers
+    them as a new worker owned by the caller. Colliding IDs are deduplicated
+    automatically so the same token can be imported by multiple users.
+    """
+    payload = _standalone_share_payload(body.token, repos)
+    if payload.get("entity_type") != "worker":
+        raise HTTPException(status_code=400, detail="Share link is not a worker")
+    share_files = payload.get("files") or []
+    if not share_files:
+        raise HTTPException(status_code=409, detail="Worker has no importable files")
+    draft_files = [DraftFile(path=f["path"], content=f.get("content") or "") for f in share_files if f.get("path")]
+    if not any(f.path == "worker.yml" for f in draft_files):
+        raise HTTPException(status_code=409, detail="Worker share is missing worker.yml")
+    new_id = _register_worker_from_files(draft_files, user_id=auth.user_id, repos=repos, dedupe_id=True)
+    return {"worker_id": new_id, "url": f"/workers/{new_id}"}
 
 
 @app.post("/workers/{worker_id}/share-link")
