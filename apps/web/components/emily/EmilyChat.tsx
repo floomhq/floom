@@ -182,33 +182,41 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
     setShowScrollButton(!nearBottom);
   }, []);
 
-  const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Scroll the container to the very bottom. Uses direct scrollTop manipulation
+  // (not scrollIntoView) so it is instant and synchronous — no smooth animation
+  // that would fight the user's own scroll gesture during streaming.
+  const scrollToBottom = useCallback((smooth = false) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (smooth) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
     isNearBottomRef.current = true;
     setShowScrollButton(false);
   }, []);
 
-  // Auto-scroll when streaming — but ONLY if the user is already near the
-  // bottom. If they've scrolled up to read history, respect that and show the
-  // scroll-to-bottom button instead. This matches ChatGPT / Claude behaviour.
+  // Auto-scroll when streaming — ONLY if the user is already near the bottom.
+  // If they've scrolled up to read history, stop and show the jump button.
+  // Uses instant scroll (no smooth animation) so it never fights user input.
   useEffect(() => {
     if (isNearBottomRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      const el = scrollContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
     }
   }, [messages, isStreaming]);
 
-  // Always jump to bottom when the USER sends a new message so the response
-  // is visible — regardless of current scroll position.
+  // Always jump to bottom when the USER sends a new message so Emily's reply
+  // is immediately visible — regardless of current scroll position.
   const prevLengthRef = useRef(messages.length);
   useEffect(() => {
     const grew = messages.length > prevLengthRef.current;
     prevLengthRef.current = messages.length;
     if (grew && messages[messages.length - 1]?.role === "user") {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-      isNearBottomRef.current = true;
-      setShowScrollButton(false);
+      scrollToBottom();
     }
-  }, [messages]);
+  }, [messages, scrollToBottom]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
@@ -236,6 +244,7 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
         <ChatControls
           onNew={() => {
             newSession();
+            // Reset scroll state for the fresh conversation
             isNearBottomRef.current = true;
             setShowScrollButton(false);
           }}
@@ -273,7 +282,7 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
         {showScrollButton && (
           <button
             type="button"
-            onClick={scrollToBottom}
+            onClick={() => scrollToBottom(true)}
             aria-label="Scroll to bottom"
             className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md hover:text-foreground hover:shadow-lg transition-all"
           >
