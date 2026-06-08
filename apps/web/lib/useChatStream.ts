@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { GenericToolCard } from "./emily-chat-types";
 import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
 import type { AttachedFile, ChatMessage, ToolCard } from "./emily-chat-types";
 import {
@@ -119,9 +120,104 @@ export function useChatStream(): ChatStreamState {
     };
   }, []);
 
+  // #591: Subscribe to the underlying run SSE stream for tool cards stuck in
+  // "running" status. When workers.run triggers a run, the backend intentionally
+  // leaves the card at status="running" because the run executes asynchronously.
+  // Without this effect, the "Starting worker run" spinner stays forever because
+  // no code ever connected the card to the run's completion event.
+  //
+  // Strategy: track subscribed card_ids in a ref (avoids re-creating sources on
+  // every render). For each unsubscribed running card that has a stream URL,
+  // open an EventSource. On a "finish" part, flip the card to completed/failed.
+  // On stream error, fall back to a one-shot REST poll of the run status.
+  const subscribedCardIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const newSources: { cardId: string; source: EventSource }[] = [];
+
+    for (const msg of messages) {
+      if (msg.role !== "assistant" || !msg.parts) continue;
+      for (const part of msg.parts) {
+        if (part.type !== "tool-card") continue;
+        const card = part.card;
+        if (card.status !== "running") continue;
+        if (!card.streams?.parts) continue;
+        if (subscribedCardIds.current.has(card.card_id)) continue;
+
+        const cardId = card.card_id;
+        const streamPath = card.streams.parts;
+        // Extract run_id for fallback REST poll: path is /runs/{id}/stream
+        const runId = streamPath.match(/\/runs\/([^/]+)\//)?.[1];
+
+        subscribedCardIds.current.add(cardId);
+
+        const source = new EventSource(apiProxyPath(streamPath, true));
+        newSources.push({ cardId, source });
+
+        const applyFinalStatus = (finalStatus: "completed" | "failed") => {
+          subscribedCardIds.current.delete(cardId);
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.role !== "assistant" || !m.parts) return m;
+              return {
+                ...m,
+                parts: m.parts.map((p) => {
+                  if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+                  const tc = p.card as GenericToolCard;
+                  return {
+                    type: "tool-card" as const,
+                    card: {
+                      ...p.card,
+                      status: finalStatus,
+                      ...("toolName" in tc
+                        ? { title: getToolCardTitle(tc.toolName, finalStatus) }
+                        : {}),
+                    } as ToolCard,
+                  };
+                }),
+              };
+            })
+          );
+        };
+
+        source.addEventListener("part", (event) => {
+          try {
+            const data = JSON.parse((event as MessageEvent).data) as { type?: string; status?: string };
+            if (data.type === "finish") {
+              source.close();
+              applyFinalStatus(data.status === "completed" ? "completed" : "failed");
+            }
+          } catch { /* ignore malformed SSE frames */ }
+        });
+
+        source.onerror = () => {
+          source.close();
+          // Fallback: one-shot REST poll to get final run status
+          if (!runId) return;
+          void fetch(apiProxyPath(`/runs/${runId}`))
+            .then((r) => r.ok ? r.json() : null)
+            .then((run: { status?: string } | null) => {
+              if (!run) return;
+              if (run.status === "completed" || run.status === "failed") {
+                applyFinalStatus(run.status as "completed" | "failed");
+              }
+            })
+            .catch(() => { /* network error — leave card as-is */ });
+        };
+      }
+    }
+
+    return () => {
+      for (const { cardId, source } of newSources) {
+        source.close();
+        subscribedCardIds.current.delete(cardId);
+      }
+    };
+  }, [messages]);
+
   const newSession = useCallback(() => {
     abortRef.current?.abort();
     clearStoredConversationId();
+    subscribedCardIds.current.clear();
     setMessages([]);
     setConversationId(null);
     setError(null);
