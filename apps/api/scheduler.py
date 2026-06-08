@@ -86,6 +86,8 @@ logger = logging.getLogger("floom.scheduler")
 
 POLL_INTERVAL_SECONDS = 60  # check every minute
 _stop_event: threading.Event = threading.Event()
+_scheduler_thread: threading.Thread | None = None
+_scheduler_lock = threading.Lock()
 
 
 def compute_next_run_at(cron_expr: str, after: datetime) -> Optional[str]:
@@ -483,22 +485,39 @@ def _tick() -> None:
 
 def start_scheduler() -> None:
     """Start the scheduler in a background daemon thread."""
-    _stop_event.clear()
+    global _scheduler_thread
+    with _scheduler_lock:
+        if _scheduler_thread is not None and _scheduler_thread.is_alive():
+            return
+        _stop_event.clear()
 
-    def _loop() -> None:
-        logger.info("Scheduler started (poll interval: %ds)", POLL_INTERVAL_SECONDS)
-        while not _stop_event.is_set():
-            try:
-                _tick()
-            except Exception as exc:
-                logger.exception("Scheduler tick failed: %s", exc)
-            _stop_event.wait(timeout=POLL_INTERVAL_SECONDS)
-        logger.info("Scheduler stopped")
+        def _loop() -> None:
+            logger.info("Scheduler started (poll interval: %ds)", POLL_INTERVAL_SECONDS)
+            while not _stop_event.is_set():
+                try:
+                    _tick()
+                except Exception as exc:
+                    logger.exception("Scheduler tick failed: %s", exc)
+                _stop_event.wait(timeout=POLL_INTERVAL_SECONDS)
+            logger.info("Scheduler stopped")
 
-    t = threading.Thread(target=_loop, daemon=True, name="workeros-scheduler")
-    t.start()
+        _scheduler_thread = threading.Thread(target=_loop, daemon=True, name="workeros-scheduler")
+        _scheduler_thread.start()
 
 
 def stop_scheduler() -> None:
     """Signal the scheduler to stop."""
     _stop_event.set()
+
+
+def scheduler_status() -> dict[str, Any]:
+    """Return scheduler thread readiness state for /health."""
+    thread = _scheduler_thread
+    alive = bool(thread is not None and thread.is_alive())
+    running = alive and not _stop_event.is_set()
+    return {
+        "ok": running,
+        "running": running,
+        "thread": thread.name if thread is not None else None,
+        "stopping": _stop_event.is_set(),
+    }

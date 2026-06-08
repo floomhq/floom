@@ -20,6 +20,7 @@ import json
 import platform
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -790,6 +791,36 @@ class TestEmailNotifications:
         assert "run_&lt;123&gt;" in payload["html"]
         assert "Boom &lt;script&gt;" in payload["html"]
         assert "Weekly <Digest>" in payload["text"]
+
+    def test_send_email_timeout_returns_without_waiting_for_resend(self, monkeypatch):
+        """A hung Resend SDK call is bounded and does not block run completion."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test")
+        monkeypatch.setenv("WORKEROS_RESEND_TIMEOUT_SECONDS", "0.1")
+        send_entered = threading.Event()
+
+        def hung_send(_payload):
+            send_entered.set()
+            time.sleep(5)
+
+        fake_resend = MagicMock()
+        fake_resend.Emails.send.side_effect = hung_send
+        monkeypatch.setitem(sys.modules, "resend", fake_resend)
+        run_svc = self._import_send_email()
+
+        started = time.monotonic()
+        run_svc._send_email_notification(
+            to_addrs=["ops@example.com"],
+            worker_name="Worker",
+            run_id="run_123",
+            worker_id="worker_123",
+            status="failed",
+            error=None,
+        )
+        elapsed = time.monotonic() - started
+
+        assert send_entered.wait(timeout=0.1)
+        assert elapsed < 1.0
+        fake_resend.Emails.send.assert_called_once()
 
     def test_notify_config_model_accepts_email_to(self):
         """NotifyConfig Pydantic model accepts email_to list."""

@@ -8,6 +8,7 @@ import re
 import logging
 import shutil
 import time
+import queue
 from html import escape
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,6 +78,34 @@ import urllib.request
 import urllib.error
 
 logger = logging.getLogger("floom.run_service")
+
+
+def _resend_timeout_seconds() -> float:
+    try:
+        return max(0.1, float(os.environ.get("WORKEROS_RESEND_TIMEOUT_SECONDS", "10")))
+    except ValueError:
+        return 10.0
+
+
+def _resend_send_with_timeout(resend_module: Any, payload: dict[str, Any]) -> None:
+    timeout = _resend_timeout_seconds()
+    result: "queue.Queue[BaseException | None]" = queue.Queue(maxsize=1)
+
+    def _send() -> None:
+        try:
+            resend_module.Emails.send(payload)
+            result.put(None)
+        except BaseException as exc:
+            result.put(exc)
+
+    thread = threading.Thread(target=_send, daemon=True, name="workeros-resend-send")
+    thread.start()
+    thread.join(timeout=timeout)
+    if thread.is_alive():
+        raise TimeoutError(f"Resend email send exceeded {timeout:g}s timeout")
+    outcome = result.get_nowait()
+    if outcome is not None:
+        raise outcome
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -338,7 +367,7 @@ def _send_email_notification(
     try:
         import resend
         resend.api_key = api_key
-        resend.Emails.send({
+        _resend_send_with_timeout(resend, {
             "from": from_addr,
             "to": to_addrs,
             "subject": subject,
