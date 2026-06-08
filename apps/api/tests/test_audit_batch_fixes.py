@@ -192,7 +192,8 @@ def test_599_mcp_test_handles_connection_error():
     """test_connection must catch network errors and return status='failed'."""
     test_idx = MAIN_SRC.find("def test_connection(")
     assert test_idx != -1, "test_connection endpoint not found"
-    endpoint_src = MAIN_SRC[test_idx: test_idx + 2500]
+    next_endpoint_idx = MAIN_SRC.find("\n@app.", test_idx + 1)
+    endpoint_src = MAIN_SRC[test_idx: next_endpoint_idx if next_endpoint_idx != -1 else None]
     assert "except Exception" in endpoint_src, "#599: must catch exceptions"
     assert "Could not reach MCP server" in endpoint_src or "reach" in endpoint_src, (
         "#599: must return helpful error when unreachable"
