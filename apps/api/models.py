@@ -527,7 +527,10 @@ def composio_connection_app_name(connection: WorkerConnectionSpec) -> Optional[s
 
 def composio_connection_allowed_tools(connection: WorkerConnectionSpec) -> Optional[List[str]]:
     if isinstance(connection, str):
-        return None
+        app = connection.strip().lower()
+        if not app:
+            return []
+        return read_only_preset_for_app(app) or []
     composio = getattr(connection, "composio", None)
     if composio is None:
         return None
@@ -536,7 +539,7 @@ def composio_connection_allowed_tools(connection: WorkerConnectionSpec) -> Optio
 
 def composio_connection_scopes(connection: WorkerConnectionSpec) -> List[str]:
     if isinstance(connection, str):
-        return ["full"]
+        return ["read_only"]
     composio = getattr(connection, "composio", None)
     if composio is None:
         return []
@@ -550,23 +553,30 @@ def declared_composio_connections(config: Optional["WorkerConfig"]) -> Dict[str,
     declared: Dict[str, Optional[List[str]]] = {}
     if not config:
         return declared
+    legacy_allowlists: Dict[str, set[str]] = {}
+    explicit_allowlists: Dict[str, set[str]] = {}
+    full_access_apps: set[str] = set()
     for connection in config.connections or []:
         app = composio_connection_app_name(connection)
         if not app:
             continue
         allowed_tools = composio_connection_allowed_tools(connection)
-        if app not in declared:
-            declared[app] = allowed_tools
+        if isinstance(connection, str):
+            legacy_allowlists.setdefault(app, set()).update(allowed_tools or [])
             continue
-        existing = declared.get(app)
-        if existing is None:
-            # A legacy string declaration means full app access for this worker;
-            # a later structured declaration must not accidentally narrow it.
-            continue
-        elif allowed_tools is None:
-            declared[app] = None
+        if allowed_tools is None:
+            full_access_apps.add(app)
         else:
-            declared[app] = sorted(set(existing) | set(allowed_tools))
+            explicit_allowlists.setdefault(app, set()).update(allowed_tools)
+    for app in sorted(set(legacy_allowlists) | set(explicit_allowlists) | full_access_apps):
+        if app in legacy_allowlists:
+            declared[app] = sorted(legacy_allowlists[app] | explicit_allowlists.get(app, set()))
+            continue
+        if app in full_access_apps:
+            declared[app] = None
+            continue
+        if app in explicit_allowlists:
+            declared[app] = sorted(explicit_allowlists[app])
     return declared
 
 
@@ -574,14 +584,31 @@ def declared_composio_connection_scopes(config: Optional["WorkerConfig"]) -> Dic
     declared: Dict[str, List[str]] = {}
     if not config:
         return declared
+    legacy_apps: set[str] = set()
+    explicit_scopes: Dict[str, set[str]] = {}
+    full_access_apps: set[str] = set()
     for connection in config.connections or []:
         app = composio_connection_app_name(connection)
         if not app:
             continue
         scopes = composio_connection_scopes(connection)
-        existing = declared.get(app, [])
-        merged = sorted(set(existing) | set(scopes))
-        declared[app] = ["full"] if "full" in merged else merged
+        if isinstance(connection, str):
+            legacy_apps.add(app)
+            continue
+        if "full" in scopes or not scopes:
+            full_access_apps.add(app)
+        else:
+            explicit_scopes.setdefault(app, set()).update(scopes)
+    for app in sorted(set(legacy_apps) | set(explicit_scopes) | full_access_apps):
+        if app in legacy_apps:
+            declared[app] = ["read_only"]
+            continue
+        if app in full_access_apps:
+            declared[app] = ["full"]
+            continue
+        merged = sorted(explicit_scopes.get(app, set()))
+        if merged:
+            declared[app] = ["full"] if "full" in merged else merged
     return declared
 
 
@@ -780,7 +807,7 @@ class WorkerConfig(BaseModel):
     runtime: WorkerRuntime
     inputs: List[WorkerInput] = []
     secrets: List[str] = []
-    connections: List[WorkerConnectionSpec] = []  # Strings are legacy Composio app slugs.
+    connections: List[WorkerConnectionSpec] = []  # Strings are deprecated legacy Composio app slugs.
     contexts: List[WorkerContextMountSpec] = []
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
@@ -1291,8 +1318,32 @@ def _lift_legacy_manifest_fields(raw: Dict[str, Any]) -> Dict[str, Any]:
     return raw
 
 
+def _warn_legacy_composio_connections(raw: Dict[str, Any]) -> None:
+    connections = raw.get("connections")
+    if not isinstance(connections, list):
+        return
+    legacy_apps = sorted(
+        {
+            app
+            for connection in connections
+            if isinstance(connection, str)
+            for app in [composio_connection_app_name(connection)]
+            if app
+        }
+    )
+    if not legacy_apps:
+        return
+    warnings.warn(
+        "Legacy Composio connection strings are deprecated; migrate to structured "
+        f"connections with explicit allowed_tools instead ({', '.join(legacy_apps)}).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+
 def parse_worker_manifest(raw: Dict[str, Any]) -> WorkerManifest:
     """Parse a worker manifest, using schema_version to select old vs new shape."""
+    _warn_legacy_composio_connections(raw)
     if raw.get("schema_version") == "0.3":
         raw = _lift_legacy_manifest_fields(raw)
         return WorkerContract(**raw)
