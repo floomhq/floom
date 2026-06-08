@@ -3818,6 +3818,7 @@ def _list_visible_workers(
         worker["id"]: worker
         for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
         if not str(worker.get("id") or "").startswith(".")
+        and not _worker_hidden_from_api(str(worker.get("id") or ""))
     }
     for worker in _stock_workers_from_filesystem(use_cache=use_cache):
         visible.setdefault(worker["id"], worker)
