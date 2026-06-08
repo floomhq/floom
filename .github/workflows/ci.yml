@@ -90,6 +90,9 @@ jobs:
         # run via vitest (no describe blocks).
         run: |
           for f in tests/fl-*.test.ts tests/strip-citations.test.ts; do
+            if grep -q 'from "vitest"' "$f"; then
+              continue
+            fi
             npx tsx "$f" || exit 1
           done
 

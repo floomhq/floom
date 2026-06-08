@@ -6,7 +6,7 @@ The open-source, self-hosted runtime for AI workers. Sandboxed by default.
 
 ## Worker execution model
 
-Every worker runs in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. The local in-process runner (`runner: local`) is available as an explicit opt-out for trusted bundles where you want zero cold-start latency.
+Pure-script workers run in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. Agent workers (`SKILL.md`) run through the API-hosted AgentDriver tool loop. There is no supported local in-process worker runner.
 
 **Cost comparison at typical use (100 runs/day × 30s average):**
 
@@ -19,7 +19,7 @@ Every worker runs in an **E2B sandbox by default** — isolated dependencies, no
 | n8n Cloud Business | $200 | 25,000 executions |
 | Make.com Pro | $16 | 10,000 operations |
 
-For workers that fire every few seconds or need offline operation, switch to `runner: local` in `worker.yml`.
+For workers that fire every few seconds or need offline operation, keep `runner: e2b` and tune the schedule or worker implementation; local in-process execution is not supported.
 
 ---
 

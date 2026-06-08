@@ -18,6 +18,12 @@ from fastapi.testclient import TestClient
 AUTH_HEADERS = {"x-floom-secret": "test-secret-connections"}
 
 
+def _httpx_response(status_code: int, body: dict) -> types.SimpleNamespace:
+    response = types.SimpleNamespace(status_code=status_code)
+    response.json = lambda: body
+    return response
+
+
 def _load_api(monkeypatch, tmp_path):
     """Bootstrap the FastAPI app with an isolated temp DB and mocked scheduler."""
     api_dir = Path(__file__).resolve().parents[1] / "apps" / "api"
@@ -491,11 +497,40 @@ class TestMCPConnections:
         mock_check.assert_not_called()
         assert status_resp.json()["kind"] == "mcp"
 
-        with patch("composio_client.check_status") as mock_check:
+        with patch("httpx.post") as mock_post, patch("httpx.get") as mock_get:
+            mock_post.side_effect = [
+                _httpx_response(
+                    200,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "result": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "github-mcp", "version": "1.0"},
+                        },
+                    },
+                ),
+                _httpx_response(
+                    200,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "result": {
+                            "tools": [
+                                {"name": "list_pull_requests"},
+                                {"name": "get_repo"},
+                            ]
+                        },
+                    },
+                ),
+            ]
             test_resp = client.post(f"/connections/{created['id']}/test", headers=AUTH_HEADERS)
         assert test_resp.status_code == 200
-        mock_check.assert_not_called()
+        assert mock_post.call_count == 2
+        mock_get.assert_not_called()
         assert test_resp.json()["status"] == "valid"
+        assert "2 tools" in test_resp.json()["reason"]
 
         with patch("composio_client.revoke_connection") as mock_revoke:
             delete_resp = client.delete(f"/connections/{created['id']}", headers=AUTH_HEADERS)
@@ -556,6 +591,54 @@ class TestMCPConnections:
             },
         )
         assert bad_env_secret.status_code == 400
+
+    def test_test_mcp_connection_reports_allowed_tool_mismatch(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        create_resp = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={
+                "label": "files-mcp",
+                "url": "https://example.com/mcp",
+                "allowed_tools": ["read_file", "write_file"],
+            },
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        created = create_resp.json()
+
+        with patch("httpx.post") as mock_post:
+            mock_post.side_effect = [
+                _httpx_response(
+                    200,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "result": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "filesystem", "version": "1.0"},
+                        },
+                    },
+                ),
+                _httpx_response(
+                    200,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "result": {
+                            "tools": [{"name": "read_file"}],
+                        },
+                    },
+                ),
+            ]
+            resp = client.post(f"/connections/{created['id']}/test", headers=AUTH_HEADERS)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "failed"
+        assert "Allowed-tool mismatch" in body["reason"]
 
     def test_create_stdio_mcp_connection(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)

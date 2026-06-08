@@ -43,7 +43,7 @@ def make_config(tmp_path, *, limits=None, outputs=None, secrets=None, connection
         runtime={
             "type": "python311",
             "entrypoint": "SKILL.md",
-            "runner": "local",
+            "runner": "e2b",
             "mode": "agent",
             "bundle_path": str(bundle),
             "system_prompt": "Override prompt.",
@@ -166,11 +166,22 @@ def test_total_token_cap_is_enforced(tmp_path):
     assert result.error_code == "token_cap_exceeded"
 
 
-def test_run_command_containment_and_env_allowlist(tmp_path):
+def test_run_command_containment_and_env_allowlist(tmp_path, monkeypatch):
     config = make_config(tmp_path, secrets=["TOKEN"])
-    config.runtime.runner = "local"
     _entries, log_fn = logs()
     driver = AgentDriver()
+    captured_e2b = {}
+
+    def fake_run_command_e2b(**kwargs):
+        captured_e2b.update(kwargs)
+        return {
+            "ok": True,
+            "exit_code": 0,
+            "stdout": "<REDACTED:TOKEN>\n",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(driver, "_run_command_e2b", fake_run_command_e2b)
     bundle_dir = Path(config.runtime.bundle_path)
     input_dir = tmp_path / "artifacts" / "run_tools" / "inputs"
     output_dir = tmp_path / "artifacts" / "run_tools" / "outputs"
@@ -244,9 +255,10 @@ def test_run_command_containment_and_env_allowlist(tmp_path):
     assert allowed_env["ok"] is True
     assert "supersecret" not in allowed_env["stdout"]
     assert "<REDACTED:TOKEN>" in allowed_env["stdout"]
+    assert captured_e2b["env"]["TOKEN"] == "supersecret"
 
 
-def test_declared_output_validation(tmp_path):
+def test_missing_declared_output_is_left_to_common_completion_gate(tmp_path):
     config = make_config(tmp_path)
     driver = ScriptedAgentDriver()
     driver.set_scripts([[final_response()], [final_response()]])
@@ -256,9 +268,8 @@ def test_declared_output_validation(tmp_path):
         "agent-test", "run_missing_output", {}, {}, log_fn, "trace", config=config
     )
 
-    assert result.status == "failed"
-    assert result.error_code == "schema_violation"
-    assert "Missing declared output" in result.error
+    assert result.status == "success"
+    assert result.outputs == {}
 
     driver = AgentDriver()
     output_dir = tmp_path / "artifacts" / "run_missing_output" / "outputs"

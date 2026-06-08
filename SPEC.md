@@ -275,7 +275,7 @@ trigger:
 runtime:
   type: python
   entrypoint: run.py
-  runner: local
+  runner: e2b
 
 inputs:
   - name: notes
@@ -351,15 +351,9 @@ Return value on failure:
 
 # 10. Execution Model
 
-## 10.1 Local Runner
+## 10.1 E2B Runner
 
-Default. Executes trusted local worker code.
-
-Flow: API receives run request → create run record → load worker.yml → validate inputs → load secrets from .env → execute run.py → store logs → store output → set approval_status → mark completed or pending approval.
-
-## 10.2 E2B Runner
-
-Optional in V0. Use E2B for untrusted code, dependency isolation, or user-submitted code.
+Default for script workers. Use E2B for dependency isolation and user-submitted code.
 
 Worker config:
 

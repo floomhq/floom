@@ -117,7 +117,12 @@ def _safe_path(base: Path, *parts: str) -> Path:
 
 def composio_connection_names(config: Optional[WorkerConfig]) -> List[str]:
     """Sorted list of distinct Composio app slugs declared on the config."""
-    return sorted(declared_composio_connections(config).keys())
+    declared = declared_composio_connections(config)
+    return sorted(
+        app
+        for app, allowed_tools in declared.items()
+        if allowed_tools is None or len(allowed_tools) > 0
+    )
 
 
 def effective_composio_scopes(

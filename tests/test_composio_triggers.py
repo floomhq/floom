@@ -54,7 +54,7 @@ targets: [generic]
 exec:
   command: python run.py
   runtime: python311
-  runner: local
+  runner: e2b
   inputs: []
   secrets: []
   outputs:

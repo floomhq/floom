@@ -17,7 +17,7 @@ version: 0.1.0
 exec:
   command: python run.py
   runtime: python311
-  runner: local
+  runner: e2b
   inputs:
     - name: message
       type: string

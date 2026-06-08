@@ -41,9 +41,16 @@ from .base import SandboxDriver
 logger = logging.getLogger("floom.runner_sandbox.agent")
 
 _CWD_LOCK = threading.Lock()
+_CANCEL_FLAG_DB_READ_ERRORS_LOCK = threading.Lock()
+_CANCEL_FLAG_DB_READ_ERRORS_TOTAL = 0
 _STDOUT_CAP = 12000
 _STDERR_CAP = 12000
 _PATH_VALUE_RE = re.compile(r"^(?:\.?/)?(?:out|outputs|output|artifacts|inputs)/[A-Za-z0-9._/@ -]+$")
+
+
+def cancel_flag_db_read_errors_total() -> int:
+    with _CANCEL_FLAG_DB_READ_ERRORS_LOCK:
+        return _CANCEL_FLAG_DB_READ_ERRORS_TOTAL
 
 
 def _safe_path(base: Path, *parts: str) -> Path:
@@ -721,7 +728,15 @@ class AgentDriver(SandboxDriver):
                 ).fetchone()
             return bool(row and row["cancel_requested"])
         except Exception:
-            return False
+            global _CANCEL_FLAG_DB_READ_ERRORS_TOTAL
+            with _CANCEL_FLAG_DB_READ_ERRORS_LOCK:
+                _CANCEL_FLAG_DB_READ_ERRORS_TOTAL += 1
+            logger.warning(
+                "Cancel flag read failed for run %s; treating as cancelled",
+                run_id,
+                exc_info=True,
+            )
+            return True
 
     def _stage_contexts(
         self,

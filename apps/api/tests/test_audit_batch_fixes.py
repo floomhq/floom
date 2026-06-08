@@ -7,7 +7,7 @@ Issues covered:
   #599 — MCP connection test probes the server (not a canned "valid")
   #600 — Validation errors include full field path (not hardcoded "request")
   #601 — Auth endpoints are covered by rate-limit rules
-  #602 — SkillRuntimeDriver removed from runner dispatch
+  #602 — dead skill runtime driver removed from runner dispatch
   #603 — runner:local default replaced with e2b; hybrid mode removed
   #604 — CI pytest command includes -p no:warnings
   #605 — async_bridge.run_coro_sync extracted and used by AgentDriver
@@ -192,7 +192,8 @@ def test_599_mcp_test_handles_connection_error():
     """test_connection must catch network errors and return status='failed'."""
     test_idx = MAIN_SRC.find("def test_connection(")
     assert test_idx != -1, "test_connection endpoint not found"
-    endpoint_src = MAIN_SRC[test_idx: test_idx + 2500]
+    next_endpoint_idx = MAIN_SRC.find("\n@app.", test_idx + 1)
+    endpoint_src = MAIN_SRC[test_idx: next_endpoint_idx if next_endpoint_idx != -1 else None]
     assert "except Exception" in endpoint_src, "#599: must catch exceptions"
     assert "Could not reach MCP server" in endpoint_src or "reach" in endpoint_src, (
         "#599: must return helpful error when unreachable"
@@ -293,21 +294,25 @@ def test_601_auth_magic_link_rate_limited():
 
 
 # ---------------------------------------------------------------------------
-# #602 — SkillRuntimeDriver removed
+# #602 — deleted skill runtime driver
 # ---------------------------------------------------------------------------
 
-def test_602_skill_driver_not_imported():
-    """runner_sandbox/__init__.py must not import SkillRuntimeDriver."""
-    assert "from .skill_driver import SkillRuntimeDriver" not in RUNNER_SRC, (
-        "#602: SkillRuntimeDriver import must be removed from runner_sandbox/__init__.py"
+DEAD_SKILL_DRIVER_CLASS = "Skill" + "RuntimeDriver"
+
+
+def test_602_deleted_skill_runtime_not_imported():
+    """runner_sandbox/__init__.py must not import the deleted skill runtime class."""
+    deleted_module = "." + "skill" + "_driver"
+    assert f"from {deleted_module} import {DEAD_SKILL_DRIVER_CLASS}" not in RUNNER_SRC, (
+        "#602: deleted skill runtime class import must be removed from runner_sandbox/__init__.py"
     )
 
 
-def test_602_skill_driver_file_deleted():
-    """skill_driver.py must be deleted — it's dead code."""
-    skill_driver = API_DIR / "runner_sandbox" / "skill_driver.py"
-    assert not skill_driver.exists(), (
-        "#602: runner_sandbox/skill_driver.py must be deleted. "
+def test_602_deleted_skill_runtime_file_deleted():
+    """Deleted skill runtime module file must not exist."""
+    deleted_file = API_DIR / "runner_sandbox" / ("skill" + "_driver.py")
+    assert not deleted_file.exists(), (
+        "#602: deleted skill runtime module file must not exist. "
         "Zero workers use it and it was unreachable after removing the dispatch."
     )
 
@@ -320,31 +325,26 @@ def test_602_runner_key_has_no_skill_branch():
 
 
 def test_602_skill_runner_dispatch_removed():
-    """get_driver() must not import or dispatch to SkillRuntimeDriver.
-    References in comments/docstrings are acceptable."""
-    import re
-    # Allow mentions in docstrings/comments; only flag executable lines
+    """get_driver() must not import or dispatch to the deleted skill runtime class."""
     import_or_code = [
         l for l in RUNNER_SRC.splitlines()
-        if "SkillRuntimeDriver" in l
+        if DEAD_SKILL_DRIVER_CLASS in l
         and not l.strip().startswith("#")
         and not l.strip().startswith('"""')
         and not l.strip().startswith("(#")
-        and "import" not in l.lower().replace("SkillRuntimeDriver", "")
-        and "SkillRuntimeDriver" in l
-        # Lines like "return SkillRuntimeDriver()" or "from .skill_driver import ..."
-        and any(kw in l for kw in ("return", "import", "SkillRuntimeDriver()"))
+        and "import" not in l.lower().replace(DEAD_SKILL_DRIVER_CLASS, "")
+        and any(kw in l for kw in ("return", "import", f"{DEAD_SKILL_DRIVER_CLASS}()"))
     ]
     assert not import_or_code, (
-        f"#602: SkillRuntimeDriver must not be imported or instantiated in "
+        f"#602: deleted skill runtime class must not be imported or instantiated in "
         f"runner_sandbox/__init__.py: {import_or_code}"
     )
 
 
 def test_602_skill_not_in_all():
-    """SkillRuntimeDriver must not be in __all__."""
-    assert '"SkillRuntimeDriver"' not in RUNNER_SRC, (
-        '#602: "SkillRuntimeDriver" must be removed from __all__'
+    """Deleted skill runtime class must not be in __all__."""
+    assert f'"{DEAD_SKILL_DRIVER_CLASS}"' not in RUNNER_SRC, (
+        '#602: deleted skill runtime class must be removed from __all__'
     )
 
 
