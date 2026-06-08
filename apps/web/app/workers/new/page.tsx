@@ -632,14 +632,14 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
           state). First tile no longer rendered in saturated --accent-soft;
           all tiles now equal-weight ghost-style, hover lifts. */}
       <div className="space-y-3">
-        <p className="text-sm font-medium text-foreground">Or start from a popular workflow</p>
+        <p className="text-sm font-medium text-foreground">Or start from a template</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {EXAMPLES.map((ex) => (
             <button
               key={ex.label}
               type="button"
               disabled={isBusy}
-              onClick={() => setPrompt(ex.prompt)}
+              onClick={() => void handleGenerate(ex.prompt)}
               className="group flex flex-col items-start gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-3 text-left hover:bg-[var(--active-nav-bg)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <span className="text-sm font-medium text-foreground">{ex.label}</span>
