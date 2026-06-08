@@ -72,3 +72,18 @@ def test_resolved_incident_can_reopen_without_duplicate_spam():
     assert rows[0][0] == "4 failures"
     assert rows[0][1] == "new"
     assert rows[0][2] is None
+
+
+def test_alerting_tick_fires_every_n_ticks(monkeypatch):
+    alerting = _alerting()
+    fired: list[int] = []
+
+    monkeypatch.setattr(alerting, "_ALERT_ENABLED", True)
+    monkeypatch.setattr(alerting, "_ALERT_POLL_EVERY_N_TICKS", 5)
+    monkeypatch.setattr(alerting, "_tick_counter", 0)
+    monkeypatch.setattr(alerting, "_run_alerting_check", lambda: fired.append(alerting._tick_counter))
+
+    for _ in range(10):
+        alerting.alerting_tick()
+
+    assert fired == [5, 10]
