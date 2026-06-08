@@ -2059,7 +2059,8 @@ def _materialize_declared_file_outputs(
         path = _safe_artifact_path(run_id, relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         value = outputs[output.name]
-        path.write_text(value if isinstance(value, str, encoding='utf-8') else json.dumps(value, indent=2))
+        content = value if isinstance(value, str) else json.dumps(value, indent=2)
+        path.write_text(content, encoding="utf-8")
         artifacts.append(
             {
                 "name": relative_path,
