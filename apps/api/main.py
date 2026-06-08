@@ -125,6 +125,8 @@ from models import (
     WorkerFile,
     RunSummary,
     RunDetail,
+    ToolCallEntry,
+    ApprovalEntry,
     LogEntry,
     Artifact,
     OutputField,
@@ -3186,9 +3188,22 @@ def _connection_slug_for_worker_card(connection: Any) -> Optional[str]:
 
 
 def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Dict[str, Any]]:
-    if not (run_runner or "").startswith("skill"):
+    runner = (run_runner or "").lower()
+    is_skill = runner.startswith("skill")
+    is_agent = runner.startswith("agent") or "agent" in runner
+
+    # agent_driver writes to outputs/transcript.jsonl; skill_driver writes transcript.jsonl
+    if is_agent:
+        candidate_names = {"outputs/transcript.jsonl", "transcript.jsonl"}
+    elif is_skill:
+        candidate_names = {"transcript.jsonl"}
+    else:
         return []
-    transcript = next((artifact for artifact in artifacts if artifact.name == "transcript.jsonl"), None)
+
+    transcript = next(
+        (a for a in artifacts if (a.name or "") in candidate_names),
+        None,
+    )
     if not transcript:
         return []
 
@@ -3203,7 +3218,7 @@ def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Di
     if not path.is_file() or path.stat().st_size > 2_000_000:
         return []
 
-    rows: List[Dict[str, Any]] = []
+    raw_rows: List[Dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -3212,8 +3227,84 @@ def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Di
         except json.JSONDecodeError:
             parsed = {"type": "parse_error", "content": line}
         if isinstance(parsed, dict):
-            rows.append(parsed)
+            raw_rows.append(parsed)
+
+    if not is_agent:
+        return raw_rows
+
+    # agent_driver writes Anthropic API message dicts. Normalise to the same
+    # {type, id, name, arguments, content} shape that skill_driver uses so
+    # callers don't need to know which runner produced the transcript.
+    rows: List[Dict[str, Any]] = []
+    for msg in raw_rows:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            rows.append({"type": "message", "role": role, "content": content, "tool_calls": []})
+            continue
+        if not isinstance(content, list):
+            rows.append(msg)
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type", "")
+            if btype == "text":
+                rows.append({"type": "message", "role": role, "content": block.get("text", ""), "tool_calls": []})
+            elif btype == "tool_use":
+                rows.append({
+                    "type": "tool_call",
+                    "id": block.get("id", ""),
+                    "name": block.get("name", ""),
+                    "arguments": block.get("input") or {},
+                })
+            elif btype == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, list):
+                    result_content = " ".join(
+                        b.get("text", "") for b in result_content if isinstance(b, dict)
+                    )
+                rows.append({
+                    "type": "tool_result",
+                    "tool_call_id": block.get("tool_use_id", ""),
+                    "content": result_content,
+                })
     return rows
+
+
+def _parse_tool_calls_from_transcript(rows: List[Dict[str, Any]]) -> List[ToolCallEntry]:
+    """Build paired ToolCallEntry list from normalised transcript rows."""
+    # Index tool_call rows by id first, then attach matching tool_result rows.
+    calls: Dict[str, ToolCallEntry] = {}
+    order: List[str] = []
+    for row in rows:
+        rtype = row.get("type", "")
+        if rtype == "tool_call":
+            call_id = str(row.get("id") or "")
+            args = row.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {"_raw": args}
+            entry = ToolCallEntry(
+                id=call_id or f"tc_{len(calls)}",
+                name=str(row.get("name") or "unknown"),
+                arguments=args if isinstance(args, dict) else {},
+            )
+            calls[call_id] = entry
+            order.append(call_id)
+        elif rtype == "tool_result":
+            call_id = str(row.get("tool_call_id") or "")
+            if call_id in calls:
+                result = row.get("content")
+                calls[call_id] = ToolCallEntry(
+                    id=calls[call_id].id,
+                    name=calls[call_id].name,
+                    arguments=calls[call_id].arguments,
+                    result=result,
+                )
+    return [calls[cid] for cid in order if cid in calls]
 
 
 def _skill_version_id(worker_id: str, manifest: Dict[str, Any]) -> str:
@@ -11472,6 +11563,32 @@ def get_run(
         except Exception:
             run_input = {}
 
+    # #561: extract structured tool calls from transcript artifact.
+    _transcript_rows = _read_transcript_rows(run.get("runner", ""), artifacts)
+    _tool_calls = _parse_tool_calls_from_transcript(_transcript_rows)
+
+    # #561: approval trail — single approval row per run (if any).
+    _approval_trail: Optional[ApprovalEntry] = None
+    try:
+        _appr_row = repos.approvals.get_by_run_id(run_id=run_id)
+        if _appr_row:
+            _approval_trail = ApprovalEntry(
+                id=str(_appr_row.get("id", "")),
+                status=str(_appr_row.get("status", "pending")),
+                label=_appr_row.get("label"),
+                preview=_appr_row.get("preview"),
+                created_at=str(_appr_row.get("created_at", "")),
+                decided_at=_appr_row.get("decided_at"),
+                reason=_appr_row.get("reason"),
+                follow_up_run_id=_appr_row.get("follow_up_run_id"),
+            )
+    except Exception:
+        pass
+
+    # #561: replay is available for terminal statuses.
+    _terminal_statuses = {RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.ERROR.value}
+    _can_replay = run.get("status") in _terminal_statuses
+
     return RunDetail(
         id=run["id"],
         worker_id=run["worker_id"],
@@ -11487,6 +11604,9 @@ def get_run(
         logs=logs,
         artifacts=artifacts,
         transcript=transcript,
+        tool_calls=_tool_calls,
+        approval_trail=_approval_trail,
+        can_replay=_can_replay,
         error=_operator_error_message(run.get("error"), run.get("error_code")),
         # Raw error/traceback kept only for the debug "Raw" tab, secrets redacted.
         # Surfaced separately so it is never the operator-facing headline. We keep
@@ -13968,6 +14088,55 @@ def delete_connection(
     repos.connections.delete(user_id=user_id, composio_id=connection_id)
 
     return {"status": "deleted"}
+
+
+@app.get("/connections/{connection_id}/activity", response_model=List[RunSummary])
+def get_connection_activity(
+    connection_id: str,
+    limit: int = 50,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[RunSummary]:
+    """Return recent runs for all workers that declare this connection."""
+    user_id = auth.user_id
+    conn_row = _connection_row_for_user(connection_id, user_id, "id, app_name", repos=repos)
+    conn_slug = (row_to_dict(conn_row).get("app_name") or "").lower().strip()
+
+    # Find all workers owned by this user that declare this connection slug.
+    all_workers = _list_visible_workers(user_id=user_id, repos=repos, use_cache=True, role=auth.role)
+    matching_worker_ids = [
+        w["id"]
+        for w in all_workers
+        if conn_slug and conn_slug in [s.lower() for s in _worker_connection_slugs(w)]
+    ]
+
+    if not matching_worker_ids:
+        return []
+
+    # Collect recent runs across all matching workers.
+    per_worker = max(1, limit // max(1, len(matching_worker_ids)))
+    runs: List[Dict[str, Any]] = []
+    for wid in matching_worker_ids:
+        runs.extend(repos.runs.list_recent_runs(user_id=user_id, worker_id=wid, limit=per_worker))
+
+    runs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    runs = runs[:limit]
+
+    return [
+        RunSummary(
+            id=r["id"],
+            worker_id=r["worker_id"],
+            status=RunStatus(r["status"]),
+            trigger_source=r.get("trigger_source") or "manual",
+            created_at=r.get("created_at"),
+            started_at=r.get("started_at"),
+            completed_at=r.get("completed_at"),
+            duration_ms=r.get("duration_ms"),
+            error=_operator_error_message(r.get("error"), r.get("error_code")),
+            error_code=r.get("error_code"),
+        )
+        for r in runs
+    ]
 
 
 @app.get("/connections/{connection_id}/account-info")
