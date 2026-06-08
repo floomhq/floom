@@ -2559,16 +2559,20 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
 
 
 def _auto_pause_on_consecutive_failures_enabled() -> bool:
-    raw = os.environ.get("WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES", "")
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    # Default ON (opt-out). Broken scheduled workers inflated failure rate to
+    # 1,683/1,866 runs over 7 days (#526). Opt out via
+    # WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES=0.
+    raw = os.environ.get("WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES", "1")
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _alert_consecutive_failure_threshold() -> int:
-    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "3")
+    # Raised from 3 → 5 to avoid pausing workers on transient E2B/network blips.
+    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "5")
     try:
         return max(1, int(raw))
     except ValueError:
-        return 3
+        return 5
 
 
 def _maybe_pause_worker_after_consecutive_failures(
