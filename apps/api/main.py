@@ -9104,6 +9104,22 @@ def _parse_worker_payload(
         if ".." in bundle_hint.replace("\\", "/").split("/"):
             raise HTTPException(status_code=400, detail="bundle_path must not contain '..' segments")
 
+    raw_runner = None
+    if isinstance(raw_exec.get("runner"), str):
+        raw_runner = raw_exec["runner"]
+    elif isinstance(raw_runtime.get("runner"), str):
+        raw_runner = raw_runtime["runner"]
+    elif isinstance(raw.get("runner"), str):
+        raw_runner = raw["runner"]
+    if raw_runner and raw_runner.strip().lower() == "local":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "exec.runner: local is not supported by the hosted Workeros API. "
+                "Set exec.runner: e2b for workers created through the API or MCP."
+            ),
+        )
+
     try:
         from models import WorkerContract, parse_worker_manifest, worker_contract_to_worker_config
         parsed = parse_worker_manifest(raw)
@@ -9153,6 +9169,27 @@ def _parse_worker_payload(
     if worker_id in PROTECTED_STOCK_WORKER_IDS and not allow_protected_worker_id:
         _raise_if_protected_worker_mutation(worker_id)
     return worker_id, config
+def _reject_raw_local_runner_on_create(worker_yml: str) -> None:
+    import yaml as pyyaml
+
+    try:
+        raw = pyyaml.safe_load(worker_yml)
+    except Exception:
+        return
+    if not isinstance(raw, dict):
+        return
+    candidates = []
+    for section in (raw.get("exec"), raw.get("runtime"), raw):
+        if isinstance(section, dict):
+            candidates.append(str(section.get("runner") or "").strip().lower())
+    if "local" in candidates:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "exec.runner: local is not supported by the hosted Workeros API. "
+                "Set exec.runner: e2b for workers created through the API or MCP."
+            ),
+        )
 
 
 @app.post("/workers", response_model=WorkerDetail)
@@ -9179,6 +9216,7 @@ def create_worker(
         worker_id = _canonical_worker_id(raw_worker_id)
         if worker_id != raw_worker_id:
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
+    _reject_raw_local_runner_on_create(worker_yml)
     worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
 
     target_dir = WORKERS_DIR / worker_id
@@ -11660,6 +11698,7 @@ def get_run(
         raise HTTPException(status_code=404, detail="Run not found")
 
     run["output"] = json.loads(run.get("output_json") or "{}")
+    run["outputs"] = run["output"]
     # Build typed output schema from worker config
     output_config = get_worker_config_for_run(run["worker_id"])
     output_schema = []
@@ -11761,6 +11800,7 @@ def get_run(
         runner=run["runner"],
         input=run_input,
         output=run["output"],
+        outputs=run["output"],
         output_schema=output_schema,
         logs=logs,
         artifacts=artifacts,

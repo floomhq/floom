@@ -107,6 +107,115 @@ def _create_approval_worker() -> dict:
 
 
 # ===========================================================================
+# MCP/API run contract regressions
+# ===========================================================================
+
+class TestMcpRunContract(unittest.TestCase):
+    def setUp(self):
+        os.environ.pop("FLOOM_SECRET", None)
+
+    def test_worker_payload_parser_rejects_local_runner_for_hosted_api(self):
+        name = _unique_name("local-runner-parse")
+        yml = _make_worker_yml(name).replace("  runner: e2b", "  runner: local")
+
+        with self.assertRaises(app_module.HTTPException) as ctx:
+            app_module._parse_worker_payload(yml, user_id="user-a")
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("exec.runner: local is not supported", str(ctx.exception.detail))
+
+    def test_worker_create_rejects_local_runner_for_hosted_api(self):
+        name = _unique_name("local-runner")
+        yml = _make_worker_yml(name).replace("  runner: e2b", "  runner: local")
+
+        r = client.post("/workers", json={"worker_yml": yml, "run_py": _RUN_PY})
+
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("exec.runner: local is not supported", r.text)
+
+    def test_run_detail_exposes_output_and_outputs_alias(self):
+        from models import WorkerResult
+        import run_service
+
+        worker = _create_manual_worker()
+        run_id = run_service.create_run(worker["id"], {"topic": "alias-check"})
+
+        class FakeDriver:
+            def run(self, **_kwargs):
+                return WorkerResult(
+                    status="success",
+                    outputs={"proof": "result.json survived"},
+                    artifacts=[],
+                )
+
+        with patch.object(run_service, "get_sandbox_driver", return_value=FakeDriver()):
+            run_service.execute_run(run_id, worker["id"], {"topic": "alias-check"})
+
+        r = client.get(f"/runs/{run_id}")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["input"], {"topic": "alias-check"})
+        self.assertEqual(body["output"], {"proof": "result.json survived"})
+        self.assertEqual(body["outputs"], {"proof": "result.json survived"})
+
+    def test_runs_get_returns_parsed_input_and_output_payloads(self):
+        sample = {
+            "id": "run_tool_projection",
+            "worker_id": "worker_tool_projection",
+            "worker_name": "Tool Projection Worker",
+            "status": "completed",
+            "trigger_source": "manual",
+            "runner": "e2b",
+            "input_json": json.dumps({"topic": "projection-check"}),
+            "output_json": json.dumps({"proof": "persisted"}),
+            "error": None,
+            "error_code": None,
+            "started_at": None,
+            "completed_at": None,
+            "duration_ms": None,
+            "created_at": "2026-06-08T00:00:00Z",
+            "cancel_requested": 0,
+            "cancelled_at": None,
+            "bundle_snapshot_path": None,
+            "quality_warning": None,
+            "trigger_ref": None,
+        }
+
+        class _RunsRepo:
+            def get(self, *, user_id: str, run_id: str):
+                if user_id != "user-a" or run_id != sample["id"]:
+                    return None
+                return dict(sample)
+
+            def list_logs(self, *, user_id: str, run_id: str):
+                return []
+
+            def list_artifacts(self, *, user_id: str, run_id: str):
+                return []
+
+        class _ApprovalsRepo:
+            def get_by_run_id(self, *, run_id: str):
+                return None
+
+        class _Repos:
+            runs = _RunsRepo()
+            approvals = _ApprovalsRepo()
+
+        with patch.object(app_module, "_get_run_by_explicit_id", return_value=dict(sample)), patch.object(
+            app_module, "get_worker_config_for_run", return_value=None
+        ):
+            result = app_module.get_run(
+                sample["id"],
+                auth=type("Auth", (), {"user_id": "user-a"})(),
+                repos=_Repos(),
+            )
+
+        self.assertEqual(result.input, {"topic": "projection-check"})
+        self.assertEqual(result.output, {"proof": "persisted"})
+        self.assertEqual(result.outputs, {"proof": "persisted"})
+
+
+# ===========================================================================
 # Auth gate tests (Deliverable 4)
 # ===========================================================================
 
