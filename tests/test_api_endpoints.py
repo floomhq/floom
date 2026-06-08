@@ -66,7 +66,7 @@ version: 0.1.0
 exec:
   command: python run.py
   runtime: python311
-  runner: local
+  runner: e2b
   inputs: []
   outputs: []
 approvals:
@@ -901,7 +901,7 @@ version: 0.1.0
 exec:
   command: python run.py
   runtime: python311
-  runner: local
+  runner: e2b
   inputs: []
   outputs: []
 trigger:
@@ -996,7 +996,7 @@ class TestRound8ContextHtmlXss(unittest.TestCase):
 
 class TestRound8ApprovalMisconfigDiagnostic(unittest.TestCase):
     """Fix 4: approvals.required worker that never emits decision_required
-    surfaces a clear diagnostic in the run log."""
+    synthesizes an approval gate and logs the fallback."""
 
     def setUp(self):
         os.environ.pop("FLOOM_SECRET", None)
@@ -1010,7 +1010,7 @@ class TestRound8ApprovalMisconfigDiagnostic(unittest.TestCase):
 
         class FakeDriver:
             def run(self, **_kwargs):
-                # Misconfiguration: approvals.required:true but NO decision_required.
+                # Legacy worker behavior: approvals.required:true but NO explicit decision_required.
                 return WorkerResult(status="success", outputs={"message": "done"})
 
         with patch.object(run_service, "get_sandbox_driver", return_value=FakeDriver()):
@@ -1021,7 +1021,8 @@ class TestRound8ApprovalMisconfigDiagnostic(unittest.TestCase):
         messages = " ".join(row["message"] for row in logs.json())
         self.assertIn("approvals.required", messages)
         self.assertIn("decision_required", messages)
-        self.assertIn("cannot pause for approval", messages)
+        self.assertIn("synthesising approval gate", messages)
+        self.assertIn("Run awaiting approval", messages)
 
 
 # ===========================================================================

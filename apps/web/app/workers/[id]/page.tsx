@@ -1941,18 +1941,16 @@ export default function WorkerDetailPage() {
           </TabsList>
         </Tabs>
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[var(--radius-button)] border px-2.5 text-xs transition-colors ${
-                SETUP_NAV.some((n) => n.id === activeSection)
-                  ? "border-border bg-muted font-medium text-foreground"
-                  : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <MoreVertical className="w-3.5 h-3.5" />
-              {SETUP_NAV.find((n) => n.id === activeSection)?.label ?? "More"}
-            </button>
+          <DropdownMenuTrigger
+            type="button"
+            className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[var(--radius-button)] border px-2.5 text-xs transition-colors ${
+              SETUP_NAV.some((n) => n.id === activeSection)
+                ? "border-border bg-muted font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <MoreVertical className="w-3.5 h-3.5" />
+            {SETUP_NAV.find((n) => n.id === activeSection)?.label ?? "More"}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {SETUP_NAV.map((item) => (

@@ -21,7 +21,7 @@ All items below are SHIPPED unless flagged otherwise. Anything not on this list 
 - **Flexible exec block** — `exec.mode: agent | pure-script`, `exec.runtime: python311 | node22 | bash | skill | none`, optional `entrypoints[]` for multi-tool skills, `system_prompt`, `model` (default `gpt-5-mini`), `limits.{max_tool_iterations, max_output_tokens, max_total_tokens, timeout_seconds}`.
 - **Capability grants — declared-not-enforced** — `capabilities.{secrets, files, connections, network.egress}` is documentation only at launch; the frontend renders it as an audit badge. No fail-closed enforcement until marketplace install or multi-user lands.
 - **Content-hashed file inputs** — `/uploads` endpoint, sha256 dedup, per-run mount into `<artifacts>/<run_id>/inputs/`, bind-time revalidation against `inp.accepts` and `inp.max_size_mb`, ownership audit log.
-- **Sandbox abstraction — E2B-by-default** — `runner: e2b` is the default; `runner: local` is the explicit opt-out for trusted bundles. Sandboxed dependency isolation, no host process exposure, ~$15/mo for 100 runs/day (vs Zapier Pro $49 / n8n Cloud Pro $50). Local runner serializes `os.chdir` under a process lock for the opt-out case.
+- **Runtime routing — E2B scripts + AgentDriver agents** — `runner: e2b` is the supported runner for script workers. Agent workers route to AgentDriver based on `SKILL.md` / `exec.mode: agent`; script workers route to E2B based on `run.py`, `.sh`, or `.js` entrypoints. There is no in-process local runner.
 
 ### Triggers
 
@@ -33,7 +33,7 @@ All items below are SHIPPED unless flagged otherwise. Anything not on this list 
 ### Agent runtime
 
 - **AgentDriver** — loads the entrypoint file (default `SKILL.md`) as system prompt, inputs as JSON user message, OpenAI tool loop. Tool surface: `list_dir`, `read_file`, `write_output`, `run_command`, `invoke_worker`, `composio.<app>.<tool>`, `log`. Native skill-loading pattern (no bespoke file-index injection — agent calls `read_file` as needed). Composio `tool_slug` constrained to declared app namespace; missing-connection fails fast pre-HTTP. Transcript artifact per run with regex + exact-value scrubbing on logs and outputs.
-- **Pure-script driver** — direct subprocess (local or E2B), no agent overhead. Used by the 8 stock Python workers that don't need an LLM.
+- **Pure-script driver** — E2B execution with no agent overhead. Used by stock Python workers that don't need an LLM.
 - **Cost caps** — per-worker `limits` enforce iterations/output tokens/total tokens/timeout.
 
 ### Agent interface (primary)

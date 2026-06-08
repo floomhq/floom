@@ -932,8 +932,8 @@ def _infer_mode_from_entry(entry: str) -> Literal["agent", "pure-script"]:
 def _default_command_from_entry(entry: str) -> Optional[str]:
     """Derive a canonical exec.command from a script entry by extension.
 
-    Engine #211: the LLM frequently emits `exec.mode: pure-script` (or
-    `hybrid`) + `entry: run.py` WITHOUT a `command`. PR #184 added auto-repair
+    Engine #211: the LLM frequently emits `exec.mode: pure-script` +
+    `entry: run.py` WITHOUT a `command`. PR #184 added auto-repair
     that injects `python <entry>`, but in the draft-and-create / draft-from-prompt
     loops the WorkerContract validation ran (and 502'd) BEFORE the repair. By
     defaulting the command inside WorkerContractExec validation we cover every
@@ -954,7 +954,7 @@ class WorkerContractExec(BaseModel):
     command: Optional[str] = None
     runtime: Literal["python311", "node22", "bash", "skill", "none"] = "skill"
     # E2B-only execution. Workers must run in sandboxed microVMs. The
-    # `runner: local` declaration is legacy and gets coerced to `e2b` for
+    # Legacy local runner declarations get coerced to `e2b` for
     # backward-compatibility with old worker.yml files (in-process executor
     # was removed in PR #28).
     runner: str = "e2b"
@@ -1349,7 +1349,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
     elif contract.entrypoints:
         entrypoint = contract.entrypoints[0].path
 
-    runner = contract.exec.runner or ("e2b" if contract.exec.runtime.startswith("e2b") else "local")
+    runner = contract.exec.runner or "e2b"
     runtime = WorkerRuntime(
         type=contract.exec.runtime,
         entrypoint=entrypoint,

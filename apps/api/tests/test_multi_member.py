@@ -44,7 +44,7 @@ trigger:
 runtime:
   type: python
   entrypoint: run.py
-  runner: local
+  runner: e2b
 inputs: []
 outputs: []
 secrets: []

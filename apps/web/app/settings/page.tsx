@@ -2,8 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
@@ -18,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
+import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
 import { AlertTriangle, CheckCircle2, Copy, Trash2 } from "lucide-react";
@@ -159,14 +159,15 @@ function PersonalAccessTokensPanel() {
 // belongs in Settings, not Connections.
 // S-dev: renamed "API access" tab to "Developer" (value "api" → "developer").
 // The old ?tab=api / #api URLs are handled by the legacy fallback below.
-type TabKey = "developer" | "system" | "slack" | "assistant" | "notifications" | "appearance" | "danger";
+type TabKey = "developer" | "system" | "git" | "slack" | "assistant" | "notifications" | "appearance" | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["developer", "system", "slack", "appearance", "danger"];
-const TAB_KEYS: TabKey[] = ["developer", "system", "slack", "assistant", "notifications", "appearance", "danger"];
+const VISIBLE_TAB_KEYS: TabKey[] = ["developer", "system", "git", "slack", "appearance", "danger"];
+const TAB_KEYS: TabKey[] = ["developer", "system", "git", "slack", "assistant", "notifications", "appearance", "danger"];
 
 const NAV_ITEMS: { key: TabKey; label: string }[] = [
   { key: "developer", label: "Developer" },
   { key: "system", label: "System" },
+  { key: "git", label: "Git" },
   { key: "slack", label: "Slack" },
   { key: "appearance", label: "Appearance" },
   { key: "danger", label: "Danger zone" },
@@ -176,16 +177,27 @@ function isValidTab(value: string | null): value is TabKey {
   return value !== null && TAB_KEYS.includes(value as TabKey);
 }
 
+function visibleTabFromCandidate(value: string | null): TabKey | null {
+  const candidate = value === "api" ? "developer" : value;
+  return isValidTab(candidate) && VISIBLE_TAB_KEYS.includes(candidate)
+    ? candidate
+    : null;
+}
+
 export default function SettingsPage() {
-  return (
-    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading settings...</div>}>
-      <SettingsContent />
-    </Suspense>
-  );
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) {
+    return <div className="p-6 text-sm text-muted-foreground">Loading settings...</div>;
+  }
+  return <SettingsContent />;
 }
 
 function SettingsContent() {
-  const searchParams = useSearchParams();
+  const [search, setSearch] = useState(() =>
+    typeof window !== "undefined" ? window.location.search : ""
+  );
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   // S28: tabs use URL hash now (#api, #danger, etc.). Fall back to legacy
   // ?tab= for old links.
   // S30: own the hash via the History API instead of router.replace. The App
@@ -198,13 +210,7 @@ function SettingsContent() {
     const fromHash =
       typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : null;
     const fromQuery = searchParams.get("tab");
-    const candidate = fromHash || fromQuery;
-    // S22f / S-dev: hidden tab (e.g. notifications) or legacy #api URL falls
-    // back to "developer". Legacy ?tab=api / #api deep-links land here too.
-    if (candidate === "api") return "developer";
-    return isValidTab(candidate) && VISIBLE_TAB_KEYS.includes(candidate)
-      ? candidate
-      : "developer";
+    return visibleTabFromCandidate(fromHash || fromQuery) ?? "developer";
   })();
   const [tab, setTab] = useState<TabKey>(initialTab);
 
@@ -261,6 +267,7 @@ function SettingsContent() {
         const hash = typeof window !== "undefined" ? window.location.hash : "";
         const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
         window.history.replaceState(null, "", `${path}${qs}${hash}`);
+        setSearch(window.location.search);
       }
     })();
   }, [claimedWhatsAppToken, searchParams]);
@@ -278,6 +285,7 @@ function SettingsContent() {
     params.delete("from_install");
     const qs = params.size ? `?${params.toString()}` : "";
     window.history.replaceState(null, "", `${window.location.pathname}${qs}${window.location.hash}`);
+    setSearch(window.location.search);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -285,9 +293,8 @@ function SettingsContent() {
   useEffect(() => {
     function syncFromHash() {
       const raw = window.location.hash.replace(/^#/, "");
-      // legacy #api URLs redirect to developer tab
-      const fromHash = raw === "api" ? "developer" : raw;
-      if (isValidTab(fromHash) && VISIBLE_TAB_KEYS.includes(fromHash)) {
+      const fromHash = visibleTabFromCandidate(raw);
+      if (fromHash) {
         setTab((prev) => (prev === fromHash ? prev : fromHash));
       }
     }
@@ -304,6 +311,7 @@ function SettingsContent() {
     params.delete("tab");
     const qs = params.size ? `?${params.toString()}` : "";
     window.history.replaceState(null, "", `${window.location.pathname}${qs}#${value}`);
+    setSearch(window.location.search);
   }
 
   async function handleReload() {
@@ -493,6 +501,10 @@ function SettingsContent() {
 
         <TabsContent value="slack" className="pt-6">
           <SlackConnect />
+        </TabsContent>
+
+        <TabsContent value="git" className="pt-6">
+          <GitWorkspacePanel />
         </TabsContent>
 
         <TabsContent value="notifications" className="space-y-4 pt-6">
