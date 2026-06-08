@@ -290,6 +290,47 @@ def test_start_scheduler_clears_stop_event_before_launch(monkeypatch):
     assert started == ["workeros-scheduler"]
 
 
+def test_scheduler_status_reports_dead_thread():
+    scheduler = _fresh_scheduler()
+
+    assert scheduler.scheduler_status()["ok"] is False
+
+    class DeadThread:
+        name = "workeros-scheduler"
+
+        def is_alive(self):
+            return False
+
+    scheduler._scheduler_thread = DeadThread()
+
+    assert scheduler.scheduler_status() == {
+        "ok": False,
+        "running": False,
+        "thread": "workeros-scheduler",
+        "stopping": False,
+    }
+
+
+def test_scheduler_status_reports_running_thread():
+    scheduler = _fresh_scheduler()
+
+    class LiveThread:
+        name = "workeros-scheduler"
+
+        def is_alive(self):
+            return True
+
+    scheduler._scheduler_thread = LiveThread()
+    scheduler._stop_event.clear()
+
+    assert scheduler.scheduler_status() == {
+        "ok": True,
+        "running": True,
+        "thread": "workeros-scheduler",
+        "stopping": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Webhook + composio resolution to specific rows
 # ---------------------------------------------------------------------------
