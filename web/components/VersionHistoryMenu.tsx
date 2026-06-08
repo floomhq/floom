@@ -16,41 +16,30 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-function changeSourceLabel(src: string): string {
-  if (src === "user") return "Manual save";
-  if (src === "ai") return "AI edit";
-  if (src.startsWith("rollback:")) return "Rollback";
-  return src;
-}
-
-function changeSourceBadge(src: string) {
-  const label = changeSourceLabel(src);
-  const isRollback = src.startsWith("rollback:");
-  const isAi = src === "ai";
+function commitMessageBadge(message: string) {
+  const isRollback = message.startsWith("rollback:");
+  const isAi = message.includes("(ai)");
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border",
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border truncate max-w-[140px]",
         isRollback
           ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 group-focus/dropdown-menu-item:bg-amber-400/30 group-focus/dropdown-menu-item:border-amber-300/40"
           : isAi
             ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400 group-focus/dropdown-menu-item:bg-violet-400/30 group-focus/dropdown-menu-item:border-violet-300/40"
             : "border-border bg-muted text-muted-foreground group-focus/dropdown-menu-item:bg-white/20 group-focus/dropdown-menu-item:border-white/30"
       )}
+      title={message}
     >
-      {label}
+      {message}
     </span>
   );
 }
 
-// A single, consistent "Versions ▾" dropdown affordance for config-version
-// history. Used for workspace instructions (/assistant), per-file brain
-// revisions (/contexts), and worker config versions (/workers/<id>) so all
-// three surfaces feel identical and the affordance is named "Versions"
-// everywhere. The trigger sits inline on an editor/file/worker header; opening
-// it lists recent versions (newest first) with a per-version Restore action.
-// Restore semantics (what content is fetched and written back) stay with the
-// caller via onRestore.
+// A single, consistent "Versions ▾" dropdown affordance for git-backed
+// version history. Used for workspace instructions (/assistant), per-file
+// brain revisions (/contexts), and worker config versions (/workers/<id>).
+// Every edit is a git commit — each entry shows the SHA, message, and author.
 export function VersionHistoryMenu({
   versions,
   loading,
@@ -80,17 +69,17 @@ export function VersionHistoryMenu({
         <History className="size-3.5" />
         Versions
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={6} className="w-72 p-1">
+      <DropdownMenuContent align="end" sideOffset={6} className="w-80 p-1">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Version history
+            Git history
           </DropdownMenuLabel>
           <DropdownMenuSeparator className="-mx-1 my-1" />
           {loading ? (
             <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>
           ) : versions.length === 0 ? (
             <div className="px-2 py-3 text-xs text-muted-foreground">
-              No versions yet. A snapshot is saved on every edit.
+              No commits yet. Every save creates a git commit.
             </div>
           ) : (
             <div className="max-h-80 overflow-y-auto">
@@ -110,21 +99,19 @@ export function VersionHistoryMenu({
                 >
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span className="flex items-center gap-2">
-                      <span className="font-mono text-[10px] text-muted-foreground">
-                        v{v.version_number}
+                      <span className="font-mono text-[10px] text-muted-foreground shrink-0">
+                        {v.sha}
                       </span>
-                      {changeSourceBadge(v.change_source)}
+                      {commitMessageBadge(v.message)}
                       {isCurrent && (
-                        <span className="text-[10px] font-medium text-muted-foreground">
+                        <span className="text-[10px] font-medium text-muted-foreground shrink-0">
                           (current)
                         </span>
                       )}
                     </span>
-                    {!isCurrent && (
-                      <span className="text-xs text-muted-foreground">
-                        {formatRelative(v.created_at)}
-                      </span>
-                    )}
+                    <span className="text-xs text-muted-foreground">
+                      {v.author} · {formatRelative(v.timestamp)}
+                    </span>
                   </span>
                   {!isCurrent && canRestore && (
                     <span className="inline-flex shrink-0 items-center gap-1 text-xs text-foreground">

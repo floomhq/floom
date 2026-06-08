@@ -208,6 +208,25 @@ export interface OutputField {
   value: string | number | boolean | Record<string, unknown> | unknown[] | null;
 }
 
+export interface ToolCallEntry {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+}
+
+export interface ApprovalEntry {
+  id: string;
+  status: string;
+  label?: string;
+  preview?: string;
+  created_at: string;
+  decided_at?: string;
+  reason?: string;
+  follow_up_run_id?: string;
+}
+
 export interface RunDetail {
   id: string;
   worker_id: string;
@@ -221,6 +240,10 @@ export interface RunDetail {
   logs: LogEntry[];
   artifacts: Artifact[];
   transcript: TranscriptRow[];
+  tool_calls?: ToolCallEntry[];
+  approval_trail?: ApprovalEntry;
+  can_replay?: boolean;
+  total_tokens?: number;
   error?: string;
   started_at?: string;
   completed_at?: string;
@@ -269,6 +292,8 @@ export interface WorkerSummary {
   recent_stats?: RecentStats | null;
   timeseries?: TimeseriesDay[] | null;
   connections: string[];  // Composio app slugs declared in worker.yml
+  missing_secrets?: string[];
+  missing_connections?: string[];
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
   public_link?: string;   // owner-only signed share link to /w/<id>?token=
@@ -328,6 +353,8 @@ export interface WorkerDetail {
   webhook_url?: string;
   files: WorkerFile[];
   triggers_spec: TriggerSpec[];
+  missing_secrets?: string[];
+  missing_connections?: string[];
   // Owner-only signed share link to the standalone public worker page
   // (/w/<id>?token=<hmac>). Only present on the owner's authenticated fetch.
   public_link?: string;
@@ -679,6 +706,7 @@ export interface CurrentUser {
   user_id: string;
   email?: string | null;
   display_name?: string | null;
+  picture?: string | null;
   workspace_id?: string | null;
   scopes?: string[];
   // Multi-member fields (populated when using username/password or PAT auth)
@@ -966,16 +994,39 @@ export interface CatalogToolItem {
 
 export interface VersionSummary {
   id: string;
+  sha: string;
+  message: string;
+  author: string;
+  timestamp: string;
   asset_type: string;
   asset_id: string;
-  version_number: number;
-  change_source: string;
-  created_at: string;
+  version_number?: number;
+  change_source?: string;
+  created_at?: string;
 }
 
 export interface VersionFile {
   path: string;
   content: string;
+}
+
+export interface GitWorkspaceStatus {
+  connected: boolean;
+  github_username?: string | null;
+  repo_full_name?: string | null;
+  repo_url?: string | null;
+  connected_at?: string | null;
+  last_pushed_at?: string | null;
+  secrets_loaded?: number;
+}
+
+export interface GitRepoItem {
+  full_name: string;
+  name: string;
+  url: string;
+  private: boolean;
+  description?: string | null;
+  pushed_at?: string | null;
 }
 
 export interface VersionDetail {

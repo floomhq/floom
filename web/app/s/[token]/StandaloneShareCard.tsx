@@ -65,9 +65,22 @@ function baseName(path: string): string {
   return path.split("/").pop() || path;
 }
 
-export function StandaloneShareCard({ share, token }: { share: StandaloneShare; token: string }) {
+export function StandaloneShareCard({
+  share,
+  token,
+  authed = false,
+}: {
+  share: StandaloneShare;
+  token: string;
+  authed?: boolean;
+}) {
   const isSingleFile = share.entity_type === "brain_file";
   const files = useMemo(() => share.files || [], [share.files]);
+
+  // FL4: signed-in visitors land back on their dashboard; logged-out prospects
+  // keep the login-bound "Add to workspace" prompt.
+  const ctaHref = authed ? "/" : "/login";
+  const ctaLabel = authed ? "Dashboard" : "Add to workspace";
 
   // Navigation state: "" = root; a string ending in "/" = folder prefix; a path
   // (no trailing slash) that matches a file = file view.
@@ -90,7 +103,7 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
     return (
       <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
         <div className="rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
-          <WorkerShareCard worker={share.worker} />
+          <WorkerShareCard worker={share.worker} authed={authed} token={token} />
         </div>
       </div>
     );
@@ -98,7 +111,7 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
 
   // Breadcrumb segments for the current location.
   const crumbs: { label: string; onClick?: () => void }[] = [
-    { label: "Contexts" },
+    { label: "Brain" },
     {
       label: share.title,
       onClick: openFilePath || folderPrefix ? () => { setFolderPrefix(""); setOpenFilePath(null); } : undefined,
@@ -133,8 +146,8 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
         {/* Nav */}
         <div className="flex items-center justify-between rounded-t-[var(--radius-card)] border-b border-[var(--border-soft)] bg-[var(--bg-card)] px-5 py-3">
           <WorkerosMark />
-          <Link href="/login" className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
-            Add to workspace
+          <Link href={ctaHref} className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
+            {ctaLabel}
           </Link>
         </div>
 
@@ -177,6 +190,8 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
                 file={openFile}
                 packTitle={share.title}
                 downloadHref={downloadHref}
+                ctaHref={ctaHref}
+                ctaLabel={ctaLabel}
               />
             ) : (
               <PackView
@@ -185,6 +200,8 @@ export function StandaloneShareCard({ share, token }: { share: StandaloneShare; 
                 folderPrefix={folderPrefix}
                 onOpenFolder={(name) => setFolderPrefix(folderPrefix + name + "/")}
                 onOpenFile={(path) => setOpenFilePath(path)}
+                ctaHref={ctaHref}
+                ctaLabel={ctaLabel}
               />
             )}
           </div>
@@ -206,12 +223,16 @@ function PackView({
   folderPrefix,
   onOpenFolder,
   onOpenFile,
+  ctaHref,
+  ctaLabel,
 }: {
   share: StandaloneShare;
   nodes: Node[];
   folderPrefix: string;
   onOpenFolder: (name: string) => void;
   onOpenFile: (path: string) => void;
+  ctaHref: string;
+  ctaLabel: string;
 }) {
   const atRoot = folderPrefix === "";
   const fileCount = nodes.filter((n) => n.kind === "file").length;
@@ -289,12 +310,12 @@ function PackView({
 
       {/* Sticky CTA */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-soft)] bg-[var(--bg-2)] px-5 py-3">
-        <p className="text-xs text-[var(--ink-soft)]">Add this pack so your workers can use it.</p>
+        <p className="text-xs text-[var(--ink-soft)]">Add this folder so your workers can use it.</p>
         <Link
-          href="/login"
+          href={ctaHref}
           className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
         >
-          Add to workspace
+          {ctaLabel}
         </Link>
       </div>
     </>
@@ -305,10 +326,14 @@ function FileView({
   file,
   packTitle,
   downloadHref,
+  ctaHref,
+  ctaLabel,
 }: {
   file: PublicShareFile;
   packTitle: string;
   downloadHref: string;
+  ctaHref: string;
+  ctaLabel: string;
 }) {
   const type = fileOutputType(file);
   const content = file.content_text ?? "";
@@ -354,10 +379,10 @@ function FileView({
       {/* Sticky CTA */}
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-t border-[var(--border-soft)] bg-[var(--bg-2)] px-5 py-3">
         <Link
-          href="/login"
+          href={ctaHref}
           className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
         >
-          Add to workspace
+          {ctaLabel}
         </Link>
         <a
           href={downloadHref}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, apiProxyPath } from "@/lib/api";
 import type { RunDetail, RunPart } from "@/lib/types";
 
 export function useRunStream(runId: string | null | undefined) {
@@ -9,32 +9,60 @@ export function useRunStream(runId: string | null | undefined) {
   const [fallbackRun, setFallbackRun] = useState<RunDetail | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [streamUnavailable, setStreamUnavailable] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
+  const refresh = useCallback(() => {
+    if (!runId) return;
+    setError(null);
+    setStreamUnavailable(false);
+    setRefreshNonce((value) => value + 1);
+  }, [runId]);
 
   useEffect(() => {
     if (!runId) return;
     setParts([]);
     setFallbackRun(null);
     setError(null);
+    setStreamUnavailable(false);
+    setConnected(false);
 
     let closed = false;
-    let sawEvent = false;
     let sawFinish = false;
-    const apiBase = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
-    const source = new EventSource(`${apiBase}/runs/${encodeURIComponent(runId)}/stream`);
+    let staleTimer: number | null = null;
+    const source = new EventSource(
+      apiProxyPath(`/runs/${encodeURIComponent(runId)}/stream`, true),
+    );
+
+    const armStaleTimer = () => {
+      if (staleTimer) window.clearTimeout(staleTimer);
+      staleTimer = window.setTimeout(() => {
+        if (closed || sawFinish) return;
+        setStreamUnavailable(true);
+        setError("Lost connection to run status. Refresh to re-check.");
+      }, 60000);
+    };
 
     source.addEventListener("open", () => {
-      if (!closed) setConnected(true);
+      if (!closed) {
+        setConnected(true);
+        setStreamUnavailable(false);
+        armStaleTimer();
+      }
     });
 
     source.addEventListener("part", (event) => {
-      sawEvent = true;
       try {
         const part = JSON.parse((event as MessageEvent).data) as RunPart;
+        setStreamUnavailable(false);
+        setError(null);
         setParts((prev) => [...prev, part]);
+        armStaleTimer();
         if (part.type === "finish") {
           sawFinish = true;
           source.close();
           setConnected(false);
+          if (staleTimer) window.clearTimeout(staleTimer);
         }
       } catch (exc) {
         setError(exc instanceof Error ? exc.message : "Invalid stream event");
@@ -44,13 +72,27 @@ export function useRunStream(runId: string | null | undefined) {
     source.onerror = () => {
       setConnected(false);
       source.close();
-      if (closed || sawEvent) return;
+      if (closed || sawFinish) return;
       void api.runs.get(runId).then(
         (run) => {
-          if (!closed) setFallbackRun(run);
+          if (closed) return;
+          setFallbackRun(run);
+          setStreamUnavailable(false);
+          setError(null);
+          const terminal = run.status === "completed" || run.status === "failed";
+          if (terminal) {
+            sawFinish = true;
+            if (staleTimer) window.clearTimeout(staleTimer);
+          } else {
+            armStaleTimer();
+          }
         },
         (exc) => {
-          if (!closed) setError(exc instanceof Error ? exc.message : "Run stream unavailable");
+          if (!closed) {
+            setStreamUnavailable(true);
+            setError(exc instanceof Error ? exc.message : "Run stream unavailable");
+            armStaleTimer();
+          }
         },
       );
     };
@@ -66,16 +108,23 @@ export function useRunStream(runId: string | null | undefined) {
       void api.runs.get(runId).then(
         (run) => {
           if (closed) return;
+          setStreamUnavailable(false);
+          setError(null);
           const terminal = run.status === "completed" || run.status === "failed";
           if (terminal) {
             sawFinish = true;
             setFallbackRun(run);
             source.close();
             setConnected(false);
+            if (staleTimer) window.clearTimeout(staleTimer);
+          } else {
+            armStaleTimer();
           }
         },
         () => {
-          // network blips during polling are fine; SSE error handler covers persistent fail
+          // Network blips during polling are tolerated; the stale timer and
+          // SSE error path surface a lost connection when recovery is not
+          // happening.
         },
       );
     }, 8000);
@@ -84,13 +133,14 @@ export function useRunStream(runId: string | null | undefined) {
       closed = true;
       source.close();
       window.clearInterval(pollId);
+      if (staleTimer) window.clearTimeout(staleTimer);
     };
-  }, [runId]);
+  }, [runId, refreshNonce]);
 
   const finishedPart = useMemo(
     () => parts.findLast((part) => part.type === "finish") as Extract<RunPart, { type: "finish" }> | undefined,
     [parts],
   );
 
-  return { parts, fallbackRun, connected, error, finishedPart };
+  return { parts, fallbackRun, connected, error, finishedPart, streamUnavailable, refresh };
 }

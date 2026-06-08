@@ -10,8 +10,10 @@ Covers:
 from __future__ import annotations
 
 import os
+import sys
 import subprocess
 import textwrap
+from types import ModuleType
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
@@ -209,6 +211,50 @@ def test_commit_workspace_skips_secrets(tmp_path):
 
     assert sha is None
     assert not (git_dir / ".secrets.enc").exists()
+
+
+def test_commit_workspace_writes_workspace_metadata(tmp_path):
+    """workspace.md and workspace-tools.yml are committed from the live workspace source."""
+    ws_root = tmp_path / "workspaces"
+    git_dir = ws_root / WORKSPACE_ID
+    _make_git_dir(git_dir)
+
+    engine_workspace_dir = tmp_path / "engine-workspace"
+    engine_workspace_dir.mkdir()
+    (engine_workspace_dir / "workspace.md").write_text("# Workspace\n", encoding="utf-8")
+    (engine_workspace_dir / "workspace.base.md").write_text("# Base\n", encoding="utf-8")
+
+    mock_svc = MagicMock()
+    mock_svc.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+        {
+            "id": "tool-1",
+            "name": "Daily digest",
+            "worker_id": "w1",
+            "description": "Daily summary",
+        }
+    ]
+    mock_svc.storage = MagicMock()
+
+    fake_main = ModuleType("main")
+    fake_main._git_workspace = lambda: engine_workspace_dir
+
+    with patch.dict(os.environ, {"WORKEROS_GIT_WORKSPACES_DIR": str(ws_root)}):
+        with patch.dict(sys.modules, {"main": fake_main}):
+            with patch("apps.api.cloud_git_local.get_supabase_service_client", return_value=mock_svc):
+                with patch("apps.api.cloud_git_local.upload_bundle_background") as mock_upload:
+                    from apps.api.cloud_git_local import commit_workspace
+
+                    sha = commit_workspace(
+                        WORKSPACE_ID,
+                        ["workspace.md", "workspace-tools.yml"],
+                        "chore: sync workspace metadata",
+                    )
+
+    assert sha is not None
+    assert (git_dir / "workspace.md").read_text(encoding="utf-8") == "# Workspace\n"
+    assert (git_dir / "workspace.base.md").read_text(encoding="utf-8") == "# Base\n"
+    assert "Daily digest" in (git_dir / "workspace-tools.yml").read_text(encoding="utf-8")
+    mock_upload.assert_called_once_with(WORKSPACE_ID)
 
 
 # ---------------------------------------------------------------------------

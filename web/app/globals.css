@@ -126,7 +126,7 @@
   /* Squircle for small icon pills (WorkerIconPills) — softer than a button,
      not a full pill. Langdock-style rounded-square tool chips. */
   --radius-squircle: 9px;
-  --shadow-card: 0 12px 30px rgba(0,0,0,0.04);
+  --shadow-card: 0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.03);
   /* S45: light mode uses same color-mix pattern for active nav */
   --active-nav-bg: #F1EEE8;
   --active-nav-text: #111111;

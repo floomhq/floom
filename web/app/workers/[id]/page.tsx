@@ -22,7 +22,7 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   Copy, Code2, Clock, Plug2, ListChecks, History,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, Plus, RotateCcw, Search, Check,
+  Brain as BrainIcon, Settings2, Plus, RotateCcw, Search, Check, KeyRound,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
@@ -179,6 +179,8 @@ const NAV_ITEMS: NavItem[] = [
   // back-compat (see HASH_TO_SECTION).
   { id: "connections", label: "Tools", icon: <Plug2 className="w-4 h-4" />, group: "setup" },
 ];
+const PRIMARY_NAV = NAV_ITEMS.filter((item) => item.group === "view");
+const SETUP_NAV = NAV_ITEMS.filter((item) => item.group === "setup");
 // Note: "Versions" is intentionally NOT a tab. Worker config-version history is
 // surfaced via a header "Versions" dropdown → dialog (VersionsSection), to match
 // the inline Versions dropdown on Agent (/assistant) and Brain (/contexts) and
@@ -1524,7 +1526,8 @@ export default function WorkerDetailPage() {
   // it would only 409. Treat it like a connection block: disabled + a clear
   // "paused" label so the click is never a dead end.
   const isPaused = worker.enabled === false && !worker.archived;
-  const canRun = !running && missingConnections.length === 0 && !isPaused;
+  const isMissingSecretForRun = worker.status === "missing_secret";
+  const canRun = !running && missingConnections.length === 0 && !isPaused && !isMissingSecretForRun;
   // canApplySample: allowed when the worker declares any input. File-only
   // workers are now fillable too — applyExampleInput synthesizes a real upload
   // from the inline example_input content (G5 FIX 4), so a non-technical user
@@ -1595,7 +1598,7 @@ export default function WorkerDetailPage() {
                 doesn't have to hunt for where to add the secret. */}
             {worker.status === "missing_secret" && (
               <Link
-                href="/secrets"
+                href={`/connections/secrets?return_to=/workers/${encodeURIComponent(worker.id)}`}
                 className="inline-flex items-center gap-1 rounded-[var(--radius-button)] px-2 py-0.5 text-[11px] font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
               >
                 Add secret →
@@ -1921,41 +1924,51 @@ export default function WorkerDetailPage() {
           flex-column <Tabs> root (not the `w-fit` list) — the overflow chain
           didn't reliably reach the list and the last tab (History) clipped with
           no scroll. Wrapping the `w-fit` list directly restores the swipe. */}
-      <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
-        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
-          {/* E2: the shared TabsList is h-8 (32px) — below the 44px touch
-              minimum. Bump the bar (and via h-full each trigger) to ≥44px on
-              mobile only; desktop keeps the tight 32px height. */}
+      {/* #539: 4 primary view tabs + "..." overflow for setup tabs (Settings,
+          Brain, Tools). Reduces 7 competing top-level choices to 4 + overflow. */}
+      <div className="-mx-4 flex items-center gap-1 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
+        <Tabs value={SETUP_NAV.some((n) => n.id === activeSection) ? "" : activeSection} onValueChange={(v) => setSection(v as Section)}>
           <TabsList className="h-11 min-h-11 sm:h-8 sm:min-h-0">
-            {NAV_ITEMS.map((item, i) => {
-              // Divider at the view→setup group boundary: extra gap + a hairline
-              // rule so the 7 tabs read as two short clusters in one row. Every
-              // tab stays one click away; this is purely visual rhythm.
-              const startsNewGroup = i > 0 && NAV_ITEMS[i - 1].group !== item.group;
-              return (
-                <Fragment key={item.id}>
-                  {startsNewGroup && (
-                    <span
-                      aria-hidden
-                      className="mx-1 h-4 w-px shrink-0 self-center bg-border"
-                    />
-                  )}
-                  <TabsTrigger value={item.id}>
-                    {item.icon}
-                    <span>{item.label}</span>
-                    {item.id === "settings" && triggersCount > 1 && (
-                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
-                    )}
-                    {item.id === "runs" && runsCount > 0 && (
-                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
-                    )}
-                  </TabsTrigger>
-                </Fragment>
-              );
-            })}
+            {PRIMARY_NAV.map((item) => (
+              <TabsTrigger key={item.id} value={item.id}>
+                {item.icon}
+                <span>{item.label}</span>
+                {item.id === "runs" && runsCount > 0 && (
+                  <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
+                )}
+              </TabsTrigger>
+            ))}
           </TabsList>
-        </div>
-      </Tabs>
+        </Tabs>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            type="button"
+            className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[var(--radius-button)] border px-2.5 text-xs transition-colors ${
+              SETUP_NAV.some((n) => n.id === activeSection)
+                ? "border-border bg-muted font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <MoreVertical className="w-3.5 h-3.5" />
+            {SETUP_NAV.find((n) => n.id === activeSection)?.label ?? "More"}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {SETUP_NAV.map((item) => (
+              <DropdownMenuItem
+                key={item.id}
+                onClick={() => setSection(item.id as Section)}
+                className={activeSection === item.id ? "bg-muted" : ""}
+              >
+                {item.icon}
+                <span className="ml-2">{item.label}</span>
+                {item.id === "settings" && triggersCount > 1 && (
+                  <span className="ml-auto text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {/* Section content */}
       <div>
@@ -1980,6 +1993,8 @@ export default function WorkerDetailPage() {
               parts={activeRunStream.parts}
               streamConnected={activeRunStream.connected}
               streamError={activeRunStream.error}
+              streamUnavailable={activeRunStream.streamUnavailable}
+              onRefresh={activeRunStream.refresh}
               onBack={() => {
                 setActiveRunId(null);
                 setActiveRun(null);
@@ -2545,7 +2560,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
           This worker requires{" "}
           <span className="font-mono font-semibold">{requiredSecrets.join(", ")}</span>{" "}
           to run.{" "}
-          <Link href="/secrets" className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200">
+          <Link href={`/connections/secrets?return_to=/workers/${encodeURIComponent(worker.id)}`} className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200">
             Add it in Secrets →
           </Link>
         </p>
@@ -2772,22 +2787,46 @@ function RunSection({
           {missingConnections.length > 0 && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
               <Plug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <div>
-                <p className="font-medium">Connection required</p>
-                <p>
-                  Connect{" "}
-                  {missingConnections.map((s, i) => (
-                    <span key={s}>
-                      <span className="font-medium capitalize">{s}</span>
-                      {i < missingConnections.length - 1 ? ", " : ""}
-                    </span>
-                  ))}{" "}
-                  in{" "}
-                  <Link href="/connections" className="underline hover:text-amber-900">
-                    Connections
-                  </Link>{" "}
-                  before running.
-                </p>
+              <div className="space-y-1.5">
+                <p className="font-medium">Connect required tools to run</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {missingConnections.map((s) => (
+                    <Link
+                      key={s}
+                      href={`/connections/connect/${encodeURIComponent(s)}?return_to=/workers/${encodeURIComponent(worker.id)}`}
+                      className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-2 py-0.5 font-medium capitalize hover:bg-amber-200"
+                    >
+                      {s} →
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {worker.status === "missing_secret" && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
+              <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <div className="space-y-1.5">
+                <p className="font-medium">Add required secrets to run</p>
+                {worker.missing_secrets && worker.missing_secrets.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {worker.missing_secrets.map((s) => (
+                      <Link
+                        key={s}
+                        href={`/connections/secrets?prefill=${encodeURIComponent(s)}&return_to=/workers/${encodeURIComponent(worker.id)}`}
+                        className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-2 py-0.5 font-mono hover:bg-amber-200"
+                      >
+                        {s} →
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <p>
+                    <Link href={`/connections/secrets?return_to=/workers/${encodeURIComponent(worker.id)}`} className="underline hover:text-amber-900">Add the missing secret</Link>{" "}
+                    before running.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -2800,6 +2839,8 @@ function RunSection({
               ? "Paused — turn on to run"
               : missingConnections.length > 0
               ? `Connect ${missingConnections[0]} first`
+              : worker.status === "missing_secret"
+              ? "Add missing secret first"
               : "Run worker"}
           </Button>
       </div>
@@ -3738,7 +3779,7 @@ function VersionsSection({
       setVersions(fresh);
       setExpandedId(null);
       setExpandedFiles(null);
-      toast.success(`Rolled back to version ${v.version_number}`);
+      toast.success(`Rolled back to commit ${v.sha}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
     } finally {
@@ -3767,37 +3808,10 @@ function VersionsSection({
     );
   }
 
-  function changeSourceLabel(src: string): string {
-    if (src === "user") return "Manual save";
-    if (src === "ai") return "AI edit";
-    if (src === "api") return "API";
-    if (src.startsWith("rollback:")) return "Rollback";
-    return src;
-  }
-
-  function changeSourceBadge(src: string) {
-    const label = changeSourceLabel(src);
-    const isRollback = src.startsWith("rollback:");
-    const isAi = src === "ai";
-    return (
-      <span
-        className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border ${
-          isRollback
-            ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-            : isAi
-            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
-            : "border-border bg-muted text-muted-foreground"
-        }`}
-      >
-        {label}
-      </span>
-    );
-  }
-
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {versions.length} version{versions.length !== 1 ? "s" : ""} · newest first · click a version to preview
+        {versions.length} commit{versions.length !== 1 ? "s" : ""} · newest first · click a commit to preview
       </p>
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden divide-y divide-[var(--border-default)]">
         {versions.map((v, idx) => (
@@ -3807,18 +3821,18 @@ function VersionsSection({
               onClick={() => { if (idx !== 0) void handleExpand(v); }}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 text-right">
-                  v{v.version_number}
+                <span className="text-xs font-mono text-muted-foreground shrink-0">
+                  {v.sha}
                 </span>
                 <div className="min-w-0 flex flex-col gap-0.5">
                   <div className="flex items-center gap-2">
-                    {changeSourceBadge(v.change_source)}
+                    <span className="truncate text-xs text-foreground max-w-[200px]" title={v.message}>{v.message}</span>
                     {idx === 0 && (
-                      <span className="text-[10px] text-muted-foreground font-medium">(current)</span>
+                      <span className="text-[10px] text-muted-foreground font-medium shrink-0">(current)</span>
                     )}
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {formatRelative(v.created_at)}
+                    {v.author} · {formatRelative(v.timestamp)}
                   </span>
                 </div>
               </div>
@@ -3830,7 +3844,7 @@ function VersionsSection({
             </div>
             {expandedId === v.id && expandedFiles && (
               <VersionDiffPanel
-                versionNumber={v.version_number}
+                versionSha={v.sha}
                 versionFiles={expandedFiles}
                 currentFiles={currentFiles}
                 isRestoring={rollingBack === v.id}

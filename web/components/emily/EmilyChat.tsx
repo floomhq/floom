@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, ChevronLeft, Maximize2, PenSquare, Download } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronDown, Maximize2, PenSquare, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -167,11 +167,59 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
   const [input, setInput] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Start true so the first message load scrolls to bottom automatically.
+  const isNearBottomRef = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
-  // Auto-scroll on new messages
+  // Track whether the user is near the bottom of the scroll container.
+  // We use a ref (not state) so the scroll handler doesn't trigger re-renders.
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // Tight threshold: even a small scroll up (> 20px from bottom) disengages
+    // auto-scroll immediately. A large threshold like 120px caused fighting
+    // because small scrolls still read as "near bottom" and got overridden.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+    isNearBottomRef.current = nearBottom;
+    setShowScrollButton(!nearBottom);
+  }, []);
+
+  // Scroll the container to the very bottom. Uses direct scrollTop manipulation
+  // (not scrollIntoView) so it is instant and synchronous — no smooth animation
+  // that would fight the user's own scroll gesture during streaming.
+  const scrollToBottom = useCallback((smooth = false) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (smooth) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+    isNearBottomRef.current = true;
+    setShowScrollButton(false);
+  }, []);
+
+  // Auto-scroll when streaming — ONLY if the user is already near the bottom.
+  // If they've scrolled up to read history, stop and show the jump button.
+  // Uses instant scroll (no smooth animation) so it never fights user input.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (isNearBottomRef.current) {
+      const el = scrollContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
   }, [messages, isStreaming]);
+
+  // Always jump to bottom when the USER sends a new message so Emily's reply
+  // is immediately visible — regardless of current scroll position.
+  const prevLengthRef = useRef(messages.length);
+  useEffect(() => {
+    const grew = messages.length > prevLengthRef.current;
+    prevLengthRef.current = messages.length;
+    if (grew && messages[messages.length - 1]?.role === "user") {
+      scrollToBottom();
+    }
+  }, [messages, scrollToBottom]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
@@ -196,11 +244,24 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
           fullPage ? "px-6 py-2" : "px-3 py-1.5"
         )}
       >
-        <ChatControls onNew={newSession} onExport={handleExport} canExport={hasMessages} />
+        <ChatControls
+          onNew={() => {
+            newSession();
+            // Reset scroll state for the fresh conversation
+            isNearBottomRef.current = true;
+            setShowScrollButton(false);
+          }}
+          onExport={handleExport}
+          canExport={hasMessages}
+        />
       </div>
 
       {/* Message list */}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollContainerRef}
+        className="relative flex-1 overflow-y-auto"
+        onScroll={handleScroll}
+      >
         {!hasMessages ? (
           isHydrating ? (
             <div className="flex h-full items-center justify-center px-6 text-center">
@@ -217,6 +278,20 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
             {isStreaming && <TypingIndicator />}
             <div ref={bottomRef} />
           </div>
+        )}
+
+        {/* Scroll-to-bottom button — visible when user has scrolled up and
+            Emily is still typing. Matches ChatGPT / Claude UX. */}
+        {showScrollButton && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom(true)}
+            aria-label="Scroll to bottom"
+            className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md hover:text-foreground hover:shadow-lg transition-all"
+          >
+            <ChevronDown className="size-3.5" />
+            Scroll to bottom
+          </button>
         )}
       </div>
 

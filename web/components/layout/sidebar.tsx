@@ -7,6 +7,7 @@ import { Menu, X, Search, Settings, LogOut, Plus } from "lucide-react";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
+import type { CurrentUser } from "@/lib/types";
 // Compose the engine's brand mark + nav + primary actions from the SYNCED
 // engine sidebar (Phase 1 seam: those parts are exported there). This keeps
 // the Cloud dashboard's nav (order, icons, Approvals badge, active-state
@@ -163,6 +164,19 @@ export function Sidebar() {
   );
 }
 
+function profileInitials(value: string) {
+  const local = value.includes("@") ? value.split("@", 1)[0] : value;
+  const parts = local
+    .split(/[\s._-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const letters = parts.length > 1 ? [parts[0][0], parts[1][0]] : [local[0], local[1]];
+  return letters
+    .filter(Boolean)
+    .join("")
+    .toUpperCase() || "LU";
+}
+
 // Cloud build: reads the signed-in Supabase user from /api/me (which
 // decodes the workeros_cloud_session cookie set by the cloud backend's
 // /auth/callback) and shows email + initial. Logout posts to the cloud
@@ -179,7 +193,7 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const isLoginPath = pathname === "/login" || pathname.startsWith("/login/") || pathname === "/app/login" || pathname.startsWith("/app/login/");
-  const [email, setEmail] = useState<string | null>(null);
+  const [user, setUser] = useState<CurrentUser | null>(null);
   useEffect(() => {
     if (isLoginPath) return;
     let cancelled = false;
@@ -187,7 +201,7 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
       .then((r) => r.json())
       .then((d) => {
         if (!cancelled && d?.user?.email) {
-          setEmail(d.user.email as string);
+          setUser(d.user as CurrentUser);
           // Ensure the user has at least one PAT (fire-and-forget).
           // bootstrap is idempotent — no-ops if a token already exists.
           fetch("/app/api/proxy/auth/tokens/bootstrap", {
@@ -206,9 +220,12 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
     };
   }, [isLoginPath]);
   if (isLoginPath) return null;
-  const initial = email
-    ? email.split("@")[0]?.slice(0, 2).toUpperCase() ?? "??"
-    : "—";
+  const primary = user?.display_name?.trim() || user?.email || "Local user";
+  const secondary = user?.display_name?.trim()
+    ? (user?.email || "Signed in")
+    : (user?.email ? "Signed in" : "Workeros");
+  const initial = profileInitials(primary);
+  const picture = user?.picture ?? null;
 
   async function logout() {
     try {
@@ -223,12 +240,25 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   return (
     <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
-          {initial}
-        </div>
+        {picture ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={picture}
+            alt={`${primary} avatar`}
+            className="size-7 shrink-0 rounded-full border border-[var(--border-soft)] object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
+            {initial}
+          </div>
+        )}
         <div className="min-w-0 leading-tight">
           <p className="text-xs font-medium text-foreground truncate">
-            {email ?? "—"}
+            {primary}
+          </p>
+          <p className="text-[10px] text-muted-foreground truncate">
+            {secondary}
           </p>
         </div>
       </div>
