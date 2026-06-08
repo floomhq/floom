@@ -531,6 +531,53 @@ def _schedule_retry(
     t.start()
 
 
+def _schedule_retry_for_failed_run(
+    *,
+    run_id: str,
+    worker_id: str,
+    inputs: Dict[str, Any],
+    owner_id: str | None,
+    config: Any,
+    result_retryable: bool,
+    repos: "Repositories",
+    log_fn,
+) -> bool:
+    """Schedule a retry for a failed run when policy and attempt budget allow it."""
+    if not owner_id:
+        return False
+
+    retry_cfg = getattr(config, "retry", None) if config else None
+    if not retry_cfg and not result_retryable:
+        return False
+
+    current_run_row = repos.runs.get_any(run_id=run_id)
+    current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
+    max_attempts = retry_cfg.max_attempts if retry_cfg else 2
+    if current_attempt >= max_attempts - 1:
+        return False
+
+    base_delay_seconds = retry_cfg.delay_seconds if retry_cfg else 60
+    delay_seconds = base_delay_seconds
+    if result_retryable:
+        delay_seconds = min(base_delay_seconds * (2**current_attempt), 3600)
+
+    label = "retryable failure" if result_retryable and not retry_cfg else "retry"
+    log_fn(
+        f"Scheduling {label} {current_attempt + 1}/{max_attempts - 1} in {delay_seconds}s",
+        level="info",
+    )
+    _schedule_retry(
+        original_run_id=run_id,
+        worker_id=worker_id,
+        inputs=inputs,
+        attempt=current_attempt + 1,
+        delay_seconds=delay_seconds,
+        user_id=owner_id,
+        repos=repos,
+    )
+    return True
+
+
 API_ENV_PATH = Path("/root/.config/workeros/api.env")
 _PLACEHOLDER_MARKERS = (
     "i don't have access",
@@ -2787,8 +2834,13 @@ def _drain_one_batch() -> None:
                 daemon=True,
                 name=f"workeros-run-{run_id}",
             )
-            _register_active_run(_ActiveRun(run_id=run_id, worker_id=worker_id, user_id=user_id, thread=thread))
-            thread.start()
+            active_run = _ActiveRun(run_id=run_id, worker_id=worker_id, user_id=user_id, thread=thread)
+            _register_active_run(active_run)
+            try:
+                thread.start()
+            except Exception:
+                _unregister_active_run(run_id)
+                raise
             logger.info("Queue drain: dispatched run %s for worker %s", run_id, worker_id)
         except Exception as exc:
             logger.warning("Queue drain: failed to dispatch run %s: %s", run_id, exc)
@@ -3275,26 +3327,16 @@ def execute_run(
                 _log_failure_line = "Run failed."
             log_fn(_log_failure_line, level="error")
 
-            # Auto-retry if configured on the worker manifest
-            retry_cfg = getattr(config, "retry", None) if config else None
-            if retry_cfg and owner_id:
-                current_run_row = repos_obj.runs.get_any(run_id=run_id)
-                current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
-                if current_attempt < retry_cfg.max_attempts - 1:
-                    log_fn(
-                        f"Scheduling retry {current_attempt + 1}/{retry_cfg.max_attempts - 1} "
-                        f"in {retry_cfg.delay_seconds}s",
-                        level="info",
-                    )
-                    _schedule_retry(
-                        original_run_id=run_id,
-                        worker_id=worker_id,
-                        inputs=effective_inputs,
-                        attempt=current_attempt + 1,
-                        delay_seconds=retry_cfg.delay_seconds,
-                        user_id=owner_id,
-                        repos=repos_obj,
-                    )
+            _schedule_retry_for_failed_run(
+                run_id=run_id,
+                worker_id=worker_id,
+                inputs=effective_inputs,
+                owner_id=owner_id,
+                config=config,
+                result_retryable=bool(getattr(result, "retryable", False)),
+                repos=repos_obj,
+                log_fn=log_fn,
+            )
             return
 
         # S47 HITL: if the worker emitted decision_required AND the worker declares
