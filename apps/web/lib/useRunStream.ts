@@ -30,6 +30,8 @@ export function useRunStream(runId: string | null | undefined) {
     let closed = false;
     let sawFinish = false;
     let staleTimer: number | null = null;
+    let consecutivePollFailures = 0;
+    const POLL_FAILURE_THRESHOLD = 3;
     const source = new EventSource(
       apiProxyPath(`/runs/${encodeURIComponent(runId)}/stream`, true),
     );
@@ -54,6 +56,7 @@ export function useRunStream(runId: string | null | undefined) {
     source.addEventListener("part", (event) => {
       try {
         const part = JSON.parse((event as MessageEvent).data) as RunPart;
+        consecutivePollFailures = 0;
         setStreamUnavailable(false);
         setError(null);
         setParts((prev) => [...prev, part]);
@@ -108,9 +111,10 @@ export function useRunStream(runId: string | null | undefined) {
       void api.runs.get(runId).then(
         (run) => {
           if (closed) return;
+          consecutivePollFailures = 0;
           setStreamUnavailable(false);
           setError(null);
-          const terminal = run.status === "completed" || run.status === "failed";
+          const terminal = run.status === "completed" || run.status === "failed" || run.status === "cancelled";
           if (terminal) {
             sawFinish = true;
             setFallbackRun(run);
@@ -122,9 +126,11 @@ export function useRunStream(runId: string | null | undefined) {
           }
         },
         () => {
-          // Network blips during polling are tolerated; the stale timer and
-          // SSE error path surface a lost connection when recovery is not
-          // happening.
+          if (closed || sawFinish) return;
+          consecutivePollFailures += 1;
+          if (consecutivePollFailures >= POLL_FAILURE_THRESHOLD) {
+            setError("Lost connection to run. Check your network or refresh to see the latest status.");
+          }
         },
       );
     }, 8000);
