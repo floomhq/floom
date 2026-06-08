@@ -13602,6 +13602,108 @@ def _fetch_provider_email(toolkit_slug: str, composio_conn_id: str, user_id: str
     return None
 
 
+class _EmailPreviewItem(TypedDict):
+    subject: str
+    from_name: str
+    from_email: str
+    date: str
+
+
+def _fetch_email_peek(toolkit_slug: str, composio_conn_id: str, user_id: str, *, max_results: int = 3) -> List[_EmailPreviewItem]:
+    """Fetch recent email subjects/senders via Composio for trust-peek display.
+
+    Only supports gmail for now. Returns [] on any error or unsupported provider.
+    Response shapes vary by Composio tool version — handled defensively.
+    """
+    import requests as _requests
+    if toolkit_slug != "gmail":
+        return []
+    key = os.environ.get("COMPOSIO_API_KEY", "")
+    if not key:
+        return []
+    try:
+        r = _requests.post(
+            "https://backend.composio.dev/api/v3/tools/execute/GMAIL_FETCH_EMAILS",
+            headers={"x-api-key": key, "Content-Type": "application/json"},
+            json={
+                "connected_account_id": composio_conn_id,
+                "user_id": user_id,
+                "arguments": {"max_results": max_results, "include_spam_trash": False},
+            },
+            timeout=10,
+        )
+        if not r.ok:
+            return []
+        payload = r.json()
+        if not payload.get("successful"):
+            return []
+        outer = payload.get("data") or {}
+        if not isinstance(outer, dict):
+            outer = {}
+        data = (
+            outer.get("response_data")
+            or outer.get("response_dict")
+            or outer
+        )
+        # Composio GMAIL_FETCH_EMAILS returns messages in different shapes:
+        # {"messages": [{...}]} or directly a list, or {"emails": [{...}]}
+        messages: List[Any] = []
+        if isinstance(data, list):
+            messages = data
+        elif isinstance(data, dict):
+            messages = data.get("messages") or data.get("emails") or []
+        if not isinstance(messages, list):
+            return []
+
+        result: List[_EmailPreviewItem] = []
+        for msg in messages[:max_results]:
+            if not isinstance(msg, dict):
+                continue
+            # Extract subject — may be in "subject" or "payload.headers"
+            subject = str(msg.get("subject") or msg.get("snippet") or "")
+            if not subject:
+                headers = msg.get("payload", {}).get("headers") or []
+                for h in headers:
+                    if isinstance(h, dict) and h.get("name", "").lower() == "subject":
+                        subject = str(h.get("value") or "")
+                        break
+            # Extract sender
+            sender_raw = str(msg.get("from") or msg.get("sender") or "")
+            if not sender_raw:
+                headers = msg.get("payload", {}).get("headers") or []
+                for h in headers:
+                    if isinstance(h, dict) and h.get("name", "").lower() == "from":
+                        sender_raw = str(h.get("value") or "")
+                        break
+            # Parse "Name <email>" or bare email
+            from_name, from_email = "", sender_raw
+            if "<" in sender_raw and ">" in sender_raw:
+                parts = sender_raw.split("<", 1)
+                from_name = parts[0].strip().strip('"')
+                from_email = parts[1].rstrip(">").strip()
+            # Date
+            date_str = str(msg.get("date") or msg.get("internalDate") or "")
+            if date_str.isdigit():
+                # internalDate is milliseconds since epoch
+                try:
+                    import datetime
+                    dt = datetime.datetime.utcfromtimestamp(int(date_str) / 1000)
+                    date_str = dt.isoformat() + "Z"
+                except Exception:
+                    pass
+            if subject or from_email:
+                result.append(_EmailPreviewItem(
+                    subject=subject[:120],
+                    from_name=from_name[:80],
+                    from_email=from_email[:120],
+                    date=date_str,
+                ))
+        return result
+    except Exception as exc:
+        logger.debug("email peek fetch failed for %s: %s", toolkit_slug, exc)
+    return []
+
+
 def _fetch_composio_account_info(composio_conn_id: str, *, user_id: str) -> Dict[str, Any]:
     """Fetch Composio connected-account and return normalized account info.
 
@@ -14263,6 +14365,43 @@ def get_connection_account_info(
         "scopes": info.get("scopes") or [],
         "connected_at": row["created_at"],
     }
+
+
+class _ConnectionPeekResponse(BaseModel):
+    emails: List[Dict[str, str]] = Field(default_factory=list)
+
+
+@app.get("/connections/{connection_id}/peek", response_model=_ConnectionPeekResponse)
+def get_connection_peek(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _ConnectionPeekResponse:
+    """Return a privacy-conscious email preview for trust-peek on connection detail.
+
+    Only returns data for active gmail connections. Returns empty emails list for
+    other providers, MCP connections, or if Composio is unconfigured. Never errors
+    so the UI can call it best-effort.
+    """
+    try:
+        row = _connection_row_for_user(
+            connection_id,
+            auth.user_id,
+            "composio_connection_id, app_name, status",
+            repos=repos,
+        )
+    except HTTPException:
+        return _ConnectionPeekResponse(emails=[])
+    if row.get("status") != "active":
+        return _ConnectionPeekResponse(emails=[])
+    toolkit_slug = (row.get("app_name") or "").lower()
+    composio_conn_id = row.get("composio_connection_id") or ""
+    if not composio_conn_id:
+        return _ConnectionPeekResponse(emails=[])
+    items = _fetch_email_peek(toolkit_slug, composio_conn_id, auth.user_id, max_results=3)
+    return _ConnectionPeekResponse(
+        emails=[{"subject": i["subject"], "from_name": i["from_name"], "from_email": i["from_email"], "date": i["date"]} for i in items]
+    )
 
 
 @app.get("/connections/auth-configs/{auth_config_id}", dependencies=[Depends(get_auth_context)])
