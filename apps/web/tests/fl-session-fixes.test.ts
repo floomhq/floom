@@ -5,6 +5,7 @@
  *   #591 — useChatStream subscribes to run SSE stream for "running" tool cards
  *           so the "Starting worker run" spinner resolves when the run finishes
  *   #590 — _run_visible_to_api ownership-based visibility + PUBLIC_STOCK list
+ *   #587 — useRunStream recovers from a dead SSE stream and exposes refresh UI
  *
  * Run: cd apps/web && npx tsx tests/fl-session-fixes.test.ts
  */
@@ -138,6 +139,38 @@ function testToolCardTitleForWorkersRun() {
 }
 
 // ---------------------------------------------------------------------------
+// #587 — useRunStream must recover from a dead stream and expose refresh UI
+// ---------------------------------------------------------------------------
+
+function testRunStreamRecoveryState() {
+  const src = readSrc("lib/useRunStream.ts");
+  assert(src.includes("streamUnavailable"), "#587: useRunStream must track streamUnavailable state");
+  assert(src.includes("setStreamUnavailable(true)"), "#587: useRunStream must mark the stream unavailable when polling fails");
+  assert(src.includes("setRefreshNonce"), "#587: useRunStream must expose a refresh-triggering nonce");
+  assert(src.includes("Lost connection to run status"), "#587: useRunStream must surface a stale-connection message");
+  console.log("✓ #587 useRunStream tracks streamUnavailable + refresh nonce");
+}
+
+function testRunDetailShowsRefreshBanner() {
+  const src = readSrc("components/RunDetailSplitPane.tsx");
+  assert(src.includes("streamUnavailable"), "#587: RunDetailSplitPane must accept streamUnavailable");
+  assert(src.includes("Refresh status"), "#587: RunDetailSplitPane must show a Refresh status action");
+  assert(src.includes("Run status connection lost"), "#587: RunDetailSplitPane must show the lost-connection banner");
+  assert(src.includes("onRefresh"), "#587: RunDetailSplitPane must accept a refresh callback");
+  console.log("✓ #587 RunDetailSplitPane renders the recovery banner");
+}
+
+function testRunPagesWireRefreshCallback() {
+  const runPage = readSrc("app/runs/[id]/page.tsx");
+  const workerPage = readSrc("app/workers/[id]/page.tsx");
+  assert(runPage.includes("streamUnavailable"), "#587: run detail page must read streamUnavailable from the hook");
+  assert(runPage.includes("onRefresh={refresh}"), "#587: run detail page must wire the refresh callback");
+  assert(workerPage.includes("streamUnavailable={activeRunStream.streamUnavailable}"), "#587: worker page must pass streamUnavailable to RunDetailSplitPane");
+  assert(workerPage.includes("onRefresh={activeRunStream.refresh}"), "#587: worker page must pass the refresh callback");
+  console.log("✓ #587 run pages wire the recovery callback");
+}
+
+// ---------------------------------------------------------------------------
 // Run all tests
 // ---------------------------------------------------------------------------
 
@@ -147,6 +180,9 @@ const tests: Array<[string, () => void]> = [
   ["chat stream fallback REST poll (#591)", testChatStreamFallbackPoll],
   ["newSession clears subscriptions (#591)", testChatStreamNewSessionClearsSubscriptions],
   ["workers.run TOOL_LABELS correct (#591)", testToolCardTitleForWorkersRun],
+  ["useRunStream tracks stale stream recovery (#587)", testRunStreamRecoveryState],
+  ["RunDetailSplitPane shows refresh banner (#587)", testRunDetailShowsRefreshBanner],
+  ["run pages wire refresh callback (#587)", testRunPagesWireRefreshCallback],
 ];
 
 let passed = 0;
