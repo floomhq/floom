@@ -475,6 +475,41 @@ def test_uploads_context_files_from_owner_scoped_root(tmp_path, monkeypatch):
     assert sandbox.files._files["/home/user/worker/context/knowledge-base/faq.md"] == b"# Owner FAQ\n"
 
 
+def test_uploads_git_context_by_cloning_into_sandbox(tmp_path, monkeypatch):
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    sandbox = FakeFullSandbox()
+    config = WorkerConfig(
+        id="git-context-test",
+        name="Git Context Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
+        contexts=[{
+            "name": "external-notes",
+            "source": "git+https://github.com/example/notes.git",
+        }],
+        outputs=[],
+    )
+
+    err = E2BSandboxDriver()._upload_contexts_to_sandbox(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        config=config,
+        made_dirs={"/home/user/worker"},
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+
+    assert err is None
+    assert sandbox.commands.run_calls == [(
+        "git clone --depth 1 https://github.com/example/notes.git "
+        "/home/user/worker/context/external-notes",
+        {"timeout": 180},
+    )]
+    assert "/home/user/worker/context/external-notes" in sandbox.files.dirs
+    assert not sandbox.files._files
+
+
 def _tar_bytes(entries: dict[str, bytes]) -> bytes:
     buffer = BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:

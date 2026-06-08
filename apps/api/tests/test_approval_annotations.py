@@ -78,7 +78,7 @@ def _seed_pending_approval(approval_id: str, run_id: str) -> dict:
             "name": worker_id,
             "version": f"0.1.0-{approval_id}",
             "trigger": {"type": "manual"},
-            "runtime": {"type": "python", "entrypoint": "run.py", "runner": "local"},
+            "runtime": {"type": "python", "entrypoint": "run.py", "runner": "e2b"},
             "inputs": [],
             "outputs": [],
             "secrets": [],
@@ -91,7 +91,7 @@ def _seed_pending_approval(approval_id: str, run_id: str) -> dict:
         worker_id=worker_id,
         status=main.RunStatus.PENDING_APPROVAL.value,
         trigger_source="manual",
-        runner="local",
+        runner="e2b",
         input_json={},
         output_json={"proposed": "draft text the reviewer is critiquing"},
     )

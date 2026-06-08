@@ -52,7 +52,7 @@ def _make_worker_yml(name: str, mode: str = "agent") -> str:
             "  command: python run.py\n"
             "  runtime: python311\n"
             "  mode: pure-script\n"
-            "  runner: local\n"
+            "  runner: e2b\n"
             "  inputs: []\n"
             "  outputs: []"
         )
@@ -61,7 +61,7 @@ def _make_worker_yml(name: str, mode: str = "agent") -> str:
             "exec:\n"
             "  runtime: skill\n"
             "  mode: agent\n"
-            "  runner: local\n"
+            "  runner: e2b\n"
             "  inputs: []\n"
             "  outputs: []"
         )

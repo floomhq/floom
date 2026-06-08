@@ -409,7 +409,7 @@ sandbox; patch to relative paths first.
 
 **Gotchas:**
 - Claude-Code-only tools (Read/Edit/Bash on host filesystem) are not available in the sandbox runtime. Audit the skill's tool calls before porting.
-- Heavy Python deps (torch, transformers, playwright) won't fit in the E2B template. Trim or switch to `runner: local`.
+- Heavy Python deps (torch, transformers, playwright) won't fit in the E2B template. Trim dependencies or split the worker into smaller sandboxed steps.
 - Skills that use Claude's `web_search` work; the runner exposes equivalent search.
 
 ---

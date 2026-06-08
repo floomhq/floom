@@ -8,7 +8,7 @@ import { FileCode, FileText } from "lucide-react";
 // separate `mode:` field in the worker manifest. This component shows the
 // detected entry point read-only so the edit page is unambiguous.
 
-export type ExecMode = "agent" | "pure-script" | "hybrid";
+export type ExecMode = "agent" | "pure-script";
 
 export type DetectedEntry = "SKILL.md" | "run.py" | "none";
 
