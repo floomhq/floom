@@ -302,23 +302,24 @@ def apply_example_input(
     current_inputs: dict,
     example_input: dict,
     file_input_names: set[str],
-) -> tuple[dict, bool]:
+) -> tuple[dict, list[dict], bool]:
     """
     Python mirror of the frontend applyExampleInput logic.
 
-    Returns (next_inputs, skipped_file_fields).
+    Returns (next_inputs, file_uploads, unfillable_file_fields).
     """
     next_inputs = dict(current_inputs)
-    skipped_file_fields = False
+    file_uploads: list[dict] = []
+    unfillable_file_fields = False
     for key, value in example_input.items():
         if key in file_input_names:
-            if value is None:
-                pass  # leave file field empty (no sample)
-            else:
-                skipped_file_fields = True  # filename string — do not copy
+            if isinstance(value, str) and value.strip():
+                file_uploads.append({"name": key, "content": value})
+            elif value is not None:
+                unfillable_file_fields = True
             continue
         next_inputs[key] = value
-    return next_inputs, skipped_file_fields
+    return next_inputs, file_uploads, unfillable_file_fields
 
 
 class TestSampleButtonBehavior:
@@ -326,28 +327,31 @@ class TestSampleButtonBehavior:
 
     def test_non_file_inputs_populated(self):
         example = {"text_field": "hello", "number_field": 42}
-        next_inputs, skipped = apply_example_input({}, example, set())
+        next_inputs, uploads, unfillable = apply_example_input({}, example, set())
         assert next_inputs["text_field"] == "hello"
         assert next_inputs["number_field"] == 42
-        assert not skipped
+        assert uploads == []
+        assert not unfillable
 
     def test_file_input_with_null_value_not_copied_no_skip_flag(self):
         """Null file field leaves input empty and does NOT raise skip flag."""
         example = {"cv_file": None, "client_brief": "N26 brief"}
         file_inputs = {"cv_file"}
-        next_inputs, skipped = apply_example_input({}, example, file_inputs)
+        next_inputs, uploads, unfillable = apply_example_input({}, example, file_inputs)
         assert "cv_file" not in next_inputs
         assert next_inputs["client_brief"] == "N26 brief"
-        assert not skipped
+        assert uploads == []
+        assert not unfillable
 
-    def test_file_input_with_filename_string_sets_skip_flag(self):
-        """A filename string in example_input must NOT be copied and triggers skip flag."""
-        example = {"cv_file": "anna.pdf", "client_brief": "brief"}
+    def test_file_input_with_inline_string_becomes_upload(self):
+        """Inline file content in example_input is staged as an upload."""
+        example = {"cv_file": "Anna CV text", "client_brief": "brief"}
         file_inputs = {"cv_file"}
-        next_inputs, skipped = apply_example_input({}, example, file_inputs)
+        next_inputs, uploads, unfillable = apply_example_input({}, example, file_inputs)
         assert "cv_file" not in next_inputs
         assert next_inputs["client_brief"] == "brief"
-        assert skipped
+        assert uploads == [{"name": "cv_file", "content": "Anna CV text"}]
+        assert not unfillable
 
     def test_mixed_inputs_with_file_field_null(self):
         """Non-file fields get populated even when a file field has null sample."""
@@ -357,25 +361,27 @@ class TestSampleButtonBehavior:
             "target_format": "branded_markdown",
         }
         file_inputs = {"cv_file"}
-        next_inputs, skipped = apply_example_input({}, example, file_inputs)
+        next_inputs, uploads, unfillable = apply_example_input({}, example, file_inputs)
         assert "cv_file" not in next_inputs
         assert next_inputs["client_brief"] == "Test client"
         assert next_inputs["target_format"] == "branded_markdown"
-        assert not skipped
+        assert uploads == []
+        assert not unfillable
 
     def test_extra_keys_not_in_inputs_schema_are_still_copied(self):
         """Extra keys in example_input (not in worker's declared inputs) are copied."""
         example = {"text": "hi", "unknown_extra": "val"}
         file_inputs = set()
-        next_inputs, skipped = apply_example_input({}, example, file_inputs)
+        next_inputs, uploads, unfillable = apply_example_input({}, example, file_inputs)
         assert next_inputs["unknown_extra"] == "val"
-        assert not skipped
+        assert uploads == []
+        assert not unfillable
 
     def test_existing_inputs_preserved_for_fields_not_in_example(self):
         """Fields not in example_input are left untouched."""
         current = {"existing_field": "keep_me"}
         example = {"new_field": "new_val"}
-        next_inputs, _ = apply_example_input(current, example, set())
+        next_inputs, _, _ = apply_example_input(current, example, set())
         assert next_inputs["existing_field"] == "keep_me"
         assert next_inputs["new_field"] == "new_val"
 
@@ -487,8 +493,9 @@ def test_api_workers_list_exposes_t2b_fields(tmp_db, monkeypatch):
     assert cv["folder"] == "Recruiting/NovaSearch"
     assert isinstance(cv.get("tags"), list)
     example = cv.get("example_input") or {}
-    # cv_file must be null, not a filename string
-    assert example.get("cv_file") is None
+    # File samples are inline content; the Run form uploads them before creating a run.
+    assert isinstance(example.get("cv_file"), str)
+    assert "Senior Java Backend Engineer" in example["cv_file"]
 
 
 def test_api_worker_detail_exposes_t2b_fields(tmp_db, monkeypatch):
@@ -511,9 +518,8 @@ def test_api_worker_detail_exposes_t2b_fields(tmp_db, monkeypatch):
     assert "cv" in w["tags"]
     assert w.get("long_description") is not None
     example = w.get("example_input") or {}
-    assert example.get("cv_file") is None, (
-        "cv_file example_input must be null — filename string causes base64 decode failure"
-    )
+    assert isinstance(example.get("cv_file"), str)
+    assert "Senior Java Backend Engineer" in example["cv_file"]
 
 
 # ---------------------------------------------------------------------------

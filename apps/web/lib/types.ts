@@ -71,6 +71,8 @@ export interface WorkerInput {
   options?: string[];
   default?: string | number | boolean | string[] | null;
   accept_csv?: boolean;
+  accepts?: string[];
+  max_size_mb?: number;
 }
 
 export interface WorkerOutput {
