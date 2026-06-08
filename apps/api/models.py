@@ -739,7 +739,7 @@ class WorkerRuntime(BaseModel):
     runner: str = "e2b"
     command: Optional[str] = None
     bundle_path: Optional[str] = None
-    mode: Literal["agent", "pure-script", "hybrid"] = "pure-script"
+    mode: Literal["agent", "pure-script"] = "pure-script"
     model: Optional[str] = None
     system_prompt: Optional[str] = None
     # PR S11: tool opt-out propagated from WorkerContractExec.disable_tools.
@@ -950,7 +950,7 @@ class WorkerContractExec(BaseModel):
     # `mode` is a deprecated alias retained for back-compat; if both are absent we infer
     # from `command` / `runtime` (legacy path).
     entry: Optional[str] = None
-    mode: Optional[Literal["agent", "pure-script", "hybrid"]] = None
+    mode: Optional[Literal["agent", "pure-script"]] = None
     # PR S11: tools-on-by-default. `disable_tools` removes specific tools
     # from the agent loop (e.g. ["web_search"]). Empty/missing = all tools on.
     disable_tools: List[str] = Field(default_factory=list)
@@ -997,31 +997,26 @@ class WorkerContractExec(BaseModel):
         # an entry default so the new code path stays uniform.
         if self.entry:
             inferred = _infer_mode_from_entry(self.entry)
-            # "hybrid" survives as a synonym for "pure-script" until removal,
-            # but `entry` always normalizes to agent/pure-script.
             if self.mode is None:
                 self.mode = inferred
-            elif self.mode == "hybrid" and inferred == "pure-script":
-                # Legacy hybrid + entry=run.py -> normalize to pure-script.
-                self.mode = "pure-script"
         elif self.mode is not None:
             # Legacy mode-only manifest: derive entry for the new code path.
             if self.mode == "agent":
                 self.entry = "SKILL.md"
             else:
-                # pure-script / hybrid -> run.py
+                # pure-script -> run.py
                 self.entry = "run.py"
         # Engine #211: default exec.command from exec.entry for script modes
         # when the author (often the LLM) omitted it. `.py` -> `python <entry>`,
         # `.sh` -> `bash <entry>`, `.js` -> `node <entry>`. Only fall back to the
         # hard error when we genuinely cannot derive a command (no entry).
-        if self.mode in ("pure-script", "hybrid") and not self.command:
+        if self.mode == "pure-script" and not self.command:
             if self.entry:
                 self.command = _default_command_from_entry(self.entry)
         # Validation: keep existing constraints.
-        if self.mode in ("pure-script", "hybrid") and not self.command:
+        if self.mode == "pure-script" and not self.command:
             raise ValueError(f"exec.command is required when exec.mode is {self.mode!r}")
-        if self.mode in ("pure-script", "hybrid") and self.runtime == "none":
+        if self.mode == "pure-script" and self.runtime == "none":
             raise ValueError("exec.runtime 'none' is only valid when exec.mode is agent")
         if self.runtime == "none" and self.command:
             raise ValueError("exec.runtime 'none' cannot declare exec.command")
@@ -1168,9 +1163,9 @@ class WorkerContract(BaseModel):
         # Engine #211: default exec.command from exec.entry for script modes
         # (covers the legacy path where mode was resolved to pure-script above
         # from an entry but command was omitted).
-        if self.exec.mode in ("pure-script", "hybrid") and not self.exec.command and self.exec.entry:
+        if self.exec.mode == "pure-script" and not self.exec.command and self.exec.entry:
             self.exec.command = _default_command_from_entry(self.exec.entry)
-        if self.exec.mode in ("pure-script", "hybrid") and not self.exec.command:
+        if self.exec.mode == "pure-script" and not self.exec.command:
             raise ValueError(f"exec.command is required when exec.mode is {self.exec.mode!r}")
         # Canonicalize triggers: if `triggers` list present, use it; else derive from `trigger`.
         if self.triggers:
