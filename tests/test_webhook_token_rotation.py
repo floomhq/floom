@@ -78,7 +78,7 @@ def _insert_webhook_worker(main, worker_id, *, owner_id="federico", with_secret=
         "id": worker_id,
         "name": worker_id,
         "description": "webhook rotation test worker",
-        "runtime": {"type": "python311", "entrypoint": "run.py", "runner": "local"},
+        "runtime": {"type": "python311", "entrypoint": "run.py", "runner": "e2b"},
         "trigger": trigger,
         "triggers": [trigger],
         "inputs": [],

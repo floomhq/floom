@@ -1209,7 +1209,7 @@ def _smoke_and_repair_generated_worker(
     runtime = config.runtime
     mode = runtime.mode if runtime else "pure-script"
     entry = (runtime.entrypoint if runtime else "") or ""
-    is_script = mode in ("pure-script", "hybrid") and entry.lower().endswith(
+    is_script = mode == "pure-script" and entry.lower().endswith(
         (".py", ".sh", ".js")
     )
     if not is_script:
@@ -1264,7 +1264,7 @@ def _smoke_and_repair_generated_worker(
     tmp_root = Path(ARTIFACTS_DIR) / f".smoke-{uuid.uuid4().hex[:12]}"
     tmp_root.mkdir(parents=True, exist_ok=True)
     try:
-        runner = runtime.runner if runtime else "local"
+        runner = runtime.runner if runtime else "e2b"
         timeout_seconds = (
             runtime.limits.timeout_seconds
             if runtime and runtime.limits
@@ -1763,7 +1763,6 @@ def _apply_config_input_defaults(
 
 
 def _runner_key(config: Optional[WorkerConfig]) -> str:
-    # #602: removed skill runtime branch — SkillRuntimeDriver is gone.
     if config and config.runtime:
         return config.runtime.runner or "e2b"
     return "e2b"
@@ -1829,7 +1828,7 @@ def create_run(
         config,
         _merge_instance_inputs(instance, inputs),
     )
-    # Determine runner from config (default to "local" for backward compat)
+    # Determine runner from config; script workers default to E2B.
     runner = _runner_key(config)
     repos_obj.runs.create(
         user_id=owner_id,

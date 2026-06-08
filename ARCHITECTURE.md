@@ -17,11 +17,12 @@
 
 ## How workers execute (THE important part)
 
-**Workers run exclusively in E2B sandbox microVMs.** There is no in-process execution path.
+**Script workers run in E2B sandbox microVMs. Agent workers run in the API process through AgentDriver.** There is no local in-process script runner.
 
-- `runner_sandbox/__init__.py` exposes only `E2BSandboxDriver`. The `get_driver()` dispatcher returns `E2BSandboxDriver` for any value of `runner` (default `"e2b"`).
+- `runner_sandbox/__init__.py` returns `AgentDriver` for `.md`/agent workers and `E2BSandboxDriver` for `.py`, `.sh`, and `.js` script workers.
 - The `runner_local.py` module that existed in earlier commits was renamed to `runner_utils.py` in PR R. Its `run_worker_local` executor function was deleted in PR #28. The remaining contents are pure utility helpers (path constants, validation functions, context builders) consumed by the E2B driver to prepare the per-run payload.
 - E2B sandboxes are Firecracker microVMs hosted by E2B. They do not share a Python interpreter, filesystem, network namespace, or environment variables with the API service.
+- AgentDriver runs the OpenAI Agents SDK loop on the API host with access to the worker bundle, MCP/Composio clients, and workspace context. Treat agent workers as trusted platform-controlled code, not as sandbox-isolated user scripts.
 
 **Verified in-sandbox isolation** (from `docs/launch-readiness/MORNING-REPORT.md` + `docs/audits/security-edge-2026-05-26.md`): a malicious bundle running `os.environ` dump inside an E2B sandbox returns only sandbox metadata. `FLOOM_SECRET`, `OPENAI_API_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SIGNING_KEY`, `E2B_API_KEY` are all absent from `os.environ` inside the sandbox.
 
