@@ -29,7 +29,12 @@ except ImportError:
     import click
     import requests
 
+# #598: support both FLOOM_API_TOKEN (PAT / bearer token, preferred for
+# multi-member installs) and FLOOM_API_SECRET (shared secret, single-tenant).
+# Token takes precedence when both are set. FLOOM_API_BASE is respected for
+# pointing the CLI at a non-default server (e.g. localhost during dev).
 API_BASE = os.environ.get("FLOOM_API_BASE", "http://localhost:8000")
+API_TOKEN = os.environ.get("FLOOM_API_TOKEN", "")
 API_SECRET = os.environ.get("FLOOM_API_SECRET", "")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -37,7 +42,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 def _headers() -> dict:
     h = {"Content-Type": "application/json"}
-    if API_SECRET:
+    if API_TOKEN:
+        h["Authorization"] = f"Bearer {API_TOKEN}"
+    elif API_SECRET:
         h["x-floom-secret"] = API_SECRET
     return h
 

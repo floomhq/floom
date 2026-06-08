@@ -31,10 +31,13 @@ jobs:
           WORKEROS_DEPLOY: local
           FLOOM_SECRET: ci-test-secret
           OPENAI_API_KEY: ""
-        run: pytest tests/ -v --tb=short
+        # #604: -p no:warnings keeps output readable without hiding failures.
+        # All test files under tests/ are discovered automatically, including
+        # the audit-batch fixes (test_auth_security, test_session_fixes, etc.)
+        run: pytest tests/ -v --tb=short -p no:warnings
 
   web-tests:
-    name: Web tests (vitest + lint)
+    name: Web tests (vitest + tsx + lint)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -55,8 +58,17 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Unit tests
+      - name: Unit tests (vitest)
         run: npm test
+
+      - name: Unit tests (tsx — source-inspection suite)
+        # #604: run the tsx-style test files that don't use vitest describe blocks.
+        # These test structural properties of the source (scroll lock, session
+        # fixes, etc.) and can't be run via vitest.
+        run: |
+          for f in tests/fl-*.test.ts tests/strip-citations.test.ts; do
+            npx tsx "$f" || exit 1
+          done
 
   mcp-tests:
     name: MCP package tests
