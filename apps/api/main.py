@@ -11662,7 +11662,7 @@ def get_run(
         pass
 
     # #561: replay is available for terminal statuses.
-    _terminal_statuses = {RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.ERROR.value}
+    _terminal_statuses = {RunStatus.COMPLETED.value, RunStatus.FAILED.value}
     _can_replay = run.get("status") in _terminal_statuses
 
     return RunDetail(
