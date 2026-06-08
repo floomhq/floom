@@ -51,7 +51,7 @@ export async function secretsListCommand(options: { json?: boolean }): Promise<n
   }
 }
 
-export async function secretsSetCommand(key: string): Promise<number> {
+export async function secretsSetCommand(key: string, options: { value?: string } = {}): Promise<number> {
   if (!SECRET_NAME_PATTERN.test(key)) {
     log.err(`Invalid secret name: '${key}'`);
     log.info("Use UPPER_SNAKE_CASE (e.g., GITHUB_PAT)");
@@ -59,10 +59,10 @@ export async function secretsSetCommand(key: string): Promise<number> {
   }
   try {
     const { client } = await createAuthenticatedClient();
-    const value = await promptHidden(`Value for ${key}: `);
+    const value = options.value ?? await promptHidden(`Value for ${key}: `);
     if (!value) {
       log.err("Secret value cannot be empty.");
-      log.info("Run: floom secrets set " + key);
+      log.info("Run: floom secrets set " + key + " --value <value>");
       return 1;
     }
     await client.requestJson("POST", `/secrets/${encodeURIComponent(key)}`, { body: { value } });
