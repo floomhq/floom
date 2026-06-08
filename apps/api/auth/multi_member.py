@@ -80,18 +80,25 @@ class MultiMemberAuthProvider:
             if key.lower() == b"x-floom-secret":
                 provided = value
                 break
-        if provided is not None and self._secret:
-            expected = self._secret.encode("latin-1")
-            if hmac.compare_digest(provided, expected):
-                user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
-                return AuthContext(
-                    user_id=user_id,
-                    role="admin",
-                    auth_method="secret",
-                    scopes=("admin",),
-                )
+        if self._secret:
+            # A secret is configured: enforce it strictly and NEVER fall through
+            # to dev mode. A missing or wrong secret must return 401 immediately.
+            # Previously, a wrong secret with 0 users in the DB would bypass auth
+            # entirely via the dev-mode path below — a P0 security hole on fresh
+            # production installs. (#594)
+            provided_val = provided if provided is not None else b""
+            if not hmac.compare_digest(provided_val, self._secret.encode("latin-1")):
+                raise HTTPException(status_code=401, detail="unauthorized")
+            user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
+            return AuthContext(
+                user_id=user_id,
+                role="admin",
+                auth_method="secret",
+                scopes=("admin",),
+            )
 
-        # 4. No users in DB — dev mode (legacy single-user install)
+        # 4. No users in DB — dev mode (legacy single-user install).
+        # Only reached when FLOOM_SECRET is NOT set (local dev without config).
         from db import get_repositories
         repos = get_repositories()
         if repos.users is not None and repos.users.count() == 0:
