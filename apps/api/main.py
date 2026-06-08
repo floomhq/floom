@@ -1875,6 +1875,17 @@ def _health_check_composio() -> Dict[str, Any]:
     return {"ok": response.status_code == 200, "status_code": response.status_code}
 
 
+def _health_check_scheduler() -> Dict[str, Any]:
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy != "local":
+        return {"ok": True, "enabled": False, "deploy": deploy}
+    try:
+        from scheduler import scheduler_status
+        return scheduler_status()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:300]}
+
+
 def _run_health_checks() -> Dict[str, Any]:
     now = time.monotonic()
     cached = _HEALTH_CACHE.get("payload")
@@ -1887,6 +1898,7 @@ def _run_health_checks() -> Dict[str, Any]:
         "e2b": _health_check_e2b,
         "openai": _health_check_openai,
         "composio": _health_check_composio,
+        "scheduler": _health_check_scheduler,
     }.items():
         try:
             checks[name] = fn()
@@ -8013,6 +8025,9 @@ def _claim_draft_slot(request: Request) -> Optional[int]:
         dq = _draft_rate_store.setdefault(key, collections.deque())
         while dq and dq[0] <= cutoff:
             dq.popleft()
+        if not dq:
+            _draft_rate_store.pop(key, None)
+            dq = _draft_rate_store.setdefault(key, collections.deque())
         if len(dq) >= _DRAFT_RATE_LIMIT_HOUR:
             oldest = dq[0]
             retry_after = max(1, int(_DRAFT_RATE_WINDOW_SECONDS - (now - oldest)))
