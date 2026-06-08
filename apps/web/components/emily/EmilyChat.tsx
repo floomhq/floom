@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { EmilyAvatar } from "./EmilyAvatar";
 import { MarkdownText } from "./MarkdownText";
@@ -161,9 +162,12 @@ interface EmilyChatCoreProps {
   fullPage?: boolean;
 }
 
+const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
+
 function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
   const { messages, conversationId, isStreaming, isHydrating, sendMessage, newSession } =
     useChatStream();
+  const router = useRouter();
   const [input, setInput] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -220,6 +224,29 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
       scrollToBottom();
     }
   }, [messages, scrollToBottom]);
+
+  // Refresh the workers page whenever Emily completes a create/update/delete
+  // so the user sees the new worker immediately without a manual refresh.
+  const seenCardIds = useRef(new Set<string>());
+  useEffect(() => {
+    for (const msg of messages) {
+      if (msg.role !== "assistant" || !msg.parts) continue;
+      for (const part of msg.parts) {
+        if (part.type !== "tool-card") continue;
+        const card = part.card;
+        const cardId = card.card_id;
+        if (seenCardIds.current.has(cardId)) continue;
+        if (
+          "toolName" in card &&
+          WORKER_MUTATION_TOOLS.has(card.toolName) &&
+          (card.status === "completed" || card.status === "failed")
+        ) {
+          seenCardIds.current.add(cardId);
+          router.refresh();
+        }
+      }
+    }
+  }, [messages, router]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
