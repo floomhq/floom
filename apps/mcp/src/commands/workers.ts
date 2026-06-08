@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { inspect } from "node:util";
 import { parse as parseYaml } from "yaml";
 import { createAuthenticatedClient, WorkerosApiError, WorkerosConnectionError } from "../lib/api.js";
 import { log, printJson, renderTable } from "../lib/output.js";
@@ -19,7 +20,7 @@ type WorkerDetail = {
   is_example?: boolean;
   config?: {
     runtime?: { entrypoint?: string };
-    connections?: string[];
+    connections?: Array<string | Record<string, unknown>>;
     secrets?: string[];
     triggers?: Array<{ type: string }>;
   };
@@ -60,6 +61,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
 function readNestedRecord(parent: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
@@ -327,6 +333,75 @@ function emitValidationErrors(errors: string[]): number {
   return 1;
 }
 
+function workerConnectionLabel(connection: Record<string, unknown>): string {
+  const composio = readNestedRecord(connection, "composio");
+  const candidates = [
+    connection.display_name,
+    connection.account_label,
+    connection.provider,
+    connection.app,
+    connection.name,
+    connection.mcp_label,
+    composio?.provider,
+    composio?.app,
+    connection.id,
+  ];
+  for (const candidate of candidates) {
+    const value = nonEmptyString(candidate);
+    if (value) return value;
+  }
+  return "";
+}
+
+function workerConnectionDetails(connection: Record<string, unknown>): string[] {
+  const details: string[] = [];
+  const status = nonEmptyString(connection.status);
+  if (status) details.push(`status: ${status}`);
+
+  const label = workerConnectionLabel(connection);
+  const account = nonEmptyString(connection.account_label) || nonEmptyString(connection.display_name);
+  if (account && account !== label) {
+    details.push(`account: ${account}`);
+  }
+
+  const scopes = stringList(connection.scopes);
+  if (scopes.length > 0) {
+    details.push(`scopes: ${scopes.join(", ")}`);
+  }
+
+  const allowedTools = stringList(connection.allowed_tools);
+  const composio = readNestedRecord(connection, "composio");
+  const composioAllowedTools = composio ? stringList(composio.allowed_tools) : [];
+  const mergedAllowedTools = [...new Set([...allowedTools, ...composioAllowedTools])];
+  if (mergedAllowedTools.length > 0) {
+    details.push(`allowed_tools: ${mergedAllowedTools.join(", ")}`);
+  }
+
+  const expiresAt = nonEmptyString(connection.expires_at) || nonEmptyString(connection.expiresAt);
+  if (expiresAt) {
+    details.push(`expires_at: ${expiresAt}`);
+  }
+
+  return details;
+}
+
+function formatConnection(connection: unknown): string {
+  if (typeof connection === "string") return connection;
+  if (!isRecord(connection)) return String(connection ?? "");
+
+  const label = workerConnectionLabel(connection);
+  const details = workerConnectionDetails(connection);
+  if (label && details.length === 0) return label;
+  if (label) return `${label}${details.length > 0 ? ` (${details.join("; ")})` : ""}`;
+  if (details.length > 0) return `connection (${details.join("; ")})`;
+  return inspect(connection, { depth: 1, compact: true, breakLength: 80, sorted: true });
+}
+
+function formatConnections(connections: unknown): string[] {
+  if (!Array.isArray(connections) || connections.length === 0) return [];
+  return connections.map((connection) => formatConnection(connection)).filter(Boolean);
+}
+
 function apiErrorDetail(error: WorkerosApiError): string {
   const body = error.body;
   if (body && typeof body === "object" && "detail" in body) {
@@ -476,7 +551,15 @@ export async function workersShowCommand(workerId: string, options: { json?: boo
     process.stdout.write(`${worker.name} (${worker.id})\n`);
     if (worker.description) process.stdout.write(`${worker.description}\n`);
     process.stdout.write(`Entry: ${worker.config?.runtime?.entrypoint || "unknown"}\n`);
-    process.stdout.write(`Connections: ${(worker.config?.connections || []).join(", ") || "none"}\n`);
+    const connections = formatConnections(worker.config?.connections);
+    if (connections.length === 0) {
+      process.stdout.write("Connections: none\n");
+    } else {
+      process.stdout.write("Connections:\n");
+      for (const connection of connections) {
+        process.stdout.write(`  - ${connection}\n`);
+      }
+    }
     const runs = (worker.recent_runs || []).slice(0, 5);
     if (runs.length) {
       process.stdout.write("\n");
@@ -547,8 +630,15 @@ export async function workersInfoCommand(workerId: string, options: { json?: boo
     const triggers = (worker.config?.triggers || []).map((t) => t.type).join(", ");
     log.kv("Trigger", triggers || "Manual run");
 
-    const connections = (worker.config?.connections || []).join(", ");
-    log.kv("Connections", connections || "none");
+    const connections = formatConnections(worker.config?.connections);
+    if (connections.length === 0) {
+      log.kv("Connections", "none");
+    } else {
+      log.kv("Connections", connections[0]);
+      for (const connection of connections.slice(1)) {
+        log.info(`  ${connection}`);
+      }
+    }
 
     const secrets = (worker.config?.secrets || []).join(", ");
     log.kv("Secrets needed", secrets || "none");
