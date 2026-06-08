@@ -200,6 +200,96 @@ def test_scheduler_respects_running_worker_concurrency(repo_bundle, monkeypatch)
     assert fired == [], "must not fire while a run is in flight"
 
 
+def test_scheduler_advances_trigger_next_run_at_on_fire_failure(repo_bundle, monkeypatch):
+    repos, db, manifest = repo_bundle
+    scheduler = _fresh_scheduler()
+
+    worker_id = "trigger-failure-worker"
+    repos.workers.create(
+        user_id="federico",
+        worker_id=worker_id,
+        name=worker_id,
+        manifest_json={**manifest(worker_id, worker_id), "trigger": {"type": "schedule", "cron": "*/5 * * * *"}},
+        bundle_path=f"workers/{worker_id}",
+        trigger_type="schedule",
+        cron_expr="*/5 * * * *",
+    )
+    rows = repos.workers.reconcile_triggers(
+        worker_id=worker_id,
+        triggers=[{"type": "schedule", "cron": "*/5 * * * *"}],
+    )
+    trigger_id = rows[0]["id"]
+    repos.workers.set_trigger_next_run_at(
+        trigger_id=trigger_id, next_run_at="2000-01-01T00:00:00+00:00"
+    )
+
+    monkeypatch.setattr(scheduler, "compute_next_run_at", lambda *a, **k: "2030-01-01T00:00:00+00:00")
+    monkeypatch.setattr(scheduler, "create_run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(scheduler, "start_run", lambda *a, **k: None)
+    monkeypatch.setattr(scheduler, "get_repositories", lambda: repos)
+    monkeypatch.setattr(scheduler, "alerting_tick", lambda: None)
+    monkeypatch.setattr(repos.runs, "count_running_for_worker", lambda **k: 0)
+
+    scheduler._tick()
+
+    with db.get_db() as conn:
+        next_run_at = conn.execute(
+            "SELECT next_run_at FROM worker_triggers WHERE id = ?",
+            (trigger_id,),
+        ).fetchone()[0]
+
+    assert next_run_at == "2030-01-01T00:00:00+00:00"
+
+
+def test_scheduler_advances_legacy_next_run_at_on_fire_failure(repo_bundle, monkeypatch):
+    repos, _db, manifest = repo_bundle
+    scheduler = _fresh_scheduler()
+
+    worker_id = "legacy-failure-worker"
+    repos.workers.create(
+        user_id="federico",
+        worker_id=worker_id,
+        name=worker_id,
+        manifest_json={**manifest(worker_id, worker_id), "trigger": {"type": "schedule", "cron": "*/5 * * * *"}},
+        bundle_path=f"workers/{worker_id}",
+        trigger_type="schedule",
+        cron_expr="*/5 * * * *",
+    )
+    repos.workers.set_next_run_at(
+        worker_id=worker_id, next_run_at="2000-01-01T00:00:00+00:00"
+    )
+
+    monkeypatch.setattr(scheduler, "compute_next_run_at", lambda *a, **k: "2030-01-01T00:00:00+00:00")
+    monkeypatch.setattr(scheduler, "create_run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(scheduler, "start_run", lambda *a, **k: None)
+    monkeypatch.setattr(scheduler, "get_repositories", lambda: repos)
+    monkeypatch.setattr(scheduler, "alerting_tick", lambda: None)
+    monkeypatch.setattr(repos.workers, "count_schedule_trigger_rows", lambda: 0)
+    monkeypatch.setattr(repos.runs, "count_running_for_worker", lambda **k: 0)
+
+    scheduler._tick()
+
+    state = repos.workers.get_schedule_state(worker_id=worker_id)
+    assert state is not None
+    assert state["next_run_at"] == "2030-01-01T00:00:00+00:00"
+
+
+def test_start_scheduler_clears_stop_event_before_launch(monkeypatch):
+    scheduler = _fresh_scheduler()
+    started: list[str] = []
+
+    def fake_start(self):
+        started.append(self.name)
+
+    monkeypatch.setattr(scheduler.threading.Thread, "start", fake_start)
+    scheduler._stop_event.set()
+
+    scheduler.start_scheduler()
+
+    assert scheduler._stop_event.is_set() is False
+    assert started == ["workeros-scheduler"]
+
+
 # ---------------------------------------------------------------------------
 # Webhook + composio resolution to specific rows
 # ---------------------------------------------------------------------------

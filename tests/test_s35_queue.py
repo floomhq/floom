@@ -373,6 +373,86 @@ class TestDrainLoopDbMethods:
             run_service._active_runs.clear()
         run_service._get_semaphore().release()
 
+    def test_drain_loop_unregisters_active_run_when_thread_start_raises(self, tmp_path, monkeypatch):
+        main = _load_api(monkeypatch, tmp_path, max_concurrent=2)
+        _insert_minimal_worker(main, "start-fail-worker")
+
+        run_service = sys.modules.get("run_service")
+        assert run_service is not None
+        repos = main.get_repositories()
+        run_id = run_service.create_run(
+            "start-fail-worker",
+            {},
+            user_id="federico",
+            repos=repos,
+        )
+
+        def fail_start(self):
+            raise RuntimeError("thread start failed")
+
+        with patch.object(run_service.threading.Thread, "start", fail_start):
+            run_service._drain_one_batch()
+
+        with run_service._active_runs_lock:
+            assert run_id not in run_service._active_runs
+
+        row = repos.runs.get(user_id="federico", run_id=run_id)
+        assert row is not None
+        assert row["status"] == "queued"
+
+    def test_retryable_failure_schedules_retry_with_default_backoff(self, tmp_path, monkeypatch):
+        main = _load_api(monkeypatch, tmp_path, max_concurrent=2)
+        run_service = sys.modules.get("run_service")
+        assert run_service is not None
+
+        scheduled: list[dict[str, object]] = []
+        monkeypatch.setattr(run_service, "_schedule_retry", lambda **kwargs: scheduled.append(kwargs))
+        repos = types.SimpleNamespace(
+            runs=types.SimpleNamespace(get_any=lambda run_id: {"retry_attempt": 0})
+        )
+        log_messages: list[tuple[str, str]] = []
+
+        scheduled_ok = run_service._schedule_retry_for_failed_run(
+            run_id="retry-run",
+            worker_id="retry-worker",
+            inputs={"foo": "bar"},
+            owner_id="federico",
+            config=None,
+            result_retryable=True,
+            repos=repos,
+            log_fn=lambda message, level="info": log_messages.append((level, message)),
+        )
+
+        assert scheduled_ok is True
+        assert scheduled and scheduled[0]["attempt"] == 1
+        assert scheduled[0]["delay_seconds"] == 60
+        assert any("retryable failure" in message for _level, message in log_messages)
+
+    def test_permanent_failure_without_retry_config_does_not_schedule_retry(self, tmp_path, monkeypatch):
+        main = _load_api(monkeypatch, tmp_path, max_concurrent=2)
+        run_service = sys.modules.get("run_service")
+        assert run_service is not None
+
+        scheduled: list[dict[str, object]] = []
+        monkeypatch.setattr(run_service, "_schedule_retry", lambda **kwargs: scheduled.append(kwargs))
+        repos = types.SimpleNamespace(
+            runs=types.SimpleNamespace(get_any=lambda run_id: {"retry_attempt": 0})
+        )
+
+        scheduled_ok = run_service._schedule_retry_for_failed_run(
+            run_id="permanent-run",
+            worker_id="permanent-worker",
+            inputs={"foo": "bar"},
+            owner_id="federico",
+            config=None,
+            result_retryable=False,
+            repos=repos,
+            log_fn=lambda *_args, **_kwargs: None,
+        )
+
+        assert scheduled_ok is False
+        assert scheduled == []
+
 
 class TestStartupReEnqueue:
     """Queued runs on startup are re-enqueued, not failed."""
