@@ -18278,27 +18278,42 @@ def set_secrets_key_resolver(fn: Optional[Any]) -> None:
     _secrets_key_resolver = fn
 
 
+_LOCAL_KEY_PATH = Path.home() / ".config" / "workeros" / "secrets.key"
+
+
 def _get_or_create_secrets_key(pat: str, repo_full_name: str) -> bytes:
     """Return the AES-256 key for .secrets.enc.
 
-    Cloud:  _secrets_key_resolver() — key from Supabase Vault, never touches GitHub.
-    OSS:    reads WORKEROS_SECRETS_KEY from GitHub repo Variables. If missing
-            (first connect), generates a random 32-byte key and stores it there.
-            Any PAT with repo access reads the same key — PAT rotation and
-            multiple installs pointing at the same repo all work correctly.
+    Lookup order:
+      1. Cloud: _secrets_key_resolver() — Supabase Vault, never touches GitHub.
+      2. OSS + GitHub: GitHub repo Variable (WORKEROS_SECRETS_KEY). Generates
+         and stores a random key on first use.
+      3. Local git (no GitHub): ~/.config/workeros/secrets.key. Generates and
+         writes a random key with mode 600 on first use — same model as SSH keys.
     """
     import github_api as _gh
 
+    # 1. Cloud resolver (Supabase Vault)
     if _secrets_key_resolver is not None:
         return _secrets_key_resolver()
 
-    # OSS: key lives in the GitHub repo as an Actions Variable (readable via API)
-    key = _gh.get_secrets_key(pat, repo_full_name)
-    if key is None:
-        # First time connecting this repo — generate and store the key
-        key = os.urandom(32)
-        _gh.set_secrets_key(pat, repo_full_name, key)
-        logger.info("Generated new secrets key for %s", repo_full_name)
+    # 2. OSS + GitHub: key lives in the GitHub repo as an Actions Variable
+    if repo_full_name:
+        key = _gh.get_secrets_key(pat, repo_full_name)
+        if key is None:
+            key = os.urandom(32)
+            _gh.set_secrets_key(pat, repo_full_name, key)
+            logger.info("Generated new secrets key for %s", repo_full_name)
+        return key
+
+    # 3. Local git (no GitHub): key lives in ~/.config/workeros/secrets.key
+    if _LOCAL_KEY_PATH.exists():
+        return _LOCAL_KEY_PATH.read_bytes()
+    _LOCAL_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    key = os.urandom(32)
+    _LOCAL_KEY_PATH.write_bytes(key)
+    _LOCAL_KEY_PATH.chmod(0o600)
+    logger.info("Generated local secrets key at %s", _LOCAL_KEY_PATH)
     return key
 
 
