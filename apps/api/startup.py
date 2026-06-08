@@ -749,6 +749,38 @@ def _register_git_workspace_resolver() -> None:
     engine_git_ops.set_workspace_id_resolver(get_active_workspace_id)
 
 
+def _ensure_magic_link_secret() -> None:
+    """Derive a stable magic-link HMAC key from SUPABASE_SERVICE_ROLE_KEY.
+
+    In cloud, FLOOM_SECRET is stripped and WORKEROS_MAGIC_LINK_SECRET is typically
+    unset. The engine's _magic_link_secret() fallback is a per-process random value
+    that is regenerated on every restart, invalidating all outstanding magic links.
+
+    This function derives a deterministic key so links survive restarts without
+    requiring an extra env var. It only runs when WORKEROS_MAGIC_LINK_SECRET is
+    unset — an explicit env var always wins.
+
+    Derivation: HMAC-SHA256(SUPABASE_SERVICE_ROLE_KEY, "workeros-magic-link-secret-v1")
+    Domain separation ("v1" suffix) prevents key reuse across protocol changes.
+    """
+    if os.environ.get("WORKEROS_MAGIC_LINK_SECRET", "").strip():
+        return  # operator set an explicit key — honour it
+
+    service_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    if not service_key:
+        return  # no service key available — fall through to per-process fallback
+
+    import hashlib
+    import hmac as _hmac
+
+    derived = _hmac.new(
+        service_key.encode("utf-8"),
+        b"workeros-magic-link-secret-v1",
+        hashlib.sha256,
+    ).hexdigest()
+    os.environ["WORKEROS_MAGIC_LINK_SECRET"] = derived
+
+
 def _register_secrets_key_resolver() -> None:
     """Tell the engine to fetch the .secrets.enc key from Supabase Vault (pgsodium).
 
@@ -790,6 +822,7 @@ def register_cloud_components() -> None:
     _activate_cloud_deploy()
     get_cloud_settings()
     ensure_secret_crypto_ready()
+    _ensure_magic_link_secret()
     _disable_postgrest_http2()
     register_auth_provider("cloud", lambda: SupabaseAuthProvider())
     register_repositories("cloud", _cloud_repositories)
