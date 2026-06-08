@@ -642,13 +642,28 @@ class E2BSandboxDriver(SandboxDriver):
 
         # e2b 2.x: use Sandbox.create()
         from run_token import make_run_token  # noqa: PLC0415
+        _sandbox_api_url_val = _sandbox_api_url()
+        # If the worker declares calls:, issue a wrt_ token so call_worker()
+        # inside run.py can spawn child runs. The simple make_run_token is kept
+        # for backwards-compat (composio-execute and run-status callbacks) but
+        # is NOT sufficient for worker-to-worker calling.
+        _worker_call_token: str | None = None
+        if config and config.calls and user_id:
+            from run_token import issue_worker_call_token  # noqa: PLC0415
+            _worker_call_token = issue_worker_call_token(
+                user_id=user_id,
+                parent_run_id=run_id,
+                callable_workers=list(config.calls),
+                depth=0,
+            )
         _sandbox_envs = {
             "FLOOM_RUN_ID": run_id,
             "FLOOM_TRACE_ID": trace_id,
-            "WORKEROS_API_URL": _sandbox_api_url(),
+            "WORKEROS_API_URL": _sandbox_api_url_val,
             # Scoped capability token — valid only for /runs/{run_id}/composio-execute/*
             # Never inject the full FLOOM_SECRET into sandboxes (it grants full API access).
-            "WORKEROS_RUN_TOKEN": make_run_token(run_id),
+            "WORKEROS_RUN_TOKEN": _worker_call_token if _worker_call_token else make_run_token(run_id),
+            **({"WORKEROS_CALL_DEPTH": "0"} if _worker_call_token else {}),
         }
         # Propagate the codegen model override so the worker-author meta-worker
         # (which generates code from inside the sandbox) uses the same model the
@@ -695,6 +710,14 @@ class E2BSandboxDriver(SandboxDriver):
                 content = fpath.read_bytes()
                 sandbox.files.write(dest, content)
                 log_fn(f"[e2b] Uploaded {rel.as_posix()}", "debug")
+
+            # Write workeros.py into the workdir so workers with calls: can do
+            # `from workeros import call_worker`. Only uploaded when the worker
+            # declares calls: — keeps the sandbox clean for workers that don't need it.
+            if _worker_call_token:
+                from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT  # noqa: PLC0415
+                sandbox.files.write(f"{workdir}/workeros.py", WORKEROS_PY_CONTENT.encode())
+                log_fn("[e2b] Uploaded workeros.py (worker-to-worker calling enabled)", "info")
 
             context_error = self._upload_contexts_to_sandbox(
                 sandbox=sandbox,
@@ -831,14 +854,18 @@ class E2BSandboxDriver(SandboxDriver):
                 streamed_stderr.append(chunk)
                 _emit_command_output(chunk, "warning", "[e2b] stderr: ", log_fn)
 
+            _cmd_envs: dict[str, str] = {
+                "FLOOM_RUN_ID": run_id,
+                "FLOOM_TRACE_ID": trace_id,
+                "WORKEROS_API_URL": _sandbox_envs["WORKEROS_API_URL"],
+            }
+            if _worker_call_token:
+                _cmd_envs["WORKEROS_RUN_TOKEN"] = _worker_call_token
+                _cmd_envs["WORKEROS_CALL_DEPTH"] = "0"
             proc = sandbox.commands.run(
                 command,
                 cwd=workdir,
-                envs={
-                    "FLOOM_RUN_ID": run_id,
-                    "FLOOM_TRACE_ID": trace_id,
-                    "WORKEROS_API_URL": _sandbox_envs["WORKEROS_API_URL"],
-                },
+                envs=_cmd_envs,
                 on_stdout=on_stdout,
                 on_stderr=on_stderr,
                 timeout=float(timeout_seconds),
