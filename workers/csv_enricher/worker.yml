@@ -10,7 +10,10 @@ use_cases:
 - Add recruiter notes to a candidate export.
 - Normalize messy spreadsheet fields into a consistent review column.
 example_input:
-  csv_file: null
+  csv_file: |
+    name,company,title,location
+    Anna Keller,NovaSearch,Senior Recruiter,Berlin
+    Ben Ortiz,Workeros,Developer Experience Lead,Remote
   instruction: Add columns for persona, likely priority, and one concise outreach angle.
 example_output: |
   ## Enriched CSV preview
