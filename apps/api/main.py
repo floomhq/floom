@@ -20497,6 +20497,9 @@ import secrets as _secrets_mod
 from auth.multi_member import SESSION_COOKIE, _hash_token as _hash_pat
 
 _SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+# Per-process fallback HMAC key for magic links when no env var is set (local dev only).
+# Tokens signed with this key are valid only for the lifetime of the process.
+_MAGIC_LINK_FALLBACK_SECRET: str = pysecrets.token_hex(32)
 
 
 class _AuthSetupRequest(BaseModel):
@@ -20657,6 +20660,20 @@ def auth_logout(
     return {"ok": True}
 
 
+def _magic_link_secret() -> str:
+    """Return the HMAC key for magic-link tokens.
+
+    Checks WORKEROS_MAGIC_LINK_SECRET first (dedicated key), then falls back to
+    FLOOM_SECRET (shared operator secret). Never raises — falls back to a
+    module-level random key so local installs without env vars still work.
+    """
+    return (
+        os.environ.get("WORKEROS_MAGIC_LINK_SECRET", "").strip()
+        or os.environ.get("FLOOM_SECRET", "").strip()
+        or _MAGIC_LINK_FALLBACK_SECRET
+    )
+
+
 def _issue_magic_link(*, user_id: str, ttl_seconds: int = 900) -> str:
     """Issue a stateless HMAC-signed magic-link token for a user."""
     payload = {
@@ -20665,7 +20682,7 @@ def _issue_magic_link(*, user_id: str, ttl_seconds: int = 900) -> str:
         "exp": int(time.time()) + ttl_seconds,
     }
     encoded = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    signature = hmac.new(_slack_state_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    signature = hmac.new(_magic_link_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
     return f"{encoded}.{signature}"
 
 
@@ -20675,7 +20692,7 @@ def _validate_magic_link(token: str) -> str:
         encoded, signature = token.split(".", 1)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid magic link") from exc
-    expected = hmac.new(_slack_state_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    expected = hmac.new(_magic_link_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
         raise HTTPException(status_code=400, detail="Invalid magic link")
     try:
