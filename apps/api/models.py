@@ -1596,6 +1596,25 @@ class OutputField(BaseModel):
     value: Any = None
 
 
+class ToolCallEntry(BaseModel):
+    id: str
+    name: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    result: Optional[Any] = None
+    error: Optional[str] = None
+
+
+class ApprovalEntry(BaseModel):
+    id: str
+    status: str
+    label: Optional[str] = None
+    preview: Optional[str] = None
+    created_at: str
+    decided_at: Optional[str] = None
+    reason: Optional[str] = None
+    follow_up_run_id: Optional[str] = None
+
+
 class RunDetail(BaseModel):
     id: str
     worker_id: str
@@ -1609,6 +1628,9 @@ class RunDetail(BaseModel):
     logs: List[LogEntry] = Field(default_factory=list)
     artifacts: List[Artifact] = Field(default_factory=list)
     transcript: List[Dict[str, Any]] = Field(default_factory=list)
+    tool_calls: List["ToolCallEntry"] = Field(default_factory=list)
+    approval_trail: Optional["ApprovalEntry"] = None
+    can_replay: bool = False
     error: Optional[str] = None  # operator-readable headline (never a raw traceback)
     error_raw: Optional[str] = None  # raw error/traceback for the debug "Raw" tab; redacted of secrets
     error_code: Optional[str] = None

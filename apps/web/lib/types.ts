@@ -208,6 +208,25 @@ export interface OutputField {
   value: string | number | boolean | Record<string, unknown> | unknown[] | null;
 }
 
+export interface ToolCallEntry {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+}
+
+export interface ApprovalEntry {
+  id: string;
+  status: string;
+  label?: string;
+  preview?: string;
+  created_at: string;
+  decided_at?: string;
+  reason?: string;
+  follow_up_run_id?: string;
+}
+
 export interface RunDetail {
   id: string;
   worker_id: string;
@@ -221,6 +240,9 @@ export interface RunDetail {
   logs: LogEntry[];
   artifacts: Artifact[];
   transcript: TranscriptRow[];
+  tool_calls?: ToolCallEntry[];
+  approval_trail?: ApprovalEntry;
+  can_replay?: boolean;
   error?: string;
   started_at?: string;
   completed_at?: string;
