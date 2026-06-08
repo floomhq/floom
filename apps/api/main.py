@@ -3237,16 +3237,11 @@ def _connection_slug_for_worker_card(connection: Any) -> Optional[str]:
 
 def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Dict[str, Any]]:
     runner = (run_runner or "").lower()
-    is_skill = runner.startswith("skill")
     is_agent = runner.startswith("agent") or "agent" in runner
 
-    # agent_driver writes to outputs/transcript.jsonl; skill_driver writes transcript.jsonl
-    if is_agent:
-        candidate_names = {"outputs/transcript.jsonl", "transcript.jsonl"}
-    elif is_skill:
-        candidate_names = {"transcript.jsonl"}
-    else:
+    if not is_agent:
         return []
+    candidate_names = {"outputs/transcript.jsonl", "transcript.jsonl"}
 
     transcript = next(
         (a for a in artifacts if (a.name or "") in candidate_names),
@@ -3277,12 +3272,8 @@ def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Di
         if isinstance(parsed, dict):
             raw_rows.append(parsed)
 
-    if not is_agent:
-        return raw_rows
-
-    # agent_driver writes Anthropic API message dicts. Normalise to the same
-    # {type, id, name, arguments, content} shape that skill_driver uses so
-    # callers don't need to know which runner produced the transcript.
+    # AgentDriver writes message dicts. Normalize to the
+    # {type, id, name, arguments, content} shape consumed by run detail callers.
     rows: List[Dict[str, Any]] = []
     for msg in raw_rows:
         role = msg.get("role", "")
@@ -7419,7 +7410,6 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
     _raise_if_protected_worker_mutation(worker_id)
     worker = repos.workers.get(user_id=owner_id, worker_id=worker_id)
     if not worker:
-        from worker_registry import WORKERS_DIR
         bundle_dir = WORKERS_DIR / worker_id
         if bundle_dir.is_dir():
             shutil.rmtree(bundle_dir, ignore_errors=True)
@@ -10650,8 +10640,8 @@ def cancel_run(
     spawned.  Sets cancel_requested=1 first so the drain loop skips the row
     if it is already past the get_queued() poll boundary.
 
-    For running runs: sets cancel_requested=1; the runner respects this between
-    iterations (AgentDriver) or on the next status write (other drivers).
+    For running runs: sets cancel_requested=1 and asks the E2B driver to kill
+    any registered sandbox command for this run.
 
     Returns 404 if no cancellable run is visible, 200 if cancellation was
     recorded.
@@ -10688,7 +10678,14 @@ def cancel_run(
         logger.info("Cancelled queued run %s before dispatch", run_id)
         return ActionResponse(status="cancelled", run_id=run_id)
 
-    logger.info("Cancel requested for run %s", run_id)
+    try:
+        from runner_sandbox.e2b_driver import cancel_sandbox
+
+        cancel_sandbox(run_id, reason="User requested cancellation.")
+    except Exception:
+        logger.warning("Failed to cancel E2B sandbox for run %s", run_id, exc_info=True)
+
+    logger.info("Cancel requested for running run %s", run_id)
     return ActionResponse(status="cancel_requested", run_id=run_id)
 
 
