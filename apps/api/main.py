@@ -1815,8 +1815,13 @@ def _health_check_e2b() -> Dict[str, Any]:
     if not os.environ.get("E2B_API_KEY"):
         return {"ok": False, "error": "E2B_API_KEY missing"}
     from e2b import Sandbox
+    import concurrent.futures
 
-    Sandbox.list(limit=1).next_items()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            ex.submit(lambda: Sandbox.list(limit=1).next_items()).result(timeout=5)
+    except concurrent.futures.TimeoutError:
+        return {"ok": False, "error": "E2B API timeout (>5s)"}
     return {"ok": True}
 
 

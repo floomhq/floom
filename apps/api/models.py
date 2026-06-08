@@ -1143,7 +1143,7 @@ class WorkerContract(BaseModel):
     version: str
     entrypoint: Optional[str] = "SKILL.md"
     system_prompt: Optional[str] = None
-    model: Optional[str] = "gpt-4o-mini"
+    model: Optional[str] = "gpt-5.1"
     entrypoints: Optional[List[WorkerEntrypoint]] = None
     limits: WorkerLimits = Field(default_factory=WorkerLimits)
     targets: List[str] = Field(default_factory=lambda: ["generic"])
@@ -1407,7 +1407,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         runner=runner,
         command=contract.exec.command,
         mode=contract.exec.mode or "agent",
-        model=contract.model or "gpt-4o-mini",
+        model=contract.model or "gpt-5.1",
         system_prompt=contract.system_prompt,
         disable_tools=list(contract.exec.disable_tools or []),
         limits=_model_data(contract.limits),
@@ -1570,7 +1570,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
         ),
         system_prompt=config.runtime.system_prompt,
-        model=config.runtime.model or config.model or "gpt-4o-mini",
+        model=config.runtime.model or config.model or "gpt-5.1",
         limits=config.runtime.limits,
         capabilities=WorkerContractCapabilities(
             secrets=list(config.secrets),
