@@ -65,28 +65,33 @@ This is a placeholder research brief. Connect your OpenAI API key to generate re
 
     # Write artifact
     artifact_path = ""
+    artifact_size = 0
+    relative_path = "out/brief.md"
     try:
         import os
         artifact_dir = context["artifact_dir"]
-        os.makedirs(artifact_dir, exist_ok=True)
-        artifact_path = os.path.join(artifact_dir, "research_brief.md")
+        output_dir = os.path.join(artifact_dir, "out")
+        os.makedirs(output_dir, exist_ok=True)
+        artifact_path = os.path.join(output_dir, "brief.md")
         with open(artifact_path, "w", encoding="utf-8") as f:
             f.write(output)
-        context["log"]("Artifact written: research_brief.md")
+        artifact_size = os.path.getsize(artifact_path)
+        context["log"]("Artifact written: out/brief.md")
     except Exception as e:
         context["log"](f"Failed to write artifact: {e}", level="warning")
 
     return {
         "status": "success",
         "outputs": {
-            "brief": output
+            "brief": relative_path
         },
         "artifacts": [
             {
-                "name": "research_brief.md",
-                "type": "markdown",
+                "name": relative_path,
+                "relative_path": relative_path,
+                "type": "text/markdown",
                 "path": artifact_path,
-                "size_bytes": len(output.encode("utf-8")) if artifact_path else 0
+                "size_bytes": artifact_size
             }
         ] if artifact_path else []
     }
