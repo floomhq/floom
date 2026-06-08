@@ -20907,13 +20907,26 @@ def create_token(
     raw = "wos_" + _secrets_mod.token_urlsafe(32)
     token_hash = _hash_pat(raw)
     token_id = str(_uuid_mod.uuid4())
-    row = token_repo.create(
-        token_id=token_id,
-        user_id=auth.user_id,
-        name=name,
-        token_hash=token_hash,
-        expires_at=payload.expires_at,
-    )
+    try:
+        row = token_repo.create(
+            token_id=token_id,
+            user_id=auth.user_id,
+            name=name,
+            token_hash=token_hash,
+            expires_at=payload.expires_at,
+        )
+    except Exception as _pat_exc:
+        # FK constraint failure means auth.user_id has no row in the users
+        # table — this happens in dev mode (ghost auth, no setup done).
+        # Surface a clear 409 rather than a raw 500.
+        import sqlite3 as _sqlite3
+        if isinstance(_pat_exc, _sqlite3.IntegrityError):
+            raise HTTPException(
+                status_code=409,
+                detail="Personal access tokens require a real user account. "
+                       "Complete workspace setup at /login first.",
+            ) from _pat_exc
+        raise
     pat = _PATOut(**{k: row[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")})
     return _PATCreateResponse(token=raw, pat=pat)
 
