@@ -33,6 +33,8 @@ type Props = {
   parts?: RunPart[];
   streamConnected?: boolean;
   streamError?: string | null;
+  streamUnavailable?: boolean;
+  onRefresh?: () => void;
   inline?: boolean;
   onBack?: () => void;
   onReplay?: () => void;
@@ -44,6 +46,8 @@ export function RunDetailSplitPane({
   parts = [],
   streamConnected = false,
   streamError,
+  streamUnavailable = false,
+  onRefresh,
   inline = false,
   onBack,
   onReplay,
@@ -52,6 +56,8 @@ export function RunDetailSplitPane({
   const transcriptParts = parts.length > 0 ? parts : partsFromRun(run);
   const timeline = buildTimeline(run, transcriptParts);
   const isActive = run.status === "running" || run.status === "queued";
+  const latest = latestStatus(run, transcriptParts);
+  const displayStatus = streamUnavailable && isActive ? "unknown" : latest;
 
   return (
     <div className={cn("space-y-6", inline && "min-h-[280px]")}>
@@ -77,7 +83,7 @@ export function RunDetailSplitPane({
             >
               {run.worker_name || run.worker_id}
             </Link>
-            <RunStatusBadge status={latestStatus(run, transcriptParts)} />
+            <RunStatusBadge status={displayStatus} />
             {streamConnected && <span className="text-xs text-pending">Streaming</span>}
             {streamError && <span className="text-xs text-error">{streamError}</span>}
           </div>
@@ -147,7 +153,24 @@ export function RunDetailSplitPane({
         </div>
       </div>
 
-      <RunMetricsStrip run={run} parts={transcriptParts} />
+      {streamUnavailable && isActive && (
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-[var(--ink)]">Run status connection lost</p>
+            <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+              {streamError || "The stream dropped before a terminal event arrived. Refresh to check the backend."}
+            </p>
+          </div>
+          {onRefresh && (
+            <Button variant="outline" size="sm" onClick={onRefresh}>
+              <RotateCcw className="size-3.5 mr-1.5" />
+              Refresh status
+            </Button>
+          )}
+        </div>
+      )}
+
+      <RunMetricsStrip run={run} status={displayStatus} />
 
       {/* R4: the split pane was unbounded — long transcripts/logs grew the
           whole page so it scrolled "into infinity". Cap the pane at a
@@ -250,12 +273,14 @@ function OperatorLogs({ run }: { run: RunDetail }) {
   );
 }
 
-function RunMetricsStrip({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
+function RunMetricsStrip({ run, status }: { run: RunDetail; status: string }) {
+  const durationValue =
+    run.duration_ms != null ? formatDuration(run.duration_ms) : status === "unknown" ? "Unknown" : "Running";
   return (
     <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-5">
-      <RunMetric label="Status" value={statusLabel(latestStatus(run, parts))} />
+      <RunMetric label="Status" value={statusLabel(status)} />
       <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
-      <RunMetric label="Duration" value={run.duration_ms != null ? formatDuration(run.duration_ms) : "Running"} />
+      <RunMetric label="Duration" value={durationValue} />
       <RunMetric label="Output" value={`${outputItemCount(run)} item${outputItemCount(run) === 1 ? "" : "s"}`} />
       <RunMetric label="Files" value={`${run.artifacts.length} file${run.artifacts.length === 1 ? "" : "s"}`} />
     </dl>

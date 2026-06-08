@@ -154,7 +154,7 @@ export default function RunDetailPage() {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [approval, setApproval] = useState<ApprovalRow | null>(null);
   const [loading, setLoading] = useState(true);
-  const { parts, fallbackRun, connected, error, finishedPart } = useRunStream(runId);
+  const { parts, fallbackRun, connected, error, finishedPart, streamUnavailable, refresh } = useRunStream(runId);
 
   const load = useCallback(async () => {
     try {
@@ -226,33 +226,35 @@ export default function RunDetailPage() {
           Awaiting approval. <Link href="/approvals" className="underline underline-offset-2">View approvals</Link>
         </div>
       )}
-    <RunDetailSplitPane
-      run={run}
-      parts={parts}
-      streamConnected={connected}
-      streamError={error}
-      onBack={() => router.push("/runs")}
-      onReplay={async () => {
-        try {
-          const result = await api.runs.replay(run.worker_id, run.id);
-          if (!result.run_id) throw new Error("Run ID missing from API response");
-          toast.success("Re-running with same inputs");
-          router.push(`/runs/${result.run_id}`);
-        } catch (exc) {
-          toast.error(`Re-run failed: ${exc instanceof Error ? exc.message : "unknown"}`);
-        }
-      }}
-      onCancel={async () => {
-        if (!confirm("Cancel this run?")) return;
-        try {
-          await api.runs.cancel(run.id);
-          toast.success("Cancellation requested");
-          void load();
-        } catch (exc) {
-          toast.error(`Cancel failed: ${exc instanceof Error ? exc.message : "unknown"}`);
-        }
-      }}
-    />
+      <RunDetailSplitPane
+        run={run}
+        parts={parts}
+        streamConnected={connected}
+        streamError={error}
+        streamUnavailable={streamUnavailable}
+        onRefresh={refresh}
+        onBack={() => router.push("/runs")}
+        onReplay={async () => {
+          try {
+            const result = await api.runs.replay(run.worker_id, run.id);
+            if (!result.run_id) throw new Error("Run ID missing from API response");
+            toast.success("Re-running with same inputs");
+            router.push(`/runs/${result.run_id}`);
+          } catch (exc) {
+            toast.error(`Re-run failed: ${exc instanceof Error ? exc.message : "unknown"}`);
+          }
+        }}
+        onCancel={async () => {
+          if (!confirm("Cancel this run?")) return;
+          try {
+            await api.runs.cancel(run.id);
+            toast.success("Cancellation requested");
+            void load();
+          } catch (exc) {
+            toast.error(`Cancel failed: ${exc instanceof Error ? exc.message : "unknown"}`);
+          }
+        }}
+      />
     </div>
   );
 }

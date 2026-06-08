@@ -100,7 +100,7 @@ def discover_workers(use_cache: bool = False) -> List[Dict[str, Any]]:
                 "config": {},
                 "status": "error",
                 "trigger_type": "manual",
-                "runner": "local",
+                "runner": "e2b",
             })
 
     _worker_cache = workers

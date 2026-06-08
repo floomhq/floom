@@ -7,26 +7,26 @@
 ## Root Cause
 
 - `workers/worker-author/run.py` uses `_DEFAULT_CODEGEN_MODEL = "gpt-5.1"` and sent `temperature=0.2` from inside the E2B sandbox.
-- `apps/api/runner_sandbox/skill_driver.py` sent `temperature=0.5` directly through `client.chat.completions.create`.
+- The deleted legacy skill runtime module sent `temperature=0.5` directly through `client.chat.completions.create`.
 - gpt-5.x models reject non-default temperature values, producing HTTP 400 instead of a generated worker bundle.
 - `/root/.config/workeros/api.env` contained `WORKER_AUTHOR_DEFAULT_MODEL=gpt-4.1`, but no repo code reads that variable. It was removed; the live propagated override is `WORKEROS_CODEGEN_MODEL`.
 
 ## Fix
 
 - `workers/worker-author/run.py` now retries once without `temperature` when the provider rejects a non-default value.
-- `apps/api/runner_sandbox/skill_driver.py` now wraps chat completions in `_chat_completions_create_temperature_safe`, preserving tools/timeout/model kwargs and retrying once without `temperature` only on the known provider error.
+- The legacy skill runtime module wrapped chat completions in `_chat_completions_create_temperature_safe`, preserving tools/timeout/model kwargs and retrying once without `temperature` only on the known provider error. That module has since been removed.
 - `apps/api/codegen_model.py` stale docs now point to `WORKEROS_CODEGEN_MODEL`.
 - Regression tests added:
   - `tests/test_worker_author_temperature.py`
-  - `tests/test_skill_driver.py::SkillRuntimeDriverTest::test_model_temperature_rejection_retries_without_temperature`
+  - Legacy skill runtime temperature retry regression.
 
 ## Local Verification
 
-- `python3 -m pytest tests/test_codegen_model.py tests/test_worker_author_temperature.py tests/test_skill_driver.py::SkillRuntimeDriverTest::test_model_temperature_rejection_retries_without_temperature tests/test_wedge_prompt_to_worker_creates.py tests/test_workers_draft_from_prompt.py -q`
+- `python3 -m pytest tests/test_codegen_model.py tests/test_worker_author_temperature.py tests/test_wedge_prompt_to_worker_creates.py tests/test_workers_draft_from_prompt.py -q`
   - Result: 65 passed.
-- `python3 -m py_compile apps/api/runner_sandbox/skill_driver.py workers/worker-author/run.py apps/api/codegen_model.py`
+- `python3 -m py_compile workers/worker-author/run.py apps/api/codegen_model.py`
   - Result: passed.
-- Known unrelated suite drift: `tests/test_skill_driver.py::SkillRuntimeDriverTest::test_missing_declared_output_fails_after_transcript` fails in isolation by returning `success` instead of expected `failed`.
+- Known unrelated suite drift at the time: a legacy skill runtime transcript test failed in isolation by returning `success` instead of expected `failed`.
 
 ## Deployment
 
@@ -39,7 +39,7 @@
 - Active service verification:
   - `systemctl show workeros-api` working directory: `/opt/workeros-api-deploy/apps/api`.
   - `/opt/workeros-api-deploy` HEAD: `093e9c3e166f8cb8c52e58041e2d69b9d3abae43`.
-  - Source grep in `/opt/workeros-api-deploy` confirmed `skill_driver.py` and `worker-author/run.py` contain the retry-without-temperature fix.
+  - Source grep in `/opt/workeros-api-deploy` confirmed `worker-author/run.py` contained the retry-without-temperature fix.
   - External `GET https://workers-api.floom.dev/health` returned HTTP 200 and `status: ok`.
 
 ## Production From-Prompt Verification

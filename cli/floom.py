@@ -98,7 +98,7 @@ def dev():
         click.secho("", fg="yellow")
         click.secho("  WARNING: workeros dev mode is starting WITHOUT FLOOM_SECRET set.", fg="yellow", bold=True)
         click.secho("  Any request that reaches the API will be accepted.", fg="yellow")
-        click.secho("  Workers with runner: local run in-process and have full host access.", fg="yellow")
+        click.secho("  Script workers run in E2B; no in-process worker runner is supported.", fg="yellow")
         click.secho("  Set FLOOM_SECRET in apps/api/.env before exposing this beyond localhost.", fg="yellow")
         click.secho("", fg="yellow")
 
@@ -216,7 +216,7 @@ targets: [generic]
 exec:
   command: python run.py
   runtime: python311
-  runner: local
+  runner: e2b
   inputs:
   - name: input_text
     kind: scalar
