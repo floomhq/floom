@@ -3179,6 +3179,26 @@ def execute_run(
             log_fn(INTERRUPTED_RUN_ERROR, level="error")
             return
 
+        # #607: E2B driver returns status="cancelled" when the sandbox was killed
+        # by a user cancel (cancel_requested flag set). Mark the run cancelled and
+        # emit a finish event — do NOT fall through to schema validation or
+        # completion logic.
+        if result.status == "cancelled":
+            update_run_status(
+                run_id,
+                "cancelled",
+                error=result.error or "Cancelled by user",
+                error_code=result.error_code or "user_cancel",
+                user_id=owner_id,
+                repos=repos_obj,
+            )
+            publish_run_part(
+                run_id,
+                {"type": "finish", "status": "cancelled"},
+            )
+            log_fn("Run cancelled by user", level="info")
+            return
+
         outputs = result.outputs
         artifacts = result.artifacts
         _materialize_declared_file_outputs(run_id, config, outputs, artifacts)
