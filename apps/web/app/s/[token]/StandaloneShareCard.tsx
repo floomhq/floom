@@ -103,7 +103,7 @@ export function StandaloneShareCard({
     return (
       <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
         <div className="rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
-          <WorkerShareCard worker={share.worker} authed={authed} />
+          <WorkerShareCard worker={share.worker} authed={authed} token={token} />
         </div>
       </div>
     );
