@@ -1408,6 +1408,16 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
 
     path = request.url.path
+    authorization_header = request.headers.get("authorization", "")
+    bearer_token_header = ""
+    if authorization_header.startswith("Bearer "):
+        bearer_token_header = authorization_header[7:].strip()
+    if bearer_token_header.startswith("wrt_"):
+        if request.method != "POST" or not _RE_WORKER_RUN_CREATE.match(path):
+            return _JSONResponse(
+                status_code=403,
+                content={"detail": "Worker-call tokens are only valid for child run creation"},
+            )
 
     # Run-scoped token check — always evaluated, even in dev mode. A run token
     # is a narrow sandbox capability: it can only call its own Composio proxy
@@ -1504,6 +1514,7 @@ logger = logging.getLogger("floom.api")
 # auth is by X-Workeros-Run-Token, scoped to the run_id in the path).
 import re as _re
 _RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
+_RE_WORKER_RUN_CREATE = _re.compile(r"^/workers/[^/]+/runs$")
 
 # Process start time for /system/metrics uptime reporting.
 _PROCESS_START_TIME = time.time()
@@ -8088,7 +8099,11 @@ def _call_draft_llm(
 
 
 @app.post("/workers/draft-from-prompt", response_model=DraftFromPromptResponse)
-async def draft_worker_from_prompt(payload: DraftFromPromptRequest, request: Request) -> DraftFromPromptResponse:
+async def draft_worker_from_prompt(
+    payload: DraftFromPromptRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> DraftFromPromptResponse:
     """Draft a WorkerContract YAML from a natural-language prompt using LLM."""
     prompt = (payload.prompt or "").strip()
     if not prompt:
