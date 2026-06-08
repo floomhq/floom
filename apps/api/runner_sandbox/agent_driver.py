@@ -468,6 +468,8 @@ class AgentDriver(SandboxDriver):
 
             if last_result is not None:
                 transcript.append({"type": "final_output", "content": str(getattr(last_result, "final_output", ""))})
+            if total_tokens > 0:
+                transcript.append({"type": "usage", "total_tokens": total_tokens})
             self._persist_transcript(output_dir, transcript, artifacts)
             # Output-schema enforcement is now centralized at the common
             # completion gate in run_service.execute_run (one path for all three

@@ -108,6 +108,12 @@ export function RunDetailSplitPane({
                 <span>{formatDuration(run.duration_ms)}</span>
               </>
             )}
+            {run.total_tokens != null && (
+              <>
+                <span className="text-muted-foreground/60">·</span>
+                <span>{run.total_tokens.toLocaleString()} tokens</span>
+              </>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">

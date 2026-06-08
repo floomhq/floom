@@ -243,6 +243,7 @@ export interface RunDetail {
   tool_calls?: ToolCallEntry[];
   approval_trail?: ApprovalEntry;
   can_replay?: boolean;
+  total_tokens?: number;
   error?: string;
   started_at?: string;
   completed_at?: string;
