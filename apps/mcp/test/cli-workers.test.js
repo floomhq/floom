@@ -122,7 +122,19 @@ async function startMockApi({ existing = false, putStatus = 200, putDetail = "Un
         json(response, 404, { detail: "Worker not found" });
         return;
       }
-      json(response, 200, { id: "cli-test-worker", name: "CLI Test Worker" });
+      json(response, 200, {
+        id: "cli-test-worker",
+        name: "CLI Test Worker",
+        description: "CLI fixture",
+        config: {
+          runtime: { entrypoint: "run.py" },
+          connections: [
+            { app: "google_search_console", allowed_tools: ["GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY"] },
+            "github",
+          ],
+        },
+        recent_runs: [],
+      });
       return;
     }
 
@@ -287,6 +299,20 @@ test("workers push updates an existing worker with PUT /workers/:id", async (t) 
   assert.match(mock.bodies[0].worker_yml, /entrypoint: SKILL.md/);
   assert.equal(mock.bodies[0].run_py, "");
   assert.match(mock.bodies[0].skill_md, /CLI Test Worker/);
+});
+
+test("workers show renders structured connections for humans", async (t) => {
+  const mock = await startMockApi({ existing: true });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["workers", "show", "cli-test-worker"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Connections:/);
+  assert.match(result.stdout, /google_search_console \(allowed_tools: GOOGLE_SEARCH_CONSOLE_SEARCH_ANALYTICS_QUERY\)/);
+  assert.match(result.stdout, /github/);
+  assert.doesNotMatch(result.stdout, /\[object Object\]/);
 });
 
 test("workers push reports unsupported in-place source updates", async (t) => {
