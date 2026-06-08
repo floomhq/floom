@@ -2,7 +2,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ export default function ConnectionsClient({
 }: {
   initialConnections: ConnectionItem[];
 }) {
+  const router = useRouter();
   // S44: start with server-fetched data; no loading flash on initial render.
   const [connections, setConnections] = useState<ConnectionRecord[]>(
     initialConnections as ConnectionRecord[]
@@ -336,11 +338,21 @@ export default function ConnectionsClient({
   return (
     <>
       <div className="space-y-6">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-            Connect apps via OAuth so workers can read and write on your behalf.
-          </p>
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+            <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
+              Connect apps via OAuth so workers can read and write on your behalf.
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => router.push("/connections/browse")}
+          >
+            <Plus className="size-4" />
+            Add connection
+          </Button>
         </header>
         <ConnectionsTabs />
 
@@ -375,7 +387,19 @@ export default function ConnectionsClient({
               ))}
             </div>
           ) : connectionViews.filter((connection) => (connection.kind ?? "composio") === "composio").length === 0 ? (
-            <ConnectionsEmptyState onConnect={() => { window.location.href = "/connections/browse"; }} />
+            <div className="flex flex-col items-center gap-3 px-4 py-16 text-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)]">
+              <p className="text-sm font-medium text-foreground">No connections yet</p>
+              <p className="text-sm text-muted-foreground">Browse 1,000+ apps to connect.</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => router.push("/connections/browse")}
+              >
+                <Plus className="size-4" />
+                Add connection
+              </Button>
+            </div>
           ) : (
             <>
               <div className="mb-3 relative max-w-sm">
