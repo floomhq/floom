@@ -375,6 +375,14 @@ DEFAULT_CHAT_MESSAGE_MAX_CHARS = 20_000
 DEFAULT_RATE_LIMIT = (60, 60.0)
 BODYLESS_METHODS = {"GET", "HEAD", "OPTIONS"}
 RATE_LIMIT_RULES = [
+    # #601: auth/identity endpoints — strict limits to prevent brute-force and
+    # credential-stuffing. 5 attempts per minute per IP is generous for humans
+    # while blocking automated attacks.
+    (re.compile(r"^/auth/login$"), (5, 60.0)),
+    (re.compile(r"^/auth/setup$"), (5, 60.0)),
+    (re.compile(r"^/auth/tokens$"), (10, 60.0)),
+    (re.compile(r"^/auth/magic-link$"), (5, 60.0)),
+    (re.compile(r"^/auth/magic/.+$"), (10, 60.0)),
     (re.compile(r"^/cli-auth/devices$"), (5, 60.0)),
     (re.compile(r"^/workers/from-bundle$"), (10, 60.0)),
     (re.compile(r"^/workspace/import$"), (10, 60.0)),
@@ -1871,11 +1879,20 @@ async def value_error_handler(_request, exc: ValueError):
 
 
 def _redacted_validation_errors(errors: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    # #600: include the full field path (loc) so agents and tooling can
+    # identify exactly which field failed and self-repair. Previously hardcoded
+    # to "request", hiding the location entirely.
     sanitized: List[Dict[str, str]] = []
     for error in errors[:10]:
+        raw_loc = error.get("loc") or ()
+        # Convert tuple/list loc to a dot-separated string, e.g. ("exec","runner") -> "exec.runner"
+        if isinstance(raw_loc, (list, tuple)):
+            loc_str = ".".join(str(part) for part in raw_loc) if raw_loc else "request"
+        else:
+            loc_str = str(raw_loc) or "request"
         sanitized.append(
             {
-                "loc": "request",
+                "loc": loc_str,
                 "msg": str(error.get("msg") or "invalid value"),
                 "type": str(error.get("type") or "value_error"),
             }
@@ -14543,10 +14560,56 @@ def test_connection(
     tested_at = now_iso()
 
     if (row.get("kind") or "composio") != "composio":
+        # #599: actually test MCP connections by attempting to initialize the
+        # server and enumerate its tools. Previously returned "valid" immediately
+        # without contacting the server, so agents couldn't validate credentials
+        # or URL before wiring a connection into a worker.
+        mcp_url = row.get("url") or row.get("server_url") or ""
+        mcp_token = row.get("api_key") or row.get("token") or ""
+        if mcp_url:
+            try:
+                import httpx as _httpx
+                headers = {}
+                if mcp_token:
+                    headers["Authorization"] = f"Bearer {mcp_token}"
+                # Probe the MCP server's tool list via HTTP (SSE/REST transport).
+                probe_url = mcp_url.rstrip("/") + "/tools/list"
+                resp = _httpx.get(probe_url, headers=headers, timeout=8.0)
+                if resp.status_code == 404:
+                    # Try the MCP initialize endpoint instead
+                    probe_url = mcp_url.rstrip("/")
+                    resp = _httpx.post(probe_url, json={"jsonrpc": "2.0", "method": "initialize", "id": 1, "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "workeros", "version": "1.0"}}}, headers=headers, timeout=8.0)
+                if resp.status_code in (200, 201):
+                    _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
+                    tool_count = None
+                    try:
+                        body = resp.json()
+                        tools = body.get("tools") or body.get("result", {}).get("capabilities", {})
+                        if isinstance(tools, list):
+                            tool_count = len(tools)
+                    except Exception:
+                        pass
+                    reason = f"MCP server reachable{f' — {tool_count} tools' if tool_count is not None else ''}."
+                    return ConnectionTestResult(status="valid", reason=reason, tested_at=tested_at)
+                else:
+                    _write_connection_check(connection_id, "failed", f"HTTP {resp.status_code}", tested_at, status="failed", repos=repos)
+                    return ConnectionTestResult(
+                        status="failed",
+                        reason=f"MCP server returned HTTP {resp.status_code}. Check the URL and credentials.",
+                        tested_at=tested_at,
+                    )
+            except Exception as exc:
+                _write_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
+                return ConnectionTestResult(
+                    status="failed",
+                    reason=f"Could not reach MCP server: {exc}",
+                    tested_at=tested_at,
+                )
+        # No URL stored — connection is saved but untestable without a URL
         _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
         return ConnectionTestResult(
             status="valid",
-            reason="MCP server is saved; runtime connection is checked when a worker runs.",
+            reason="MCP connection saved. Add a server URL to enable live testing.",
             tested_at=tested_at,
         )
 
