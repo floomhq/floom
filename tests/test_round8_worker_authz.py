@@ -534,6 +534,32 @@ def test_internal_shipped_workers_are_hidden_from_public_api(monkeypatch, tmp_pa
     assert "slack-listener" not in worker_ids
 
 
+def test_db_persisted_hidden_workers_excluded_from_list(monkeypatch, tmp_path):
+    """Regression: workers in DB that _worker_hidden_from_api() hides must not leak
+    into GET /workers even when they were persisted to the DB via startup reload.
+
+    The bug: _list_visible_workers used to load DB workers without applying
+    _worker_hidden_from_api, so slack-listener appeared in the list but 404'd
+    on detail — a clickable ghost. Fix: apply the same filter to the DB path.
+    """
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("research_brief", "slack-listener"))
+    client = TestClient(main.app)
+
+    # Simulate what the startup lifespan does: persist all discovered workers to DB.
+    # This is the path that caused the bug — DB workers bypassed the hidden filter.
+    main._reload_workers_for_user("user-a")
+
+    listed = client.get("/workers", headers=_headers("user-a"))
+    hidden_detail = client.get("/workers/slack-listener", headers=_headers("user-a"))
+
+    assert listed.status_code == 200, listed.text
+    assert hidden_detail.status_code == 404, hidden_detail.text
+
+    worker_ids = {item["id"] for item in listed.json()}
+    assert "research_brief" in worker_ids, "public stock worker must remain visible"
+    assert "slack-listener" not in worker_ids, "DB-persisted hidden worker must not appear in list"
+
+
 def test_owner_audit_prefixed_custom_worker_remains_visible(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
