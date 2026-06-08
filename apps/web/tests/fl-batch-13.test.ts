@@ -80,6 +80,22 @@ function test538MagicLinkUsesHmac(): void {
   );
 }
 
+function test538MagicLinkHasOwnSecret(): void {
+  const s = api("main.py");
+  assert(
+    s.includes("_magic_link_secret"),
+    "magic link must use _magic_link_secret(), not _slack_state_secret() directly",
+  );
+  assert(
+    s.includes("WORKEROS_MAGIC_LINK_SECRET"),
+    "_magic_link_secret must check WORKEROS_MAGIC_LINK_SECRET env var",
+  );
+  assert(
+    s.includes("_MAGIC_LINK_FALLBACK_SECRET"),
+    "_magic_link_secret must have a process-scoped fallback for local dev",
+  );
+}
+
 function test538MagicLinkEndpointIssue(): void {
   const s = api("main.py");
   assert(
@@ -188,6 +204,7 @@ const tests: [string, () => void][] = [
   ["#562 top-level Add secret link updated to /connections/secrets with return_to", test562TopLevelSecretLinkUpdated],
   ["#538 _issue_magic_link and _validate_magic_link helpers defined", test538MagicLinkIssuer],
   ["#538 _issue_magic_link uses HMAC-SHA256 signing", test538MagicLinkUsesHmac],
+  ["#538 _magic_link_secret() uses dedicated key, not Slack secret", test538MagicLinkHasOwnSecret],
   ["#538 POST /auth/magic-link endpoint returns url + expires_in", test538MagicLinkEndpointIssue],
   ["#538 GET /auth/magic/{token} creates session and sets cookie", test538MagicLinkEndpointConsume],
   ["#538 Slack DM handler generates magic link for Emily's system context", test538SlackDmHandlerGeneratesMagicLink],
