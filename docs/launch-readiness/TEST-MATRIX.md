@@ -7,7 +7,7 @@ Single source of truth for what gets audited every time. If a row is not checked
 | # | Surface | What it is | Tested by | Current state |
 |---|---|---|---|---|
 | 1 | API | 30 REST routes on `workers-api.floom.dev` | `codex-roast` lifecycle + `codex-security` OWASP | ✅ done (79+68 pre-fix → re-running) |
-| 2 | MCP | `@floomhq/workeros@0.1.0` stdio server, 9 tools | `mcp-integration` (NEW) | ❌ not yet |
+| 2 | MCP | HTTP `/mcp-tools/serve` plus `workeros-mcp` stdio fallback, 50+ tools | `apps/mcp npm test` + prod MCP smoke | ✅ tested 2026-06-08 |
 | 3 | CLI | `floom <subcommand>` Python Click CLI | `cli-smoke` (NEW) | ❌ not yet |
 | 4 | UI | 12 frontend routes on `workers.floom.dev` | `ui-walk` via authenticated chrome | ❌ blocked by Vercel deploy protection |
 | 5 | Triggers — manual | POST /workers/{id}/runs | `codex-roast` | ✅ done |

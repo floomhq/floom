@@ -622,6 +622,16 @@ test("workeros CLI without a subcommand serves MCP over stdio", async (t) => {
   }, "dist/cli.js");
 });
 
+test("published workeros-mcp bin wrapper serves MCP over stdio", async (t) => {
+  const mock = await startMockApi();
+  t.after(() => mock.server.close());
+
+  await withClient(mock, "test-secret", async (client) => {
+    const tools = await client.listTools();
+    assert.equal(tools.tools.some((tool) => tool.name === "workers.list"), true);
+  }, "bin/workeros-mcp");
+});
+
 test("workers.create auto-fills capabilities from run.py environment variables", async (t) => {
   const mock = await startMockApi();
   t.after(() => mock.server.close());

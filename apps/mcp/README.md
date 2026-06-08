@@ -62,7 +62,18 @@ Re-running the installer updates the existing `workeros` entry instead of duplic
 
 All targets write **HTTP MCP transport** (`url` + `headers`) — no local subprocess is spawned. The MCP endpoint is hosted on the Workeros API server.
 
-## Manual config
+```json
+{
+  "mcpServers": {
+    "workeros": {
+      "url": "https://workers-api.floom.dev/mcp-tools/serve",
+      "headers": {
+        "x-floom-secret": "<WORKEROS_API_SECRET>"
+      }
+    }
+  }
+}
+```
 
 ### HTTP transport (recommended — written by `workeros mcp install`)
 
@@ -81,7 +92,26 @@ Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape):
 }
 ```
 
-Continue (`~/.continue/.continuerc.json`, array shape):
+The published binary stays connected for that handshake when launched as `npx -p @floomhq/workeros workeros-mcp`.
+
+## Manual config
+
+Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape, HTTP MCP):
+
+```json
+{
+  "mcpServers": {
+    "workeros": {
+      "url": "https://workers-api.floom.dev/mcp-tools/serve",
+      "headers": {
+        "x-floom-secret": "<WORKEROS_API_SECRET>"
+      }
+    }
+  }
+}
+```
+
+Continue (`~/.continue/.continuerc.json`, array shape, HTTP MCP):
 
 ```json
 {
