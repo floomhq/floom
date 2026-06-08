@@ -10,11 +10,13 @@ sys.path.insert(0, str(ROOT / "apps" / "api"))
 import runner_sandbox.agent_driver as agent_module
 from models import WorkerConfig
 from runner_sandbox.agent_driver import AgentDriver
+from runner_utils import _validate_output_schema
 from agent_driver_sdk_fakes import ScriptedAgentDriverMixin
 
 
 class ScriptedAgentDriver(ScriptedAgentDriverMixin, AgentDriver):
-    pass
+    def _cancel_requested(self, run_id: str) -> bool:
+        return False  # no DB in unit tests; cancel behaviour tested separately
 
 
 def tool_response(name, args, call_id="call_1", tokens=10):
@@ -248,18 +250,17 @@ def test_run_command_containment_and_env_allowlist(tmp_path):
 
 def test_declared_output_validation(tmp_path):
     config = make_config(tmp_path)
-    driver = ScriptedAgentDriver()
-    driver.set_scripts([[final_response()], [final_response()]])
+
+    # Output schema validation was moved to run_service (single convergence point
+    # for all drivers). The driver itself returns success; run_service calls
+    # _validate_output_schema before marking the run complete.
+    # Test _validate_output_schema directly for the missing-required-output case.
     _entries, log_fn = logs()
+    error = _validate_output_schema("agent-test", {}, log_fn, config=config)
+    assert error is not None
+    assert "Missing declared output" in error
 
-    result = driver.run(
-        "agent-test", "run_missing_output", {}, {}, log_fn, "trace", config=config
-    )
-
-    assert result.status == "failed"
-    assert result.error_code == "schema_violation"
-    assert "Missing declared output" in result.error
-
+    # _write_output still rejects undeclared output names at the tool level.
     driver = AgentDriver()
     output_dir = tmp_path / "artifacts" / "run_missing_output" / "outputs"
     output_dir.mkdir(parents=True, exist_ok=True)

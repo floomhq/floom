@@ -1,0 +1,23 @@
+schema_version: "0.3"
+system_worker: true
+is_example: true
+name: test-share-worker-2
+title: Test Share Worker 2
+description: A second worker to test sharing
+use_cases:
+- Test worker sharing functionality.
+- Validate share link generation.
+- Verify import from shared bundle.
+folder: Operations
+tags:
+- test
+version: 0.1.0
+targets:
+- generic
+exec:
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  entry: run.py
+trigger:
+  type: manual

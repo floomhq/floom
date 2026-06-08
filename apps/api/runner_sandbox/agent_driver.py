@@ -712,7 +712,14 @@ class AgentDriver(SandboxDriver):
             return value
 
     def _cancel_requested(self, run_id: str) -> bool:
-        """Check if the run's cancel_requested flag is set in the DB."""
+        """Check if the run's cancel_requested flag is set in the DB.
+
+        Fails CLOSED on DB error: treat a read failure as cancel-requested so a
+        DB outage cannot strand a long run in a state the user can't stop. The
+        alternative (fail-open, keep running) is worse: an operator who clicks
+        cancel expects the run to stop; a silent DB error that keeps it alive is
+        confusing and wastes resources.
+        """
         try:
             from db import get_db
             with get_db() as conn:
@@ -720,8 +727,13 @@ class AgentDriver(SandboxDriver):
                     "SELECT cancel_requested FROM runs WHERE id = ?", (run_id,)
                 ).fetchone()
             return bool(row and row["cancel_requested"])
-        except Exception:
-            return False
+        except Exception as exc:
+            logger.warning(
+                "cancel_requested DB read failed for run %s — treating as cancel requested: %s",
+                run_id,
+                exc,
+            )
+            return True
 
     def _stage_contexts(
         self,

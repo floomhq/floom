@@ -1209,7 +1209,7 @@ def _smoke_and_repair_generated_worker(
     runtime = config.runtime
     mode = runtime.mode if runtime else "pure-script"
     entry = (runtime.entrypoint if runtime else "") or ""
-    is_script = mode in ("pure-script", "hybrid") and entry.lower().endswith(
+    is_script = mode == "pure-script" and entry.lower().endswith(
         (".py", ".sh", ".js")
     )
     if not is_script:
@@ -1264,7 +1264,7 @@ def _smoke_and_repair_generated_worker(
     tmp_root = Path(ARTIFACTS_DIR) / f".smoke-{uuid.uuid4().hex[:12]}"
     tmp_root.mkdir(parents=True, exist_ok=True)
     try:
-        runner = runtime.runner if runtime else "local"
+        runner = runtime.runner if runtime else "e2b"
         timeout_seconds = (
             runtime.limits.timeout_seconds
             if runtime and runtime.limits
@@ -1829,7 +1829,6 @@ def create_run(
         config,
         _merge_instance_inputs(instance, inputs),
     )
-    # Determine runner from config (default to "local" for backward compat)
     runner = _runner_key(config)
     repos_obj.runs.create(
         user_id=owner_id,
@@ -2560,16 +2559,23 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
 
 
 def _auto_pause_on_consecutive_failures_enabled() -> bool:
-    raw = os.environ.get("WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES", "")
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    # #526: default ON. Leaving broken scheduled workers running indefinitely
+    # inflates the failure rate (1,683/1,866 runs failed over 7 days) and
+    # creates noise that obscures real regressions. Operators can opt out by
+    # setting WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES=0.
+    raw = os.environ.get("WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES", "1")
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _alert_consecutive_failure_threshold() -> int:
-    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "3")
+    # #526: raise default threshold to 5 to avoid pausing workers that have
+    # transient failures (E2B blip, network hiccup). 5 consecutive automatic
+    # failures is a strong signal that the worker is broken, not flaky.
+    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "5")
     try:
         return max(1, int(raw))
     except ValueError:
-        return 3
+        return 5
 
 
 def _maybe_pause_worker_after_consecutive_failures(

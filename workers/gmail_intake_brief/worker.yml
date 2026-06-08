@@ -81,4 +81,8 @@ approvals:
 trigger:
   type: manual
 connections:
-- gmail
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+      - "GMAIL_LIST_THREADS"
+      - "GMAIL_GET_THREAD"

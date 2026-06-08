@@ -10688,6 +10688,21 @@ def cancel_run(
         logger.info("Cancelled queued run %s before dispatch", run_id)
         return ActionResponse(status="cancelled", run_id=run_id)
 
+    # #607: For RUNNING E2B runs, immediately kill the active sandbox so the
+    # microVM is terminated and the semaphore slot is freed without waiting for
+    # the next cancel_requested poll cycle (which may be 30-44 min for long
+    # workers). AgentDriver polls between iterations so it self-terminates; only
+    # E2B pure-script runs need the explicit kill.
+    runner = str(row.get("runner") or "e2b")
+    if runner == "e2b":
+        try:
+            from runner_sandbox.e2b_driver import cancel_sandbox as _cancel_e2b_sandbox
+            killed = _cancel_e2b_sandbox(run_id, reason="user_cancel")
+            if killed:
+                logger.info("Killed active E2B sandbox for cancelled run %s", run_id)
+        except Exception as exc:
+            logger.warning("Could not kill E2B sandbox for run %s: %s", run_id, exc)
+
     logger.info("Cancel requested for run %s", run_id)
     return ActionResponse(status="cancel_requested", run_id=run_id)
 
