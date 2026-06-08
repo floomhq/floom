@@ -17,7 +17,7 @@ version: 0.1.0
 exec:
   command: python run.py
   runtime: python311
-  runner: local
+  runner: e2b
   inputs:
     - name: message
       type: string
@@ -87,13 +87,13 @@ function makeWorkerDetail(id, overrides = {}) {
     status: "healthy",
     paused: false,
     trigger_type: "manual",
-    runner: "local",
+    runner: "e2b",
     config: {
       id,
       name: "MCP Test Worker",
       description: "Tiny worker created through the MCP integration test.",
       trigger: { type: "manual" },
-      runtime: { type: "python", entrypoint: "run.py", runner: "local" },
+      runtime: { type: "python", entrypoint: "run.py", runner: "e2b" },
       inputs: [],
       secrets: [],
       outputs: [],
@@ -261,7 +261,7 @@ async function startMockApi() {
         worker_id: "mcp-test-worker",
         status: "completed",
         trigger_source: "manual",
-        runner: "local",
+        runner: "e2b",
         input: { message: "hello" },
         output: { result: "hello" },
         output_schema: [],
