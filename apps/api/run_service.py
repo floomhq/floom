@@ -3384,6 +3384,12 @@ def execute_run(
                     # already-terminal SSE event does not carry custom fields).
                     outputs = dict(outputs or {})
                     outputs["created_worker_id"] = created_worker_id
+                else:
+                    # Registration failed (see run logs for gate that fired).
+                    # Store flag so the create-flow frontend can show an error
+                    # instead of the misleading "Worker drafted" fallback.
+                    outputs = dict(outputs or {})
+                    outputs["worker_creation_failed"] = True
 
                     # Wedge safety net: prove the generated SCRIPT-mode worker
                     # actually RUNS (and bounded-repair it if not) before telling
@@ -3412,6 +3418,8 @@ def execute_run(
                 # still viewable. Log so the operator/engineer can see why.
                 logger.exception("worker-author registration failed for run %s", run_id)
                 log_fn(f"Could not auto-register the drafted worker: {exc}", level="warning")
+                outputs = dict(outputs or {})
+                outputs["worker_creation_failed"] = True
 
         update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
         # Broadcast the new worker id on the live stream so the create flow can
