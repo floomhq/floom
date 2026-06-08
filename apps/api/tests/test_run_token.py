@@ -77,12 +77,17 @@ class TestMakeVerifyRunToken:
         t2 = make_run_token("run-bbb", secret=self.SECRET)
         assert t1 != t2
 
-    def test_dev_mode_no_secret(self):
-        """In dev mode (no secret), token is accepted based on payload only."""
+    def test_empty_secret_rejects_token(self):
+        """Run tokens are never accepted without an HMAC key."""
         from run_token import make_run_token, verify_run_token
         token = make_run_token("run-dev", secret="")
         result = verify_run_token(token, secret="")
-        assert result == "run-dev"
+        assert result is None
+
+    def test_empty_secret_rejects_forged_token(self):
+        from run_token import verify_run_token
+
+        assert verify_run_token("run:victim-run-id:ffffffffff.fakesig", secret="") is None
 
     def test_token_embeds_correct_run_id(self):
         from run_token import make_run_token, verify_run_token

@@ -75,14 +75,7 @@ def verify_run_token(token: str, *, secret: str | None = None) -> str | None:
     if secret is None:
         secret = os.environ.get("FLOOM_SECRET", "")
     if not secret:
-        # Dev mode — no secret configured, treat any token as valid
-        # but still parse the run_id from the payload.
-        try:
-            data, _ = token.rsplit(".", 1)
-            _, run_id, _ = data.split(":", 2)
-            return run_id or None
-        except Exception:
-            return None
+        return None
     try:
         data, sig = token.rsplit(".", 1)
         _, run_id, hex_expires = data.split(":", 2)
