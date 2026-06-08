@@ -775,6 +775,7 @@ class WorkerConfig(BaseModel):
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
     retry: Optional["RetryConfig"] = None
     notify: Optional["NotifyConfig"] = None
+    calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
 
     @model_validator(mode="after")
     def validate_webhook_secret(self) -> "WorkerConfig":
