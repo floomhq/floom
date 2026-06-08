@@ -31,7 +31,7 @@ from db import get_db, now_iso
 logger = logging.getLogger("floom.chat")
 
 WORKSPACE_AGENT_ID = "workspace-agent"
-DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-5.5"
+DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-5.1"
 TOOL_RESULT_MAX_BYTES = 2048
 CONVERSATION_WINDOW = 50       # LLM context window; stored rows are permanent
 CONVERSATION_KEEP_VERBATIM = 20  # retained for legacy summary compatibility
