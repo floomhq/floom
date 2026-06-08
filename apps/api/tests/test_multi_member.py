@@ -85,7 +85,7 @@ def load_main(monkeypatch, tmp_path):
 def client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app, raise_server_exceptions=True) as c:
+    with TestClient(main.app, raise_server_exceptions=True, base_url="https://testserver") as c:
         yield c
 
 
@@ -94,7 +94,7 @@ def admin_client(monkeypatch, tmp_path):
     """Client that's already set up with an admin account and logged in."""
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app, raise_server_exceptions=True) as c:
+    with TestClient(main.app, raise_server_exceptions=True, base_url="https://testserver") as c:
         resp = c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
         assert resp.status_code == 201
         yield c  # session cookie is set in the client jar
@@ -130,7 +130,7 @@ def test_floom_secret_auth(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_SECRET", "mysecret")
     main = load_main(monkeypatch, tmp_path)
     monkeypatch.setenv("FLOOM_SECRET", "mysecret")  # re-set after reload
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         resp = c.get("/auth/me", headers={"x-floom-secret": "mysecret"})
         assert resp.status_code == 200
         assert resp.json()["auth_method"] == "secret"
@@ -143,7 +143,7 @@ def test_wrong_secret_returns_401(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_SECRET", "mysecret")
     main = load_main(monkeypatch, tmp_path)
     monkeypatch.setenv("FLOOM_SECRET", "mysecret")
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         # /me is not an exempt path; wrong secret is caught by the middleware.
         resp = c.get("/me", headers={"x-floom-secret": "wrongsecret"})
         assert resp.status_code == 401
@@ -166,6 +166,7 @@ def test_setup_returns_session_cookie(client):
     resp = client.post("/auth/setup", json={"username": "alice", "password": "password123"})
     assert resp.status_code == 201
     assert "wos_session" in resp.cookies
+    assert "Secure" in resp.headers["set-cookie"]
 
 
 def test_setup_blocked_when_users_exist(client):
@@ -194,6 +195,7 @@ def test_login_correct_creds(admin_client):
     resp = admin_client.post("/auth/login", json={"username": "admin", "password": "adminpass123"})
     assert resp.status_code == 200
     assert "wos_session" in resp.cookies
+    assert "Secure" in resp.headers["set-cookie"]
     assert resp.json()["redirect_to"] == "/overview"
 
 
@@ -254,14 +256,14 @@ def test_create_and_list_pat(admin_client):
 def test_pat_auth(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         # Setup + get a PAT
         c.post("/auth/setup", json={"username": "alice", "password": "password123"})
         token_resp = c.post("/auth/tokens", json={"name": "ci-token"})
         raw_token = token_resp.json()["token"]
 
         # Use PAT in a fresh client (no session cookie)
-        c2 = TestClient(main.app)
+        c2 = TestClient(main.app, base_url="https://testserver")
         resp = c2.get("/auth/me", headers={"Authorization": f"Bearer {raw_token}"})
         assert resp.status_code == 200
         assert resp.json()["auth_method"] == "pat"
@@ -272,7 +274,7 @@ def test_pat_auth(monkeypatch, tmp_path):
 def test_revoked_pat_returns_401(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         c.post("/auth/setup", json={"username": "alice", "password": "password123"})
         token_resp = c.post("/auth/tokens", json={"name": "temp-token"})
         raw = token_resp.json()["token"]
@@ -283,7 +285,7 @@ def test_revoked_pat_returns_401(monkeypatch, tmp_path):
         assert del_resp.status_code == 204
 
         # Token should now be rejected
-        c2 = TestClient(main.app)
+        c2 = TestClient(main.app, base_url="https://testserver")
         resp = c2.get("/auth/me", headers={"Authorization": f"Bearer {raw}"})
         assert resp.status_code == 401
 
@@ -312,7 +314,7 @@ def test_list_users_returns_all(admin_client):
 def test_member_cannot_list_users(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
         c.post("/users", json={"username": "bob", "password": "bobpass123", "role": "member"})
         c.post("/auth/logout")
@@ -366,7 +368,7 @@ def _create_worker_db(client, name: str, visibility: str = "private"):
 def test_member_sees_workspace_workers(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         # Admin creates a workspace-visible worker
         c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
         c.post("/users", json={"username": "bob", "password": "bobpass123", "role": "member"})
@@ -394,7 +396,7 @@ def test_member_cannot_see_private_worker_of_other_user(monkeypatch, tmp_path):
     """A member should NOT see another user's private worker."""
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
         c.post("/users", json={"username": "bob", "password": "bobpass123", "role": "member"})
 
@@ -415,7 +417,7 @@ def test_admin_sees_all_workers(monkeypatch, tmp_path):
     """Admin sees all workers regardless of ownership."""
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
         me = c.get("/auth/me").json()
         assert me["role"] == "admin"
@@ -432,14 +434,14 @@ def test_admin_sees_all_workers(monkeypatch, tmp_path):
 def test_disabled_user_session_rejected(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
         c.post("/users", json={"username": "frank", "password": "frankpass123", "role": "member"})
         users = c.get("/users").json()
         frank = next(u for u in users if u["username"] == "frank")
 
         # Frank logs in â€” gets a session
-        c2 = TestClient(main.app)
+        c2 = TestClient(main.app, base_url="https://testserver")
         c2.post("/auth/login", json={"username": "frank", "password": "frankpass123"})
 
         # Admin disables frank
@@ -453,7 +455,7 @@ def test_disabled_user_session_rejected(monkeypatch, tmp_path):
 def test_disabled_user_pat_rejected(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
-    with TestClient(main.app) as c:
+    with TestClient(main.app, base_url="https://testserver") as c:
         c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
         c.post("/users", json={"username": "grace", "password": "gracepass123", "role": "member"})
 
@@ -472,7 +474,7 @@ def test_disabled_user_pat_rejected(monkeypatch, tmp_path):
         c.patch(f"/users/{grace['id']}", json={"disabled": True})
 
         # Grace's PAT should be rejected
-        c3 = TestClient(main.app)
+        c3 = TestClient(main.app, base_url="https://testserver")
         resp = c3.get("/auth/me", headers={"Authorization": f"Bearer {raw_token}"})
         assert resp.status_code == 401
 

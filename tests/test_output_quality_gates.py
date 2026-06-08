@@ -126,6 +126,29 @@ def test_file_output_content_is_materialized_before_validation(tmp_path, monkeyp
     assert (tmp_path / "artifacts" / run_id / "out" / "update.md").is_file()
 
 
+def test_json_file_output_content_is_materialized(tmp_path, monkeypatch):
+    run_id = "run_materialize_json"
+    monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    config = _config([
+        WorkerOutput(
+            name="report",
+            label="Report",
+            type="file",
+            kind="file",
+            media_type="application/json",
+            path="out/report.json",
+        )
+    ])
+    outputs = {"report": {"ok": True, "items": [1, 2, 3]}}
+    artifacts = []
+
+    run_service._materialize_declared_file_outputs(run_id, config, outputs, artifacts)
+
+    path = tmp_path / "artifacts" / run_id / "out" / "report.json"
+    assert path.read_text(encoding="utf-8") == '{\n  "ok": true,\n  "items": [\n    1,\n    2,\n    3\n  ]\n}'
+    assert artifacts[0]["relative_path"] == "out/report.json"
+
+
 def test_optional_file_output_can_be_absent(tmp_path, monkeypatch):
     run_id = "run_optional_missing"
     monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
