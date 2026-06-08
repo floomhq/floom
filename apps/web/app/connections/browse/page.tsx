@@ -295,11 +295,6 @@ function CatalogCard({
           <div className="min-w-0 flex-1">
             <h2 className="line-clamp-2 text-sm font-semibold text-ink">{item.name}</h2>
           </div>
-          {isConnected && (
-            <span title="Connected" aria-label="Connected">
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
-            </span>
-          )}
         </div>
 
         <div className="min-w-0 pt-3">
@@ -322,16 +317,21 @@ function CatalogCard({
         </div>
 
         {isConnected ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="w-full border-green-200 bg-green-50 text-green-700 hover:bg-green-100 hover:text-green-800"
-            onClick={() => onConnect(item.slug)}
-          >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Connected · Add another
-          </Button>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1 text-[11px] font-medium text-green-600">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Connected
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="ml-auto h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => onConnect(item.slug)}
+            >
+              + Add account
+            </Button>
+          </div>
         ) : (
           <Button
             type="button"
