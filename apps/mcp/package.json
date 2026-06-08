@@ -4,7 +4,7 @@
   "description": "CLI + MCP server for Workeros OSS and Workeros Cloud.",
   "type": "module",
   "bin": {
-    "workeros-mcp": "./dist/server.js",
+    "workeros-mcp": "./bin/workeros-mcp",
     "workeros": "./dist/cli.js",
     "floom": "./dist/cli.js"
   },
