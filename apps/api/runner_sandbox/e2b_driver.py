@@ -566,6 +566,27 @@ class E2BSandboxDriver(SandboxDriver):
                 retryable=True,
             )
         except Exception as exc:
+            # #607: if the sandbox was killed because the user clicked cancel,
+            # surface "cancelled" instead of "error" so the UI shows the right
+            # terminal state. check_requested is the canonical flag; read it
+            # before logging so we don't misclassify a real crash.
+            try:
+                from db import get_db
+                with get_db() as _conn:
+                    _row = _conn.execute(
+                        "SELECT cancel_requested FROM runs WHERE id = ?", (run_id,)
+                    ).fetchone()
+                if _row and _row["cancel_requested"]:
+                    logger.info("E2B sandbox terminated by user cancel for run %s", run_id)
+                    log_fn("[e2b] Sandbox terminated — run cancelled by user", "info")
+                    return WorkerResult(
+                        status="cancelled",
+                        error="Cancelled by user",
+                        error_code="user_cancel",
+                    )
+            except Exception:
+                pass  # DB unavailable — fall through to generic error handling
+
             exc_stdout = getattr(exc, "stdout", None)
             exc_stderr = getattr(exc, "stderr", None)
             exc_exit_code = getattr(exc, "exit_code", None)
