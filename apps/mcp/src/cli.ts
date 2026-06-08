@@ -175,7 +175,8 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
   secrets.command("set")
     .description("Set a secret value")
     .argument("<key>", "Secret name")
-    .action(async (key: string) => runAction(secretsSetCommand(key)));
+    .option("--value <value>", "Secret value for non-interactive automation")
+    .action(async (key: string, options: { value?: string }) => runAction(secretsSetCommand(key, options)));
   secrets.command("delete")
     .description("Delete a secret")
     .argument("<key>", "Secret name")

@@ -1119,7 +1119,7 @@ class WorkerContract(BaseModel):
     schema_version: Literal["0.3"]
     name: str
     title: str
-    description: str
+    description: str = ""
     long_description: Optional[str] = None
     use_cases: Optional[List[str]] = None
     example_input: Optional[Dict[str, Any]] = None
@@ -1164,6 +1164,14 @@ class WorkerContract(BaseModel):
     csv_required_columns: Optional[List[str]] = None
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
     calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_missing_description(cls, value: Any) -> Any:
+        if isinstance(value, dict) and not str(value.get("description") or "").strip():
+            fallback = str(value.get("title") or value.get("name") or "Workeros worker").strip()
+            value = {**value, "description": fallback[:500]}
+        return value
 
     @field_validator("name")
     @classmethod
