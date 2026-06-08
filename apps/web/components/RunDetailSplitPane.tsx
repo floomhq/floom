@@ -26,7 +26,7 @@ import {
   exportStateText,
 } from "@/lib/run-format";
 import { stripCitationTokens } from "@/lib/strip-citations";
-import type { LogEntry, RunDetail, RunPart, TranscriptRow } from "@/lib/types";
+import type { LogEntry, RunDetail, RunPart, TranscriptRow, ToolCallEntry, ApprovalEntry } from "@/lib/types";
 
 type Props = {
   run: RunDetail;
@@ -120,10 +120,12 @@ export function RunDetailSplitPane({
               Edit worker
             </Button>
           </Link>
-          <Button variant="outline" size="sm" onClick={onReplay}>
-            <RotateCcw className="size-3.5 mr-1.5" />
-            Re-run
-          </Button>
+          {run.can_replay !== false && (
+            <Button variant="outline" size="sm" onClick={onReplay}>
+              <RotateCcw className="size-3.5 mr-1.5" />
+              Re-run
+            </Button>
+          )}
           <a href={api.runs.downloadUrl(run.id)} download>
             <Button variant="outline" size="sm">
               <Download className="size-3.5 mr-1.5" />
@@ -171,6 +173,12 @@ export function RunDetailSplitPane({
                 <TabsTrigger value="output">Output</TabsTrigger>
                 <TabsTrigger value="inputs">Inputs</TabsTrigger>
                 <TabsTrigger value="transcript">Steps</TabsTrigger>
+                {(run.tool_calls?.length ?? 0) > 0 && (
+                  <TabsTrigger value="tool-calls">Tool calls</TabsTrigger>
+                )}
+                {run.approval_trail && (
+                  <TabsTrigger value="approval">Approval</TabsTrigger>
+                )}
                 <TabsTrigger value="files">Files</TabsTrigger>
                 <TabsTrigger value="logs">Logs</TabsTrigger>
                 <TabsTrigger value="raw">Raw</TabsTrigger>
@@ -189,6 +197,12 @@ export function RunDetailSplitPane({
             </TabsContent>
             <TabsContent value="transcript" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <TranscriptView run={run} parts={transcriptParts} />
+            </TabsContent>
+            <TabsContent value="tool-calls" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
+              <ToolCallsView calls={run.tool_calls ?? []} />
+            </TabsContent>
+            <TabsContent value="approval" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
+              <ApprovalView approval={run.approval_trail ?? null} />
             </TabsContent>
             <TabsContent value="files" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <FilesView run={run} />
@@ -729,6 +743,98 @@ function InputsView({ run }: { run: RunDetail }) {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function ToolCallsView({ calls }: { calls: ToolCallEntry[] }) {
+  if (calls.length === 0) {
+    return <p className="text-sm text-muted-foreground">No tool calls recorded for this run.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {calls.map((call) => (
+        <div key={call.id} className="rounded-[var(--radius-button)] border border-border overflow-hidden">
+          <div className="flex items-center gap-2 bg-muted/40 px-3 py-2 border-b border-border">
+            <span className="font-mono text-xs font-medium text-foreground">{call.name}</span>
+            {call.error && (
+              <span className="ml-auto text-xs text-destructive">error</span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-border">
+            <div className="p-3">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Arguments</p>
+              <pre className="text-xs text-foreground whitespace-pre-wrap break-words leading-5">
+                {JSON.stringify(call.arguments, null, 2)}
+              </pre>
+            </div>
+            <div className="p-3">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                {call.error ? "Error" : "Result"}
+              </p>
+              <pre className="text-xs text-foreground whitespace-pre-wrap break-words leading-5">
+                {call.error
+                  ? call.error
+                  : typeof call.result === "string"
+                  ? call.result
+                  : JSON.stringify(call.result, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
+  if (!approval) {
+    return <p className="text-sm text-muted-foreground">No approval required for this run.</p>;
+  }
+  const statusColor =
+    approval.status === "approved"
+      ? "text-emerald-600"
+      : approval.status === "rejected"
+      ? "text-destructive"
+      : "text-amber-600";
+  return (
+    <div className="space-y-4 max-w-lg">
+      <div className="rounded-[var(--radius-button)] border border-border p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">{approval.label || "Approval checkpoint"}</span>
+          <span className={cn("text-xs font-medium capitalize", statusColor)}>{approval.status}</span>
+        </div>
+        {approval.preview && (
+          <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded border border-border bg-muted/30 px-3 py-2">
+            {approval.preview}
+          </pre>
+        )}
+        <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+          <div>
+            <span className="font-medium">Requested</span>
+            <p>{formatAbsolute(approval.created_at)}</p>
+          </div>
+          {approval.decided_at && (
+            <div>
+              <span className="font-medium">Decided</span>
+              <p>{formatAbsolute(approval.decided_at)}</p>
+            </div>
+          )}
+        </div>
+        {approval.reason && (
+          <p className="text-xs text-muted-foreground border-t border-border pt-2">
+            <span className="font-medium">Reason: </span>{approval.reason}
+          </p>
+        )}
+        {approval.follow_up_run_id && (
+          <p className="text-xs">
+            <span className="text-muted-foreground">Follow-up run: </span>
+            <Link href={`/runs/${approval.follow_up_run_id}`} className="text-primary hover:underline font-mono">
+              {approval.follow_up_run_id}
+            </Link>
+          </p>
+        )}
+      </div>
     </div>
   );
 }

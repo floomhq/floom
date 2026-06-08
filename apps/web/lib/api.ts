@@ -689,6 +689,11 @@ export const api = {
         `/connections/${encodeURIComponent(id)}/account-info`,
         { cache: "no-store" }
       ),
+    activity: (id: string, limit = 50) =>
+      fetchJson<import("./types").RunSummary[]>(
+        `/connections/${encodeURIComponent(id)}/activity?limit=${limit}`,
+        { cache: "no-store" }
+      ),
   },
   slack: {
     // Read-only status (configured: true/false + installed workspaces). Slack
