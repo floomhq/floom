@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
-import type { AttachedFile, ChatMessage, ToolCard } from "./emily-chat-types";
+import type { AttachedFile, ChatMessage } from "./emily-chat-types";
 import {
   CONVERSATION_STORAGE_KEY,
   readStoredConversationId,
@@ -329,6 +329,9 @@ export function useChatStream(): ChatStreamState {
               setMessages((prev) => reduceSSEEvent(prev, event, assistantMsgId));
 
               if (event.type === "finish" || event.type === "error") {
+                if (event.type === "error") {
+                  setError(sseErrorMessage(event));
+                }
                 break;
               }
             }
@@ -385,9 +388,13 @@ export function useChatStream(): ChatStreamState {
 // Exported for unit testing.
 
 import type {
+  CardStatus,
   ChatSSEEvent,
+  RunCard,
   MsgPart,
   GenericToolCard,
+  ToolCard,
+  WorkerListCard,
 } from "./emily-chat-types";
 
 type ToolLabel = {
@@ -604,6 +611,125 @@ export function getToolCardTitle(toolName: string, status: ToolCard["status"]): 
   return fallbackToolLabel(toolName, done);
 }
 
+function normalizeCardStatus(status: unknown): CardStatus {
+  if (status === "succeeded") return "completed";
+  if (typeof status === "string") return status as CardStatus;
+  return "completed";
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function sseErrorMessage(event: Extract<ChatSSEEvent, { type: "error" }>): string {
+  const message =
+    optionalString(event.error) ??
+    optionalString((event as { message?: unknown }).message) ??
+    optionalString((event as { detail?: unknown }).detail);
+  return message ?? "Emily could not complete that request.";
+}
+
+function appendAssistantError(
+  prev: ChatMessage[],
+  assistantMsgId: string,
+  message: string
+): ChatMessage[] {
+  const errorPart: MsgPart = { type: "text", text: message, streaming: false };
+  const existing = prev.find((m) => m.id === assistantMsgId);
+  if (existing && existing.role === "assistant") {
+    return prev.map((m) =>
+      m.id === assistantMsgId && m.role === "assistant"
+        ? { ...m, parts: [...(m.parts ?? []), errorPart] }
+        : m
+    );
+  }
+  return [
+    ...prev,
+    {
+      id: assistantMsgId,
+      role: "assistant",
+      parts: [errorPart],
+    },
+  ];
+}
+
+function workerListCardFromResult(
+  event: Extract<ChatSSEEvent, { type: "tool-result" }>,
+  existing: ToolCard
+): WorkerListCard | null {
+  const result = asRecord(event.result);
+  const workers = result?.workers;
+  const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
+  const isWorkerList =
+    event.card?.kind === "worker-list" || normalizedTool === "workers.list_all";
+  if (!isWorkerList || !Array.isArray(workers)) return null;
+
+  return {
+    kind: "worker-list",
+    callId: existing.callId,
+    card_id: existing.card_id,
+    status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "completed")),
+    actions: event.actions,
+    streams: event.streams,
+    workers: workers.reduce<WorkerListCard["workers"]>((acc, worker) => {
+      const row = asRecord(worker);
+      const id = optionalString(row?.id);
+      if (!id) return acc;
+      const trigger = optionalString(row?.trigger);
+      acc.push({
+        id,
+        name: optionalString(row?.title) ?? optionalString(row?.name) ?? id,
+        ...(trigger ? { trigger } : {}),
+        enabled: row?.enabled === undefined ? true : Boolean(row.enabled),
+      });
+      return acc;
+    }, []),
+  };
+}
+
+function runCardFromResult(
+  event: Extract<ChatSSEEvent, { type: "tool-result" }>,
+  existing: ToolCard
+): RunCard | null {
+  const result = asRecord(event.result);
+  const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
+  const isRun = event.card?.kind === "run" || normalizedTool === "workers.run";
+  const resource = event.resource?.kind === "run" ? event.resource : null;
+  const runId = optionalString(result?.run_id) ?? optionalString(resource?.run_id);
+  if (!isRun || !runId) return null;
+
+  const preview = "preview" in existing ? existing.preview : undefined;
+  const workerId =
+    optionalString(resource?.worker_id) ??
+    optionalString(asRecord(preview)?.id);
+  const workerName = optionalString(resource?.worker_name) ?? workerId ?? "Worker run";
+
+  return {
+    kind: "run",
+    callId: existing.callId,
+    card_id: existing.card_id,
+    status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
+    actions: event.actions,
+    streams: event.streams,
+    runId,
+    workerId,
+    workerName,
+  };
+}
+
+function toolCardFromResult(
+  event: Extract<ChatSSEEvent, { type: "tool-result" }>,
+  existing: ToolCard
+): ToolCard | null {
+  return workerListCardFromResult(event, existing) ?? runCardFromResult(event, existing);
+}
+
 /**
  * Extract the effective card_id from any tool event.
  * The live backend puts id in event.card.id; the enriched v2 protocol also
@@ -677,7 +803,7 @@ export function reduceSSEEvent(
       // Use card metadata from the event if available, otherwise synthesise.
       const cardId = resolveCardId(event) ?? event.callId;
       const cardMeta = event.card;
-      const status = cardMeta?.status ?? "running";
+      const status = normalizeCardStatus(cardMeta?.status ?? "running");
       const card: GenericToolCard = {
         kind: "generic",
         callId: event.callId,
@@ -711,7 +837,7 @@ export function reduceSSEEvent(
       const cardId = resolveCardId(event);
       if (!cardId) return prev;
 
-      const newStatus = event.type === "tool-progress" ? event.status : undefined;
+      const newStatus = event.type === "tool-progress" ? normalizeCardStatus(event.status) : undefined;
 
       return prev.map((m) => {
         if (m.role !== "assistant" || !m.parts) return m;
@@ -743,12 +869,14 @@ export function reduceSSEEvent(
         if (m.role !== "assistant" || !m.parts) return m;
         const updatedParts = m.parts.map((p) => {
           if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+          const specializedCard = toolCardFromResult(event, p.card);
+          if (specializedCard) return { type: "tool-card" as const, card: specializedCard };
           const status = event.card?.status ?? (event.isError ? "failed" : "completed");
           const updatedCard: ToolCard = {
             ...p.card,
-            status,
+            status: normalizeCardStatus(status),
             ...("toolName" in p.card
-              ? { title: getToolCardTitle(p.card.toolName, status) }
+              ? { title: getToolCardTitle(p.card.toolName, normalizeCardStatus(status)) }
               : {}),
             ...(event.actions ? { actions: event.actions } : {}),
             ...(event.streams ? { streams: event.streams } : {}),
@@ -776,9 +904,9 @@ export function reduceSSEEvent(
                 type: "tool-card" as const,
                 card: {
                   ...p.card,
-                  status: reconciled.status,
+                  status: normalizeCardStatus(reconciled.status),
                   ...("toolName" in p.card
-                    ? { title: getToolCardTitle(p.card.toolName, reconciled.status) }
+                    ? { title: getToolCardTitle(p.card.toolName, normalizeCardStatus(reconciled.status)) }
                     : {}),
                 } as ToolCard,
               };
@@ -791,7 +919,7 @@ export function reduceSSEEvent(
     }
 
     case "error":
-      return prev;
+      return appendAssistantError(prev, assistantMsgId, sseErrorMessage(event));
 
     default:
       return prev;

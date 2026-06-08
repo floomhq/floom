@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, ChevronLeft, ChevronDown, Maximize2, PenSquare, Download } from "lucide-react";
+import { AlertTriangle, ChevronRight, ChevronLeft, ChevronDown, Maximize2, PenSquare, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -165,7 +165,7 @@ interface EmilyChatCoreProps {
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
 function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
-  const { messages, conversationId, isStreaming, isHydrating, sendMessage, newSession } =
+  const { messages, conversationId, isStreaming, isHydrating, error, sendMessage, newSession } =
     useChatStream();
   const router = useRouter();
   const [input, setInput] = useState("");
@@ -261,6 +261,13 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
   }, [messages, conversationId]);
 
   const hasMessages = messages.length > 0;
+  const errorAlreadyVisible = Boolean(
+    error &&
+      messages.some((message) =>
+        message.role === "assistant" &&
+        message.parts?.some((part) => part.type === "text" && part.text === error)
+      )
+  );
 
   return (
     <div className={cn("flex flex-col h-full", fullPage && "max-w-2xl mx-auto w-full")}>
@@ -302,6 +309,12 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
             {messages.map((msg) => (
               <MessageRow key={msg.id} msg={msg} />
             ))}
+            {error && !errorAlreadyVisible && (
+              <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-3 text-xs text-destructive">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <p className="leading-relaxed">{error}</p>
+              </div>
+            )}
             {isStreaming && <TypingIndicator />}
             <div ref={bottomRef} />
           </div>
