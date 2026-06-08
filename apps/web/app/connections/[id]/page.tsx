@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { ArrowLeft, Zap, Trash2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RunStatusBadge } from "@/components/RunStatus";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import {
   getSupportedApp,
@@ -14,7 +16,8 @@ import {
   type ConnectionRecord,
 } from "@/components/connections/connection-data";
 import { api } from "@/lib/api";
-import type { ConnectionItem, ConnectionTestResult } from "@/lib/types";
+import { formatAbsolute, formatDuration } from "@/lib/formatters";
+import type { ConnectionItem, ConnectionTestResult, RunSummary } from "@/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -54,6 +57,7 @@ export default function ConnectionDetailPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [activity, setActivity] = useState<RunSummary[]>([]);
 
   useEffect(() => {
     void (async () => {
@@ -72,6 +76,13 @@ export default function ConnectionDetailPage() {
                 prev ? { ...prev, email: account.email, scopes: account.scopes ?? prev.scopes } : prev
               );
             }
+          } catch {
+            // non-fatal
+          }
+          // Load activity log (best-effort)
+          try {
+            const runs = await api.connections.activity(id);
+            setActivity(runs);
           } catch {
             // non-fatal
           }
@@ -320,6 +331,44 @@ export default function ConnectionDetailPage() {
               </dd>
             </div>
           </dl>
+        </div>
+
+        {/* Activity log */}
+        <div className="rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-6">
+          <h2 className="text-sm font-medium text-[var(--ink)] mb-4">
+            Activity
+            {activity.length > 0 && (
+              <span className="ml-2 text-[var(--ink-soft)] font-normal">({activity.length} recent runs)</span>
+            )}
+          </h2>
+          {activity.length === 0 ? (
+            <p className="text-sm text-[var(--ink-soft)]">
+              No runs yet for workers using this connection.
+            </p>
+          ) : (
+            <div className="divide-y divide-[var(--border-default)]">
+              {activity.map((run) => (
+                <Link
+                  key={run.id}
+                  href={`/runs/${run.id}`}
+                  className="flex items-center justify-between gap-3 py-2.5 hover:bg-[var(--bg-app)] -mx-2 px-2 rounded transition-colors"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <RunStatusBadge status={run.status} />
+                    <span className="font-mono text-xs text-[var(--ink-soft)] truncate">{run.id}</span>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0 text-xs text-[var(--ink-soft)]">
+                    {run.duration_ms != null && (
+                      <span>{formatDuration(run.duration_ms)}</span>
+                    )}
+                    {run.created_at && (
+                      <span>{formatAbsolute(run.created_at)}</span>
+                    )}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
