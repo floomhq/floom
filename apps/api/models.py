@@ -1119,6 +1119,7 @@ class WorkerContract(BaseModel):
     contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
     csv_required_columns: Optional[List[str]] = None
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
+    calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
 
     @field_validator("name")
     @classmethod
@@ -1398,6 +1399,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
+        calls=list(contract.calls),
     )
 
 
