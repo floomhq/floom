@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, ChevronLeft, Maximize2, PenSquare, Download } from "lucide-react";
+import { ChevronRight, ChevronLeft, ChevronDown, Maximize2, PenSquare, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -167,11 +167,48 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
   const [input, setInput] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Start true so the first message load scrolls to bottom automatically.
+  const isNearBottomRef = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
-  // Auto-scroll on new messages
-  useEffect(() => {
+  // Track whether the user is near the bottom of the scroll container.
+  // We use a ref (not state) so the scroll handler doesn't trigger re-renders.
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    isNearBottomRef.current = nearBottom;
+    setShowScrollButton(!nearBottom);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    isNearBottomRef.current = true;
+    setShowScrollButton(false);
+  }, []);
+
+  // Auto-scroll when streaming — but ONLY if the user is already near the
+  // bottom. If they've scrolled up to read history, respect that and show the
+  // scroll-to-bottom button instead. This matches ChatGPT / Claude behaviour.
+  useEffect(() => {
+    if (isNearBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, isStreaming]);
+
+  // Always jump to bottom when the USER sends a new message so the response
+  // is visible — regardless of current scroll position.
+  const prevLengthRef = useRef(messages.length);
+  useEffect(() => {
+    const grew = messages.length > prevLengthRef.current;
+    prevLengthRef.current = messages.length;
+    if (grew && messages[messages.length - 1]?.role === "user") {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      isNearBottomRef.current = true;
+      setShowScrollButton(false);
+    }
+  }, [messages]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
@@ -196,11 +233,23 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
           fullPage ? "px-6 py-2" : "px-3 py-1.5"
         )}
       >
-        <ChatControls onNew={newSession} onExport={handleExport} canExport={hasMessages} />
+        <ChatControls
+          onNew={() => {
+            newSession();
+            isNearBottomRef.current = true;
+            setShowScrollButton(false);
+          }}
+          onExport={handleExport}
+          canExport={hasMessages}
+        />
       </div>
 
       {/* Message list */}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollContainerRef}
+        className="relative flex-1 overflow-y-auto"
+        onScroll={handleScroll}
+      >
         {!hasMessages ? (
           isHydrating ? (
             <div className="flex h-full items-center justify-center px-6 text-center">
@@ -217,6 +266,20 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
             {isStreaming && <TypingIndicator />}
             <div ref={bottomRef} />
           </div>
+        )}
+
+        {/* Scroll-to-bottom button — visible when user has scrolled up and
+            Emily is still typing. Matches ChatGPT / Claude UX. */}
+        {showScrollButton && (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            aria-label="Scroll to bottom"
+            className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md hover:text-foreground hover:shadow-lg transition-all"
+          >
+            <ChevronDown className="size-3.5" />
+            Scroll to bottom
+          </button>
         )}
       </div>
 
