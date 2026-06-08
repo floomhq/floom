@@ -3622,14 +3622,22 @@ def _persist_discovered_workers(
                 now,
             ),
         )
+        # System workers must be workspace-visible so any authenticated user
+        # can run them regardless of which bootstrap user originally persisted
+        # the row. Without this, a multi-member setup where user A bootstrapped
+        # the DB and user B logs in gets "worker does not belong to B" when
+        # Emily tries to start a worker-author run (#698).
+        is_system_worker = bool(manifest.get("system_worker"))
+        worker_visibility = "workspace" if is_system_worker else "private"
+
         conn.execute(
             """
             INSERT INTO workers
                 (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
                  next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
                  notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id,
-                 composio_trigger_id, composio_event, triggers_json)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+                 composio_trigger_id, composio_event, triggers_json, visibility)
+            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 skill_version_id=excluded.skill_version_id,
                 name=excluded.name,
@@ -3640,7 +3648,8 @@ def _persist_discovered_workers(
                 owner_id=workers.owner_id,
                 composio_trigger_id=excluded.composio_trigger_id,
                 composio_event=excluded.composio_event,
-                triggers_json=excluded.triggers_json
+                triggers_json=excluded.triggers_json,
+                visibility=excluded.visibility
             """,
             (
                 worker_id,
@@ -3657,6 +3666,7 @@ def _persist_discovered_workers(
                 composio_trigger_id,
                 composio_event,
                 triggers_json_str,
+                worker_visibility,
             ),
         )
 
