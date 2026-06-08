@@ -371,15 +371,18 @@ def test_603_no_local_fallback_in_runner_config():
 
 
 def test_603_hybrid_mode_removed_from_models():
-    """models.py must not include 'hybrid' in exec mode Literal."""
-    import re
-    # Find mode field definitions
-    mode_lines = [l for l in MODELS_SRC.splitlines() if "hybrid" in l and "mode" in l.lower()]
-    # Only allow hybrid in comments (legacy explanation lines)
-    non_comment = [l for l in mode_lines if not l.strip().startswith("#")]
-    assert not non_comment, (
-        f"#603: 'hybrid' must be removed from mode Literal types in models.py. "
-        f"Found in non-comment lines: {non_comment}"
+    """models.py must not include 'hybrid' in Literal type definitions.
+    A field_validator that coerces 'hybrid' is acceptable and expected."""
+    # Only flag lines where hybrid appears in a Literal type annotation
+    literal_lines = [
+        l for l in MODELS_SRC.splitlines()
+        if "hybrid" in l
+        and "Literal[" in l
+        and not l.strip().startswith("#")
+    ]
+    assert not literal_lines, (
+        f"#603: 'hybrid' must not appear in Literal type definitions in models.py. "
+        f"Found: {literal_lines}"
     )
 
 

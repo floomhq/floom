@@ -746,6 +746,18 @@ class WorkerRuntime(BaseModel):
     disable_tools: List[str] = Field(default_factory=list)
     limits: "WorkerLimits" = Field(default_factory=lambda: WorkerLimits())
 
+    @field_validator("mode", mode="before")
+    @classmethod
+    def coerce_hybrid_mode(cls, v: object) -> object:
+        # #603: "hybrid" was a deprecated synonym for "pure-script". Coerce it
+        # here so existing DB rows that still carry mode="hybrid" in their
+        # manifest_json load cleanly after the Literal was narrowed.
+        # The startup migration converts rows proactively, but this validator
+        # is the safety net for any row not yet migrated.
+        if v == "hybrid":
+            return "pure-script"
+        return v
+
     @field_validator("runner")
     @classmethod
     def validate_runner(cls, v: str) -> str:
@@ -958,6 +970,15 @@ class WorkerContractExec(BaseModel):
     secrets: List[str] = Field(default_factory=list)
     contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
     outputs: List[WorkerContractField] = Field(default_factory=list)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def coerce_hybrid_mode(cls, v: object) -> object:
+        # #603: coerce legacy "hybrid" → "pure-script" on read so existing DB
+        # rows don't crash with ValidationError after the Literal was narrowed.
+        if v == "hybrid":
+            return "pure-script"
+        return v
 
     @field_validator("command")
     @classmethod
