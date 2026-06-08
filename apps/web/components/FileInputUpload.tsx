@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { FileText, UploadCloud } from "lucide-react";
+import { apiProxyPath } from "@/lib/api";
 
 type UploadResponse = {
   id: string;
@@ -25,6 +26,10 @@ function formatBytes(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+export function uploadEndpointPath(): string {
+  return apiProxyPath("/uploads");
+}
+
 export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onUploaded }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -46,7 +51,7 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
     if (accepts?.length) form.append("accepts", JSON.stringify(accepts));
 
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/proxy/uploads");
+    xhr.open("POST", uploadEndpointPath());
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
         setProgress(Math.max(1, Math.round((event.loaded / event.total) * 100)));
