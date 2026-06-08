@@ -101,7 +101,6 @@ def test_devices_use_configured_bootstrap_user(monkeypatch, tmp_path):
 
 def test_approve_requires_secret_and_flips_device_to_approved(monkeypatch, tmp_path):
     main, client = _load_api(monkeypatch, tmp_path)
-    _setup_bootstrap_user(monkeypatch, main, client)
     created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
     user_code = created["user_code"]
 
@@ -121,7 +120,6 @@ def test_approve_requires_secret_and_flips_device_to_approved(monkeypatch, tmp_p
 
 def test_poll_returns_approved_once_then_404_after_consumption(monkeypatch, tmp_path):
     main, client = _load_api(monkeypatch, tmp_path)
-    _setup_bootstrap_user(monkeypatch, main, client)
     created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
     device_code = created["device_code"]
     user_code = created["user_code"]
@@ -141,7 +139,7 @@ def test_poll_returns_approved_once_then_404_after_consumption(monkeypatch, tmp_
     assert body["api_secret"].startswith("wos_")
     assert body["api_secret"] != AUTH_HEADER["x-floom-secret"]
 
-    token_auth = client.get("/auth/me", headers={"Authorization": f"Bearer {body['api_secret']}"})
+    token_auth = client.get("/auth/me", headers={"x-floom-secret": body["api_secret"]})
     assert token_auth.status_code == 200
     assert token_auth.json()["auth_method"] == "pat"
 
@@ -165,7 +163,6 @@ def test_poll_returns_404_for_expired_device(monkeypatch, tmp_path):
 
 def test_poll_returns_404_for_denied_device(monkeypatch, tmp_path):
     main, client = _load_api(monkeypatch, tmp_path)
-    _setup_bootstrap_user(monkeypatch, main, client)
     created = client.post("/cli-auth/devices", json={"client_name": "floom-cli"}).json()
     device_code = created["device_code"]
     user_code = created["user_code"]

@@ -1603,6 +1603,25 @@ MIGRATIONS: list[Migration] = [
         last_pushed_at  TEXT
     );
     """,
+    # -- migration 61: hash-backed CLI API tokens ------------------------------
+    # CLI device flow returns a per-client token that the MCP package sends in
+    # x-floom-secret. Store only its hash; do not reuse or reveal FLOOM_SECRET.
+    """
+    CREATE TABLE IF NOT EXISTS cli_api_tokens (
+        id           TEXT PRIMARY KEY,
+        token_hash   TEXT NOT NULL,
+        user_id      TEXT NOT NULL,
+        role         TEXT NOT NULL DEFAULT 'admin',
+        name         TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        last_used_at TEXT,
+        revoked_at   TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cli_api_tokens_hash
+        ON cli_api_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_cli_api_tokens_user_id
+        ON cli_api_tokens(user_id);
+    """,
 ]
 
 
