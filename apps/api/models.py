@@ -1694,6 +1694,7 @@ class RunDetail(BaseModel):
     runner: str
     input: Dict[str, Any] = Field(default_factory=dict)
     output: Dict[str, Any] = Field(default_factory=dict)
+    outputs: Dict[str, Any] = Field(default_factory=dict)
     output_schema: List["OutputField"] = Field(default_factory=list)
     logs: List[LogEntry] = Field(default_factory=list)
     artifacts: List[Artifact] = Field(default_factory=list)
