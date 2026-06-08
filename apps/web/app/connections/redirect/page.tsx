@@ -21,7 +21,9 @@ function RedirectInner() {
   const [phase, setPhase] = useState<RedirectPhase>("preparing");
   const [redirectUrl, setRedirectUrl] = useState("");
   const [error, setError] = useState("");
-  const startedRef = useRef(false);
+  // Don't use a ref guard — it survives Fast Refresh rebuilds and prevents
+  // the effect from re-firing after a hot reload, leaving the page stuck in
+  // "preparing" forever. The slug dep on the effect is the dedup guard instead.
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Poll connections list until the new connection appears as active,
@@ -55,14 +57,17 @@ function RedirectInner() {
   }, []);
 
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-
     if (!slug) {
       setPhase("error");
       setError("Missing integration name.");
       return;
     }
+
+    // Reset to preparing whenever slug changes so re-navigating to a
+    // different app starts fresh.
+    setPhase("preparing");
+    setRedirectUrl("");
+    setError("");
 
     let cancelled = false;
     (async () => {
@@ -89,7 +94,7 @@ function RedirectInner() {
     })();
 
     return () => { cancelled = true; };
-  }, [providerName, returnTo, router, slug]);
+  }, [slug, providerName, returnTo, router]);
 
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4 py-12">
