@@ -10277,6 +10277,24 @@ def create_worker_run(
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
     worker_id = _canonical_worker_id(worker_id)
+
+    # Worker-to-worker call token enforcement
+    if auth.auth_method == "run_token" and auth.run_token_payload:
+        rtp = auth.run_token_payload
+        callable_workers: list[str] = rtp.get("callable_workers") or []
+        if worker_id not in callable_workers:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Worker {worker_id!r} is not in the caller's calls: list",
+            )
+        from run_token import MAX_CALL_DEPTH
+        depth = int(rtp.get("depth") or 0)
+        if depth >= MAX_CALL_DEPTH:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Maximum worker call depth ({MAX_CALL_DEPTH}) exceeded",
+            )
+
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
