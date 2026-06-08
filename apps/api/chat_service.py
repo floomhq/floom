@@ -3480,6 +3480,7 @@ async def stream_chat(
     conversation_id: Optional[str],
     part_queue: asyncio.Queue,
     source: str = "web",
+    system_suffix: str = "",
 ) -> None:
     """Run the workspace agent and push SSE parts into part_queue.
 
@@ -3549,6 +3550,8 @@ async def stream_chat(
         input_messages.append({"role": "user", "content": message})
 
     system_prompt = build_system_prompt_for_source(user_id, source)
+    if system_suffix:
+        system_prompt = f"{system_prompt}\n\n{system_suffix}"
     settings = get_workspace_agent_settings(user_id)
     workspace_tools = _workspace_tools(user_id, settings)
 
