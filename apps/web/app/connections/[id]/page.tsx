@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Zap, Trash2, RefreshCw } from "lucide-react";
+import { ArrowLeft, Zap, Trash2, RefreshCw, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -58,6 +58,7 @@ export default function ConnectionDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [activity, setActivity] = useState<RunSummary[]>([]);
+  const [emailPeek, setEmailPeek] = useState<Array<{ subject: string; from_name: string; from_email: string; date: string }>>([]);
 
   useEffect(() => {
     void (async () => {
@@ -83,6 +84,13 @@ export default function ConnectionDetailPage() {
           try {
             const runs = await api.connections.activity(id);
             setActivity(runs);
+          } catch {
+            // non-fatal
+          }
+          // Load email peek for gmail connections (best-effort, privacy-conscious)
+          try {
+            const peek = await api.connections.peek(id);
+            if (peek.emails.length > 0) setEmailPeek(peek.emails);
           } catch {
             // non-fatal
           }
@@ -332,6 +340,40 @@ export default function ConnectionDetailPage() {
             </div>
           </dl>
         </div>
+
+        {/* Recent emails trust peek — gmail only, shown only when data is available */}
+        {emailPeek.length > 0 && (
+          <div className="rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-6">
+            <h2 className="flex items-center gap-2 text-sm font-medium text-[var(--ink)] mb-4">
+              <Mail className="size-3.5 text-[var(--ink-soft)]" aria-hidden="true" />
+              Recent emails
+              <span className="text-[var(--ink-soft)] font-normal">(trust signal — live from your account)</span>
+            </h2>
+            <ul className="divide-y divide-[var(--border-default)]">
+              {emailPeek.map((email, i) => (
+                <li key={i} className="py-2.5 first:pt-0 last:pb-0">
+                  <p className="text-sm text-[var(--ink)] truncate">{email.subject || "(no subject)"}</p>
+                  <p className="mt-0.5 text-xs text-[var(--ink-soft)] truncate">
+                    {email.from_name
+                      ? `${email.from_name} <${email.from_email}>`
+                      : email.from_email}
+                    {email.date && (
+                      <span className="ml-2 text-[var(--ink-faint)]">
+                        {(() => {
+                          try {
+                            return new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(email.date));
+                          } catch {
+                            return email.date;
+                          }
+                        })()}
+                      </span>
+                    )}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Activity log */}
         <div className="rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-6">
