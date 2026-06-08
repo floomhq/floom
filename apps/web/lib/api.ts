@@ -163,6 +163,12 @@ async function fetchWorkspaceBasePersona(): Promise<{ content: string; is_custom
 }
 
 export const api = {
+  auth: {
+    issueMagicLink: () =>
+      fetchJson<{ url: string; expires_in: number }>("/auth/magic-link", { method: "POST" }),
+    consumeMagicLink: (token: string) =>
+      fetchJson<{ ok: boolean; redirect_to: string }>(`/auth/magic/${encodeURIComponent(token)}`),
+  },
   me: async () => {
     const res = await fetch(`${APP_API_BASE}/me`, {
       cache: "no-store",
