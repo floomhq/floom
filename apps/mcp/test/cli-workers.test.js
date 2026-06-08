@@ -145,6 +145,13 @@ async function startMockApi({ existing = false, putStatus = 200, putDetail = "Un
       return;
     }
 
+    if (request.method === "POST" && url.pathname.startsWith("/secrets/")) {
+      const body = await readBody(request);
+      bodies.push(body);
+      json(response, 200, { status: "set" });
+      return;
+    }
+
     if (request.method === "PUT" && url.pathname === "/workers/cli-test-worker") {
       const body = await readBody(request);
       bodies.push(body);
@@ -349,6 +356,19 @@ test("workers push accepts FLOOM_API_BASE and FLOOM_API_SECRET env aliases", asy
     "GET /workers/cli-test-worker",
     "POST /workers",
   ]);
+});
+
+test("secrets set accepts --value for non-interactive automation", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+
+  const result = await runCli(["secrets", "set", "OPENAI_API_KEY", "--value", "sk-test"], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Saved OPENAI_API_KEY/);
+  assert.deepEqual(mock.seen, ["POST /secrets/OPENAI_API_KEY"]);
+  assert.deepEqual(mock.bodies[0], { value: "sk-test" });
 });
 
 test("workers push reports unreachable API separately from expired auth", async () => {
