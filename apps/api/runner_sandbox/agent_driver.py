@@ -1195,9 +1195,11 @@ class AgentDriver(SandboxDriver):
                     input_dir=input_dir,
                     output_dir=output_dir,
                     timeout_seconds=timeout_seconds,
+                    user_id=user_id,
+                    run_id=run_id,
                 )
             if name == "invoke_worker":
-                return self._invoke_worker(args, state_user_id=user_id)
+                return self._invoke_worker(args, state_user_id=user_id, config=config, run_id=run_id)
             if name == "log":
                 level = str(args.get("level") or "info")
                 log_fn(str(args.get("message") or ""), level)
@@ -1373,6 +1375,8 @@ class AgentDriver(SandboxDriver):
         input_dir: Path,
         output_dir: Path,
         timeout_seconds: int,
+        user_id: str | None = None,
+        run_id: str | None = None,
     ) -> Dict[str, Any]:
         cmd = str(args.get("cmd") or "")
         if not cmd:
@@ -1402,6 +1406,34 @@ class AgentDriver(SandboxDriver):
         for key in requested_env:
             if key in secrets:
                 env[key] = secrets[key]
+
+        # Inject worker-to-worker call capability when the manifest declares calls:
+        _workeros_helper_dir: str | None = None
+        if config.calls and user_id and run_id:
+            from run_token import issue_worker_call_token, MAX_CALL_DEPTH
+            _api_url = os.environ.get("WORKEROS_API_URL") or (
+                f"http://127.0.0.1:{os.environ.get('PORT', '8000')}"
+            )
+            _wrt = issue_worker_call_token(
+                user_id=user_id,
+                parent_run_id=run_id,
+                callable_workers=list(config.calls),
+                depth=0,
+            )
+            env["WORKEROS_API_URL"] = _api_url
+            env["WORKEROS_RUN_TOKEN"] = _wrt
+            env["WORKEROS_CALL_DEPTH"] = "0"
+            # Write workeros.py into a temp dir and add to PYTHONPATH so that
+            # run.py workers can do: from workeros import call_worker
+            import tempfile
+            from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT
+            _workeros_helper_dir = tempfile.mkdtemp(prefix="workeros_helper_")
+            (Path(_workeros_helper_dir) / "workeros.py").write_text(WORKEROS_PY_CONTENT)
+            existing_path = env.get("PYTHONPATH", os.environ.get("PYTHONPATH", ""))
+            env["PYTHONPATH"] = (
+                _workeros_helper_dir + (":" + existing_path if existing_path else "")
+            )
+
         timeout = min(int(args.get("timeout") or timeout_seconds), timeout_seconds)
         if config.runtime.runner == "e2b":
             return self._run_command_e2b(
@@ -1415,22 +1447,27 @@ class AgentDriver(SandboxDriver):
                 output_dir=output_dir,
                 secrets=secrets,
             )
-        with _CWD_LOCK:
-            proc = subprocess.run(
-                [cmd, *cmd_args],
-                cwd=str(cwd),
-                env=env,
-                text=True,
-                capture_output=True,
-                timeout=timeout,
-                check=False,
-            )
-        return {
-            "ok": proc.returncode == 0,
-            "exit_code": proc.returncode,
-            "stdout": _truncate(_scrub(proc.stdout or "", secrets), _STDOUT_CAP),
-            "stderr": _truncate(_scrub(proc.stderr or "", secrets), _STDERR_CAP),
-        }
+        try:
+            with _CWD_LOCK:
+                proc = subprocess.run(
+                    [cmd, *cmd_args],
+                    cwd=str(cwd),
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    timeout=timeout,
+                    check=False,
+                )
+            return {
+                "ok": proc.returncode == 0,
+                "exit_code": proc.returncode,
+                "stdout": _truncate(_scrub(proc.stdout or "", secrets), _STDOUT_CAP),
+                "stderr": _truncate(_scrub(proc.stderr or "", secrets), _STDERR_CAP),
+            }
+        finally:
+            if _workeros_helper_dir:
+                import shutil
+                shutil.rmtree(_workeros_helper_dir, ignore_errors=True)
 
     def _run_command_e2b(
         self,
@@ -1524,7 +1561,14 @@ class AgentDriver(SandboxDriver):
     def _shell_quote(self, value: str) -> str:
         return "'" + value.replace("'", "'\"'\"'") + "'"
 
-    def _invoke_worker(self, args: Dict[str, Any], *, state_user_id: str | None) -> Dict[str, Any]:
+    def _invoke_worker(
+        self,
+        args: Dict[str, Any],
+        *,
+        state_user_id: str | None,
+        config: Optional[WorkerConfig] = None,
+        run_id: str | None = None,
+    ) -> Dict[str, Any]:
         target_id = str(args.get("id") or "")
         target_inputs = args.get("inputs") or {}
         if not target_id:
@@ -1533,16 +1577,52 @@ class AgentDriver(SandboxDriver):
             return {"ok": False, "error": "inputs must be an object"}
         if not state_user_id:
             return {"ok": False, "error": "invoke_worker requires an authenticated owner"}
+
+        # Enforce calls: allowlist declared in worker.yml
+        if config is not None and config.calls:
+            if target_id not in config.calls:
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Worker {target_id!r} is not in this worker's calls: list. "
+                        f"Add it to the calls: section of worker.yml to allow this."
+                    ),
+                }
+
         from db import get_repositories
         from run_service import create_run, execute_run
+        from run_token import MAX_CALL_DEPTH
 
         repos = get_repositories()
+
+        # Depth tracking: the current run's trigger_source encodes depth as
+        # "invoke_worker:depth=N".  The first call (directly triggered by a run)
+        # has no depth encoded, so we default to 0.
+        current_depth = 0
+        if run_id:
+            parent_row = repos.runs.get(user_id=state_user_id, run_id=run_id)
+            if parent_row:
+                ts = parent_row.get("trigger_source") or ""
+                if ts.startswith("invoke_worker:depth="):
+                    try:
+                        current_depth = int(ts.split("=", 1)[1])
+                    except (ValueError, IndexError):
+                        current_depth = 0
+
+        if current_depth >= MAX_CALL_DEPTH:
+            return {
+                "ok": False,
+                "error": f"Maximum worker call depth ({MAX_CALL_DEPTH}) exceeded",
+            }
+
         if repos.workers.get(user_id=state_user_id, worker_id=target_id) is None:
             return {"ok": False, "error": f"Worker not found or not owned by this run: {target_id}"}
+
+        child_trigger_source = f"invoke_worker:depth={current_depth + 1}"
         child_run_id = create_run(
             target_id,
             target_inputs,
-            trigger_source="invoke_worker",
+            trigger_source=child_trigger_source,
             user_id=state_user_id,
             repos=repos,
         )
