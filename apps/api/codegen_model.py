@@ -36,7 +36,7 @@ from typing import Any, Dict, List
 
 # The strongest chat-capable coder reachable on the prod OPENAI_API_KEY as of
 # 2026-05-29. Override with the WORKEROS_CODEGEN_MODEL env var (ops-tunable).
-DEFAULT_CODEGEN_MODEL = "gpt-5.1"
+DEFAULT_CODEGEN_MODEL = "gpt-5.5"
 
 _CODEGEN_MODEL_ENV = "WORKEROS_CODEGEN_MODEL"
 
