@@ -46,13 +46,33 @@ pip install -r requirements.txt
 ### 2. Set up secrets
 
 ```bash
-cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
+cp apps/api/.env.example apps/api/.env
+# Edit apps/api/.env and fill in at minimum: OPENAI_API_KEY, E2B_API_KEY
 ```
 
-Optional — only needed for Composio-triggered workers:
-- `COMPOSIO_API_KEY` — enables/disables Composio triggers
-- `COMPOSIO_WEBHOOK_SIGNING_KEY` — verifies signed Composio webhook payloads
+**Required:**
+- `OPENAI_API_KEY` — powers all agent-mode workers
+- `E2B_API_KEY` — sandbox execution (get one at e2b.dev)
+
+**Recommended for production:**
+- `FLOOM_SECRET` — operator secret that gates all API requests. Omit entirely for unauthenticated local dev.
+
+**Optional integrations:**
+- `COMPOSIO_API_KEY` + `COMPOSIO_WEBHOOK_SIGNING_KEY` — Connections feature (OAuth apps, triggers)
+- `SLACK_CLIENT_ID` + `SLACK_CLIENT_SECRET` — Slack integration (Emily in Slack, magic sign-in links)
+- `WORKEROS_MAGIC_LINK_SECRET` — dedicated HMAC key for magic sign-in links; falls back to `FLOOM_SECRET` then a per-process key if unset
+
+**Secrets encryption key (`.secrets.enc`):**
+
+Worker secrets are stored encrypted in `.secrets.enc` in your workspace. The decryption key is stored out-of-band:
+
+| Setup | Key location |
+|---|---|
+| Cloud (workeros.floom.dev) | Supabase Vault — managed automatically |
+| Self-hosted + GitHub remote | GitHub repo Variable `WORKEROS_SECRETS_KEY` — set automatically on first use |
+| Self-hosted, local git only | `~/.config/workeros/secrets.key` (mode 600) — generated automatically on first use |
+
+For local git setups, back up `~/.config/workeros/secrets.key`. Losing it means existing `.secrets.enc` is unreadable and secrets must be re-entered.
 
 ### 3. Start the backend
 
@@ -132,19 +152,49 @@ workeros run <id> --inputs-file inputs.json
 
 Base URL: `http://localhost:8000`
 
-All endpoints require `x-floom-secret` header (set `FLOOM_SECRET` in `.env`). Omit `FLOOM_SECRET` entirely to run in unauthenticated local dev mode.
+All endpoints require the `x-floom-secret` header (set `FLOOM_SECRET` in `.env`). Omit `FLOOM_SECRET` entirely to run in unauthenticated local dev mode.
+
+**Workers**
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/workers` | GET | List workers |
-| `/workers/{id}` | GET | Worker detail |
+| `/workers/{id}` | GET | Worker detail (includes `missing_secrets`, `missing_connections`) |
 | `/workers/reload` | POST | Reload workers from disk |
-| `/workers/{id}/runs` | POST | Trigger a run |
+| `/workers/{id}/runs` | POST | Trigger a run — returns 422 with named items if secrets/connections missing |
+| `/workers/import-from-share` | POST | Import a worker from a public share token |
+
+**Runs**
+
+| Endpoint | Method | Description |
+|---|---|---|
 | `/runs` | GET | List runs |
-| `/runs/{id}` | GET | Run detail |
+| `/runs/{id}` | GET | Run detail (includes `tool_calls`, `approval_trail`, `can_replay`, `total_tokens`) |
 | `/runs/{id}/approve` | POST | Approve a pending run |
 | `/runs/{id}/reject` | POST | Reject a pending run |
 | `/approvals` | GET | List pending approvals |
-| `/secrets` | GET | List secret metadata |
+
+**Connections & Secrets**
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/connections` | GET | List connections |
+| `/connections/{id}` | GET | Connection detail |
+| `/connections/{id}/activity` | GET | Recent runs that used this connection |
+| `/connections/{id}/peek` | GET | Recent emails for active Gmail connections (trust signal) |
+| `/connections/secrets` | GET | List secret metadata |
+
+**Auth (multi-member mode)**
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/auth/magic-link` | POST | Issue a 15-minute personal sign-in URL (authenticated) |
+| `/auth/magic/{token}` | GET | Consume a magic-link token and create a session (unauthenticated) |
+
+**System**
+
+| Endpoint | Method | Description |
+|---|---|---|
 | `/composio-events` | POST | Signed Composio webhook receiver |
-| `/health` | GET | Health check |
+| `/healthz` | GET | Health check |
+| `/system/overview` | GET | Overview stats, attention items, setup-incomplete alerts |
