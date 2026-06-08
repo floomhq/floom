@@ -7,6 +7,8 @@ Routes mounted under /workspaces (prefix applied in main.py):
   DELETE /workspaces/{id}/members/{user_id}       -> remove member (admin only)
   PATCH  /workspaces/{id}/members/{user_id}/role  -> change role (admin only)
   GET    /workspaces/{id}/invitations             -> list invitations (admin only)
+  GET    /workspaces/{id}/invites/{token}         -> preview invite by token
+  GET    /invites/{token}                         -> preview invite by token
   DELETE /workspaces/{id}/invitations/{inv_id}    -> revoke invite (admin only)
   POST   /workspaces/accept-invite                -> accept invitation (any auth user)
 """
@@ -218,6 +220,26 @@ async def list_invitations(
     _require_admin(auth, workspace_id)
     invitations = members_db.list_invitations(workspace_id=workspace_id)
     return {"workspace_id": workspace_id, "invitations": invitations}
+
+
+@router.get("/workspaces/{workspace_id}/invites/{token}")
+async def preview_workspace_invitation(workspace_id: str, token: str) -> dict:
+    preview = members_db.preview_invitation(raw_token=token, workspace_id=workspace_id)
+    if not preview:
+        raise HTTPException(status_code=404, detail="invitation not found or already used")
+    if preview.get("expired"):
+        raise HTTPException(status_code=410, detail="invitation has expired")
+    return preview
+
+
+@router.get("/invites/{token}")
+async def preview_invitation(token: str) -> dict:
+    preview = members_db.preview_invitation(raw_token=token)
+    if not preview:
+        raise HTTPException(status_code=404, detail="invitation not found or already used")
+    if preview.get("expired"):
+        raise HTTPException(status_code=410, detail="invitation has expired")
+    return preview
 
 
 @router.delete("/workspaces/{workspace_id}/invitations/{invitation_id}")
