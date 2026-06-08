@@ -32,7 +32,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <IconSprite />
         <Ambient />
         <main className="relative z-10 min-h-screen w-full">{children}</main>
-        <Toaster position="bottom-right" />
+        <Toaster position="bottom-right" closeButton />
       </>
     );
   }
@@ -46,7 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Sidebar />
         <main className="relative z-10 flex-1 min-w-0 min-h-screen">{children}</main>
         <CommandPalette />
-        <Toaster position="bottom-right" />
+        <Toaster position="bottom-right" closeButton />
       </>
     );
   }
@@ -63,7 +63,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Emily dock: fixed-height right rail — scrolls internally, never bleeds to body */}
       <EmilyDock className="hidden md:flex" />
       <CommandPalette />
-      <Toaster position="bottom-right" />
+      <Toaster position="bottom-right" closeButton />
     </>
   );
 }
