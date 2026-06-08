@@ -76,7 +76,7 @@ def test_health_runs_dependency_checks_and_uses_cache(monkeypatch, tmp_path):
     assert calls == ["db", "e2b", "openai", "composio"]
 
 
-def test_health_check_e2b_passes_timeout_to_sandbox_list(monkeypatch, tmp_path):
+def test_health_check_e2b_bounds_sdk_call_without_unsupported_kwargs(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     captured: dict[str, object] = {}
 
@@ -95,7 +95,7 @@ def test_health_check_e2b_passes_timeout_to_sandbox_list(monkeypatch, tmp_path):
     monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
 
     assert main._health_check_e2b() == {"ok": True}
-    assert captured["kwargs"] == {"limit": 1, "timeout": 3}
+    assert captured["kwargs"] == {"limit": 1}
 
 
 def test_prometheus_metrics_expose_run_counters_duration_and_active_runs(monkeypatch, tmp_path):
