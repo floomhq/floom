@@ -11,8 +11,10 @@ class AuthContext:
     scopes: tuple[str, ...] = ()
     # multi-member fields (added in migration 59)
     role: str = "admin"          # "admin" | "member"
-    auth_method: str = "secret"  # "pat" | "session" | "secret" | "dev" | "supabase"
+    auth_method: str = "secret"  # "pat" | "session" | "secret" | "dev" | "supabase" | "run_token"
     username: str | None = None  # human-readable login name (None for legacy auth)
+    # populated when auth_method == "run_token" — contains the decoded wrt_ token payload
+    run_token_payload: dict | None = None
 
     @property
     def is_admin(self) -> bool:
