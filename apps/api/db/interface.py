@@ -176,7 +176,13 @@ class RunRepository(Protocol):
         trace_id: str | None = None,
     ) -> None: ...
 
-    def list_logs(self, *, user_id: str, run_id: str) -> list[RowDict]: ...
+    def list_logs(
+        self,
+        *,
+        user_id: str,
+        run_id: str,
+        limit: int | None = 10_000,
+    ) -> list[RowDict]: ...
 
     def list_logs_for_worker(
         self,
@@ -201,7 +207,13 @@ class RunRepository(Protocol):
         created_at: str,
     ) -> None: ...
 
-    def list_artifacts(self, *, user_id: str, run_id: str) -> list[RowDict]: ...
+    def list_artifacts(
+        self,
+        *,
+        user_id: str,
+        run_id: str,
+        limit: int | None = 1_000,
+    ) -> list[RowDict]: ...
 
     def clear_all(self, *, user_id: str) -> int: ...
 
