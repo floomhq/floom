@@ -1,0 +1,25 @@
+schema_version: '0.3'
+name: meeting-scheduler-3
+title: Meeting Scheduler
+description: Adds meetings to the calendar based on email requests.
+version: 0.1.0
+entrypoint: run.py
+exec:
+  entry: run.py
+  runtime: python311
+  runner: e2b
+  inputs:
+  - name: email_request
+    kind: scalar
+    type: string
+    required: true
+    default: "vbellala@asu.edu"
+  outputs:
+  - name: approval_request
+    type: markdown
+    required: true
+trigger:
+  type: cron
+  cron: '*/10 * * * *'
+secrets: []
+connections: []
