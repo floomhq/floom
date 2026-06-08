@@ -29,7 +29,7 @@ export function useRunStream(runId: string | null | undefined) {
 
     let closed = false;
     let sawFinish = false;
-    let staleTimer: ReturnType<typeof window.setTimeout> | null = null;
+    let staleTimer: number | null = null;
     const source = new EventSource(
       apiProxyPath(`/runs/${encodeURIComponent(runId)}/stream`, true),
     );
