@@ -10247,9 +10247,7 @@ def create_worker_run(
             detail=_OPERATOR_ERROR_CODE_HEADLINES["worker_disabled"],
         )
 
-    # #551: Reject the run if any required secret is not configured — backend
-    # enforcement mirrors the frontend gate. The UI already disables the button,
-    # but the API must also reject so CLI/API callers see a clear error.
+    # #551: Reject the run if any required secret or connection is not configured.
     _run_available_secrets = _available_secret_names_for_user(auth.user_id, repos)
     _run_required_secrets = _worker_required_secret_names(worker)
     _run_missing_secrets = [s for s in _run_required_secrets if s not in _run_available_secrets]
@@ -10258,6 +10256,15 @@ def create_worker_run(
             status_code=422,
             detail=f"Cannot run: missing required secret(s): {', '.join(_run_missing_secrets)}. "
                    f"Add them at /connections/secrets before running.",
+        )
+    _run_available_conn_slugs = _available_connection_slugs_for_user(auth.user_id, repos)
+    _run_required_conn_slugs = _worker_connection_slugs(worker)
+    _run_missing_conns = [c for c in _run_required_conn_slugs if c.lower() not in _run_available_conn_slugs]
+    if _run_missing_conns:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot run: missing required connection(s): {', '.join(_run_missing_conns)}. "
+                   f"Connect them at /connections before running.",
         )
 
     # P1-2: Validate required inputs at the request boundary before creating a run row.
@@ -17828,6 +17835,47 @@ def system_overview(
                     action_url=f"/workers/{wid}",
                 )
             )
+
+    # #556 Surface 3: surface workers with missing secrets/connections in the
+    # global needs-attention inbox so operators know exactly what to fix.
+    _ov_available_secrets = _available_secret_names_for_user(auth.user_id, repos)
+    _ov_available_conns = _available_connection_slugs_for_user(auth.user_id, repos)
+    for worker in workers:
+        wid = worker.get("id")
+        if not wid or wid in _already_surfaced:
+            continue
+        if worker.get("archived") or (worker.get("manifest") or {}).get("archived"):
+            continue
+        _ov_req_secrets = _worker_required_secret_names(worker)
+        _ov_missing_secrets = [s for s in _ov_req_secrets if s not in _ov_available_secrets]
+        _ov_req_conns = _worker_connection_slugs(worker)
+        _ov_missing_conns = [c for c in _ov_req_conns if c.lower() not in _ov_available_conns]
+        if _ov_missing_secrets:
+            attention_items.append(
+                OverviewAttentionItem(
+                    type="setup_incomplete",
+                    kind="missing_secret",
+                    worker_id=wid,
+                    worker_name=worker_names.get(wid, wid),
+                    message=f"Missing secret{'' if len(_ov_missing_secrets) == 1 else 's'}: {', '.join(_ov_missing_secrets)}. Add {'it' if len(_ov_missing_secrets) == 1 else 'them'} to run this worker.",
+                    suggested_actions=["add_secret"],
+                    action_url="/connections/secrets",
+                )
+            )
+            _already_surfaced.add(wid)
+        elif _ov_missing_conns:
+            attention_items.append(
+                OverviewAttentionItem(
+                    type="setup_incomplete",
+                    kind="missing_connection",
+                    worker_id=wid,
+                    worker_name=worker_names.get(wid, wid),
+                    message=f"Missing connection{'' if len(_ov_missing_conns) == 1 else 's'}: {', '.join(_ov_missing_conns)}. Connect {'it' if len(_ov_missing_conns) == 1 else 'them'} to run this worker.",
+                    suggested_actions=["connect"],
+                    action_url="/connections",
+                )
+            )
+            _already_surfaced.add(wid)
 
     for row in sorted(
         (

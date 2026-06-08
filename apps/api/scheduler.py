@@ -24,6 +24,50 @@ from db.factory import get_repositories
 from run_service import create_run, get_worker_config_for_run, start_run
 from alerting import alerting_tick
 
+
+def _missing_secrets_for_scheduled_worker(repos, worker_id: str, user_id: str | None) -> list[str]:
+    """Return required secret names not yet configured for this worker's owner."""
+    if not user_id:
+        return []
+    config = get_worker_config_for_run(worker_id)
+    required = list(getattr(config, "secrets", []) or []) if config else []
+    if not required:
+        return []
+    try:
+        available = set(repos.secrets.list_names(user_id=user_id))
+    except Exception:
+        return []
+    return [s for s in required if s not in available]
+
+
+def _missing_connections_for_scheduled_worker(repos, worker_id: str, user_id: str | None) -> list[str]:
+    """Return required connection slugs not yet active for this worker's owner."""
+    if not user_id:
+        return []
+    config = get_worker_config_for_run(worker_id)
+    raw_connections = list(getattr(config, "connections", []) or []) if config else []
+    required_slugs: list[str] = []
+    for c in raw_connections:
+        if isinstance(c, str) and c.strip():
+            required_slugs.append(c.strip().lower())
+        elif isinstance(c, dict):
+            slug = (c.get("app") or c.get("slug") or "").strip().lower()
+            if slug:
+                required_slugs.append(slug)
+    if not required_slugs:
+        return []
+    try:
+        _live = {"active", "valid", "connected"}
+        rows = repos.connections.list(user_id=user_id)
+        available_slugs = {
+            str(r.get("app_name") or "").lower()
+            for r in rows
+            if str(r.get("status") or "").lower() in _live
+        }
+    except Exception:
+        return []
+    return [s for s in required_slugs if s not in available_slugs]
+
 logger = logging.getLogger("floom.scheduler")
 
 POLL_INTERVAL_SECONDS = 60  # check every minute
@@ -192,6 +236,26 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             )
             continue
 
+        # #551: Block upfront if required secrets/connections are not configured.
+        _sched_missing_secrets = _missing_secrets_for_scheduled_worker(repos, worker_id, user_id)
+        if _sched_missing_secrets:
+            if new_next:
+                repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+            logger.warning(
+                "Skipping schedule trigger %s for worker %s: missing secret(s): %s",
+                trigger_id, worker_id, ", ".join(_sched_missing_secrets),
+            )
+            continue
+        _sched_missing_conns = _missing_connections_for_scheduled_worker(repos, worker_id, user_id)
+        if _sched_missing_conns:
+            if new_next:
+                repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+            logger.warning(
+                "Skipping schedule trigger %s for worker %s: missing connection(s): %s",
+                trigger_id, worker_id, ", ".join(_sched_missing_conns),
+            )
+            continue
+
         logger.info(
             "Firing schedule trigger %s for worker %s (was due %s)",
             trigger_id,
@@ -327,6 +391,26 @@ def _tick() -> None:
                 "Skipping scheduled run for worker %s: missing required scheduled input(s): %s",
                 worker_id,
                 ", ".join(missing_inputs),
+            )
+            continue
+
+        # #551: Block upfront if required secrets/connections are not configured.
+        _sched_missing_secrets = _missing_secrets_for_scheduled_worker(repos, worker_id, user_id)
+        if _sched_missing_secrets:
+            if new_next:
+                repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+            logger.warning(
+                "Skipping scheduled run for worker %s: missing secret(s): %s",
+                worker_id, ", ".join(_sched_missing_secrets),
+            )
+            continue
+        _sched_missing_conns = _missing_connections_for_scheduled_worker(repos, worker_id, user_id)
+        if _sched_missing_conns:
+            if new_next:
+                repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+            logger.warning(
+                "Skipping scheduled run for worker %s: missing connection(s): %s",
+                worker_id, ", ".join(_sched_missing_conns),
             )
             continue
 
