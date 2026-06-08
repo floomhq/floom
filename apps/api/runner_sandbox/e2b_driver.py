@@ -96,6 +96,7 @@ def _status_code_from_exception(exc: Exception) -> int | None:
 
 
 def _is_e2b_quota_or_rate_limit_error(exc: Exception) -> bool:
+    """True when another configured E2B key may succeed (quota, rate limit, billing block)."""
     status_code = _status_code_from_exception(exc)
     if status_code in {402, 429}:
         return True
@@ -115,11 +116,18 @@ def _is_e2b_quota_or_rate_limit_error(exc: Exception) -> bool:
         "exhausted",
         "insufficient credits",
         "payment required",
+        "missing payment method",
+        "team is blocked",
         "usage limit",
         "limit exceeded",
         "billing limit",
     )
-    return any(marker in text for marker in markers)
+    if any(marker in text for marker in markers):
+        return True
+    if status_code == 403:
+        message = str(exc).lower()
+        return any(token in message for token in ("billing", "payment", "blocked", "quota"))
+    return False
 
 
 def _create_sandbox_with_key_fallback(
@@ -146,7 +154,7 @@ def _create_sandbox_with_key_fallback(
             last_quota_error = exc
             if index < total:
                 log_fn(
-                    f"[e2b] E2B key {index}/{total} hit a quota/rate limit; "
+                    f"[e2b] E2B key {index}/{total} hit a quota/billing/rate limit; "
                     "retrying with the next configured key",
                     "warning",
                 )
