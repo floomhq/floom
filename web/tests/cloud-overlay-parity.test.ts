@@ -40,4 +40,16 @@ describe("Cloud overlay parity", () => {
     expect(switcher).toContain("Invite someone by link");
     expect(switcher).toContain("Invite link copied");
   });
+
+  it("keeps the cloud /api/me route mirrored between web and overlay", () => {
+    const webMeHelper = readWeb("app/lib/me.ts");
+    const overlayMeHelper = readOverlay("app/lib/me.ts");
+    const webMe = readWeb("app/api/me/route.ts");
+    const overlayMe = readOverlay("app/api/me/route.ts");
+
+    expect(webMeHelper).toBe(overlayMeHelper);
+    expect(webMe).toBe(overlayMe);
+    expect(webMeHelper).toContain("display_name");
+    expect(webMeHelper).toContain("picture");
+  });
 });

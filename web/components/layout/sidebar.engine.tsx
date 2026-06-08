@@ -295,10 +295,13 @@ export function UserProfileFooter({
 
   // Multi-member: prefer username, then email, then display_name
   const primary = (user as (typeof user & { username?: string | null }) | null)?.username
-    || user?.email || user?.display_name || "Local user";
+    || user?.display_name
+    || user?.email
+    || "Local user";
   const userRole = (user as (typeof user & { role?: string }) | null)?.role;
   const secondary = userRole === "admin" ? "Admin" : userRole === "member" ? "Member" : (user?.email ? "Signed in" : "Workeros");
   const initials = profileInitials(primary);
+  const resolvedAvatarUrl = avatarUrl ?? user?.picture ?? null;
 
   async function logout() {
     try {
@@ -323,9 +326,9 @@ export function UserProfileFooter({
           aria-label="Profile menu"
         >
           {/* M36: show Google avatar when avatarUrl is provided, else initials. */}
-          {avatarUrl ? (
+          {resolvedAvatarUrl ? (
             <img
-              src={avatarUrl}
+              src={resolvedAvatarUrl}
               alt="Profile avatar"
               className="size-7 shrink-0 rounded-full border border-[var(--border-soft)] object-cover"
               referrerPolicy="no-referrer"
