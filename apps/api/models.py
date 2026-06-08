@@ -1631,6 +1631,7 @@ class RunDetail(BaseModel):
     tool_calls: List["ToolCallEntry"] = Field(default_factory=list)
     approval_trail: Optional["ApprovalEntry"] = None
     can_replay: bool = False
+    total_tokens: Optional[int] = None
     error: Optional[str] = None  # operator-readable headline (never a raw traceback)
     error_raw: Optional[str] = None  # raw error/traceback for the debug "Raw" tab; redacted of secrets
     error_code: Optional[str] = None

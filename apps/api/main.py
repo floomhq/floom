@@ -3272,6 +3272,14 @@ def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Di
     return rows
 
 
+def _extract_total_tokens_from_transcript(rows: List[Dict[str, Any]]) -> Optional[int]:
+    """Return total_tokens from the usage row appended by agent_driver, or None."""
+    for row in rows:
+        if row.get("type") == "usage" and isinstance(row.get("total_tokens"), int):
+            return row["total_tokens"]
+    return None
+
+
 def _parse_tool_calls_from_transcript(rows: List[Dict[str, Any]]) -> List[ToolCallEntry]:
     """Build paired ToolCallEntry list from normalised transcript rows."""
     # Index tool_call rows by id first, then attach matching tool_result rows.
@@ -11570,9 +11578,10 @@ def get_run(
         except Exception:
             run_input = {}
 
-    # #561: extract structured tool calls from transcript artifact.
+    # #561: extract structured tool calls and token usage from transcript artifact.
     _transcript_rows = _read_transcript_rows(run.get("runner", ""), artifacts)
     _tool_calls = _parse_tool_calls_from_transcript(_transcript_rows)
+    _total_tokens = _extract_total_tokens_from_transcript(_transcript_rows)
 
     # #561: approval trail — single approval row per run (if any).
     _approval_trail: Optional[ApprovalEntry] = None
@@ -11614,6 +11623,7 @@ def get_run(
         tool_calls=_tool_calls,
         approval_trail=_approval_trail,
         can_replay=_can_replay,
+        total_tokens=_total_tokens,
         error=_operator_error_message(run.get("error"), run.get("error_code")),
         # Raw error/traceback kept only for the debug "Raw" tab, secrets redacted.
         # Surfaced separately so it is never the operator-facing headline. We keep
