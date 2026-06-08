@@ -42,6 +42,17 @@ def test_manifest_parser_finds_active_stock_workers():
     csv_spec = next(spec for spec in specs if spec.worker_id == "csv_enricher")
     assert csv_spec.file_input_name == "csv_file"
     assert csv_spec.sample_file and csv_spec.sample_file.name == "sample_candidates.csv"
+    assert csv_spec.sample_file.is_file()
+
+    cv_spec = next(spec for spec in specs if spec.worker_id == "cv_writeup")
+    assert cv_spec.file_input_name == "cv_file"
+    assert cv_spec.sample_file and cv_spec.sample_file.name == "sample_cv.txt"
+    assert cv_spec.sample_file.is_file()
+
+    node_spec = next(spec for spec in specs if spec.worker_id == "node-smoke-test")
+    assert node_spec.file_input_name is None
+    assert node_spec.sample_file is None
+    assert "No inputs required" in node_spec.smoke_input.read_text(encoding="utf-8")
 
     opendraft_spec = next(spec for spec in specs if spec.worker_id == "opendraft")
     assert opendraft_spec.cancel_after_start is True
