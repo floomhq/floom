@@ -163,6 +163,37 @@ def test_runtime_snapshot_created_and_persisted(api_ctx):
     assert snapshot_worker_yml.is_file()
 
 
+def test_execute_run_fetches_secrets_once_for_log_scrubbing(api_ctx, monkeypatch):
+    client = api_ctx["client"]
+    headers = api_ctx["headers"]
+    main = api_ctx["main"]
+    run_service = importlib.import_module("run_service")
+
+    calls: list[tuple[str, str | None]] = []
+
+    def _fake_get_secrets(worker_id: str, *, user_id: str | None = None, repos=None):
+        calls.append((worker_id, user_id))
+        return {"TOKEN": "secret-value"}
+
+    monkeypatch.setattr(run_service, "get_secrets_for_worker", _fake_get_secrets)
+
+    worker_id = _create_worker(client, headers)
+    _start_run(client, headers, worker_id, {"text": "hello"})
+
+    with main.get_db() as conn:
+        log_count = conn.execute(
+            """
+            SELECT COUNT(*) FROM logs l
+            JOIN runs r ON r.id = l.run_id
+            WHERE r.worker_id = ?
+            """,
+            (worker_id,),
+        ).fetchone()[0]
+
+    assert log_count > 1
+    assert calls == [(worker_id, "federico")]
+
+
 def test_runs_filter_and_total_count_header(api_ctx):
     client = api_ctx["client"]
     headers = api_ctx["headers"]
