@@ -448,6 +448,8 @@ PUBLIC_STOCK_WORKER_IDS = frozenset(
         "github-digest",
         "gmail_intake_brief",
         "gmail_inbox_manager",
+        "kugelaudio-bug-intake",
+        "kugelaudio-meeting-pipeline",
         "linkedin-post-engagements",
         "node-smoke-test",
         "openblog",
@@ -456,9 +458,20 @@ PUBLIC_STOCK_WORKER_IDS = frozenset(
         "research_brief",
         "reverse_match_crm",
         "search_console_insights",
+        "topic-explainer",
         "weekly_update",
     }
 )
+
+# System/infra workers whose runs are never surfaced in the operator /runs list.
+# These run autonomously in the background (trigger-based, high-volume, or
+# internal generation agents) and flooding the runs list with them harms UX.
+_SYSTEM_WORKER_IDS = frozenset({
+    "workspace-agent",
+    "worker-author",
+    "slack-listener",
+    "whatsapp-listener",
+})
 
 _INTERNAL_WORKER_ID_PREFIXES = (
     "_mcp_",
@@ -3900,7 +3913,22 @@ def _run_visible_to_api(row: Any, *, user_id: str, repos: Repositories) -> bool:
     worker_id = str(row_to_dict(row).get("worker_id") or "")
     if not worker_id:
         return False
-    return _get_visible_worker(worker_id, user_id=user_id, repos=repos) is not None
+    # Always hide runs for system/infra workers — they're high-volume background
+    # workers whose runs would flood the operator view and are never user-initiated.
+    if worker_id in _SYSTEM_WORKER_IDS:
+        return False
+    if worker_id.startswith(".") or any(worker_id.startswith(p) for p in _INTERNAL_WORKER_ID_PREFIXES):
+        return False
+    # A run is visible if its worker is owned by the requesting user — regardless
+    # of whether the worker is a stock/tracked worker. This closes the gap where
+    # Emily (which bypasses the visibility filter) could see runs that /runs hid.
+    worker = _get_db_worker(worker_id, user_id=user_id, repos=repos)
+    if worker is not None:
+        return True
+    # Filesystem fallback: public stock workers are always visible.
+    if _shared_filesystem_fallback_allowed() or worker_id in PUBLIC_STOCK_WORKER_IDS:
+        return get_worker(worker_id) is not None
+    return False
 
 
 def _get_visible_run(
