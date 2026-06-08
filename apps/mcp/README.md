@@ -1,11 +1,12 @@
 # Workeros CLI + MCP
 
-Workeros lets agents create, update, run, watch, and delete production worker automations through a local stdio MCP server backed by the Workeros API. The package installs into Claude Code, Cursor, VS Code, Windsurf, Continue, or any harness that accepts an MCP stdio server entry.
+Workeros lets agents create, update, run, watch, and delete production worker automations through an HTTP MCP endpoint backed by the Workeros API. The package installs into Claude Code, Cursor, VS Code, Windsurf, Continue, or any harness that accepts an MCP HTTP or stdio server entry.
 
 Workeros ships as a single npm package that exposes:
 
 - **`workeros` CLI** – `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue. `floom` remains a compatibility alias for older Floom operator workflows.
-- **`workeros-mcp` stdio server** – the production MCP surface (workers / runs / approvals / secrets / connections / contexts / triggers / system) used by agents.
+- **HTTP MCP endpoint** – `workeros mcp install` writes an HTTP transport entry (`url` + `headers`) pointing at `/mcp-tools/serve` on the Workeros API. No local subprocess is required.
+- **`workeros-mcp` stdio server** – legacy stdio path; still works when run directly as `npx -p @floomhq/workeros workeros-mcp` (or `node dist/server.js`). Use this for harnesses that do not support HTTP MCP transport.
 
 The CLI targets both deployments:
 
@@ -59,9 +60,11 @@ Re-running the installer updates the existing `workeros` entry instead of duplic
 | `continue` | `~/.continue/.continuerc.json` | `{ mcpServers: [ { name:"workeros", ... } ] }` |
 | `generic` | (no file) | prints JSON snippet to stdout |
 
-All targets use stdio transport (`command: npx`, `args: ["-y", "@floomhq/workeros"]`). There is no HTTP/SSE variant — the MCP server starts in-process via stdio.
+All targets write **HTTP MCP transport** (`url` + `headers`) — no local subprocess is spawned. The MCP endpoint is hosted on the Workeros API server.
 
 ## Manual config
+
+### HTTP transport (recommended — written by `workeros mcp install`)
 
 Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape):
 
@@ -69,11 +72,9 @@ Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape):
 {
   "mcpServers": {
     "workeros": {
-      "command": "npx",
-      "args": ["-y", "@floomhq/workeros"],
-      "env": {
-        "WORKEROS_API_SECRET": "<WORKEROS_API_SECRET>",
-        "WORKEROS_API_BASE": "https://workers-api.floom.dev"
+      "url": "https://workers-api.floom.dev/mcp-tools/serve",
+      "headers": {
+        "x-floom-secret": "<WORKEROS_API_SECRET>"
       }
     }
   }
@@ -87,18 +88,35 @@ Continue (`~/.continue/.continuerc.json`, array shape):
   "mcpServers": [
     {
       "name": "workeros",
-      "command": "npx",
-      "args": ["-y", "@floomhq/workeros"],
-      "env": {
-        "WORKEROS_API_SECRET": "<WORKEROS_API_SECRET>",
-        "WORKEROS_API_BASE": "https://workers-api.floom.dev"
+      "url": "https://workers-api.floom.dev/mcp-tools/serve",
+      "headers": {
+        "x-floom-secret": "<WORKEROS_API_SECRET>"
       }
     }
   ]
 }
 ```
 
-The server targets `https://workers-api.floom.dev` by default. For development, set `WORKEROS_API_BASE`.
+For self-hosted OSS, replace `https://workers-api.floom.dev` with your API base URL.
+
+### Stdio transport (fallback — for harnesses that do not support HTTP MCP)
+
+```json
+{
+  "mcpServers": {
+    "workeros": {
+      "command": "npx",
+      "args": ["-p", "@floomhq/workeros", "workeros-mcp"],
+      "env": {
+        "WORKEROS_API_SECRET": "<WORKEROS_API_SECRET>",
+        "WORKEROS_API_BASE": "https://workers-api.floom.dev"
+      }
+    }
+  }
+}
+```
+
+Or launch directly if the package is already installed: `node /path/to/@floomhq/workeros/dist/server.js`.
 
 ## Worker bundle CLI flow
 
