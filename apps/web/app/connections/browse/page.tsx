@@ -296,7 +296,9 @@ function CatalogCard({
             <h2 className="line-clamp-2 text-sm font-semibold text-ink">{item.name}</h2>
           </div>
           {isConnected && (
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" title="Connected" />
+            <span title="Connected" aria-label="Connected">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+            </span>
           )}
         </div>
 
