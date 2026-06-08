@@ -60,9 +60,20 @@ def _api(method: str, path: str, **kwargs) -> requests.Response:
 # ---------------------------------------------------------------------------
 
 @click.group()
-def cli():
+@click.option("--secret", envvar="FLOOM_API_SECRET", default="", help="x-floom-secret header value (or set FLOOM_API_SECRET)")
+@click.option("--token", envvar="FLOOM_API_TOKEN", default="", help="Bearer token / PAT (or set FLOOM_API_TOKEN)")
+@click.option("--api-base", envvar="FLOOM_API_BASE", default="http://localhost:8000", help="API base URL")
+@click.pass_context
+def cli(ctx: click.Context, secret: str, token: str, api_base: str):
     """floom — Workeros operator CLI."""
-    pass
+    # #598: allow --secret / --token flags to override env vars at call time
+    ctx.ensure_object(dict)
+    if secret:
+        ctx.obj["secret"] = secret
+    if token:
+        ctx.obj["token"] = token
+    if api_base:
+        ctx.obj["api_base"] = api_base
 
 
 # ---------------------------------------------------------------------------

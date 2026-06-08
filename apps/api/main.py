@@ -252,6 +252,20 @@ async def lifespan(app: FastAPI):
     register_part_publisher(_run_part_publish)
     # Startup
     _validate_startup_configuration()
+    # #603: migrate any DB rows that still store exec.mode="hybrid" to "pure-script".
+    # The "hybrid" mode was a deprecated alias; removing it from the Literal without
+    # migrating existing rows would break workers whose manifests were saved before
+    # the deprecation was enforced.
+    try:
+        with get_db() as _mig_conn:
+            _rows_updated = _mig_conn.execute(
+                "UPDATE workers SET manifest_json = REPLACE(manifest_json, '\"mode\": \"hybrid\"', '\"mode\": \"pure-script\"') "
+                "WHERE manifest_json LIKE '%\"mode\": \"hybrid\"%'"
+            ).rowcount
+            if _rows_updated:
+                logger.info("Migration #603: converted %d workers from exec.mode=hybrid to pure-script", _rows_updated)
+    except Exception as _mig_exc:
+        logger.warning("Migration #603 (hybrid→pure-script) failed (non-fatal): %s", _mig_exc)
     # Ensure the git workspace repo is initialized (idempotent)
     try:
         _wgit = _git_workspace()
@@ -377,9 +391,11 @@ BODYLESS_METHODS = {"GET", "HEAD", "OPTIONS"}
 RATE_LIMIT_RULES = [
     # #601: auth/identity endpoints — strict limits to prevent brute-force and
     # credential-stuffing. 5 attempts per minute per IP is generous for humans
-    # while blocking automated attacks.
+    # while blocking automated attacks. /auth/me is included because it is the
+    # primary identity probe used by scanners checking for auth bypass (#594).
     (re.compile(r"^/auth/login$"), (5, 60.0)),
     (re.compile(r"^/auth/setup$"), (5, 60.0)),
+    (re.compile(r"^/auth/me$"), (30, 60.0)),
     (re.compile(r"^/auth/tokens$"), (10, 60.0)),
     (re.compile(r"^/auth/magic-link$"), (5, 60.0)),
     (re.compile(r"^/auth/magic/.+$"), (10, 60.0)),
@@ -14591,12 +14607,21 @@ def test_connection(
                     reason = f"MCP server reachable{f' — {tool_count} tools' if tool_count is not None else ''}."
                     return ConnectionTestResult(status="valid", reason=reason, tested_at=tested_at)
                 else:
+                    # #599: distinguish auth failures (server reachable, wrong key)
+                    # from URL/routing failures — they need different user actions.
+                    if resp.status_code in (401, 403):
+                        reason = (
+                            f"MCP server reachable but authentication failed (HTTP {resp.status_code}). "
+                            "Check your API key / token."
+                        )
+                    elif resp.status_code == 404:
+                        reason = (
+                            f"MCP server returned 404. Verify the server URL is correct."
+                        )
+                    else:
+                        reason = f"MCP server returned HTTP {resp.status_code}."
                     _write_connection_check(connection_id, "failed", f"HTTP {resp.status_code}", tested_at, status="failed", repos=repos)
-                    return ConnectionTestResult(
-                        status="failed",
-                        reason=f"MCP server returned HTTP {resp.status_code}. Check the URL and credentials.",
-                        tested_at=tested_at,
-                    )
+                    return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
             except Exception as exc:
                 _write_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
                 return ConnectionTestResult(

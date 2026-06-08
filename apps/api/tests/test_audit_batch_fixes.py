@@ -30,6 +30,7 @@ MAIN_PY = API_DIR / "main.py"
 MAIN_SRC = MAIN_PY.read_text(encoding="utf-8")
 
 RUN_SERVICE_PY = API_DIR / "run_service.py"
+# Reload from disk so all edits are picked up at test-collection time
 RUN_SVC_SRC = RUN_SERVICE_PY.read_text(encoding="utf-8")
 
 MODELS_PY = API_DIR / "models.py"
@@ -67,18 +68,26 @@ def test_595_approvals_synthesised_when_manifest_requires_but_run_py_omits():
 
 def test_595_synthesis_guarded_by_approval_flag():
     """The synthesis must only happen when approvals.required is true."""
-    # Find the synthesis block
     synth_idx = RUN_SVC_SRC.find("result.decision_required = {")
     if synth_idx == -1:
         synth_idx = RUN_SVC_SRC.find("result.decision_required=")
     assert synth_idx != -1, "Synthesis block not found in run_service.py"
     context = RUN_SVC_SRC[max(0, synth_idx - 400): synth_idx + 10]
-    assert "worker_needs_approval" in context, (
-        "Synthesis must be gated on worker_needs_approval"
+    assert "worker_needs_approval" in context, "Synthesis must be gated on worker_needs_approval"
+    assert "not result.decision_required" in context, "Synthesis must only fire when run.py didn't emit"
+
+
+def test_595_cancelled_timeout_rejected_excluded():
+    """Approval synthesis must NOT fire for cancelled, timeout, or rejected runs."""
+    assert "_non_approval_terminal" in RUN_SVC_SRC, (
+        "#595: a _non_approval_terminal set must exclude cancelled/timeout/rejected"
     )
-    assert "not result.decision_required" in context, (
-        "Synthesis must only fire when run.py did NOT emit decision_required"
-    )
+    non_terminal_idx = RUN_SVC_SRC.find("_non_approval_terminal")
+    block = RUN_SVC_SRC[non_terminal_idx: non_terminal_idx + 200]
+    for status in ("cancelled", "timeout", "rejected"):
+        assert status in block, (
+            f"#595: '{status}' must be in _non_approval_terminal to prevent approval synthesis on terminal runs"
+        )
 
 
 def test_595_informational_log_on_synthesis():
@@ -123,6 +132,14 @@ def test_596_old_bare_import_gone():
 # ---------------------------------------------------------------------------
 # #598 — CLI respects FLOOM_API_TOKEN
 # ---------------------------------------------------------------------------
+
+def test_598_cli_has_secret_flag():
+    """CLI must expose a --secret flag (the originally reported bug)."""
+    assert "--secret" in CLI_SRC, (
+        "#598: CLI must have a --secret flag so operators can pass the secret "
+        "at call time without setting an env var"
+    )
+
 
 def test_598_cli_reads_api_token():
     """CLI must read FLOOM_API_TOKEN env var."""
@@ -173,15 +190,34 @@ def test_599_mcp_test_returns_failed_on_bad_status():
 
 def test_599_mcp_test_handles_connection_error():
     """test_connection must catch network errors and return status='failed'."""
-    # Find the MCP test endpoint region
     test_idx = MAIN_SRC.find("def test_connection(")
     assert test_idx != -1, "test_connection endpoint not found"
     endpoint_src = MAIN_SRC[test_idx: test_idx + 2500]
-    assert "except Exception" in endpoint_src, (
-        "#599: test_connection must catch exceptions from failed MCP probes"
-    )
+    assert "except Exception" in endpoint_src, "#599: must catch exceptions"
     assert "Could not reach MCP server" in endpoint_src or "reach" in endpoint_src, (
-        "#599: test_connection must return a helpful error when the server is unreachable"
+        "#599: must return helpful error when unreachable"
+    )
+
+
+def test_599_mcp_test_distinguishes_auth_vs_url_errors():
+    """401/403 should say 'check credentials', not 'check URL'."""
+    test_idx = MAIN_SRC.find("def test_connection(")
+    endpoint_src = MAIN_SRC[test_idx: test_idx + 3000]
+    assert "401" in endpoint_src and "403" in endpoint_src, (
+        "#599: 401/403 must be handled separately from other HTTP errors"
+    )
+    assert "authentication failed" in endpoint_src or "credentials" in endpoint_src.lower(), (
+        "#599: 401/403 must explain it's an auth failure, not a URL problem"
+    )
+
+
+def test_601_auth_me_rate_limited():
+    """/auth/me must have a rate-limit rule (explicitly listed in the issue)."""
+    rules_idx = MAIN_SRC.find("RATE_LIMIT_RULES = [")
+    rules_block = MAIN_SRC[rules_idx: rules_idx + 900]
+    assert "/auth/me" in rules_block, (
+        "#601: /auth/me was explicitly listed in the issue as needing a rate limit. "
+        "It is the primary identity probe used to test for auth bypass."
     )
 
 
@@ -267,6 +303,22 @@ def test_602_skill_driver_not_imported():
     )
 
 
+def test_602_skill_driver_file_deleted():
+    """skill_driver.py must be deleted — it's dead code."""
+    skill_driver = API_DIR / "runner_sandbox" / "skill_driver.py"
+    assert not skill_driver.exists(), (
+        "#602: runner_sandbox/skill_driver.py must be deleted. "
+        "Zero workers use it and it was unreachable after removing the dispatch."
+    )
+
+
+def test_602_runner_key_has_no_skill_branch():
+    """_runner_key() in run_service.py must not have a skill branch."""
+    assert "startswith(\"skill\")" not in RUN_SVC_SRC, (
+        "#602: _runner_key() must not check runtime_type.startswith('skill')"
+    )
+
+
 def test_602_skill_runner_dispatch_removed():
     """get_driver() must not import or dispatch to SkillRuntimeDriver.
     References in comments/docstrings are acceptable."""
@@ -346,6 +398,14 @@ def test_604_ci_tsx_tests_run():
     """CI must run the tsx-style frontend test files."""
     assert "tsx" in CI_SRC and "fl-" in CI_SRC, (
         "#604: CI must run tsx-based test files (fl-*.test.ts) in addition to vitest"
+    )
+
+
+def test_604_root_runtime_tests_in_ci():
+    """CI must have a job that runs the root-level tests/ directory."""
+    assert "runtime-tests" in CI_SRC or ("root" in CI_SRC and "pytest" in CI_SRC), (
+        "#604: CI must have a job running root-level tests/ (66 runtime test files). "
+        "These were the main ask — apps/api/tests/ is separate from tests/."
     )
 
 
