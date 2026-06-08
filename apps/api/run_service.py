@@ -2844,6 +2844,7 @@ def _drain_one_batch() -> None:
             logger.info("Queue drain: dispatched run %s for worker %s", run_id, worker_id)
         except Exception as exc:
             logger.warning("Queue drain: failed to dispatch run %s: %s", run_id, exc)
+            _unregister_active_run(run_id)
             try:
                 repos_obj.runs.update(
                     user_id=user_id,

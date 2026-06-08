@@ -317,6 +317,11 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 worker_id,
                 exc,
             )
+            if new_next:
+                try:
+                    repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=new_next)
+                except Exception:
+                    pass
     return len(rows)
 
 
@@ -469,6 +474,11 @@ def _tick() -> None:
             logger.exception(
                 "Failed to fire scheduled run for worker %s: %s", worker_id, exc
             )
+            if new_next:
+                try:
+                    repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=new_next)
+                except Exception:
+                    pass
 
 
 def start_scheduler() -> None:
