@@ -159,3 +159,30 @@ def test_queued_run_cancel_does_not_call_e2b_sandbox(monkeypatch, tmp_path):
     assert row["status"] == "failed"
     assert row["error_code"] == "cancelled_queued"
     db.get_repositories.cache_clear()
+
+
+def test_cancel_flag_db_read_failure_fails_closed_and_is_metrified(monkeypatch, tmp_path, caplog):
+    db, main = _load_app(monkeypatch, tmp_path)
+    import db as db_module
+    import runner_sandbox.agent_driver as agent_driver
+    from unittest.mock import patch
+
+    before = agent_driver.cancel_flag_db_read_errors_total()
+
+    with patch.object(db_module, "get_db", side_effect=RuntimeError("db unavailable")):
+        with caplog.at_level("WARNING", logger="floom.runner_sandbox.agent"):
+            result = agent_driver.AgentDriver()._cancel_requested("run-missing")
+
+    assert result is True
+    assert agent_driver.cancel_flag_db_read_errors_total() == before + 1
+    assert any("cancel flag read failed" in record.message.lower() for record in caplog.records)
+
+    client = TestClient(main.app, raise_server_exceptions=False)
+    metrics = client.get("/system/metrics", headers={"x-floom-secret": "test-secret"})
+    assert metrics.status_code == 200, metrics.text
+    assert metrics.json()["cancel_flag_db_read_errors"] == before + 1
+
+    prom = client.get("/metrics", headers={"x-floom-secret": "test-secret"})
+    assert prom.status_code == 200, prom.text
+    assert f"workeros_cancel_flag_db_read_errors_total {before + 1}" in prom.text
+    db.get_repositories.cache_clear()
