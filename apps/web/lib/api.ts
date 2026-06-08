@@ -694,6 +694,11 @@ export const api = {
         `/connections/${encodeURIComponent(id)}/activity?limit=${limit}`,
         { cache: "no-store" }
       ),
+    peek: (id: string) =>
+      fetchJson<{ emails: Array<{ subject: string; from_name: string; from_email: string; date: string }> }>(
+        `/connections/${encodeURIComponent(id)}/peek`,
+        { cache: "no-store" }
+      ),
   },
   slack: {
     // Read-only status (configured: true/false + installed workspaces). Slack
