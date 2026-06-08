@@ -125,6 +125,54 @@ def get_invitation_by_token(*, raw_token: str) -> dict[str, Any] | None:
     return _row(response)
 
 
+def preview_invitation(*, raw_token: str, workspace_id: str | None = None) -> dict[str, Any] | None:
+    """Return non-secret invitation preview data for an accept page."""
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    client = get_supabase_service_client()
+    query = (
+        client.table("workspace_invitations")
+        .select("id,workspace_id,email,role,invited_by,status,created_at,expires_at")
+        .eq("token_hash", token_hash)
+        .eq("status", "pending")
+    )
+    if workspace_id:
+        query = query.eq("workspace_id", workspace_id)
+    invite = _row(query.limit(1).execute())
+    if not invite:
+        return None
+
+    expires_at_str = invite.get("expires_at") or ""
+    expired = False
+    if expires_at_str:
+        try:
+            exp = datetime.fromisoformat(str(expires_at_str).replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            expired = datetime.now(timezone.utc) > exp
+        except (ValueError, TypeError):
+            expired = True
+
+    workspace = _row(
+        client.table("workspaces")
+        .select("id,name,owner_user_id")
+        .eq("id", invite["workspace_id"])
+        .limit(1)
+        .execute()
+    ) or {}
+    emails = resolve_member_emails([str(invite.get("invited_by") or "")])
+    return {
+        "id": invite.get("id"),
+        "workspace_id": invite.get("workspace_id"),
+        "workspace_name": workspace.get("name") or "Workspace",
+        "email": invite.get("email"),
+        "role": invite.get("role") or "member",
+        "inviter_user_id": invite.get("invited_by"),
+        "inviter_email": emails.get(str(invite.get("invited_by") or ""), ""),
+        "expires_at": invite.get("expires_at"),
+        "expired": expired,
+    }
+
+
 def accept_invitation(
     *,
     raw_token: str,

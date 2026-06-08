@@ -80,6 +80,8 @@ function cloudApexRedirects(): RedirectRule[] {
     "settings",
     "members",
     "cli-auth",
+    "install",
+    "invite",
   ];
 
   return appPathRules.flatMap((path) => [

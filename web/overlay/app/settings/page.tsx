@@ -86,6 +86,7 @@ export default function SettingsPage() {
 
 function SettingsContent() {
   const searchParams = useSearchParams();
+  const fromInstallChannel = searchParams.get("from_install");
   // S28: tabs use URL hash now (#api, #danger, etc.). Fall back to legacy
   // ?tab= for old links.
   // S30: own the hash via the History API instead of router.replace. The App
@@ -374,6 +375,20 @@ function SettingsContent() {
           System configuration and access.
         </p>
       </div>
+
+      {fromInstallChannel ? (
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>
+            {fromInstallChannel === "slack" ? "Connect Slack to continue" : `Finish ${fromInstallChannel} setup`}
+          </AlertTitle>
+          <AlertDescription>
+            {fromInstallChannel === "slack"
+              ? "Open Assistant to connect Slack OAuth for this workspace."
+              : "This install channel needs platform credentials before setup can finish."}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {/* S22f: hide Notifications tab. Roast P1: it shipped two "Soon"
           placeholder toggles, which read as "this team ships features that
