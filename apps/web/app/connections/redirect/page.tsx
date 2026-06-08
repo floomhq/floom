@@ -9,7 +9,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProviderLogos } from "@/components/connections/ProviderLogos";
 
-type RedirectPhase = "preparing" | "ready" | "waiting" | "done" | "error" | "api_key";
+type RedirectPhase = "preparing" | "ready" | "waiting_click" | "waiting" | "done" | "error" | "api_key";
 
 function RedirectInner() {
   const searchParams = useSearchParams();
@@ -150,6 +150,26 @@ function RedirectInner() {
                 <p className="mt-2 text-sm text-muted-foreground">
                   {providerName} is now connected. Taking you back…
                 </p>
+              </>
+
+            ) : phase === "waiting_click" ? (
+              <>
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-full border border-border bg-muted">
+                  <ExternalLink className="size-5 text-muted-foreground" />
+                </div>
+                <h1 className="mt-4 text-xl font-semibold">Finish authorization in Composio</h1>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Complete the authorization in the tab that opened, then return here.
+                </p>
+                <Button
+                  className="mt-6 w-full"
+                  onClick={startPolling}
+                >
+                  I&apos;ve authorized — take me back
+                </Button>
+                <Link href={returnTo} className={buttonVariants({ variant: "ghost", className: "mt-2 w-full" })}>
+                  Go to connections
+                </Link>
               </>
 
             ) : phase === "waiting" ? (
