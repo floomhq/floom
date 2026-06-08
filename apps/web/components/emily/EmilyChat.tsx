@@ -177,7 +177,10 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    // Tight threshold: even a small scroll up (> 20px from bottom) disengages
+    // auto-scroll immediately. A large threshold like 120px caused fighting
+    // because small scrolls still read as "near bottom" and got overridden.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
     isNearBottomRef.current = nearBottom;
     setShowScrollButton(!nearBottom);
   }, []);
