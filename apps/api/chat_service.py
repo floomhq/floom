@@ -87,6 +87,33 @@ immediately. I don't hold the reply until every tool has settled.
 to people outside this workspace will ask for your approval first. That's what
 the approval queue is for.
 
+## Worker authoring rules
+
+When I create or update a worker I follow these rules exactly. They are not
+suggestions — they are hard constraints the server enforces.
+
+**Approvals** — if the user says anything like "ask me to approve", "needs my OK",
+"HITL", "before it sends / posts / does anything": set `approvals: {required: true}`
+in the YAML. Never set `required: false` when the user asked for approval.
+
+**Connections** — if the user mentions any external service (Gmail, Google Calendar,
+Slack, Notion, etc.): add every named service to the `connections:` list in the YAML.
+An empty `connections: []` means the worker cannot reach any external service at all.
+
+**Exec mode** — if the worker reads email, writes calendar events, posts messages,
+or calls ANY external service via a connection: use `exec.mode: "agent"` (entry:
+SKILL.md). pure-script mode (`run.py`) cannot call Composio connections — it can
+only run deterministic Python with no external API calls.
+
+**Trigger types** — valid values: `manual`, `schedule`, `webhook`, `event`. For
+"every N minutes" use `type: "schedule"` with `cron: "*/N * * * *"`. Never use
+`type: "cron"` or `type: "incoming_email"` — they don't exist in WorkerOS.
+
+**Runner** — always `exec.runner: "e2b"`. The local runner was removed.
+
+After creating a worker I re-read what was actually saved (connections, approvals,
+trigger) and confirm it matches what the user asked for before I say it's done.
+
 **Links over walls of text.** When something needs the UI (approve a run, connect
 a tool, sign in), I give you the exact link. I don't describe where to go.
 
@@ -1286,7 +1313,23 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
         ),
         _make_tool(
             "workers__create",
-            "Create a new worker from a YAML bundle string.",
+            (
+                "Create a new worker from a YAML bundle string.\n\n"
+                "FIELD RULES — these are non-negotiable and will be validated server-side:\n"
+                "- exec.runner: always \"e2b\" (the local runner was removed)\n"
+                "- trigger.type: \"manual\" | \"schedule\" | \"webhook\" | \"event\"\n"
+                "  Do NOT use \"cron\" or \"incoming_email\" — they are not valid.\n"
+                "  For a scheduled worker: type: \"schedule\", cron: \"*/10 * * * *\"\n"
+                "- exec.mode: \"agent\" (uses SKILL.md) or \"pure-script\" (uses run.py)\n"
+                "  Use \"agent\" whenever the worker calls external services via connections.\n"
+                "- approvals.required: true when the user asks for approval before any action\n"
+                "- connections: list ALL app slugs the worker needs (e.g. [\"gmail\", \"googlecalendar\"])\n"
+                "  Declare every service mentioned. Empty list means the worker cannot call any external app.\n"
+                "INTENT MAPPING:\n"
+                "- 'ask me to approve' / 'needs approval' / 'HITL' → approvals: {required: true}\n"
+                "- 'use gmail / google calendar / slack / etc.' → add to connections list\n"
+                "- worker reads email / writes calendar / posts message → exec.mode: \"agent\""
+            ),
             {
                 "type": "object",
                 "properties": {"yaml_text": {"type": "string", "description": "Full worker.yml content"}},
@@ -2429,6 +2472,35 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     if not (manifest.get("name") or manifest.get("id")):
         return {"ok": False, "error": "worker name is required in YAML"}
 
+    # #673: validate field values before persisting so Emily gets an immediate,
+    # actionable error instead of silently saving a broken worker.
+    _VALID_TRIGGER_TYPES = {"manual", "schedule", "webhook", "event"}
+    trigger_block = manifest.get("trigger") or {}
+    if isinstance(trigger_block, dict):
+        trigger_type = trigger_block.get("type") or ""
+        if trigger_type and trigger_type not in _VALID_TRIGGER_TYPES:
+            return {
+                "ok": False,
+                "error": (
+                    f"Invalid trigger.type '{trigger_type}'. "
+                    f"Valid values: {sorted(_VALID_TRIGGER_TYPES)}. "
+                    "For a scheduled worker use type: 'schedule' with cron: '*/10 * * * *'. "
+                    "Never use 'cron' or 'incoming_email' — they do not exist in WorkerOS."
+                ),
+            }
+    exec_block = manifest.get("exec") or {}
+    if isinstance(exec_block, dict):
+        runner = exec_block.get("runner") or ""
+        if runner and runner != "e2b":
+            return {
+                "ok": False,
+                "error": (
+                    f"Invalid exec.runner '{runner}'. "
+                    "The only valid runner is 'e2b'. "
+                    "The local in-process runner was removed. Set exec.runner: 'e2b'."
+                ),
+            }
+
     # Step 1: converge onto the proven materialization path. ``dedupe_id`` rewrites
     # a colliding id to a free one (matches the worker-author hook) so a create
     # never dead-ends on a taken slug.
@@ -2455,7 +2527,21 @@ def _tool_workers_create(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     # (the worker stays editable), but it IS surfaced so Emily can tell the user
     # the worker is not yet runnable instead of presenting a dead worker as ready.
     smoke_status, smoke_reason = _smoke_gate_emily_worker(worker_id, manifest, user_id)
-    return _emily_worker_result_message(worker_id, "created", smoke_status, smoke_reason)
+    result = _emily_worker_result_message(worker_id, "created", smoke_status, smoke_reason)
+    # #675: include what was *actually* saved so Emily can verify it matches the
+    # user's intent without a separate workers.get call. This surfaces silent drops
+    # (e.g. connections=[], approvals.required=False) immediately in the tool result.
+    exec_block = manifest.get("exec") or {}
+    trigger_block = manifest.get("trigger") or {}
+    approvals_block = manifest.get("approvals") or {}
+    result["saved_config"] = {
+        "connections": manifest.get("connections") or [],
+        "approvals_required": bool(approvals_block.get("required", False)),
+        "trigger_type": (trigger_block.get("type") if isinstance(trigger_block, dict) else trigger_block) or "manual",
+        "exec_mode": (exec_block.get("mode") if isinstance(exec_block, dict) else None) or "unknown",
+        "runner": (exec_block.get("runner") if isinstance(exec_block, dict) else None) or "unknown",
+    }
+    return result
 
 
 def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
