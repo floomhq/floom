@@ -1829,9 +1829,24 @@ def _health_check_disk() -> Dict[str, Any]:
 def _health_check_e2b() -> Dict[str, Any]:
     if not os.environ.get("E2B_API_KEY"):
         return {"ok": False, "error": "E2B_API_KEY missing"}
+    import concurrent.futures
+
     from e2b import Sandbox
 
-    Sandbox.list(limit=1, timeout=3).next_items()
+    def _list_sandboxes() -> None:
+        Sandbox.list(limit=1).next_items()
+
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="workeros-e2b-health",
+    )
+    try:
+        future = executor.submit(_list_sandboxes)
+        future.result(timeout=3)
+    except concurrent.futures.TimeoutError:
+        return {"ok": False, "error": "E2B health check timed out after 3s"}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     return {"ok": True}
 
 
