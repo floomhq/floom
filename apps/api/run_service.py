@@ -1763,10 +1763,8 @@ def _apply_config_input_defaults(
 
 
 def _runner_key(config: Optional[WorkerConfig]) -> str:
+    # #602: removed skill runtime branch — SkillRuntimeDriver is gone.
     if config and config.runtime:
-        runtime_type = (config.runtime.type or "").strip().lower()
-        if runtime_type.startswith("skill"):
-            return runtime_type
         return config.runtime.runner or "e2b"
     return "e2b"
 
@@ -3196,10 +3194,11 @@ def execute_run(
         worker_needs_approval = bool(
             config and getattr(config, "approvals", None) and config.approvals.required
         )
+        _non_approval_terminal = {"error", "failed", "cancelled", "timeout", "rejected"}
         if (
             worker_needs_approval
             and not result.decision_required
-            and result.status not in ("error", "failed")
+            and result.status not in _non_approval_terminal
         ):
             approval_label = (
                 config.approvals.label
@@ -3279,7 +3278,7 @@ def execute_run(
         # approvals row.  Do NOT mark COMPLETED — execution halts here.
         decision_required = result.decision_required
         worker_needs_approval = bool(config and getattr(config, "approvals", None) and config.approvals.required)
-        if decision_required and worker_needs_approval and result.status not in ("error", "failed"):
+        if decision_required and worker_needs_approval and result.status not in _non_approval_terminal:
             approval_id = f"apr_{uuid.uuid4().hex[:12]}"
             label = decision_required.get("label") or (config.approvals.label if config and config.approvals else "Approve action")
             preview = decision_required.get("preview") or ""

@@ -31,9 +31,33 @@ jobs:
           WORKEROS_DEPLOY: local
           FLOOM_SECRET: ci-test-secret
           OPENAI_API_KEY: ""
-        # #604: -p no:warnings keeps output readable without hiding failures.
-        # All test files under tests/ are discovered automatically, including
-        # the audit-batch fixes (test_auth_security, test_session_fixes, etc.)
+        # #604: -p no:warnings keeps output clean; all test files auto-discovered.
+        run: pytest tests/ -v --tb=short -p no:warnings
+
+  runtime-tests:
+    name: Runtime tests (root pytest suite)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r apps/api/requirements.txt pytest pytest-asyncio
+
+      - name: Run root runtime tests
+        env:
+          WORKEROS_DEPLOY: local
+          FLOOM_SECRET: ci-test-secret
+          OPENAI_API_KEY: ""
+        # #604: root pytest.ini points at tests/ (66 files). These cover the
+        # full worker runtime — agent driver, E2B sandbox, run orchestration —
+        # and were previously not run in CI.
         run: pytest tests/ -v --tb=short -p no:warnings
 
   web-tests:
@@ -62,9 +86,8 @@ jobs:
         run: npm test
 
       - name: Unit tests (tsx — source-inspection suite)
-        # #604: run the tsx-style test files that don't use vitest describe blocks.
-        # These test structural properties of the source (scroll lock, session
-        # fixes, etc.) and can't be run via vitest.
+        # #604: tsx-style tests check structural source properties and can't
+        # run via vitest (no describe blocks).
         run: |
           for f in tests/fl-*.test.ts tests/strip-citations.test.ts; do
             npx tsx "$f" || exit 1
