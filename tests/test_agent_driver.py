@@ -193,6 +193,7 @@ def test_run_command_containment_and_env_allowlist(tmp_path):
         {},
         [],
         30,
+        bundle_dir,
     )
     assert escaped["ok"] is False
     assert "Path traversal" in escaped["error"]
@@ -213,6 +214,7 @@ def test_run_command_containment_and_env_allowlist(tmp_path):
         {},
         [],
         30,
+        bundle_dir,
     )
     assert undeclared_env["ok"] is False
     assert "not declared secrets" in undeclared_env["error"]
@@ -237,6 +239,7 @@ def test_run_command_containment_and_env_allowlist(tmp_path):
         {},
         [],
         30,
+        bundle_dir,
     )
     assert allowed_env["ok"] is True
     assert "supersecret" not in allowed_env["stdout"]
@@ -313,6 +316,7 @@ def test_composio_execute_uses_run_owner_and_resolved_connection(tmp_path, monke
         {},
         [],
         30,
+        Path(config.runtime.bundle_path),
         connection_ids={"gmail": "conn-owner-a"},
         user_id="owner-a",
     )
@@ -345,6 +349,7 @@ def test_composio_execute_requires_scoped_active_connection(tmp_path, monkeypatc
         {},
         [],
         30,
+        Path(config.runtime.bundle_path),
         connection_ids={},
         user_id=None,
     )
@@ -374,6 +379,7 @@ def test_invoke_worker_requires_authenticated_owner(tmp_path):
         {},
         [],
         30,
+        Path(config.runtime.bundle_path),
     )
 
     assert result["ok"] is False
