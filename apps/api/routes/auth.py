@@ -1024,6 +1024,70 @@ def bootstrap_token(ctx: AuthContext = Depends(get_auth_context)):
     return {"created": True, "token": raw, "header": PAT_HEADER, **row}
 
 
+@router.get("/magic/{token}")
+def cloud_consume_magic_link(token: str) -> RedirectResponse:
+    """Consume an OSS-style HMAC magic-link token and create a Supabase session.
+
+    The engine issues HMAC-signed tokens via POST /auth/magic-link and builds URLs
+    of the form {frontend_url}/auth/magic/{token}. In OSS that token is consumed by
+    the engine's own GET /auth/magic/{token} which creates an SQLite session —
+    wrong in cloud. This route shadows it.
+
+    Steps:
+      1. Validate the HMAC token via the engine's _validate_magic_link.
+      2. Look up the user's email from Supabase Admin.
+      3. Call auth.admin.generate_link (type=magiclink) — no email is sent;
+         Supabase returns a short-lived action_link URL.
+      4. Redirect the user to the action_link; Supabase creates a native session
+         and redirects to settings.frontend_url.
+    """
+    from apps.api._engine import import_engine_module
+
+    engine_main = import_engine_module("main")
+
+    # Step 1 — validate HMAC token; raises 400 on bad/expired
+    try:
+        user_id: str = engine_main._validate_magic_link(token)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid magic link") from exc
+
+    # Step 2 — look up email
+    svc = new_supabase_service_client()
+    try:
+        user_resp = svc.auth.admin.get_user_by_id(user_id)
+        email: str | None = user_resp.user.email if user_resp and user_resp.user else None
+    except Exception as exc:
+        logger.warning("cloud_consume_magic_link: get_user_by_id failed for %s: %s", user_id, exc)
+        raise HTTPException(status_code=404, detail="User not found") from exc
+
+    if not email:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Step 3 — generate Supabase session URL (no email sent)
+    settings = get_cloud_settings()
+    try:
+        link_resp = svc.auth.admin.generate_link(
+            {
+                "type": "magiclink",
+                "email": email,
+                "options": {"redirect_to": settings.frontend_url},
+            }
+        )
+        action_link: str = link_resp.properties.action_link
+        if not action_link:
+            raise ValueError("empty action_link in generate_link response")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("cloud_consume_magic_link: generate_link failed for %s: %s", user_id, exc)
+        raise HTTPException(status_code=502, detail="Failed to create session") from exc
+
+    # Step 4 — redirect; Supabase creates the session and sends user to frontend_url
+    return RedirectResponse(action_link, status_code=307)
+
+
 @router.post("/logout")
 def logout(request: Request):
     session_cookie = _decode_session_cookie(request.cookies.get(_SESSION_COOKIE_NAME))
