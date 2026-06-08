@@ -1426,6 +1426,8 @@ async def auth_middleware(request: Request, call_next):
             or _RE_RUN_COMPOSIO_PROXY.match(path)
             # Multi-member: login/setup paths always exempt so users can authenticate without secret
             or path in {"/auth/setup", "/auth/login", "/auth/logout", "/auth/me", "/auth/setup-required"}
+            # Magic-link consume: unauthenticated by definition — user has no session yet
+            or path.startswith("/auth/magic/")
         ):
             return await call_next(request)
         raw_secret = None
