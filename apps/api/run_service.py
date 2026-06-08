@@ -2559,16 +2559,20 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
 
 
 def _auto_pause_on_consecutive_failures_enabled() -> bool:
-    raw = os.environ.get("WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES", "")
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    # Default ON (opt-out). Broken scheduled workers inflated failure rate to
+    # 1,683/1,866 runs over 7 days (#526). Opt out via
+    # WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES=0.
+    raw = os.environ.get("WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES", "1")
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _alert_consecutive_failure_threshold() -> int:
-    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "3")
+    # Raised from 3 → 5 to avoid pausing workers on transient E2B/network blips.
+    raw = os.environ.get("WORKEROS_ALERT_CONSECUTIVE_FAILURES", "5")
     try:
         return max(1, int(raw))
     except ValueError:
-        return 3
+        return 5
 
 
 def _maybe_pause_worker_after_consecutive_failures(
@@ -3377,6 +3381,12 @@ def execute_run(
                     # already-terminal SSE event does not carry custom fields).
                     outputs = dict(outputs or {})
                     outputs["created_worker_id"] = created_worker_id
+                else:
+                    # Registration failed (see run logs for gate that fired).
+                    # Store flag so the create-flow frontend can show an error
+                    # instead of the misleading "Worker drafted" fallback.
+                    outputs = dict(outputs or {})
+                    outputs["worker_creation_failed"] = True
 
                     # Wedge safety net: prove the generated SCRIPT-mode worker
                     # actually RUNS (and bounded-repair it if not) before telling
@@ -3405,6 +3415,8 @@ def execute_run(
                 # still viewable. Log so the operator/engineer can see why.
                 logger.exception("worker-author registration failed for run %s", run_id)
                 log_fn(f"Could not auto-register the drafted worker: {exc}", level="warning")
+                outputs = dict(outputs or {})
+                outputs["worker_creation_failed"] = True
 
         update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
         # Broadcast the new worker id on the live stream so the create flow can
