@@ -55,6 +55,26 @@ exec:
         self.assertEqual(config.runtime.entrypoint, "run.py")
         self.assertEqual(config.runtime.command, "python run.py")
 
+    def test_worker_contract_defaults_missing_description_from_title(self):
+        raw = yaml.safe_load(
+            """
+schema_version: "0.3"
+name: minimal-script-worker
+title: Minimal Script Worker
+version: 0.1.0
+exec:
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  entry: run.py
+  inputs: []
+  outputs: []
+"""
+        )
+        parsed = parse_worker_manifest(raw)
+        self.assertIsInstance(parsed, WorkerContract)
+        self.assertEqual(parsed.description, "Minimal Script Worker")
+
     def test_worker_contract_projects_contexts(self):
         raw = yaml.safe_load(
             """
