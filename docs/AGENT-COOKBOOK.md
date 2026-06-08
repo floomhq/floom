@@ -17,7 +17,7 @@ The npm package exposes three binaries:
 
 - `workeros` — preferred CLI name in these docs.
 - `floom` — compatible alias for existing Floom operator workflows.
-- `workeros-mcp` — stdio MCP server binary used by client config.
+- `workeros-mcp` — stdio MCP fallback binary for clients that cannot use HTTP MCP.
 
 If a different local `floom` command exists, use `workeros`.
 
@@ -27,7 +27,11 @@ npx -y @floomhq/workeros mcp install --target claude
 npx -y @floomhq/workeros mcp install --target cursor
 ```
 
-Set `WORKEROS_API_SECRET` in env before install to skip the prompt. Verify:
+Set `WORKEROS_API_SECRET` in env before install to skip the prompt. The installer
+writes HTTP MCP config pointing at
+`https://workers-api.floom.dev/mcp-tools/serve`. For older harnesses that need a
+local stdio process, configure `npx -y -p @floomhq/workeros workeros-mcp`.
+Verify:
 
 ```bash
 # Inside the agent, call the MCP tool:
