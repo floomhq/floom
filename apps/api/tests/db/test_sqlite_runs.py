@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from models import RunStatus
 
 
@@ -177,3 +179,112 @@ def test_normal_run_duration_unaffected(repo_bundle):
     done = repos.runs.get(user_id="user-a", run_id="run-normal")
     assert done["duration_ms"] is not None
     assert done["duration_ms"] >= 1500
+
+
+def test_run_log_and_artifact_paths_are_scoped_without_get_preflight(monkeypatch, repo_bundle):
+    repos, _db, manifest = repo_bundle
+
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-a",
+        worker_id="worker-a",
+        input_json={},
+        trigger_source="manual",
+        runner="e2b",
+    )
+
+    def _forbidden_get(*_args, **_kwargs):
+        raise AssertionError("log/artifact hot paths must not call runs.get")
+
+    monkeypatch.setattr(type(repos.runs), "get", _forbidden_get)
+
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id="run-a",
+        level="info",
+        message="first",
+        timestamp="2026-06-08T00:00:00+00:00",
+    )
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id="run-a",
+        level="info",
+        message="second",
+        timestamp="2026-06-08T00:00:01+00:00",
+    )
+    logs = repos.runs.list_logs(user_id="user-a", run_id="run-a", limit=1)
+    assert [row["message"] for row in logs] == ["first"]
+
+    repos.runs.add_artifact(
+        user_id="user-a",
+        run_id="run-a",
+        artifact_id="artifact-a",
+        name="a.txt",
+        artifact_type="text/plain",
+        path="/tmp/a.txt",
+        size_bytes=1,
+        created_at="2026-06-08T00:00:00+00:00",
+    )
+    repos.runs.add_artifact(
+        user_id="user-a",
+        run_id="run-a",
+        artifact_id="artifact-b",
+        name="b.txt",
+        artifact_type="text/plain",
+        path="/tmp/b.txt",
+        size_bytes=1,
+        created_at="2026-06-08T00:00:01+00:00",
+    )
+    artifacts = repos.runs.list_artifacts(user_id="user-a", run_id="run-a", limit=1)
+    assert [row["id"] for row in artifacts] == ["artifact-a"]
+
+
+def test_run_log_and_artifact_paths_reject_foreign_owner(repo_bundle):
+    repos, _db, manifest = repo_bundle
+
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-a",
+        worker_id="worker-a",
+        input_json={},
+        trigger_source="manual",
+        runner="e2b",
+    )
+
+    with pytest.raises(ValueError, match="run run-a not found for user-b"):
+        repos.runs.add_log(
+            user_id="user-b",
+            run_id="run-a",
+            level="info",
+            message="foreign",
+            timestamp="2026-06-08T00:00:00+00:00",
+        )
+
+    with pytest.raises(ValueError, match="run run-a not found for user-b"):
+        repos.runs.add_artifact(
+            user_id="user-b",
+            run_id="run-a",
+            artifact_id="artifact-b",
+            name="foreign.txt",
+            artifact_type="text/plain",
+            path="/tmp/foreign.txt",
+            size_bytes=1,
+            created_at="2026-06-08T00:00:00+00:00",
+        )
+
+    assert repos.runs.list_logs(user_id="user-b", run_id="run-a") == []
+    assert repos.runs.list_artifacts(user_id="user-b", run_id="run-a") == []
