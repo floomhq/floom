@@ -100,10 +100,17 @@ in the YAML. Never set `required: false` when the user asked for approval.
 Slack, Notion, etc.): add every named service to the `connections:` list in the YAML.
 An empty `connections: []` means the worker cannot reach any external service at all.
 
-**Exec mode** — if the worker reads email, writes calendar events, posts messages,
-or calls ANY external service via a connection: use `exec.mode: "agent"` (entry:
-SKILL.md). pure-script mode (`run.py`) cannot call Composio connections — it can
-only run deterministic Python with no external API calls.
+**Exec mode and tool choice** — if the worker reads email, writes calendar events,
+posts messages, or calls ANY external service via a connection: it needs agent
+mode. **Use `workers__create_from_prompt`, NOT `workers__create`** — the former
+routes through the worker-author meta-worker which writes the SKILL.md
+implementation file. `workers__create` only creates `worker.yml`; it never
+creates SKILL.md, so every agent-mode worker created that way fails immediately
+with "Agent entrypoint not found: SKILL.md".
+
+Rule: `workers__create_from_prompt` for agent-mode (connections, email, calendar,
+any external API). `workers__create` only for pure-script workers where you are
+supplying the full run.py code yourself.
 
 **Trigger types** — valid values: `manual`, `schedule`, `webhook`, `event`. For
 "every N minutes" use `type: "schedule"` with `cron: "*/N * * * *"`. Never use
