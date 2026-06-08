@@ -315,6 +315,20 @@ connections:
 - The E2B Composio proxy rejects undeclared apps and rejects tool slugs outside `allowed_tools`. This is platform-level enforcement against prompt injection or worker bugs; it does not shrink the underlying OAuth refresh token. For true OAuth least privilege, create a separate Composio auth config with narrower scopes such as Gmail readonly.
 - E2B `run.py` workers call `POST /runs/{FLOOM_RUN_ID}/composio-execute/{TOOL_SLUG}` through `WORKEROS_API_URL`; they do not shell out to `composio execute` or carry `COMPOSIO_API_KEY` in the sandbox.
 
+### Brain/context packs
+
+Attach local or git-backed brain packs with `contexts:`. Script workers receive them under `context/<name>/` inside the E2B workdir. Agent workers receive the same `context/<name>/` layout in their staged run directory.
+
+```yaml
+contexts:
+  - name: company-handbook
+    source: local
+  - name: external-notes
+    source: git+https://github.com/example/notes.git
+```
+
+Local packs are copied from the workspace context store. Git-backed packs are cloned into the E2B sandbox at run time; they are read-only from Workeros' perspective. Add `writeable: true` only for local packs that the worker is allowed to persist back after a successful run.
+
 ### Triggers
 
 - **manual** — runs only from /workers/<id> Run tab or via `POST /workers/<id>/runs`.
@@ -453,7 +467,7 @@ If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the pa
 
 - Claude-skill bundles often assume the working directory is the skill folder (`~/.claude/skills/<name>/`). Inside the sandbox the working dir IS the bundle, so relative paths work; absolute paths to `~/.claude/...` won't.
 - Skills that depend on Claude-Code-only tools (Read, Edit, Bash that hits the host filesystem) won't work — the runner exposes a different tool set. Audit the skill's tool calls before porting.
-- Heavy Python deps (torch, transformers) won't fit in the E2B template. Either trim the deps or use `runner: local` and accept the bigger trust surface.
+- Heavy Python deps (torch, transformers) won't fit in the E2B template. Trim dependencies or split the worker into smaller sandboxed steps.
 
 `workeros workers push` creates a new worker id with `POST /workers` and updates
 an existing worker id with `PUT /workers/<id>` when the target API supports

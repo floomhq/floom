@@ -70,7 +70,7 @@ targets:
 exec:
   command: python run.py
   runtime: python311
-  runner: local
+  runner: e2b
   inputs:
   - name: upload
     kind: file

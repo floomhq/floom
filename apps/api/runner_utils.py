@@ -25,7 +25,6 @@ import io
 import os
 import sys
 import json
-import threading
 import uuid
 import traceback
 import logging
@@ -33,7 +32,7 @@ from typing import Dict, Any, Callable, List, Optional
 from pathlib import Path
 
 from models import WorkerConfig, WorkerContext, WorkerResult, declared_composio_connections
-from worker_registry import get_worker_entrypoint, get_worker_config
+from worker_registry import get_worker_config
 
 logger = logging.getLogger("floom.runner_utils")
 
@@ -41,11 +40,6 @@ WORKERS_DIR = Path(os.environ.get("FLOOM_WORKERS_DIR", "../../workers")).resolve
 ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts")).resolve()
 
 DEFAULT_TIMEOUT_SECONDS = int(os.environ.get("FLOOM_RUN_TIMEOUT", "300"))
-
-# Fix 2: os.chdir() is process-global; this lock serialises the chdir + run_fn
-# window so concurrent local runs don't clobber each other's relative paths.
-_CWD_LOCK = threading.Lock()
-
 
 def _safe_path(base: Path, *parts: str) -> Path:
     target = base.joinpath(*parts).resolve()
@@ -243,6 +237,6 @@ def _validate_output_schema(
 
 # run_worker_local() removed 2026-05-26: the in-process local runner was
 # deleted because it gave worker code full host access (malicious-bundle
-# audit landed at 45/100). E2B is now the only execution sandbox. The
-# helpers above remain because AgentDriver, SkillRuntimeDriver, and main.py
-# still use ARTIFACTS_DIR, _validate_output_schema, _safe_path, etc.
+# audit landed at 45/100). The helpers above remain because runtime drivers
+# and main.py still use ARTIFACTS_DIR, _validate_output_schema, _safe_path,
+# and related context utilities.

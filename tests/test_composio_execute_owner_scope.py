@@ -109,7 +109,7 @@ def _seed_running_run(main, *, owner_id: str, worker_id: str) -> str:
         run_id=run_id,
         status=main.RunStatus.RUNNING.value,
         trigger_source="manual",
-        runner="local",
+        runner="e2b",
     )
     return run_id
 
@@ -214,7 +214,7 @@ class TestComposioExecuteOwnerScope:
             run_id=run_id,
             status=main.RunStatus.COMPLETED.value,
             trigger_source="manual",
-            runner="local",
+            runner="e2b",
         )
 
         captured, fake_post = _patch_composio_post()

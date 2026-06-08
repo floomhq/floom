@@ -115,7 +115,7 @@ def _build_new_worker_yaml(
     lines.append("exec:")
     lines.append("  command: python run.py")
     lines.append("  runtime: python311")
-    lines.append("  runner: local")
+    lines.append("  runner: e2b")
     if inputs:
         lines.append("  inputs:")
         for inp in inputs:

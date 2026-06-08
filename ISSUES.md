@@ -94,9 +94,9 @@ Status legend: OPEN / FIXING / FIXED / VERIFIED. Issues raised by Federico from 
 
 **Status:** VERIFIED
 
-**Root cause:** the from-prompt path sent non-default `temperature` values to gpt-5.x models from two places: `workers/worker-author/run.py` (`temperature=0.2`) and `apps/api/runner_sandbox/skill_driver.py` (`temperature=0.5`). gpt-5.x models reject those values with HTTP 400. The draft-and-create path already had retry-without-temperature protection; from-prompt did not.
+**Root cause:** the from-prompt path sent non-default `temperature` values to gpt-5.x models from `workers/worker-author/run.py` (`temperature=0.2`). gpt-5.x models reject those values with HTTP 400. The draft-and-create path already had retry-without-temperature protection; from-prompt did not.
 
-**Fix:** commit `093e9c3e166f8cb8c52e58041e2d69b9d3abae43` adds retry-without-temperature handling to worker-author and skill-driver, adds focused regression tests, removes the unused `WORKER_AUTHOR_DEFAULT_MODEL` env override, and updates stale codegen docs to reference `WORKEROS_CODEGEN_MODEL`.
+**Fix:** commit `093e9c3e166f8cb8c52e58041e2d69b9d3abae43` adds retry-without-temperature handling to worker-author, adds focused regression tests, removes the unused `WORKER_AUTHOR_DEFAULT_MODEL` env override, and updates stale codegen docs to reference `WORKEROS_CODEGEN_MODEL`.
 
 **Verification:**
 - Deployed via `ops/deploy-api.sh`; active systemd working directory `/opt/workeros-api-deploy/apps/api` verified at SHA `093e9c3e166f8cb8c52e58041e2d69b9d3abae43`.
@@ -584,18 +584,18 @@ After PRs #34-#40 + the sticky-sidebar fix landed, Federico did another walkthro
 
 ---
 
-### #25 Worker can be Python or Python+SKILL.md hybrid, not just agent skill
+### #25 Worker can be agent or pure script
 
 **Where:** `apps/web/app/workers/new/page.tsx` Step 2 worker mode picker
 
 **Federico:** "Also, this worker could also be Python. It could have SkillMD plus Python or just Python with invocation of agent. I guess SkillMD plus Python is best, but yeah, way to go here."
 
 **Fix scope:**
-- Step 2 should expose `exec.mode` choices: `agent` (SKILL.md only), `pure-script` (run.py only), `hybrid` (run.py orchestrates + can call agent with SKILL.md when needed).
-- Backend already supports the first two. "Hybrid" is conceptually `pure-script` + access to an agent helper. Probably needs a new helper in the E2B sandbox runtime.
+- Step 2 exposes entry-point choices: `agent` (SKILL.md only) and `pure-script` (run.py only).
+- Backend supports those two modes. A future script-plus-agent helper would be a new runtime feature, not a third manifest mode.
 - Frontend: radio group with explanation of each. Default = `agent`.
 
-**Status:** OPEN — `hybrid` mode is a small new primitive in the runtime. Could ship the radio with `agent`/`pure-script` first, hybrid as a follow-up.
+**Status:** OPEN — agent and pure-script are the supported modes.
 
 ---
 
@@ -646,7 +646,7 @@ After PRs #34-#40 + the sticky-sidebar fix landed, Federico did another walkthro
 | PR | Scope | Issues |
 |----|-------|--------|
 | **PR H** | Worker card improvements: View/Edit buttons, drop runner label, show all triggers, last-run/usage stats | #16 #17 #18 |
-| **PR I** | /workers/new layout + uploads: reorder Step 1, accept .py/.zip/folder, wire Cmd+Enter, mode picker (agent/pure-script/hybrid) | #19 #20 #21 #25 |
+| **PR I** | /workers/new layout + uploads: reorder Step 1, accept .py/.zip/folder, wire Cmd+Enter, mode picker (agent/pure-script) | #19 #20 #21 #25 |
 | **PR J** | Triggers UX: visual cron scheduler + connection-event picker actually works | #23 #24 |
 | **PR K** | Requirements UX v2: per-app OAuth XOR API key TOGGLE (user choice, not LLM enforced) | #22 |
 | **PR L** | Platform polish: real Floom logo (icon, apple-icon, sidebar) + reduce platform-secrets to mandatory three + add OPENAI_API_KEY | #26 #27 |
