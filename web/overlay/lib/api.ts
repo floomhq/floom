@@ -150,7 +150,25 @@ async function fetchRaw(path: string, options?: RequestInit): Promise<Response> 
   return res;
 }
 
+async function fetchWorkspaceBasePersona(): Promise<{ content: string; is_custom: boolean; default: string }> {
+  try {
+    return await fetchJson<{ content: string; is_custom: boolean; default: string }>("/workspace/base/state");
+  } catch (err) {
+    if (!(err instanceof Error) || err.message !== "Not Found") {
+      throw err;
+    }
+    const content = await fetchText("/workspace/base");
+    return { content, is_custom: false, default: content };
+  }
+}
+
 export const api = {
+  auth: {
+    issueMagicLink: () =>
+      fetchJson<{ url: string; expires_in: number }>("/auth/magic-link", { method: "POST" }),
+    consumeMagicLink: (token: string) =>
+      fetchJson<{ ok: boolean; redirect_to: string }>(`/auth/magic/${encodeURIComponent(token)}`),
+  },
   me: async () => {
     const res = await fetch(`${APP_API_BASE}/me`, {
       cache: "no-store",
@@ -195,6 +213,11 @@ export const api = {
     shareLink: (id: string) =>
       fetchJson<import("./types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
         method: "POST",
+      }),
+    importFromShare: (token: string) =>
+      fetchJson<{ worker_id: string; url: string }>("/workers/import-from-share", {
+        method: "POST",
+        body: JSON.stringify({ token }),
       }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
@@ -582,8 +605,46 @@ export const api = {
       }),
     listWorkspaceVersions: (limit = 50) =>
       fetchJson<import("./types").VersionSummary[]>(`/workspace/versions?limit=${limit}`),
+    getWorkspaceVersion: (versionId: string) =>
+      fetchJson<{ content: string }>(`/workspace/versions/${encodeURIComponent(versionId)}`),
     rollbackWorkspaceInstructions: (versionId: string) =>
       fetchText(`/workspace/rollback/${versionId}`, { method: "POST" }),
+    workspaceBasePersona: fetchWorkspaceBasePersona,
+    updateWorkspaceBasePersona: (content: string) =>
+      fetchText("/workspace/base", {
+        method: "PUT",
+        headers: { "Content-Type": "text/markdown" },
+        body: content,
+      }),
+    resetWorkspaceBasePersona: () =>
+      fetchRaw("/workspace/base", { method: "DELETE" }).then(() => undefined),
+    listWorkspaceBaseVersions: (limit = 50) =>
+      fetchJson<import("./types").VersionSummary[]>(`/workspace/base/versions?limit=${limit}`),
+    rollbackWorkspaceBasePersona: (versionId: string) =>
+      fetchText(`/workspace/base/rollback/${versionId}`, { method: "POST" }),
+    gitStatus: () =>
+      fetchJson<import("./types").GitWorkspaceStatus>("/system/git"),
+    gitConnect: (pat: string) =>
+      fetchJson<{ username: string }>("/system/git/connect", {
+        method: "POST",
+        body: JSON.stringify({ pat }),
+      }),
+    gitListRepos: () =>
+      fetchJson<import("./types").GitRepoItem[]>("/system/git/repos"),
+    gitCreateRepo: (name: string) =>
+      fetchJson<import("./types").GitRepoItem>("/system/git/repos", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    gitLink: (repo_full_name: string) =>
+      fetchJson<import("./types").GitWorkspaceStatus>("/system/git/link", {
+        method: "POST",
+        body: JSON.stringify({ repo_full_name }),
+      }),
+    gitPush: () =>
+      fetchJson<import("./types").GitWorkspaceStatus>("/system/git/push", { method: "POST" }),
+    gitDisconnect: () =>
+      fetchRaw("/system/git", { method: "DELETE" }).then(() => undefined),
   },
   connections: {
     list: () => fetchJson<import("./types").ConnectionItem[]>("/connections"),
@@ -623,6 +684,16 @@ export const api = {
     accountInfo: (id: string) =>
       fetchJson<import("./types").ConnectedAccountMetadata>(
         `/connections/${encodeURIComponent(id)}/account-info`,
+        { cache: "no-store" }
+      ),
+    activity: (id: string, limit = 50) =>
+      fetchJson<import("./types").RunSummary[]>(
+        `/connections/${encodeURIComponent(id)}/activity?limit=${limit}`,
+        { cache: "no-store" }
+      ),
+    peek: (id: string) =>
+      fetchJson<{ emails: Array<{ subject: string; from_name: string; from_email: string; date: string }> }>(
+        `/connections/${encodeURIComponent(id)}/peek`,
         { cache: "no-store" }
       ),
   },

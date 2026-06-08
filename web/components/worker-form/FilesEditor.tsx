@@ -47,18 +47,18 @@ function sourceFileKind(path: string, language?: string) {
 }
 
 // A file has a *genuine* rendered-vs-source distinction worth a second tab.
-// Generic .yaml/.yml/.json/.py/etc. do NOT: their "rendered" form is just the
-// same syntax-highlighted source, so showing both a Preview and a Raw tab is
-// redundant (the confusing dual-tab Federico flagged). Only these kinds render
-// to something materially different from their source:
-//   - markdown -> formatted document
-//   - html     -> iframe
+// Preview semantics per kind:
+//   - markdown -> formatted prose document
+//   - html     -> sandboxed iframe
 //   - table    -> parsed grid
+//   - code     -> plain wrapped text (Preview) vs syntax-highlighted (Raw)
+// Generic .yaml/.yml get a single view — their "Preview" would be identical
+// to the syntax-highlighted source (the confusing dual-tab Federico flagged).
 // worker.yml is special-cased separately (structured summary), handled by
 // `hasWorkerYamlSummary`.
 function supportsRenderedPreview(path: string, binary?: boolean): boolean {
   if (binary) return false;
-  return ["markdown", "html", "table"].includes(sourceFileKind(path));
+  return ["markdown", "html", "table", "code"].includes(sourceFileKind(path));
 }
 
 // worker.yml gets a structured "Summary" rendering distinct from its raw YAML
@@ -386,8 +386,7 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
     );
   }
 
-  // Everything else (.py / .ts / .json / .yaml / .yml / .txt / ...): a single
-  // canonical syntax-highlighted view — no redundant Preview-vs-Raw tabs.
+  // Remaining cases: .yaml/.yml (not worker.yml) — single syntax-highlighted view.
   return (
     <div>
       <SourcePreviewToolbar path={file.path} content={content} label="Source" />
@@ -502,6 +501,26 @@ function RenderedFilePreview({
         detail="This worker source payload only includes text content for source files. This renderer needs file bytes or a backend download URL, which is not present in WorkerFile."
         path={path}
       />
+    );
+  }
+
+  // "code" kind (run.py, .sh, .json, etc.): Preview = comfortable plain-text
+  // reading view matching Brain's PlainTextPreview (max-w-3xl column, no
+  // syntax colour). Raw tab = syntax-highlighted source.
+  if (sourceFileKind(path, detected) === "code") {
+    if (!content.trim()) {
+      return (
+        <div className="p-6">
+          <p className="text-sm text-muted-foreground italic">This file is empty.</p>
+        </div>
+      );
+    }
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-6">
+        <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-foreground">
+          {content}
+        </pre>
+      </div>
     );
   }
 

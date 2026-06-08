@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { PromptText } from "@/components/PromptText";
 import { PromptChips } from "@/components/PromptChips";
+import { tokenisePrompt } from "@/lib/prompt-detect";
 
 // ---------------------------------------------------------------------------
 // Example workflows shown below the hero card. The tool/capability chips on
@@ -505,24 +506,43 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
             <p className="text-sm font-medium text-foreground">Drop a .md / .py / .zip or a worker folder to import</p>
           </div>
         )}
-        <Textarea
-          ref={textareaRef}
-          placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onInput={(e) => {
-            const val = (e.target as HTMLTextAreaElement).value;
-            if (val !== prompt) setPrompt(val);
-          }}
-          className="min-h-[160px] resize-none border-0 px-0 shadow-none text-base focus-visible:ring-0 focus-visible:border-0 placeholder:text-muted-foreground/50"
-          disabled={isBusy}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              void handleGenerate();
+        {/* Highlight overlay — PromptText rendered behind the textarea so
+            detected tool names show inline highlights while the user types.
+            The textarea sits on top with transparent text + visible caret;
+            the overlay mirrors its geometry exactly via absolute inset. */}
+        <div className="relative">
+          {prompt && tokenisePrompt(prompt).some((s) => s.kind !== "plain") && (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 py-2 px-0 text-base leading-relaxed whitespace-pre-wrap break-words overflow-hidden select-none"
+            >
+              <PromptText>{prompt}</PromptText>
+            </div>
+          )}
+          <Textarea
+            ref={textareaRef}
+            placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onInput={(e) => {
+              const val = (e.target as HTMLTextAreaElement).value;
+              if (val !== prompt) setPrompt(val);
+            }}
+            className="min-h-[160px] resize-none border-0 px-0 shadow-none text-base focus-visible:ring-0 focus-visible:border-0 placeholder:text-muted-foreground/50"
+            style={
+              prompt && tokenisePrompt(prompt).some((s) => s.kind !== "plain")
+                ? { color: "transparent", caretColor: "currentColor" }
+                : undefined
             }
-          }}
-        />
+            disabled={isBusy}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                void handleGenerate();
+              }
+            }}
+          />
+        </div>
 
         {/* Detected tools + capabilities — a textarea can't carry rich inline
             highlights, so we surface what the prompt touches as a removable,

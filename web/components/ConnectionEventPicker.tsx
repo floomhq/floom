@@ -14,6 +14,7 @@
  */
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -173,10 +174,10 @@ export function ConnectionEventPicker({
     return (
       <div className="rounded-[var(--radius-button)] border border-border bg-muted/30 p-3 space-y-2">
         <p className="text-sm text-muted-foreground">No connected integrations yet.</p>
-        <a href="/connections/browse" className="inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-card px-2 py-1 text-xs hover:bg-muted">
+        <Link href="/connections/browse" className="inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-card px-2 py-1 text-xs hover:bg-muted">
           <Plus className="w-3 h-3" />
           Connect an integration
-        </a>
+        </Link>
       </div>
     );
   }
@@ -211,12 +212,12 @@ export function ConnectionEventPicker({
             })}
           </SelectContent>
         </Select>
-        <a
+        <Link
           href="/connections/browse"
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-muted-foreground transition-colors"
         >
           Connect another integration
-        </a>
+        </Link>
       </div>
 
       {/* Step 2: Event (only after app is chosen) */}

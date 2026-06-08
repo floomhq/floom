@@ -2,7 +2,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ export default function ConnectionsClient({
 }: {
   initialConnections: ConnectionItem[];
 }) {
+  const router = useRouter();
   // S44: start with server-fetched data; no loading flash on initial render.
   const [connections, setConnections] = useState<ConnectionRecord[]>(
     initialConnections as ConnectionRecord[]
@@ -52,7 +54,13 @@ export default function ConnectionsClient({
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [scopesByConnectionId, setScopesByConnectionId] = useState<Record<string, string[]>>({});
+  // #565: map app slug -> worker count that uses that connection
+  const [usedByCountBySlug, setUsedByCountBySlug] = useState<Record<string, number>>({});
+  // #556: map connection slug -> worker names that require it but it's not connected yet
+  const [missingBySlug, setMissingBySlug] = useState<Record<string, string[]>>({});
   const [connectionSearch, setConnectionSearch] = useState("");
+  // #565: track which row is expanded for the in-place peek
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   // X9: floom UUID of the connection that was just added/reconnected, so the
   // Connected tab can highlight + scroll to it instead of silently dropping the
   // user on an unchanged-looking table.
@@ -96,8 +104,11 @@ export default function ConnectionsClient({
       setConnections(records);
       hydrateConnectionMetadata(records);
       loadWorkerDetails()
-        .then((workers) => getLastUsedByConnection(workers))
-        .then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); })
+        .then((workers) => {
+          void getLastUsedByConnection(workers).then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); });
+          setUsedByCountBySlug(computeUsedByCount(workers));
+          setMissingBySlug(computeMissingBySlug(workers));
+        })
         .catch(() => {
           setLastUsedBySlug({});
           setLastUsedLoaded(true);
@@ -116,8 +127,11 @@ export default function ConnectionsClient({
       hydrateConnectionMetadata(initialConnections as ConnectionRecord[]);
       // Still load last-used data and secrets in background
       loadWorkerDetails()
-        .then((workers) => getLastUsedByConnection(workers))
-        .then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); })
+        .then((workers) => {
+          void getLastUsedByConnection(workers).then((data) => { setLastUsedBySlug(data); setLastUsedLoaded(true); });
+          setUsedByCountBySlug(computeUsedByCount(workers));
+          setMissingBySlug(computeMissingBySlug(workers));
+        })
         .catch(() => { setLastUsedBySlug({}); setLastUsedLoaded(true); });
     } else {
       void refresh();
@@ -324,13 +338,46 @@ export default function ConnectionsClient({
   return (
     <>
       <div className="space-y-6">
-        <header>
-          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-            Connect apps via OAuth so workers can read and write on your behalf.
-          </p>
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+            <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
+              Connect apps via OAuth so workers can read and write on your behalf.
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => router.push("/connections/browse")}
+          >
+            <Plus className="size-4" />
+            Add connection
+          </Button>
         </header>
         <ConnectionsTabs />
+
+        {/* #556: setup-required callout — connections needed by workers but not yet connected */}
+        {Object.keys(missingBySlug).length > 0 && (
+          <div className="rounded-[var(--radius-card)] border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-4 space-y-2">
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-300">Setup required</p>
+            {Object.entries(missingBySlug).map(([slug, workerNames]) => (
+              <div key={slug} className="flex items-center justify-between gap-3">
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  <span className="font-medium capitalize">{slug}</span>
+                  {" — required by "}
+                  {workerNames.slice(0, 2).join(", ")}
+                  {workerNames.length > 2 ? ` +${workerNames.length - 2} more` : ""}
+                </p>
+                <a
+                  href={`/connections/browse?search=${encodeURIComponent(slug)}`}
+                  className="shrink-0 text-xs font-medium text-amber-800 dark:text-amber-300 underline underline-offset-2 hover:opacity-80"
+                >
+                  Connect
+                </a>
+              </div>
+            ))}
+          </div>
+        )}
 
         <section aria-label="Connected tools">
           {loading ? (
@@ -340,7 +387,19 @@ export default function ConnectionsClient({
               ))}
             </div>
           ) : connectionViews.filter((connection) => (connection.kind ?? "composio") === "composio").length === 0 ? (
-            <ConnectionsEmptyState onConnect={() => { window.location.href = "/connections/browse"; }} />
+            <div className="flex flex-col items-center gap-3 px-4 py-16 text-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)]">
+              <p className="text-sm font-medium text-foreground">No connections yet</p>
+              <p className="text-sm text-muted-foreground">Browse 1,000+ apps to connect.</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => router.push("/connections/browse")}
+              >
+                <Plus className="size-4" />
+                Add connection
+              </Button>
+            </div>
           ) : (
             <>
               <div className="mb-3 relative max-w-sm">
@@ -371,10 +430,13 @@ export default function ConnectionsClient({
                     testing={testing === connection.id}
                     highlighted={highlightId === connection.id}
                     lastUsedLoading={!lastUsedLoaded}
+                    expanded={expandedId === connection.id}
+                    usedByCount={usedByCountBySlug[connection.app_name?.toLowerCase() ?? ""] ?? 0}
                     onDelete={handleDelete}
                     onReconnect={handleConnect}
                     onRefresh={handleRefresh}
                     onTest={handleTest}
+                    onToggle={() => setExpandedId((prev) => prev === connection.id ? null : connection.id)}
                   />
                 ))}
                 {oauthConnections.length === 0 && connectionSearch && (
@@ -463,4 +525,29 @@ function removeKey<T>(record: Record<string, T>, key: string) {
   const next = { ...record };
   delete next[key];
   return next;
+}
+
+function computeUsedByCount(workers: WorkerDetail[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const worker of workers) {
+    const connections = worker.config?.connections ?? [];
+    for (const appName of connections) {
+      if (typeof appName !== "string") continue;
+      const slug = appName.toLowerCase();
+      counts[slug] = (counts[slug] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+// #556: slug -> worker names that require it but haven't connected it yet.
+function computeMissingBySlug(workers: WorkerDetail[]): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const worker of workers) {
+    for (const slug of worker.missing_connections ?? []) {
+      const key = slug.toLowerCase();
+      result[key] = [...(result[key] ?? []), worker.name];
+    }
+  }
+  return result;
 }

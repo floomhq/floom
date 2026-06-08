@@ -77,8 +77,10 @@ type NavItem = {
 
 const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
-  { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
+  // FL9: Assistant above Workers — the thing you talk to comes before the
+  // things that run on triggers.
   { href: "/assistant", label: "Assistant", icon: null, emilyDot: true, hint: "Chat, ask, delegate" },
+  { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
@@ -295,13 +297,10 @@ export function UserProfileFooter({
 
   // Multi-member: prefer username, then email, then display_name
   const primary = (user as (typeof user & { username?: string | null }) | null)?.username
-    || user?.display_name
-    || user?.email
-    || "Local user";
+    || user?.email || user?.display_name || "Local user";
   const userRole = (user as (typeof user & { role?: string }) | null)?.role;
   const secondary = userRole === "admin" ? "Admin" : userRole === "member" ? "Member" : (user?.email ? "Signed in" : "Workeros");
   const initials = profileInitials(primary);
-  const resolvedAvatarUrl = avatarUrl ?? user?.picture ?? null;
 
   async function logout() {
     try {
@@ -326,9 +325,9 @@ export function UserProfileFooter({
           aria-label="Profile menu"
         >
           {/* M36: show Google avatar when avatarUrl is provided, else initials. */}
-          {resolvedAvatarUrl ? (
+          {avatarUrl ? (
             <img
-              src={resolvedAvatarUrl}
+              src={avatarUrl}
               alt="Profile avatar"
               className="size-7 shrink-0 rounded-full border border-[var(--border-soft)] object-cover"
               referrerPolicy="no-referrer"
