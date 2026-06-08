@@ -3237,16 +3237,11 @@ def _connection_slug_for_worker_card(connection: Any) -> Optional[str]:
 
 def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Dict[str, Any]]:
     runner = (run_runner or "").lower()
-    is_skill = runner.startswith("skill")
     is_agent = runner.startswith("agent") or "agent" in runner
 
-    # agent_driver writes to outputs/transcript.jsonl; skill_driver writes transcript.jsonl
-    if is_agent:
-        candidate_names = {"outputs/transcript.jsonl", "transcript.jsonl"}
-    elif is_skill:
-        candidate_names = {"transcript.jsonl"}
-    else:
+    if not is_agent:
         return []
+    candidate_names = {"outputs/transcript.jsonl", "transcript.jsonl"}
 
     transcript = next(
         (a for a in artifacts if (a.name or "") in candidate_names),
@@ -3277,12 +3272,8 @@ def _read_transcript_rows(run_runner: str, artifacts: List[Artifact]) -> List[Di
         if isinstance(parsed, dict):
             raw_rows.append(parsed)
 
-    if not is_agent:
-        return raw_rows
-
-    # agent_driver writes Anthropic API message dicts. Normalise to the same
-    # {type, id, name, arguments, content} shape that skill_driver uses so
-    # callers don't need to know which runner produced the transcript.
+    # AgentDriver writes message dicts. Normalize to the
+    # {type, id, name, arguments, content} shape consumed by run detail callers.
     rows: List[Dict[str, Any]] = []
     for msg in raw_rows:
         role = msg.get("role", "")
@@ -4378,6 +4369,31 @@ def _resolve_file_input_references(
     _increment_file_ref_counts(bound_file_ids)
 
     return resolved_inputs
+
+
+def _validate_file_input_references(
+    run_config: Optional[WorkerConfig],
+    inputs: Dict[str, Any],
+) -> None:
+    """Reject invalid file input references before a run row is created."""
+    if not run_config:
+        return
+    for inp in getattr(run_config, "inputs", []) or []:
+        if getattr(inp, "type", None) != "file":
+            continue
+        value = inputs.get(inp.name)
+        if value in (None, ""):
+            continue
+        if not is_sha256(value):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"File input '{inp.name}': value must be a SHA-256 reference "
+                    f"from /uploads, got non-SHA value"
+                ),
+            )
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
+            raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
 
 
 _DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
@@ -7419,7 +7435,6 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
     _raise_if_protected_worker_mutation(worker_id)
     worker = repos.workers.get(user_id=owner_id, worker_id=worker_id)
     if not worker:
-        from worker_registry import WORKERS_DIR
         bundle_dir = WORKERS_DIR / worker_id
         if bundle_dir.is_dir():
             shutil.rmtree(bundle_dir, ignore_errors=True)
@@ -10413,6 +10428,7 @@ def create_worker_run(
                 status_code=400,
                 detail=f"Missing required inputs: {', '.join(missing)}",
             )
+        _validate_file_input_references(run_config, payload.inputs)
 
     _enforce_run_create_quota(auth, worker_id)
 
@@ -10650,8 +10666,8 @@ def cancel_run(
     spawned.  Sets cancel_requested=1 first so the drain loop skips the row
     if it is already past the get_queued() poll boundary.
 
-    For running runs: sets cancel_requested=1; the runner respects this between
-    iterations (AgentDriver) or on the next status write (other drivers).
+    For running runs: sets cancel_requested=1 and asks the E2B driver to kill
+    any registered sandbox command for this run.
 
     Returns 404 if no cancellable run is visible, 200 if cancellation was
     recorded.
@@ -10688,7 +10704,14 @@ def cancel_run(
         logger.info("Cancelled queued run %s before dispatch", run_id)
         return ActionResponse(status="cancelled", run_id=run_id)
 
-    logger.info("Cancel requested for run %s", run_id)
+    try:
+        from runner_sandbox.e2b_driver import cancel_sandbox
+
+        cancel_sandbox(run_id, reason="User requested cancellation.")
+    except Exception:
+        logger.warning("Failed to cancel E2B sandbox for run %s", run_id, exc_info=True)
+
+    logger.info("Cancel requested for running run %s", run_id)
     return ActionResponse(status="cancel_requested", run_id=run_id)
 
 
@@ -14568,7 +14591,7 @@ def test_connection(
     row = _connection_row_for_user(
         connection_id,
         auth.user_id,
-        "composio_connection_id, kind",
+        "composio_connection_id, kind, mcp_transport, mcp_allowed_tools_json, mcp_url, mcp_auth_secret",
         repos=repos,
     )
 
@@ -14580,49 +14603,140 @@ def test_connection(
         # server and enumerate its tools. Previously returned "valid" immediately
         # without contacting the server, so agents couldn't validate credentials
         # or URL before wiring a connection into a worker.
-        mcp_url = row.get("url") or row.get("server_url") or ""
-        mcp_token = row.get("api_key") or row.get("token") or ""
+        mcp_url = row.get("mcp_url") or row.get("url") or row.get("server_url") or ""
+        mcp_token = row.get("mcp_auth_secret") or row.get("api_key") or row.get("token") or ""
+        mcp_transport = str(row.get("mcp_transport") or "streamable_http").lower()
+        allowed_tools = set(_parse_json_string_list(row.get("mcp_allowed_tools_json")))
         if mcp_url:
             try:
                 import httpx as _httpx
                 headers = {}
                 if mcp_token:
                     headers["Authorization"] = f"Bearer {mcp_token}"
-                # Probe the MCP server's tool list via HTTP (SSE/REST transport).
-                probe_url = mcp_url.rstrip("/") + "/tools/list"
-                resp = _httpx.get(probe_url, headers=headers, timeout=8.0)
-                if resp.status_code == 404:
-                    # Try the MCP initialize endpoint instead
-                    probe_url = mcp_url.rstrip("/")
-                    resp = _httpx.post(probe_url, json={"jsonrpc": "2.0", "method": "initialize", "id": 1, "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "workeros", "version": "1.0"}}}, headers=headers, timeout=8.0)
-                if resp.status_code in (200, 201):
-                    _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
-                    tool_count = None
-                    try:
-                        body = resp.json()
-                        tools = body.get("tools") or body.get("result", {}).get("capabilities", {})
-                        if isinstance(tools, list):
-                            tool_count = len(tools)
-                    except Exception:
-                        pass
-                    reason = f"MCP server reachable{f' — {tool_count} tools' if tool_count is not None else ''}."
-                    return ConnectionTestResult(status="valid", reason=reason, tested_at=tested_at)
-                else:
-                    # #599: distinguish auth failures (server reachable, wrong key)
-                    # from URL/routing failures — they need different user actions.
-                    if resp.status_code in (401, 403):
+                probe_url = mcp_url.rstrip("/")
+                init_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "initialize",
+                    "id": 1,
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "workeros", "version": "1.0"},
+                    },
+                }
+                tools_payload = {"jsonrpc": "2.0", "method": "tools/list", "id": 2, "params": {}}
+
+                init_resp = _httpx.post(probe_url, json=init_payload, headers=headers, timeout=8.0)
+                if init_resp.status_code not in (200, 201):
+                    if init_resp.status_code in (401, 403):
                         reason = (
-                            f"MCP server reachable but authentication failed (HTTP {resp.status_code}). "
+                            f"MCP server reachable but authentication failed (HTTP {init_resp.status_code}). "
                             "Check your API key / token."
                         )
-                    elif resp.status_code == 404:
-                        reason = (
-                            f"MCP server returned 404. Verify the server URL is correct."
-                        )
+                    elif init_resp.status_code == 404:
+                        reason = "MCP server returned 404. Verify the server URL is correct."
                     else:
-                        reason = f"MCP server returned HTTP {resp.status_code}."
-                    _write_connection_check(connection_id, "failed", f"HTTP {resp.status_code}", tested_at, status="failed", repos=repos)
+                        reason = f"MCP server returned HTTP {init_resp.status_code}."
+                    _write_connection_check(
+                        connection_id,
+                        "failed",
+                        f"HTTP {init_resp.status_code}",
+                        tested_at,
+                        status="failed",
+                        repos=repos,
+                    )
                     return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
+
+                tools_resp = _httpx.post(probe_url, json=tools_payload, headers=headers, timeout=8.0)
+                tools = None
+                if tools_resp.status_code in (200, 201):
+                    body = tools_resp.json()
+                    if isinstance(body, dict):
+                        tools = body.get("tools")
+                        if tools is None and isinstance(body.get("result"), dict):
+                            tools = body["result"].get("tools")
+                        if tools is None and isinstance(body.get("result"), dict):
+                            tools = body["result"].get("capabilities", {}).get("tools")
+                elif tools_resp.status_code in (401, 403):
+                    reason = (
+                        f"MCP server reachable but authentication failed (HTTP {tools_resp.status_code}). "
+                        "Check your API key / token."
+                    )
+                    _write_connection_check(
+                        connection_id,
+                        "failed",
+                        f"HTTP {tools_resp.status_code}",
+                        tested_at,
+                        status="failed",
+                        repos=repos,
+                    )
+                    return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
+                elif tools_resp.status_code == 404 and mcp_transport in {"streamable_http", "sse"}:
+                    legacy_resp = _httpx.get(f"{probe_url}/tools/list", headers=headers, timeout=8.0)
+                    if legacy_resp.status_code in (200, 201):
+                        body = legacy_resp.json()
+                        tools = body.get("tools") if isinstance(body, dict) else None
+                    else:
+                        if legacy_resp.status_code in (401, 403):
+                            reason = (
+                                f"MCP server reachable but authentication failed (HTTP {legacy_resp.status_code}). "
+                                "Check your API key / token."
+                            )
+                        elif legacy_resp.status_code == 404:
+                            reason = "MCP server returned 404. Verify the server URL is correct."
+                        else:
+                            reason = f"MCP server returned HTTP {legacy_resp.status_code}."
+                        _write_connection_check(
+                            connection_id,
+                            "failed",
+                            f"HTTP {legacy_resp.status_code}",
+                            tested_at,
+                            status="failed",
+                            repos=repos,
+                        )
+                        return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
+                else:
+                    reason = f"MCP server returned HTTP {tools_resp.status_code}."
+                    _write_connection_check(
+                        connection_id,
+                        "failed",
+                        f"HTTP {tools_resp.status_code}",
+                        tested_at,
+                        status="failed",
+                        repos=repos,
+                    )
+                    return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
+
+                tool_names = sorted({
+                    str(tool.get("name"))
+                    for tool in (tools or [])
+                    if isinstance(tool, dict) and isinstance(tool.get("name"), str) and tool.get("name")
+                })
+                tool_count = len(tool_names)
+                missing_allowed = sorted(name for name in allowed_tools if name not in tool_names)
+                if missing_allowed:
+                    reason = (
+                        f"MCP server reachable — {tool_count} tools. "
+                        f"Allowed-tool mismatch: missing {', '.join(missing_allowed)}."
+                    )
+                    _write_connection_check(
+                        connection_id,
+                        "failed",
+                        f"tool mismatch: {', '.join(missing_allowed)}",
+                        tested_at,
+                        status="failed",
+                        repos=repos,
+                    )
+                    return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
+
+                _write_connection_check(connection_id, "valid", None, tested_at, status="active", repos=repos)
+                extra_tools = f" — {tool_count} tools" if tool_count is not None else ""
+                allowed_tools_note = f" (allowlist: {len(allowed_tools)} tools)" if allowed_tools else ""
+                return ConnectionTestResult(
+                    status="valid",
+                    reason=f"MCP server reachable{extra_tools}{allowed_tools_note}.",
+                    tested_at=tested_at,
+                )
             except Exception as exc:
                 _write_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
                 return ConnectionTestResult(
@@ -19042,6 +19156,11 @@ def system_metrics(
         for worker in workers
         if worker.get("enabled") and worker.get("trigger_type") != "manual"
     )
+    try:
+        from runner_sandbox.agent_driver import cancel_flag_db_read_errors_total
+        cancel_flag_errors = cancel_flag_db_read_errors_total()
+    except Exception:
+        cancel_flag_errors = 0
     return {
         "workers_count": len(workers),
         "runs_total": int(runs_total or 0),
@@ -19051,6 +19170,7 @@ def system_metrics(
         "secrets_count": int(secrets_count or 0),
         "active_triggers": int(active_triggers or 0),
         "drafts_last_hour": _drafts_last_hour_total(),
+        "cancel_flag_db_read_errors": int(cancel_flag_errors or 0),
         "uptime_seconds": int(time.time() - _PROCESS_START_TIME),
     }
 
@@ -19073,6 +19193,11 @@ _METRICS_DB_CONNECTION_ERRORS_TOTAL = 0
 def prometheus_metrics(auth: AuthContext = Depends(get_auth_context)):
     """Prometheus text exposition for runtime health."""
     buckets = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600]
+    try:
+        from runner_sandbox.agent_driver import cancel_flag_db_read_errors_total
+        cancel_flag_errors = cancel_flag_db_read_errors_total()
+    except Exception:
+        cancel_flag_errors = 0
     try:
         with get_db() as conn:
             run_rows = conn.execute(
@@ -19160,6 +19285,9 @@ def prometheus_metrics(auth: AuthContext = Depends(get_auth_context)):
         "# HELP workeros_db_connection_errors_total Total DB connection/query errors observed by metrics.",
         "# TYPE workeros_db_connection_errors_total counter",
         f"workeros_db_connection_errors_total {_METRICS_DB_CONNECTION_ERRORS_TOTAL}",
+        "# HELP workeros_cancel_flag_db_read_errors_total Total cancel flag DB read failures treated as cancelled.",
+        "# TYPE workeros_cancel_flag_db_read_errors_total counter",
+        f"workeros_cancel_flag_db_read_errors_total {int(cancel_flag_errors or 0)}",
         "# HELP workeros_active_runs Active queued or running runs.",
         "# TYPE workeros_active_runs gauge",
         f"workeros_active_runs {int(active_runs or 0)}",

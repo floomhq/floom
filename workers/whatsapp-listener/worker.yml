@@ -55,4 +55,7 @@ secrets:
   - WORKEROS_API_SECRET
   - WORKEROS_API_BASE
 connections:
-  - whatsapp
+  - app: whatsapp
+    allowed_tools:
+      - WHATSAPP_GET_MESSAGES
+      - WHATSAPP_SEND_MESSAGE

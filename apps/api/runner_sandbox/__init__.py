@@ -1,4 +1,4 @@
-"""Sandbox driver dispatch for Workeros — E2B-only execution.
+"""Sandbox driver dispatch for Workeros.
 
 Federico 2026-05-26: cut the local in-process runner. E2B is the only sandbox.
 The malicious-bundle audit landed at 45/100 against the in-process runner
@@ -7,11 +7,8 @@ enforcement). Rather than reinvent sandboxing in 300+ lines of subprocess +
 rlimit + seccomp code, delegate to E2B. ~$15/month for 100 runs/day at 30s
 avg, cheaper than Zapier Pro.
 
-agent-mode workers use AgentDriver (LLM tool loop, separate concern).
-pure-script workers always run inside E2B.
-
-#602: SkillRuntimeDriver removed — zero stock workers used runner:skill and
-the driver duplicated path-traversal + LLM-loop logic already in AgentDriver.
+Agent-mode workers use AgentDriver (LLM tool loop on the API host).
+Pure-script workers run inside E2B.
 """
 
 from .base import SandboxDriver
@@ -45,8 +42,7 @@ def get_driver(runner: str = "e2b", config: WorkerConfig | None = None) -> Sandb
       3. Default: AgentDriver (agent-mode workers are the common case).
 
     The `runner` parameter is accepted for backwards compat but ignored for
-    pure-script dispatch (always E2B). `runner:skill` is no longer supported
-    (#602 — SkillRuntimeDriver removed).
+    pure-script dispatch (always E2B).
     """
     if config and config.runtime:
         inferred = _resolve_mode_from_entry(config.runtime.entrypoint)

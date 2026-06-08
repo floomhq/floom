@@ -34,7 +34,7 @@ def _base_contract(extra: dict = None) -> dict:
         "exec": {
             "runtime": "python311",
             "mode": "pure-script",
-            "runner": "local",
+            "runner": "e2b",
             "command": "python run.py",
             "inputs": [],
             "outputs": [],
