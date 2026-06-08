@@ -1831,7 +1831,7 @@ def _health_check_e2b() -> Dict[str, Any]:
         return {"ok": False, "error": "E2B_API_KEY missing"}
     from e2b import Sandbox
 
-    Sandbox.list(limit=1).next_items()
+    Sandbox.list(limit=1, timeout=3).next_items()
     return {"ok": True}
 
 
