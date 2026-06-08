@@ -1993,6 +1993,8 @@ export default function WorkerDetailPage() {
               parts={activeRunStream.parts}
               streamConnected={activeRunStream.connected}
               streamError={activeRunStream.error}
+              streamUnavailable={activeRunStream.streamUnavailable}
+              onRefresh={activeRunStream.refresh}
               onBack={() => {
                 setActiveRunId(null);
                 setActiveRun(null);
