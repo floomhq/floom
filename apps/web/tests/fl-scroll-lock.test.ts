@@ -38,6 +38,11 @@ function testAutoScrollGuardedByNearBottom() {
     effectBlock.includes("isNearBottomRef.current"),
     "#593: the auto-scroll useEffect must check isNearBottomRef.current before scrolling"
   );
+  // Must use direct scrollTop (not scrollIntoView) to avoid animation fighting user scroll
+  assert(
+    effectBlock.includes("scrollTop") || effectBlock.includes("scrollToBottom"),
+    "#593: auto-scroll must use scrollTop (instant) not scrollIntoView (animated) during streaming"
+  );
   console.log("✓ #593 auto-scroll is gated on isNearBottomRef");
 }
 
