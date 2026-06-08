@@ -20,6 +20,7 @@ function RedirectInner() {
 
   const [phase, setPhase] = useState<RedirectPhase>("preparing");
   const [redirectUrl, setRedirectUrl] = useState("");
+  const [connectionId, setConnectionId] = useState("");
   const [error, setError] = useState("");
   // Don't use a ref guard — it survives Fast Refresh rebuilds and prevents
   // the effect from re-firing after a hot reload, leaving the page stuck in
@@ -33,6 +34,13 @@ function RedirectInner() {
     const deadline = Date.now() + 2 * 60 * 1000;
     const tick = async () => {
       try {
+        // Sync status from Composio first so our DB reflects reality.
+        // The Composio /connected_accounts/link flow never calls our callback
+        // URL — without this sync our DB stays "initiated" forever even after
+        // the user has completed OAuth on Composio's hosted page.
+        if (connectionId) {
+          await api.connections.status(connectionId).catch(() => null);
+        }
         const list = await api.connections.list();
         const active = list.find(
           (c) => c.app_name?.toLowerCase() === slug && c.status === "active"
@@ -48,7 +56,7 @@ function RedirectInner() {
       }
     };
     pollRef.current = setTimeout(tick, 2000);
-  }, [slug, returnTo, router]);
+  }, [slug, returnTo, router, connectionId]);
 
   useEffect(() => {
     return () => {
@@ -76,6 +84,7 @@ function RedirectInner() {
         if (cancelled) return;
         if (result.redirect_url) {
           setRedirectUrl(result.redirect_url);
+          setConnectionId(result.id ?? "");
           setPhase("ready");
           return;
         }
