@@ -203,11 +203,14 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
     }
     try {
       const run = await api.runs.get(runId);
-      const createdId = (run.output as Record<string, unknown> | undefined)?.["created_worker_id"];
+      const output = run.output as Record<string, unknown> | undefined;
+      const createdId = output?.["created_worker_id"];
       if (typeof createdId === "string" && createdId) {
         navigateToWorker(createdId);
         return;
       }
+      navigateToRun(runId, { failed: Boolean(output?.["worker_creation_failed"]) });
+      return;
     } catch {
       // fall through to the run view
     }
@@ -231,11 +234,12 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
         const run = await api.runs.get(runId);
         const status = String(run.status || "");
         if (status === "completed") {
-          const createdId = (run.output as Record<string, unknown> | undefined)?.["created_worker_id"];
+          const output = run.output as Record<string, unknown> | undefined;
+          const createdId = output?.["created_worker_id"];
           if (typeof createdId === "string" && createdId) {
             navigateToWorker(createdId);
           } else {
-            navigateToRun(runId);
+            navigateToRun(runId, { failed: Boolean(output?.["worker_creation_failed"]) });
           }
           return;
         }
