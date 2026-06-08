@@ -101,6 +101,7 @@ export const OVERLAY_FILES = [
   "tests/fl-batch-6.test.ts",
   "lib/server-api.ts",
   "lib/api.ts",
+  "lib/types.ts",
   "lib/telemetry.ts",
   "lib/useRunStream.ts",
 ];
