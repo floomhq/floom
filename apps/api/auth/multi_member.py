@@ -61,10 +61,12 @@ class MultiMemberAuthProvider:
     # ------------------------------------------------------------------
 
     async def verify(self, request: Request) -> AuthContext:
-        # 1. Bearer PAT
+        # 1. Bearer token — PAT or worker-call run token (wrt_)
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             raw_token = auth_header[7:].strip()
+            if raw_token.startswith("wrt_"):
+                return await self._verify_worker_call_token(raw_token)
             return await self._verify_pat(raw_token)
 
         # 2. Session cookie
@@ -102,6 +104,26 @@ class MultiMemberAuthProvider:
             )
 
         raise HTTPException(status_code=401, detail="unauthorized")
+
+    # ------------------------------------------------------------------
+    # Worker-call run token verification
+    # ------------------------------------------------------------------
+
+    async def _verify_worker_call_token(self, raw_token: str) -> AuthContext:
+        from run_token import validate_worker_call_token
+        try:
+            payload = validate_worker_call_token(raw_token)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail=str(exc))
+        user_id = str(payload.get("user_id") or "")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="invalid run token: missing user_id")
+        return AuthContext(
+            user_id=user_id,
+            role="member",
+            auth_method="run_token",
+            run_token_payload=payload,
+        )
 
     # ------------------------------------------------------------------
     # PAT verification
