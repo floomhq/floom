@@ -1697,6 +1697,14 @@ def _load_worker_recipe(
         if recipe:
             config = recipe.get("config")
             if isinstance(config, WorkerConfig):
+                # WorkerContract (schema 0.3) has no `calls` field, so the manifest
+                # round-trip through DB drops it. Re-hydrate from the filesystem
+                # registry when the DB config has an empty calls list so that
+                # worker-to-worker call capability survives DB persistence.
+                if not config.calls:
+                    fs_config = get_worker_config(worker_id)
+                    if fs_config and fs_config.calls:
+                        config = config.model_copy(update={"calls": fs_config.calls})
                 return (
                     recipe.get("owner_id"),
                     config,
