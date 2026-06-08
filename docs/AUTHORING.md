@@ -284,6 +284,18 @@ trigger:
 - The runtime resolves them from the host's secret store (`/secrets` API) and exposes them as env vars to the worker.
 - Workers cannot read host env vars that are not declared. Failure mode is the var is unset, not a permission denial.
 
+**Secrets encryption key (`.secrets.enc`):**
+
+Worker secrets are stored encrypted in `.secrets.enc` in your workspace. The decryption key is stored out-of-band and managed automatically:
+
+| Setup | Key location | Notes |
+|---|---|---|
+| Cloud (workeros.floom.dev) | Supabase Vault | Managed automatically, no action needed |
+| Self-hosted + GitHub remote | GitHub repo Variable `WORKEROS_SECRETS_KEY` | Set automatically on first write; shared across team |
+| Self-hosted, local git only | `~/.config/workeros/secrets.key` (mode 600) | Generated automatically on first write |
+
+For local git setups: back up `~/.config/workeros/secrets.key`. Losing it means the existing `.secrets.enc` is unreadable and all secrets must be re-entered. The key is a 32-byte hex string.
+
 ### Connections (Composio)
 
 - Composio connections (Gmail, Calendar, GitHub, etc.) are passed to the worker as objects on `context.connections[<provider>]`.
