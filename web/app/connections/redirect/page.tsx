@@ -42,7 +42,10 @@ function RedirectInner() {
         if (result.redirect_url) {
           setRedirectUrl(result.redirect_url);
           setPhase("redirecting");
-          window.location.assign(result.redirect_url);
+          // Don't auto-navigate — window.location.assign() is unreliable in
+          // dev (Fast Refresh rebuilds interrupt it) and some browsers block
+          // automatic navigation to external domains. Show an explicit button
+          // instead so the user always has a clear, clickable path forward.
           return;
         }
 
@@ -118,21 +121,34 @@ function RedirectInner() {
             ) : (
               <>
                 <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-full border border-border bg-muted">
-                  <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                  {redirectUrl ? (
+                    <ExternalLink className="size-5 text-muted-foreground" />
+                  ) : (
+                    <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                  )}
                 </div>
-                <h1 className="mt-4 text-xl font-semibold">Redirecting to Composio</h1>
+                <h1 className="mt-4 text-xl font-semibold">
+                  {redirectUrl ? `Authorize ${providerName}` : "Preparing authorization…"}
+                </h1>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Authorize {providerName} with Composio. You will return to Workeros when the connection is complete.
+                  {redirectUrl
+                    ? "Click the button below to continue to Composio and authorize the connection."
+                    : "Getting the authorization URL, please wait."}
                 </p>
                 {redirectUrl ? (
-                  <a href={redirectUrl} className={buttonVariants({ className: "mt-6 w-full" })}>
-                    <ExternalLink className="size-4" />
-                    Continue to Composio
+                  <a
+                    href={redirectUrl}
+                    target="_self"
+                    rel="noopener noreferrer"
+                    className={buttonVariants({ className: "mt-6 w-full" })}
+                  >
+                    <ExternalLink className="size-4 mr-2" />
+                    Continue to Composio →
                   </a>
                 ) : (
                   <Button disabled className="mt-6 w-full">
-                    <Loader2 className="size-4 animate-spin" />
-                    Preparing authorization
+                    <Loader2 className="size-4 animate-spin mr-2" />
+                    Preparing…
                   </Button>
                 )}
               </>
