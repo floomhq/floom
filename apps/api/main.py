@@ -15349,6 +15349,7 @@ async def _collect_workspace_agent_reply_for_slack(
     user_id: str,
     conversation_id: Optional[str],
     source: str = "slack",
+    system_suffix: str = "",
 ) -> str:
     from chat_service import stream_chat
 
@@ -15360,6 +15361,7 @@ async def _collect_workspace_agent_reply_for_slack(
             conversation_id=conversation_id,
             part_queue=queue,
             source=source,
+            system_suffix=system_suffix,
         )
     )
     text_parts: list[str] = []
@@ -15663,6 +15665,19 @@ async def _handle_slack_direct_message(
         logger.warning("Slack direct message missing channel/thread timestamp")
         return
     conversation_id = f"slack-assistant:{channel}:{thread_ts}"
+    # Generate a short-lived sign-in URL and surface it in the system prompt so
+    # Emily can share it when the user asks about signing in or getting started.
+    try:
+        _magic_token = _issue_magic_link(user_id=user_id, ttl_seconds=900)
+        _signin_url = f"{_frontend_base_url()}/auth/magic/{_magic_token}"
+        _slack_system_suffix = (
+            f"## Sign-in link for this conversation\n"
+            f"If the user asks how to sign in, access the dashboard, or get started on the web, "
+            f"share this personal sign-in link (valid 15 minutes): {_signin_url}\n"
+            f"Do not share this URL unprompted."
+        )
+    except Exception:
+        _slack_system_suffix = ""
     try:
         try:
             _set_slack_assistant_status(
@@ -15677,6 +15692,7 @@ async def _handle_slack_direct_message(
             message=prompt,
             user_id=user_id,
             conversation_id=conversation_id,
+            system_suffix=_slack_system_suffix,
         )
         _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply, bot_token=bot_token)
     except Exception:
@@ -20465,6 +20481,74 @@ def auth_logout(
             pass
     response.delete_cookie(SESSION_COOKIE)
     return {"ok": True}
+
+
+def _issue_magic_link(*, user_id: str, ttl_seconds: int = 900) -> str:
+    """Issue a stateless HMAC-signed magic-link token for a user."""
+    payload = {
+        "user_id": user_id,
+        "nonce": pysecrets.token_urlsafe(18),
+        "exp": int(time.time()) + ttl_seconds,
+    }
+    encoded = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    signature = hmac.new(_slack_state_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _validate_magic_link(token: str) -> str:
+    """Validate a magic-link token and return the user_id. Raises HTTPException on failure."""
+    try:
+        encoded, signature = token.split(".", 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid magic link") from exc
+    expected = hmac.new(_slack_state_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=400, detail="Invalid magic link")
+    try:
+        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid magic link") from exc
+    if int(payload.get("exp") or 0) < int(time.time()):
+        raise HTTPException(status_code=400, detail="Magic link expired")
+    user_id = str(payload.get("user_id") or "")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid magic link")
+    return user_id
+
+
+@app.post("/auth/magic-link")
+def auth_issue_magic_link(
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict:
+    """Issue a one-time sign-in URL for the authenticated user (multi-member mode only)."""
+    token = _issue_magic_link(user_id=auth.user_id)
+    url = f"{_frontend_base_url()}/auth/magic/{token}"
+    return {"url": url, "expires_in": 900}
+
+
+@app.get("/auth/magic/{token}")
+def auth_consume_magic_link(
+    token: str,
+    response: Response,
+    repos: Repositories = Depends(get_repos),
+) -> dict:
+    """Consume a magic-link token and create a session (multi-member mode only)."""
+    user_id = _validate_magic_link(token)
+    try:
+        user_repo, session_repo, _ = _require_multi_member_repos(repos)
+    except HTTPException:
+        raise HTTPException(status_code=400, detail="Magic links require multi-member auth mode")
+    user = user_repo.get(user_id=user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.get("disabled"):
+        raise HTTPException(status_code=403, detail="Account disabled")
+    from datetime import datetime, timedelta, timezone as _tz
+    session_id = pysecrets.token_urlsafe(32)
+    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
+    session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
+    response.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=_SESSION_TTL_SECONDS)
+    return {"ok": True, "redirect_to": "/overview"}
 
 
 @app.get("/auth/me")

@@ -1598,7 +1598,7 @@ export default function WorkerDetailPage() {
                 doesn't have to hunt for where to add the secret. */}
             {worker.status === "missing_secret" && (
               <Link
-                href="/secrets"
+                href={`/connections/secrets?return_to=/workers/${encodeURIComponent(worker.id)}`}
                 className="inline-flex items-center gap-1 rounded-[var(--radius-button)] px-2 py-0.5 text-[11px] font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
               >
                 Add secret →
@@ -2560,7 +2560,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
           This worker requires{" "}
           <span className="font-mono font-semibold">{requiredSecrets.join(", ")}</span>{" "}
           to run.{" "}
-          <Link href="/secrets" className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200">
+          <Link href={`/connections/secrets?return_to=/workers/${encodeURIComponent(worker.id)}`} className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200">
             Add it in Secrets →
           </Link>
         </p>
@@ -2787,22 +2787,19 @@ function RunSection({
           {missingConnections.length > 0 && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
               <Plug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <div>
-                <p className="font-medium">Connection required</p>
-                <p>
-                  Connect{" "}
-                  {missingConnections.map((s, i) => (
-                    <span key={s}>
-                      <span className="font-medium capitalize">{s}</span>
-                      {i < missingConnections.length - 1 ? ", " : ""}
-                    </span>
-                  ))}{" "}
-                  in{" "}
-                  <Link href="/connections" className="underline hover:text-amber-900">
-                    Connections
-                  </Link>{" "}
-                  before running.
-                </p>
+              <div className="space-y-1.5">
+                <p className="font-medium">Connect required tools to run</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {missingConnections.map((s) => (
+                    <Link
+                      key={s}
+                      href={`/connections/connect/${encodeURIComponent(s)}?return_to=/workers/${encodeURIComponent(worker.id)}`}
+                      className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-2 py-0.5 font-medium capitalize hover:bg-amber-200"
+                    >
+                      {s} →
+                    </Link>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -2810,25 +2807,23 @@ function RunSection({
           {worker.status === "missing_secret" && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
               <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <div>
-                <p className="font-medium">Secret required</p>
+              <div className="space-y-1.5">
+                <p className="font-medium">Add required secrets to run</p>
                 {worker.missing_secrets && worker.missing_secrets.length > 0 ? (
-                  <p>
-                    Add{" "}
-                    {worker.missing_secrets.map((s, i) => (
-                      <span key={s}>
-                        <Link href={`/connections/secrets?prefill=${encodeURIComponent(s)}`} className="font-mono underline hover:text-amber-900">{s}</Link>
-                        {i < (worker.missing_secrets?.length ?? 0) - 1 ? ", " : ""}
-                      </span>
-                    ))}{" "}
-                    in{" "}
-                    <Link href="/connections/secrets" className="underline hover:text-amber-900">Secrets</Link>{" "}
-                    before running.
-                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {worker.missing_secrets.map((s) => (
+                      <Link
+                        key={s}
+                        href={`/connections/secrets?prefill=${encodeURIComponent(s)}&return_to=/workers/${encodeURIComponent(worker.id)}`}
+                        className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-2 py-0.5 font-mono hover:bg-amber-200"
+                      >
+                        {s} →
+                      </Link>
+                    ))}
+                  </div>
                 ) : (
                   <p>
-                    This worker requires a secret that is not configured. Add it in{" "}
-                    <Link href="/connections/secrets" className="underline hover:text-amber-900">Secrets</Link>{" "}
+                    <Link href={`/connections/secrets?return_to=/workers/${encodeURIComponent(worker.id)}`} className="underline hover:text-amber-900">Add the missing secret</Link>{" "}
                     before running.
                   </p>
                 )}
