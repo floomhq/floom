@@ -378,7 +378,7 @@ class AgentDriver(SandboxDriver):
                     instructions=system_prompt,
                     tools=self._sdk_tools(config, state),
                     mcp_servers=mcp_servers,
-                    model=config.runtime.model or "gpt-5-mini",
+                    model=config.runtime.model or "gpt-4o-mini",
                     model_settings=ModelSettings(
                         max_tokens=limits.max_output_tokens,
                         include_usage=True,

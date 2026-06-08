@@ -3052,9 +3052,10 @@ def execute_run(
         _merge_instance_inputs(instance, inputs),
     )
 
+    _run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
+
     def log_fn(msg: str, level: str = "info") -> None:
-        secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
-        safe_msg = scrub_secrets(msg, secrets)
+        safe_msg = scrub_secrets(msg, _run_secrets)
         add_log(
             run_id,
             safe_msg,
@@ -3095,7 +3096,7 @@ def execute_run(
                 return
 
         log_fn("Loading secrets", level="debug")
-        secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
+        secrets = _run_secrets
         missing = [s for s in config.secrets if s not in secrets]
         if missing:
             err = f"Missing secrets: {', '.join(missing)}"

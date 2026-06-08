@@ -227,7 +227,7 @@ def alerting_tick() -> None:
     if not _ALERT_ENABLED:
         return
 
-    if _ALERT_POLL_EVERY_N_TICKS > 0 and (_tick_counter % (_ALERT_POLL_EVERY_N_TICKS + 1)) != 1:
+    if _ALERT_POLL_EVERY_N_TICKS > 0 and (_tick_counter % _ALERT_POLL_EVERY_N_TICKS) != 0:
         return
 
     try:
