@@ -4,10 +4,12 @@
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
 // Downstream host consume this file unmodified (no fork).
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
+const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
 const APP_API_BASE = API_BASE.endsWith("/api/proxy")
   ? API_BASE.slice(0, -"/api/proxy".length) + "/api"
   : "/api";
+let loginRedirectStarted = false;
 
 export function getActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
@@ -70,6 +72,50 @@ export function apiProxyPath(path: string, includeWorkspaceQuery = false): strin
   return `${API_BASE}${includeWorkspaceQuery ? withWorkspaceQuery(path) : path}`;
 }
 
+function isSignedApprovalProxyPath(path: string): boolean {
+  return path.startsWith("/approvals/public/");
+}
+
+function currentPathForLoginNext(): string {
+  if (typeof window === "undefined") return "/";
+  const path = `${window.location.pathname}${window.location.search || ""}`;
+  return path || "/";
+}
+
+function redirectToLoginOnce(path: string): void {
+  if (loginRedirectStarted || typeof window === "undefined") return;
+  if (isSignedApprovalProxyPath(path)) return;
+  loginRedirectStarted = true;
+  const loginPath = `${WEB_BASE_PATH}/login`;
+  const next = currentPathForLoginNext();
+  const target =
+    next && next !== "/" && next !== loginPath
+      ? `${loginPath}?next=${encodeURIComponent(next)}`
+      : loginPath;
+  window.location.assign(target);
+}
+
+function handleUnauthorizedResponse(status: number, path: string): void {
+  if (status === 401) redirectToLoginOnce(path);
+}
+
+async function apiErrorFromResponse(res: Response): Promise<string> {
+  let err = "";
+  try {
+    const body = await res.json();
+    err = extractApiErrorMessage(body);
+  } catch {
+    err = "";
+  }
+  if (!err || err === "{}") {
+    err =
+      res.status === 504
+        ? "Request timed out. The server took too long to respond."
+        : res.statusText || `HTTP ${res.status}`;
+  }
+  return err;
+}
+
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = withWorkspaceHeaders(options?.headers);
   if (!headers.has("Content-Type")) {
@@ -80,22 +126,8 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     headers,
   });
   if (!res.ok) {
-    // PR S19 (I-6): surface SOMETHING actionable even when the upstream
-    // returns no JSON body (Vercel 504 timeouts hand back empty HTML).
-    let err = "";
-    try {
-      const body = await res.json();
-      err = extractApiErrorMessage(body);
-    } catch {
-      err = "";
-    }
-    if (!err || err === "{}") {
-      err =
-        res.status === 504
-          ? "Request timed out. The server took too long to respond."
-          : res.statusText || `HTTP ${res.status}`;
-    }
-    throw new Error(err);
+    handleUnauthorizedResponse(res.status, path);
+    throw new Error(await apiErrorFromResponse(res));
   }
   // No-content responses (204, or any empty body) carry no JSON. Calling
   // res.json() on them throws ("Unexpected end of JSON input"), which used to
@@ -119,14 +151,8 @@ async function fetchText(path: string, options?: RequestInit): Promise<string> {
     headers,
   });
   if (!res.ok) {
-    let err = "";
-    try {
-      const body = await res.json();
-      err = extractApiErrorMessage(body);
-    } catch {
-      err = "";
-    }
-    throw new Error(err || res.statusText || `HTTP ${res.status}`);
+    handleUnauthorizedResponse(res.status, path);
+    throw new Error(await apiErrorFromResponse(res));
   }
   if (res.status === 204) return "";
   return res.text();
@@ -138,14 +164,8 @@ async function fetchRaw(path: string, options?: RequestInit): Promise<Response> 
     headers: withWorkspaceHeaders(options?.headers),
   });
   if (!res.ok) {
-    let err = "";
-    try {
-      const body = await res.json();
-      err = extractApiErrorMessage(body);
-    } catch {
-      err = res.statusText || `HTTP ${res.status}`;
-    }
-    throw new Error(err);
+    handleUnauthorizedResponse(res.status, path);
+    throw new Error(await apiErrorFromResponse(res));
   }
   return res;
 }
@@ -175,14 +195,8 @@ export const api = {
       headers: withWorkspaceHeaders(),
     });
     if (!res.ok) {
-      let err = "";
-      try {
-        const body = await res.json();
-        err = extractApiErrorMessage(body);
-      } catch {
-        err = res.statusText || `HTTP ${res.status}`;
-      }
-      throw new Error(err);
+      handleUnauthorizedResponse(res.status, "/me");
+      throw new Error(await apiErrorFromResponse(res));
     }
     return res.json() as Promise<import("./types").CurrentUser>;
   },
@@ -420,14 +434,8 @@ export const api = {
         { method: "POST", headers: withWorkspaceHeaders(), body: form }
       );
       if (!res.ok) {
-        let err: string;
-        try {
-          const body = await res.json();
-          err = body.detail || JSON.stringify(body);
-        } catch {
-          err = res.statusText;
-        }
-        throw new Error(err);
+        handleUnauthorizedResponse(res.status, `/approvals/${approvalId}/uploads`);
+        throw new Error(await apiErrorFromResponse(res));
       }
       return res.json() as Promise<import("./types").ApprovalUploadResponse>;
     },
@@ -444,14 +452,8 @@ export const api = {
         { method: "POST", body: form }
       );
       if (!res.ok) {
-        let err: string;
-        try {
-          const body = await res.json();
-          err = body.detail || JSON.stringify(body);
-        } catch {
-          err = res.statusText;
-        }
-        throw new Error(err);
+        handleUnauthorizedResponse(res.status, `/approvals/public/${approvalId}/uploads`);
+        throw new Error(await apiErrorFromResponse(res));
       }
       return res.json() as Promise<import("./types").ApprovalUploadResponse>;
     },
