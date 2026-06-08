@@ -63,6 +63,14 @@ function testScrollContainerHasHandler() {
     src.includes("handleScroll"),
     "#593: a handleScroll function must exist to update isNearBottomRef"
   );
+  // Threshold must be tight (≤ 30px) so a small scroll up immediately disengages.
+  // A large threshold (e.g. 120px) means small scrolls still read "near bottom"
+  // and the auto-scroll keeps fighting the user.
+  const thresholdMatch = src.match(/scrollHeight - el\.scrollTop - el\.clientHeight < (\d+)/);
+  assert(
+    thresholdMatch !== null && parseInt(thresholdMatch[1]) <= 30,
+    `#593: near-bottom threshold must be ≤ 30px (found ${thresholdMatch?.[1] ?? "none"}) — a larger value causes fighting on small scrolls`
+  );
   console.log("✓ #593 scroll container has onScroll handler");
 }
 
