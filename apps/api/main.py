@@ -21996,4 +21996,26 @@ def delete_token(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    from pathlib import Path as _Path
+
+    # Exclude runtime-written dirs from the reload watcher. The runner stages a
+    # per-run bundle at data/run-bundles/<run_id>/run.py on every execution; since
+    # data/ lives under this dir (the watched cwd), each run would otherwise trip
+    # WatchFiles and restart the API mid-run (interrupted_by_restart). Worker
+    # bundles in WORKERS_DIR are likewise data, not source. Paths must be absolute
+    # because watchfiles yields absolute paths and uvicorn matches exclude *dirs*
+    # via `exclude_dir in path.parents`.
+    _api_dir = _Path(__file__).resolve().parent
+    _reload_excludes = [str(_api_dir / "data")]
+    try:
+        from worker_registry import WORKERS_DIR as _WORKERS_DIR
+        _reload_excludes.append(str(_Path(_WORKERS_DIR).resolve()))
+    except Exception:
+        pass
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        reload_excludes=_reload_excludes,
+    )
