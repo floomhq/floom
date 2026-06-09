@@ -7,6 +7,14 @@
 **Context**: single-tenant V0 (one owner), hardened as if multi-tenant is coming
 **Constraints honored**: no secret VALUES printed/committed; test data cleaned; uptime verified post-probe (no crash); coordinated — SSE concurrent-stream cap left to the backend-correctness lane.
 
+**2026-06-09 scope update for issue #609**: worker execution has two
+topologies. Pure-script workers run in E2B microVMs. Agent workers (`SKILL.md`,
+`.md`, or `mode: agent`) run through AgentDriver in the API process. The
+current single-tenant deployment treats agent bundles as trusted,
+platform-controlled code by policy; that policy is not a sandbox boundary or
+a code-enforced provenance check. Statements below about sandbox isolation
+apply only to the pure-script path unless they explicitly name AgentDriver.
+
 ---
 
 ## Scorecard
@@ -18,7 +26,7 @@
 | 3 | Security headers (frontend + API) | **PASS** — all 6 present on both |
 | 4 | OWASP Top-10 scan | **PASS** (1 quick win in #11; see below) |
 | 5 | SQLi / XSS / auth | **PASS** — parametrized, JSON-only + CSP, 401/403 without secret |
-| 6 | `.env` values not leaking | **PASS** — sandbox env carries no platform secret; denylist enforced |
+| 6 | `.env` values not leaking | **PASS** — pure-script sandbox env carries no platform secret; denylist enforced |
 | 7 | API responses for sensitive data | **PASS** (email now null, account-label redacted); 1 residual P2 (`ca_*` ids) |
 | 8 | Remove secrets from logs | **PASS** — no literal secrets in journald/run-logs/DB |
 | 9 | Never expose API keys in frontend | **FIXED (P0)** — removed unauthenticated `/api/floom-secret` |
@@ -35,20 +43,24 @@
 ### 1. Privacy / Terms — FIXED
 No privacy/terms surface existed. Added minimal honest static pages
 `apps/web/app/privacy/page.tsx` and `apps/web/app/terms/page.tsx` documenting:
-single-tenant reality, what is stored, where workers run (E2B microVMs),
-third-party providers that may receive data (OpenAI/E2B/Composio), and
-owner-controlled retention/deletion. Not over-built.
+single-tenant reality, what is stored, E2B execution, third-party providers
+that may receive data (OpenAI/E2B/Composio), and owner-controlled
+retention/deletion. The 2026-06-09 scope update above supersedes any inference
+from that historical wording that agent workers are E2B-isolated. Not
+over-built.
 **Federico decision needed**: if Workeros Cloud (multi-tenant) reuses this OS
 frontend, these pages must be replaced with a real processor-listed GDPR
 privacy policy + ToS. For the single-tenant OS they are sufficient.
 
 ### 2. Data map — FIXED
-`docs/SECURITY-DATA-MAP.md` enumerates every storage location: all SQLite
+`docs/SECURITY-DATA-MAP.md` enumerates every storage location and execution
+topology: all SQLite
 tables (workers/runs/logs/secrets/composio_connections/conversations/
 conversation_messages/contexts/approvals/artifacts/files/worker_webhook_secrets/
 cli_auth_devices/schedules/worker_state/...), artifacts dir, contexts dir,
-`.env`, ephemeral E2B sandboxes, journald — each with sensitivity, at-rest
-encryption (disk-level only), and retention. Includes a data-flow diagram.
+`.env`, ephemeral E2B sandboxes for pure-script workers, API-process
+AgentDriver execution, journald — each with sensitivity, at-rest encryption
+(disk-level only), and retention. Includes a data-flow diagram.
 
 ### 3. Security headers — PASS
 Verified live on both hosts. API (`security_headers_middleware`, main.py):
@@ -66,8 +78,10 @@ nosniff, Referrer-Policy, Permissions-Policy. (Minor: frontend HSTS lacks
 - A02 Crypto Failures: secrets write-only via API (never returned); platform
   secrets in `.env` (0600) never served. At-rest = disk-level (documented).
 - A03 Injection: parametrized SQL (probes inert, table intact); JSON-only API
-  + strict CSP defeats XSS; command exec in sandbox restricts paths + declared
-  env only. PASS.
+  + strict CSP defeats XSS; pure-script command execution runs in E2B.
+  AgentDriver is trusted in-process execution and requires separate review of
+  host-side tools, connection scopes, approvals, and secret handling.
+  PASS for the audited single-tenant policy.
 - A04 Insecure Design: per-user quotas, body-size caps, secret length caps.
 - A05 Misconfig: CORS locked to `*.floom.dev`; auth-configs endpoint gated
   behind env flag (404 by default).
@@ -76,9 +90,11 @@ nosniff, Referrer-Policy, Permissions-Policy. (Minor: frontend HSTS lacks
 - A07 Auth Failures: 401/403 without secret on every protected path.
 - A08 Integrity: webhook HMAC verification (`COMPOSIO_WEBHOOK_SIGNING_KEY`).
 - A09 Logging: redaction in place (see #8).
-- A10 SSRF: MCP url is consumed only inside the isolated sandbox, never fetched
-  server-side at creation; server-side fetches (Composio/Granola/OpenAI) hit
-  fixed hosts only. PASS for the platform boundary.
+- A10 SSRF: pure-script network access happens inside E2B. Agent-worker MCP
+  URLs are dialed by AgentDriver in the API process after URL validation and
+  are trusted platform configuration under the current deployment policy.
+  Server-side fetches (Composio/Granola/OpenAI) use the API process. PASS for
+  the audited single-tenant policy; this is not an agent sandbox guarantee.
 
 ### 5. SQLi / XSS / auth — PASS
 - SQLi: `?worker_id=1' OR '1'='1` → `[]`; `;DROP TABLE runs;--` inert, table
@@ -88,14 +104,16 @@ nosniff, Referrer-Policy, Permissions-Policy. (Minor: frontend HSTS lacks
 - Auth bypass: every protected endpoint returns 401/403 without `x-floom-secret`.
 
 ### 6. `.env` not leaking — PASS
-E2B sandbox receives only `FLOOM_RUN_ID` + `FLOOM_TRACE_ID` as env; secrets
-come from `get_secrets_for_worker`, which filters `_PLATFORM_SECRET_NAMES`
-(FLOOM_SECRET, COMPOSIO_API_KEY, COMPOSIO_WEBHOOK_SIGNING_KEY, E2B_API_KEY,
-infra paths). `exec_command` env in the agent driver only forwards declared
-secrets + PATH + FLOOM dirs. env-vars-worker dumping `os.environ` inside the
-sandbox sees no platform secret. (OPENAI_API_KEY is intentionally allowed into
-worker sandboxes in single-tenant V0; must split to a platform-only name when
-multi-tenant lands — documented in code.)
+E2B sandboxes for pure-script workers receive only `FLOOM_RUN_ID` +
+`FLOOM_TRACE_ID` as env; secrets come from `get_secrets_for_worker`, which
+filters `_PLATFORM_SECRET_NAMES` (FLOOM_SECRET, COMPOSIO_API_KEY,
+COMPOSIO_WEBHOOK_SIGNING_KEY, E2B_API_KEY, infra paths). AgentDriver receives
+the resolved worker-secret set in the API process; its `run_command` tool
+forwards only requested declared secrets plus runtime paths into E2B.
+env-vars-worker dumping `os.environ` inside the E2B sandbox sees no platform
+secret. (OPENAI_API_KEY is intentionally allowed into worker sandboxes in
+single-tenant V0; must split to a platform-only name when multi-tenant lands —
+documented in code.)
 
 ### 7. Sensitive data in API responses — PASS (1 residual P2)
 - `/system/overview`: no secret-shaped strings.
