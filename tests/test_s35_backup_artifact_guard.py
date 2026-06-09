@@ -169,7 +169,7 @@ def test_backup_script_writes_db_artifacts_and_manifest(tmp_path):
     backups = sorted(backup_root.glob("workeros-*"))
     assert len(backups) == 1
     backup = backups[0]
-    assert (backup / "floom.db").is_file()
+    assert (backup / "floom.db.gz").is_file()
     assert (backup / "artifacts.tar.gz").is_file()
     assert (backup / "manifest.json").is_file()
     assert f"wrote {backup}" in result.stdout

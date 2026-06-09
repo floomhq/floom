@@ -256,15 +256,24 @@ def _load_api(monkeypatch, tmp_path):
     workers_dir.mkdir()
     db_path = tmp_path / "floom.db"
 
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
+    monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("COMPOSIO_API_KEY", "test-key")
     monkeypatch.setenv("FLOOM_SECRET", AUTH_HEADERS["x-floom-secret"])
+    monkeypatch.delenv("WORKEROS_GIT_REMOTE", raising=False)
     monkeypatch.delenv("WORKEROS_ALLOW_PRIVATE_MCP_URLS", raising=False)
 
     sys.path.insert(0, str(api_dir))
-    for name in ["main", "db", "models", "worker_registry", "run_service", "composio_client"]:
-        sys.modules.pop(name, None)
+    for name in list(sys.modules):
+        if any(name == m or name.startswith(m + ".") for m in [
+            "main", "db", "models", "worker_registry", "runner_utils",
+            "run_service", "composio_client", "auth", "contexts",
+        ]):
+            sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,

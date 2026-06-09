@@ -116,7 +116,7 @@ def test_get_connections_scoped_to_caller(monkeypatch, tmp_path):
     body = resp.json()
     assert [item["id"] for item in body] == [owned]
     assert "connection_id" not in body[0]
-    assert "composio_connection_id" in body[0]
+    assert "composio_connection_id" not in body[0]
 
 
 def test_request_body_size_limit(monkeypatch, tmp_path):

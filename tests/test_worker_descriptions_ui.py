@@ -461,6 +461,7 @@ def tmp_db(tmp_path, monkeypatch):
     """Provide a fresh temp SQLite DB for API integration tests."""
     db_file = tmp_path / "test.db"
     monkeypatch.setenv("FLOOM_DB", str(db_file))
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret-descriptions-ui")
     # Force re-import of db module with the new env
     import importlib
     import db as _db
@@ -483,7 +484,7 @@ def test_api_workers_list_exposes_t2b_fields(tmp_db, monkeypatch):
     invalidate_worker_cache()
 
     client = TestClient(_main.app)
-    resp = client.get("/workers")
+    resp = client.get("/workers", headers={"x-floom-secret": "test-secret-descriptions-ui"})
     assert resp.status_code == 200, resp.text
     workers = resp.json()
     assert isinstance(workers, list)
@@ -493,9 +494,9 @@ def test_api_workers_list_exposes_t2b_fields(tmp_db, monkeypatch):
     assert cv["folder"] == "Recruiting/Search Assistant"
     assert isinstance(cv.get("tags"), list)
     example = cv.get("example_input") or {}
-    # File samples are inline content; the Run form uploads them before creating a run.
-    assert isinstance(example.get("cv_file"), str)
-    assert "Senior Java Backend Engineer" in example["cv_file"]
+    # File inputs stay null in persisted samples so the run form never tries to
+    # base64-decode inline prose as an uploaded file.
+    assert example.get("cv_file") is None
 
 
 def test_api_worker_detail_exposes_t2b_fields(tmp_db, monkeypatch):
@@ -510,7 +511,7 @@ def test_api_worker_detail_exposes_t2b_fields(tmp_db, monkeypatch):
     invalidate_worker_cache()
 
     client = TestClient(_main.app)
-    resp = client.get("/workers/cv_writeup")
+    resp = client.get("/workers/cv_writeup", headers={"x-floom-secret": "test-secret-descriptions-ui"})
     assert resp.status_code == 200, resp.text
     w = resp.json()
     assert w["folder"] == "Recruiting/Search Assistant"
@@ -518,8 +519,7 @@ def test_api_worker_detail_exposes_t2b_fields(tmp_db, monkeypatch):
     assert "cv" in w["tags"]
     assert w.get("long_description") is not None
     example = w.get("example_input") or {}
-    assert isinstance(example.get("cv_file"), str)
-    assert "Senior Java Backend Engineer" in example["cv_file"]
+    assert example.get("cv_file") is None
 
 
 # ---------------------------------------------------------------------------

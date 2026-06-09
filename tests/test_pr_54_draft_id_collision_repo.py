@@ -46,7 +46,8 @@ _tmp_db.close()
 # in-process client path is used deterministically.
 os.environ["FLOOM_DB"] = _tmp_db.name
 os.environ.pop("FLOOM_SECRET", None)
-os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake-key")
+if not os.environ.get("OPENAI_API_KEY", "").strip():
+    os.environ["OPENAI_API_KEY"] = "sk-test-fake-key"
 
 # Force local (SQLite) repositories regardless of ambient config.
 os.environ["WORKEROS_DEPLOY"] = "local"
