@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import re
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request
@@ -25,6 +26,7 @@ from .context import AuthContext
 
 SESSION_COOKIE = "wos_session"  # backend session; intentionally different from the Next.js web-session cookie
 _PAT_PREFIX = "wos_"  # all generated PATs start with this prefix for easy identification
+_LOCAL_USER_HEADER_RE = re.compile(r"[A-Za-z0-9_.:@-]{1,128}")
 
 
 def _hash_token(token: str) -> str:
@@ -44,6 +46,26 @@ def _is_expired(expires_at: str | None) -> bool:
         return datetime.now(timezone.utc) > exp
     except Exception:
         return False
+
+
+def _local_shared_secret_context(request: Request) -> AuthContext:
+    user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
+    if os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1":
+        header_user = (request.headers.get("x-floom-user") or "").strip()
+        if header_user:
+            if not _LOCAL_USER_HEADER_RE.fullmatch(header_user):
+                raise HTTPException(status_code=400, detail="invalid x-floom-user")
+            return AuthContext(
+                user_id=header_user,
+                role="member",
+                auth_method="secret",
+            )
+    return AuthContext(
+        user_id=user_id,
+        role="admin",
+        auth_method="secret",
+        scopes=("admin",),
+    )
 
 
 class MultiMemberAuthProvider:
@@ -93,13 +115,7 @@ class MultiMemberAuthProvider:
             provided_val = provided if provided is not None else b""
             if not hmac.compare_digest(provided_val, self._secret.encode("latin-1")):
                 raise HTTPException(status_code=401, detail="unauthorized")
-            user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
-            return AuthContext(
-                user_id=user_id,
-                role="admin",
-                auth_method="secret",
-                scopes=("admin",),
-            )
+            return _local_shared_secret_context(request)
 
         # 4. No users in DB — dev mode (legacy single-user install).
         # Only reached when FLOOM_SECRET is NOT set (local dev without config).

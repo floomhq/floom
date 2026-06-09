@@ -145,6 +145,11 @@ def test_binary_file_restore_round_trip(monkeypatch, tmp_path):
 
     # Create a pack and upload a BINARY file (a tiny PNG header — not valid UTF-8).
     assert client.post("/contexts/binpack", headers=headers).status_code in (200, 201)
+    assert client.patch(
+        "/contexts/binpack/sensitive",
+        json={"sensitive": False},
+        headers=headers,
+    ).status_code == 200
     png_v1 = b"\x89PNG\r\n\x1a\n\x00\x01\x02\xff\xfe\xfd"
     r = client.put(
         "/contexts/binpack/files/logo.png",
@@ -193,6 +198,11 @@ def test_binary_restore_bad_token_and_owner_scope(monkeypatch, tmp_path):
     other = {"x-floom-secret": "test-secret", "x-floom-user": "mallory"}
 
     client.post("/contexts/scoped", headers=owner)
+    assert client.patch(
+        "/contexts/scoped/sensitive",
+        json={"sensitive": False},
+        headers=owner,
+    ).status_code == 200
     client.put(
         "/contexts/scoped/files/doc.bin",
         content=b"\x00\x01\x02alice",
@@ -319,6 +329,8 @@ def _load_app(monkeypatch, tmp_path, *, contexts_dir=None, user_header_scope=Fal
     monkeypatch.setenv("COMPOSIO_API_KEY", "test-composio-key")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.delenv("WORKEROS_GIT_REMOTE", raising=False)
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     if contexts_dir is not None:
