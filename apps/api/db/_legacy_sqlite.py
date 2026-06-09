@@ -23,6 +23,7 @@ DB_PATH = _configured_db_path()
 logger = logging.getLogger("floom.db")
 _WAL_LOCK = threading.Lock()
 _WAL_INITIALIZED_PATHS: set[str] = set()
+_DB_CONNECTION_STATE = threading.local()
 
 
 def _busy_timeout_ms() -> int:
@@ -48,6 +49,137 @@ def _enable_wal_once(conn: sqlite3.Connection, db_path: str) -> None:
         _WAL_INITIALIZED_PATHS.add(cache_key)
 
 
+def _db_cache_key(db_path: str, busy_timeout_ms: int) -> tuple[str, int]:
+    if db_path == ":memory:":
+        return (db_path, busy_timeout_ms)
+    return (os.path.abspath(db_path), busy_timeout_ms)
+
+
+def _close_cached_db_connection() -> None:
+    conn = getattr(_DB_CONNECTION_STATE, "conn", None)
+    if conn is not None:
+        conn.close()
+    _DB_CONNECTION_STATE.conn = None
+    _DB_CONNECTION_STATE.cache_key = None
+    _DB_CONNECTION_STATE.depth = 0
+
+
+def _open_db_connection(db_path: str, busy_timeout_ms: int) -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(db_path) if os.path.dirname(db_path) else ".", exist_ok=True)
+    conn = sqlite3.connect(
+        db_path,
+        detect_types=sqlite3.PARSE_DECLTYPES,
+        timeout=busy_timeout_ms / 1000,
+    )
+    conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
+    _enable_wal_once(conn, db_path)
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def _get_cached_db_connection(db_path: str, busy_timeout_ms: int) -> sqlite3.Connection:
+    cache_key = _db_cache_key(db_path, busy_timeout_ms)
+    cached_key = getattr(_DB_CONNECTION_STATE, "cache_key", None)
+    conn = getattr(_DB_CONNECTION_STATE, "conn", None)
+    if conn is not None and cached_key == cache_key:
+        return conn
+
+    _close_cached_db_connection()
+    conn = _open_db_connection(db_path, busy_timeout_ms)
+    _DB_CONNECTION_STATE.conn = conn
+    _DB_CONNECTION_STATE.cache_key = cache_key
+    return conn
+
+
+def _execute_sql_script(conn: sqlite3.Connection, script: str) -> None:
+    statement: list[str] = []
+    in_single_quote = False
+    in_double_quote = False
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+    length = len(script)
+    while i < length:
+        ch = script[i]
+        nxt = script[i + 1] if i + 1 < length else ""
+
+        if in_line_comment:
+            statement.append(ch)
+            if ch == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        if in_block_comment:
+            statement.append(ch)
+            if ch == "*" and nxt == "/":
+                statement.append(nxt)
+                i += 2
+                in_block_comment = False
+            else:
+                i += 1
+            continue
+
+        if in_single_quote:
+            statement.append(ch)
+            if ch == "'" and nxt == "'":
+                statement.append(nxt)
+                i += 2
+                continue
+            if ch == "'":
+                in_single_quote = False
+            i += 1
+            continue
+
+        if in_double_quote:
+            statement.append(ch)
+            if ch == '"' and nxt == '"':
+                statement.append(nxt)
+                i += 2
+                continue
+            if ch == '"':
+                in_double_quote = False
+            i += 1
+            continue
+
+        if ch == "-" and nxt == "-":
+            statement.append(ch)
+            statement.append(nxt)
+            in_line_comment = True
+            i += 2
+            continue
+
+        if ch == "/" and nxt == "*":
+            statement.append(ch)
+            statement.append(nxt)
+            in_block_comment = True
+            i += 2
+            continue
+
+        if ch == "'":
+            in_single_quote = True
+        elif ch == '"':
+            in_double_quote = True
+
+        if ch == ";":
+            statement.append(ch)
+            sql = "".join(statement).strip()
+            if sql:
+                conn.execute(sql)
+            statement = []
+            i += 1
+            continue
+
+        statement.append(ch)
+        i += 1
+
+    trailing = "".join(statement).strip()
+    if trailing:
+        conn.execute(trailing)
+
+
 def sqlite_runtime_settings() -> dict[str, Any]:
     with get_db() as conn:
         journal_mode_row = conn.execute("PRAGMA journal_mode").fetchone()
@@ -71,25 +203,31 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
     rolls back on exception, and closes on exit."""
     global DB_PATH
     DB_PATH = _configured_db_path()
-    os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else ".", exist_ok=True)
-    conn = sqlite3.connect(
-        DB_PATH,
-        detect_types=sqlite3.PARSE_DECLTYPES,
-        timeout=_busy_timeout_ms() / 1000,
-    )
-    conn.row_factory = sqlite3.Row
-    conn.execute(f"PRAGMA busy_timeout = {_busy_timeout_ms()}")
-    _enable_wal_once(conn, DB_PATH)
-    conn.execute("PRAGMA synchronous = NORMAL")
-    conn.execute("PRAGMA foreign_keys = ON")
+    busy_timeout_ms = _busy_timeout_ms()
+    conn = _get_cached_db_connection(DB_PATH, busy_timeout_ms)
+    depth = getattr(_DB_CONNECTION_STATE, "depth", 0)
+    _DB_CONNECTION_STATE.depth = depth + 1
+    savepoint_name = None
+    if depth > 0:
+        savepoint_name = f"db_ctx_{depth}"
+        conn.execute(f"SAVEPOINT {savepoint_name}")
+    else:
+        conn.execute("BEGIN")
     try:
         yield conn
-        conn.commit()
+        if savepoint_name is not None:
+            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        else:
+            conn.commit()
     except Exception:
-        conn.rollback()
+        if savepoint_name is not None:
+            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        else:
+            conn.rollback()
         raise
     finally:
-        conn.close()
+        _DB_CONNECTION_STATE.depth = depth
 
 
 def now_iso() -> str:
@@ -145,7 +283,7 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
         if not _table_exists(conn, "workers_legacy"):
             conn.execute("ALTER TABLE workers RENAME TO workers_legacy")
 
-        conn.executescript(
+        _execute_sql_script(conn,
             """
             CREATE TABLE IF NOT EXISTS skill_versions (
                 id TEXT PRIMARY KEY,
@@ -289,7 +427,7 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
                 raise RuntimeError(
                     f"Cannot migrate runs: {missing_run_workers} run rows reference missing workers"
                 )
-            conn.executescript(
+            _execute_sql_script(conn,
                 """
                 CREATE TABLE runs_new (
                     id TEXT PRIMARY KEY,
@@ -351,7 +489,7 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
             if approvals_preserved:
                 conn.execute("DROP TABLE approvals_preserve")
 
-        conn.executescript(
+        _execute_sql_script(conn,
             """
             CREATE INDEX IF NOT EXISTS idx_skill_versions_name_version
                 ON skill_versions(name, version);
@@ -399,7 +537,7 @@ def _migrate_secrets_user_scope(conn: sqlite3.Connection) -> None:
     if "user_id" in columns:
         return
 
-    conn.executescript(
+    _execute_sql_script(conn,
         """
         CREATE TABLE IF NOT EXISTS secrets_new (
             user_id TEXT NOT NULL DEFAULT 'federico',
@@ -438,7 +576,7 @@ def _migrate_secrets_user_scope(conn: sqlite3.Connection) -> None:
             ),
         )
 
-    conn.executescript(
+    _execute_sql_script(conn,
         """
         DROP TABLE secrets;
         ALTER TABLE secrets_new RENAME TO secrets;
@@ -448,7 +586,7 @@ def _migrate_secrets_user_scope(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_cli_auth_devices(conn: sqlite3.Connection) -> None:
-    conn.executescript(
+    _execute_sql_script(conn,
         """
         CREATE TABLE IF NOT EXISTS cli_auth_devices (
             device_code TEXT PRIMARY KEY,
@@ -472,7 +610,7 @@ def _migrate_cli_auth_devices(conn: sqlite3.Connection) -> None:
 
 
 def _add_owner_indexes(conn: sqlite3.Connection) -> None:
-    conn.executescript(
+    _execute_sql_script(conn,
         """
         CREATE INDEX IF NOT EXISTS idx_workers_owner_id ON workers(owner_id);
         CREATE INDEX IF NOT EXISTS idx_runs_worker_created_at ON runs(worker_id, created_at);
@@ -513,7 +651,7 @@ def _ensure_runs_artifacts_archived_column(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_file_owners(conn: sqlite3.Connection) -> None:
-    conn.executescript(
+    _execute_sql_script(conn,
         """
         CREATE TABLE IF NOT EXISTS file_owners (
             file_id TEXT NOT NULL,
@@ -570,7 +708,7 @@ def _migrate_workspace_members_and_visibility(conn: sqlite3.Connection) -> None:
     Backwards-safe: existing workers keep working; the backfill (next migration)
     populates the new columns so single-tenant behaviour is unchanged.
     """
-    conn.executescript(
+    _execute_sql_script(conn,
         """
         CREATE TABLE IF NOT EXISTS workspace_members (
             workspace_id TEXT NOT NULL,
@@ -715,7 +853,7 @@ def _migrate_brain_pack_assistant_visibility(conn: sqlite3.Connection) -> None:
 
     Idempotent: IF NOT EXISTS / re-runnable.
     """
-    conn.executescript(
+    _execute_sql_script(conn,
         """
         CREATE TABLE IF NOT EXISTS brain_packs (
             id           TEXT PRIMARY KEY,
@@ -833,7 +971,7 @@ def _make_worker_alerts_url_nullable(conn: sqlite3.Connection) -> None:
     if url_col is None or int(url_col["notnull"] or 0) == 0:
         return
 
-    conn.executescript(
+    _execute_sql_script(conn,
         """
         CREATE TABLE worker_alerts_new (
             id          TEXT PRIMARY KEY,
@@ -1645,7 +1783,7 @@ def apply_migrations():
             with get_db() as conn:
                 try:
                     if isinstance(migration, str):
-                        conn.executescript(migration)
+                        _execute_sql_script(conn, migration)
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
