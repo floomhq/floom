@@ -119,6 +119,44 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
   );
 }
 
+function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const n = name.trim();
+    if (!n) return;
+    setBusy(true);
+    try {
+      await api.contexts.create(n);
+      toast.success(`Created ${n}`);
+      await onCreated();
+    } catch {
+      toast.error("Could not create the folder.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 420 }}>
+      <label style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Folder name</label>
+      <input
+        className="c-srch"
+        style={{ maxWidth: "none" }}
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void submit();
+        }}
+        placeholder="e.g. Company facts"
+      />
+      <button type="button" className="c-addbtn" disabled={busy || !name.trim()} onClick={() => void submit()}>
+        {busy ? "Creating…" : "Create folder"}
+      </button>
+    </div>
+  );
+}
+
 function UsedByTab({ folder }: { folder: ContextSummary }) {
   const d = useContextDetail(folder.name);
   if (!d) return <div style={muted}>Loading…</div>;
@@ -248,7 +286,10 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     }),
     add: {
       label: "New folder",
-      onSelect: () => (window.location.href = "/contexts?new=1"),
+      panel: {
+        title: "New folder",
+        render: (close) => <NewFolderForm onCreated={async () => { await refresh(); close(); }} />,
+      },
     },
     states: {
       empty: { title: "No folders yet", help: "Create a folder of files your workers can read." },

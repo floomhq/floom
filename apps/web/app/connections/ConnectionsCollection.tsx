@@ -331,8 +331,32 @@ export default function ConnectionsCollection({
     },
     add: {
       label: "Add",
-      onSelect: () => {
-        window.location.href = "/connections/browse";
+      panel: {
+        title: "Add a connection",
+        render: () => (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 460 }}>
+            <p style={pad}>Connect an app, register an MCP server, or store a secret.</p>
+            {[
+              ["Browse apps", "/connections/browse"],
+              ["Add MCP server", "/connections/mcp"],
+              ["Add secret", "/connections/secrets"],
+            ].map(([label, href]) => (
+              <Link
+                key={href}
+                href={href}
+                className="c-lrow"
+                style={{ gridTemplateColumns: "1fr auto", textDecoration: "none", border: "1px solid var(--line)", borderRadius: 12, padding: "12px 14px" }}
+              >
+                <div className="c-lprimary">
+                  <div className="c-lp-tx">
+                    <div className="nm">{label}</div>
+                  </div>
+                </div>
+                <span className="c-cell m">→</span>
+              </Link>
+            ))}
+          </div>
+        ),
       },
     },
     states: {

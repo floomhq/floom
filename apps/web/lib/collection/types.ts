@@ -136,8 +136,15 @@ export interface CollectionConfig<T> {
 
   states?: CollectionStates;
 
-  /** +Add button: label + handler (SPEC §0 control bar). */
-  add?: { label: string; onSelect: () => void };
+  /**
+   * +Add button (SPEC §0 control bar). Provide `panel` to open the add flow in
+   * the detail pane (SPEC §5); otherwise `onSelect` runs (e.g. navigate).
+   */
+  add?: {
+    label: string;
+    onSelect?: () => void;
+    panel?: { title: string; render: (close: () => void) => ReactNode };
+  };
   /** Extra control-bar actions (e.g. Runs "Export CSV"), left of +Add. */
   toolbarActions?: ReactNode;
   /** Optional banner above the list (e.g. member-visibility note). */
