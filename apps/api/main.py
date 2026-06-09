@@ -2171,6 +2171,10 @@ def _canonical_worker_id(value: str) -> str:
 
 def _require_worker_write_workspace_context(request: Request) -> None:
     require_explicit = os.environ.get("WORKEROS_REQUIRE_WORKSPACE_HEADER_FOR_WRITES") == "1"
+    # ASGI-internal requests (from _api_call / MCP dispatcher) have host "asgi".
+    # They're already authenticated — skip workspace check.
+    if (request.headers.get("host") or "").lower() == "asgi":
+        return
     if _is_cloud_deploy():
         raw_workspace = (
             request.headers.get("x-workeros-workspace")
@@ -21084,6 +21088,8 @@ async def _api_call(
     import httpx
     _AUTH_HEADERS = {"x-floom-secret", "x-floom-token", "authorization", "cookie", "x-workeros-workspace"}
     auth_headers = {k: v for k, v in request.headers.items() if k.lower() in _AUTH_HEADERS}
+    if "x-workeros-workspace" not in auth_headers:
+        auth_headers["x-workeros-workspace"] = DEFAULT_WORKSPACE_ID
     clean_params = {k: str(v) for k, v in (params or {}).items() if v is not None}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
