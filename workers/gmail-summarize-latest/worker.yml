@@ -21,8 +21,6 @@ version: "0.1.0"
 is_example: false
 trigger:
   type: "manual"
-limits:
-  max_output_tokens: 64000
 connections:
   - app: "gmail"
     allowed_tools:
