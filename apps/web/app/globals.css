@@ -114,6 +114,7 @@
   --warning: #F9735B;
   --success: #2F8F5B;
   --pending: #E0B349;
+  --info: #3E6FE0; /* "running"/in-progress accent (SPEC §4) */
   --radius-card: 18px;
   --radius-button: 12px;
   --radius-pill: 9999px;
@@ -240,6 +241,7 @@ html.dark {
      --accent-soft is replaced by color-mix usage at call sites (18% alpha).
      Keeping --accent-soft as alias for backwards compat (selection, etc.) */
   --accent: oklch(0.72 0.14 250);
+  --info: oklch(0.72 0.14 250); /* in dark, "running" shares the blue hue */
   --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
   --accent-line: oklch(0.45 0.1 250);
   --accent-hover-bg: hsl(0 0% 100% / 0.06);
@@ -682,4 +684,131 @@ html.dark .grain {
   0%   { left: -33%; }
   60%  { left: 100%; }
   100% { left: 100%; }
+}
+
+/* ============================================================================
+   Collection system (SPEC §0–§4). ONE anatomy for Workers/Runs/Connections/
+   Brain/Approvals. Classes are `c-` prefixed to avoid collisions. Colors come
+   from the existing token layer so day/dark themes are automatic.
+   ========================================================================== */
+
+/* count strip — inline on the right of the title row (SPEC §11) */
+.c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:wrap; }
+.c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:1px solid var(--line); }
+.c-counts .ct:first-child { padding-left:0; }
+.c-counts .ct:last-child { border-right:0; }
+.c-counts .ct b { color:var(--ink); font-weight:600; font-size:14px; }
+
+/* control bar */
+.c-toolbar { display:flex; align-items:center; gap:10px; }
+.c-srch { flex:1; display:flex; align-items:center; gap:9px; border:1px solid var(--line); border-radius:var(--radius-button); padding:9px 12px; color:var(--muted-foreground); background:var(--bg-card); max-width:480px; }
+.c-srch input { flex:1; border:0; background:none; outline:none; color:var(--ink); font:inherit; min-width:0; }
+.c-srch input::placeholder { color:var(--muted-foreground); }
+.c-vtog { display:flex; gap:2px; border:1px solid var(--line); border-radius:var(--radius-button); padding:2px; background:var(--bg-card); }
+.c-vtog button { width:32px; height:28px; border-radius:9px; color:var(--muted-foreground); display:flex; align-items:center; justify-content:center; }
+.c-vtog button.on { background:var(--bg-2); color:var(--ink); }
+.c-addbtn { display:flex; align-items:center; gap:6px; background:var(--primary); color:var(--primary-text); border-radius:var(--radius-button); padding:9px 14px; font-weight:500; font-size:13px; white-space:nowrap; }
+
+/* tag bar — small chips, single scrollable row, families divided */
+.c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; scrollbar-width:none; }
+.c-tagbar::-webkit-scrollbar { height:0; display:none; }
+.c-tgroup { display:flex; gap:5px; align-items:center; flex:0 0 auto; }
+.c-tgroup + .c-tgroup { padding-left:10px; border-left:1px solid var(--line); }
+.c-tag { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); border-radius:var(--radius-pill); padding:3px 9px; font-size:11.5px; color:var(--ink-soft); background:var(--bg-card); white-space:nowrap; }
+.c-tag:hover { border-color:var(--border-default); }
+.c-tag.on { background:var(--primary); color:var(--primary-text); border-color:var(--primary); }
+.c-tag .ct { opacity:.55; font-size:11px; }
+
+/* canonical list (SPEC §2a) */
+.c-ltable { border:1px solid var(--line); border-radius:var(--radius-card); overflow:hidden; background:var(--bg-card); box-shadow:var(--shadow-card); }
+.c-lhead { display:grid; gap:14px; padding:11px 18px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted-foreground); background:var(--bg-2); border-bottom:1px solid var(--line); }
+.c-lrow { display:grid; gap:14px; align-items:center; padding:0 18px; min-height:64px; border-bottom:1px solid var(--line-soft); cursor:pointer; text-align:left; width:100%; background:none; }
+.c-lrow:last-child { border-bottom:0; }
+.c-lrow:hover { background:var(--bg-2); }
+.c-lrow.sel { background:var(--accent-soft); box-shadow:inset 3px 0 0 var(--accent); }
+.c-lprimary { display:flex; align-items:center; gap:13px; min-width:0; }
+.c-logo { width:30px; height:30px; border-radius:8px; background:#fff; border:1px solid var(--line-soft); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.c-av { width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--primary-text); font-size:12px; font-weight:600; flex:0 0 auto; }
+.c-lp-tx { min-width:0; }
+.c-lp-tx .nm { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
+.c-lp-tx .sub { color:var(--muted-foreground); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.c-cell { color:var(--ink-soft); font-size:12.5px; }
+.c-cell.m { color:var(--muted-foreground); }
+.c-menu { color:var(--muted-foreground); text-align:right; }
+.c-daygrp .dh { display:flex; align-items:center; padding:16px 4px 8px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted-foreground); font-weight:600; }
+
+/* status pill — outlined/tinted + leading dot (SPEC §2a) */
+.c-pill { display:inline-flex; align-items:center; gap:6px; border-radius:var(--radius-pill); font-size:11.5px; padding:3px 10px; font-weight:500; border:1px solid transparent; }
+.c-pill .dot { width:6px; height:6px; border-radius:var(--radius-pill); background:currentColor; }
+.c-pill.ok   { background:color-mix(in srgb, var(--success) 12%, transparent); color:var(--success); border-color:color-mix(in srgb, var(--success) 28%, transparent); }
+.c-pill.err  { background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--warning); border-color:color-mix(in srgb, var(--warning) 30%, transparent); }
+.c-pill.warn,.c-pill.pending { background:color-mix(in srgb, var(--pending) 16%, transparent); color:var(--pending); border-color:color-mix(in srgb, var(--pending) 34%, transparent); }
+.c-pill.run  { background:color-mix(in srgb, var(--info) 14%, transparent); color:var(--info); border-color:color-mix(in srgb, var(--info) 30%, transparent); }
+.c-pill.idle { background:var(--bg-2); color:var(--muted-foreground); }
+
+/* grid cards (SPEC §2b — calm: avatar+name, desc, one status line) */
+.c-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:14px; }
+.c-gcard { border:1px solid var(--line); background:var(--bg-card); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:150px; cursor:pointer; position:relative; box-shadow:var(--shadow-card); text-align:left; }
+.c-gcard:hover { border-color:var(--border-default); }
+.c-gcard.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.c-gcard .star { position:absolute; top:13px; right:13px; color:var(--muted-foreground); opacity:0; transition:opacity .12s; }
+.c-gcard:hover .star { opacity:1; }
+.c-gcard .star.on { opacity:1; color:var(--pending); }
+.c-gtop { display:flex; align-items:center; gap:11px; }
+.c-gnm { font-weight:500; font-size:15px; color:var(--ink); }
+.c-gd { color:var(--muted-foreground); font-size:13px; margin-top:10px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.c-gfoot { margin-top:auto; padding-top:12px; display:flex; align-items:center; gap:8px; color:var(--muted-foreground); font-size:12px; }
+.c-gtools { margin-left:auto; display:flex; gap:4px; }
+
+/* split detail (SPEC §3, §8c) */
+.c-body { flex:1; min-height:0; display:flex; overflow:hidden; }
+.c-listcol { flex:1; min-width:0; overflow:auto; }
+.c-split .c-listcol { flex:0 0 30%; min-width:240px; border-right:1px solid var(--line); padding:0; display:flex; flex-direction:column; overflow:hidden; }
+.c-split.lc .c-listcol { flex:0 0 46px; min-width:46px; }
+.c-split.lc .c-listcol > .lcin, .c-split.lc .c-listcol > .c-splitbar { display:none; }
+.c-sliver { display:none; }
+.c-split.lc .c-listcol .c-sliver { display:flex; flex-direction:column; align-items:center; gap:8px; padding-top:14px; color:var(--muted-foreground); }
+.c-split .c-listcol .lcin { flex:1; overflow:auto; padding:14px 16px; }
+.c-splitbar { display:none; }
+.c-split .c-splitbar { display:flex; align-items:center; min-height:56px; padding:8px 14px; border-bottom:1px solid var(--line); flex:0 0 auto; }
+.c-detailcol { display:none; }
+.c-split .c-detailcol { display:flex; flex:1; min-width:0; flex-direction:column; overflow:hidden; }
+/* split-left list = the SAME connected list, just single-column + no cols/pills */
+.c-split .c-listcol .c-lhead { display:none; }
+.c-split .c-listcol .c-lrow { grid-template-columns:1fr !important; min-height:58px; padding:13px 14px; }
+.c-split .c-listcol .c-lrow .c-cell, .c-split .c-listcol .c-lrow .c-pill, .c-split .c-listcol .c-lrow .c-menu { display:none; }
+.c-split .c-listcol .c-lrow.sel { background:var(--bg-2); box-shadow:none; }
+.c-split .c-listcol .c-daygrp .dh { display:none; }
+
+/* detail header + tabs (SPEC §3) */
+.c-dhead { display:flex; align-items:center; gap:11px; padding:10px 20px; border-bottom:1px solid var(--line); min-height:64px; }
+.c-dhead .lcbtn, .c-dhead .x { color:var(--muted-foreground); padding:5px; border-radius:7px; flex:0 0 auto; }
+.c-dhead .lcbtn:hover, .c-dhead .x:hover { background:var(--bg-2); }
+.c-dh-main { flex:1; min-width:0; }
+.c-dh-title { display:flex; align-items:center; gap:8px; min-width:0; }
+.c-dh-title .nm { font-size:17px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
+.c-dh-sub { color:var(--muted-foreground); font-size:12.5px; margin-top:3px; display:flex; align-items:center; gap:8px; min-width:0; }
+.c-dh-act { display:flex; gap:7px; align-items:center; }
+.c-vpill { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-card); white-space:nowrap; flex:0 0 auto; }
+.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:1px solid var(--line); overflow:auto; }
+.c-dtab { display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
+.c-dtab:hover { background:var(--bg-2); }
+.c-dtab.on { background:var(--bg-2); color:var(--ink); font-weight:500; }
+.c-dtab .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10.5px; border-radius:var(--radius-pill); padding:0 6px; }
+.c-dbody { flex:1; overflow:auto; padding:18px 20px; }
+
+/* states (SPEC §7) */
+.c-statebox { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--muted-foreground); padding:50px; }
+.c-statebox .g { width:52px; height:52px; border-radius:16px; background:var(--bg-2); display:flex; align-items:center; justify-content:center; }
+.c-statebox h3 { margin:0; color:var(--ink); font-size:17px; }
+
+/* responsive (SPEC §8c): persistent ≥1100; drawer 768–1100; stack <768 */
+@media (max-width:1100px) {
+  .c-split .c-detailcol { position:absolute; top:0; right:0; bottom:0; width:min(560px,100%); background:var(--bg-card); border-left:1px solid var(--line); box-shadow:var(--shadow-pop); z-index:20; }
+  .c-split { position:relative; }
+  .c-split .c-listcol { flex:1 1 auto; }
+}
+@media (max-width:768px) {
+  .c-split .c-detailcol { width:100%; border-left:0; }
+  .c-split .c-listcol { display:none; }
 }

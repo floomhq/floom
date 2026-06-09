@@ -127,6 +127,8 @@ export interface CollectionConfig<T> {
 
   view?: { default?: ViewMode; grid?: boolean };
   columns: ListColumns;
+  /** Optional day/section grouping for the resting list (Runs — SPEC §5). */
+  group?: (item: T) => string;
   row: (item: T) => ListRowSpec;
   card?: (item: T) => CardSpec;
 
