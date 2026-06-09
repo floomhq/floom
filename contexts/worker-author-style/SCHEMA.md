@@ -173,6 +173,26 @@ contexts:
 
 ## Connections (Composio integrations)
 
+**`connections:` is a TOP-LEVEL field — it is a sibling of `exec:`, never a child of it.**
+Placing it under `exec:` causes Pydantic to silently drop it, the agent never receives
+the tools, and the run fails. This is the #1 generated-worker bug.
+
+```yaml
+# CORRECT structure — connections and exec are siblings at the top level
+schema_version: "0.3"
+name: "my-worker"
+connections:              # ← TOP LEVEL, sibling of exec
+  - app: "gmail"
+    allowed_tools:
+      - GMAIL_FETCH_EMAILS
+      - GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID
+exec:                     # ← TOP LEVEL, no connections key inside here
+  entry: "SKILL.md"
+  runtime: "skill"
+  runner: "e2b"
+  inputs: []
+```
+
 ```yaml
 connections:
   - "github"               # legacy full app access

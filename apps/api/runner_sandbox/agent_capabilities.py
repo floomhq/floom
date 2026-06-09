@@ -424,6 +424,35 @@ def stage_context_packs(
 # Composio execute (shared HTTP path, scope-gated)
 # ---------------------------------------------------------------------------
 
+_MAX_COMPOSIO_STRING_LEN = 4000
+_MAX_COMPOSIO_ARRAY_LEN = 20
+
+
+def _trim_composio_response(obj: Any, _depth: int = 0) -> Any:
+    """Recursively trim a Composio API response to prevent token blowout.
+
+    Gmail messages in particular return full HTML bodies, base64 attachments,
+    and raw headers that can exceed 50k tokens. We cap strings at 4000 chars
+    and arrays at 20 items so the agent gets enough context without flooding
+    its output budget.
+    """
+    if _depth > 8:
+        return obj
+    if isinstance(obj, str):
+        if len(obj) > _MAX_COMPOSIO_STRING_LEN:
+            return obj[:_MAX_COMPOSIO_STRING_LEN] + f"…[trimmed, {len(obj)} chars total]"
+        return obj
+    if isinstance(obj, dict):
+        return {k: _trim_composio_response(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, list):
+        trimmed = obj[:_MAX_COMPOSIO_ARRAY_LEN]
+        result = [_trim_composio_response(item, _depth + 1) for item in trimmed]
+        if len(obj) > _MAX_COMPOSIO_ARRAY_LEN:
+            result.append(f"…[{len(obj) - _MAX_COMPOSIO_ARRAY_LEN} more items trimmed]")
+        return result
+    return obj
+
+
 def composio_execute(
     *,
     name: str,
@@ -497,4 +526,4 @@ def composio_execute(
             "ok": False,
             "error": f"{response.status_code} {response.reason}: {response.text[:400]}",
         }
-    return {"ok": True, "result": response.json()}
+    return {"ok": True, "result": _trim_composio_response(response.json())}
