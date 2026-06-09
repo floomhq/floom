@@ -1360,6 +1360,74 @@ export function createServer(): McpServer {
   );
 
   // ---------------------------------------------------------------------------
+  // HIGH: Worker feedback
+  // ---------------------------------------------------------------------------
+
+  server.registerTool(
+    "workers.feedback.list",
+    {
+      title: "List Worker Feedback",
+      description: "List member feedback comments for a worker.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        include_resolved: z.boolean().default(false).describe("Include resolved feedback items."),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async ({ id, include_resolved }) =>
+      callTool(async () =>
+        jsonResult(
+          await request(
+            "GET",
+            `/workers/${encodeURIComponent(id)}/feedback`,
+            undefined,
+            include_resolved ? { include_resolved: "true" } : undefined,
+          ),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "workers.feedback.create",
+    {
+      title: "Create Worker Feedback",
+      description: "Leave feedback on a worker the caller can see. Owners can resolve it after handling.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        body: z.string().min(1).describe("Feedback text."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ id, body }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("POST", `/workers/${encodeURIComponent(id)}/feedback`, { body }),
+          "Feedback created.",
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "workers.feedback.resolve",
+    {
+      title: "Resolve Worker Feedback",
+      description: "Resolve a worker feedback item. Requires worker owner/admin edit permission.",
+      inputSchema: {
+        id: z.string().min(1).describe("Worker ID."),
+        feedback_id: z.string().min(1).describe("Feedback ID."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ id, feedback_id }) =>
+      callTool(async () =>
+        jsonResult(
+          await request("PATCH", `/workers/${encodeURIComponent(id)}/feedback/${encodeURIComponent(feedback_id)}`, { resolved: true }),
+          "Feedback resolved.",
+        ),
+      ),
+  );
+
+  // ---------------------------------------------------------------------------
   // HIGH: Worker lifecycle — archive / restore / stats
   // ---------------------------------------------------------------------------
 

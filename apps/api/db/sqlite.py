@@ -2674,6 +2674,97 @@ class SqliteAlertRepository:
         return cursor.rowcount > 0
 
 
+class SqliteWorkerFeedbackRepository:
+    """SQLite implementation for worker feedback comments."""
+
+    _cols = (
+        "id, worker_id, author_id, body, resolved, resolved_by, "
+        "resolved_at, created_at, updated_at"
+    )
+
+    def _deserialize(self, row: dict[str, Any]) -> dict[str, Any]:
+        row["resolved"] = bool(row.get("resolved"))
+        return row
+
+    def create(
+        self,
+        *,
+        feedback_id: str,
+        worker_id: str,
+        author_id: str,
+        body: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO worker_feedback
+                    (id, worker_id, author_id, body, resolved,
+                     resolved_by, resolved_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 0, NULL, NULL, ?, ?)
+                """,
+                (feedback_id, worker_id, author_id, body, created_at, created_at),
+            )
+        row = self.get(feedback_id=feedback_id, worker_id=worker_id)
+        if row is None:
+            raise RuntimeError("failed to create worker feedback")
+        return row
+
+    def list(self, *, worker_id: str, include_resolved: bool = False) -> list[dict[str, Any]]:
+        where = "worker_id = ?"
+        args: tuple[Any, ...] = (worker_id,)
+        if not include_resolved:
+            where += " AND resolved = 0"
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {self._cols}
+                FROM worker_feedback
+                WHERE {where}
+                ORDER BY created_at DESC, id DESC
+                """,
+                args,
+            ).fetchall()
+        return [self._deserialize(_row_dict(row)) for row in rows]
+
+    def get(self, *, feedback_id: str, worker_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                f"""
+                SELECT {self._cols}
+                FROM worker_feedback
+                WHERE id = ? AND worker_id = ?
+                LIMIT 1
+                """,
+                (feedback_id, worker_id),
+            ).fetchone()
+        return self._deserialize(_row_dict(row)) if row else None
+
+    def resolve(
+        self,
+        *,
+        feedback_id: str,
+        worker_id: str,
+        resolved_by: str,
+        resolved_at: str,
+    ) -> dict[str, Any] | None:
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE worker_feedback
+                SET resolved = 1,
+                    resolved_by = ?,
+                    resolved_at = ?,
+                    updated_at = ?
+                WHERE id = ? AND worker_id = ?
+                """,
+                (resolved_by, resolved_at, resolved_at, feedback_id, worker_id),
+            )
+        if cursor.rowcount == 0:
+            return None
+        return self.get(feedback_id=feedback_id, worker_id=worker_id)
+
+
 class SqliteMcpToolRepository:
     _cols = "id, user_id, name, description, input_schema, worker_id, created_at, updated_at"
 

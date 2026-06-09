@@ -506,3 +506,36 @@ class AlertRepository(Protocol):
     def get(self, *, alert_id: str) -> RowDict | None: ...
 
     def delete(self, *, alert_id: str, worker_id: str) -> bool: ...
+
+
+class WorkerFeedbackRepository(Protocol):
+    """Lightweight comments attached to workers.
+
+    Members who can view a worker may create feedback. Owners/admins resolve it
+    once handled. Feedback rows are scoped by worker_id; worker visibility and
+    mutation permissions stay enforced by the API layer so Cloud can mirror the
+    same contract through RLS-backed repositories.
+    """
+
+    def create(
+        self,
+        *,
+        feedback_id: str,
+        worker_id: str,
+        author_id: str,
+        body: str,
+        created_at: str,
+    ) -> RowDict: ...
+
+    def list(self, *, worker_id: str, include_resolved: bool = False) -> list[RowDict]: ...
+
+    def get(self, *, feedback_id: str, worker_id: str) -> RowDict | None: ...
+
+    def resolve(
+        self,
+        *,
+        feedback_id: str,
+        worker_id: str,
+        resolved_by: str,
+        resolved_at: str,
+    ) -> RowDict | None: ...

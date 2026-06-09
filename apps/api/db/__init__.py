@@ -19,6 +19,7 @@ from .interface import (
     SecretRepository,
     UserRepository,
     UserSessionRepository,
+    WorkerFeedbackRepository,
     WorkerRepository,
     WorkspaceMemberRepository,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "UserRepository",
     "PersonalAccessTokenRepository",
     "UserSessionRepository",
+    "WorkerFeedbackRepository",
     "VISIBILITY_VALUES",
     "assistant_row_id",
     "derive_workspace_id",
