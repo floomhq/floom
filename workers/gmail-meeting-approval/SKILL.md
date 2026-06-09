@@ -32,7 +32,20 @@ Scan the 10 most recent Gmail inbox messages, detect meeting requests, and for e
      metadata={"from": "...", "subject": "...", "proposed_time": "...", "duration_minutes": ..., "location": "..."}
    )
    ```
-   - If the result has `approved: true` — create the Google Calendar event using `composio__googlecalendar__execute` with `tool="GOOGLECALENDAR_CREATE_EVENT"`. Record the `calendar_event_id` from the response (or empty string if not returned). Mark `approval_status: "approved"` in the summary.
+   - If the result has `approved: true` — create the Google Calendar event using `composio__googlecalendar__execute` with `tool="GOOGLECALENDAR_CREATE_EVENT"`. Use these argument keys (NOT the Google Calendar API format):
+     ```
+     composio__googlecalendar__execute(
+       tool="GOOGLECALENDAR_CREATE_EVENT",
+       arguments={
+         "summary": "<event title>",
+         "start_datetime": "<YYYY-MM-DDTHH:MM:SS naive, no Z or offset>",
+         "end_datetime": "<YYYY-MM-DDTHH:MM:SS naive, no Z or offset>",
+         "timezone": "<IANA timezone e.g. America/New_York>",
+         "attendees": ["<sender email if available>"]
+       }
+     )
+     ```
+     The event ID is at `result.data.response_data.id` in the response (use empty string if missing). Mark `approval_status: "approved"` in the summary.
    - If the result has `approved: false` — skip creating the event. Mark `approval_status: "rejected"` in the summary.
 
 6. Create the `out/` directory if needed. Write `out/result.json` with exactly this shape:
