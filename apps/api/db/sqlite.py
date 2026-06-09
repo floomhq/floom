@@ -459,6 +459,7 @@ class SqliteWorkerRepository:
             # already-parsed dict via a thin wrapper to avoid the duplicate parse.
             records.append(_worker_record_from_row(row))
             if config is not None:
+                _mj = json.loads(row["manifest_json"] or "{}")
                 cache[wid] = {
                     "config": config,
                     "grants": _json_load(row["grants_json"], {}),
@@ -466,7 +467,7 @@ class SqliteWorkerRepository:
                     "enabled": bool(row["enabled"]),
                     "owner_id": row["owner_id"],
                     "bundle_path": row["bundle_path"],
-                    "manifest_json": json.loads(row["manifest_json"] or "{}"),
+                    "manifest_json": {k: v for k, v in _mj.items() if k != "_files"},
                 }
             else:
                 cache[wid] = None
@@ -779,7 +780,6 @@ class SqliteWorkerRepository:
 
     def stats_batch(self, *, user_id: str, worker_ids: list[str], days: int = 7) -> dict[str, RecentStats]:
         if not worker_ids:
-            _last_run_batch.set({})
             return {}
         placeholders = ",".join("?" for _ in worker_ids)
         with get_db() as conn:
@@ -847,7 +847,7 @@ class SqliteWorkerRepository:
                     seen.add(wid)
             _last_run_batch.set(batch)
         except Exception:
-            _last_run_batch.set({})
+            pass
         return result
 
     def timeseries_batch(
@@ -981,8 +981,8 @@ class SqliteWorkerRepository:
 
     def get_recipe(self, *, worker_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         cache = _recipe_cache.get()
-        if cache is not None:
-            return cache.get(worker_id)
+        if cache is not None and worker_id in cache:
+            return cache[worker_id]
         where = "WHERE w.id = ?"
         params: list[Any] = [worker_id]
         if user_id is not None:
@@ -1011,6 +1011,7 @@ class SqliteWorkerRepository:
             cron_timezone=row["cron_timezone"],
             bundle_path=row["bundle_path"],
         )
+        _mj = json.loads(row["manifest_json"] or "{}")
         return {
             "config": config,
             "grants": _json_load(row["grants_json"], {}),
@@ -1018,7 +1019,7 @@ class SqliteWorkerRepository:
             "enabled": bool(row["enabled"]),
             "owner_id": row["owner_id"],
             "bundle_path": row["bundle_path"],
-            "manifest_json": json.loads(row["manifest_json"] or "{}"),
+            "manifest_json": {k: v for k, v in _mj.items() if k != "_files"},
         }
 
     def upsert_webhook_secret_hash(
@@ -2551,22 +2552,27 @@ class SqliteApprovalRepository:
         owner_id: str,
         run_id: str,
         decided_at: str,
+        approval_id: str | None = None,
         edited_output_json: str | None = None,
         follow_up_run_id: str | None = None,
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
+        id_clause = "AND id = ?" if approval_id is not None else ""
+        params_list: list[Any] = [decided_at, edited_output_json, follow_up_run_id, annotations_json, run_id, owner_id]
+        if approval_id is not None:
+            params_list.append(approval_id)
         with get_db() as conn:
             conn.execute(
-                """
+                f"""
                 UPDATE approvals
                 SET status = 'approved',
                     decided_at = ?,
                     edited_output_json = ?,
                     follow_up_run_id = ?,
                     annotations_json = COALESCE(?, annotations_json)
-                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending' {id_clause}
                 """,
-                (decided_at, edited_output_json, follow_up_run_id, annotations_json, run_id, owner_id),
+                params_list,
             )
         return self.get_by_run_id(run_id=run_id)
 
@@ -2576,20 +2582,25 @@ class SqliteApprovalRepository:
         owner_id: str,
         run_id: str,
         decided_at: str,
+        approval_id: str | None = None,
         reason: str | None = None,
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
+        id_clause = "AND id = ?" if approval_id is not None else ""
+        params_list: list[Any] = [decided_at, reason, annotations_json, run_id, owner_id]
+        if approval_id is not None:
+            params_list.append(approval_id)
         with get_db() as conn:
             conn.execute(
-                """
+                f"""
                 UPDATE approvals
                 SET status = 'rejected',
                     decided_at = ?,
                     reason = ?,
                     annotations_json = COALESCE(?, annotations_json)
-                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending' {id_clause}
                 """,
-                (decided_at, reason, annotations_json, run_id, owner_id),
+                params_list,
             )
         return self.get_by_run_id(run_id=run_id)
 
