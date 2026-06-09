@@ -62,6 +62,10 @@ cp apps/api/.env.example apps/api/.env
 - `SLACK_CLIENT_ID` + `SLACK_CLIENT_SECRET` — Slack integration (Emily in Slack, magic sign-in links)
 - `WORKEROS_MAGIC_LINK_SECRET` — dedicated HMAC key for magic sign-in links; falls back to `FLOOM_SECRET` then a per-process key if unset
 
+**Version history (recommended):**
+- `FLOOM_WORKERS_DIR` + `FLOOM_CONTEXTS_DIR` — point these to a directory **outside the cloned repo** (e.g. `~/.workeros/workers` and `~/.workeros/contexts`) to enable git-backed version history and rollback. Left at their in-repo defaults, the engine **refuses to version into its own source checkout** (and logs a warning), so worker/context versions stay empty. See [Workspace & versioning](#workspace--versioning).
+- `WORKEROS_GIT_REMOTE` *(optional)* — a git remote (`https://{token}@github.com/{owner}/{repo}.git`) to push version history to. Unset = local history only.
+
 **Secrets encryption key (`.secrets.enc`):**
 
 Worker secrets are stored encrypted in `.secrets.enc` in your workspace. The decryption key is stored out-of-band:
@@ -80,15 +84,17 @@ For local git setups, back up `~/.config/workeros/secrets.key`. Losing it means 
 ```bash
 cd apps/api
 source venv/bin/activate
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python main.py
 ```
 
 **Windows**
 ```powershell
 cd apps/api
 venv\Scripts\activate
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python main.py
 ```
+
+The API serves on `http://localhost:8000` with auto-reload. Start it with **`python main.py`**, not a bare `uvicorn main:app --reload`: `main.py` configures the reloader to exclude `data/` and the workers directory. Without that, every run — which stages a bundle under `data/run-bundles/` — would trip the file-watcher and **restart the API mid-execution**. For production, run without reload, e.g. `uvicorn main:app --host 0.0.0.0 --port 8000`.
 
 ### 4. Start the frontend
 
@@ -121,9 +127,21 @@ data/         SQLite DB + run artifacts
 Workers live in `workers/<name>/` and contain:
 
 - `worker.yml` — manifest (inputs, outputs, secrets, trigger, runtime)
-- `run.py` — worker code exposing a `run(inputs, context)` function (script mode)
+- `run.py` — script-mode worker. It is launched as `python run.py` inside the sandbox: read inputs from `inputs.json` and **write `result.json`** in the form `{"status": "success", "outputs": { ... }, "artifacts": [ ... ]}` (use `"status": "error"` + `"error"` on failure). There is **no** in-process `run(inputs, context)` entrypoint — the old `hybrid` mode was removed (migration #603); a bare `def run(...)` that only `return`s a value produces no result.
 - `SKILL.md` — agent prompt (agent mode); mutually exclusive with `run.py`
 - `requirements.txt` — Python dependencies
+
+Minimal `run.py`:
+
+```python
+import json
+
+with open("inputs.json") as f:
+    inputs = json.load(f)
+
+with open("result.json", "w") as f:
+    json.dump({"status": "success", "outputs": {"greeting": f"Hello, {inputs.get('name', 'world')}"}}, f)
+```
 
 **Writing workers with an AI agent (Claude Code / Cursor):** see [docs/AGENT-COOKBOOK.md](docs/AGENT-COOKBOOK.md) for end-to-end recipes including porting Claude skill bundles.
 
@@ -145,6 +163,31 @@ workeros run <id> --inputs-file inputs.json
 - **csv_enricher** — Enriches CSV rows using custom instructions (AI)
 - **research_brief** — Generates markdown research briefs on any topic (AI, requires approval)
 - **search_console_insights** — Pulls Google Search Console data and summarises performance
+
+---
+
+## Workspace & versioning
+
+Every change to a worker, context, or workspace setting is committed to a **git "workspace" repo** — that's your version history. `workers.versions` / `contexts.versions` list the commits; rollback restores any of them (and writes a *new* commit, so you can roll forward again too).
+
+The workspace git root is the **parent of `FLOOM_WORKERS_DIR`**, which by default is this cloned repo. To avoid versioning into — and accidentally pushing to — its own source tree, **the engine refuses to commit when the workspace root is the engine checkout**, so with the defaults versioning is off and a one-time warning is logged.
+
+**To enable versioning**, point `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR` at a directory **outside** the checkout that share a parent:
+
+```bash
+FLOOM_WORKERS_DIR=~/.workeros/workers
+FLOOM_CONTEXTS_DIR=~/.workeros/contexts
+```
+
+That shared parent (`~/.workeros`) becomes a local git repo with **no remote** — versioned locally, never pushed. Copy the shipped example workers into `FLOOM_WORKERS_DIR` once if you want them tracked. To also push history to your own git host (never the engine's repo), set `WORKEROS_GIT_REMOTE`.
+
+---
+
+## Contexts (brain packs)
+
+Contexts are reusable file bundles you attach to workers as reference material, stored in `contexts/<name>/`. Manage them via the API/MCP (`contexts.create`, `contexts.write`, `contexts.read`, …) or the UI, then list a context under a worker's `contexts:` in `worker.yml`.
+
+Contexts are **sensitive by default** and excluded from git (they may hold credentials). To put one under version control, create it with `sensitive: false` — its history then appears in `contexts.versions` and is restorable via `contexts.rollback`, exactly like workers.
 
 ---
 
