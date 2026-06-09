@@ -4139,6 +4139,22 @@ def _stock_workers_from_filesystem(*, use_cache: bool = True) -> List[Dict[str, 
     ]
 
 
+def _visibility_role(role: Optional[str]) -> Optional[str]:
+    """Resolve the worker-visibility role for the current request.
+
+    Most callers pass role=None and historically relied on the shared-filesystem
+    fallback to surface admin/shared workers. Now that the fallback is owner-
+    scoped, default the role from the active request's auth context so admins
+    still see EVERY worker and members still see workers SHARED with them, while
+    another member's private worker stays hidden. Outside a request (no auth
+    context) the role stays None — legacy owner-scoped behaviour.
+    """
+    if role is not None:
+        return role
+    ctx = current_auth_context()
+    return ctx.role if ctx is not None else None
+
+
 def _db_worker_owners() -> Dict[str, str]:
     """Map every DB worker id to its owner_id in one query.
 
@@ -4164,6 +4180,9 @@ def _list_visible_workers(
     use_cache: bool = True,
     role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    # Admin sees all, member sees own + shared; default from the request context
+    # so the owner-scoped fallback below doesn't hide admin/shared workers.
+    role = _visibility_role(role)
     # Pre-load ownership for all git-tracked workers in one query so
     # _worker_hidden_from_api() inside the loop doesn't fire N extra SELECTs.
     _owned = _build_owned_tracked_ids()
@@ -4256,6 +4275,10 @@ def _get_visible_worker(
     repos: Repositories,
     role: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
+    # Admin sees all, member sees own + shared; default from the request context
+    # so the owner-scoped filesystem fallback below doesn't 404 an admin or a
+    # worker shared with this member.
+    role = _visibility_role(role)
     worker = _get_db_worker(worker_id, user_id=user_id, repos=repos, role=role)
     if worker is not None:
         if _worker_hidden_from_api(worker["id"]):
