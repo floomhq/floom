@@ -854,7 +854,7 @@ class AgentDriver(SandboxDriver):
         entrypoint = config.runtime.entrypoint or "SKILL.md"
         entrypoint_path = _safe_path(bundle_dir, entrypoint)
         if entrypoint_path.is_file():
-            prompt_parts.append(entrypoint_path.read_text())
+            prompt_parts.append(entrypoint_path.read_text(encoding="utf-8"))
         elif config.runtime.type != "none":
             raise FileNotFoundError(f"Agent entrypoint not found: {entrypoint}")
         if staged_context_packs:
@@ -1253,7 +1253,7 @@ class AgentDriver(SandboxDriver):
         target = self._resolve_read_path(bundle_dir, context_dir, path)
         if not target.is_file():
             return {"ok": False, "error": f"File not found: {path}"}
-        return {"ok": True, "content": target.read_text()}
+        return {"ok": True, "content": target.read_text(encoding="utf-8")}
 
     def _write_output(
         self,
