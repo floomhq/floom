@@ -96,7 +96,7 @@ def test_slack_reply_strips_em_dashes():
     import importlib
 
     # Build a fake part_queue that yields a text part with em dashes then finish
-    async def _fake_stream_chat(*, message, user_id, conversation_id, part_queue, source="slack"):
+    async def _fake_stream_chat(*, message, user_id, conversation_id, part_queue, source="slack", **_kwargs):
         await part_queue.put({"type": "text", "text": "Worker A — failed due to — timeout"})
         await part_queue.put({"type": "finish", "conversation_id": "c1", "message_id": "m1"})
 

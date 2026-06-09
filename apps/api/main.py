@@ -453,6 +453,7 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "kugelaudio-bug-intake",
         "kugelaudio-meeting-pipeline",
         "linkedin-post-engagements",
+        "meeting-scheduler-3",
         "node-smoke-test",
         "openblog",
         "opendraft",
@@ -461,6 +462,7 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "reverse_match_crm",
         "search_console_insights",
         "slack-listener",
+        "topic-explainer",
         "weekly_update",
         "whatsapp-listener",
         "worker-author",
@@ -1940,18 +1942,20 @@ async def value_error_handler(_request, exc: ValueError):
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
-def _redacted_validation_errors(errors: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-    # #600: include the full field path (loc) so agents and tooling can
-    # identify exactly which field failed and self-repair. Previously hardcoded
-    # to "request", hiding the location entirely.
+def _redacted_validation_errors(
+    errors: List[Dict[str, Any]],
+    *,
+    expose_locations: bool = True,
+) -> List[Dict[str, str]]:
     sanitized: List[Dict[str, str]] = []
     for error in errors[:10]:
         raw_loc = error.get("loc") or ()
-        # Convert tuple/list loc to a dot-separated string, e.g. ("exec","runner") -> "exec.runner"
         if isinstance(raw_loc, (list, tuple)):
             loc_str = ".".join(str(part) for part in raw_loc) if raw_loc else "request"
         else:
             loc_str = str(raw_loc) or "request"
+        if not expose_locations:
+            loc_str = "request"
         sanitized.append(
             {
                 "loc": loc_str,
@@ -1966,7 +1970,10 @@ def _redacted_validation_errors(errors: List[Dict[str, Any]]) -> List[Dict[str, 
 async def request_validation_error_handler(_request, exc: RequestValidationError):
     return JSONResponse(
         status_code=422,
-        content={"detail": "validation failed", "errors": _redacted_validation_errors(exc.errors())},
+        content={
+            "detail": "validation failed",
+            "errors": _redacted_validation_errors(exc.errors(), expose_locations=False),
+        },
     )
 
 
@@ -2697,6 +2704,25 @@ def _git_join(*parts: str) -> str:
     return "/".join(p for p in parts if p)
 
 
+def _context_git_path(name: str, rel_path: Optional[str] = None) -> str:
+    try:
+        base = context_dir(name).relative_to(_git_workspace()).as_posix()
+        return _git_join(base, rel_path or "")
+    except Exception:
+        return _git_join(_contexts_git_prefix(), name, rel_path or "")
+
+
+def _ensure_git_workspace_ready(workspace: Path) -> None:
+    """Initialize the git workspace before path-level commit helpers run."""
+    remote = os.environ.get("WORKEROS_GIT_REMOTE", "").strip()
+    if remote and not (workspace / ".git").exists():
+        _git_ops.clone_or_init(workspace, remote)
+    else:
+        _git_ops.ensure_repo(workspace)
+        if remote:
+            _git_ops.configure_remote(workspace, remote)
+
+
 def _git_commit_worker(
     worker_id: str,
     *,
@@ -2706,6 +2732,7 @@ def _git_commit_worker(
 ) -> None:
     try:
         workspace = _git_workspace()
+        _ensure_git_workspace_ready(workspace)
         rel = _git_join(_workers_git_prefix(), worker_id)
         _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
         _git_ops.push_background(workspace)
@@ -2725,7 +2752,8 @@ def _git_commit_context(
         return  # sensitive contexts never enter git
     try:
         workspace = _git_workspace()
-        rel = _git_join(_contexts_git_prefix(), name, rel_path or "")
+        _ensure_git_workspace_ready(workspace)
+        rel = _context_git_path(name, rel_path)
         _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
         _git_ops.push_background(workspace)
     except Exception as exc:
@@ -2741,6 +2769,7 @@ def _git_commit_workspace_md(
     try:
         from chat_service import WORKSPACE_MD_PATH
         workspace = _git_workspace()
+        _ensure_git_workspace_ready(workspace)
         try:
             rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
         except ValueError:
@@ -2760,6 +2789,7 @@ def _git_commit_workspace_base_md(
     try:
         from chat_service import WORKSPACE_BASE_PERSONA_PATH
         workspace = _git_workspace()
+        _ensure_git_workspace_ready(workspace)
         try:
             rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
         except ValueError:
@@ -2777,6 +2807,7 @@ class VersionSummary(BaseModel):
     timestamp: str    # ISO 8601 commit date
     asset_type: str   # kept for API compat
     asset_id: str     # kept for API compat
+    change_source: Optional[str] = None
 
 
 class ContextWorkerRef(BaseModel):
@@ -2992,11 +3023,11 @@ def list_context_versions(
 ) -> List[VersionSummary]:
     """List git commit history for a brain pack (newest first)."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
-    prefix = _contexts_git_prefix()
     workspace = _git_workspace()
+    rel_path = _context_git_path(safe_name)
     rows = _git_ops.get_log(
         workspace,
-        rel_path=f"{prefix}/{safe_name}",
+        rel_path=rel_path,
         limit=min(limit, 100),
         asset_type="brain_pack",
         asset_id=safe_name,
@@ -3005,7 +3036,7 @@ def list_context_versions(
         _git_commit_context(safe_name, message=f"baseline: snapshot existing context {safe_name}")
         rows = _git_ops.get_log(
             workspace,
-            rel_path=f"{prefix}/{safe_name}",
+            rel_path=rel_path,
             limit=min(limit, 100),
             asset_type="brain_pack",
             asset_id=safe_name,
@@ -3024,15 +3055,15 @@ def get_context_version(
     import base64 as _base64
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     workspace = _git_workspace()
-    prefix = _contexts_git_prefix()
-    file_paths = _git_ops.list_files_at_sha(workspace, sha, f"{prefix}/{safe_name}")
+    context_path = _context_git_path(safe_name)
+    file_paths = _git_ops.list_files_at_sha(workspace, sha, context_path)
     if not file_paths:
         raise HTTPException(status_code=404, detail="Version not found or context had no files at this commit")
     files = []
     for fp in file_paths:
         content = _git_ops.get_file_at_sha(workspace, sha, fp)
         if content is not None:
-            rel = fp[len(f"{prefix}/{safe_name}/"):]
+            rel = fp[len(f"{context_path}/"):]
             try:
                 content.encode("utf-8")
                 files.append({"path": rel, "content": content, "encoding": "utf-8"})
@@ -3052,10 +3083,9 @@ def list_context_file_versions(
     """List git commits that touched one brain-pack file (newest first)."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
-    prefix = _contexts_git_prefix()
     rows = _git_ops.get_log(
         _git_workspace(),
-        rel_path=f"{prefix}/{safe_name}/{rel}",
+        rel_path=_context_git_path(safe_name, rel),
         limit=min(limit, 100),
         asset_type="brain_file",
         asset_id=f"{safe_name}:{rel}",
@@ -3072,13 +3102,26 @@ def get_context_file_version(
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
     """Return file content at a specific git commit for one brain-pack file."""
+    import base64 as _base64
+
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
-    prefix = _contexts_git_prefix()
-    content = _git_ops.get_file_at_sha(_git_workspace(), sha, f"{prefix}/{safe_name}/{rel}")
+    git_path = _context_git_path(safe_name, rel)
+    if is_binary_file(rel, guess_mime_type(rel)):
+        content_bytes = _git_ops.get_file_bytes_at_sha(_git_workspace(), sha, git_path)
+        if content_bytes is None:
+            raise HTTPException(status_code=404, detail="Version not found")
+        return {
+            "file": {
+                "path": rel,
+                "content": _base64.b64encode(content_bytes).decode("ascii"),
+                "encoding": "base64",
+            }
+        }
+    content = _git_ops.get_file_at_sha(_git_workspace(), sha, git_path)
     if content is None:
         raise HTTPException(status_code=404, detail="Version not found")
-    return {"file": {"path": rel, "content": content}}
+    return {"file": {"path": rel, "content": content, "encoding": "utf-8"}}
 
 
 @app.post("/contexts/{name}/files/{file_path:path}/restore/{sha}", response_model=ContextFileItem)
@@ -3093,8 +3136,7 @@ def restore_context_file_version(
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     rel = _context_file_path_or_400(file_path)
     workspace = _git_workspace()
-    prefix = _contexts_git_prefix()
-    git_path = f"{prefix}/{safe_name}/{rel}"
+    git_path = _context_git_path(safe_name, rel)
 
     try:
         _git_ops.checkout_path(workspace, sha, git_path)
@@ -3131,8 +3173,7 @@ def rollback_context(
     """Restore a brain pack to its state at a given git commit SHA."""
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     workspace = _git_workspace()
-    prefix = _contexts_git_prefix()
-    ctx_git_path = f"{prefix}/{safe_name}"
+    ctx_git_path = _context_git_path(safe_name)
 
     try:
         _git_ops.checkout_path(workspace, sha, ctx_git_path)
@@ -3972,6 +4013,10 @@ def _get_db_worker(
 ) -> Optional[Dict[str, Any]]:
     try:
         return repos.workers.get(user_id=user_id, worker_id=worker_id, role=role)
+    except TypeError as exc:
+        if "role" not in str(exc):
+            raise
+        return repos.workers.get(user_id=user_id, worker_id=worker_id)
     except sqlite3.OperationalError:
         return None
 
@@ -4031,6 +4076,8 @@ def _run_visible_to_api(row: Any, *, user_id: str, repos: Repositories) -> bool:
     if worker_id in _SYSTEM_WORKER_IDS:
         return False
     if worker_id.startswith(".") or any(worker_id.startswith(p) for p in _INTERNAL_WORKER_ID_PREFIXES):
+        return False
+    if _worker_hidden_from_api(worker_id):
         return False
     # A run is visible if its worker is owned by the requesting user — regardless
     # of whether the worker is a stock/tracked worker. This closes the gap where
@@ -5900,6 +5947,8 @@ async def upload_context_files(
             repos=repos,
         )
     elif create_if_missing:
+        if _user_scoped_local_mode() or _is_cloud_deploy():
+            raise HTTPException(status_code=404, detail="Context not found")
         root.mkdir(parents=True, exist_ok=True)
         set_context_metadata(safe_name, writeable=True, owner_id=auth.user_id)
         _ensure_brain_pack_row(safe_name, owner_id=auth.user_id, repos=repos)
@@ -7341,6 +7390,47 @@ def get_worker_sample_input(
 # PATCH /workers/{worker_id} — partial update
 # ---------------------------------------------------------------------------
 
+def _ensure_worker_row_for_rotation(
+    *,
+    worker_id: str,
+    worker: Dict[str, Any],
+    config: Optional[WorkerConfig],
+    auth: AuthContext,
+    repos: Repositories,
+) -> None:
+    """Persist a filesystem-registry worker before storing FK-backed webhook state."""
+    if _get_db_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role):
+        return
+
+    manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+    if not isinstance(manifest, dict):
+        manifest = {}
+    config_dict: Dict[str, Any] = {}
+    if config is not None:
+        config_dict = config.model_dump(mode="json")
+        if not manifest:
+            manifest = config_dict
+    elif isinstance(worker.get("config"), dict):
+        config_dict = worker["config"]
+
+    trigger = (config_dict.get("trigger") if isinstance(config_dict, dict) else None) or {}
+    triggers_json = _extract_triggers_from_manifest(manifest, config_dict)
+    repos.workers.upsert(
+        user_id=auth.user_id,
+        worker_id=worker_id,
+        name=worker.get("name") or manifest.get("name") or worker_id,
+        manifest_json=manifest,
+        bundle_path=worker.get("bundle_path") or str((WORKERS_DIR / worker_id).resolve()),
+        trigger_type=worker.get("trigger_type") or trigger.get("type") or "manual",
+        cron_expr=worker.get("cron_expr") or trigger.get("cron"),
+        cron_timezone=worker.get("cron_timezone") or trigger.get("timezone"),
+        grants_json=worker.get("grants_json") or {},
+        input_values_json=worker.get("input_values_json") or {},
+        triggers_json=triggers_json,
+        visibility=worker.get("visibility") or "private",
+    )
+
+
 @app.patch("/workers/{worker_id}", response_model=WorkerDetail)
 def update_worker(
     worker_id: str,
@@ -7399,6 +7489,13 @@ def update_worker(
                 status_code=400,
                 detail=f"Worker {worker_id!r} does not have a webhook trigger — cannot rotate secret",
             )
+        _ensure_worker_row_for_rotation(
+            worker_id=worker_id,
+            worker=worker,
+            config=config,
+            auth=auth,
+            repos=repos,
+        )
         new_raw_secret = generate_webhook_secret(worker_id, repos=repos)
 
     if updates:
@@ -10306,7 +10403,7 @@ def _clone_protected_worker_for_edit(
 def update_worker_files(
     worker_id: str,
     payload: WorkerFilesUpdateRequest,
-    request: Request,
+    request: Request = None,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -10321,7 +10418,8 @@ def update_worker_files(
     """
     from worker_registry import WORKERS_DIR
 
-    _require_worker_write_workspace_context(request)
+    if request is not None:
+        _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
     if not worker:
@@ -10759,9 +10857,12 @@ def _backup_db_before_clear() -> str:
     backup_dir = _preclear_backup_dir()
     os.makedirs(backup_dir, exist_ok=True)
     backup_path = os.path.join(
-        backup_dir, f"floom-preclear-{int(time.time())}.db"
+        backup_dir, f"floom-preclear-{time.time_ns()}.db"
     )
-    with get_db() as conn:
+    # VACUUM cannot run inside a transaction. Use a standalone autocommit
+    # connection so callers can safely invoke this before owner-scoped deletes.
+    with sqlite3.connect(db_file, timeout=30.0, isolation_level=None) as conn:
+        conn.execute("PRAGMA busy_timeout = 30000")
         # VACUUM INTO writes a fresh, fully-consistent copy (no WAL sidecar).
         conn.execute("VACUUM INTO ?", (backup_path,))
     if not os.path.isfile(backup_path) or os.path.getsize(backup_path) == 0:
@@ -11860,6 +11961,8 @@ def get_run(
         for row in _collapse_stderr_code_echo_rows(_raw_log_rows)
     ]
 
+    _artifact_rows = repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
+    _has_sensitive_run_artifacts = any(_is_sensitive_artifact_row(r) for r in _artifact_rows)
     artifacts = [
         Artifact(
             id=r["id"],
@@ -11874,7 +11977,7 @@ def get_run(
             size_bytes=row_to_dict(r).get("size_bytes"),
             created_at=r["created_at"],
         )
-        for r in repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
+        for r in _artifact_rows
         if not _is_sensitive_artifact_row(r)
     ]
     transcript: List[Dict[str, Any]] = []
@@ -11894,6 +11997,8 @@ def get_run(
                 run_input = {}
         except Exception:
             run_input = {}
+    if _has_sensitive_run_artifacts:
+        run_input = {}
 
     # #561: extract structured tool calls and token usage from transcript artifact.
     _transcript_rows = _read_transcript_rows(run.get("runner", ""), artifacts)
@@ -19973,12 +20078,11 @@ async def reset_workspace_base_persona(
     was_custom = base_persona_is_custom()
     clear_workspace_base_persona()
     if was_custom:
-        _snapshot_workspace_base_persona(
-            user_id=auth.user_id,
-            repos=repos,
-            asset_id=_workspace_base_persona_asset_id(request),
-            content=get_workspace_base_persona(),
-            change_source="reset-to-default",
+        author_name, author_email = _git_author(auth)
+        _git_commit_workspace_base_md(
+            message="workspace base: reset-to-default",
+            author_name=author_name,
+            author_email=author_email,
         )
     return Response(status_code=204)
 
@@ -19999,6 +20103,14 @@ def list_workspace_base_persona_versions(
         rel = "workspace.base.md"
     rows = _git_ops.get_log(workspace, rel_path=rel, limit=min(limit, 100),
                             asset_type=_WORKSPACE_BASE_PERSONA_ASSET_TYPE, asset_id="default")
+    for row in rows:
+        message = str(row.get("message") or "")
+        if "reset-to-default" in message:
+            row["change_source"] = "reset-to-default"
+        elif "update (ai)" in message:
+            row["change_source"] = "ai"
+        elif "update (user)" in message:
+            row["change_source"] = "user"
     return [VersionSummary(**r) for r in rows]
 
 

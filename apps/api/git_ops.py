@@ -244,6 +244,24 @@ def get_file_at_sha(
     return result.stdout
 
 
+def get_file_bytes_at_sha(
+    workspace_dir: Path,
+    sha: str,
+    rel_path: str,
+) -> Optional[bytes]:
+    """Return raw bytes for rel_path at commit sha, or None if missing."""
+    result = subprocess.run(
+        ["git", "show", f"{sha}:{rel_path}"],
+        cwd=str(workspace_dir),
+        capture_output=True,
+        timeout=30,
+        env={**os.environ},
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
 def list_files_at_sha(
     workspace_dir: Path,
     sha: str,

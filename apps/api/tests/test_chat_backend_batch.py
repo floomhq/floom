@@ -123,4 +123,4 @@ def test_auth_middleware_rejects_trailing_space_secret(booted):
         trailing = client.get("/workers", headers={"x-floom-secret": "test-secret-chat "})
 
     assert exact.status_code == 200, exact.text
-    assert trailing.status_code == 403, trailing.text
+    assert trailing.status_code == 401, trailing.text

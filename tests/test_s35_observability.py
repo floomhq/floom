@@ -61,6 +61,7 @@ def test_health_runs_dependency_checks_and_uses_cache(monkeypatch, tmp_path):
     main._HEALTH_CACHE["checked_at"] = 0.0
     main._HEALTH_CACHE["payload"] = None
     monkeypatch.setattr(main, "_health_check_db", lambda: calls.append("db") or {"ok": True})
+    monkeypatch.setattr(main, "_health_check_disk", lambda: calls.append("disk") or {"ok": True})
     monkeypatch.setattr(main, "_health_check_e2b", lambda: calls.append("e2b") or {"ok": True})
     monkeypatch.setattr(main, "_health_check_openai", lambda: calls.append("openai") or {"ok": True})
     monkeypatch.setattr(main, "_health_check_composio", lambda: calls.append("composio") or {"ok": True})
@@ -71,9 +72,10 @@ def test_health_runs_dependency_checks_and_uses_cache(monkeypatch, tmp_path):
 
     assert first.status_code == 200, first.text
     assert first.json()["status"] == "ok"
-    assert set(first.json()["checks"]) == {"db", "disk", "e2b", "openai", "composio"}
+    assert set(first.json()["checks"]) == {"db", "disk", "e2b", "openai", "composio", "scheduler"}
+    assert first.json()["checks"]["scheduler"]["ok"] is True
     assert second.status_code == 200, second.text
-    assert calls == ["db", "e2b", "openai", "composio"]
+    assert calls == ["db", "disk", "e2b", "openai", "composio"]
 
 
 def test_health_check_e2b_bounds_sdk_call_without_unsupported_kwargs(monkeypatch, tmp_path):
