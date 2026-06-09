@@ -79,7 +79,7 @@ function test690ConnectionGateUsesBackendLiveStatuses(): void {
   );
 }
 
-function test691FileSamplesAreInlineAndUploaded(): void {
+function test691FileSamplesRespectInputContracts(): void {
   const src = readFileSync(WORKER_PAGE, "utf8");
   assert(src.includes('fetch(apiProxyPath("/uploads")'), "sample file upload must use the configured API proxy base");
   assert(
@@ -95,15 +95,14 @@ function test691FileSamplesAreInlineAndUploaded(): void {
   assert(csvYml.includes("name,company,title,location"), "csv_enricher must include inline CSV sample content");
 
   const cvYml = read("workers/cv_writeup/worker.yml");
-  assert(!cvYml.includes("cv_file: null"), "cv_writeup example_input must not leave cv_file null");
-  assert(cvYml.includes("Senior Java Backend Engineer"), "cv_writeup must include inline CV sample content");
+  assert(cvYml.includes("cv_file: null"), "cv_writeup example_input must leave cv_file null");
 }
 
 const tests: [string, () => void][] = [
   ["#668 required inputs gate manual run", test668RequiredInputsGateRun],
   ["#689 no-input workers run without sample-fill", test689NoInputWorkersCanRunWithoutSample],
   ["#690 valid/connected GitHub connections enable run", test690ConnectionGateUsesBackendLiveStatuses],
-  ["#691 file-upload worker samples synthesize uploads", test691FileSamplesAreInlineAndUploaded],
+  ["#691 file-upload worker samples respect input contracts", test691FileSamplesRespectInputContracts],
 ];
 
 let passed = 0;

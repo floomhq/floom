@@ -36,6 +36,10 @@ def _auth_headers(token: str = "test-langdock-token"):
     }
 
 
+def _secret_headers():
+    return {"x-floom-secret": "test-api-secret"}
+
+
 def _rpc(method, request_id=1, params=None):
     payload = {"jsonrpc": "2.0", "id": request_id, "method": method}
     if params is not None:
@@ -66,8 +70,8 @@ def test_workspace_agent_mcp_get_discovery_matches_nova_pattern(monkeypatch, tmp
     main = _load_api(monkeypatch, tmp_path)
 
     with TestClient(main.app) as client:
-        response = client.get("/api/mcp")
-        mounted_response = client.get("/mcp")
+        response = client.get("/api/mcp", headers=_secret_headers())
+        mounted_response = client.get("/mcp", headers=_secret_headers())
 
     assert response.status_code == 200, response.text
     assert mounted_response.status_code == 200, mounted_response.text

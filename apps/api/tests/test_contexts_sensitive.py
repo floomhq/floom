@@ -171,7 +171,9 @@ def client(monkeypatch, tmp_path):
     import importlib
     main_mod = importlib.import_module("main")
     from fastapi.testclient import TestClient
-    return TestClient(main_mod.app), main_mod, git_ops_stub
+    with TestClient(main_mod.app) as test_client:
+        yield test_client, main_mod, git_ops_stub
+    sys.modules.pop("git_ops", None)
 
 
 def _auth(client_tuple):

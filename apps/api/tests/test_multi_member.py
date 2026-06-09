@@ -61,7 +61,7 @@ def load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(tmp_path / "artifacts"))
     monkeypatch.setenv("FLOOM_BLOBS_DIR", str(tmp_path / "blobs"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
-    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+    monkeypatch.setenv("FLOOM_SECRET", "")
 
     for name in [
         "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",

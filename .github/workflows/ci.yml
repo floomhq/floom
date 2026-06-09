@@ -9,7 +9,7 @@ on:
 jobs:
   api-tests:
     name: API tests (pytest)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, workeros-ci]
     defaults:
       run:
         working-directory: apps/api
@@ -29,14 +29,15 @@ jobs:
       - name: Run tests
         env:
           WORKEROS_DEPLOY: local
+          WORKEROS_ROOT: ${{ github.workspace }}
           FLOOM_SECRET: ci-test-secret
-          OPENAI_API_KEY: ""
+          OPENAI_API_KEY: sk-test-fake-key
         # #604: -p no:warnings keeps output clean; all test files auto-discovered.
         run: pytest tests/ -v --tb=short -p no:warnings
 
   runtime-tests:
     name: Runtime tests (root pytest suite)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, workeros-ci]
 
     steps:
       - uses: actions/checkout@v4
@@ -53,8 +54,9 @@ jobs:
       - name: Run root runtime tests
         env:
           WORKEROS_DEPLOY: local
+          WORKEROS_ROOT: ${{ github.workspace }}
           FLOOM_SECRET: ci-test-secret
-          OPENAI_API_KEY: ""
+          OPENAI_API_KEY: sk-test-fake-key
         # #604: root pytest.ini points at tests/ (66 files). These cover the
         # full worker runtime — agent driver, E2B sandbox, run orchestration —
         # and were previously not run in CI.
@@ -62,7 +64,7 @@ jobs:
 
   web-tests:
     name: Web tests (vitest + tsx + lint)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, workeros-ci]
     defaults:
       run:
         working-directory: apps/web
@@ -98,7 +100,7 @@ jobs:
 
   mcp-tests:
     name: MCP package tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, workeros-ci]
     defaults:
       run:
         working-directory: apps/mcp
