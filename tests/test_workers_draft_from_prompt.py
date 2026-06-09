@@ -429,6 +429,55 @@ class TestDraftFromPromptEndpoint:
         assert mock_client.chat.completions.create.call_count == 3
         assert "after 3 attempts" in resp.json()["detail"]
 
+    @patch("openai.OpenAI")
+    def test_numeric_schema_version_and_missing_version_are_repaired(self, mock_openai_cls, client):
+        """Generated YAML with schema_version 0.3 as a number and no version gets repaired."""
+        import yaml as pyyaml
+        from models import parse_worker_manifest, WorkerContract
+
+        bad_yaml = (
+            "schema_version: 0.3\n"
+            "name: test-worker\n"
+            'title: "Test Worker"\n'
+            'description: "A test worker."\n'
+            "exec:\n"
+            '  entry: "run.py"\n'
+            '  command: "python run.py"\n'
+            '  runtime: "python311"\n'
+            '  runner: "e2b"\n'
+            "trigger:\n"
+            '  type: "manual"\n'
+        )
+        mock_client = MagicMock()
+        mock_openai_cls.return_value = mock_client
+        mock_client.chat.completions.create.return_value = _mock_openai_response(
+            json.dumps(
+                {
+                    "worker_yml": bad_yaml,
+                    "skill_md": None,
+                    "suggested_name": "test-worker",
+                    "suggested_title": "Test Worker",
+                    "required_connections": [],
+                    "required_secrets": [],
+                    "inputs": [],
+                    "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}],
+                }
+            )
+        )
+
+        resp = client.post(
+            "/workers/draft-from-prompt",
+            json={"prompt": "Create a worker that prints a summary."},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        raw = pyyaml.safe_load(body["worker_yml"])
+        parsed = parse_worker_manifest(raw)
+
+        assert isinstance(parsed, WorkerContract)
+        assert raw["schema_version"] == "0.3"
+        assert raw["version"] == "0.1.0"
+
 
 # ---------------------------------------------------------------------------
 # Tests: POST /workers writes skill_md correctly (Issue #1)
