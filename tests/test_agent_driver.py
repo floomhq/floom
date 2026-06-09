@@ -258,7 +258,7 @@ def test_run_command_containment_and_env_allowlist(tmp_path, monkeypatch):
     assert captured_e2b["env"]["TOKEN"] == "supersecret"
 
 
-def test_missing_declared_output_is_left_to_common_completion_gate(tmp_path):
+def test_missing_declared_output_fails_before_completion_gate(tmp_path):
     config = make_config(tmp_path)
     driver = ScriptedAgentDriver()
     driver.set_scripts([[final_response()], [final_response()]])
@@ -268,7 +268,8 @@ def test_missing_declared_output_is_left_to_common_completion_gate(tmp_path):
         "agent-test", "run_missing_output", {}, {}, log_fn, "trace", config=config
     )
 
-    assert result.status == "success"
+    assert result.status == "failed"
+    assert result.error == "Output schema violation: Missing declared output 'summary'"
     assert result.outputs == {}
 
     driver = AgentDriver()

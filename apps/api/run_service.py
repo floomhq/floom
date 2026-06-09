@@ -9,6 +9,7 @@ import logging
 import shutil
 import time
 import queue
+import sqlite3
 from html import escape
 from dataclasses import dataclass
 from pathlib import Path
@@ -1906,17 +1907,29 @@ def create_run(
     )
     # Determine runner from config; script workers default to E2B.
     runner = _runner_key(config)
-    repos_obj.runs.create(
-        user_id=owner_id,
-        run_id=run_id,
-        worker_id=worker_id,
-        status=status or RunStatus.QUEUED.value,
-        trigger_source=trigger_source,
-        runner=runner,
-        input_json=effective_inputs,
-        created_at=_now_iso(),
-        trigger_ref=trigger_ref,
-    )
+    last_exc: Exception | None = None
+    for attempt in range(6):
+        try:
+            repos_obj.runs.create(
+                user_id=owner_id,
+                run_id=run_id,
+                worker_id=worker_id,
+                status=status or RunStatus.QUEUED.value,
+                trigger_source=trigger_source,
+                runner=runner,
+                input_json=effective_inputs,
+                created_at=_now_iso(),
+                trigger_ref=trigger_ref,
+            )
+            last_exc = None
+            break
+        except sqlite3.OperationalError as exc:
+            if "database is locked" not in str(exc).lower() or attempt == 5:
+                raise
+            last_exc = exc
+            time.sleep(0.05 * (attempt + 1))
+    if last_exc is not None:
+        raise last_exc
     logger.info("Created run %s for worker %s (runner=%s)", run_id, worker_id, runner)
     return run_id
 
@@ -2662,7 +2675,13 @@ def _maybe_pause_worker_after_consecutive_failures(
     if not user_id or not _auto_pause_on_consecutive_failures_enabled():
         return False
     threshold = _alert_consecutive_failure_threshold()
-    rows, _ = repos.runs.list(user_id=user_id, worker_id=worker_id, limit=threshold, offset=0)
+    try:
+        rows, _ = repos.runs.list(user_id=user_id, worker_id=worker_id, limit=threshold, offset=0)
+    except sqlite3.OperationalError as exc:
+        if "no such table:" in str(exc).lower():
+            logger.debug("Skipping auto-pause check for %s: run tables unavailable: %s", worker_id, exc)
+            return False
+        raise
     if len(rows) < threshold:
         return False
     automatic_sources = {"schedule", "scheduled", "webhook", "composio", "trigger"}
