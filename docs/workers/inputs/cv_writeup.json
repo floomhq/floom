@@ -1,4 +1,5 @@
 {
+  "cv_file": "Anna Keller\nSenior Java Backend Engineer\n\nExperience\n- 8 years building Java, Spring Boot, Kafka, and microservice platforms.\n- Led payment reliability projects in regulated fintech environments.\n- Mentored backend teams and improved deployment observability.\n\nSkills\nJava, Spring Boot, Kafka, PostgreSQL, AWS, Docker, Kubernetes\n",
   "client_brief": "Client: N26 Berlin. Role: Senior Java Backend Engineer. Must-haves: 5+ years Java, Spring Boot, Kafka, microservices. Nice-to-have: banking domain. Perm hire, EUR 90-110k.",
   "target_format": "branded_markdown",
   "note": "cv_file is a file upload — provide a PDF, DOCX, or TXT CV."
