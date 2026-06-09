@@ -390,10 +390,13 @@ export const api = {
           body: JSON.stringify({ reason, annotations: annotations ?? null }),
         }
       ),
-    approveAgentTool: (approvalId: string) =>
+    approveAgentTool: (approvalId: string, editedOutput?: Record<string, unknown>) =>
       fetchJson<import("./types").ActionResponse>(
         `/approvals/${approvalId}/approve`,
-        { method: "POST" }
+        {
+          method: "POST",
+          body: JSON.stringify({ edited_output: editedOutput ?? null }),
+        }
       ),
     rejectAgentTool: (approvalId: string, reason?: string) =>
       fetchJson<import("./types").ActionResponse>(
