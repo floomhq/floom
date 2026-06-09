@@ -718,6 +718,7 @@ function runCardFromResult(
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
     actions: event.actions,
     streams: event.streams,
+    toolName: normalizedTool || event.toolName,
     runId,
     workerId,
     workerName,
@@ -729,6 +730,10 @@ function toolCardFromResult(
   existing: ToolCard
 ): ToolCard | null {
   return workerListCardFromResult(event, existing) ?? runCardFromResult(event, existing);
+}
+
+function toolCardToolName(card: ToolCard): string | null {
+  return "toolName" in card && typeof card.toolName === "string" ? card.toolName : null;
 }
 
 /**
@@ -810,7 +815,7 @@ export function reduceSSEEvent(
         callId: event.callId,
         card_id: cardId,
         toolName: event.toolName,
-        title: getToolCardTitle(event.toolName, status),
+        title: event.card?.title ?? getToolCardTitle(event.toolName, status),
         preview: event.args_preview as Record<string, unknown> | undefined,
         status,
         ...(event.resource ? {} : {}),
@@ -844,12 +849,15 @@ export function reduceSSEEvent(
         if (m.role !== "assistant" || !m.parts) return m;
         const updatedParts = m.parts.map((p) => {
           if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+          const toolName = toolCardToolName(p.card);
           const updatedCard: ToolCard = {
             ...p.card,
             ...(newStatus !== undefined ? { status: newStatus } : {}),
-            ...(newStatus !== undefined && "toolName" in p.card
-              ? { title: getToolCardTitle(p.card.toolName, newStatus) }
-              : {}),
+            ...(event.type === "tool-progress" && event.label
+              ? { title: event.label }
+              : newStatus !== undefined && toolName
+                ? { title: getToolCardTitle(toolName, newStatus) }
+                : {}),
             ...(event.actions ? { actions: event.actions } : {}),
             ...(event.type === "tool-resource" && event.streams
               ? { streams: event.streams }
@@ -873,12 +881,15 @@ export function reduceSSEEvent(
           const specializedCard = toolCardFromResult(event, p.card);
           if (specializedCard) return { type: "tool-card" as const, card: specializedCard };
           const status = event.card?.status ?? (event.isError ? "failed" : "completed");
+          const toolName = toolCardToolName(p.card);
           const updatedCard: ToolCard = {
             ...p.card,
             status: normalizeCardStatus(status),
-            ...("toolName" in p.card
-              ? { title: getToolCardTitle(p.card.toolName, normalizeCardStatus(status)) }
-              : {}),
+            ...(event.card?.title
+              ? { title: event.card.title }
+              : toolName
+                ? { title: getToolCardTitle(toolName, normalizeCardStatus(status)) }
+                : {}),
             ...(event.actions ? { actions: event.actions } : {}),
             ...(event.streams ? { streams: event.streams } : {}),
           } as ToolCard;
@@ -901,13 +912,14 @@ export function reduceSSEEvent(
               (c) => c.id === p.card.card_id || c.callId === p.card.callId
             );
             if (reconciled) {
+              const toolName = toolCardToolName(p.card);
               return {
                 type: "tool-card" as const,
                 card: {
                   ...p.card,
                   status: normalizeCardStatus(reconciled.status),
-                  ...("toolName" in p.card
-                    ? { title: getToolCardTitle(p.card.toolName, normalizeCardStatus(reconciled.status)) }
+                  ...(toolName
+                    ? { title: getToolCardTitle(toolName, normalizeCardStatus(reconciled.status)) }
                     : {}),
                 } as ToolCard,
               };
@@ -925,4 +937,17 @@ export function reduceSSEEvent(
     default:
       return prev;
   }
+}
+
+export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
+  return (
+    card.kind === "run" &&
+    normalizeToolName(card.toolName || "") === "runs.get" &&
+    card.status === "completed" &&
+    Boolean(card.runId)
+  );
+}
+
+export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
+  return shouldAutoOpenRunDetails(card) ? `/runs/${card.runId}?tab=logs` : null;
 }

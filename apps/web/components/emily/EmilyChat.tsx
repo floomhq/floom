@@ -14,7 +14,11 @@ import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
-import { useChatStream } from "@/lib/useChatStream";
+import {
+  getAutoOpenRunDetailsHref,
+  shouldAutoOpenRunDetails,
+  useChatStream,
+} from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
 
@@ -175,6 +179,8 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
   // Start true so the first message load scrolls to bottom automatically.
   const isNearBottomRef = useRef(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const openedRunDetailsRef = useRef(new Set<string>());
+  const runDetailsNavReadyRef = useRef(false);
 
   // Track whether the user is near the bottom of the scroll container.
   // We use a ref (not state) so the scroll handler doesn't trigger re-renders.
@@ -221,6 +227,7 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
     const grew = messages.length > prevLengthRef.current;
     prevLengthRef.current = messages.length;
     if (grew && messages[messages.length - 1]?.role === "user") {
+      runDetailsNavReadyRef.current = true;
       scrollToBottom();
     }
   }, [messages, scrollToBottom]);
@@ -238,6 +245,7 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
         if (seenCardIds.current.has(cardId)) continue;
         if (
           "toolName" in card &&
+          typeof card.toolName === "string" &&
           WORKER_MUTATION_TOOLS.has(card.toolName) &&
           (card.status === "completed" || card.status === "failed")
         ) {
@@ -247,6 +255,27 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
       }
     }
   }, [messages, router]);
+
+  useEffect(() => {
+    if (!runDetailsNavReadyRef.current || isHydrating) return;
+    if (fullPage) return;
+    for (const msg of messages) {
+      if (msg.role !== "assistant" || !msg.parts) continue;
+      for (const part of msg.parts) {
+        if (part.type !== "tool-card") continue;
+        const card = part.card;
+        if (!shouldAutoOpenRunDetails(card)) continue;
+        const href = getAutoOpenRunDetailsHref(card);
+        if (!href) continue;
+        const runId = card.runId;
+        if (!runId) continue;
+        if (openedRunDetailsRef.current.has(runId)) continue;
+        openedRunDetailsRef.current.add(runId);
+        router.push(href);
+        return;
+      }
+    }
+  }, [messages, router, fullPage, isHydrating]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
@@ -284,6 +313,8 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
             // Reset scroll state for the fresh conversation
             isNearBottomRef.current = true;
             setShowScrollButton(false);
+            openedRunDetailsRef.current.clear();
+            runDetailsNavReadyRef.current = false;
           }}
           onExport={handleExport}
           canExport={hasMessages}
@@ -393,7 +424,7 @@ export function EmilyDock({ className }: { className?: string }) {
 
       {/* Full header — shown only when open */}
       {open && (
-        <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
+        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4">
           <EmilyAvatar size="sm" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold leading-none truncate">Emily</p>

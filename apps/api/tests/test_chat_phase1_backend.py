@@ -233,6 +233,45 @@ def test_tool_result_preview_redacts_secret_query_params(booted):
     assert "token=[redacted]" in encoded
 
 
+def test_approval_list_result_keeps_token_out_of_model_visible_text(booted):
+    chat_service = booted["chat_service"]
+    token = chat_service._approval_public_token({
+        "id": "apr_1",
+        "run_id": "run_1",
+        "owner_id": "federico",
+    })
+
+    metadata = chat_service.build_tool_event_metadata(
+        "approvals__list_pending",
+        "call_pending",
+        args={},
+        result={
+            "ok": True,
+            "count": 1,
+            "approvals": [
+                {
+                    "id": "apr_1",
+                    "owner_id": "federico",
+                    "worker_id": "gmail_sender",
+                    "worker_name": "Gmail Sender",
+                    "run_id": "run_1",
+                    "label": "Review before send",
+                    "preview": "Please review the draft",
+                    "created_at": "2026-06-08T10:00:00Z",
+                }
+            ],
+        },
+        phase="result",
+    )
+
+    encoded = json.dumps(metadata["result_preview"])
+    assert token not in encoded
+    assert "link" not in encoded
+    assert metadata["card"]["status"] == "pending_approval"
+    assert metadata["card"]["title"] == "Pending approvals"
+    assert metadata["actions"] and metadata["actions"][0]["href"].endswith(f"token={token}")
+
+
 def test_finish_tool_args_are_normalized_before_card_metadata(booted):
     chat_service = booted["chat_service"]
     approval_token = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
@@ -442,8 +481,8 @@ def test_approval_result_builds_action_required_card(booted):
         phase="result",
     )
 
-    assert metadata["card"]["status"] == "action_required"
-    assert metadata["reason"] == "approval_required"
+    assert metadata["card"]["status"] == "pending_approval"
+    assert metadata["reason"] is None
     assert metadata["resource"] == {
         "kind": "approval",
         "approval_id": "apr_1",
