@@ -50,6 +50,7 @@ def _load_api(monkeypatch, tmp_path, *, run_create_rate_limit: int = 30):
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,
+        scheduler_status=lambda: {"ok": True, "enabled": False, "deploy": "local"},
     )
     main = importlib.import_module("main")
     main.get_auth_provider.cache_clear()

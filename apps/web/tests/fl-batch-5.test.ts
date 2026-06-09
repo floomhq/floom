@@ -89,15 +89,11 @@ function test551CanRunBlocksOnMissingSecret(): void {
   const src = readFileSync(WORKER_PAGE, "utf8");
   // canRun must be gated on missing_secret status — either directly or via a
   // local boolean declared just before canRun.
-  const canRunLine = src.split("\n").find(
-    (line) => line.includes("const canRun =") && line.includes("missingConnections")
-  );
-  assert(Boolean(canRunLine), "canRun declaration must reference missingConnections");
+  const canRunIndex = src.split("\n").findIndex((line) => line.includes("const canRun ="));
+  const canRunBlock = src.split("\n").slice(canRunIndex, canRunIndex + 8).join("\n");
+  assert(canRunIndex >= 0 && canRunBlock.includes("missingConnections"), "canRun declaration must reference missingConnections");
   // The line itself must reference missing secret — either literally or through
   // a local var declared immediately above it.
-  const canRunIndex = src.split("\n").findIndex(
-    (line) => line.includes("const canRun =") && line.includes("missingConnections")
-  );
   const surroundingLines = src.split("\n").slice(Math.max(0, canRunIndex - 3), canRunIndex + 1).join("\n");
   assert(
     surroundingLines.includes("missing_secret"),

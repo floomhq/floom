@@ -17,9 +17,12 @@ def _load_api(monkeypatch, tmp_path):
     contexts_dir.mkdir()
     db_path = tmp_path / "floom.db"
 
+    monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
+    monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLOOM_SECRET", "test-api-secret")
     monkeypatch.setenv("WORKEROS_USER_ID", "mcp-test-user")
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
@@ -27,10 +30,15 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "")
     monkeypatch.setenv("SLACK_BOT_TOKEN", "")
     monkeypatch.setenv("SLACK_ALLOWED_TEAM_IDS", "")
+    monkeypatch.delenv("WORKEROS_GIT_REMOTE", raising=False)
 
     sys.path.insert(0, str(api_dir))
-    for name in ["main", "db", "models", "worker_registry", "run_service", "chat_service"]:
-        sys.modules.pop(name, None)
+    for name in list(sys.modules):
+        if any(name == m or name.startswith(m + ".") for m in [
+            "main", "db", "models", "worker_registry", "runner_utils",
+            "run_service", "chat_service", "auth", "contexts", "git_ops",
+        ]):
+            sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,
